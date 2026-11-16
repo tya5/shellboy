@@ -3,15 +3,19 @@ use super::discard::{RejectionReason, rejected};
 use super::*;
 #[derive(Clone, Debug)]
 pub(super) struct FinalRSource {
-    fact: super::gc_capture::GcSourceFacts,
-    hash: String,
+    pub(super) fact: super::gc_capture::GcSourceFacts,
+    pub(super) hash: String,
 }
 
 fn rejection(reason: RejectionReason, message: &str) -> StorageError {
     StorageError::from(rejected(reason, message))
 }
 
-fn final_r_source(source: &Source, group_complete: bool, protected: bool) -> FinalRSource {
+pub(super) fn final_r_source(
+    source: &Source,
+    group_complete: bool,
+    protected: bool,
+) -> FinalRSource {
     FinalRSource {
         fact: super::gc_capture::GcSourceFacts {
             ordinal: 0,
@@ -32,7 +36,7 @@ fn final_r_source(source: &Source, group_complete: bool, protected: bool) -> Fin
     }
 }
 
-fn current_r_sources(
+pub(super) fn current_r_sources(
     tx: &rusqlite::Transaction<'_>,
     thread: &str,
     expected: &[FinalRSource],
@@ -142,7 +146,7 @@ fn current_r_sources(
     Ok(())
 }
 
-fn current_path_ids(
+pub(super) fn current_path_ids(
     tx: &rusqlite::Transaction<'_>,
     thread: &str,
     markers: &[FinalRSource],
@@ -215,7 +219,88 @@ fn current_path_ids(
     Ok((current_revision, path))
 }
 
-fn locate_r(path: &[String], ids: &[String]) -> Result<usize, StorageError> {
+pub(super) fn restore_current_marker_tx(
+    tx: &rusqlite::Transaction<'_>,
+    thread: &str,
+    cancel: &CancellationToken,
+    marker: &FinalRSource,
+    replacement_sources: &[FinalRSource],
+    replacement_ids: &[String],
+    remove_ids: &HashSet<String>,
+) -> Result<(), StorageError> {
+    if cancel.is_cancelled() {
+        return Err(rejection(
+            RejectionReason::Cancelled,
+            "restore cancelled before adoption",
+        ));
+    }
+    if replacement_ids.len() != replacement_sources.len()
+        || replacement_ids
+            .iter()
+            .zip(replacement_sources)
+            .any(|(id, source)| id != &source.fact.id)
+        || replacement_ids.iter().collect::<HashSet<_>>().len() != replacement_ids.len()
+    {
+        return Err(StorageError::InvalidInput(
+            "restore replacement IDs and source facts disagree".into(),
+        ));
+    }
+    if remove_ids.iter().any(|id| !replacement_ids.contains(id)) {
+        return Err(StorageError::InvalidInput(
+            "restore removal set is not contained in the replacement".into(),
+        ));
+    }
+    let (revision, mut path) = current_path_ids(tx, thread, &[])?;
+    current_r_sources(tx, thread, std::slice::from_ref(marker))?;
+    current_r_sources(tx, thread, replacement_sources)?;
+    let marker_ids = [marker.fact.id.clone()];
+    let start = locate_r(&path, &marker_ids)?;
+    let end = start
+        .checked_add(1)
+        .ok_or_else(|| StorageError::InvalidInput("restore path position overflow".into()))?;
+    let mut remove_positions = Vec::new();
+    for id in replacement_ids {
+        let positions = path
+            .iter()
+            .enumerate()
+            .filter_map(|(position, candidate)| (candidate == id).then_some(position))
+            .collect::<Vec<_>>();
+        if remove_ids.contains(id) {
+            if positions.len() != 1 || positions[0] <= start {
+                return Err(rejection(
+                    RejectionReason::SourceChanged,
+                    "restore retained anchor is no longer uniquely after its marker",
+                ));
+            }
+            remove_positions.push(positions[0]);
+        } else if !positions.is_empty() {
+            return Err(rejection(
+                RejectionReason::SourceChanged,
+                "restore source is already selected outside its marker",
+            ));
+        }
+    }
+    for position in remove_positions.into_iter().rev() {
+        path.remove(position);
+    }
+    path.splice(start..end, replacement_ids.iter().cloned());
+    if cancel.is_cancelled() {
+        return Err(rejection(
+            RejectionReason::Cancelled,
+            "restore cancelled before path adoption",
+        ));
+    }
+    history::select_path(tx, thread, revision as u64, &path, &timestamp())?;
+    if cancel.is_cancelled() {
+        return Err(rejection(
+            RejectionReason::Cancelled,
+            "restore cancelled during adoption",
+        ));
+    }
+    Ok(())
+}
+
+pub(super) fn locate_r(path: &[String], ids: &[String]) -> Result<usize, StorageError> {
     if ids.is_empty() {
         return Err(rejection(
             RejectionReason::SourceChanged,
@@ -249,6 +334,7 @@ pub(super) struct FinalAdoption<'a> {
     markers: &'a [FinalRSource],
     payload: &'a Value,
     input_key: &'a str,
+    format: &'a str,
 }
 
 pub(super) fn adopt_current_r_tx(
@@ -263,6 +349,7 @@ pub(super) fn adopt_current_r_tx(
         markers,
         payload,
         input_key,
+        format,
     } = request;
     if cancel.is_cancelled() {
         return Err(rejection(
@@ -307,7 +394,7 @@ pub(super) fn adopt_current_r_tx(
         super::ReplacementMaterial {
             thread,
             input_key,
-            format: FORMAT,
+            format,
             sources: &selected_sources,
             payload,
         },
@@ -437,6 +524,7 @@ impl SummaryAdoption {
                 markers: &markers,
                 payload: &self.payload,
                 input_key: &self.input_key,
+                format: super::FORMAT,
             },
         )?;
         if self.automatic.is_none() {
@@ -563,6 +651,7 @@ pub(super) fn adopt_gc_result_tx(
             markers: &[],
             payload: &artifact.payload,
             input_key: &artifact.input_key,
+            format: super::FORMAT,
         },
     )
 }
@@ -641,6 +730,183 @@ mod final_r_adoption_tests {
     }
 
     #[tokio::test]
+    async fn spill_format_uses_final_r_and_preserves_unrelated_current_prefix_suffix() {
+        let (_root, db) = fixture().await;
+        seed(&db).await;
+        db.call(|db| {
+            let tx = db.transaction()?;
+            tx.execute(
+                "INSERT INTO node(id,kind,created_at,payload_json) VALUES('new-prefix','message','now','{}')",
+                [],
+            )?;
+            let revision: i64 = tx.query_row(
+                "SELECT selection_revision FROM thread WHERE id='t'",
+                [],
+                |row| row.get(0),
+            )?;
+            history::select_path(
+                &tx,
+                "t",
+                revision as u64,
+                &["new-prefix".into(), "prefix".into(), "r1".into(), "r2".into(), "suffix".into()],
+                &timestamp(),
+            )?;
+            tx.commit()?;
+            Ok(())
+        }).await.unwrap();
+        let payload = json!({"spill_tools":[],"output":[],"reasoning_epoch":0,"spill_version":1,"source_node_ids":["r1","r2"]});
+        db.call(move |db| {
+            let tx = db.transaction()?;
+            let config = Config::default();
+            let cancel = CancellationToken::new();
+            let sources = [source("r1", true, false), source("r2", true, false)];
+            let node = adopt_current_r_tx(
+                &tx,
+                FinalAdoption {
+                    config: &config,
+                    cancel: &cancel,
+                    thread: "t",
+                    sources: &sources,
+                    markers: &[],
+                    payload: &payload,
+                    input_key: "spill-final-r",
+                    format: "spill-v1",
+                },
+            )?;
+            let kind: String =
+                tx.query_row("SELECT kind FROM node WHERE id=?1", [&node], |row| {
+                    row.get(0)
+                })?;
+            assert_eq!(kind, "spill");
+            let path = tx
+                .prepare("SELECT node_id FROM thread_path WHERE thread_id='t' ORDER BY ordinal")?
+                .query_map([], |row| row.get::<_, String>(0))?
+                .collect::<Result<Vec<_>, _>>()?;
+            assert_eq!(path, ["new-prefix", "prefix", node.as_str(), "suffix"]);
+            Ok(())
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn restore_splices_current_marker_without_overwriting_external_prefix_suffix() {
+        let (_root, db) = fixture().await;
+        seed(&db).await;
+        let marker_payload =
+            json!({"summary_format":"context-trim-v1","source_node_ids":["r1","r2"]});
+        let marker_payload_for_insert = marker_payload.clone();
+        db.call(move |db| {
+            let tx = db.transaction()?;
+            tx.execute("INSERT INTO node(id,kind,created_at,payload_json) VALUES('marker','summary','now',?1)", [marker_payload_for_insert.to_string()])?;
+            tx.execute("INSERT INTO node(id,kind,created_at,payload_json) VALUES('new-prefix','message','now','{}')", [])?;
+            let revision: i64 = tx.query_row("SELECT selection_revision FROM thread WHERE id='t'", [], |row| row.get(0))?;
+            history::select_path(&tx, "t", revision as u64, &["new-prefix".into(),"prefix".into(),"marker".into(),"suffix".into()], &timestamp())?;
+            tx.commit()?;
+            Ok(())
+        }).await.unwrap();
+        let marker = FinalRSource {
+            fact: super::super::gc_capture::GcSourceFacts {
+                ordinal: 0,
+                id: "marker".into(),
+                revision: 0,
+                turn: None,
+                group_id: None,
+                protected: false,
+                group_complete: true,
+                has_summary_marker: true,
+                attachments: Vec::new(),
+            },
+            hash: super::key(&(0, marker_payload)),
+        };
+        let replacements = [source("r1", true, false), source("r2", true, false)];
+        let replacement_ids = vec!["r1".into(), "r2".into()];
+        db.call(move |db| {
+            let tx = db.transaction()?;
+            restore_current_marker_tx(
+                &tx,
+                "t",
+                &CancellationToken::new(),
+                &marker,
+                &replacements,
+                &replacement_ids,
+                &HashSet::new(),
+            )?;
+            let path = tx
+                .prepare("SELECT node_id FROM thread_path WHERE thread_id='t' ORDER BY ordinal")?
+                .query_map([], |row| row.get::<_, String>(0))?
+                .collect::<Result<Vec<_>, _>>()?;
+            assert_eq!(path, ["new-prefix", "prefix", "r1", "r2", "suffix"]);
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn restore_rejects_changed_original_source_without_changing_current_path() {
+        let (_root, db) = fixture().await;
+        seed(&db).await;
+        let marker_payload =
+            json!({"summary_format":"context-trim-v1","source_node_ids":["r1","r2"]});
+        let marker_payload_for_insert = marker_payload.clone();
+        db.call(move |db| {
+            let tx = db.transaction()?;
+            tx.execute("INSERT INTO node(id,kind,created_at,payload_json) VALUES('marker','summary','now',?1)", [marker_payload_for_insert.to_string()])?;
+            let revision: i64 = tx.query_row("SELECT selection_revision FROM thread WHERE id='t'", [], |row| row.get(0))?;
+            history::select_path(&tx, "t", revision as u64, &["prefix".into(),"marker".into(),"suffix".into()], &timestamp())?;
+            tx.execute("UPDATE node SET payload_revision=payload_revision+1,payload_json='{}' WHERE id='r1'", [])?;
+            tx.commit()?;
+            Ok(())
+        }).await.unwrap();
+        let marker = FinalRSource {
+            fact: super::super::gc_capture::GcSourceFacts {
+                ordinal: 0,
+                id: "marker".into(),
+                revision: 0,
+                turn: None,
+                group_id: None,
+                protected: false,
+                group_complete: true,
+                has_summary_marker: true,
+                attachments: Vec::new(),
+            },
+            hash: super::key(&(0, marker_payload)),
+        };
+        let replacements = [source("r1", true, false), source("r2", true, false)];
+        let replacement_ids = vec!["r1".into(), "r2".into()];
+        db.call(move |db| {
+            let tx = db.transaction()?;
+            let error = restore_current_marker_tx(
+                &tx,
+                "t",
+                &CancellationToken::new(),
+                &marker,
+                &replacements,
+                &replacement_ids,
+                &HashSet::new(),
+            )
+            .unwrap_err()
+            .into_api_error();
+            assert_eq!(
+                crate::compaction::discard::cause(&error),
+                super::super::discard::Outcome::Rejected {
+                    reason: RejectionReason::SourceChanged,
+                }
+            );
+            let path = tx
+                .prepare("SELECT node_id FROM thread_path WHERE thread_id='t' ORDER BY ordinal")?
+                .query_map([], |row| row.get::<_, String>(0))?
+                .collect::<Result<Vec<_>, _>>()?;
+            assert_eq!(path, ["prefix", "marker", "suffix"]);
+            Ok(())
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
     async fn final_r_splices_current_path_between_new_prefix_and_suffix_after_outside_changes() {
         let (_root, db) = fixture().await;
         seed(&db).await;
@@ -680,6 +946,7 @@ mod final_r_adoption_tests {
                     markers: &[],
                     payload: &payload,
                     input_key: "final-r-positive",
+                    format: super::FORMAT,
                 },
             )?;
             let path = tx
@@ -761,6 +1028,7 @@ mod final_r_adoption_tests {
                     markers: &[],
                     payload: &summary_payload(),
                     input_key: "final-r-partial-tool",
+                    format: super::FORMAT,
                 },
             );
             let error = result.unwrap_err().into_api_error();
@@ -840,6 +1108,7 @@ mod final_r_adoption_tests {
                     markers: &[],
                     payload: &payload,
                     input_key: "final-r-negative",
+                    format: super::FORMAT,
                 },
             );
             let expected = match kind {

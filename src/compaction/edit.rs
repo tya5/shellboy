@@ -410,6 +410,16 @@ impl Compactor {
                 attachment.get("state").and_then(Value::as_str) == Some("excluded")
             })
             .count();
+        let mut final_completed = completed.clone();
+        final_completed.extend(
+            snapshot
+                .groups
+                .iter()
+                .filter(|group| group.complete)
+                .flat_map(|group| group.sources.iter())
+                .filter_map(|source| source.payload.get("group_id").and_then(Value::as_str))
+                .map(str::to_owned),
+        );
         let mut validation = snapshot.clone();
         validation.groups = source_groups(originals, &completed);
         if !validation.groups.is_empty() {
@@ -419,17 +429,6 @@ impl Compactor {
                 range::RangeMode::Summary,
             )?;
         }
-        let mut path = selected[..marker_position]
-            .iter()
-            .map(|source| source.id.clone())
-            .collect::<Vec<_>>();
-        path.extend(expanded.iter().map(|source| source.id.clone()));
-        path.extend(
-            selected[marker_position + 1..]
-                .iter()
-                .filter(|source| !retained.contains(&source.id))
-                .map(|source| source.id.clone()),
-        );
         let invalidated = suffix_characters(&snapshot, index);
         let mut after_snapshot = snapshot.clone();
         let suffix = snapshot.groups[index + 1..]
@@ -446,7 +445,7 @@ impl Compactor {
             .iter()
             .flat_map(|group| group.sources.clone())
             .collect::<Vec<_>>();
-        all.extend(expanded);
+        all.extend(expanded.iter().cloned());
         all.extend(suffix);
         after_snapshot.groups = source_groups(all, &completed);
         let after = history_characters(&after_snapshot);
@@ -455,6 +454,26 @@ impl Compactor {
             warnings.push(format!("Restored text only: {excluded_attachments} excluded attachment references remain excluded; attach again with new IDs if needed"));
         }
         let marker_id = marker.id.clone();
+        let final_marker =
+            summary::final_r_source(&marker, true, snapshot.protected.contains(&marker.id));
+        let final_replacements = expanded
+            .iter()
+            .map(|source| {
+                summary::final_r_source(
+                    source,
+                    source
+                        .payload
+                        .get("group_id")
+                        .and_then(Value::as_str)
+                        .is_none_or(|group| final_completed.contains(group)),
+                    snapshot.protected.contains(&source.id),
+                )
+            })
+            .collect::<Vec<_>>();
+        let replacement_ids = expanded
+            .iter()
+            .map(|source| source.id.clone())
+            .collect::<Vec<_>>();
         let result = ContextEditResult {
             compact: CompactResult {
                 source_nodes: validation
@@ -481,14 +500,14 @@ impl Compactor {
                     )));
                 }
                 ensure_not_pruned(&tx, &marker_id)?;
-                validate(&tx, &snapshot)?;
-                validate(&tx, &validation)?;
-                history::select_path(
+                summary::restore_current_marker_tx(
                     &tx,
                     &snapshot.thread,
-                    snapshot.revision,
-                    &path,
-                    &timestamp(),
+                    &cancel,
+                    &final_marker,
+                    &final_replacements,
+                    &replacement_ids,
+                    &retained,
                 )?;
                 tx.commit()?;
                 Ok(result)

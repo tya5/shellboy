@@ -356,7 +356,7 @@ impl Compactor {
         self.database.call(move |db| {
             let tx = db.transaction()?;
             if cancel.is_cancelled() { return Err(StorageError::from(invalid("Context edit cancelled before adoption"))); }
-            validate(&tx, &snapshot)?;
+            validate_snapshot_for_strict_edit(&tx, &snapshot)?;
             let sources: Vec<_> = snapshot.groups.iter().enumerate().filter(|(index, _)| plan.omitted.contains(index)).flat_map(|(_, group)| group.sources.clone()).collect();
             let omitted_refs=sources.iter().collect::<Vec<_>>();
             let changed_refs=snapshot.groups.iter().enumerate().filter(|(index,_)|plan.omitted.contains(index)||spill_payloads.contains_key(index)).flat_map(|(_,group)|group.sources.iter()).collect::<Vec<_>>();

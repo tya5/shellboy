@@ -720,7 +720,7 @@ retained response's reasoning item was dropped. The baselines also succeeded.
 behaviour (the harness omitted Shellboy's routing headers), other
 models/endpoints, long Turns. Not validated: Claude (by instruction), Chat
 Completions, Shellboy's own B adoption code. Details:
-[midturn-compaction](../design/midturn-compaction.md#9-real-provider-validation-2026-11-03-approved-gpt-subscription-only).
+[midturn-compaction](../design/midturn-compaction-history.md#9-real-provider-validation-2026-11-03-approved-gpt-subscription-only).
 ## F8 action list scrollbar (#176)
 
 Synthetic Ratatui TestBackend coverage checks small and large viewports, the
@@ -12069,3 +12069,23 @@ Integration `control_db::long_public_model_selection_round_trips_without_normali
 covers real public create/set/get. These tests are authored; final native and
 independent implementation results are recorded separately, not inferred from
 contract approval or the distinct fork/docs b60 CI.
+
+## Core v2.1 U1 Current-Path Closeout (follow-up source candidate)
+
+Acceptance requires one final current-path/source-fact authority for automatic, manual,
+active-Turn and context-limit summary results; multi-range spill replacements must
+preserve unrelated current prefix/suffix and commit replacement/stage/FINISH atomically;
+restore must splice one still-valid marker in current path while preserving outside
+changes and rejecting changed/pruned sources or invalid retained anchors; failure-memory
+writes must remain bounded by cancellation, owner lifetime, identity and observed-slot
+CAS without unrelated path veto. Obsolete no-emitter rejection variants and superseded
+full-snapshot adoption descriptions must be retired without weakening explicit trim,
+protection, tool-closure, cancellation or replay behavior.
+
+Candidate base: `0ce8bfcd91c0755ee516ef98b09aa886284992ce`; follow-up branch:
+`task/core-v21-unit-a-closeout-63724`. Deterministic source tests were added for spill-format
+current-R adoption, restore outside-prefix/suffix preservation, changed-restore-source
+rejection, and outside-R failure-memory append. They are authored but **not run**. Only
+format and whitespace checks passed. Native full qualification, independent review and
+exact-SHA CI for the follow-up are **pending**; do not treat the frozen base SHA's green
+native check or in-progress three-OS CI as evidence for these edits.

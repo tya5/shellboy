@@ -366,7 +366,6 @@ impl Compactor {
                 };
                 if let Some(value) = stored_value {
                     let thread = snapshot.thread.clone();
-                    let proof = snapshot.clone();
                     let observation = observed.clone();
                     let cancel = cancel.clone();
                     let owner_lifetime = self.owner_lifetime.clone();
@@ -376,7 +375,6 @@ impl Compactor {
                             let wrote = remember_failure_qualified(
                                 &tx,
                                 QualifiedWrite {
-                                    snapshot: &proof,
                                     cancel: &cancel,
                                     owner_lifetime: owner_lifetime.as_ref(),
                                     thread: &thread,
@@ -482,7 +480,6 @@ impl Compactor {
         let payload = artifact.payload;
         if projected >= source_chars {
             let thread = snapshot.thread.clone();
-            let proof = snapshot.clone();
             let observation = observed.clone();
             let cancel = cancel.clone();
             let owner_lifetime = self.owner_lifetime.clone();
@@ -492,7 +489,6 @@ impl Compactor {
                     let wrote = remember_failure_qualified(
                         &tx,
                         QualifiedWrite {
-                            snapshot: &proof,
                             cancel: &cancel,
                             owner_lifetime: owner_lifetime.as_ref(),
                             thread: &thread,
@@ -891,7 +887,6 @@ pub(super) fn remember_failure(
     failure_memory::write(tx, &region.key(thread), observed, value)
 }
 pub(super) struct QualifiedWrite<'a> {
-    pub snapshot: &'a Snapshot,
     pub cancel: &'a CancellationToken,
     pub owner_lifetime: Option<&'a CancellationToken>,
     pub thread: &'a str,
@@ -904,7 +899,6 @@ pub(super) fn remember_failure_qualified(
     write: QualifiedWrite<'_>,
 ) -> Result<bool, StorageError> {
     let QualifiedWrite {
-        snapshot,
         cancel,
         owner_lifetime,
         thread,
@@ -914,12 +908,6 @@ pub(super) fn remember_failure_qualified(
     } = write;
     if cancel.is_cancelled() || owner_lifetime.is_some_and(CancellationToken::is_cancelled) {
         return Ok(false);
-    }
-    if let Err(authority) = validate(tx, snapshot) {
-        return match authority {
-            StorageError::Operation(_) => Ok(false),
-            error => Err(error),
-        };
     }
     remember_failure(tx, thread, region, observed, value)
 }
@@ -1135,8 +1123,23 @@ mod tests {
         let first_e = failure_identity("t", &first, 0..1, limit).expect("actual stored source");
         let first_f = provider_identity(&first_e, &first, &owner).expect("captured live scope");
         let first_e_value = first_e.0.clone();
-        let first_proof = first.clone();
         let first_f_value = first_f.clone();
+        db.call(|db| {
+            let tx = db.transaction()?;
+            history::append_node(
+                &tx,
+                "t",
+                "outside-source-append",
+                Some("source-turn"),
+                "message",
+                &json!({"role":"user","content":"outside the failed range"}),
+                "later",
+            )?;
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+        .unwrap();
         let first_cancel = CancellationToken::new();
         let first_owner_lifetime = owner_lifetime.clone();
         db.call(move |db| {
@@ -1146,7 +1149,6 @@ mod tests {
             assert!(remember_failure_qualified(
                 &tx,
                 QualifiedWrite {
-                    snapshot: &first_proof,
                     cancel: &first_cancel,
                     owner_lifetime: Some(&first_owner_lifetime),
                     thread: "t",
@@ -1190,7 +1192,6 @@ mod tests {
             first_f, second_f,
             "new real Run/Turn scope reopens provider memory"
         );
-        let stale_proof = first.clone();
         let stale_f = provider_identity(&second_e, &second, &owner).unwrap();
         let stale_cancel = CancellationToken::new();
         let stale_owner_lifetime = owner_lifetime.clone();
@@ -1200,7 +1201,6 @@ mod tests {
                 !remember_failure_qualified(
                     &tx,
                     QualifiedWrite {
-                        snapshot: &stale_proof,
                         cancel: &stale_cancel,
                         owner_lifetime: Some(&stale_owner_lifetime),
                         thread: "t",

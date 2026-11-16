@@ -280,7 +280,7 @@ contract in [compaction](compaction.md).
 compaction operations, automatic-failure observations and retained replacements,
 newest first. Unknown legacy metrics remain null and retention gaps are explicit.
 Adopted summaries add `post_compaction_input_tokens` / `post_compaction_attempt_id`
-(#230), derived at read time ([compaction](compaction.md#post-compaction-input-230)).
+(#230), derived at read time ([compaction](compaction-history.md#post-compaction-input-230)).
 `thread get` includes its latest retained compaction observation.
 
 `usage get` accepts a half-open RFC3339 interval [since,until), selecting model
@@ -288,7 +288,7 @@ attempts by started_at, shells by started_at and Runs by created_at. Selected
 lifetimes are counted whole, not prorated; unknown start times are excluded only
 when a period is requested. Existing usage state/unknown/overflow rules remain.
 Compaction summary requests are reported separately as `compaction`, selected by
-their first request time ([compaction](compaction.md#summary-request-usage-133--d-020)).
+their first request time ([compaction](compaction-history.md#summary-request-usage-133--d-020)).
 
 `shell list` defaults to all conversations, with optional thread, period, command
 substring (literal/case-sensitive), native state and exit-code filters. Maximum

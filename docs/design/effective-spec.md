@@ -109,7 +109,7 @@ then the active-Turn summary, which replaces every tool round of the Turn with
 one summary carrying the latest round as text and keeps the request prefix
 byte-identical. A documented thinking-binding rejection is resent once with
 the epoch advanced, and recorded. No vendor knob is sent. See
-[compaction](compaction.md#signed-reasoning-and-history-edits-182).
+[compaction](compaction-history.md#signed-reasoning-and-history-edits-182).
 
 ## 0.2.0 compatibility boundary
 
@@ -193,7 +193,7 @@ UIは既存のイベント・世代付き応答へリアクティブに追従し
 | Thread session | 会話・要約のResponsesへThread UUIDのheaderを既定付与。本文prompt_cache_keyは任意・既定無効。embedding/一覧へ自動付与しない | [model HTTP](model-http.md)、[config](config.md) |
 | Prompt caching (#127) | 共通のキャッシュの目印を既定で送る（`prompt_caching=false` でopt-out）。Messagesは最後のtool・system・末尾のShellboy通知（event・保存済み文脈行）の手前の会話末尾に5分の `cache_control`（最大3個）。Responses/Chatは新規送信なし | [model HTTP](model-http.md#common-cache-hint-127)、[config](config.md) |
 | Turnの文脈行 (#183) | `Shellboy context v1` は要求ごとに末尾へ付け直さず、kind=`context` の履歴nodeとして保存する。Turn開始時、Turn途中のcwd/connection/model/effort変更時（`thread_settings` eventの直後）、置換で経路から外れた後だけ末尾に追記し、最後の行が常に現在値。同じTurnの連続要求は厳密な追記 | [replay cache](replay-cache.md#turnの文脈行183)、[model HTTP](model-http.md#common-cache-hint-127) |
-| 要約要求usage (#133/#303) | manual/closed/activeの単一要約要求でproviderが報告したinput/cached/cache_creation/outputを `app_meta summary.usage.*` に圧縮単位で保存。未報告は不明のまま。map/reduce別request/cache/segment情報は廃止。`usage get` の `compaction` と `compact list` の `metrics.summary_usage` で会話要求と分けて表示 | [compaction](compaction.md#summary-request-usage-133--d-020)、D-020/#303 |
+| 要約要求usage (#133/#303) | manual/closed/activeの単一要約要求でproviderが報告したinput/cached/cache_creation/outputを `app_meta summary.usage.*` に圧縮単位で保存。未報告は不明のまま。map/reduce別request/cache/segment情報は廃止。`usage get` の `compaction` と `compact list` の `metrics.summary_usage` で会話要求と分けて表示 | [compaction](compaction-history.md#summary-request-usage-133--d-020)、D-020/#303 |
 | 接続先/モデル | Responses proxy経由、利用可能モデル・context長・価格の内蔵カタログなし | [models](models.md)、[model HTTP](model-http.md)。特定proxy製品への実装依存なし |
 | 再試行 | Failure-driven: no pre-POST estimate. First transient failure retries unchanged; eligible second failure reduces maximally. Explicit context overflow reduces immediately. All resends share the configured consecutive budget (default eight); success resets it. | [failure-driven reduction](failure-driven-reduction.md) |
 | HTTP期限 | 接続確立は固定30秒。Responsesは要求開始からheader受領まで接続別120000ms（正整数）、header後の受信停滞600000ms（0で無効）、embeddingは全体60000ms、モデル一覧は全体設定と20000msの短い方 | [model HTTP](model-http.md)、[config](config.md)。timeoutは索引の既存retry/pauseへ渡す。生成全体期限は追加しない。会話の停滞timeoutは再試行条件に従う。要約/索引/RAGの再試行は変更しない |

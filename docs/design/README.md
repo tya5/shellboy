@@ -67,7 +67,7 @@ saved activity classifier and frame-boundary writer, not a conversation renderer
   The runtime design and parallel-map implementation are not adopted; any
   specific infrastructure already landed is described in the current document,
   not implied by this proposal.
-- [Recoverable automatic attempt record](compaction.md#adopted-recoverable-automatic-attempt-record-after-post-commit-failure-226)
+- [Recoverable automatic attempt record](compaction-history.md#adopted-recoverable-automatic-attempt-record-after-post-commit-failure-226)
   (#226): stage facts written in the stage adoption transaction; complete or
   explicitly `unknown` after post-commit storage failure. Adopted and implemented
   on main.

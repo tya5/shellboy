@@ -373,3 +373,23 @@ are authored. Initial compile caught and corrected a SQLite usize parameter;
 initial test build caught an incorrect fixture DTO method. Original failures are
 preserved. Focused final-SHA validation and independent implementation review are
 pending; no full, CI, installed migration or deployment qualification is claimed.
+
+## Core v2.1 U1 Final-Path Closeout (source preparation; unqualified)
+
+A follow-up source worktree, `task/core-v21-unit-a-closeout-63724`, is prepared from
+native-green-but-not-yet-CI-qualified `0ce8bfcd91c0755ee516ef98b09aa886284992ce`.
+The frozen/pushed U1 worktree is not edited. The follow-up routes multi-range spill
+replacements through `FinalAdoption` against current R, gives restore a current-marker
+splice with unchanged source facts and current prefix/suffix preservation, and narrows
+manual failure-memory writes to cancellation/owner lifetime plus slot CAS. The former
+full-snapshot validator is named for strict explicit edits (trim), not summary adoption;
+three never-emitted nonappend/prefix/tail reason variants are removed. The old design
+narrative is preserved in `docs/design/compaction-history.md`; `docs/design/compaction.md`
+now states the operative v2.1 contract.
+
+`cargo fmt --all` and `cargo fmt --all -- --check` passed via the pinned worktree toolchain
+and shared rust-slot; `git diff --check` passed. A first formatter attempt from the wrong
+working directory used the sandbox stable toolchain and failed because its rustfmt
+component is absent; it changed nothing. No component was installed. No Rust build, test,
+Clippy, full check or CI was run on this follow-up; these source changes are unvalidated.
+The `0ce8` three-OS workflow remains separate and must finish under its existing watcher.

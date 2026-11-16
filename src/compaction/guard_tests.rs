@@ -66,7 +66,7 @@ async fn validator_preserves_first_rejection_and_does_not_write() {
             // Capture after the injected edit: validation itself must be read-only.
             let before = db.total_changes();
             let tx = db.transaction()?;
-            let error = validate(&tx, &snapshot).unwrap_err().into_api_error();
+            let error = validate_snapshot_for_strict_edit(&tx, &snapshot).unwrap_err().into_api_error();
             assert_eq!(error.code, ErrorCode::InvalidState);
             assert_eq!(discard::cause(&error), Outcome::Rejected { reason });
             assert!(!discard::cause(&error).deterministic());

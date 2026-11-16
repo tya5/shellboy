@@ -364,7 +364,7 @@ Empty-thread welcome shows a 39-column ASCII logo with five info rows (version, 
 
 ## Automatic compaction attempt record after post-commit failure (#226; implemented, CI pending)
 
-Implemented per the [adopted design](../design/compaction.md#adopted-recoverable-automatic-attempt-record-after-post-commit-failure-226):
+Implemented per the [adopted design](../design/compaction-history.md#adopted-recoverable-automatic-attempt-record-after-post-commit-failure-226):
 a provisional `unknown` record in the witness transaction, a fixed-size stage fact
 (and the calibrated provisional pending target) inside each stage's adoption
 transaction, W2/W4 keeping the facts, the two uncalibrated call sites recorded
@@ -437,7 +437,7 @@ as one summary carrying the latest tool round as text (#181's epoch advance and
 retained suffix removed). Spill and trims wait for a closed tool loop; overflow
 before that uses the active-Turn summary. A documented thinking-binding 400 is
 resent once with reasoning dropped and recorded. Design:
-[compaction](../design/compaction.md#signed-reasoning-and-history-edits-182),
+[compaction](../design/compaction-history.md#signed-reasoning-and-history-edits-182),
 decision D-189. Validation: see acceptance. No paid provider call. Next:
 coordinator merge; real Claude behaviour remains unvalidated.
 
@@ -494,7 +494,7 @@ conditions) awaits the user's approval.
 Branch `issue-185/keep-turn-inputs`: the overflow-recovery maximum omission now
 retains every user message of the active Turn (request and mid-Turn messages)
 verbatim, and its notice says so. See
-[compaction](../design/compaction.md#failure-driven-maximum-reduction-50).
+[compaction](../design/compaction-history.md#failure-driven-maximum-reduction-50).
 
 ## Mid-Turn active-Turn summary (#181, branch CI passed)
 
@@ -502,7 +502,7 @@ Proactive compaction now replaces the oldest eligible run of whole groups inside
 a long active Turn with one developer summary instead of the ordinary summary,
 keeping the request, later user messages and the latest complete tool group
 onward. Adoption starts a new reasoning epoch. See
-[compaction](../design/compaction.md#active-turn-middle-summary-181). No
+[compaction](../design/compaction-history.md#active-turn-middle-summary-181). No
 migration or setting. 3-OS CI run 41535174896 passed. Next: merge sequencing with
 issue-183/append-context and #180 (coordinator). #182 is separate.
 ## Revisit as a delivery timing (#187, rebased on fd23d321; CI in acceptance)
@@ -5647,7 +5647,7 @@ Empty-thread welcome shows a 39-column ASCII logo with five info rows (version, 
 
 ## Automatic compaction attempt record after post-commit failure (#226; implemented, CI pending)
 
-Implemented per the [adopted design](../design/compaction.md#adopted-recoverable-automatic-attempt-record-after-post-commit-failure-226):
+Implemented per the [adopted design](../design/compaction-history.md#adopted-recoverable-automatic-attempt-record-after-post-commit-failure-226):
 a provisional `unknown` record in the witness transaction, a fixed-size stage fact
 (and the calibrated provisional pending target) inside each stage's adoption
 transaction, W2/W4 keeping the facts, the two uncalibrated call sites recorded
@@ -5720,7 +5720,7 @@ as one summary carrying the latest tool round as text (#181's epoch advance and
 retained suffix removed). Spill and trims wait for a closed tool loop; overflow
 before that uses the active-Turn summary. A documented thinking-binding 400 is
 resent once with reasoning dropped and recorded. Design:
-[compaction](../design/compaction.md#signed-reasoning-and-history-edits-182),
+[compaction](../design/compaction-history.md#signed-reasoning-and-history-edits-182),
 decision D-189. Validation: see acceptance. No paid provider call. Next:
 coordinator merge; real Claude behaviour remains unvalidated.
 
@@ -5777,7 +5777,7 @@ conditions) awaits the user's approval.
 Branch `issue-185/keep-turn-inputs`: the overflow-recovery maximum omission now
 retains every user message of the active Turn (request and mid-Turn messages)
 verbatim, and its notice says so. See
-[compaction](../design/compaction.md#failure-driven-maximum-reduction-50).
+[compaction](../design/compaction-history.md#failure-driven-maximum-reduction-50).
 
 ## Mid-Turn active-Turn summary (#181, branch CI passed)
 
@@ -5785,7 +5785,7 @@ Proactive compaction now replaces the oldest eligible run of whole groups inside
 a long active Turn with one developer summary instead of the ordinary summary,
 keeping the request, later user messages and the latest complete tool group
 onward. Adoption starts a new reasoning epoch. See
-[compaction](../design/compaction.md#active-turn-middle-summary-181). No
+[compaction](../design/compaction-history.md#active-turn-middle-summary-181). No
 migration or setting. 3-OS CI run 41535174896 passed. Next: merge sequencing with
 issue-183/append-context and #180 (coordinator). #182 is separate.
 ## Revisit as a delivery timing (#187, rebased on fd23d321; CI in acceptance)

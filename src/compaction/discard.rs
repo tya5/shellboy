@@ -16,9 +16,6 @@ pub enum RejectionReason {
     RunStopped,
     TurnStarted,
     TurnChanged,
-    NonappendGenerationChanged,
-    SelectedPrefixChanged,
-    CurrentTailChanged,
     SourceChanged,
     SourcePruned,
 }
@@ -813,9 +810,6 @@ mod retention_contract_tests {
             RejectionReason::RunStopped,
             RejectionReason::TurnStarted,
             RejectionReason::TurnChanged,
-            RejectionReason::NonappendGenerationChanged,
-            RejectionReason::SelectedPrefixChanged,
-            RejectionReason::CurrentTailChanged,
             RejectionReason::SourceChanged,
             RejectionReason::SourcePruned,
         ] {

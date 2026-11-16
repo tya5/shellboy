@@ -185,7 +185,7 @@ index design for where it is applied.
 ## Explicit summary limits (#73)
 
 The optional `[compaction]` section follows D-015 and the
-[bounded summary contract](compaction.md#bounded-explicit-summaries-73--d-015).
+[bounded summary contract](compaction-history.md#bounded-explicit-summaries-73--d-015).
 Unlike sections with independent defaults, an explicitly present section uses
 only its specified limit keys; omission of the whole section selects both
 20,000 characters and 5%. Config parsing and config check enforce the same

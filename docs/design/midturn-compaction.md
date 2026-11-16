@@ -3,7 +3,7 @@
 Status: **Adopted and implemented (2026-11-03)** after review, the survey and the
 GPT-route validation. **Superseded in part by #182 (2026-11-03):** the segment,
 retained suffix, epoch rule and trigger order in sections 1-4 and 7 are replaced
-by [compaction #181/#182](compaction.md#active-turn-middle-summary-181-reshaped-by-182)
+by [compaction #181/#182](compaction-history.md#active-turn-middle-summary-181-reshaped-by-182)
 (all tool rounds replaced, the latest round as text, no epoch advance, ordinary
 summary first). #215 supersedes that scope: automatic mid-Turn summary chooses
 oldest-first whole safe groups only until the remaining calibrated removal need
@@ -12,7 +12,7 @@ atomically advances the Thread reasoning epoch and clears the kept set, dropping
 all earlier reasoning. The original request, kept user instructions, unreflected
 input, incomplete groups and protected nodes remain fenced; the summary keeps
 its User instructions to keep section. Record remaining need before and after.
-The evidence and cache sections remain as history. Adopted contract summary: [compaction](compaction.md#active-turn-middle-summary-181).
+The evidence and cache sections remain as history. Adopted contract summary: [compaction](compaction-history.md#active-turn-middle-summary-181).
 Implementation differences from this memo: the readback `compact list` metric
 for the scope is not added (the `midturn` object is in the saved attempt record),
 and the function is named `active_turn_range`/`summarize_active_turn`.

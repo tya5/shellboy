@@ -614,30 +614,52 @@ impl Compactor {
                         "Compaction cancelled before adoption",
                     )));
                 }
-                validate(&tx, &snapshot)?;
-                let mut path = Vec::new();
-                for (ordinal, group) in snapshot.groups.iter().enumerate() {
-                    if let Some((_, payload)) = replacements.iter().find(|(i, _)| *i == ordinal) {
-                        let node = store_replacement(
-                            &tx,
-                            &config,
-                            &snapshot,
-                            &group.sources,
+                for (ordinal, payload) in &replacements {
+                    let group = &snapshot.groups[*ordinal];
+                    let sources = group
+                        .sources
+                        .iter()
+                        .map(|source| {
+                            summary::final_r_source(
+                                source,
+                                group.complete,
+                                snapshot.protected.contains(&source.id),
+                            )
+                        })
+                        .collect::<Vec<_>>();
+                    let markers = snapshot
+                        .extra_sources
+                        .iter()
+                        .map(|source| {
+                            summary::final_r_source(
+                                source,
+                                true,
+                                snapshot.protected.contains(&source.id),
+                            )
+                        })
+                        .collect::<Vec<_>>();
+                    let input_key = key(&(
+                        "spill-v1",
+                        sources
+                            .iter()
+                            .map(|source| (&source.fact.id, source.fact.revision, &source.hash))
+                            .collect::<Vec<_>>(),
+                        payload,
+                    ));
+                    summary::adopt_current_r_tx(
+                        &tx,
+                        summary::FinalAdoption {
+                            config: &config,
+                            cancel: &cancel,
+                            thread: &snapshot.thread,
+                            sources: &sources,
+                            markers: &markers,
                             payload,
-                            "spill-v1",
-                        )?;
-                        path.push(node);
-                    } else {
-                        path.extend(group.sources.iter().map(|s| s.id.clone()));
-                    }
+                            input_key: &input_key,
+                            format: "spill-v1",
+                        },
+                    )?;
                 }
-                history::select_path(
-                    &tx,
-                    &snapshot.thread,
-                    snapshot.revision,
-                    &path,
-                    &timestamp(),
-                )?;
                 if drop_all_reasoning {
                     tx.execute(
                         "UPDATE thread SET reasoning_epoch=?2 WHERE id=?1",
@@ -1175,7 +1197,11 @@ struct SnapshotMatch {
     epoch: Option<bool>,
     settings: Option<bool>,
 }
-fn validate(tx: &rusqlite::Transaction<'_>, s: &Snapshot) -> Result<(), StorageError> {
+/// Strict full-snapshot fence for explicit trim/edit transactions, not summary adoption.
+fn validate_snapshot_for_strict_edit(
+    tx: &rusqlite::Transaction<'_>,
+    s: &Snapshot,
+) -> Result<(), StorageError> {
     use discard::{RejectionReason as R, rejected};
     let matches:Option<SnapshotMatch>=tx.query_row(
         "SELECT selection_revision=?2,profile_revision=?3,reasoning_epoch=?4,summary_max_chars IS ?5 FROM thread WHERE id=?1 AND deleted_at IS NULL",
@@ -2179,7 +2205,7 @@ mod tests {
         let settings_rejected = db
             .call(move |db| {
                 let tx = db.transaction()?;
-                validate(&tx, &stale_settings)?;
+                validate_snapshot_for_strict_edit(&tx, &stale_settings)?;
                 Ok(())
             })
             .await
@@ -2208,7 +2234,7 @@ mod tests {
         let rejected = db
             .call(move |db| {
                 let tx = db.transaction()?;
-                validate(&tx, &snapshot)?;
+                validate_snapshot_for_strict_edit(&tx, &snapshot)?;
                 store_replacement(
                     &tx,
                     &Config::default(),
@@ -3893,7 +3919,7 @@ mod tests {
         let snapshot = compactor.snapshot("t", true).await.unwrap();
         db.call(move |db| {
             let tx = db.transaction()?;
-            validate(&tx, &snapshot)?;
+            validate_snapshot_for_strict_edit(&tx, &snapshot)?;
             let node = store_replacement(
                 &tx,
                 &Config::default(),
@@ -3974,7 +4000,7 @@ mod tests {
         let count = db
             .call(move |db| {
                 let tx = db.transaction()?;
-                validate(&tx, &snapshot)?;
+                validate_snapshot_for_strict_edit(&tx, &snapshot)?;
                 store_replacement(
                     &tx,
                     &config,
@@ -4014,7 +4040,7 @@ mod tests {
         let failed = db
             .call(move |db| {
                 let tx = db.transaction()?;
-                validate(&tx, &snapshot)?;
+                validate_snapshot_for_strict_edit(&tx, &snapshot)?;
                 let node = store_replacement(
                     &tx,
                     &Config::default(),
