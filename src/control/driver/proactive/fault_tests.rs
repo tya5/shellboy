@@ -1748,24 +1748,7 @@ impl ActiveTurnPhase {
                         custody.generation,
                         scripted.call_id
                     ],
-                    |row| {
-                        Ok((
-                            row.get::<_, String>(0)?,
-                            row.get::<_, String>(1)?,
-                            row.get::<_, String>(2)?,
-                            row.get::<_, String>(3)?,
-                            row.get::<_, String>(4)?,
-                            row.get::<_, String>(5)?,
-                            row.get::<_, String>(6)?,
-                            row.get::<_, String>(7)?,
-                            row.get::<_, i64>(8)?,
-                            row.get::<_, String>(9)?,
-                            row.get::<_, String>(10)?,
-                            row.get::<_, String>(11)?,
-                            row.get::<_, Option<String>>(12)?,
-                            row.get::<_, String>(13)?,
-                        ))
-                    },
+                    ActivePhaseCustodyRow::read,
                 )?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             assert_eq!(
@@ -1773,26 +1756,27 @@ impl ActiveTurnPhase {
                 1,
                 "every registered continuation has exactly one original output item"
             );
-            let (
-                attempt,
-                assistant_node,
-                item_json,
-                item_status,
+            let row = rows.into_iter().next().unwrap();
+            let ActivePhaseCustodyRow {
+                attempt_id: attempt,
+                assistant_node_id: assistant_node,
+                output_item_json: item_json,
+                output_item_status: item_status,
                 attempt_state,
-                thread,
-                run,
-                turn,
-                generation,
-                node_kind,
-                assistant_thread,
-                assistant_turn,
-                assistant_json,
-            ) = rows.into_iter().next().unwrap();
+                thread_id: thread,
+                run_id: run,
+                turn_id: turn,
+                attempt_generation,
+                assistant_node_kind: node_kind,
+                assistant_node_thread_id: assistant_thread,
+                assistant_node_turn_id: assistant_turn,
+                assistant_node_json: assistant_json,
+            } = row;
             assert_eq!(thread, custody.thread, "scripted continuation Thread");
             assert_eq!(run, custody.run, "scripted continuation Run");
             assert_eq!(turn, custody.turn, "scripted continuation Turn");
             assert_eq!(
-                generation, custody.generation,
+                attempt_generation, custody.generation,
                 "immutable model-attempt generation"
             );
             assert_eq!(
@@ -1910,6 +1894,42 @@ impl ActiveTurnPhase {
             );
         }
         Ok(certificate)
+    }
+}
+
+struct ActivePhaseCustodyRow {
+    attempt_id: String,
+    assistant_node_id: String,
+    output_item_json: String,
+    output_item_status: String,
+    attempt_state: String,
+    thread_id: String,
+    run_id: String,
+    turn_id: String,
+    attempt_generation: i64,
+    assistant_node_kind: String,
+    assistant_node_thread_id: String,
+    assistant_node_turn_id: Option<String>,
+    assistant_node_json: String,
+}
+
+impl ActivePhaseCustodyRow {
+    fn read(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
+        Ok(Self {
+            attempt_id: row.get(0)?,
+            assistant_node_id: row.get(1)?,
+            output_item_json: row.get(2)?,
+            output_item_status: row.get(3)?,
+            attempt_state: row.get(4)?,
+            thread_id: row.get(5)?,
+            run_id: row.get(6)?,
+            turn_id: row.get(7)?,
+            attempt_generation: row.get(8)?,
+            assistant_node_kind: row.get(9)?,
+            assistant_node_thread_id: row.get(10)?,
+            assistant_node_turn_id: row.get(11)?,
+            assistant_node_json: row.get(12)?,
+        })
     }
 }
 
@@ -2423,9 +2443,10 @@ async fn assert_boundary(
                 [&target], |row| row.get(0),
             )?;
             assert_eq!(committed, 0, "rejected follow-on active summary leaves no adopted summary node");
+            let custody = active_phase.custody.as_ref().expect("active RejectFinal has original Turn custody");
             let active_attempts: i64 = db.query_row(
                 "SELECT count(*) FROM model_attempt WHERE turn_id=?1 AND json_extract(error_json,'$.automatic_trim_attempt.stages.active_summary') IS NOT NULL",
-                [custody.turn], |row| row.get(0),
+                [&custody.turn], |row| row.get(0),
             )?;
             assert_eq!(active_attempts, 0, "no committed active-summary automatic attempt survives rejected FINISH");
         }
