@@ -446,6 +446,11 @@ impl HttpModelClient {
         let started = std::time::Instant::now();
         let rate_generation = self.rate_gate.generation();
         let mut connection_failed = false;
+        #[cfg(test)]
+        if let Some(stage) = _gc_dispatch_stage {
+            *stage.lock().expect("GC dispatch stage observer poisoned") =
+                crate::control::GcDispatchStage::TransportSendEntered;
+        }
         let outcome = deadline
             .wait_headers(cancel, outgoing.send())
             .await

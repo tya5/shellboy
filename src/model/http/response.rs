@@ -195,9 +195,6 @@ impl HttpModelClient {
         cancel: CancellationToken,
         events: Option<mpsc::Sender<ObservedEvent>>,
         bypass_usage_limit: Option<crate::model::usage_limit::UsageLimit>,
-        #[cfg(test)] gc_dispatch_stage: Option<
-            &std::sync::Arc<std::sync::Mutex<crate::control::GcDispatchStage>>,
-        >,
     ) -> Result<ModelResponse, AttemptFailure> {
         self.response_inner(
             request,
@@ -218,6 +215,9 @@ impl HttpModelClient {
         events: Option<Events>,
         thread: Option<&str>,
         bypass_usage_limit: Option<crate::model::usage_limit::UsageLimit>,
+        #[cfg(test)] gc_dispatch_stage: Option<
+            &std::sync::Arc<std::sync::Mutex<crate::control::GcDispatchStage>>,
+        >,
     ) -> Result<ModelResponse, AttemptFailure> {
         if cancel.is_cancelled() {
             return Err(cancelled().into());
@@ -256,6 +256,8 @@ impl HttpModelClient {
                 },
                 &mut facts,
                 session_header,
+                #[cfg(test)]
+                gc_dispatch_stage,
             )
             .await;
         if result.is_ok()
