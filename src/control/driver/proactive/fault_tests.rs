@@ -755,6 +755,12 @@ async fn prepare_with_mode(
             ))
             .unwrap();
         settled(&control, &target).await;
+        let facts = admission_boundary_facts(&control, &target).await;
+        assert!(
+            facts.latest_attempt_id.is_some(),
+            "closed trigger report must have an attempt witness: {facts:?}"
+        );
+        eprintln!("U2 closed trigger before next Turn: {facts:?}");
         send(&control, &target, "next turn").await;
     }
     let mut held_summary = None;
@@ -870,6 +876,14 @@ async fn prepare_with_mode(
                     .send((200, answer_with_usage("pre-summary continuation", 100)))
                     .unwrap();
                 continue;
+            }
+            if hold_summary {
+                let facts = admission_boundary_facts(&control, &target).await;
+                assert!(
+                    facts.latest_attempt_id.is_some(),
+                    "ordinary request must have a report witness: {facts:?}"
+                );
+                eprintln!("U2 first ordinary request before summary: {facts:?}");
             }
             request
                 .reply
@@ -1442,6 +1456,65 @@ async fn progress(control: &Control) -> Result<Value, crate::storage::StorageErr
         Ok(Value::Object(state))
     }).await
 }
+#[derive(Debug)]
+struct AdmissionBoundaryFacts {
+    latest_attempt_id: Option<String>,
+    input_tokens: Option<u64>,
+    next_request_pending: Option<bool>,
+    slot_exists: bool,
+    proactive_active: bool,
+    job_exists: bool,
+    job_finished: bool,
+}
+
+async fn admission_boundary_facts(control: &Control, thread: &str) -> AdmissionBoundaryFacts {
+    let thread_for_usage = thread.to_owned();
+    let (latest_attempt_id, input_tokens, next_request_pending) = control
+        .store
+        .database
+        .call(move |db| {
+            let (usage, _) = crate::compaction::context_usage::prepare_context_usage(
+                crate::compaction::context_usage::read_context_usage_tx(
+                    db,
+                    &thread_for_usage,
+                    None,
+                )?,
+            );
+            let report = &usage["last_successful_attempt"];
+            Ok((
+                report["attempt_id"].as_str().map(str::to_owned),
+                report["input_tokens"].as_u64(),
+                report["next_request_pending"].as_bool(),
+            ))
+        })
+        .await
+        .unwrap();
+    let slot = {
+        let drivers = control.live.test_drivers().lock().await;
+        drivers.get(thread).cloned()
+    };
+    let (proactive_active, job_exists, job_finished) = if let Some(slot) = slot.as_ref() {
+        let job = slot.proactive_job.lock().await;
+        (
+            slot.proactive_active.load(Ordering::Acquire),
+            job.is_some(),
+            job.as_ref()
+                .is_some_and(crate::control::driver::proactive::BackgroundJob::is_finished),
+        )
+    } else {
+        (false, false, false)
+    };
+    AdmissionBoundaryFacts {
+        latest_attempt_id,
+        input_tokens,
+        next_request_pending,
+        slot_exists: slot.is_some(),
+        proactive_active,
+        job_exists,
+        job_finished,
+    }
+}
+
 #[track_caller]
 fn incoming<'a>(
     control: &'a Control,
