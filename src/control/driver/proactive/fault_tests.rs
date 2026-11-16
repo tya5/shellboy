@@ -1254,10 +1254,10 @@ async fn prepare_with_mode(
                     );
                     first_normal_facts_recorded = true;
                 }
-                if hold_summary {
+                if hold_summary && held_summary.is_some() {
                     assert!(
                         held_normal.replace(request).is_none(),
-                        "only one ordinary Run A request is held"
+                        "only one post-summary ordinary request is held"
                     );
                 } else {
                     request
