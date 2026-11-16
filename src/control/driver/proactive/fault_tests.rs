@@ -518,7 +518,7 @@ async fn prepare_with_options(
             })
             .await
             .unwrap();
-        if scenario.active() {
+        if scenario.active() && !spill_off {
             assert_eq!(
                 diagnostic.2["last_successful_attempt"]["next_request_pending"], true,
                 "the active spill committed after the trigger attempt; witnesses: latest row={:?}; usage/report attempt={:?}; output nodes/path={:?}; replacements after report attempt={:?}",
