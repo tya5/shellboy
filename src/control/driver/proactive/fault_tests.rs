@@ -387,6 +387,9 @@ async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_b
         let query_thread = thread_id.clone();
         let query_run = run_id.clone();
         let query_turn = turn_id.clone();
+        let event_thread = thread_id.clone();
+        let event_run = run_id.clone();
+        let event_turn = turn_id.clone();
         let (run_state, turn_state, receipt_state, message_turn, turn_started_events) = control
             .store
             .database
@@ -408,7 +411,7 @@ async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_b
                 )?;
                 let turn_started_events: i64 = db.query_row(
                     "SELECT count(*) FROM event WHERE target_thread_id=?1 AND json_extract(payload_ref_json,'$.kind')='turn_started' AND json_extract(payload_ref_json,'$.change.run_id')=?2 AND json_extract(payload_ref_json,'$.change.turn_id')=?3",
-                    rusqlite::params![thread_id, run_id, turn_id],
+                    rusqlite::params![event_thread, event_run, event_turn],
                     |row| row.get(0),
                 )?;
                 Ok((run_state, turn_state, receipt_state, message_turn, turn_started_events))
