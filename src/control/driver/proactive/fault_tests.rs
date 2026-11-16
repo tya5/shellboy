@@ -173,16 +173,12 @@ async fn context_limit_waits_for_the_same_proactive_job_without_a_second_summary
             mut receive,
             server,
             mut held_summary,
-            mut held_normal,
             ..
         } = prepare_held_summary(Scenario::ClosedSummary).await;
         let summary = held_summary
             .take()
             .expect("one proactive summary request is held");
-        let normal = match held_normal.take() {
-            Some(request) => request,
-            None => incoming(&control, &mut receive).await,
-        };
+        let normal = incoming(&control, &mut receive).await;
         assert_ne!(normal.body, summary.body);
         normal
             .reply
@@ -247,7 +243,6 @@ async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_b
             receive,
             server,
             held_summary,
-            held_normal,
             ..
         } = &mut fx;
         let summary = held_summary
@@ -272,10 +267,7 @@ async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_b
             .unwrap();
 
         // This request reached the provider while the summary response was held.
-        let normal = match held_normal.take() {
-            Some(request) => request,
-            None => incoming(control, receive).await,
-        };
+        let normal = incoming(control, receive).await;
         assert_ne!(
             normal.body, summary.body,
             "next request is not a duplicate summary POST"
@@ -766,7 +758,6 @@ async fn prepare_with_mode(
         send(&control, &target, "next turn").await;
     }
     let mut held_summary = None;
-    let mut held_normal = None;
     if scenario.summary() {
         loop {
             let request = incoming(&control, &mut receive).await;
@@ -872,11 +863,12 @@ async fn prepare_with_mode(
                 break;
             }
             if hold_summary {
-                assert!(
-                    held_normal.is_none(),
-                    "one normal request may be held before the summary"
-                );
-                held_normal = Some(request);
+                // Drain any request that reached the provider before the
+                // summary; the tests then hold a fresh request with R pending.
+                request
+                    .reply
+                    .send((200, answer_with_usage("pre-summary continuation", 100)))
+                    .unwrap();
                 continue;
             }
             request
@@ -933,7 +925,6 @@ async fn prepare_with_mode(
             checkpoint_reached,
             release_checkpoint,
             held_summary,
-            held_normal,
         };
     }
     let saved = control.store.database.call(|db| Ok(db.query_row(
@@ -997,7 +988,6 @@ async fn prepare_with_mode(
         checkpoint_reached,
         release_checkpoint,
         held_summary,
-        held_normal,
     }
 }
 
@@ -1015,7 +1005,6 @@ struct Fx {
     checkpoint_reached: Arc<AtomicBool>,
     release_checkpoint: Arc<tokio::sync::Notify>,
     held_summary: Option<Incoming>,
-    held_normal: Option<Incoming>,
 }
 
 /// Whether the latest automatic attempt record has left the provisional state,
