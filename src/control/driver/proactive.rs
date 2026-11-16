@@ -49,7 +49,7 @@ pub(super) async fn preflight(
 ) -> Result<Option<ProactivePlan>, ApiError> {
     let thread = snapshot.thread.clone();
     let config = control.store.config.clone();
-    let (settings, usage, spill, a_input_tokens) = control
+    let (settings, usage, spill, a_input_tokens, attempt_consumed) = control
         .store
         .database
         .call(move |db| {
@@ -61,6 +61,14 @@ pub(super) async fn preflight(
             let (usage, _) = crate::compaction::context_usage::prepare_context_usage(
                 crate::compaction::context_usage::read_context_usage_tx(db, &thread, None)?,
             );
+            let attempt_consumed = match usage["last_successful_attempt"]["attempt_id"].as_str() {
+                Some(attempt_id) => db.query_row(
+                    "SELECT json_type(error_json,'$.automatic_trim_attempt') IS NOT NULL FROM model_attempt WHERE id=?1",
+                    [attempt_id],
+                    |row| row.get::<_, bool>(0),
+                )?,
+                None => true,
+            };
             let connection_spill = config
                 .current()
                 .connections
@@ -77,7 +85,7 @@ pub(super) async fn preflight(
             } else {
                 None
             };
-            Ok((settings, usage, spill, a_input_tokens))
+            Ok((settings, usage, spill, a_input_tokens, attempt_consumed))
         })
         .await
         .map_err(storage_error)?;
@@ -115,7 +123,11 @@ pub(super) async fn preflight(
     ) else {
         return Ok(None);
     };
-    if threshold == 0 || input_tokens < threshold || report["next_request_pending"] == true {
+    if attempt_consumed
+        || threshold == 0
+        || input_tokens < threshold
+        || report["next_request_pending"] == true
+    {
         return Ok(None);
     }
     Ok(Some(ProactivePlan {

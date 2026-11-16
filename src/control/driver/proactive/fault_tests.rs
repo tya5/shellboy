@@ -1025,14 +1025,20 @@ async fn prepare_with_mode(
             let request = if hold_summary {
                 loop {
                     tokio::select! {
-                        head = heads.recv() => {
-                            let head = head.expect("mock server head channel remains open");
-                            assert!(head.request_line.starts_with("POST /v1/responses "), "unexpected accepted request line: {head:?}");
-                            assert!(head.content_length.is_some(), "fixture expects Content-Length framing: {head:?}");
-                            assert!(head.transfer_encoding.is_none(), "fixture does not decode chunked request bodies: {head:?}");
-                            assert!(head.content_encoding.is_none(), "fixture does not decode compressed request bodies: {head:?}");
-                            eprintln!("U2 accepted HTTP request head: {head:?}");
-                            observed_heads.push(head);
+                        event = heads.recv() => {
+                            match event.expect("mock server request event channel remains open") {
+                                ProxyRequestEvent::Accepted { request_id, peer } => {
+                                    eprintln!("U2 mock listener accepted connection: id={request_id} peer={peer}");
+                                }
+                                ProxyRequestEvent::Headers(head) => {
+                                    assert!(head.request_line.starts_with("POST /v1/responses "), "unexpected accepted request line: {head:?}");
+                                    assert!(head.content_length.is_some(), "fixture expects Content-Length framing: {head:?}");
+                                    assert!(head.transfer_encoding.is_none(), "fixture does not decode chunked request bodies: {head:?}");
+                                    assert!(head.content_encoding.is_none(), "fixture does not decode compressed request bodies: {head:?}");
+                                    eprintln!("U2 accepted HTTP request headers: {head:?}");
+                                    observed_heads.push(head);
+                                }
+                            }
                         }
                         request = receive.recv() => break request.expect("mock server body channel remains open"),
                     }
@@ -1046,19 +1052,28 @@ async fn prepare_with_mode(
                     .any(|head| head.request_id == request.request_id)
             {
                 loop {
-                    let head = heads
+                    match heads
                         .recv()
                         .await
-                        .expect("completed body has an accepted HTTP head");
-                    assert!(head.request_line.starts_with("POST /v1/responses "));
-                    assert!(head.content_length.is_some());
-                    assert!(head.transfer_encoding.is_none());
-                    assert!(head.content_encoding.is_none());
-                    eprintln!("U2 accepted HTTP request head: {head:?}");
-                    let matched = head.request_id == request.request_id;
-                    observed_heads.push(head);
-                    if matched {
-                        break;
+                        .expect("completed body has accepted connection/header events")
+                    {
+                        ProxyRequestEvent::Accepted { request_id, peer } => {
+                            eprintln!(
+                                "U2 mock listener accepted connection: id={request_id} peer={peer}"
+                            );
+                        }
+                        ProxyRequestEvent::Headers(head) => {
+                            assert!(head.request_line.starts_with("POST /v1/responses "));
+                            assert!(head.content_length.is_some());
+                            assert!(head.transfer_encoding.is_none());
+                            assert!(head.content_encoding.is_none());
+                            eprintln!("U2 accepted HTTP request headers: {head:?}");
+                            let matched = head.request_id == request.request_id;
+                            observed_heads.push(head);
+                            if matched {
+                                break;
+                            }
+                        }
                     }
                 }
             }
@@ -2025,6 +2040,15 @@ struct Incoming {
     release: Option<oneshot::Sender<()>>,
 }
 #[derive(Clone, Debug)]
+enum ProxyRequestEvent {
+    Accepted {
+        request_id: u64,
+        peer: std::net::SocketAddr,
+    },
+    Headers(ProxyHead),
+}
+
+#[derive(Clone, Debug)]
 struct ProxyHead {
     request_id: u64,
     request_line: String,
@@ -2036,20 +2060,21 @@ struct ProxyHead {
 async fn proxy() -> (
     String,
     mpsc::Receiver<Incoming>,
-    mpsc::UnboundedReceiver<ProxyHead>,
+    mpsc::UnboundedReceiver<ProxyRequestEvent>,
     tokio::task::JoinHandle<()>,
 ) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let (send, receive) = mpsc::channel(8);
-    let (head_send, head_receive) = mpsc::unbounded_channel();
+    let (head_send, head_receive) = mpsc::unbounded_channel::<ProxyRequestEvent>();
     let request_ids = Arc::new(AtomicU64::new(0));
     let server = tokio::spawn(async move {
         loop {
-            let (mut stream, _) = listener.accept().await.unwrap();
+            let (mut stream, peer) = listener.accept().await.unwrap();
             let send = send.clone();
             let head_send = head_send.clone();
             let request_id = request_ids.fetch_add(1, Ordering::Relaxed);
+            let _ = head_send.send(ProxyRequestEvent::Accepted { request_id, peer });
             tokio::spawn(async move {
                 let mut bytes = Vec::new();
                 let mut buffer = [0; 8192];
@@ -2077,13 +2102,13 @@ async fn proxy() -> (
                         let transfer_encoding = header_value("transfer-encoding");
                         let content_encoding = header_value("content-encoding");
                         if !head_sent {
-                            let _ = head_send.send(ProxyHead {
+                            let _ = head_send.send(ProxyRequestEvent::Headers(ProxyHead {
                                 request_id,
                                 request_line,
                                 content_length,
                                 transfer_encoding,
                                 content_encoding,
-                            });
+                            }));
                             head_sent = true;
                         }
                         let size = content_length.unwrap();
