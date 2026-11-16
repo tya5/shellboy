@@ -526,6 +526,15 @@ pub(super) fn adopt_current_rs_tx(
             "final compaction reasoning projection differs from selected-path adoption".into(),
         ));
     }
+    let actual_keep = history::reasoning_keep(tx, thread, actual_epoch)?;
+    if kept_reasoning_node_ids
+        .iter()
+        .any(|id| !actual_keep.contains(id))
+    {
+        return Err(StorageError::Schema(
+            "final compaction reasoning keep differs from selected-path adoption".into(),
+        ));
+    }
     if matches!(reasoning_policy, FinalReasoningPolicy::DropAll) {
         let changed = tx.execute(
             "UPDATE thread SET reasoning_epoch=?2 WHERE id=?1 AND reasoning_epoch=?3",
@@ -558,16 +567,6 @@ pub(super) fn adopt_current_rs_tx(
                     rusqlite::params![node, body, body.len() as i64, super::key(&final_payload)],
                 )?;
             }
-        }
-    } else {
-        let actual_keep = history::reasoning_keep(tx, thread, actual_epoch)?;
-        if kept_reasoning_node_ids
-            .iter()
-            .any(|id| !actual_keep.contains(id))
-        {
-            return Err(StorageError::Schema(
-                "final summary reasoning keep differs from selected-path adoption".into(),
-            ));
         }
     }
     if cancel.is_cancelled() {
@@ -1076,10 +1075,27 @@ mod final_r_adoption_tests {
             let tx = db.transaction()?;
             tx.execute("INSERT INTO node(id,kind,created_at,payload_json) VALUES('marker','summary','now',?1)", [marker_payload_for_insert.to_string()])?;
             let revision: i64 = tx.query_row("SELECT selection_revision FROM thread WHERE id='t'", [], |row| row.get(0))?;
-            history::select_path(&tx, "t", revision as u64, &["prefix".into(),"marker".into(),"r2".into(),"r1".into(),"suffix".into()], &timestamp())?;
+            history::select_path(&tx, "t", revision as u64, &["prefix".into(),"marker".into(),"r1".into(),"r2".into(),"suffix".into()], &timestamp())?;
             tx.commit()?;
             Ok(())
         }).await.unwrap();
+        db.call(|db| {
+            let tx = db.transaction()?;
+            tx.execute("DELETE FROM thread_path WHERE thread_id='t'", [])?;
+            for (ordinal, id) in ["prefix", "marker", "r2", "r1", "suffix"]
+                .iter()
+                .enumerate()
+            {
+                tx.execute(
+                    "INSERT INTO thread_path(thread_id,ordinal,node_id) VALUES('t',?1,?2)",
+                    rusqlite::params![ordinal as i64, id],
+                )?;
+            }
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+        .unwrap();
         let marker = FinalRSource {
             fact: super::super::gc_capture::GcSourceFacts {
                 ordinal: 0,

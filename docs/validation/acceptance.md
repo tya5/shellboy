@@ -12076,7 +12076,9 @@ Acceptance requires one final current-path/source-fact authority for automatic, 
 active-Turn and context-limit summary results; multi-range spill replacements must
 preserve unrelated current prefix/suffix and commit replacement/stage/FINISH atomically;
 restore must splice one still-valid marker in current path while preserving outside
-changes and rejecting changed/pruned sources or invalid retained anchors; failure-memory
+changes and rejecting changed/pruned sources, invalid retained anchors, and retained
+anchors reordered relative to the marker's recorded original order before any deletion;
+failure-memory
 writes must remain bounded by cancellation, owner lifetime, identity and observed-slot
 CAS without unrelated path veto. Obsolete no-emitter rejection variants and superseded
 full-snapshot adoption descriptions must be retired without weakening explicit trim,

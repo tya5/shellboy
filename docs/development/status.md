@@ -411,3 +411,34 @@ U1 driver and isolate nonblocking launch/reuse as planned U2. These fixes are au
 formatted and committed at the current follow-up head; no corrected-SHA compile/focused
 suite/fullnormal has completed yet. The separate `0ce8` three-OS workflow is green and
 does not transfer to this candidate.
+
+
+### U1 Closeout Reviewer Corrections and Focused Evidence
+
+Independent review of immutable `0de70de1ff74c40e0b4da34a4bf7b16bdcf28e0f` returned
+REVISE with three P2s. Source report `.local/leader/core-v21-u1-closeout-0de-independent-review-20261116.md` has SHA-256
+`b18251718d2528e006fc5c2091ca33b0b3011c49acc84601fc4c39fa939d495a`. The three
+findings are: active spill's captured `snapshot.epoch + 1` after shared current projection;
+restore removal order failing to validate retained positions before reverse deletion; and
+operative docs claiming U2 nonblocking/reuse behavior while U1 driver still awaits
+`maybe_compact_with_run_stop`. The exact `0de` native failure remains the earlier E0451
+followed by stale deleted-enum test references, not a green candidate.
+
+Current follow-up source adds a single batch final-adoption authority for multi-interval
+spill. It computes one live current-path projection, selects the full path once, then
+performs active DROP_ALL from that projection and stamps all replacement metadata with
+the same resulting epoch inside the kernel. Restore now checks retained-anchor order in
+`replacement_ids` before any removal and only then removes verified positions descending;
+a reorder is a typed `SourceChanged` rejection before path mutation. Current docs describe
+the actually awaited U1 driver and explicitly mark nonblocking launch/reuse as planned U2.
+
+Guarded `cargo check --tests` on commit `c622888c050e8264ba61d90fd44f982d7b7f4417`
+passed (exit0; log/resource receipt `.local/private-reports/studio-current-20261113/core-v21-u1-closeout-check-c622888c.*`). The next guarded focused group on that SHA ran the
+`final_r_adoption_tests` filter: 11 passed, 1 failed in fixture setup with SQLite
+`conversation edge cycle` while trying to create the reordered path through `history::select_path`;
+the other three filters in the `&&` group were not reached. This is a test-fixture setup
+RED, not evidence against the source rejection path. Its log/resource receipt is
+`.local/private-reports/studio-current-20261113/core-v21-u1-closeout-focused-c622888c.*`;
+cleanup was confirmed and the remaining slot is free. The fixture is being changed to seed
+a valid path then directly install the adversarial `thread_path` order, avoiding edge creation.
+No corrected-SHA focused result or full standard result is yet claimed.
