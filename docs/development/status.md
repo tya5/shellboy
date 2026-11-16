@@ -396,7 +396,18 @@ resources and is not source evidence. The next guarded run on `0de70de1` reached
 exited 101 at E0451 because `FinalAdoption` request fields were private to `summary`; the
 exact compiler log/resource receipt is saved at
 `.local/private-reports/studio-current-20261113/core-v21-u1-closeout-check-0de70de1-r2.log`
-and its adjacent `-result.json` / `-resources.tsv`. The source now makes those fields
-`pub(super)` in the separate follow-up worktree. No test, strict Clippy, full check or CI
-has run on the corrected source; it remains unqualified. The separate `0ce8` three-OS
-workflow is green and does not transfer to this candidate.
+and its adjacent `-result.json` / `-resources.tsv`. The first follow-up compile failure was fixed by making the request fields `pub(super)`.
+A guarded check on `a322ee8d` then reached Rust and exited 101 because the exhaustive
+`all_canonical_guard_causes` test still referenced the three removed rejection variants;
+that stale test-only list is now updated. Exact report:
+`.local/private-reports/studio-current-20261113/core-v21-u1-closeout-check-a322ee8d.log`
+with adjacent result/resources files. The next source hunk also unifies active spill's
+multi-interval R replacements under one current-path reasoning projection, increments
+the live projected epoch once for DROP_ALL, and stamps every spill payload with the same
+final epoch; the separate caller-side snapshot epoch write is removed. Restore validates
+retained-anchor positions in original order before descending-index removal and rejects
+reordering with typed `SourceChanged`. The operative docs now state the actual awaited
+U1 driver and isolate nonblocking launch/reuse as planned U2. These fixes are authored,
+formatted and committed at the current follow-up head; no corrected-SHA compile/focused
+suite/fullnormal has completed yet. The separate `0ce8` three-OS workflow is green and
+does not transfer to this candidate.

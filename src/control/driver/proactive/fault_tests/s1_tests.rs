@@ -372,9 +372,6 @@ async fn all_canonical_guard_causes_share_one_public_projection_without_requests
         R::RunStopped,
         R::TurnStarted,
         R::TurnChanged,
-        R::NonappendGenerationChanged,
-        R::SelectedPrefixChanged,
-        R::CurrentTailChanged,
         R::SourceChanged,
         R::SourcePruned,
     ];

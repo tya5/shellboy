@@ -12086,8 +12086,11 @@ Candidate base: `0ce8bfcd91c0755ee516ef98b09aa886284992ce`; follow-up branch:
 `task/core-v21-unit-a-closeout-63724`. Deterministic source tests were added for spill-format
 current-R adoption, restore outside-prefix/suffix preservation, changed-restore-source
 rejection, and outside-R failure-memory append. They are authored but **not run**. Format, test-layout, watchdog-policy and whitespace
-checks passed. Guarded `cargo check --tests` on the initial commit failed with E0451
-(private `FinalAdoption` fields) after an earlier path-only wrapper setup error; that
-field-visibility defect is corrected in the working tree, but the corrected SHA is not
-compiled yet. Native full qualification, independent review and exact-SHA CI for the
-follow-up are **pending**; do not transfer the frozen base SHA's native/three-OS green.
+checks passed. Guarded `cargo check --tests` on `0de70de1` first failed at E0451 (private
+request fields); a later guarded compile on `a322ee8d` failed at E0599 for three removed
+reason enum members still listed by an exhaustive test. Both source causes have been
+fixed in the current working candidate, which additionally centralizes multi-spill
+reasoning epoch projection and rejects reordered retained restore anchors. No compile or
+focused tests have yet completed on that corrected candidate. Native full qualification,
+independent review and exact-SHA CI remain pending; do not transfer the frozen base SHA's
+green.
