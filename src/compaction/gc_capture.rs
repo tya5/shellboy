@@ -45,6 +45,25 @@ struct ThreadPlanFacts {
     spill_committed: bool,
 }
 
+/// Authorize an epoch advance only from the same parent attempt and its committed spill stage.
+pub(super) fn committed_spill_epoch_matches(
+    tx: &Connection,
+    thread: &str,
+    stage: &super::attempt::GcStage,
+    current_epoch: i64,
+) -> Result<bool, StorageError> {
+    tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM model_attempt a JOIN turn u ON u.id=a.turn_id
+         WHERE a.id=?2 AND u.thread_id=?1 AND a.reasoning_epoch=?5
+           AND json_extract(a.error_json,'$.automatic_trim_attempt.token')=?3
+           AND (json_extract(a.error_json,'$.automatic_trim_attempt.committed_stages.active_spill.reasoning_epoch')=?4
+             OR json_extract(a.error_json,'$.automatic_trim_attempt.committed_stages.closed_spill.reasoning_epoch')=?4))",
+        params![thread, stage.attempt_id, stage.token, current_epoch, stage.reasoning_epoch],
+        |row| row.get(0),
+    )
+    .map_err(StorageError::from)
+}
+
 struct ActiveGroupFacts {
     range: Range<usize>,
     complete: bool,
@@ -90,7 +109,6 @@ pub(crate) struct CapturedSummaryInput {
     pub(crate) origin_generation: Option<i64>,
     pub(crate) groups: Vec<CapturedGroup>,
     pub(crate) active_turn: bool,
-    pub(crate) spill_epoch_advanced: bool,
     pub(crate) active_user_messages: Vec<String>,
 }
 
@@ -102,14 +120,15 @@ fn plan_gc_prefix_tx(
     thread: &str,
     stage: &super::attempt::GcStage,
 ) -> Result<Option<GcRangePlan>, StorageError> {
-    let facts = tx.query_row(
-        "SELECT selection_revision,profile_revision,reasoning_epoch,profile_id,model_id,effort,(SELECT id FROM turn WHERE thread_id=?1 AND state IN ('preparing','running','waiting','recovery_wait') ORDER BY rowid DESC LIMIT 1),(SELECT id FROM turn WHERE thread_id=?1 AND state='completed' ORDER BY rowid DESC LIMIT 1),EXISTS(SELECT 1 FROM model_attempt a WHERE a.id=?2 AND json_extract(a.error_json,'$.automatic_trim_attempt.token')=?3 AND (json_extract(a.error_json,'$.automatic_trim_attempt.committed_stages.active_spill.reasoning_epoch')=(SELECT reasoning_epoch FROM thread WHERE id=?1) OR json_extract(a.error_json,'$.automatic_trim_attempt.committed_stages.closed_spill.reasoning_epoch')=(SELECT reasoning_epoch FROM thread WHERE id=?1))) FROM thread WHERE id=?1 AND deleted_at IS NULL",
-        params![thread,stage.attempt_id,stage.token],
+    let mut facts = tx.query_row(
+        "SELECT selection_revision,profile_revision,reasoning_epoch,profile_id,model_id,effort,(SELECT id FROM turn WHERE thread_id=?1 AND state IN ('preparing','running','waiting','recovery_wait') ORDER BY rowid DESC LIMIT 1),(SELECT id FROM turn WHERE thread_id=?1 AND state='completed' ORDER BY rowid DESC LIMIT 1) FROM thread WHERE id=?1 AND deleted_at IS NULL",
+        [thread],
         |row| Ok(ThreadPlanFacts {
             selection: row.get(0)?, profile_revision: row.get(1)?, epoch: row.get(2)?,
-            profile: row.get(3)?, model: row.get(4)?, effort: row.get(5)?, current_turn: row.get(6)?, latest_turn: row.get(7)?, spill_committed: row.get(8)?,
+            profile: row.get(3)?, model: row.get(4)?, effort: row.get(5)?, current_turn: row.get(6)?, latest_turn: row.get(7)?, spill_committed: false,
         }),
     )?;
+    facts.spill_committed = committed_spill_epoch_matches(tx, thread, stage, facts.epoch)?;
     let ThreadPlanFacts {
         selection,
         profile_revision,
@@ -121,8 +140,7 @@ fn plan_gc_prefix_tx(
         latest_turn,
         spill_committed,
     } = facts;
-    let spill_epoch_advanced =
-        stage.reasoning_epoch.checked_add(1) == Some(epoch) && spill_committed;
+    let spill_epoch_advanced = stage.reasoning_epoch != epoch && spill_committed;
     if stage.thread_id != thread
         || stage.profile_id != profile
         || stage.model_id != model
@@ -308,18 +326,19 @@ fn plan_gc_prefix_tx(
     }))
 }
 
-fn plan_gc_active_turn_tx(
+pub(super) fn plan_gc_active_turn_tx(
     tx: &rusqlite::Transaction<'_>,
     thread: &str,
     stage: &super::attempt::GcStage,
     expected_turn: &str,
 ) -> Result<Option<GcRangePlan>, StorageError> {
-    let facts = tx.query_row(
-        "SELECT selection_revision,profile_revision,reasoning_epoch,profile_id,model_id,effort,(SELECT id FROM turn WHERE thread_id=?1 AND state IN ('preparing','running','waiting','recovery_wait') ORDER BY rowid DESC LIMIT 1),(SELECT id FROM turn WHERE thread_id=?1 AND state='completed' ORDER BY rowid DESC LIMIT 1),EXISTS(SELECT 1 FROM model_attempt a WHERE a.id=?2 AND json_extract(a.error_json,'$.automatic_trim_attempt.token')=?3 AND (json_extract(a.error_json,'$.automatic_trim_attempt.committed_stages.active_spill.reasoning_epoch')=(SELECT reasoning_epoch FROM thread WHERE id=?1) OR json_extract(a.error_json,'$.automatic_trim_attempt.committed_stages.closed_spill.reasoning_epoch')=(SELECT reasoning_epoch FROM thread WHERE id=?1))) FROM thread WHERE id=?1 AND deleted_at IS NULL",
-        params![thread,stage.attempt_id,stage.token],|r|Ok(ThreadPlanFacts {
+    let mut facts = tx.query_row(
+        "SELECT selection_revision,profile_revision,reasoning_epoch,profile_id,model_id,effort,(SELECT id FROM turn WHERE thread_id=?1 AND state IN ('preparing','running','waiting','recovery_wait') ORDER BY rowid DESC LIMIT 1),(SELECT id FROM turn WHERE thread_id=?1 AND state='completed' ORDER BY rowid DESC LIMIT 1) FROM thread WHERE id=?1 AND deleted_at IS NULL",
+        [thread],|r|Ok(ThreadPlanFacts {
         selection:r.get(0)?, profile_revision:r.get(1)?, epoch:r.get(2)?,
-        profile:r.get(3)?, model:r.get(4)?, effort:r.get(5)?, current_turn:r.get(6)?, latest_turn:r.get(7)?, spill_committed:r.get(8)?,
+        profile:r.get(3)?, model:r.get(4)?, effort:r.get(5)?, current_turn:r.get(6)?, latest_turn:r.get(7)?, spill_committed:false,
     }))?;
+    facts.spill_committed = committed_spill_epoch_matches(tx, thread, stage, facts.epoch)?;
     let ThreadPlanFacts {
         selection,
         profile_revision,
@@ -339,8 +358,7 @@ fn plan_gc_active_turn_tx(
             "active GC parent Turn differs from current Thread Turn".into(),
         ));
     }
-    let spill_epoch_advanced =
-        stage.reasoning_epoch.checked_add(1) == Some(epoch) && spill_committed;
+    let spill_epoch_advanced = stage.reasoning_epoch != epoch && spill_committed;
     if stage.thread_id != thread
         || stage.profile_id != profile
         || stage.model_id != model
@@ -743,8 +761,7 @@ fn capture_gc_plan_and_sources(
             || stage.model_id != thread_facts.4
             || stage.effort != thread_facts.5
             || (stage.reasoning_epoch != thread_facts.2
-                && !(planned.spill_epoch_advanced
-                    && stage.reasoning_epoch.checked_add(1) == Some(thread_facts.2)))
+                && !committed_spill_epoch_matches(&tx, thread, stage, thread_facts.2)?)
         {
             return Err(StorageError::InvalidInput(
                 "GC parent receipt context differs from the captured Thread".into(),
@@ -765,7 +782,6 @@ fn capture_gc_plan_and_sources(
         origin_generation: origin.2,
         groups,
         active_turn: planned.active_turn,
-        spill_epoch_advanced: planned.spill_epoch_advanced,
         active_user_messages: planned.active_user_messages.clone(),
     })))
 }

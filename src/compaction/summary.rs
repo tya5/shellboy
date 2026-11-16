@@ -488,8 +488,11 @@ pub(super) fn adopt_current_rs_tx(
     };
     for (request, node) in requests.iter().zip(&nodes) {
         let mut final_payload = request.payload.clone();
-        if final_payload.get("summary_scope").is_some()
-            || final_payload.get("reasoning_epoch").is_some()
+        let stamp_projection = request.format == super::FORMAT
+            || matches!(reasoning_policy, FinalReasoningPolicy::DropAll);
+        if stamp_projection
+            && (final_payload.get("summary_scope").is_some()
+                || final_payload.get("reasoning_epoch").is_some())
         {
             final_payload["reasoning_epoch"] = json!(projected_epoch);
             if let Some(item) = final_payload.get_mut("item") {

@@ -2740,7 +2740,6 @@ mod lane_budget_tests {
             origin_generation: Some(0),
             groups: vec![group],
             active_turn: false,
-            spill_epoch_advanced: false,
             active_user_messages: Vec::new(),
         };
         let stage = crate::compaction::GcStage {
@@ -2961,7 +2960,7 @@ mod lane_budget_tests {
                 Ok(())
             }).await.unwrap();
             let stage=crate::compaction::GcStage{attempt_id:"a".into(),token:"tok".into(),thread_id:"t".into(),profile_id:"fixture".into(),model_id:"fixture".into(),effort:None,reasoning_epoch:0,stage:"active_summary"};
-            let captured=crate::compaction::CapturedSummaryInput{thread:"t".into(),epoch:0,profile:"fixture".into(),model:"fixture".into(),thread_summary_max_chars:None,effort:None,origin_turn:None,origin_run:None,origin_generation:None,groups:Vec::new(),active_turn:false,spill_epoch_advanced:false,active_user_messages:Vec::new()};
+            let captured=crate::compaction::CapturedSummaryInput{thread:"t".into(),epoch:0,profile:"fixture".into(),model:"fixture".into(),thread_summary_max_chars:None,effort:None,origin_turn:None,origin_run:None,origin_generation:None,groups:Vec::new(),active_turn:false,active_user_messages:Vec::new()};
             let (producer_ready_tx,producer_ready_rx)=oneshot::channel();
             let (complete_tx,complete_rx)=oneshot::channel();
             let (admitted_tx,admitted_rx)=oneshot::channel();

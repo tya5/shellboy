@@ -2592,6 +2592,109 @@ mod tests {
         db.shutdown().await.unwrap();
     }
     #[tokio::test]
+    async fn active_gc_planner_retains_target_after_committed_current_epoch_spill() {
+        let (_root, db) = database().await;
+        active_turn_fixture(&db).await;
+        db.call(|db| {
+            let tx = db.transaction()?;
+            attempt_begin_tx(
+                &tx,
+                "attempt",
+                "gc-plan-token",
+                "proactive_threshold",
+                ABoundaryObservation::Unobserved,
+                &json!({"input_tokens":200}),
+                &Value::Null,
+            )?;
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        db.call(|db| {
+            for group in ["g1", "g2"] {
+                let output = json!({"stdout":"x".repeat(20_000)}).to_string();
+                db.execute("UPDATE node SET payload_json=json_set(payload_json, '$.item.output', ?1) WHERE id=?2", params![output, format!("{group}-result")])?;
+            }
+            Ok(())
+        }).await.unwrap();
+        let compactor = Compactor::new(db.clone(), Arc::new(Config::default()));
+        let active_spill = AutomaticStage {
+            attempt_id: "attempt".into(),
+            token: "gc-plan-token".into(),
+            stage: "active_spill",
+        };
+        let spilled = compactor
+            .spill_staged_cancellable(
+                "t",
+                true,
+                u64::MAX,
+                CancellationToken::new(),
+                Some(active_spill),
+            )
+            .await
+            .unwrap();
+        assert_eq!(spilled.spilled_groups, 2);
+        let planned = db
+            .call(|db| {
+                let tx = db.transaction()?;
+                let stage = GcStage {
+                    attempt_id: "attempt".into(),
+                    token: "gc-plan-token".into(),
+                    thread_id: "t".into(),
+                    profile_id: "fixture".into(),
+                    model_id: "fixture".into(),
+                    effort: None,
+                    reasoning_epoch: 0,
+                    stage: "active_summary",
+                };
+                let plan = gc_capture::plan_gc_active_turn_tx(&tx, "t", &stage, "current")?;
+                tx.commit()?;
+                Ok(plan)
+            })
+            .await
+            .unwrap();
+        assert!(
+            planned.is_some(),
+            "post-spill active plan inputs (current turn/current user/latest complete tool/spill markers/committed epoch witness) must still select R"
+        );
+        let plan = planned.unwrap();
+        assert!(plan.active_turn && plan.spill_epoch_advanced);
+        assert!(plan.range.end > plan.range.start);
+        assert_eq!(plan.sources.len(), 2);
+        assert!(
+            plan.sources.iter().all(|source| source.group_id.is_none()),
+            "active R contains the two compact spill marker nodes, not their retired source rows"
+        );
+        assert!(plan.sources.iter().all(|source| !source.has_summary_marker));
+        db.call(|db| {
+            let tx = db.transaction()?;
+            tx.execute(
+                "UPDATE thread SET reasoning_epoch=reasoning_epoch+1 WHERE id='t'",
+                [],
+            )?;
+            let stage = GcStage {
+                attempt_id: "attempt".into(),
+                token: "gc-plan-token".into(),
+                thread_id: "t".into(),
+                profile_id: "fixture".into(),
+                model_id: "fixture".into(),
+                effort: None,
+                reasoning_epoch: 0,
+                stage: "active_summary",
+            };
+            assert!(
+                gc_capture::plan_gc_active_turn_tx(&tx, "t", &stage, "current").is_err(),
+                "an unrelated later Thread epoch change must not borrow the earlier spill witness"
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+        db.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
     async fn staged_active_spill_drops_all_prior_reasoning_atomically() {
         let (_root, db) = database().await;
         active_turn_fixture(&db).await;

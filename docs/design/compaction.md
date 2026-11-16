@@ -13,6 +13,10 @@ Automatic proactive, manual summary, active-Turn summary and context-limit summa
 
 The transaction writes the replacement and ordered source provenance, splices only R in the current path, computes the current reasoning projection/keep set, selects that path, and records the terminal attempt/token CAS. Prefix and suffix outside R are read from current state and preserved, including unrelated appends and outside-R edits. The summary's captured path, profile/model/effort, reasoning epoch, Run/Turn start or generation are not independent final-adoption vetoes. Do not add another caller-side validation authority or write a captured keep/path after this transaction.
 
+The reasoning projection is a single path-state invariant shared with `history::select_path`, not a caller-owned side write. Summary adoption records the projected epoch/keep returned by that same positional edit rule and verifies the committed values. A multi-range spill validates every R interval against one transaction-current path, checks disjoint ordered identity/facts, splices all intervals as one batch, then computes one projection. Active spill's DROP_ALL transition advances once from that projection and clears keep atomically; payloads retain the common pre-drop epoch so old signed reasoning is not replayed. No source-derived captured epoch may be assigned back to the Thread after this operation. Virtual preview uses the same positional reasoning-edit predicate as actual path selection.
+
+Context restore has its own undo operation, not summary replacement. Before any retained-anchor removal, every anchor must be present exactly once after the selected marker and in the recorded original order; reject reordered anchors as `SourceChanged` before mutation. Only then remove verified positions descending and splice the originals while preserving the current unrelated prefix/suffix.
+
 Cancellation remains an authority boundary: explicit Run Stop, owner shutdown and Thread deletion cancel the job; cancellation before or during final adoption rolls back the transaction. The operation does not publish a result after cancellation. Source, protection, pruning and tool-closure checks remain mandatory even when outside-R state changes.
 
 ## Other path edits
@@ -47,3 +51,10 @@ Source review, focused tests, full native `scripts/check.sh`, independent review
 - Failure identity/slot CAS: `src/compaction/single_request.rs`, `src/compaction/failure_memory.rs`
 - Writer-owned proactive lifecycle: `src/compaction/gc_coordinator.rs`, `src/control/driver/proactive.rs`, `src/control/driver.rs`
 - FINISH and source-reason facts: `src/compaction/attempt.rs`, `src/compaction/discard.rs`
+
+The active GC planner may cross an epoch change only when the original `model_attempt`
+reasoning epoch, exact automatic-attempt token, and committed spill stage fact all match
+that attempt and the current Thread epoch. An unrelated later epoch change cannot borrow
+the earlier spill witness. The proactive entry guard also refuses to re-trigger from a
+provider report marked `next_request_pending`; tests of post-spill stage continuation must
+enter the already-admitted stage path rather than weakening that gate.

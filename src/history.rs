@@ -274,10 +274,10 @@ fn carries_output(db: &Connection, id: &str) -> Result<bool, StorageError> {
 /// The node at P itself (a new spill or restored original) keeps its own
 /// unchanged prefix. Appends and truncations change nothing before a kept
 /// response.
-fn edit_invalidates_kept_reasoning(
-    db: &Connection,
+pub(crate) fn reasoning_edit_point(
     previous: &[String],
     path: &[String],
+    mut carries_output: impl FnMut(&str) -> Result<bool, StorageError>,
 ) -> Result<Option<usize>, StorageError> {
     let unchanged = previous
         .iter()
@@ -288,11 +288,19 @@ fn edit_invalidates_kept_reasoning(
         return Ok(None);
     }
     for id in path.iter().skip(unchanged + 1) {
-        if carries_output(db, id)? {
+        if carries_output(id)? {
             return Ok(Some(unchanged));
         }
     }
     Ok(None)
+}
+
+fn edit_invalidates_kept_reasoning(
+    db: &Connection,
+    previous: &[String],
+    path: &[String],
+) -> Result<Option<usize>, StorageError> {
+    reasoning_edit_point(previous, path, |id| carries_output(db, id))
 }
 
 /// Per-Thread set of output nodes whose reasoning stays sendable although it

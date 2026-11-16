@@ -342,29 +342,71 @@ async fn explicit_tool_span_summary_sends_complete_groups_in_one_request() {
 }
 
 #[tokio::test]
-async fn stale_restore_selection_and_turn_generation_never_replace_the_current_path_or_originals() {
+async fn restore_rebases_unrelated_selection_and_turn_changes_without_overwriting_sources() {
     let fixture = Fixture::new().await;
     let marker = omit_middle(&fixture).await;
-    let original_payloads=fixture.db.call(|db| {
-        Ok(db.prepare("SELECT id,payload_json FROM node WHERE id IN ('before','middle-a','middle-b','after') ORDER BY id")?
-            .query_map([],|row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?)))?
-            .collect::<rusqlite::Result<Vec<_>>>()?)
-    }).await.unwrap();
+    let original_payloads = fixture
+        .db
+        .call(|db| {
+            Ok(db
+                .prepare("SELECT id,payload_json FROM node WHERE id IN ('before','middle-a','middle-b','after') ORDER BY id")?
+                .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?
+                .collect::<rusqlite::Result<Vec<_>>>()?)
+        })
+        .await
+        .unwrap();
     let stale = fixture.compactor.snapshot("t", true).await.unwrap();
     fixture.text("later", "keep a newer accepted message").await;
-    let path = fixture.path().await;
-    let error = fixture
+    let before_restore = fixture.path().await;
+    let result = fixture
         .compactor
         .restore_marker(stale, Some(&marker), CancellationToken::new())
         .await
-        .unwrap_err();
-    assert_eq!(error.code, ErrorCode::InvalidState);
-    assert_eq!(fixture.path().await, path);
-    fixture.db.call(|db| {
-        db.execute_batch("INSERT INTO run(id,thread_id,state,created_at)VALUES('current-run','t','live','now');
-            INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('current-turn','t','current-run','running','now');")?;
-        Ok(())
-    }).await.unwrap();
+        .unwrap();
+    assert_eq!(result.compact.source_nodes, 2);
+    let mut expected = before_restore;
+    let marker_position = expected.iter().position(|id| id == &marker).unwrap();
+    expected.splice(
+        marker_position..=marker_position,
+        ["middle-a".into(), "middle-b".into()],
+    );
+    assert_eq!(fixture.path().await, expected);
+    let restored_payloads = fixture
+        .db
+        .call(|db| {
+            Ok(db
+                .prepare("SELECT id,payload_json FROM node WHERE id IN ('before','middle-a','middle-b','after') ORDER BY id")?
+                .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?
+                .collect::<rusqlite::Result<Vec<_>>>()?)
+        })
+        .await
+        .unwrap();
+    assert_eq!(restored_payloads, original_payloads);
+    fixture.close().await;
+
+    let fixture = Fixture::new().await;
+    let marker = omit_middle(&fixture).await;
+    let original_payloads = fixture
+        .db
+        .call(|db| {
+            Ok(db
+                .prepare("SELECT id,payload_json FROM node WHERE id IN ('before','middle-a','middle-b','after') ORDER BY id")?
+                .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?
+                .collect::<rusqlite::Result<Vec<_>>>()?)
+        })
+        .await
+        .unwrap();
+    fixture
+        .db
+        .call(|db| {
+            db.execute_batch(
+                "INSERT INTO run(id,thread_id,state,created_at)VALUES('current-run','t','live','now');
+                 INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('current-turn','t','current-run','running','now');",
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
     fixture
         .append(
             "current-request",
@@ -373,7 +415,6 @@ async fn stale_restore_selection_and_turn_generation_never_replace_the_current_p
         )
         .await;
     let stale = fixture.compactor.snapshot("t", true).await.unwrap();
-    let path = fixture.path().await;
     fixture
         .db
         .call(|db| {
@@ -385,20 +426,31 @@ async fn stale_restore_selection_and_turn_generation_never_replace_the_current_p
         })
         .await
         .unwrap();
-    let error = fixture
+    let before_restore = fixture.path().await;
+    fixture
         .compactor
         .restore_marker(stale, Some(&marker), CancellationToken::new())
         .await
-        .unwrap_err();
-    assert_eq!(error.code, ErrorCode::InvalidState);
-    assert!(error.message.contains("generation changed"));
-    assert_eq!(fixture.path().await, path);
-    let final_payloads=fixture.db.call(|db| {
-        Ok(db.prepare("SELECT id,payload_json FROM node WHERE id IN ('before','middle-a','middle-b','after') ORDER BY id")?
-            .query_map([],|row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?)))?
-            .collect::<rusqlite::Result<Vec<_>>>()?)
-    }).await.unwrap();
-    assert_eq!(final_payloads, original_payloads);
+        .unwrap();
+    let mut expected = before_restore;
+    let marker_position = expected.iter().position(|id| id == &marker).unwrap();
+    expected.splice(
+        marker_position..=marker_position,
+        ["middle-a".into(), "middle-b".into()],
+    );
+    assert_eq!(fixture.path().await, expected);
+    assert!(fixture.path().await.contains(&"current-request".to_owned()));
+    let restored_payloads = fixture
+        .db
+        .call(|db| {
+            Ok(db
+                .prepare("SELECT id,payload_json FROM node WHERE id IN ('before','middle-a','middle-b','after') ORDER BY id")?
+                .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?
+                .collect::<rusqlite::Result<Vec<_>>>()?)
+        })
+        .await
+        .unwrap();
+    assert_eq!(restored_payloads, original_payloads);
     fixture.close().await;
 }
 

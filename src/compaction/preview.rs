@@ -592,6 +592,37 @@ fn spill(snapshot: &Snapshot, ranges: Vec<Range<usize>>) -> Result<SpillProjecti
             };
         }
     }
+    // Mirror history::select_path's positional reasoning invalidation using the
+    // already bounded snapshots: a changed path advances when any later output
+    // would otherwise replay under a stale prefix. This keeps virtual and real
+    // spill character projection on the same epoch without predicting a delta.
+    let previous_ids = snapshot
+        .groups
+        .iter()
+        .flat_map(|group| group.sources.iter().map(|source| source.id.clone()))
+        .collect::<Vec<_>>();
+    let projected_ids = projected
+        .groups
+        .iter()
+        .flat_map(|group| group.sources.iter().map(|source| source.id.clone()))
+        .collect::<Vec<_>>();
+    let output_nodes = projected
+        .groups
+        .iter()
+        .flat_map(|group| group.sources.iter())
+        .map(|source| (source.id.clone(), source.payload.get("output").is_some()))
+        .collect::<HashMap<_, _>>();
+    if crate::history::reasoning_edit_point(&previous_ids, &projected_ids, |id| {
+        Ok(output_nodes.get(id).copied().unwrap_or(false))
+    })
+    .map_err(crate::app::storage_error)?
+    .is_some()
+    {
+        projected.epoch = projected
+            .epoch
+            .checked_add(1)
+            .ok_or_else(|| ApiError::new(ErrorCode::InvalidState, "reasoning epoch exhausted"))?;
+    }
     Ok((projected, original, count))
 }
 fn make_plan(loaded: &Loaded, args: &CompactPreviewArgs, config: &Config) -> Plan {

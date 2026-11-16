@@ -184,7 +184,7 @@ async fn spill_off_skips_automatic_spill_stages_and_adopts_summary() {
                     db.prepare(
                         "SELECT node_id FROM thread_path WHERE thread_id=?1 ORDER BY ordinal",
                     )?
-                    .query_map([target], |row| row.get(0))?
+                    .query_map([&target], |row| row.get(0))?
                     .collect::<rusqlite::Result<Vec<_>>>()
                     .map_err(Into::into)
                 }
@@ -464,7 +464,90 @@ async fn prepare_with_options(
     }
     if scenario.summary() {
         let summary_request = incoming(&control, &mut receive).await;
-        assert_eq!(summary_request.body["tools"], json!([]));
+        let diagnostic = control
+            .store
+            .database
+            .call({
+                let target = target.clone();
+                move |db| {
+                    let attempt: Option<(String, String)> = db
+                        .query_row(
+                            "SELECT a.id,COALESCE(a.error_json,'{}') FROM model_attempt a JOIN turn u ON u.id=a.turn_id WHERE u.thread_id=?1 ORDER BY a.rowid DESC LIMIT 1",
+                            [&target],
+                            |row| Ok((row.get(0)?, row.get(1)?)),
+                        )
+                        .optional()?;
+                    let path: Vec<String> = db
+                        .prepare("SELECT node_id FROM thread_path WHERE thread_id=?1 ORDER BY ordinal")?
+                        .query_map([&target], |row| row.get(0))?
+                        .collect::<rusqlite::Result<_>>()?;
+                    let (usage, _) = crate::compaction::context_usage::prepare_context_usage(
+                        crate::compaction::context_usage::read_context_usage_tx(db, &target, None)?,
+                    );
+                    let report_attempt = usage["last_successful_attempt"]["attempt_id"]
+                        .as_str()
+                        .unwrap_or("")
+                        .to_owned();
+                    let outputs = db
+                        .prepare("SELECT o.node_id,EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id=?2 AND p.node_id=o.node_id) FROM output_item o WHERE o.attempt_id=?1 ORDER BY o.node_id")?
+                        .query_map(rusqlite::params![report_attempt, target], |row| {
+                            Ok((row.get::<_, String>(0)?, row.get::<_, bool>(1)?))
+                        })?
+                        .collect::<rusqlite::Result<Vec<_>>>()?;
+                    let replacements = db
+                        .prepare("SELECT r.id,r.created_at,r.state,r.format_version,r.prompt_version,r.output_node_id,n.kind,json_extract(n.payload_json,'$.summary_scope'),COALESCE((SELECT json_group_array(source_node_id) FROM (SELECT source_node_id FROM replacement_source WHERE replacement_id=r.id ORDER BY ordinal)),'[]') FROM thread_replacement tr JOIN replacement r ON r.id=tr.replacement_id JOIN node n ON n.id=r.output_node_id WHERE tr.thread_id=?1 AND r.created_at>(SELECT started_at FROM model_attempt WHERE id=?2) ORDER BY r.created_at,r.id")?
+                        .query_map(rusqlite::params![target, report_attempt], |row| Ok((
+                            row.get::<_, String>(0)?, row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?, row.get::<_, String>(3)?,
+                            row.get::<_, String>(4)?, row.get::<_, String>(5)?,
+                            row.get::<_, String>(6)?, row.get::<_, Option<String>>(7)?,
+                            row.get::<_, String>(8)?,
+                        )))?
+                        .collect::<rusqlite::Result<Vec<_>>>()?;
+                    let report_facts: Option<(String, Option<String>, String)> = db.query_row(
+                        "SELECT started_at,ended_at,COALESCE(error_json,'{}') FROM model_attempt WHERE id=?1",
+                        [&report_attempt], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?)),
+                    ).optional()?;
+                    let a = crate::compaction::a_state::read(db, &target)?;
+                    let a = match crate::compaction::a_state::reading(a.as_ref()) {
+                        crate::compaction::a_state::Reading::Known(tokens) => Some(tokens),
+                        _ => None,
+                    };
+                    Ok((attempt, path, usage, outputs, replacements, report_facts, a))
+                }
+            })
+            .await
+            .unwrap();
+        if scenario.active() {
+            assert_eq!(
+                diagnostic.2["last_successful_attempt"]["next_request_pending"], true,
+                "the active spill committed after the trigger attempt; witnesses: latest row={:?}; usage/report attempt={:?}; output nodes/path={:?}; replacements after report attempt={:?}",
+                diagnostic.0, diagnostic.2["last_successful_attempt"], diagnostic.3, diagnostic.4,
+            );
+            assert!(
+                !diagnostic.3.is_empty() && diagnostic.3.iter().all(|(_, selected)| *selected),
+                "the trigger attempt's output items remain selected on the path: {:?}",
+                diagnostic.3
+            );
+            assert!(
+                !diagnostic.4.is_empty(),
+                "active spill must leave typed replacement facts: {:?}",
+                diagnostic.4
+            );
+        }
+        assert_eq!(
+            summary_request.body["tools"],
+            json!([]),
+            "expected tool-free GC summary POST; unexpected provider request body={:?}, latest attempt/stage={:?}, selected path={:?}, trigger usage={:?}, report outputs/path={:?}, typed replacement facts={:?}, report attempt facts={:?}, current A={:?}",
+            summary_request.body,
+            diagnostic.0,
+            diagnostic.1,
+            diagnostic.2,
+            diagnostic.3,
+            diagnostic.4,
+            diagnostic.5,
+            diagnostic.6,
+        );
         summary_request
             .reply
             .send((200, answer("Short adopted summary.")))

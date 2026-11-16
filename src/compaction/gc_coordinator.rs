@@ -184,8 +184,13 @@ impl WriterGcCoordinator {
             || stage.model_id != captured.model
             || stage.effort != captured.effort
             || (stage.reasoning_epoch != captured.epoch
-                && !(captured.spill_epoch_advanced
-                    && stage.reasoning_epoch.checked_add(1) == Some(captured.epoch)))
+                && !super::gc_capture::committed_spill_epoch_matches(
+                    db,
+                    &captured.thread,
+                    &stage,
+                    captured.epoch,
+                )
+                .map_err(|_| "GC committed spill receipt verification failed")?)
             || !super::attempt::provisional_gc_matches(db, &stage)
                 .map_err(|_| "GC provisional receipt verification failed")?
         {
