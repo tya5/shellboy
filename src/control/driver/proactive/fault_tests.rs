@@ -1021,11 +1021,7 @@ async fn prepare_with_mode(
     if scenario.summary() {
         let mut first_normal_facts_recorded = false;
         loop {
-            let request = if hold_summary {
-                incoming_or_job_finish(&control, &target, &mut receive).await
-            } else {
-                incoming(&control, &mut receive).await
-            };
+            let request = incoming(&control, &mut receive).await;
             if request.body["tools"] == json!([]) {
                 if hold_summary {
                     held_summary = Some(request);
@@ -1139,7 +1135,30 @@ async fn prepare_with_mode(
                         facts.slot_exists && facts.job_exists,
                         "preflight must publish the eligible job before normal dispatch: {facts:?}"
                     );
-                    eprintln!("U2 first ordinary request while Run A active: {facts:?}");
+                    let input = request.body["input"]
+                        .as_array()
+                        .expect("Responses request carries an input array");
+                    let call_ids: Vec<&str> = input
+                        .iter()
+                        .filter(|item| item["type"] == "function_call")
+                        .filter_map(|item| item["call_id"].as_str())
+                        .collect();
+                    let result_ids: Vec<&str> = input
+                        .iter()
+                        .filter(|item| item["type"] == "function_call_output")
+                        .filter_map(|item| item["call_id"].as_str())
+                        .collect();
+                    assert!(
+                        call_ids.contains(&"boundary-small"),
+                        "the actual normal request must carry Run A's open tool call: {call_ids:?}"
+                    );
+                    assert!(
+                        result_ids.contains(&"boundary-small"),
+                        "the actual normal request must carry the matching saved tool result: {result_ids:?}"
+                    );
+                    eprintln!(
+                        "U2 first ordinary request while Run A active: facts={facts:?} call_ids={call_ids:?} result_ids={result_ids:?}"
+                    );
                     first_normal_facts_recorded = true;
                 }
                 request
@@ -1786,62 +1805,6 @@ async fn admission_boundary_facts(control: &Control, thread: &str) -> AdmissionB
         slot_exists: slot.is_some(),
         job_exists,
         job_finished,
-    }
-}
-
-async fn incoming_or_job_finish(
-    control: &Control,
-    thread: &str,
-    receive: &mut mpsc::Receiver<Incoming>,
-) -> Incoming {
-    let slot = {
-        let drivers = control.live.test_drivers().lock().await;
-        drivers.get(thread).cloned()
-    };
-    let Some(slot) = slot else {
-        return incoming(control, receive).await;
-    };
-    let job = slot.proactive_job.clone();
-    let nudge = slot.nudge.clone();
-    loop {
-        let notified = nudge.notified();
-        tokio::pin!(notified);
-        if job
-            .lock()
-            .await
-            .as_ref()
-            .is_some_and(crate::control::driver::proactive::BackgroundJob::is_finished)
-        {
-            let thread_id = thread.to_owned();
-            let (usage, latest): (Value, Option<(String, String, String)>) = control
-                .store
-                .database
-                .call(move |db| {
-                    let (usage, _) = crate::compaction::context_usage::prepare_context_usage(
-                        crate::compaction::context_usage::read_context_usage_tx(db, &thread_id, None)?,
-                    );
-                    let latest = db
-                        .query_row(
-                            "SELECT id,state,COALESCE(json_extract(error_json,'$.automatic_trim_attempt'),'null') FROM model_attempt a JOIN turn u ON u.id=a.turn_id WHERE u.thread_id=?1 ORDER BY a.rowid DESC LIMIT 1",
-                            [&thread_id],
-                            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-                        )
-                        .optional()?;
-                    Ok((usage, latest))
-                })
-                .await
-                .unwrap();
-            panic!(
-                "U2 background job finished before provider summary: latest_attempt={latest:?}; report={:?}",
-                usage["last_successful_attempt"]
-            );
-        }
-        tokio::select! {
-            request = receive.recv() => {
-                return request.expect("provider request channel closed before summary admission");
-            }
-            _ = &mut notified => { tokio::task::yield_now().await; }
-        }
     }
 }
 
