@@ -341,7 +341,69 @@ async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_b
                 tokio::task::yield_now().await;
             }
         }).await.unwrap();
-        send(control, target, "new Run while previous R job is held").await;
+        let accepted: MessageAccepted = serde_json::from_value(
+            send(control, target, "new Run while previous R job is held").await,
+        )
+        .unwrap();
+        assert_eq!(accepted.assignment, Assignment::NewRun, "Run B assignment: {accepted:?}");
+        assert_eq!(accepted.delivery_status, DeliveryStatus::Accepted);
+        let run_id = accepted.run_id.clone().expect("NewRun returns its Run ID");
+        let turn_id = accepted.turn_id.clone().expect("NewRun returns its Turn ID");
+        let message_id = accepted.message_id.clone();
+        let thread_id = target.clone();
+        let query_thread = thread_id.clone();
+        let query_run = run_id.clone();
+        let query_turn = turn_id.clone();
+        let (run_state, turn_state, receipt_state, message_turn, turn_started_events) = control
+            .store
+            .database
+            .call(move |db| {
+                let run_state: String = db.query_row(
+                    "SELECT state FROM run WHERE id=?1 AND thread_id=?2",
+                    rusqlite::params![query_run, query_thread],
+                    |row| row.get(0),
+                )?;
+                let turn_state: String = db.query_row(
+                    "SELECT state FROM turn WHERE id=?1 AND run_id=?2",
+                    rusqlite::params![query_turn, query_run],
+                    |row| row.get(0),
+                )?;
+                let (receipt_state, message_turn): (String, Option<String>) = db.query_row(
+                    "SELECT r.state,n.turn_id FROM receipt r JOIN node n ON n.id=r.message_node_id WHERE r.message_node_id=?1",
+                    [&message_id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )?;
+                let turn_started_events: i64 = db.query_row(
+                    "SELECT count(*) FROM event WHERE target_thread_id=?1 AND json_extract(payload_ref_json,'$.kind')='turn_started' AND json_extract(payload_ref_json,'$.change.run_id')=?2 AND json_extract(payload_ref_json,'$.change.turn_id')=?3",
+                    rusqlite::params![thread_id, run_id, turn_id],
+                    |row| row.get(0),
+                )?;
+                Ok((run_state, turn_state, receipt_state, message_turn, turn_started_events))
+            })
+            .await
+            .unwrap();
+        let slot = {
+            let drivers = control.live.test_drivers().lock().await;
+            drivers.get(target).cloned()
+        };
+        let slot_facts = if let Some(slot) = slot {
+            let job = slot.proactive_job.lock().await;
+            Some((
+                slot.run_id.clone(),
+                slot.driver_active.load(Ordering::Acquire),
+                slot.proactive_active.load(Ordering::Acquire),
+                job.is_some(),
+                job.as_ref().is_some_and(crate::control::driver::proactive::BackgroundJob::is_finished),
+            ))
+        } else {
+            None
+        };
+        eprintln!("U2 after Deliver::Next acceptance={accepted:?} db=(run:{run_state},turn:{turn_state},receipt:{receipt_state},message_turn:{message_turn:?},turn_started_events:{turn_started_events}) slot={slot_facts:?}");
+        assert_eq!(run_state, "live", "accepted NewRun must persist live Run state");
+        assert!(matches!(turn_state.as_str(), "preparing" | "running"), "NewRun Turn state={turn_state}");
+        assert_eq!(receipt_state, "accepted");
+        assert_eq!(message_turn.as_deref(), Some(accepted.turn_id.as_deref().unwrap()));
+        assert_eq!(turn_started_events, 1, "Run B has a persisted turn_started event");
         let overflow_request = incoming(control, receive).await;
         assert_ne!(overflow_request.body, summary.body, "Run B proceeds without cancelling R");
         overflow_request
@@ -1607,7 +1669,7 @@ async fn thread(control: &Arc<Control>) -> String {
         .unwrap()
         .into()
 }
-async fn send(control: &Arc<Control>, thread: &str, text: &str) {
+async fn send(control: &Arc<Control>, thread: &str, text: &str) -> Value {
     request(
         control,
         Command::MessageSend(MessageSendArgs {
@@ -1621,7 +1683,7 @@ async fn send(control: &Arc<Control>, thread: &str, text: &str) {
             text: text.into(),
         }),
     )
-    .await;
+    .await
 }
 
 async fn proactive_owner(root: &std::path::Path, url: &str, extra: &str) -> DataOwner {
