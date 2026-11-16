@@ -53,7 +53,6 @@ impl LiveRegistry {
                 foreground: Arc::new(ForegroundSlot::default()),
                 turn: Arc::new(Mutex::new(None)),
                 driver_active: Arc::new(AtomicBool::new(true)),
-                proactive_active: existing.proactive_active.clone(),
                 proactive_job: existing.proactive_job.clone(),
             };
             drivers.insert(thread.to_owned(), slot.clone());
@@ -67,7 +66,6 @@ impl LiveRegistry {
             foreground: Arc::new(ForegroundSlot::default()),
             turn: Arc::new(Mutex::new(None)),
             driver_active: Arc::new(AtomicBool::new(true)),
-            proactive_active: Arc::new(AtomicBool::new(false)),
             proactive_job: Arc::new(Mutex::new(None)),
         };
         drivers.insert(thread.to_owned(), slot.clone());
@@ -89,7 +87,7 @@ impl LiveRegistry {
         let mut drivers = self.drivers.lock().await;
         if let Some(entry) = drivers.get(thread).filter(|entry| entry.id == slot) {
             entry.driver_active.store(false, Ordering::Release);
-            if entry.proactive_active.load(Ordering::Acquire) {
+            if entry.proactive_job.lock().await.is_some() {
                 return false;
             }
             drivers.remove(thread);
@@ -106,8 +104,7 @@ impl LiveRegistry {
             job.cancel();
             let _ = job.join().await;
         }
-        slot.proactive_active.store(false, Ordering::Release);
-        self.prune_idle_background(thread, &slot.proactive_active)
+        self.prune_idle_background(thread, &slot.proactive_job)
             .await;
     }
 
@@ -128,17 +125,19 @@ impl LiveRegistry {
     pub(super) async fn prune_idle_background(
         &self,
         thread: &str,
-        proactive_active: &Arc<AtomicBool>,
+        proactive_job: &Arc<Mutex<Option<crate::control::driver::proactive::BackgroundJob>>>,
     ) {
         let mut drivers = self.drivers.lock().await;
-        let prune = drivers.get(thread).is_some_and(|entry| {
-            Arc::ptr_eq(&entry.proactive_active, proactive_active)
-                && !entry.driver_active.load(Ordering::Acquire)
-                && !entry.proactive_active.load(Ordering::Acquire)
-        });
-        if prune {
-            drivers.remove(thread);
+        let Some(entry) = drivers.get(thread) else {
+            return;
+        };
+        if !Arc::ptr_eq(&entry.proactive_job, proactive_job)
+            || entry.driver_active.load(Ordering::Acquire)
+            || entry.proactive_job.lock().await.is_some()
+        {
+            return;
         }
+        drivers.remove(thread);
     }
 
     pub(super) async fn foreground_for_run(
@@ -366,16 +365,15 @@ mod tests {
             .register_or_nudge_driver("thread", "run-a".into(), &owner_stop, false)
             .await
             .unwrap();
-        first.proactive_active.store(true, Ordering::Release);
         let old_run_stop = first.stop.clone();
         let (release_tx, release_rx) = tokio::sync::oneshot::channel();
         let (finished_tx, finished_rx) = tokio::sync::oneshot::channel();
         let registry_for_job = registry.clone();
-        let active_for_job = first.proactive_active.clone();
+        let job_for_job = first.proactive_job.clone();
         let task = tokio::spawn(async move {
             let _ = release_rx.await;
             registry_for_job
-                .prune_idle_background("thread", &active_for_job)
+                .prune_idle_background("thread", &job_for_job)
                 .await;
             let _ = finished_tx.send(());
             Ok(
@@ -422,7 +420,7 @@ mod tests {
             .await
             .expect("a natural Run exit permits a new driver on the same Thread");
         assert!(Arc::ptr_eq(&first.proactive_job, &second.proactive_job));
-        assert!(second.proactive_active.load(Ordering::Acquire));
+        assert!(second.proactive_job.lock().await.is_some());
         assert!(
             !old_run_stop.is_cancelled(),
             "natural retirement is not Stop"
@@ -447,9 +445,8 @@ mod tests {
                 }
             )
         ));
-        second.proactive_active.store(false, Ordering::Release);
         registry
-            .prune_idle_background("thread", &second.proactive_active)
+            .prune_idle_background("thread", &second.proactive_job)
             .await;
         assert!(
             registry
@@ -478,7 +475,6 @@ mod tests {
             .register_or_nudge_driver("thread", "run".into(), &owner_stop, false)
             .await
             .unwrap();
-        slot.proactive_active.store(true, Ordering::Release);
         let job_cancel = CancellationToken::new();
         let observed_join = Arc::new(AtomicBool::new(false));
         let task_cancel = job_cancel.clone();
@@ -496,7 +492,7 @@ mod tests {
         registry.cancel_join_proactive_job("thread", &slot).await;
         assert!(observed_join.load(Ordering::Acquire));
         assert!(slot.proactive_job.lock().await.is_none());
-        assert!(!slot.proactive_active.load(Ordering::Acquire));
+        assert!(slot.proactive_job.lock().await.is_none());
         assert!(registry.remove_driver_if_current("thread", &slot.id).await);
         assert!(registry.is_empty().await);
     }
@@ -509,7 +505,6 @@ mod tests {
             .register_or_nudge_driver("thread", "run-a".into(), &owner_stop, false)
             .await
             .unwrap();
-        slot.proactive_active.store(true, Ordering::Release);
         let job_cancel = CancellationToken::new();
         let joined = Arc::new(AtomicBool::new(false));
         let task_cancel = job_cancel.clone();
@@ -527,7 +522,7 @@ mod tests {
 
         assert!(joined.load(Ordering::Acquire));
         assert!(slot.proactive_job.lock().await.is_none());
-        assert!(!slot.proactive_active.load(Ordering::Acquire));
+        assert!(slot.proactive_job.lock().await.is_none());
         assert!(registry.is_empty().await);
     }
 

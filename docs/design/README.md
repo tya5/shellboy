@@ -1,5 +1,7 @@
 # Adopted designs
 
+- [Automatic attempt receipt](compaction.md#automatic-attempt-receipt) (#226): exact Thread/attempt/token custody, committed stage facts and terminal FINISH.
+
 Start with the [effective specification](effective-spec.md). Use ordinary Cargo
 layout: modules in `src/`, integration tests in `tests/`, versioned SQL in
 `migrations/`, and subdirectories only for modules that need them.
@@ -67,9 +69,5 @@ saved activity classifier and frame-boundary writer, not a conversation renderer
   The runtime design and parallel-map implementation are not adopted; any
   specific infrastructure already landed is described in the current document,
   not implied by this proposal.
-- [Recoverable automatic attempt record](compaction-history.md#adopted-recoverable-automatic-attempt-record-after-post-commit-failure-226)
-  (#226): stage facts written in the stage adoption transaction; complete or
-  explicitly `unknown` after post-commit storage failure. Adopted and implemented
-  on main.
 
 - [Usage aggregates](usage-aggregates.md): bounded grouped CLI reads (#101/#272), grouped compaction usage (landed on main at `16784db966`), and branch-relative usage with provenance (#273, landed at `c54ed50c98` and finalized at `dc98c52cb3`).

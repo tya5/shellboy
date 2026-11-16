@@ -37,31 +37,8 @@ struct ThreadPlanFacts {
     selection: i64,
     profile_revision: i64,
     epoch: i64,
-    profile: String,
-    model: String,
-    effort: Option<String>,
     current_turn: Option<String>,
     latest_turn: Option<String>,
-    spill_committed: bool,
-}
-
-/// Authorize an epoch advance only from the same parent attempt and its committed spill stage.
-pub(super) fn committed_spill_epoch_matches(
-    tx: &Connection,
-    thread: &str,
-    stage: &super::attempt::GcStage,
-    current_epoch: i64,
-) -> Result<bool, StorageError> {
-    tx.query_row(
-        "SELECT EXISTS(SELECT 1 FROM model_attempt a JOIN turn u ON u.id=a.turn_id
-         WHERE a.id=?2 AND u.thread_id=?1 AND a.reasoning_epoch=?5
-           AND json_extract(a.error_json,'$.automatic_trim_attempt.token')=?3
-           AND (json_extract(a.error_json,'$.automatic_trim_attempt.committed_stages.active_spill.reasoning_epoch')=?4
-             OR json_extract(a.error_json,'$.automatic_trim_attempt.committed_stages.closed_spill.reasoning_epoch')=?4))",
-        params![thread, stage.attempt_id, stage.token, current_epoch, stage.reasoning_epoch],
-        |row| row.get(0),
-    )
-    .map_err(StorageError::from)
 }
 
 struct ActiveGroupFacts {
@@ -119,43 +96,18 @@ fn plan_gc_prefix_tx(
     thread: &str,
     stage: &super::attempt::GcStage,
 ) -> Result<Option<GcRangePlan>, StorageError> {
-    let mut facts = tx.query_row(
-        "SELECT selection_revision,profile_revision,reasoning_epoch,profile_id,model_id,effort,(SELECT id FROM turn WHERE thread_id=?1 AND state IN ('preparing','running','waiting','recovery_wait') ORDER BY rowid DESC LIMIT 1),(SELECT id FROM turn WHERE thread_id=?1 AND state='completed' ORDER BY rowid DESC LIMIT 1) FROM thread WHERE id=?1 AND deleted_at IS NULL",
+    let ThreadPlanFacts { selection, profile_revision, epoch, current_turn, latest_turn } = tx.query_row(
+        "SELECT selection_revision,profile_revision,reasoning_epoch,(SELECT id FROM turn WHERE thread_id=?1 AND state IN ('preparing','running','waiting','recovery_wait') ORDER BY rowid DESC LIMIT 1),(SELECT id FROM turn WHERE thread_id=?1 AND state='completed' ORDER BY rowid DESC LIMIT 1) FROM thread WHERE id=?1 AND deleted_at IS NULL",
         [thread],
         |row| Ok(ThreadPlanFacts {
             selection: row.get(0)?, profile_revision: row.get(1)?, epoch: row.get(2)?,
-            profile: row.get(3)?, model: row.get(4)?, effort: row.get(5)?, current_turn: row.get(6)?, latest_turn: row.get(7)?, spill_committed: false,
+            current_turn: row.get(3)?, latest_turn: row.get(4)?,
         }),
     )?;
-    facts.spill_committed = committed_spill_epoch_matches(tx, thread, stage, facts.epoch)?;
-    let ThreadPlanFacts {
-        selection,
-        profile_revision,
-        epoch,
-        profile,
-        model,
-        effort,
-        current_turn,
-        latest_turn,
-        spill_committed,
-    } = facts;
-    let spill_epoch_advanced = stage.reasoning_epoch != epoch && spill_committed;
-    if stage.thread_id != thread
-        || stage.profile_id != profile
-        || stage.model_id != model
-        || stage.effort != effort
-        || (stage.reasoning_epoch != epoch && !spill_epoch_advanced)
-    {
-        return Err(StorageError::InvalidInput(format!(
-            "GC range-plan context mismatch thread={} profile={} model={} effort={} stage_epoch={} thread_epoch={} committed_spill={}",
-            stage.thread_id == thread,
-            stage.profile_id == profile,
-            stage.model_id == model,
-            stage.effort == effort,
-            stage.reasoning_epoch,
-            epoch,
-            spill_committed
-        )));
+    if stage.thread_id != thread {
+        return Err(StorageError::InvalidInput(
+            "GC range-plan receipt belongs to a different Thread".into(),
+        ));
     }
     let current_boundary = current_turn
         .as_deref()
@@ -330,24 +282,12 @@ pub(super) fn plan_gc_active_turn_tx(
     stage: &super::attempt::GcStage,
     expected_turn: &str,
 ) -> Result<Option<GcRangePlan>, StorageError> {
-    let mut facts = tx.query_row(
-        "SELECT selection_revision,profile_revision,reasoning_epoch,profile_id,model_id,effort,(SELECT id FROM turn WHERE thread_id=?1 AND state IN ('preparing','running','waiting','recovery_wait') ORDER BY rowid DESC LIMIT 1),(SELECT id FROM turn WHERE thread_id=?1 AND state='completed' ORDER BY rowid DESC LIMIT 1) FROM thread WHERE id=?1 AND deleted_at IS NULL",
+    let ThreadPlanFacts { selection, profile_revision, epoch, current_turn, latest_turn } = tx.query_row(
+        "SELECT selection_revision,profile_revision,reasoning_epoch,(SELECT id FROM turn WHERE thread_id=?1 AND state IN ('preparing','running','waiting','recovery_wait') ORDER BY rowid DESC LIMIT 1),(SELECT id FROM turn WHERE thread_id=?1 AND state='completed' ORDER BY rowid DESC LIMIT 1) FROM thread WHERE id=?1 AND deleted_at IS NULL",
         [thread],|r|Ok(ThreadPlanFacts {
         selection:r.get(0)?, profile_revision:r.get(1)?, epoch:r.get(2)?,
-        profile:r.get(3)?, model:r.get(4)?, effort:r.get(5)?, current_turn:r.get(6)?, latest_turn:r.get(7)?, spill_committed:false,
+        current_turn:r.get(3)?, latest_turn:r.get(4)?,
     }))?;
-    facts.spill_committed = committed_spill_epoch_matches(tx, thread, stage, facts.epoch)?;
-    let ThreadPlanFacts {
-        selection,
-        profile_revision,
-        epoch,
-        profile,
-        model,
-        effort,
-        current_turn,
-        latest_turn,
-        spill_committed,
-    } = facts;
     let Some(current_turn) = current_turn else {
         return Ok(None);
     };
@@ -356,22 +296,10 @@ pub(super) fn plan_gc_active_turn_tx(
             "active GC parent Turn differs from current Thread Turn".into(),
         ));
     }
-    let spill_epoch_advanced = stage.reasoning_epoch != epoch && spill_committed;
-    if stage.thread_id != thread
-        || stage.profile_id != profile
-        || stage.model_id != model
-        || stage.effort != effort
-        || (stage.reasoning_epoch != epoch && !spill_epoch_advanced)
-    {
-        return Err(StorageError::InvalidInput(format!(
-            "GC active plan context mismatch: thread={} profile={} model={} effort={} epoch={} committed_spill={}",
-            stage.thread_id == thread,
-            stage.profile_id == profile,
-            stage.model_id == model,
-            stage.effort == effort,
-            stage.reasoning_epoch == epoch,
-            spill_committed
-        )));
+    if stage.thread_id != thread {
+        return Err(StorageError::InvalidInput(
+            "GC active-plan receipt belongs to a different Thread".into(),
+        ));
     }
     let current_boundary =
         super::resolve_turn_boundary(tx, thread, &current_turn, super::TURN_BOUNDARY_IDS)?;
@@ -753,15 +681,9 @@ fn capture_gc_plan_and_sources(
             tx.commit()?;
             return Ok(GcCaptureOutcome::Cancelled);
         }
-        if stage.thread_id != thread
-            || stage.profile_id != thread_facts.3
-            || stage.model_id != thread_facts.4
-            || stage.effort != thread_facts.5
-            || (stage.reasoning_epoch != thread_facts.2
-                && !committed_spill_epoch_matches(&tx, thread, stage, thread_facts.2)?)
-        {
+        if stage.thread_id != thread {
             return Err(StorageError::InvalidInput(
-                "GC parent receipt context differs from the captured Thread".into(),
+                "GC parent receipt belongs to a different Thread".into(),
             ));
         }
         super::attempt::begin_gc_tx(&tx, stage, reason, trigger, target_plan)?;

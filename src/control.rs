@@ -104,8 +104,6 @@ struct DriverSlot {
     foreground: Arc<ForegroundSlot>,
     turn: Arc<Mutex<Option<turn_interrupt::TurnBinding>>>,
     driver_active: Arc<AtomicBool>,
-    // True until the Thread-owned proactive handle is joined, not just until it exits.
-    proactive_active: Arc<AtomicBool>,
     proactive_job: Arc<Mutex<Option<driver::proactive::BackgroundJob>>>,
 }
 #[cfg(test)]
@@ -119,7 +117,6 @@ impl Default for DriverSlot {
             foreground: Arc::new(ForegroundSlot::default()),
             turn: Arc::new(Mutex::new(None)),
             driver_active: Arc::new(AtomicBool::new(true)),
-            proactive_active: Arc::new(AtomicBool::new(false)),
             proactive_job: Arc::new(Mutex::new(None)),
         }
     }

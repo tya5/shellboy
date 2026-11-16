@@ -383,9 +383,8 @@ replacements through `FinalAdoption` against current R, gives restore a current-
 splice with unchanged source facts and current prefix/suffix preservation, and narrows
 manual failure-memory writes to cancellation/owner lifetime plus slot CAS. The former
 full-snapshot validator is named for strict explicit edits (trim), not summary adoption;
-three never-emitted nonappend/prefix/tail reason variants are removed. The old design
-narrative is preserved in `docs/design/compaction-history.md`; `docs/design/compaction.md`
-now states the operative v2.1 contract.
+three never-emitted nonappend/prefix/tail reason variants are removed. The operative v2.1 source contract is in `docs/design/compaction.md`; superseded
+design narratives remain recoverable through Git history.
 
 `cargo fmt --all` and `cargo fmt --all -- --check` passed via the pinned worktree toolchain
 and shared rust-slot; `git diff --check` passed. A first formatter attempt from the wrong

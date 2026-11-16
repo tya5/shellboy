@@ -390,7 +390,6 @@ async fn client_initialization_failure_recovers_once_instead_of_rekicking_prepar
         turn: Arc::new(tokio::sync::Mutex::new(None)),
 
         driver_active: Arc::new(AtomicBool::new(true)),
-        proactive_active: Arc::new(AtomicBool::new(false)),
         proactive_job: Arc::new(tokio::sync::Mutex::new(None)),
     };
     assert_eq!(
@@ -1045,7 +1044,6 @@ async fn already_admitted_tool_calls_cannot_create_an_execution_or_spawn_again()
             turn: Arc::new(tokio::sync::Mutex::new(None)),
 
             driver_active: Arc::new(AtomicBool::new(true)),
-            proactive_active: Arc::new(AtomicBool::new(false)),
             proactive_job: Arc::new(tokio::sync::Mutex::new(None)),
         };
         assert_eq!(
@@ -1193,7 +1191,6 @@ async fn interrupted_reserved_call_finishes_its_pair_without_native_creation() {
         turn: Arc::new(Mutex::new(None)),
 
         driver_active: Arc::new(AtomicBool::new(true)),
-        proactive_active: Arc::new(AtomicBool::new(false)),
         proactive_job: Arc::new(tokio::sync::Mutex::new(None)),
     };
     let binding = slot.bind_turn(&control, &snapshot.turn).await.unwrap();
@@ -1351,7 +1348,6 @@ async fn interrupted_unfinished_group_waits_for_pairs_instead_of_rechecking() {
             turn: Arc::new(Mutex::new(None)),
 
             driver_active: Arc::new(AtomicBool::new(true)),
-            proactive_active: Arc::new(AtomicBool::new(false)),
             proactive_job: Arc::new(tokio::sync::Mutex::new(None)),
         };
         let stop = slot.stop.clone();
@@ -1789,7 +1785,6 @@ async fn unknown_arguments_are_ignored_with_a_warning_and_other_calls_continue()
         turn: Arc::new(Mutex::new(None)),
 
         driver_active: Arc::new(AtomicBool::new(true)),
-        proactive_active: Arc::new(AtomicBool::new(false)),
         proactive_job: Arc::new(tokio::sync::Mutex::new(None)),
     };
     let turn = snapshot.turn.clone();

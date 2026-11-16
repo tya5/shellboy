@@ -391,7 +391,6 @@ async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_b
             Some((
                 slot.run_id.clone(),
                 slot.driver_active.load(Ordering::Acquire),
-                slot.proactive_active.load(Ordering::Acquire),
                 job.is_some(),
                 job.as_ref().is_some_and(crate::control::driver::proactive::BackgroundJob::is_finished),
             ))
@@ -1524,7 +1523,6 @@ struct AdmissionBoundaryFacts {
     input_tokens: Option<u64>,
     next_request_pending: Option<bool>,
     slot_exists: bool,
-    proactive_active: bool,
     job_exists: bool,
     job_finished: bool,
 }
@@ -1555,23 +1553,21 @@ async fn admission_boundary_facts(control: &Control, thread: &str) -> AdmissionB
         let drivers = control.live.test_drivers().lock().await;
         drivers.get(thread).cloned()
     };
-    let (proactive_active, job_exists, job_finished) = if let Some(slot) = slot.as_ref() {
+    let (job_exists, job_finished) = if let Some(slot) = slot.as_ref() {
         let job = slot.proactive_job.lock().await;
         (
-            slot.proactive_active.load(Ordering::Acquire),
             job.is_some(),
             job.as_ref()
                 .is_some_and(crate::control::driver::proactive::BackgroundJob::is_finished),
         )
     } else {
-        (false, false, false)
+        (false, false)
     };
     AdmissionBoundaryFacts {
         latest_attempt_id,
         input_tokens,
         next_request_pending,
         slot_exists: slot.is_some(),
-        proactive_active,
         job_exists,
         job_finished,
     }

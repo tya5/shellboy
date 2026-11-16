@@ -179,11 +179,9 @@ async fn drive_inner(
         };
         if let Some(mut job) = completed_job {
             let joined = job.join().await;
-            slot.proactive_active
-                .store(false, std::sync::atomic::Ordering::Release);
             control
                 .live
-                .prune_idle_background(&thread, &slot.proactive_active)
+                .prune_idle_background(&thread, &slot.proactive_job)
                 .await;
             match joined {
                 Ok(Ok(proactive::ProactiveOutcome::Finished { path_changed: true })) => {
@@ -228,26 +226,32 @@ async fn drive_inner(
         // flight. A reported input over the threshold compacts here, one step
         // after the large request; the new snapshot is then read again.
         let snapshot = snapshot;
-        let proactive_job_exists = slot.proactive_job.lock().await.is_some();
-        if !proactive_job_exists {
+        let mut jobs = slot.proactive_job.lock().await;
+        if jobs.is_none()
+            && let Some(plan) = proactive::preflight(&control, &snapshot).await?
+        {
             drop(boundary_guard);
-            slot.proactive_active
-                .store(true, std::sync::atomic::Ordering::Release);
             let mut job = proactive::spawn_background(
                 control.clone(),
                 *snapshot.clone(),
                 slot.clone(),
                 boundary.clone(),
                 slot.stop.clone(),
+                plan,
             );
-            let started = job.wait_started().await;
-            *slot.proactive_job.lock().await = Some(job);
-            started?;
+            *jobs = Some(job);
+            jobs.as_mut()
+                .expect("published Thread job")
+                .wait_started()
+                .await?;
+            drop(jobs);
             boundary_guard = tokio::select! {biased;
                 _=slot.stop.cancelled()=>return drain_and_stop(&control,&slot.run_id,Some(&thread)).await,
                 _=turn_binding.cancel.cancelled()=>continue,
                 guard=boundary.lock()=>guard,
             };
+        } else {
+            drop(jobs);
         }
         let refreshed = instructions
             .refresh(&control, snapshot, &request_slot)
@@ -503,14 +507,10 @@ async fn drive_inner(
                         boundary_guard,
                     )
                     .await?;
-                    if proactive_job.is_none() {
-                        slot.proactive_active
-                            .store(false, std::sync::atomic::Ordering::Release);
-                    }
                 }
                 control
                     .live
-                    .prune_idle_background(&thread, &slot.proactive_active)
+                    .prune_idle_background(&thread, &slot.proactive_job)
                     .await;
                 continue;
             }

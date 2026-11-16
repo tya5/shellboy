@@ -10,7 +10,7 @@
 
 Baseline4e6241a9a3235bb6ceffb03574ae983c5919765b; authoritative file SHA256
 b822f2b54f8cb5940bc8e0e65dc7287818b1b55457c629fd655eb12b3c2e1a61.
-Its complete text0-13 is verbatim in docs/design/compaction-history.md. USER decisions,
+Its complete text0-13 is retained in Git history at the baseline commit. USER decisions,
 Claude recommendations and to-confirm facts retain their original labels.
 The following branch/test identifiers are implementation PROPOSALS, not existing
 functions or executed tests. Independent S6 review must precede product edits.

@@ -439,7 +439,6 @@ async fn terminal_provider_failure_through_retry_persists_one_transition_time() 
         turn: Arc::new(tokio::sync::Mutex::new(None)),
 
         driver_active: Arc::new(AtomicBool::new(true)),
-        proactive_active: Arc::new(AtomicBool::new(false)),
         proactive_job: Arc::new(tokio::sync::Mutex::new(None)),
     };
     let mut failure: model::http::AttemptFailure =
@@ -502,7 +501,6 @@ async fn capacity_failure_through_drive_persists_one_transition_time() {
         turn: Arc::new(tokio::sync::Mutex::new(None)),
 
         driver_active: Arc::new(AtomicBool::new(true)),
-        proactive_active: Arc::new(AtomicBool::new(false)),
         proactive_job: Arc::new(tokio::sync::Mutex::new(None)),
     };
     let error = drive(control.clone(), accepted.thread_id, slot)
@@ -542,7 +540,6 @@ async fn low_disk_holds_the_turn_and_explicit_retry_resumes_after_space_returns(
         turn: Arc::new(tokio::sync::Mutex::new(None)),
 
         driver_active: Arc::new(AtomicBool::new(true)),
-        proactive_active: Arc::new(AtomicBool::new(false)),
         proactive_job: Arc::new(tokio::sync::Mutex::new(None)),
     };
     let error = drive(control.clone(), accepted.thread_id.clone(), slot)

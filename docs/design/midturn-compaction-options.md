@@ -47,9 +47,9 @@ nor these options establishes real-provider acceptance or native Windows behavio
 
 Sources at the researched revision `21b83fbf854d2065450e07c1ebb5553925beb0e1`:
 `src/compaction/policy.rs`, `src/compaction/range.rs`, `src/compaction.rs`,
-`src/control/replay.rs`, `docs/design/compaction-history.md`,
-`docs/design/replay-cache.md`, and `docs/design/model-http.md`. The historical
-`docs/design/compaction-history.md` #125 and #153 sections preserve the prior baseline;
+`src/control/replay.rs`, `docs/design/compaction.md`,
+`docs/design/replay-cache.md`, and `docs/design/model-http.md`. The current
+trigger and retry baseline is in [compaction](compaction.md#driver-and-writer-lifecycle);
 the other options in this document remain unadopted possibilities.
 
 ## Non-Negotiable Trigger And Boundary

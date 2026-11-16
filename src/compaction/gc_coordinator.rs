@@ -180,17 +180,6 @@ impl WriterGcCoordinator {
             return Err("a writer-owned GC job is already active");
         }
         if stage.thread_id != captured.thread
-            || stage.profile_id != captured.profile
-            || stage.model_id != captured.model
-            || stage.effort != captured.effort
-            || (stage.reasoning_epoch != captured.epoch
-                && !super::gc_capture::committed_spill_epoch_matches(
-                    db,
-                    &captured.thread,
-                    &stage,
-                    captured.epoch,
-                )
-                .map_err(|_| "GC committed spill receipt verification failed")?)
             || !super::attempt::provisional_gc_matches(db, &stage)
                 .map_err(|_| "GC provisional receipt verification failed")?
         {

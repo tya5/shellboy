@@ -29,6 +29,108 @@ mod spill_route_tests {
 
 pub(super) const REASON: &str = "proactive_threshold";
 
+#[derive(Clone, Debug)]
+pub(super) struct ProactivePlan {
+    attempt_id: String,
+    input_tokens: u64,
+    threshold: u64,
+    target_percent: u64,
+    target_tokens: u64,
+    a_input_tokens: Option<u64>,
+    sampled_profile: String,
+    sampled_revision: i64,
+    spill_effective: bool,
+}
+
+/// Decide eligibility before allocating or publishing a background task.
+pub(super) async fn preflight(
+    control: &Arc<Control>,
+    snapshot: &Snapshot,
+) -> Result<Option<ProactivePlan>, ApiError> {
+    let thread = snapshot.thread.clone();
+    let config = control.store.config.clone();
+    let (settings, usage, spill, a_input_tokens) = control
+        .store
+        .database
+        .call(move |db| {
+            let settings: (Option<i64>, Option<i64>, String, Option<bool>, i64) = db.query_row(
+                "SELECT auto_compact_at,auto_compact_target_percent,profile_id,spill_override,revision FROM thread WHERE id=?1",
+                [&thread],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, crate::storage::decode_spill_override(r.get_ref(3)?, 3)?, r.get(4)?)),
+            )?;
+            let (usage, _) = crate::compaction::context_usage::prepare_context_usage(
+                crate::compaction::context_usage::read_context_usage_tx(db, &thread, None)?,
+            );
+            let connection_spill = config
+                .current()
+                .connections
+                .get(&settings.2)
+                .and_then(|connection| connection.spill);
+            let spill = crate::config::SpillPolicy::resolve(settings.3, connection_spill);
+            let a_input_tokens = if spill.effective {
+                let state = crate::compaction::a_state::read(db, &thread)?;
+                Some(match crate::compaction::a_state::reading(state.as_ref()) {
+                    crate::compaction::a_state::Reading::LegacyAbsent
+                    | crate::compaction::a_state::Reading::AwaitingFirst => 0,
+                    crate::compaction::a_state::Reading::Known(tokens) => tokens,
+                })
+            } else {
+                None
+            };
+            Ok((settings, usage, spill, a_input_tokens))
+        })
+        .await
+        .map_err(storage_error)?;
+    let connection = snapshot.clients.connections.get(&snapshot.profile);
+    let threshold = control.store.config.compaction.auto_at_tokens_for(
+        settings
+            .0
+            .map(|value| {
+                u64::try_from(value).map_err(|_| {
+                    ApiError::new(ErrorCode::InvalidState, "Invalid automatic threshold")
+                })
+            })
+            .transpose()?,
+        connection,
+    );
+    let target_percent = crate::config::SummarySettings::resolve(
+        settings
+            .1
+            .map(|value| {
+                u64::try_from(value).map_err(|_| {
+                    ApiError::new(ErrorCode::InvalidState, "Invalid automatic percentage")
+                })
+            })
+            .transpose()?,
+        None,
+        connection,
+        None,
+        &control.store.config.compaction,
+    )
+    .target_percent;
+    let report = &usage["last_successful_attempt"];
+    let (Some(input_tokens), Some(attempt_id)) = (
+        report["input_tokens"].as_u64(),
+        report["attempt_id"].as_str(),
+    ) else {
+        return Ok(None);
+    };
+    if threshold == 0 || input_tokens < threshold || report["next_request_pending"] == true {
+        return Ok(None);
+    }
+    Ok(Some(ProactivePlan {
+        attempt_id: attempt_id.to_owned(),
+        input_tokens,
+        threshold,
+        target_percent,
+        target_tokens: ((threshold as u128 * target_percent as u128) / 100) as u64,
+        a_input_tokens,
+        sampled_profile: settings.2,
+        sampled_revision: settings.4,
+        spill_effective: spill.effective,
+    }))
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::control) enum ProactiveOutcome {
     NotStarted,
@@ -413,84 +515,22 @@ pub(super) async fn maybe_compact_with_run_stop(
     slot: &DriverSlot,
     boundary: &mut crate::compaction::boundary::Boundary<'_>,
     run_stop: tokio_util::sync::CancellationToken,
+    plan: ProactivePlan,
 ) -> Result<ProactiveOutcome, ApiError> {
-    // One decision per fresh provider report; no character forecast or marks.
-    let thread = snapshot.thread.clone();
-    let config = control.store.config.clone();
-    let data = control
-        .store
-        .database
-        .call(move |db| {
-            let settings: (Option<i64>, Option<i64>, String, Option<bool>, i64) = db.query_row(
-                "SELECT auto_compact_at,auto_compact_target_percent,profile_id,spill_override,revision FROM thread WHERE id=?1",
-                [&thread],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, crate::storage::decode_spill_override(r.get_ref(3)?, 3)?, r.get(4)?)),
-            )?;
-            let (usage, _) = crate::compaction::context_usage::prepare_context_usage(
-                crate::compaction::context_usage::read_context_usage_tx(db, &thread, None)?,
-            );
-            let current = config.current();
-            let connection_spill = current.connections.get(&settings.2).and_then(|c| c.spill);
-            let spill = crate::config::SpillPolicy::resolve(settings.3, connection_spill);
-            let a = if spill.effective {
-                let state = crate::compaction::a_state::read(db, &thread)?;
-                Some(match crate::compaction::a_state::reading(state.as_ref()) {
-                    crate::compaction::a_state::Reading::LegacyAbsent
-                    | crate::compaction::a_state::Reading::AwaitingFirst => 0,
-                    crate::compaction::a_state::Reading::Known(n) => n,
-                })
-            } else {
-                None
-            };
-            Ok((settings, usage, spill, a))
-        })
-        .await
-        .map_err(storage_error)?;
-    let connection = snapshot.clients.connections.get(&snapshot.profile);
-    let threshold = control.store.config.compaction.auto_at_tokens_for(
-        data.0
-            .0
-            .map(|n| {
-                u64::try_from(n).map_err(|_| {
-                    ApiError::new(ErrorCode::InvalidState, "Invalid automatic threshold")
-                })
-            })
-            .transpose()?,
-        connection,
-    );
-    let percent = crate::config::SummarySettings::resolve(
-        data.0
-            .1
-            .map(|n| {
-                u64::try_from(n).map_err(|_| {
-                    ApiError::new(ErrorCode::InvalidState, "Invalid automatic percentage")
-                })
-            })
-            .transpose()?,
-        None,
-        connection,
-        None,
-        &control.store.config.compaction,
-    )
-    .target_percent;
-    if threshold == 0 {
-        return Ok(ProactiveOutcome::NotStarted);
-    }
-    let report = &data.1["last_successful_attempt"];
-    let (Some(input), Some(attempt)) = (
-        report["input_tokens"].as_u64(),
-        report["attempt_id"].as_str(),
-    ) else {
-        return Ok(ProactiveOutcome::NotStarted);
-    };
-    if input < threshold || report["next_request_pending"] == true {
-        return Ok(ProactiveOutcome::NotStarted);
-    }
-    let a = data.3;
-    let target = ((threshold as u128 * percent as u128) / 100) as u64;
+    let ProactivePlan {
+        attempt_id: attempt,
+        input_tokens: input,
+        threshold,
+        target_percent: percent,
+        target_tokens: target,
+        a_input_tokens: a,
+        sampled_profile,
+        sampled_revision,
+        spill_effective,
+    } = plan;
     let compactor = control.compactor.pinned(snapshot.clients.clone());
     let automatic = Automatic {
-        attempt: attempt.into(),
+        attempt,
         token: uuid::Uuid::new_v4().to_string(),
         thread: snapshot.thread.clone(),
         turn: snapshot.turn.clone(),
@@ -514,8 +554,6 @@ pub(super) async fn maybe_compact_with_run_stop(
         turn_id: Some(snapshot.turn.clone()),
         ..Default::default()
     };
-    let sampled_profile = data.0.2.clone();
-    let sampled_revision = data.0.4;
     let guard_thread = thread.clone();
     let can_run=control.store.database.call(move |db| {
         let tx=db.transaction()?;
@@ -528,7 +566,7 @@ pub(super) async fn maybe_compact_with_run_stop(
             &id,
             &token,
             REASON,
-            if data.2.effective {
+            if spill_effective {
                 crate::compaction::ABoundaryObservation::Observe
             } else {
                 crate::compaction::ABoundaryObservation::Unobserved
@@ -554,7 +592,7 @@ pub(super) async fn maybe_compact_with_run_stop(
     // terminal record aggregates it with the summary (compact list reads it).
     let mut committed_spill: Option<crate::compaction::CompactResult> = None;
     let result: Result<crate::compaction::CompactResult, ApiError> = async {
-        let route = spill_route(data.2.effective, a, target);
+        let route = spill_route(spill_effective, a, target);
         if route == SpillRoute::SpillOnly {
             let spilled = automatic
                 .observed(
@@ -754,6 +792,7 @@ pub(super) fn spawn_background(
     slot: DriverSlot,
     boundary: Arc<tokio::sync::Mutex<()>>,
     cancel: tokio_util::sync::CancellationToken,
+    plan: ProactivePlan,
 ) -> BackgroundJob {
     let task_cancel = cancel.clone();
     let (started_tx, started) = tokio::sync::oneshot::channel();
@@ -792,7 +831,7 @@ pub(super) fn spawn_background(
         slot.nudge.notify_one();
         control_for_cleanup
             .live
-            .prune_idle_background(&thread, &slot.proactive_active)
+            .prune_idle_background(&thread, &slot.proactive_job)
             .await;
         control_for_cleanup.changed(&thread);
         result

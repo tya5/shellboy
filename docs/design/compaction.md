@@ -1,6 +1,6 @@
 # Compaction: Current Contract
 
-This document describes the current Core v2.1 implementation contract. Historical proposals, superseded guard rules, review narratives and past failure receipts live in [Compaction Design History](compaction-history.md); they are not alternate runtime authorities. Historical workload reports remain attributed observations, not causal proof of any source change.
+This document describes current compaction source contracts. Superseded proposals, review narratives and past failure receipts remain in repository history; they are not alternate runtime authorities. Operational qualification and release status are recorded in run reports, not in this design document.
 
 ## Summary adoption
 
@@ -29,38 +29,74 @@ Spill, restore and failure-memory bookkeeping are distinct operations; none is c
 - Other explicit context edits (trim, selection, preview) retain their operation-specific range, marker, provenance and transaction rules. Prefix trim still uses `validate_snapshot_for_strict_edit` because it computes a user-directed path edit from the captured prefix; this strict edit fence is not an alternate summary-adoption authority. These operations must not be weakened by mechanically deleting snapshot checks.
 - Completed replacement provenance remains attached to the Thread through `thread_replacement`; restore does not delete that audit/retention root. Pruning remains the operation that releases retained originals.
 
-## Current proactive driver and writer lifecycle (U1)
+## Driver and writer lifecycle
 
-At present, the driver calls `proactive::maybe_compact_with_run_stop` at a safe request boundary and awaits it before refreshing the snapshot and dispatching the next model request. The thread boundary and Run cancellation remain active for this operation. The GC coordinator owns producer completion, terminal facts, joining/retirement, transactional adoption and attempt FINISH; natural Turn completion is not a substitute for the explicit cancellation token. This U1 source does **not** establish that ordinary requests progress while a summary is held, that a later Run reuses a still-live proactive job after natural Run exit, or that only a context-limit response waits. Do not describe those outcomes as implemented here.
+U1's baseline driver awaited `proactive::maybe_compact_with_run_stop` at a safe
+request boundary. The U2 source candidate instead runs typed eligibility
+preflight while the boundary is current and only publishes a `BackgroundJob`
+for a report that passes threshold and pending-request checks. Ineligible
+reports allocate no job. The job handle in the existing per-Thread `DriverSlot`
+is the sole retained-job authority; no separate activity flag, registry,
+detached observer, coordinator or retry layer is introduced.
 
-## U2: nonblocking proactive turn (source implementation; qualification pending)
+After publication, the ordinary request proceeds. The job uses the same
+Thread-boundary/adoption transaction and exact original Thread/attempt/token
+receipt. Request profile/model/effort/epoch and replay projection are captured
+coherently from current Thread facts in the GC capture transaction; origin
+configuration equality is not a veto. Receipt Thread/attempt/token validation,
+source/protection/pruning/tool closure, cancellation and atomic FINISH remain
+mandatory. Natural Run completion does not cancel or join the job. The Thread
+slot retains its handle, including after completion, until the next Run reuses
+and joins it. Only a missing handle permits idle-slot pruning. Context-limit
+recovery joins that same handle before existing overflow behavior; it does not
+start a duplicate summary or resend the same POST. Stop/error and owner
+shutdown cancel and join through the same slot. The existing writer coordinator
+continues to own producer completion, terminal facts, FINISH and retirement.
 
-The U2 source candidate launches the eligible proactive operation as a joined
-`BackgroundJob` stored in the existing per-Thread `DriverSlot` in `LiveRegistry`.
-The normal request proceeds while the job waits for the current Thread boundary;
-adoption still occurs only through the shared final transaction above. No second
-coordinator, registry, detached observer or retry layer is introduced.
-
-Natural Run/Turn completion does not cancel or join the task. The Thread slot
-retains the same handle, including after task completion, until a later Run
-reattaches and joins it; only that join permits idle-slot pruning. Context-limit
-recovery joins the same job before following existing overflow rules, without a
-duplicate summary or identical POST. Stop/error and owner shutdown cancel and
-join through the shared slot. The existing writer coordinator continues to own
-producer completion, terminal facts, FINISH and retirement.
-
-The U2 source draft contains deterministic controls for next-request progress
-while a summary is held, natural Run A exit and same-Thread Run B reuse, same-job
-context-limit joining, no duplicate summary, Stop/error join and owner-shutdown
-join. Source presence is not test evidence: focused native results, full normal,
-independent review and exact-SHA CI remain separate qualification gates.
+Manual summary and preview retain their strict operation-specific snapshot,
+range, marker, provenance and transaction rules. This current automatic path
+contract does not weaken those explicit-edit controls.
 
 
-## Validation and evidence
 
-The U1 deterministic suite must establish outside-R prefix/suffix preservation for summary and multi-range spill, current reasoning epoch/keep consistency across the whole spill transaction, and restore marker/source/retained-anchor ordering; changed/pruned/protected/tool-split R, cancellation, failure-slot CAS and FINISH rollback remain negative controls. U2 additionally requires controls for natural Run exit, ordinary request progress, same-job context-limit joining, duplicate prevention and Stop/shutdown cleanup; these are separate U2 evidence.
+## Deterministic acceptance properties
 
-Source review, focused tests, full native `scripts/check.sh`, independent review, and exact-SHA required CI are separate gates. A green native check does not imply CI or main landing. No provider/runtime comparison, private measurement, installation, owner restart, tag, publication or release is part of implementation qualification. Core release remains STOPPED.
+Summary and multi-range spill preserve outside-R prefix/suffix and current
+reasoning epoch/keep. Restore validates marker, source and retained-anchor order
+before mutation. Changed, pruned, protected or tool-split R; cancellation;
+failure-slot CAS; and FINISH rollback remain negative controls.
+
+The nonblocking lifecycle uses barriers, not elapsed-time thresholds: hold the
+summary response, observe an ordinary provider request, keep the path unchanged
+while that request is in flight, let Run A retire naturally, and prove Run B on
+the same Thread reuses the same job. A context-limit request joins that job with
+no duplicate summary or identical POST. Stop/error and owner-shutdown controls
+prove cancellation and join. Test runs, full-normal checks, independent review,
+CI conclusions and release gates belong to their exact-SHA run reports; source
+or test presence alone is not qualification.
+
+
+## Limits and readback
+
+Automatic thresholds and explicit summary bounds are configured independently:
+`auto_at_tokens`, target percentage, and `summary_max_chars` affect the automatic
+path; manual `compact --summary` supports its own validated bounded-summary
+options. Spill policy is the per-Thread override, then connection setting, then
+the built-in default. There is no global spill setting.
+
+`compact list` and `usage get` report persisted summary usage and post-compaction
+input observations from their saved source records. Unknown historical metrics
+remain unknown; no provider comparison or inferred measurement is added.
+
+## Automatic attempt receipt
+
+A provisional attempt is owned by its original Thread, model-attempt ID and
+exact token. A stage may be installed only while that receipt is provisional
+and matches its original owner. A captured request uses current Thread
+profile/model/effort/epoch as one transaction-current configuration snapshot;
+these fields are not compared back to the stage's origin snapshot. The final
+adoption transaction still authenticates the original receipt and enforces its
+source, cancellation, protection, tool-closure and atomic terminal-write rules.
 
 ## Source map
 

@@ -1024,7 +1024,6 @@ async fn uncalibrated_site(fault: Fault, active: bool) {
         foreground: Arc::new(crate::control::foreground::ForegroundSlot::default()),
         turn: Arc::new(tokio::sync::Mutex::new(None)),
         driver_active: Arc::new(AtomicBool::new(true)),
-        proactive_active: Arc::new(AtomicBool::new(false)),
         proactive_job: Arc::new(tokio::sync::Mutex::new(None)),
     };
     let mutex = control.boundary(&thread_id).await;

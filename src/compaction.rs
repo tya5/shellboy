@@ -2683,9 +2683,16 @@ mod tests {
                 reasoning_epoch: 0,
                 stage: "active_summary",
             };
+            let current_plan = gc_capture::plan_gc_active_turn_tx(&tx, "t", &stage, "current")?
+                .expect(
+                    "the coherent plan uses the current Thread epoch, not the origin receipt epoch",
+                );
+            assert_eq!(current_plan.epoch, 1);
+            let mut wrong_receipt = stage.clone();
+            wrong_receipt.token = "other-token".into();
             assert!(
-                gc_capture::plan_gc_active_turn_tx(&tx, "t", &stage, "current").is_err(),
-                "an unrelated later Thread epoch change must not borrow the earlier spill witness"
+                !attempt::provisional_gc_matches(&tx, &wrong_receipt)?,
+                "the original Thread/attempt/token receipt remains authoritative"
             );
             Ok(())
         })
