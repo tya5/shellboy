@@ -1084,7 +1084,7 @@ impl Compactor {
         #[cfg(test)]
         if let Some(stage) = gc_dispatch_stage {
             *stage.lock().expect("GC dispatch stage observer poisoned") =
-                crate::control::GcDispatchStage::ProviderSendEntered;
+                crate::control::GcDispatchStage::ResponsePathEntered;
         }
         let mut response: Result<crate::model::ModelResponse, crate::model::http::AttemptFailure> =
             match &admission {
