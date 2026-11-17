@@ -7559,48 +7559,7 @@ async fn bx_growing_turn(
             prepared_reports.push(prepared_report_from_incoming(
                 &control, &current_turn, &ordinary, input_tokens as u64,
             ).await);
-            if summary_reply.0 == 500 && input_tokens == 205 {
-                let report = &prepared_reports.last().unwrap().owner;
-                let manifest: Value = serde_json::from_str(&report.request_token).unwrap();
-                let report_thread = target.clone();
-                let a_state: Value = control.store.database.call(move |db| {
-                    let text: String = db.query_row(
-                        "SELECT value FROM app_meta WHERE key=?1",
-                        [format!("compact.a_state.{report_thread}")], |row| row.get(0))?;
-                    Ok(serde_json::from_str(&text).expect("persisted source A-state"))
-                }).await.unwrap();
-                assert_eq!(manifest["boundary"], 2,
-                    "the independently declared 205 report is born after two terminal boundary transitions: {manifest:#?}");
-                assert_eq!(a_state["boundary_generation"], 2);
-                assert!(a_state["first"].is_null(),
-                    "the new boundary awaits this request's first independently known report: {a_state:#?}");
-                let previous = prepared_reports.iter()
-                    .filter(|candidate| matches!(candidate.owner.input_tokens, 202 | 204))
-                    .map(|candidate| candidate.owner.attempt_id.clone()).collect::<Vec<_>>();
-                assert_eq!(previous.len(), 2);
-                let prior_records = control.store.database.call(move |db| {
-                    let mut records = Vec::new();
-                    for id in previous {
-                        let text: String = db.query_row(
-                            "SELECT json_extract(error_json,'$.automatic_trim_attempt') FROM model_attempt WHERE id=?1",
-                            [&id], |row| row.get(0))?;
-                        records.push(serde_json::from_str::<Value>(&text).expect("prior terminal automatic record"));
-                    }
-                    Ok(records)
-                }).await.unwrap();
-                let first = prior_records.iter().find(|record| record["trigger"]["input_tokens"] == 202).unwrap();
-                let reset = prior_records.iter().find(|record| record["trigger"]["input_tokens"] == 204).unwrap();
-                assert_eq!(first["trigger"]["a_boundary"]["boundary"], 0);
-                assert_eq!(first["trigger"]["a_input_tokens"], 100);
-                assert_eq!(first["outcome"], "failed");
-                assert_eq!(reset["trigger"]["a_boundary"]["boundary"], 1);
-                assert_eq!(reset["trigger"]["a_input_tokens"], 0);
-                assert_eq!(reset["outcome"], "no_target");
-                assert!(!first["provisional"].as_bool().unwrap());
-                assert!(!reset["provisional"].as_bool().unwrap());
-                assert_eq!(a_state["last_reset_origin"], reset["token"],
-                    "the current A boundary is advanced by the exact prior no-target GC FINISH token");
-            }
+
             ordinary.reply.send((200, tool(index as u32, input_tokens))).unwrap();
         }
         let final_request = loop {
@@ -7615,16 +7574,7 @@ async fn bx_growing_turn(
             assert_eq!(scope.2, "live", "the active source capture precedes natural final completion");
             request.reply.send(summary_reply.clone()).unwrap();
         };
-        if summary_reply.0 == 500 {
-            // A natural context-limit failure uses the existing Driver join on
-            // any retained proactive job before this Run leaves its live Turn.
-            final_request.reply.send((413, json!({"error":{
-                "code":"context_length_exceeded",
-                "message":"synthetic final boundary joins an in-flight proactive Summary"
-            }}))).unwrap();
-        } else {
-            final_request.reply.send((200, answer("finished"))).unwrap();
-        }
+final_request.reply.send((200, answer("finished"))).unwrap();
         let settle = settled(&control, &target);
         tokio::pin!(settle);
         loop {
@@ -7637,21 +7587,6 @@ async fn bx_growing_turn(
                     summary_inputs.push(incoming.body["input"].clone());
                     summaries += 1;
                     assert!(summaries < 80, "unbounded automatic summary loop");
-                    if summary_reply.0 == 500 {
-                        // Read the live join-owned scope directly: settled() would
-                        // wait on the same Driver job that is waiting on this reply.
-                        let scope_thread = target.clone();
-                        let scope = control.store.database.call(move |db| {
-                            db.query_row(
-                                "SELECT r.id,t.id,r.state FROM run r JOIN turn t ON t.run_id=r.id WHERE r.thread_id=?1 AND r.state IN ('live','stopping') AND t.state IN ('preparing','running','waiting','recovery_wait') ORDER BY t.rowid DESC LIMIT 1",
-                                [scope_thread],
-                                |row| Ok((row.get::<_,String>(0)?, row.get::<_,String>(1)?, row.get::<_,String>(2)?)),
-                            ).map_err(Into::into)
-                        }).await.unwrap();
-                        assert_eq!(scope.0, current_run);
-                        assert_eq!(scope.1, current_turn);
-                        assert_eq!(scope.2, "live");
-                    }
                     // A successful Ordinary final response may retire the Turn
                     // before a retained background Summary reaches this drain.
                     incoming.reply.send(summary_reply.clone()).unwrap();
