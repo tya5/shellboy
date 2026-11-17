@@ -4227,6 +4227,8 @@ struct AxFixtureResult {
     records: Vec<Value>,
     owner_instance_id: String,
     report_scopes: Vec<(String, String, i64)>,
+    expected_scope: (String, String, i64),
+    expected_report_tokens: Vec<u64>,
     initial_path_ids: Vec<String>,
     final_path_ids: Vec<String>,
     failure_memory_slots: usize,
@@ -4262,7 +4264,18 @@ async fn ax_growing_turn_summary_requests(
             incoming(&control, &mut receive).await.reply.send((200, answer("ok"))).unwrap();
             settled(&control, &target).await;
         }
-        send(&control, &target, &"protected current ".repeat(70_000)).await;
+        let accepted = send_accepted(&control, &target, &"protected current ".repeat(70_000)).await;
+        let expected_run = accepted.run_id.clone().expect("accepted triggering Run");
+        let expected_turn = accepted.turn_id.clone().expect("accepted triggering Turn");
+        let turn_id = expected_turn.clone();
+        let expected_generation = control.store.database.call(move |db| {
+            db.query_row("SELECT generation FROM turn WHERE id=?1", [turn_id], |row| row.get::<_,i64>(0))
+                .map_err(Into::into)
+        }).await.unwrap();
+        let expected_scope = (expected_run, expected_turn, expected_generation);
+        // Reports 202..=218 are the 17 known-usage boundaries; index 19 is
+        // the final ordinary answer and intentionally carries no usage report.
+        let expected_report_tokens = (202..=218).collect::<Vec<u64>>();
         let path_thread = target.clone();
         let initial_path_ids = control.store.database.call(move |db| {
             let mut statement = db.prepare("SELECT node_id FROM thread_path WHERE thread_id=?1 ORDER BY ordinal")?;
@@ -4345,7 +4358,7 @@ async fn ax_growing_turn_summary_requests(
         assert_eq!(explicit.body["tools"], json!([]), "explicit compact is not blocked");
         let _ = explicit.reply.send((200, answer("explicit summary")));
         control.shutdown().await.unwrap(); owner.shutdown().await.unwrap(); server.abort();
-        AxFixtureResult { summaries, records, owner_instance_id, report_scopes, initial_path_ids, final_path_ids, failure_memory_slots }
+        AxFixtureResult { summaries, records, owner_instance_id, report_scopes, expected_scope, expected_report_tokens, initial_path_ids, final_path_ids, failure_memory_slots }
     }).await.unwrap()
 }
 

@@ -28,6 +28,24 @@ fn assert_scope_trace(result: &AxFixtureResult) {
         "actual Run/Turn/generation changed: {:?}",
         result.report_scopes
     );
+    assert_eq!(
+        first, &result.expected_scope,
+        "scopes equal the accepted trigger Run/Turn/generation"
+    );
+    let mut report_tokens = result
+        .records
+        .iter()
+        .map(|record| {
+            record["trigger"]["input_tokens"]
+                .as_u64()
+                .expect("saved attempt has provider input tokens")
+        })
+        .collect::<Vec<_>>();
+    report_tokens.sort_unstable();
+    assert_eq!(
+        report_tokens, result.expected_report_tokens,
+        "attempt identity set matches the 17 predeclared eligible inputs"
+    );
     assert!(
         result.final_path_ids.starts_with(&result.initial_path_ids),
         "the original path prefix changed during report growth"
