@@ -5390,6 +5390,71 @@ fn bx_omitted_outputs(body: &Value) -> usize {
         .count()
 }
 
+fn fresh_growth_attempts(reports: &[Value]) -> Vec<&Value> {
+    let mut fresh = Vec::new();
+    for report in reports {
+        let Some(attempt) = report["automatic_attempt"].as_object() else {
+            continue;
+        };
+        let token = &report["manifest_token"];
+        let request_scope = token["scope"].as_u64().expect("saved report scope");
+        let request_boundary = token["boundary"].as_u64().expect("saved report boundary");
+        let a = &attempt["trigger"]["a_boundary"];
+        let a_scope = a["scope"].as_u64().expect("automatic A scope");
+        let a_boundary = a["boundary"].as_u64().expect("automatic A boundary");
+        assert_eq!(
+            request_scope, a_scope,
+            "report and automatic A token remain in the same scope: {report:#?}"
+        );
+        assert!(
+            request_boundary <= a_boundary,
+            "the request manifest cannot be from a future A boundary: {report:#?}"
+        );
+        assert_eq!(
+            attempt["trigger"]["input_tokens"], report["input_tokens"],
+            "the automatic trigger belongs to this exact captured report row: {report:#?}"
+        );
+        assert!(
+            !attempt["provisional"].as_bool().unwrap_or(true),
+            "the automatic record is compared only after its original terminal receipt: {report:#?}"
+        );
+        assert!(
+            attempt["token"]
+                .as_str()
+                .is_some_and(|token| !token.is_empty()),
+            "the GC token remains a separate nonempty terminal witness: {report:#?}"
+        );
+        if request_boundary < a_boundary {
+            assert_eq!(
+                attempt["trigger"]["a_input_tokens"], 0,
+                "pre-reset report manifest has no #A in the later boundary: {report:#?}"
+            );
+            assert_eq!(
+                attempt["outcome"], "no_target",
+                "a pre-reset report does not enter a post-reset compaction route: {report:#?}"
+            );
+            assert!(
+                attempt["compaction_outcome"].is_null(),
+                "no Summary operation for stale A: {report:#?}"
+            );
+        } else {
+            let first = reports
+                .iter()
+                .find(|candidate| {
+                    candidate["manifest_token"]["scope"] == json!(request_scope)
+                        && candidate["manifest_token"]["boundary"] == json!(request_boundary)
+                })
+                .expect("the source ledger names a first report for every manifest boundary");
+            assert_eq!(
+                attempt["trigger"]["a_input_tokens"], first["input_tokens"],
+                "#A is the first independently declared report under this same saved boundary: {report:#?}"
+            );
+            fresh.push(report);
+        }
+    }
+    fresh
+}
+
 /// #303 §6.3: a deterministic closed failure blocks only its own original
 /// endpoints. When a new older Turn becomes eligible, the closed range ends
 /// later, so the next eligible report sends a summary again and adopts it.
@@ -7128,14 +7193,44 @@ async fn sender_label_reaches_the_request_only_when_present_and_not_human() {
 /// spilled nor summarized by those attempts (§3).
 #[tokio::test]
 async fn proactive_deterministic_closed_failure_stays_suppressed_while_the_turn_grows() {
-    let (summaries, most, attempts, slots, spills, _, _) =
+    let (summaries, most, attempts, slots, spills, _, _, report_ledger) =
         bx_growing_turn(true, true, (200, answer(" ")), 19).await;
-    assert_eq!(summaries, 1, "{attempts:#?}");
+    let high_inputs: Vec<u64> = report_ledger
+        .iter()
+        .filter_map(|report| {
+            report["input_tokens"]
+                .as_u64()
+                .filter(|tokens| *tokens >= 200)
+        })
+        .collect();
+    assert_eq!(
+        high_inputs,
+        (202..=218).collect::<Vec<_>>(),
+        "all 17 independently named high reports remain present: {report_ledger:#?}"
+    );
+    let fresh = fresh_growth_attempts(&report_ledger);
+    assert_eq!(
+        attempts.len(),
+        17,
+        "one saved automatic record per declared eligible report: {report_ledger:#?}"
+    );
+    assert_eq!(
+        summaries, 1,
+        "the original closed range posts once, then its failure memory suppresses retries"
+    );
     assert_eq!(most, 1);
-    assert_eq!(attempts.len(), 17, "one attempt per eligible report");
     assert!(
-        attempts.iter().all(|a| a["outcome"] == "failed"),
-        "{attempts:#?}"
+        attempts
+            .iter()
+            .all(|attempt| attempt["outcome"] == "failed" || attempt["outcome"] == "no_target"),
+        "stale-A no-target and fresh failure-memory records remain distinct: {attempts:#?}"
+    );
+    assert!(!fresh.is_empty());
+    assert!(
+        fresh
+            .iter()
+            .all(|report| report["automatic_attempt"]["outcome"] == "failed"),
+        "every source-current closed attempt retains the failure negative: {fresh:#?}"
     );
     assert!(slots.0.is_some() && slots.1.is_none(), "{slots:?}");
     assert_eq!(
@@ -7143,56 +7238,115 @@ async fn proactive_deterministic_closed_failure_stays_suppressed_while_the_turn_
         "the active region is not spilled for a closed summary; attempts={attempts:#?}; slots={slots:?}"
     );
 }
-
 /// #303 §6.3: an active range's identity is its original first/last node, so
 /// each new tool group gives a new range; with no closed target, every
 /// eligible report retries the active summary exactly once.
 #[tokio::test]
 async fn proactive_growing_active_range_permits_one_summary_per_new_report() {
-    let (summaries, most, attempts, slots, _, _, _) =
+    let (summaries, most, attempts, slots, _, _, _, report_ledger) =
         bx_growing_turn(false, false, (200, answer(" ")), 19).await;
-    assert_eq!(summaries, 17, "{attempts:#?}");
-    assert_eq!(most, 1, "at most one summary request per reported value");
-    assert_eq!(attempts.len(), 17);
+    let high_inputs: Vec<u64> = report_ledger
+        .iter()
+        .filter_map(|report| {
+            report["input_tokens"]
+                .as_u64()
+                .filter(|tokens| *tokens >= 200)
+        })
+        .collect();
+    assert_eq!(
+        high_inputs,
+        (202..=218).collect::<Vec<_>>(),
+        "all 17 independently named high reports remain present: {report_ledger:#?}"
+    );
+    let fresh = fresh_growth_attempts(&report_ledger);
+    assert_eq!(
+        summaries as usize,
+        fresh.len(),
+        "each source-current admitted active range requests Summary; stale/coalesced reports do not: {report_ledger:#?}"
+    );
+    assert_eq!(
+        most, 1,
+        "at most one Summary request per admitted active range"
+    );
     assert!(
-        attempts.iter().all(|a| a["outcome"] == "failed"),
-        "{attempts:#?}"
+        attempts
+            .iter()
+            .all(|attempt| attempt["outcome"] == "failed" || attempt["outcome"] == "no_target"),
+        "the report ledger preserves failed versus stale no-target negatives: {attempts:#?}"
+    );
+    assert!(!fresh.is_empty());
+    assert!(
+        fresh
+            .iter()
+            .all(|report| report["automatic_attempt"]["outcome"] == "failed"),
+        "fresh active ranges retain output-validation failure memory: {fresh:#?}"
     );
     assert!(slots.0.is_none() && slots.1.is_some(), "{slots:?}");
 }
-
 #[tokio::test]
 async fn proactive_provider_500_retries_for_a_new_active_range() {
     let reply = (
         500,
         json!({"error":{"code":"invalid_request_error","message":"synthetic range-scoped 500"}}),
     );
-    let (summaries, _, attempts, slots, spills, scopes, inputs) =
-        bx_growing_turn(false, false, reply, 4).await;
-    assert_eq!(summaries, 2, "one provider request per changed active R");
-    assert_eq!(attempts.len(), 2, "both reports retain their attempts");
-    assert_eq!(scopes.len(), 2);
+    let (summaries, _, attempts, slots, spills, scopes, inputs, report_ledger) =
+        bx_growing_turn(false, false, reply, 6).await;
+    let high_inputs: Vec<u64> = report_ledger
+        .iter()
+        .filter_map(|report| {
+            report["input_tokens"]
+                .as_u64()
+                .filter(|tokens| *tokens >= 200)
+        })
+        .collect();
     assert_eq!(
-        scopes[0], scopes[1],
-        "both reports share exact Run/Turn/generation"
+        high_inputs,
+        [202, 203, 204, 205],
+        "two source ranges are built from four independently named high reports: {report_ledger:#?}"
     );
-    assert_ne!(
-        inputs[0], inputs[1],
-        "selected active R changes between requests"
+    let fresh = fresh_growth_attempts(&report_ledger);
+    assert!(
+        fresh.len() >= 2,
+        "the declared report continuation reaches two current A-boundary ranges: {report_ledger:#?}"
+    );
+    assert_eq!(
+        summaries as usize,
+        fresh.len(),
+        "one provider POST per source-current changed active range: {report_ledger:#?}"
+    );
+    assert_eq!(
+        scopes.len(),
+        attempts.len(),
+        "every admitted report retains its Run/Turn/generation"
+    );
+    assert!(
+        scopes.iter().all(|scope| *scope == scopes[0]),
+        "same active source scope: {scopes:#?}"
+    );
+    assert_eq!(inputs.len(), summaries as usize);
+    assert!(
+        inputs.windows(2).all(|pair| pair[0] != pair[1]),
+        "each fresh admitted range changes selected R: {inputs:#?}"
     );
     assert!(
         attempts
             .iter()
-            .all(|a| a["compaction_outcome"]["outcome"]["reason"] == "provider_error"),
-        "{attempts:#?}"
+            .all(|attempt| attempt["outcome"] == "failed" || attempt["outcome"] == "no_target"),
+        "stale A and actual provider failures remain separate: {attempts:#?}"
+    );
+    assert!(
+        fresh.iter().all(
+            |report| report["automatic_attempt"]["compaction_outcome"]["outcome"]["reason"]
+                == "provider_error"
+        ),
+        "fresh ranges preserve the actual synthetic HTTP500 negative: {fresh:#?}"
     );
     assert!(
         slots.0.is_none() && slots.1.is_some(),
-        "provider memory remains in active slot: {slots:?}"
+        "provider failure remains active-range scoped: {slots:?}"
     );
     assert_eq!(spills, 0, "unknown tool responses do not authorize spills");
 }
-
 /// A current Turn of 20 tool rounds: reports 100, 100, then 202..=218 (17
 /// eligible reports at threshold 200; the first known report 100 is #A > 40).
 /// Summary reply, final report index, and range scopes are configurable for exact
@@ -7211,6 +7365,7 @@ async fn bx_growing_turn(
     usize,
     Vec<(String, String, i64)>,
     Vec<Value>,
+    Vec<Value>,
 ) {
     crate::test_watchdog::watchdog("bx growing turn", async move {
         let root = tempfile::tempdir().unwrap();
@@ -7226,11 +7381,13 @@ async fn bx_growing_turn(
                 settled(&control, &target).await;
             }
         }
-        send(&control, &target, "protected current").await;
+        let accepted = send_accepted(&control, &target, "protected current").await;
+        let current_turn = accepted.turn_id.expect("one declared growing Turn");
         // An unknown tool name returns a short error, so no spill can shrink it.
         let tool = |index: u32, tokens: u32| json!({"id":format!("grow-{index}"),"status":"completed","usage":{"input_tokens":tokens,"output_tokens":1},"output":[{"type":"function_call","call_id":format!("grow-{index}"),"name":if spilling {"shell"}else{"nope"},"arguments":if spilling {json!({"command":"printf '%02000d' 1"}).to_string()}else{"{}".into()}}]});
         let (mut summaries, mut most) = (0, 0);
         let mut summary_inputs=Vec::new();
+        let mut prepared_reports = Vec::new();
         for index in 0..=final_index {
             let mut run = 0;
             let ordinary = loop {
@@ -7243,18 +7400,101 @@ async fn bx_growing_turn(
                 request.reply.send(summary_reply.clone()).unwrap();
             };
             most = most.max(run);
-            if index == final_index { ordinary.reply.send((200, answer("finished"))).unwrap(); }
-            else { ordinary.reply.send((200, tool(index, if index < 2 { 100 } else { 200 + index }))).unwrap(); }
+            if index == final_index {
+                ordinary.reply.send((200, answer("finished"))).unwrap();
+            } else {
+                let input_tokens = if index < 2 { 100 } else { 200 + index };
+                prepared_reports.push(prepared_report_from_incoming(
+                    &control,
+                    &current_turn,
+                    &ordinary,
+                    input_tokens as u64,
+                ).await);
+                ordinary.reply.send((200, tool(index, input_tokens))).unwrap();
+            }
         }
         settled(&control, &target).await;
-        assert!(receive.try_recv().is_err());
+        assert_eq!(prepared_reports.len(), final_index as usize,
+            "each predeclared response has one separately captured in-flight report owner");
+        let owner_ids: Vec<String> = prepared_reports.iter()
+            .map(|report| report.owner.attempt_id.clone()).collect();
+        assert_eq!(owner_ids.iter().collect::<std::collections::HashSet<_>>().len(), owner_ids.len(),
+            "the predeclared report ledger has unique actual model-attempt identities");
+        let ledger_ids = owner_ids.clone();
+        let expected_tokens: Vec<u64> = prepared_reports.iter().map(|report| report.owner.input_tokens).collect();
+        let request_tokens: Vec<String> = prepared_reports.iter().map(|report| report.owner.request_token.clone()).collect();
+        let mut report_ledger = control.store.database.call(move |db| {
+            let mut ledger = Vec::new();
+            for ((id, input_tokens), request_token) in ledger_ids.into_iter().zip(expected_tokens).zip(request_tokens) {
+                let (usage, automatic): (Option<i64>, Option<String>) = db.query_row(
+                    "SELECT json_extract(usage_json,'$.input_tokens'),json_extract(error_json,'$.automatic_trim_attempt') FROM model_attempt WHERE id=?1",
+                    [&id], |row| Ok((row.get(0)?,row.get(1)?)))?;
+                assert_eq!(usage, Some(input_tokens as i64), "source report usage remains independently declared for {id}");
+                let manifest: Value = serde_json::from_str(&request_token).expect("saved source report token");
+                let automatic = automatic.map(|text| serde_json::from_str::<Value>(&text).expect("automatic attempt record"));
+                ledger.push(json!({"model_attempt_id":id,"manifest_token":manifest,"input_tokens":input_tokens,"automatic_attempt":automatic}));
+            }
+            Ok(ledger)
+        }).await.unwrap();
+        let expected_terminals = report_ledger.iter()
+            .filter(|report| report["automatic_attempt"].is_object()).count();
+        if expected_terminals > 0 {
+            let turns = [current_turn.clone()];
+            let finish_wait = automatic_attempts_finished_for_turns(&control, &turns, expected_terminals);
+            tokio::pin!(finish_wait);
+            let mut late_summaries = 0;
+            let terminals = loop {
+                tokio::select! {
+                    terminals = &mut finish_wait => break terminals,
+                    incoming = receive.recv() => {
+                        let incoming = incoming.expect("late automatic Summary remains on the owning proxy");
+                        assert_eq!(incoming.kind(), ProviderRequestKind::Summary,
+                            "only a background Summary for one of the exact report owners may follow foreground settlement");
+                        summary_inputs.push(incoming.body["input"].clone());
+                        incoming.reply.send(summary_reply.clone()).unwrap();
+                        summaries += 1;
+                        late_summaries += 1;
+                    }
+                }
+            };
+            for terminal in &terminals {
+                let report = report_ledger.iter().find(|report| report["model_attempt_id"] == terminal.id)
+                    .expect("FINISH row belongs to one independently captured report ID");
+                assert_eq!(terminal.token, report["automatic_attempt"]["token"],
+                    "original GC token matches the exact report attempt");
+            }
+            most = most.max(late_summaries);
+        }
+        let refresh_ids: Vec<String> = report_ledger.iter()
+            .map(|report| report["model_attempt_id"].as_str().unwrap().to_owned()).collect();
+        let refreshed = control.store.database.call(move |db| {
+            let mut values = Vec::new();
+            for id in refresh_ids {
+                let automatic: Option<String> = db.query_row(
+                    "SELECT json_extract(error_json,'$.automatic_trim_attempt') FROM model_attempt WHERE id=?1",
+                    [&id], |row| row.get(0))?;
+                values.push(automatic);
+            }
+            Ok(values)
+        }).await.unwrap();
+        for (report, automatic) in report_ledger.iter_mut().zip(refreshed) {
+            report["automatic_attempt"] = automatic
+                .map(|text| serde_json::from_str::<Value>(&text).expect("terminal automatic record"))
+                .unwrap_or(Value::Null);
+        }
         let attempts = bx_attempts(&control, &target).await;
         let slots = bx_failure_slots(&control, &target).await;
+        assert!(receive.try_recv().is_err());
+        let linked_attempts: Vec<Value> = report_ledger.iter()
+            .filter_map(|report| report["automatic_attempt"].as_object().map(|_| report["automatic_attempt"].clone()))
+            .collect();
+        assert_eq!(linked_attempts, attempts,
+            "automatic records link to the exact captured model-attempt IDs in request order");
         let scope_thread=target.clone();
         let scopes=control.store.database.call(move|db|Ok(db.prepare("SELECT r.id,t.id,t.generation FROM model_attempt a JOIN turn t ON t.id=a.turn_id JOIN run r ON r.id=t.run_id WHERE t.thread_id=?1 AND json_extract(a.error_json,'$.automatic_trim_attempt') IS NOT NULL ORDER BY a.rowid")?.query_map([scope_thread],|row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,i64>(2)?)))?.collect::<rusqlite::Result<Vec<_>>>()?)).await.unwrap();
         let id = target.clone();
         let spills = control.store.database.call(move |db| proactive_wait_witness(db, &id)).await.unwrap().0.len();
         control.shutdown().await.unwrap(); owner.shutdown().await.unwrap(); server.abort();
-        (summaries,most,attempts,slots,spills,scopes,summary_inputs)
+        (summaries,most,attempts,slots,spills,scopes,summary_inputs,report_ledger)
     }).await.unwrap()
 }
