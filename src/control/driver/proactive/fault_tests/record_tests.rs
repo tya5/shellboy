@@ -137,7 +137,17 @@ async fn record_boundary(fault: Fault, scenario: Scenario) -> Value {
     );
     assert_eq!(
         receipt.reopened_witness.cursor,
-        receipt.after_fault_witness.cursor
+        receipt
+            .reopened_witness
+            .full_path
+            .as_array()
+            .unwrap()
+            .last()
+            .map(|row| (
+                row[0].as_i64().unwrap(),
+                row[1].as_str().unwrap().to_owned()
+            )),
+        "reopen cursor follows the actual full selected-path tail, including appended audit nodes"
     );
     assert_eq!(
         receipt.reopened_witness.selected_path_source_bytes,

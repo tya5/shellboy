@@ -963,6 +963,35 @@ mod shell_argument_policy_tests {
         }
     }
     #[test]
+    fn function_call_item_status_is_optional_but_noncompleted_status_is_rejected() {
+        let call = json!({
+            "type":"function_call",
+            "call_id":"call-1",
+            "name":"shell",
+            "arguments":"{\"command\":\"echo latest\"}"
+        });
+        let mut raw = json!({
+            "id":"response-call-1",
+            "status":"completed",
+            "usage":{"input_tokens":200,"output_tokens":1,"total_tokens":201},
+            "output":[call.clone()]
+        });
+        let parsed = ModelResponse::completed(raw.clone(), true).unwrap();
+        assert_eq!(parsed.calls.len(), 1);
+        assert_eq!(parsed.calls[0].call_id, "call-1");
+        assert_eq!(
+            parsed.calls[0].args.as_ref().unwrap().command,
+            "echo latest"
+        );
+
+        raw["output"][0]["status"] = json!("in_progress");
+        assert_eq!(
+            ModelResponse::completed(raw, true).unwrap_err().kind,
+            "incomplete",
+            "an explicitly unfinished item remains rejected"
+        );
+    }
+    #[test]
     fn byte_limit_and_duplicate_ids_remain_protocol_errors() {
         let item = |id: &str, arguments: String| json!({"type":"function_call","name":"shell","call_id":id,"arguments":arguments});
         let large = "x".repeat(MAX_TOOL_ARGUMENT_BYTES + 1);

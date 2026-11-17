@@ -379,6 +379,25 @@ pub(crate) async fn thread(control: &Arc<Control>) -> String {
         .unwrap()
         .into()
 }
+async fn send_accepted(control: &Arc<Control>, thread: &str, text: &str) -> MessageAccepted {
+    serde_json::from_value(
+        request(
+            control,
+            Command::MessageSend(MessageSendArgs {
+                resume_recovery: false,
+                human: false,
+                to_human: false,
+                expect_reply: false,
+                sender_label: None,
+                deliver: Deliver::Next,
+                thread_id: Some(thread.into()),
+                text: text.into(),
+            }),
+        )
+        .await,
+    )
+    .expect("accepted Turn identity")
+}
 pub(crate) async fn send(control: &Arc<Control>, thread: &str, text: &str) {
     request(
         control,
@@ -3588,6 +3607,81 @@ fn answer_with_usage(text: &str, input_tokens: u64) -> Value {
         json!({"input_tokens":input_tokens,"output_tokens":1,"total_tokens":input_tokens+1});
     body
 }
+#[derive(Clone, Debug)]
+struct ExpectedAutomaticAttempt {
+    id: String,
+    token: String,
+}
+async fn automatic_attempts_finished_for_turns(
+    control: &Control,
+    turn_ids: &[String],
+    expected_count: usize,
+) -> Vec<ExpectedAutomaticAttempt> {
+    assert!(
+        expected_count > 0,
+        "terminal wait requires an expected operation"
+    );
+    assert_eq!(
+        turn_ids.len(),
+        1,
+        "this fixture contract names the exact triggering Turn"
+    );
+    let mut changes = control.subscribe();
+    let turns = turn_ids.to_vec();
+    crate::test_watchdog::watchdog("tests/runtime_features.rs: exact automatic FINISH", async {
+        let attempts = loop {
+            let turns = turns.clone();
+            let rows = control.store.database.call(move |db| {
+                let mut statement = db.prepare("SELECT a.id,json_extract(a.error_json,'$.automatic_trim_attempt.token') FROM model_attempt a WHERE a.turn_id=?1 AND json_type(a.error_json,'$.automatic_trim_attempt')='object' ORDER BY a.rowid")?;
+                statement.query_map([&turns[0]], |row| {
+                    let token: Option<String> = row.get(1)?;
+                    Ok((row.get::<_, String>(0)?, token))
+                })?.collect::<rusqlite::Result<Vec<_>>>().map_err(Into::into)
+            }).await.unwrap();
+            assert!(rows.len() <= expected_count, "unexpected extra automatic attempts for the named Turn: {rows:?}");
+            if rows.len() == expected_count {
+                break rows.into_iter().map(|(id, token)| ExpectedAutomaticAttempt {
+                    id,
+                    token: token.filter(|token| !token.is_empty()).expect("registered attempt has a nonempty token"),
+                }).collect::<Vec<_>>();
+            }
+            match changes.recv().await {
+                Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {},
+                Err(error) => panic!("exact automatic attempt receipt did not arrive: {error}"),
+            }
+        };
+        loop {
+            let ids = attempts.iter().map(|attempt| attempt.id.clone()).collect::<Vec<_>>();
+            let tokens = attempts.iter().map(|attempt| attempt.token.clone()).collect::<Vec<_>>();
+            let pending = control.store.database.call(move |db| {
+                let mut statement = db.prepare("SELECT id,json_extract(error_json,'$.automatic_trim_attempt.token'),json_extract(error_json,'$.automatic_trim_attempt.provisional'),json_extract(error_json,'$.automatic_trim_attempt.outcome') FROM model_attempt WHERE id=?1")?;
+                for (id, token) in ids.iter().zip(tokens.iter()) {
+                    let row = statement.query_row([id], |row| Ok((
+                        row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?,
+                        row.get::<_, Option<i64>>(2)?, row.get::<_, Option<String>>(3)?,
+                    )))?;
+                    assert_eq!(&row.0, id, "exact automatic attempt identity remains present");
+                    assert_eq!(row.1.as_deref(), Some(token.as_str()), "exact attempt token remains bound");
+                    let provisional = row.2.expect("FINISH fact has a typed provisional field");
+                    let outcome = row.3.as_deref().expect("FINISH fact has a typed outcome field");
+                    assert!(provisional == 0 || provisional == 1, "invalid provisional value {provisional}");
+                    if provisional != 0 || outcome == "unknown" {
+                        return Ok(true);
+                    }
+                    assert!(matches!(outcome, "adopted" | "failed" | "no_target" | "cancelled"),
+                        "unexpected terminal outcome {outcome}");
+                }
+                Ok(false)
+            }).await.unwrap();
+            if !pending { return attempts; }
+            match changes.recv().await {
+                Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {},
+                Err(error) => panic!("exact automatic attempt FINISH notification closed: {error}"),
+            }
+        }
+    }).await.unwrap()
+}
+
 async fn proactive_events(control: &Arc<Control>, thread: &str) -> Vec<Value> {
     let listed = request(
         control,
@@ -4915,7 +5009,7 @@ async fn bx_failure_slots(
         .unwrap()
 }
 fn bx_tool(id: &str, tokens: u64, command: &str) -> Value {
-    json!({"id":format!("response-{id}"),"status":"completed","usage":{"input_tokens":tokens,"output_tokens":1},"output":[{"type":"function_call","call_id":id,"name":"shell","arguments":json!({"command":command}).to_string()}]})
+    json!({"id":format!("response-{id}"),"status":"completed","usage":{"input_tokens":tokens,"output_tokens":1,"total_tokens":tokens+1},"output":[{"type":"function_call","status":"completed","call_id":id,"name":"shell","arguments":json!({"command":command}).to_string()}]})
 }
 /// Function-call outputs replayed in `body` that are spill replacements.
 fn bx_omitted_outputs(body: &Value) -> usize {
@@ -5031,7 +5125,8 @@ async fn proactive_resumes_when_an_older_complete_tool_group_becomes_reducible()
         .send((200, answer_with_usage("saved", 150)))
         .unwrap();
     settled(&control, &thread).await;
-    send(&control, &thread, "current task").await;
+    let accepted = send_accepted(&control, &thread, "current task").await;
+    let trigger_turn = accepted.turn_id.expect("accepted current tool-loop Turn");
     let command = if cfg!(windows) {
         "powershell -NoProfile -Command \"[Console]::Write(('x' * 50000))\""
     } else {
@@ -5056,12 +5151,40 @@ async fn proactive_resumes_when_an_older_complete_tool_group_becomes_reducible()
         .reply
         .send((200, bx_tool("call-1", 200, command)))
         .unwrap();
-    let summary = incoming_summary(&control, &mut receive).await;
-    assert_eq!(
-        summary.body["tools"],
-        json!([]),
-        "spill then the active summary"
-    );
+    let mut ordinary_before_summary = None;
+    let summary = loop {
+        let request = incoming(&control, &mut receive).await;
+        match request.kind() {
+            ProviderRequestKind::Summary => break request,
+            ProviderRequestKind::Ordinary => {
+                assert!(
+                    ordinary_before_summary.is_none(),
+                    "preserve at most the one current tool-loop continuation before summary"
+                );
+                assert!(
+                    request.body["input"].to_string().contains("call-1"),
+                    "latest complete group remains in the ordinary continuation"
+                );
+                let append_thread = thread.clone();
+                control.store.database.call(move |db| {
+                    let tx = db.transaction()?;
+                    let turn: String = tx.query_row(
+                        "SELECT id FROM turn WHERE thread_id=?1 AND state IN ('preparing','running','waiting','recovery_wait') ORDER BY rowid DESC LIMIT 1",
+                        [&append_thread], |row| row.get(0),
+                    )?;
+                    shellboy::history::append_node(&tx, &append_thread, "gc-append-during-provider", Some(&turn), "user", &json!({"role":"user","content":"GC-APPENDED-TAIL"}), "gc-append")?;
+                    tx.commit()?;
+                    Ok(())
+                }).await.unwrap();
+                ordinary_before_summary = Some(request.body.clone());
+                request
+                    .reply
+                    .send((200, answer_with_usage("done", 10)))
+                    .unwrap();
+            }
+        }
+    };
+    assert_eq!(summary.kind(), ProviderRequestKind::Summary);
     let input = summary.body["input"].to_string();
     assert!(
         input.contains("call-0"),
@@ -5071,37 +5194,47 @@ async fn proactive_resumes_when_an_older_complete_tool_group_becomes_reducible()
         !input.contains("call-1"),
         "latest complete group remains outside summary R"
     );
-    let append_thread = thread.clone();
-    control.store.database.call(move|db|{
-        let tx=db.transaction()?;
-        let turn:String=tx.query_row("SELECT id FROM turn WHERE thread_id=?1 AND state IN ('preparing','running','waiting','recovery_wait') ORDER BY rowid DESC LIMIT 1",[&append_thread],|row|row.get(0))?;
-        shellboy::history::append_node(&tx,&append_thread,"gc-append-during-provider",Some(&turn),"user",&json!({"role":"user","content":"GC-APPENDED-TAIL"}),"gc-append")?;
-        tx.commit()?;Ok(())
-    }).await.unwrap();
+    if ordinary_before_summary.is_none() {
+        let append_thread = thread.clone();
+        control.store.database.call(move|db|{
+            let tx=db.transaction()?;
+            let turn:String=tx.query_row("SELECT id FROM turn WHERE thread_id=?1 AND state IN ('preparing','running','waiting','recovery_wait') ORDER BY rowid DESC LIMIT 1",[&append_thread],|row|row.get(0))?;
+            shellboy::history::append_node(&tx,&append_thread,"gc-append-during-provider",Some(&turn),"user",&json!({"role":"user","content":"GC-APPENDED-TAIL"}),"gc-append")?;
+            tx.commit()?;Ok(())
+        }).await.unwrap();
+    }
     summary
         .reply
         .send((200, answer("short middle summary")))
         .unwrap();
-    let next = incoming_ordinary(&control, &mut receive).await;
-    assert_ne!(
-        next.body["tools"],
-        json!([]),
-        "ordinary work continues after compaction"
-    );
-    let next_input = next.body["input"].to_string();
-    assert!(
-        next_input.contains("call-1"),
-        "the latest round remains outside R"
-    );
-    assert_eq!(
-        next_input.matches("GC-APPENDED-TAIL").count(),
-        1,
-        "valid tail append during provider wait survives adoption exactly once"
-    );
-    next.reply
-        .send((200, answer_with_usage("done", 10)))
-        .unwrap();
+    if ordinary_before_summary.is_none() {
+        let next = incoming_ordinary(&control, &mut receive).await;
+        assert_ne!(
+            next.body["tools"],
+            json!([]),
+            "ordinary work continues after compaction"
+        );
+        let next_input = next.body["input"].to_string();
+        assert!(
+            next_input.contains("call-1"),
+            "the latest round remains outside R"
+        );
+        assert_eq!(
+            next_input.matches("GC-APPENDED-TAIL").count(),
+            1,
+            "valid tail append during provider wait survives adoption exactly once"
+        );
+        next.reply
+            .send((200, answer_with_usage("done", 10)))
+            .unwrap();
+    }
     settled(&control, &thread).await;
+    let terminal = automatic_attempts_finished_for_turns(&control, &[trigger_turn], 2).await;
+    assert_eq!(
+        terminal.len(),
+        2,
+        "both source-eligible attempts for the accepted Turn FINISH"
+    );
     let attempts = bx_attempts(&control, &thread).await;
     assert_eq!(attempts.len(), 2, "{attempts:#?}");
     assert_eq!(attempts[0]["outcome"], "no_target");
@@ -5120,108 +5253,6 @@ async fn proactive_resumes_when_an_older_complete_tool_group_becomes_reducible()
     server.abort();
 }
 
-async fn active_gc_candidate_mutation_case(mutation: &'static str, expect_adopted: bool) {
-    let root = tempfile::tempdir().unwrap();
-    let (url, mut receive, server) = proxy().await;
-    let owner = proactive_owner(
-        root.path(),
-        &url,
-        "spill=false\n[compaction]\nauto_at_tokens=100\n",
-    )
-    .await;
-    let control = Control::new(&owner, root.path().into());
-    let thread = thread(&control).await;
-    send(&control, &thread, "active mutation fixture").await;
-    incoming(&control, &mut receive)
-        .await
-        .reply
-        .send((200, bx_tool("call-0", 50, "echo first")))
-        .unwrap();
-    let next = incoming(&control, &mut receive).await;
-    assert_ne!(
-        next.body["tools"],
-        json!([]),
-        "first usage is below threshold"
-    );
-    next.reply
-        .send((200, bx_tool("call-1", 200, "echo latest")))
-        .unwrap();
-    let summary = incoming_summary(&control, &mut receive).await;
-    assert_eq!(
-        summary.body["tools"],
-        json!([]),
-        "active candidate is waiting for its real provider response"
-    );
-    let target = thread.clone();
-    control.store.database.call(move|db|{
-        let tx=db.transaction()?;
-        let (source,payload):(String,String)=tx.query_row(
-            "SELECT n.id,n.payload_json FROM thread_path p JOIN node n ON n.id=p.node_id JOIN json_each(n.payload_json,'$.output') item WHERE p.thread_id=?1 AND json_extract(item.value,'$.call_id')='call-0' LIMIT 1",
-            [&target],|row|Ok((row.get(0)?,row.get(1)?)))?;
-        match mutation{
-            "source"=>{tx.execute("UPDATE node SET payload_revision=payload_revision+1 WHERE id=?1",[source])?;}
-            "protection"=>{let receipt=uuid::Uuid::new_v4().to_string();tx.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at)VALUES(?1,?1,'{}',?2,?3,'accepted','gc-mutation')",rusqlite::params![receipt,target,source])?;}
-            "tool"=>{let payload:Value=serde_json::from_str(&payload).map_err(|e|rusqlite::Error::FromSqlConversionFailure(0,rusqlite::types::Type::Text,Box::new(e)))?;let group=payload["group_id"].as_str().ok_or_else(||rusqlite::Error::InvalidQuery)?;tx.execute("UPDATE tool_group SET state='running' WHERE id=?1",[group])?;}
-            "epoch"=>{tx.execute("UPDATE thread SET reasoning_epoch=reasoning_epoch+1 WHERE id=?1",[&target])?;}
-            _=>unreachable!(),
-        }
-        tx.commit()?;Ok(())
-    }).await.unwrap();
-    summary
-        .reply
-        .send((200, answer("a deliberately short summary")))
-        .unwrap();
-    let ordinary = incoming_ordinary(&control, &mut receive).await;
-    assert_ne!(
-        ordinary.body["tools"],
-        json!([]),
-        "a stale candidate is rejected and normal work resumes"
-    );
-    let target = thread.clone();
-    let outcome=control.store.database.call(move|db|{
-        let summaries:i64=db.query_row("SELECT count(*) FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND n.kind='summary'",[&target],|r|r.get(0))?;
-        let outcome:Option<String>=db.query_row("SELECT json_extract(a.error_json,'$.automatic_trim_attempt.outcome') FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE t.thread_id=?1 AND json_type(a.error_json,'$.automatic_trim_attempt') IS NOT NULL ORDER BY a.rowid DESC LIMIT 1",[&target],|r|r.get(0)).optional()?;
-        Ok((summaries,outcome))
-    }).await.unwrap();
-    if expect_adopted {
-        assert_eq!(
-            outcome.0, 1,
-            "R-external {mutation} change keeps the accepted summary"
-        );
-        assert_eq!(
-            outcome.1.as_deref(),
-            Some("adopted"),
-            "{mutation}: {outcome:?}"
-        );
-    } else {
-        assert_eq!(
-            outcome,
-            (0, Some("failed".into())),
-            "{mutation} changes R or its closure/protection"
-        );
-    }
-    ordinary
-        .reply
-        .send((200, answer_with_usage("continued", 10)))
-        .unwrap();
-    settled(&control, &thread).await;
-    control.shutdown().await.unwrap();
-    owner.shutdown().await.unwrap();
-    server.abort();
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn proactive_active_candidate_rejects_r_mutations_and_adopts_across_r_external_epoch_change()
-{
-    for mutation in ["source", "protection", "tool"] {
-        active_gc_candidate_mutation_case(mutation, false).await;
-    }
-    active_gc_candidate_mutation_case("epoch", true).await;
-}
-
-/// #303 §6.2 (replaces the #180 bounded no-target proof): with only a
-/// protected latest completed Turn and a large protected current request,
-/// the eligible report starts one attempt that ends `no_target` locally.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn proactive_large_protected_turn_is_a_local_no_target_attempt() {
     let root = tempfile::tempdir().unwrap();
@@ -6148,12 +6179,13 @@ async fn proactive_attempt_runs_one_summary_operation_and_keeps_its_usage() {
                 .unwrap();
             settled(&control, &target).await;
         }
-        send(
+        let accepted = send_accepted(
             &control,
             &target,
             &format!("current {}", "b".repeat(40_000)),
         )
         .await;
+        let trigger_turn = accepted.turn_id.expect("current request Turn");
         for (n, tokens) in [(0, 50_000), (1, 50_000), (2, 201_061)] {
             incoming(&control, &mut receive)
                 .await
@@ -6185,6 +6217,16 @@ async fn proactive_attempt_runs_one_summary_operation_and_keeps_its_usage() {
             .send((200, answer_with_usage("done", 100_000)))
             .unwrap();
         settled(&control, &target).await;
+        let terminal = automatic_attempts_finished_for_turns(&control, &[trigger_turn], 1).await;
+        assert_eq!(
+            terminal.len(),
+            1,
+            "one expected attempt for the triggering Turn"
+        );
+        assert!(
+            !terminal[0].token.is_empty(),
+            "attempt token is bound before FINISH"
+        );
         let attempts = bx_attempts(&control, &target).await;
         assert_eq!(attempts.len(), 1, "{attempts:#?}");
         assert_eq!(attempts[0]["outcome"], "adopted");

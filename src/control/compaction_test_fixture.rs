@@ -78,6 +78,7 @@ pub(crate) struct StageFixture {
     pub(crate) input_tokens: u64,
     pub(crate) a_input_tokens: u64,
     pub(crate) target_percent: u64,
+    pub(crate) spill_effective: bool,
 }
 
 /// Construct the stage's real turn placement, whole groups, and policy facts.
@@ -85,6 +86,7 @@ pub(crate) async fn stage_fixture(
     db: &DbWorker,
     placement: StagePlacement,
     target_percent: u64,
+    spill_effective: bool,
 ) -> StageFixture {
     let run_id = format!("direct-run-{}", uuid::Uuid::new_v4());
     match placement {
@@ -105,6 +107,7 @@ pub(crate) async fn stage_fixture(
             input_tokens: 200,
             a_input_tokens: 100,
             target_percent,
+            spill_effective,
         },
         StagePlacement::ClosedPrefix => StageFixture {
             thread_id: "t",
@@ -115,6 +118,7 @@ pub(crate) async fn stage_fixture(
             input_tokens: 200,
             a_input_tokens: 100,
             target_percent,
+            spill_effective,
         },
     };
     let mut a_state = crate::compaction::a_state::State::new("fixture", "fixture").unwrap();

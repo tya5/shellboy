@@ -1634,6 +1634,18 @@ async fn issue_160_auto_compaction_detached_attachment_and_retry() {
             send(&control, &thread, "second").await;
         }
         let second = incoming(&control, &thread, &mut receive).await;
+        let target = thread.clone();
+        let (trigger_attempt, trigger_run, active_attempts): (String, String, i64) = control.store.database.call(move |db| {
+            db.query_row(
+                "SELECT a.id,t.run_id,count(*) OVER() FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE t.thread_id=?1 AND t.state IN ('running','waiting') AND a.state='inflight'",
+                [target],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            ).map_err(Into::into)
+        }).await.unwrap();
+        assert_eq!(
+            active_attempts, 1,
+            "the observed ordinary provider request has one exact in-flight attempt"
+        );
         let mut reply = answer("second answer");
         reply["usage"] = json!({"input_tokens":150,"output_tokens":1});
         second.reply.send((200, reply)).unwrap();
@@ -1652,7 +1664,7 @@ async fn issue_160_auto_compaction_detached_attachment_and_retry() {
             ),
             _ => assert_eq!(before.0, "active"),
         }
-        let resumed = request(
+        request(
             &control,
             Command::MessageSend(MessageSendArgs {
                 resume_recovery: false,
@@ -1672,35 +1684,74 @@ async fn issue_160_auto_compaction_detached_attachment_and_retry() {
             json!([]),
             "automatic summary: {mode}"
         );
-        let target = thread.clone();
+        let attempt = trigger_attempt.clone();
         let (automatic_attempt, automatic_token): (String, String) = control.store.database.call(move |db| {
             db.query_row(
-                "SELECT a.id,json_extract(a.error_json,'$.automatic_trim_attempt.token') FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE t.thread_id=?1 AND json_type(a.error_json,'$.automatic_trim_attempt')='object' ORDER BY a.rowid DESC LIMIT 1",
-                [target],
+                "SELECT id,json_extract(error_json,'$.automatic_trim_attempt.token') FROM model_attempt WHERE id=?1 AND json_type(error_json,'$.automatic_trim_attempt')='object'",
+                [attempt],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             ).map_err(Into::into)
         }).await.unwrap();
+        // Subscribe before replying so the exact terminal FINISH notification cannot be missed.
+        let mut changes = control.subscribe();
+        let mut third_body = None;
         summary
             .reply
             .send((200, answer("synthetic summary")))
             .unwrap();
-        // The queued resume may be sent before FINISH; bind completion to this exact attempt/token.
-        crate::test_watchdog::watchdog("issue160 automatic summary FINISH", async {
-            loop {
-                let attempt = automatic_attempt.clone();
-                let token = automatic_token.clone();
-                let adopted = control.store.database.call(move |db| {
-                    Ok(db.query_row(
-                        "SELECT EXISTS(SELECT 1 FROM model_attempt WHERE id=?1 AND state='completed' AND json_extract(error_json,'$.automatic_trim_attempt.token')=?2 AND json_extract(error_json,'$.automatic_trim_attempt.outcome')='adopted')",
-                        rusqlite::params![attempt, token],
-                        |row| row.get::<_, bool>(0),
-                    )?)
-                }).await.unwrap();
-                if adopted { break; }
-                tokio::task::yield_now().await;
+        // Provider request arrival is not FINISH; inspect this exact token's durable terminal record.
+        let terminal_attempt = crate::test_watchdog::watchdog(
+            "issue160 automatic summary FINISH",
+            async {
+                loop {
+                    let attempt = automatic_attempt.clone();
+                    let token = automatic_token.clone();
+                    let record = control.store.database.call(move |db| {
+                        let value: String = db.query_row(
+                            "SELECT json_extract(error_json,'$.automatic_trim_attempt') FROM model_attempt WHERE id=?1 AND json_extract(error_json,'$.automatic_trim_attempt.token')=?2",
+                            rusqlite::params![attempt, token],
+                            |row| row.get(0),
+                        )?;
+                        Ok(serde_json::from_str::<Value>(&value).unwrap())
+                    }).await.unwrap();
+                    if record["provisional"] == false {
+                        break record;
+                    }
+                    tokio::select! {
+                        changed = changes.recv() => match changed {
+                            Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {},
+                            Err(error) => panic!("issue160 FINISH notification stream closed: {error}"),
+                        },
+                        request = receive.recv() => {
+                            let request = request.expect("provider remains available through exact automatic FINISH");
+                            if request.body["tools"].as_array().is_some_and(Vec::is_empty) {
+                                request.reply.send((200, answer("synthetic follow-on summary"))).unwrap();
+                            } else {
+                                assert!(third_body.is_none(), "preserve one ordinary in-flight request body before FINISH");
+                                third_body = Some(request.body.clone());
+                                request.reply.send((200, answer("third answer"))).unwrap();
+                            }
+                        }
+                    }
+                }
+            },
+        ).await.unwrap();
+        assert_eq!(
+            terminal_attempt["outcome"], "adopted",
+            "the exact attempt from source Run {trigger_run} must FINISH as adopted before source/attachment assertions: {terminal_attempt:#?}"
+        );
+        let third_body = match third_body {
+            Some(body) => body,
+            None => {
+                let request = incoming(&control, &thread, &mut receive).await;
+                assert!(!request.body["tools"].as_array().is_some_and(Vec::is_empty));
+                let body = request.body.clone();
+                request.reply.send((200, answer("third answer"))).unwrap();
+                body
             }
-        }).await.unwrap();
-        let next = incoming(&control, &thread, &mut receive).await;
+        };
+        assert!(!third_body["tools"].as_array().is_some_and(Vec::is_empty));
+        settled(&control, &thread).await;
         let target = thread.clone();
         let attachment = id.clone();
         let source_id = source.clone();
@@ -1715,16 +1766,36 @@ async fn issue_160_auto_compaction_detached_attachment_and_retry() {
                 _ => "context_replacement",
             })
         );
+        let retry_acceptance = request(
+            &control,
+            Command::MessageSend(MessageSendArgs {
+                resume_recovery: false,
+                human: false,
+                to_human: false,
+                expect_reply: false,
+                sender_label: None,
+                deliver: Deliver::Next,
+                thread_id: Some(thread.clone()),
+                text: "retry detached source".into(),
+            }),
+        )
+        .await;
+        let retry_request = incoming(&control, &thread, &mut receive).await;
         if mode == "active" {
-            assert!(next.body.to_string().contains("context_replacement"));
+            assert!(
+                retry_request
+                    .body
+                    .to_string()
+                    .contains("context_replacement")
+            );
         } else {
-            assert!(!next.body.to_string().contains(&id));
+            assert!(!retry_request.body.to_string().contains(&id));
         }
-        // Simulate the persisted recovery state of an older version, while keeping
-        // its detached selection and replacement path untouched across retry.
-        next.reply.send((500,json!({"error":{"message":"Attachment synthetic source is outside the selected path"}}))).unwrap();
+        // Simulate the old-version request failure only after the automatic
+        // replacement has durably finished and the retry request sees its path.
+        retry_request.reply.send((500,json!({"error":{"message":"Attachment synthetic source is outside the selected path"}}))).unwrap();
         settled(&control, &thread).await;
-        let turn_id = resumed["turn_id"].as_str().unwrap().to_owned();
+        let turn_id = retry_acceptance["turn_id"].as_str().unwrap().to_owned();
         let saved: (String, Option<String>) = control
             .store
             .database
@@ -1748,7 +1819,7 @@ async fn issue_160_auto_compaction_detached_attachment_and_retry() {
         request(
             &control,
             Command::RunRetry(RunTarget {
-                run_id: resumed["run_id"].as_str().unwrap().into(),
+                run_id: retry_acceptance["run_id"].as_str().unwrap().into(),
             }),
         )
         .await;

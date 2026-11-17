@@ -957,8 +957,11 @@ pub(super) struct StageWitness {
     pub(super) selection_revision: i64,
     pub(super) reasoning_epoch: i64,
     pub(super) cursor: Option<(i64, String)>,
+    pub(super) full_path: Value,
     pub(super) selected_path_source_bytes: Value,
     pub(super) audit_path: Value,
+    pub(super) audit_projection: Value,
+    pub(super) audit_relations: Value,
     pub(super) replacement_provenance_and_source_bytes: Value,
     pub(super) whole_tool_group_facts: Value,
     pub(super) protected_request_receipts: Value,
@@ -982,28 +985,142 @@ async fn committed_selection_witness(control: &Control, thread: &str) -> StageWi
             [&thread],
             |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
         )?;
-        let path = tx.prepare(
-            "SELECT p.ordinal,n.id,n.turn_id,n.kind,n.payload_revision,n.payload_json,n.deleted_reason FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND n.kind NOT IN ('event','interruption_details','interruption_context') ORDER BY p.ordinal",
+        // Read the complete selected path first. Audit suffix classification must
+        // never affect the cursor or hide an unexpected node/order from the witness.
+        let full_path = tx.prepare(
+            "SELECT p.ordinal,n.id,n.turn_id,n.kind,n.payload_revision,n.payload_json,n.deleted_reason FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 ORDER BY p.ordinal",
         )?.query_map([&thread], |row| Ok((row.get::<_, i64>(0)?,row.get::<_,String>(1)?,row.get::<_,Option<String>>(2)?,row.get::<_,String>(3)?,row.get::<_,i64>(4)?,row.get::<_,Option<String>>(5)?,row.get::<_,Option<String>>(6)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
-        let audit_path = tx.prepare(
-            "SELECT p.ordinal,n.id,n.turn_id,n.kind,n.payload_revision,n.payload_json,n.deleted_reason FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND n.kind IN ('event','interruption_details','interruption_context') ORDER BY p.ordinal",
-        )?.query_map([&thread], |row| Ok((row.get::<_, i64>(0)?,row.get::<_,String>(1)?,row.get::<_,Option<String>>(2)?,row.get::<_,String>(3)?,row.get::<_,i64>(4)?,row.get::<_,Option<String>>(5)?,row.get::<_,Option<String>>(6)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
+        let is_audit = |kind: &str| matches!(kind,"event"|"interruption_details"|"interruption_context");
+        let source_path = full_path.iter().filter(|row| !is_audit(&row.3)).cloned().collect::<Vec<_>>();
+        let audit_path = full_path.iter().filter(|row| is_audit(&row.3)).cloned().collect::<Vec<_>>();
+
+        // Reuse the repository's bounded persisted-payload projection for every
+        // audit node; its result kind and field paths are part of the witness.
+        let mut audit_projection = Vec::with_capacity(audit_path.len());
+        for row in &audit_path {
+            let kind = row.3.as_str();
+            let payload: Value = serde_json::from_str(row.5.as_deref().expect("selected audit node payload"))
+                .map_err(|error| crate::storage::StorageError::Schema(error.to_string()))?;
+            let text = crate::history::text_of_payload(&payload);
+            let projection = crate::presentation::project(kind, &payload, &text, 0);
+            let expected_kind = if kind == "event" {
+                crate::presentation::PresentationKind::Event
+            } else {
+                crate::presentation::PresentationKind::Interrupted
+            };
+            if projection.kind != expected_kind {
+                return Err(crate::storage::StorageError::Schema(format!(
+                    "audit payload projection kind mismatch for node {}", row.1
+                )));
+            }
+            audit_projection.push(json!({
+                "ordinal":row.0,"node_id":row.1,"kind":kind,
+                "presentation_kind":format!("{:?}",projection.kind),
+                "field_paths":projection.fields.iter().map(|field| field.key.clone()).collect::<Vec<_>>(),
+            }));
+        }
+
+        let events = tx.prepare(
+            "SELECT p.ordinal,n.id,n.notification_event_id,e.id,e.kind,e.source_json,e.target_thread_id,e.target_run_id,e.payload_ref_json,e.created_at,(SELECT json_group_array(json_object('recipient_id',d.recipient_id,'state',d.state,'owner_thread_id',r.thread_id,'owner_run_state',r.state)) FROM delivery d LEFT JOIN run r ON r.id=d.recipient_id WHERE d.event_id=e.id) FROM thread_path p JOIN node n ON n.id=p.node_id LEFT JOIN event e ON e.id=COALESCE(n.notification_event_id,json_extract(n.payload_json,'$.event_id')) WHERE p.thread_id=?1 AND n.kind='event' ORDER BY p.ordinal",
+        )?.query_map([&thread], |row| Ok((row.get::<_,i64>(0)?,row.get::<_,String>(1)?,row.get::<_,Option<String>>(2)?,row.get::<_,Option<String>>(3)?,row.get::<_,Option<String>>(4)?,row.get::<_,Option<String>>(5)?,row.get::<_,Option<String>>(6)?,row.get::<_,Option<String>>(7)?,row.get::<_,Option<String>>(8)?,row.get::<_,Option<String>>(9)?,row.get::<_,Option<String>>(10)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
         let provenance = tx.prepare(
             "SELECT tr.replacement_id,r.output_node_id,out.kind,rs.ordinal,rs.source_node_id,rs.source_revision,rs.source_hash,src.payload_json FROM thread_replacement tr JOIN replacement r ON r.id=tr.replacement_id JOIN node out ON out.id=r.output_node_id LEFT JOIN replacement_source rs ON rs.replacement_id=r.id LEFT JOIN node src ON src.id=rs.source_node_id WHERE tr.thread_id=?1 ORDER BY r.created_at,r.id,rs.ordinal",
         )?.query_map([&thread], |row| Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,String>(2)?,row.get::<_,Option<i64>>(3)?,row.get::<_,Option<String>>(4)?,row.get::<_,Option<i64>>(5)?,row.get::<_,Option<String>>(6)?,row.get::<_,Option<String>>(7)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
-        let groups = tx.prepare(
-            "SELECT g.id,g.turn_id,g.attempt_id,g.state,c.call_id,c.ordinal,c.state,r.node_id,r.status FROM tool_group g JOIN turn t ON t.id=g.turn_id LEFT JOIN tool_call c ON c.group_id=g.id LEFT JOIN tool_result r ON r.group_id=c.group_id AND r.call_id=c.call_id WHERE t.thread_id=?1 ORDER BY g.rowid,c.ordinal,r.node_id",
-        )?.query_map([&thread], |row| Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,String>(2)?,row.get::<_,String>(3)?,row.get::<_,Option<String>>(4)?,row.get::<_,Option<i64>>(5)?,row.get::<_,Option<String>>(6)?,row.get::<_,Option<String>>(7)?,row.get::<_,Option<String>>(8)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
-        let receipts = tx.prepare(
-            "SELECT id,message_node_id,run_id,turn_id,state,result_json FROM receipt WHERE target_thread_id=?1 ORDER BY created_at,id",
-        )?.query_map([&thread], |row| Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,Option<String>>(2)?,row.get::<_,Option<String>>(3)?,row.get::<_,String>(4)?,row.get::<_,Option<String>>(5)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
-        let cursor = path.last().map(|(ordinal,node,..)| (*ordinal,node.clone()));
+        let runs = tx.prepare("SELECT id,thread_id,state FROM run WHERE thread_id=?1 ORDER BY created_at,rowid")?.query_map([&thread],|row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,String>(2)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
+        let turns = tx.prepare("SELECT id,run_id,state FROM turn WHERE thread_id=?1 ORDER BY created_at,rowid")?.query_map([&thread],|row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,String>(2)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
+        let shells = tx.prepare("SELECT s.id,s.owner_run_id,s.turn_id,s.state FROM shell_execution s JOIN run r ON r.id=s.owner_run_id WHERE r.thread_id=?1 ORDER BY s.started_at,s.rowid")?.query_map([&thread],|row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,String>(2)?,row.get::<_,String>(3)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
+        let groups = tx.prepare("SELECT g.id,g.turn_id,g.attempt_id,g.state FROM tool_group g JOIN turn t ON t.id=g.turn_id WHERE t.thread_id=?1 ORDER BY g.rowid")?.query_map([&thread],|row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,String>(2)?,row.get::<_,String>(3)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
+        let receipts = tx.prepare("SELECT id,target_thread_id,run_id,turn_id,message_node_id,state FROM receipt WHERE target_thread_id=?1 ORDER BY created_at,id")?.query_map([&thread],|row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,Option<String>>(2)?,row.get::<_,Option<String>>(3)?,row.get::<_,String>(4)?,row.get::<_,String>(5)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
+
+        // Validate persisted interruption-detail/context ownership links against
+        // their actual selected positions and source rows, not a kind-filtered suffix.
+        for row in full_path.iter().filter(|row| row.3 == "interruption_context") {
+            let payload: Value = serde_json::from_str(row.5.as_deref().expect("interruption context payload"))
+                .map_err(|error| crate::storage::StorageError::Schema(error.to_string()))?;
+            let text = payload["text"].as_str().ok_or_else(||crate::storage::StorageError::Schema("interruption context has no text envelope".into()))?;
+            let context: Value = serde_json::from_str(text)
+                .map_err(|error| crate::storage::StorageError::Schema(error.to_string()))?;
+            if context["snapshot_node_id"] != row.1 {
+                return Err(crate::storage::StorageError::Schema("interruption snapshot identity differs from its selected node".into()));
+            }
+            for section in ["runs","turns","shells","tool_calls","unreflected_messages","cancelled_waits","pending_operations_with_unknown_targets"] {
+                if let Some(ids) = context["change"][section]["detail_node_ids"].as_array() {
+                    for id in ids.iter().filter_map(Value::as_str) {
+                        let detail = full_path.iter().find(|candidate| candidate.1 == id)
+                            .ok_or_else(||crate::storage::StorageError::Schema(format!("interruption detail {id} is not selected")))?;
+                        if detail.0 >= row.0 || detail.3 != "interruption_details" {
+                            return Err(crate::storage::StorageError::Schema(format!("interruption detail {id} is not an earlier detail node")));
+                        }
+                        let detail_payload: Value = serde_json::from_str(detail.5.as_deref().expect("detail payload"))
+                            .map_err(|error|crate::storage::StorageError::Schema(error.to_string()))?;
+                        let detail_text = detail_payload["text"].as_str().ok_or_else(||crate::storage::StorageError::Schema("interruption detail has no text envelope".into()))?;
+                        let detail_body: Value = serde_json::from_str(detail_text)
+                            .map_err(|error|crate::storage::StorageError::Schema(error.to_string()))?;
+                        if detail_body["section"] != section {
+                            return Err(crate::storage::StorageError::Schema(format!("interruption detail {id} section mismatch")));
+                        }
+                    }
+                }
+            }
+            for item in context["change"]["runs"]["items"].as_array().into_iter().flatten() {
+                let id = item["run_id"].as_str().ok_or_else(||crate::storage::StorageError::Schema("interruption run has no id".into()))?;
+                if !runs.iter().any(|(run,owner,_)|run==id && owner==&thread) {
+                    return Err(crate::storage::StorageError::Schema(format!("interruption run {id} is not owned by target Thread")));
+                }
+            }
+            for item in context["change"]["turns"]["items"].as_array().into_iter().flatten() {
+                let id = item["turn_id"].as_str().ok_or_else(||crate::storage::StorageError::Schema("interruption turn has no id".into()))?;
+                let run = item["run_id"].as_str().ok_or_else(||crate::storage::StorageError::Schema("interruption turn has no Run owner".into()))?;
+                if !turns.iter().any(|(turn,owner,_)|turn==id && owner==run) {
+                    return Err(crate::storage::StorageError::Schema(format!("interruption Turn {id} has mismatched owner")));
+                }
+            }
+            for item in context["change"]["shells"]["items"].as_array().into_iter().flatten() {
+                let id = item["execution_id"].as_str().ok_or_else(||crate::storage::StorageError::Schema("interruption shell has no id".into()))?;
+                let run = item["run_id"].as_str().ok_or_else(||crate::storage::StorageError::Schema("interruption shell has no Run owner".into()))?;
+                let turn = item["turn_id"].as_str().ok_or_else(||crate::storage::StorageError::Schema("interruption shell has no Turn owner".into()))?;
+                if !shells.iter().any(|(execution,owner,owner_turn,_)|execution==id && owner==run && owner_turn==turn) {
+                    return Err(crate::storage::StorageError::Schema(format!("interruption shell {id} has mismatched owner")));
+                }
+            }
+        }
+        for event in &events {
+            if event.2.is_some() && event.3.is_none() {
+                return Err(crate::storage::StorageError::Schema(format!("selected event node {} references a missing event",event.1)));
+            }
+            if let Some(target) = event.6.as_deref()
+                && target != thread
+            {
+                return Err(crate::storage::StorageError::Schema(format!("event {} targets another Thread",event.1)));
+            }
+            if let Some(run) = event.7.as_deref()
+                && !runs.iter().any(|(id,owner,_)|id==run && owner==&thread)
+            {
+                return Err(crate::storage::StorageError::Schema(format!("event {} targets a Run outside its Thread",event.1)));
+            }
+            if let Some(serialized) = event.10.as_deref() {
+                let deliveries: Value = serde_json::from_str(serialized)
+                    .map_err(|error|crate::storage::StorageError::Schema(error.to_string()))?;
+                for delivery in deliveries.as_array().into_iter().flatten() {
+                    if let Some(owner) = delivery["owner_thread_id"].as_str()
+                        && owner != thread
+                    {
+                        return Err(crate::storage::StorageError::Schema(format!("event {} delivery recipient belongs to another Thread",event.1)));
+                    }
+                }
+            }
+        }
+
+        let cursor = full_path.last().map(|(ordinal,node,..)| (*ordinal,node.clone()));
         let witness = StageWitness {
             selection_revision: selection.0,
             reasoning_epoch: selection.1,
             cursor,
-            selected_path_source_bytes: json!(path),
+            full_path: json!(full_path),
+            selected_path_source_bytes: json!(source_path),
             audit_path: json!(audit_path),
+            audit_projection: json!(audit_projection),
+            audit_relations: json!({"events":events,"runs":runs,"turns":turns,"shells":shells,"tool_groups":groups,"receipts":receipts}),
             replacement_provenance_and_source_bytes: json!(provenance),
             whole_tool_group_facts: json!(groups),
             protected_request_receipts: json!(receipts),
@@ -1057,8 +1174,8 @@ async fn direct_boundary_case(
     let agents = root.path().join("AGENTS.md").to_string_lossy().into_owned();
     control.store.database.call(move |db| {
         db.execute(
-            "INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,auto_compact_at,auto_compact_target_percent,updated_at) VALUES('t',?1,?2,'fixture','fixture',200,?3,'now')",
-            rusqlite::params![cwd, agents, thread_target_percent.map(|value| value as i64)],
+            "INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,auto_compact_at,auto_compact_target_percent,spill_override,updated_at) VALUES('t',?1,?2,'fixture','fixture',200,?3,?4,'now')",
+            rusqlite::params![cwd, agents, thread_target_percent.map(|value| value as i64), Some(true)],
         )?;
         Ok(())
     }).await.unwrap();
@@ -1068,7 +1185,7 @@ async fn direct_boundary_case(
         StagePlacement::ClosedPrefix
     };
     let target_percent = thread_target_percent.unwrap_or(scenario.target_percent());
-    let fixture = stage_fixture(&control.store.database, placement, target_percent).await;
+    let fixture = stage_fixture(&control.store.database, placement, target_percent, true).await;
 
     let slot = DriverSlot {
         id: "direct-slot".into(),
@@ -1093,10 +1210,13 @@ async fn direct_boundary_case(
         .expect("saved provider usage makes this threshold attempt eligible");
     assert_eq!(plan.attempt_id, fixture.attempt_id);
     assert_eq!(plan.input_tokens, fixture.input_tokens);
-    assert_eq!(plan.a_input_tokens, Some(fixture.a_input_tokens));
+    assert_eq!(
+        plan.a_input_tokens,
+        fixture.spill_effective.then_some(fixture.a_input_tokens)
+    );
     assert_eq!(plan.target_percent, fixture.target_percent);
     assert_eq!(plan.target_tokens, scenario.target_tokens());
-    assert!(plan.spill_effective);
+    assert_eq!(plan.spill_effective, fixture.spill_effective);
     let expected_attempt = plan.attempt_id.clone();
 
     let checkpoint_reached = Arc::new(AtomicBool::new(false));
@@ -1148,6 +1268,7 @@ async fn direct_boundary_case(
         );
         tokio::pin!(direct);
         let mut identity = None;
+        let mut rejected_stage_baseline = None;
         if fault == Fault::RejectFact {
             let result = loop {
                 tokio::select! {
@@ -1157,6 +1278,7 @@ async fn direct_boundary_case(
                         assert!(request.body["tools"].as_array().is_some_and(Vec::is_empty));
                         if identity.is_none() {
                             identity = Some(capture_terminal_identity(&control, fixture.thread_id, true).await);
+                            rejected_stage_baseline = Some(committed_selection_witness(&control, fixture.thread_id).await);
                         }
                         request.reply.send((200, answer("## Goal\nPreserve the active turn.\n## Constraints\nDo not alter protected input.\n## Current state\nThree complete groups remain.\n## Open issues and next steps\nContinue after summary.\n## Key references\nCurrent fixture."))).unwrap();
                     }
@@ -1168,7 +1290,10 @@ async fn direct_boundary_case(
                 None => capture_terminal_identity(&control, fixture.thread_id, false).await,
             };
             let checkpoint_record = automatic_attempt_record(&control, &fixture).await;
-            let checkpoint_witness = committed_selection_witness(&control, fixture.thread_id).await;
+            let checkpoint_witness = match rejected_stage_baseline {
+                Some(baseline) => baseline,
+                None => committed_selection_witness(&control, fixture.thread_id).await,
+            };
             (result, identity, checkpoint_record, checkpoint_witness)
         } else {
             while !checkpoint_reached.load(Ordering::SeqCst) {
@@ -1242,6 +1367,116 @@ async fn direct_boundary_case(
         );
     }
     let after_fault_witness = committed_selection_witness(&control, fixture.thread_id).await;
+    let after_fault_record = automatic_attempt_record(&control, &fixture).await;
+    let stage_names = [
+        "closed_spill",
+        "closed_summary",
+        "active_spill",
+        "active_summary",
+    ];
+    // automatic_attempt_record already returns the `automatic_trim_attempt` object.
+    let checkpoint_stages = &checkpoint_record["committed_stages"];
+    let after_stages = &after_fault_record["committed_stages"];
+    if let Some(checkpoint_stage) = stage_names
+        .iter()
+        .rev()
+        .find(|stage| checkpoint_stages[stage].is_object())
+    {
+        assert_eq!(
+            checkpoint_stages[checkpoint_stage]["selection_revision"].as_i64(),
+            Some(checkpoint_witness.selection_revision),
+            "checkpoint's latest committed stage receipt must match its captured path revision"
+        );
+    }
+    let mut receipt_revision = checkpoint_witness.selection_revision;
+    let mut newly_committed_path_stages = 0i64;
+    for stage in stage_names {
+        if after_stages[stage].is_object() && checkpoint_stages[stage] != after_stages[stage] {
+            let stage_revision = after_stages[stage]["selection_revision"]
+                .as_i64()
+                .expect("committed stage receipt records its post-adoption selection revision");
+            assert_eq!(
+                stage_revision,
+                receipt_revision + 1,
+                "each changed stage receipt follows exactly one committed path adoption: checkpoint={checkpoint_stages}, after={after_stages}"
+            );
+            receipt_revision = stage_revision;
+            newly_committed_path_stages += 1;
+        }
+    }
+    let checkpoint_audit = checkpoint_witness.audit_path.as_array().unwrap();
+    let after_audit = after_fault_witness.audit_path.as_array().unwrap();
+    let checkpoint_audit_ids = checkpoint_audit
+        .iter()
+        .map(|row| row[1].as_str().unwrap())
+        .collect::<Vec<_>>();
+    let after_audit_ids = after_audit
+        .iter()
+        .map(|row| row[1].as_str().unwrap())
+        .collect::<Vec<_>>();
+    let retained_audit_ids = after_audit_ids
+        .iter()
+        .filter(|id| checkpoint_audit_ids.contains(id))
+        .copied()
+        .collect::<Vec<_>>();
+    assert_eq!(
+        retained_audit_ids, checkpoint_audit_ids,
+        "stage path replacement preserves old audit-node order; ordinal shifts are witnessed in the full path"
+    );
+    let newly_appended_audit_nodes = after_audit_ids
+        .iter()
+        .filter(|id| !checkpoint_audit_ids.contains(id))
+        .count() as i64;
+    let path_identity = |path: &Value| {
+        path.as_array()
+            .unwrap()
+            .iter()
+            .map(|row| json!([row[0], row[1], row[3]]))
+            .collect::<Vec<_>>()
+    };
+    let replacement_identity = |witness: &StageWitness| {
+        witness
+            .replacement_provenance_and_source_bytes
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| json!([row[0], row[1], row[2], row[3], row[4], row[5], row[6]]))
+            .collect::<Vec<_>>()
+    };
+    let revision_context = json!({
+        "attempt_id":fixture.attempt_id,
+        "token":checkpoint_record["token"],
+        "checkpoint_revision":checkpoint_witness.selection_revision,
+        "after_revision":after_fault_witness.selection_revision,
+        "checkpoint_stages":checkpoint_stages,
+        "after_stages":after_stages,
+        "new_stage_count":newly_committed_path_stages,
+        "new_audit_count":newly_appended_audit_nodes,
+        "checkpoint_path_ids_kinds":path_identity(&checkpoint_witness.full_path),
+        "after_path_ids_kinds":path_identity(&after_fault_witness.full_path),
+        "checkpoint_replacements":replacement_identity(&checkpoint_witness),
+        "after_replacements":replacement_identity(&after_fault_witness),
+    });
+    assert_eq!(
+        after_fault_witness.selection_revision,
+        checkpoint_witness.selection_revision
+            + newly_committed_path_stages
+            + newly_appended_audit_nodes,
+        "exact direct revision chronology mismatch: {revision_context}"
+    );
+    assert_eq!(
+        after_fault_witness.cursor,
+        after_fault_witness
+            .full_path
+            .as_array()
+            .unwrap()
+            .last()
+            .map(|row| (
+                row[0].as_i64().unwrap(),
+                row[1].as_str().unwrap().to_owned()
+            )),
+        "cursor is the actual full selected-path tail, including audit nodes"
+    );
     let follows_active_summary = scenario == Scenario::ActiveSpill && fault == Fault::Remeasurement;
     if follows_active_summary {
         let checkpoint_path = checkpoint_witness
@@ -1304,31 +1539,124 @@ async fn direct_boundary_case(
             source_rows.len() as u64,
             active_summary["source_nodes"].as_u64().unwrap()
         );
-        for (ordinal, source) in source_rows.iter().enumerate() {
-            assert_eq!(
-                source[3].as_u64(),
-                Some(ordinal as u64),
-                "summary source ordinal"
-            );
+        let checkpoint_path = checkpoint_witness
+            .selected_path_source_bytes
+            .as_array()
+            .unwrap();
+        let expected_r = checkpoint_path
+            .iter()
+            .filter(|row| row[3] == "spill")
+            .map(|row| row[1].as_str().unwrap().to_owned())
+            .collect::<Vec<_>>();
+        let provenance_r = source_rows
+            .iter()
+            .map(|row| row[4].as_str().unwrap().to_owned())
+            .collect::<Vec<_>>();
+        let payload_r = summary_payload["source_node_ids"]
+            .as_array()
+            .expect("adopted summary stores its ordered source IDs")
+            .iter()
+            .map(|id| {
+                id.as_str()
+                    .expect("summary source ID is a string")
+                    .to_owned()
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            !expected_r.is_empty(),
+            "the checkpoint includes the active spill R"
+        );
+        assert_eq!(
+            provenance_r, expected_r,
+            "replacement provenance is exactly the ordered pre-summary active R"
+        );
+        assert_eq!(
+            payload_r, expected_r,
+            "persisted summary source_node_ids exactly certify the ordered pre-summary R"
+        );
+        let checkpoint_sources = checkpoint_witness
+            .selected_path_source_bytes
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row[1].as_str().unwrap())
+            .collect::<Vec<_>>();
+        let mut previous_source_position = None;
+        for source in &source_rows {
             let source_id = source[4].as_str().unwrap();
-            let selected_bytes = checkpoint_witness
+            let source_revision = source[5].as_i64().unwrap();
+            let source_hash = source[6].as_str().unwrap();
+            let source_position = checkpoint_sources
+                .iter()
+                .position(|id| *id == source_id)
+                .expect("replacement source is in the checkpoint selected path");
+            assert!(previous_source_position.is_none_or(|previous| source_position > previous));
+            previous_source_position = Some(source_position);
+            let selected_source = checkpoint_witness
                 .selected_path_source_bytes
                 .as_array()
                 .unwrap()
                 .iter()
                 .find(|row| row[1] == source_id);
-            let replacement_bytes = checkpoint_witness
+            let retained_provenance = checkpoint_witness
                 .replacement_provenance_and_source_bytes
                 .as_array()
                 .unwrap()
                 .iter()
-                .find(|row| row[4] == source_id && row[5] == source[5] && row[6] == source[6]);
-            assert!(
-                selected_bytes.is_some_and(|row| row[5] == source[7])
-                    || replacement_bytes.is_some_and(|row| row[7] == source[7]),
-                "follow-on summary source {source_id} retains the exact pre-summary source bytes and provenance"
-            );
+                .find(|row| {
+                    row[4] == source_id && row[5] == source_revision && row[6] == source_hash
+                });
+            let expected_bytes = selected_source
+                .map(|row| row[5].as_str().unwrap())
+                .or_else(|| retained_provenance.map(|row| row[7].as_str().unwrap()))
+                .expect("source bytes are witnessed directly or by exact prior provenance");
+            assert_eq!(source[7].as_str().unwrap(), expected_bytes);
         }
+        let summary_position = final_path
+            .iter()
+            .position(|row| row[1] == summary_id)
+            .unwrap();
+        let last_spilled_ordinal = checkpoint_path
+            .iter()
+            .filter(|spill| spill[3] == "spill")
+            .map(|spill| spill[0].as_i64().unwrap())
+            .max()
+            .expect("committed spill has a selected checkpoint path position");
+        let summary_ordinal = final_path
+            .iter()
+            .find(|row| row[1] == summary_id)
+            .and_then(|row| row[0].as_i64())
+            .unwrap();
+        let summary_source_positions = source_rows
+            .iter()
+            .filter_map(|row| {
+                checkpoint_sources
+                    .iter()
+                    .position(|id| *id == row[4].as_str().unwrap())
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            summary_source_positions
+                .windows(2)
+                .all(|positions| positions[0] < positions[1])
+        );
+        let first_replaced_ordinal = source_rows
+            .first()
+            .and_then(|source| {
+                checkpoint_path
+                    .iter()
+                    .find(|row| row[1] == source[4])
+                    .and_then(|row| row[0].as_i64())
+            })
+            .expect("summary's first ordered source has its checkpoint path ordinal");
+        assert_eq!(
+            summary_ordinal, first_replaced_ordinal,
+            "follow-on summary occupies the first source's exact splice position; prior spill ordinal {last_spilled_ordinal}, ordered source positions {summary_source_positions:?}"
+        );
+        assert!(
+            summary_position < final_path.len(),
+            "summary remains on the selected path"
+        );
     } else {
         assert_eq!(
             after_fault_witness, checkpoint_witness,
@@ -1505,8 +1833,12 @@ async fn direct_boundary_case(
     );
     let reopened_witness = committed_selection_witness(&reopened, fixture.thread_id).await;
     let mut reopened_core = reopened_witness.clone();
+    reopened_core.full_path = after_fault_witness.full_path.clone();
     reopened_core.audit_path = after_fault_witness.audit_path.clone();
+    reopened_core.audit_projection = after_fault_witness.audit_projection.clone();
+    reopened_core.audit_relations = after_fault_witness.audit_relations.clone();
     reopened_core.selection_revision = after_fault_witness.selection_revision;
+    reopened_core.cursor = after_fault_witness.cursor.clone();
     assert_eq!(
         reopened_core, after_fault_witness,
         "normal reopen preserves the exact source path/provenance/group/receipt/cursor/epoch witness"
@@ -1517,7 +1849,32 @@ async fn direct_boundary_case(
         after_audit.starts_with(before_audit),
         "normal reopen only appends audit-path records"
     );
+    assert!(
+        reopened_witness
+            .audit_projection
+            .as_array()
+            .unwrap()
+            .starts_with(after_fault_witness.audit_projection.as_array().unwrap()),
+        "reopen preserves old audit projection witnesses before appending new ones"
+    );
     let reopen_audit_appends = json!(&after_audit[before_audit.len()..]);
+    let before_full = after_fault_witness.full_path.as_array().unwrap();
+    let after_full = reopened_witness.full_path.as_array().unwrap();
+    assert!(
+        after_full.starts_with(before_full),
+        "reopen preserves the exact old full-path prefix"
+    );
+    assert_eq!(
+        &after_full[before_full.len()..],
+        reopen_audit_appends.as_array().unwrap(),
+        "every reopen path append is represented at its actual full-path position"
+    );
+    assert_eq!(
+        reopened_witness.selection_revision,
+        after_fault_witness.selection_revision
+            + reopen_audit_appends.as_array().unwrap().len() as i64,
+        "shared reopen witness accounts for every authorized audit append revision exactly"
+    );
     assert!(
         reopen_audit_appends
             .as_array()
@@ -1545,6 +1902,230 @@ async fn direct_boundary_case(
         reopened_witness,
         reopen_audit_appends,
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CandidateMutation {
+    SourceRevision,
+    Protection,
+    ToolState,
+    ExternalEpoch,
+}
+impl CandidateMutation {
+    const ALL: [Self; 4] = [
+        Self::SourceRevision,
+        Self::Protection,
+        Self::ToolState,
+        Self::ExternalEpoch,
+    ];
+    fn expected_adoption(self) -> bool {
+        self == Self::ExternalEpoch
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn direct_active_candidate_mutations_preserve_r_and_source_provenance() {
+    for mutation in CandidateMutation::ALL {
+        direct_active_candidate_mutation(mutation).await;
+    }
+}
+
+async fn direct_active_candidate_mutation(mutation: CandidateMutation) {
+    use crate::control::compaction_test_fixture::{StagePlacement, stage_fixture};
+
+    let root = tempfile::tempdir().unwrap();
+    let (url, mut receive, _heads, server) = proxy().await;
+    let owner = proactive_owner(
+        root.path(),
+        &url,
+        "[limits]\ndraft_bytes=2097152\n[compaction]\nauto_at_tokens=200\nsummary_max_chars=4000\n",
+    )
+    .await;
+    let control = Control::new(&owner, root.path().into());
+    let cwd = root.path().to_string_lossy().into_owned();
+    let agents = root.path().join("AGENTS.md").to_string_lossy().into_owned();
+    control.store.database.call(move |db| {
+        db.execute(
+            "INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,auto_compact_at,auto_compact_target_percent,spill_override,updated_at) VALUES('t',?1,?2,'fixture','fixture',200,20,0,'now')",
+            rusqlite::params![cwd, agents],
+        )?;
+        Ok(())
+    }).await.unwrap();
+    let fixture = stage_fixture(
+        &control.store.database,
+        StagePlacement::ActiveTurn,
+        20,
+        false,
+    )
+    .await;
+    let slot = DriverSlot {
+        id: "direct-candidate-slot".into(),
+        run_id: fixture.run_id.clone(),
+        ..DriverSlot::default()
+    };
+    slot.turn
+        .lock()
+        .await
+        .replace(crate::control::turn_interrupt::TurnBinding {
+            turn: fixture.turn_id.into(),
+            cancel: tokio_util::sync::CancellationToken::new(),
+            start_gate: Arc::new(tokio::sync::Mutex::new(false)),
+        });
+    let mut snapshot = direct_snapshot_for_fixture(&control, &fixture).await;
+    let plan = preflight(&control, &snapshot)
+        .await
+        .unwrap()
+        .expect("typed active fixture is eligible");
+    assert_eq!(plan.attempt_id, fixture.attempt_id);
+    assert_eq!(plan.input_tokens, fixture.input_tokens);
+    assert_eq!(plan.a_input_tokens, None, "spill-off has no A measurement");
+    assert_eq!(plan.target_tokens, 40);
+    assert!(!plan.spill_effective);
+
+    let boundary_mutex = tokio::sync::Mutex::new(());
+    let guard = boundary_mutex.lock().await;
+    let mut boundary = crate::compaction::boundary::Boundary::new(&boundary_mutex, guard);
+    let run_stop = slot.stop.clone();
+    let (result, identity, before_mutation, mutated_candidate) = {
+        let direct = maybe_compact_with_run_stop(
+            &control,
+            &mut snapshot,
+            &slot,
+            &mut boundary,
+            run_stop,
+            plan,
+        );
+        tokio::pin!(direct);
+        let request = tokio::select! {
+            result = &mut direct => panic!("direct active candidate finished before its existing summary request: {result:?}"),
+            request = receive.recv() => request.expect("active candidate sends its tool-free summary"),
+        };
+        assert!(request.body["tools"].as_array().is_some_and(Vec::is_empty));
+        let input = request.body["input"].to_string();
+        assert!(input.contains("g1-call") && input.contains("g2-call"));
+        assert!(
+            !input.contains("g3-call"),
+            "latest complete group stays outside active R"
+        );
+        let identity = capture_terminal_identity(&control, fixture.thread_id, true).await;
+        assert_eq!(identity.attempt, fixture.attempt_id);
+        let before_mutation = committed_selection_witness(&control, fixture.thread_id).await;
+
+        let receipt_id = uuid::Uuid::new_v4().to_string();
+        let mutation_for_db = mutation;
+        control.store.database.call(move |db| {
+            let tx = db.transaction()?;
+            match mutation_for_db {
+                CandidateMutation::SourceRevision => {
+                    tx.execute("UPDATE node SET payload_revision=payload_revision+1 WHERE id='g1-call'", [])?;
+                }
+                CandidateMutation::Protection => {
+                    tx.execute(
+                        "INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at) VALUES(?1,?1,'{}','t','g1-call','accepted','direct-candidate-mutation')",
+                        [&receipt_id],
+                    )?;
+                }
+                CandidateMutation::ToolState => {
+                    tx.execute("UPDATE tool_group SET state='running' WHERE id='g1'", [])?;
+                }
+                CandidateMutation::ExternalEpoch => {
+                    tx.execute("UPDATE thread SET reasoning_epoch=reasoning_epoch+1 WHERE id='t'", [])?;
+                }
+            }
+            tx.commit()?;
+            Ok(())
+        }).await.unwrap();
+        let mutated_candidate = committed_selection_witness(&control, fixture.thread_id).await;
+        request
+            .reply
+            .send((200, answer("short direct candidate summary")))
+            .unwrap();
+        let result = direct.await;
+        (result, identity, before_mutation, mutated_candidate)
+    };
+    drop(boundary.into_guard());
+    let expected_adoption = mutation.expected_adoption();
+    let expected_outcome = if expected_adoption {
+        "adopted"
+    } else {
+        "failed"
+    };
+    assert!(
+        terminal_record_written(
+            &control,
+            &identity,
+            expected_outcome,
+            expected_adoption.then_some("active_summary")
+        )
+        .await,
+        "exact attempt/token terminal FINISH for {mutation:?}"
+    );
+    let record = automatic_attempt_record(&control, &fixture).await;
+    assert_eq!(identity.attempt, fixture.attempt_id);
+    assert_eq!(record["token"], identity.token);
+    assert_eq!(record["outcome"], expected_outcome, "{record:#?}");
+    assert_eq!(
+        result.unwrap(),
+        ProactiveOutcome::Finished {
+            path_changed: expected_adoption
+        }
+    );
+
+    let after = committed_selection_witness(&control, fixture.thread_id).await;
+    if expected_adoption {
+        let summary_id = record["committed_stages"]["active_summary"]["summary_node_id"]
+            .as_str()
+            .unwrap();
+        let rows = after
+            .replacement_provenance_and_source_bytes
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|row| row[1] == summary_id && row[2] == "summary")
+            .collect::<Vec<_>>();
+        assert_eq!(
+            rows.len() as u64,
+            record["committed_stages"]["active_summary"]["source_nodes"]
+                .as_u64()
+                .unwrap()
+        );
+        for (ordinal, source) in rows.iter().enumerate() {
+            assert_eq!(source[3].as_u64(), Some(ordinal as u64));
+            let prior = before_mutation
+                .selected_path_source_bytes
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|row| row[1] == source[4]);
+            assert!(
+                prior.is_some_and(|row| row[5] == source[7] && row[4] == source[5]),
+                "epoch-only mutation preserves exact ordered source bytes/revision for {}",
+                source[4]
+            );
+        }
+        assert_eq!(
+            after.reasoning_epoch,
+            mutated_candidate.reasoning_epoch + 1,
+            "DropAll adoption advances the post-mutation projected epoch exactly once"
+        );
+    } else {
+        assert!(
+            record["committed_stages"]["active_summary"].is_null(),
+            "stale candidate is not committed"
+        );
+        assert_eq!(
+            after.selected_path_source_bytes, mutated_candidate.selected_path_source_bytes,
+            "rejected candidate leaves the explicit source/protection/tool mutation as the only path effect"
+        );
+        assert_eq!(
+            after.replacement_provenance_and_source_bytes,
+            mutated_candidate.replacement_provenance_and_source_bytes,
+            "no summary replacement/provenance is added for stale R"
+        );
+    }
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+    server.abort();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
