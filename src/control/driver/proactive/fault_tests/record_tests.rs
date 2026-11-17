@@ -526,6 +526,8 @@ async fn uncalibrated_site(fault: Fault, active: bool) {
         turn: Arc::new(tokio::sync::Mutex::new(None)),
         driver_active: Arc::new(AtomicBool::new(true)),
         proactive_job: Arc::new(tokio::sync::Mutex::new(None)),
+        proactive_joining: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        proactive_join_done: Arc::new(tokio::sync::Notify::new()),
     };
     let mutex = control.boundary(&thread_id).await;
     let mut boundary = crate::compaction::boundary::Boundary::new(&mutex, mutex.lock().await);

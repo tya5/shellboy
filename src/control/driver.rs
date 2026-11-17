@@ -167,7 +167,19 @@ async fn drive_inner(
         let _ = slot.nudge.notified().now_or_never();
         let boundary_guard = tokio::select! {biased;_=slot.stop.cancelled()=>return drain_and_stop(&control,&slot.run_id,Some(&thread)).await,guard=boundary.lock()=>guard};
         let completed_job = {
+            let join_notified = slot.proactive_join_done.clone().notified_owned();
+            tokio::pin!(join_notified);
+            join_notified.as_mut().enable();
             let mut job = slot.proactive_job.lock().await;
+            if slot.proactive_joining.load(Ordering::Acquire) {
+                drop(job);
+                drop(boundary_guard);
+                tokio::select! {
+                    _ = slot.stop.cancelled() => return drain_and_stop(&control, &slot.run_id, Some(&thread)).await,
+                    _ = join_notified => {}
+                }
+                continue;
+            }
             if job
                 .as_ref()
                 .is_some_and(proactive::BackgroundJob::is_finished)
@@ -226,7 +238,20 @@ async fn drive_inner(
         // flight. A reported input over the threshold compacts here, one step
         // after the large request; the new snapshot is then read again.
         let snapshot = snapshot;
+        let join_notified = slot.proactive_join_done.clone().notified_owned();
+        tokio::pin!(join_notified);
+        join_notified.as_mut().enable();
         let mut jobs = slot.proactive_job.lock().await;
+        if slot.proactive_joining.load(Ordering::Acquire) {
+            drop(jobs);
+            drop(boundary_guard);
+            tokio::select! {
+                _ = slot.stop.cancelled() => return drain_and_stop(&control, &slot.run_id, Some(&thread)).await,
+                _ = turn_binding.cancel.cancelled() => continue,
+                _ = join_notified => {}
+            }
+            continue;
+        }
         if jobs.is_none()
             && let Some(plan) = proactive::preflight(&control, &snapshot).await?
         {
@@ -867,46 +892,79 @@ pub(super) async fn stop_without_driver(
     control: &Arc<Control>,
     run_id: &str,
 ) -> Result<(), ApiError> {
-    let run = run_id.to_owned();
-    let target: Option<(String, String)> = control
-        .store
-        .database
-        .call(move |db| {
-            Ok(db
-                .query_row("SELECT thread_id,state FROM run WHERE id=?1", [run], |r| {
-                    Ok((r.get(0)?, r.get(1)?))
-                })
-                .optional()?)
-        })
-        .await
-        .map_err(storage_error)?;
-    let Some((thread, state)) = target else {
-        return Ok(());
-    };
-    if state != "stopping" {
-        return Ok(());
+    loop {
+        let run = run_id.to_owned();
+        let target: Option<(String, String)> = control
+            .store
+            .database
+            .call(move |db| {
+                Ok(db
+                    .query_row("SELECT thread_id,state FROM run WHERE id=?1", [run], |r| {
+                        Ok((r.get(0)?, r.get(1)?))
+                    })
+                    .optional()?)
+            })
+            .await
+            .map_err(storage_error)?;
+        let Some((thread, state)) = target else {
+            return Ok(());
+        };
+        if state != "stopping" {
+            return Ok(());
+        }
+
+        // Prejoin an already-inactive exact Run before taking its Thread boundary.
+        // The ownership state is checked again below at the actual boundary cut.
+        control
+            .live
+            .cancel_join_inactive_proactive_job_for_run(&thread, run_id)
+            .await;
+        let boundary = control.boundary(&thread).await;
+        let boundary_guard = boundary.lock().await;
+        let state_run = run_id.to_owned();
+        let still_stopping = control
+            .store
+            .database
+            .call(move |db| {
+                Ok(db.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM run WHERE id=?1 AND state='stopping')",
+                    [state_run],
+                    |r| r.get::<_, bool>(0),
+                )?)
+            })
+            .await
+            .map_err(storage_error)?;
+        if !still_stopping {
+            drop(boundary_guard);
+            return Ok(());
+        }
+
+        match control
+            .live
+            .stopped_run_boundary_state(&thread, run_id)
+            .await
+        {
+            super::live::StoppedRunBoundary::MatchingDriverActive => {
+                // The current Driver owns this Run's stop; let it enter its own drain.
+                drop(boundary_guard);
+                return Ok(());
+            }
+            super::live::StoppedRunBoundary::InactiveJobNeedsJoin => {
+                // Boundary-dependent work must reacquire before its slot can be joined.
+                drop(boundary_guard);
+                control
+                    .live
+                    .cancel_join_inactive_proactive_job_for_run(&thread, run_id)
+                    .await;
+                continue;
+            }
+            super::live::StoppedRunBoundary::NoMatchingDriver
+            | super::live::StoppedRunBoundary::InactiveRunClear => {
+                drain_and_stop(control, run_id, None).await?;
+                return Ok(());
+            }
+        }
     }
-    // Reuse the existing Thread boundary so simultaneous retirement/stop handlers
-    // cannot terminalize the same generation twice. Never lock the registry here.
-    let boundary = control.boundary(&thread).await;
-    let _boundary = boundary.lock().await;
-    let run = run_id.to_owned();
-    let stopping = control
-        .store
-        .database
-        .call(move |db| {
-            Ok(db.query_row(
-                "SELECT EXISTS(SELECT 1 FROM run WHERE id=?1 AND state='stopping')",
-                [run],
-                |r| r.get::<_, bool>(0),
-            )?)
-        })
-        .await
-        .map_err(storage_error)?;
-    if stopping {
-        drain_and_stop(control, run_id, None).await?;
-    }
-    Ok(())
 }
 
 /// Freeze this Run, drain its shells, then record terminal state only after

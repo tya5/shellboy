@@ -107,6 +107,8 @@ struct DriverSlot {
     turn: Arc<Mutex<Option<turn_interrupt::TurnBinding>>>,
     driver_active: Arc<AtomicBool>,
     proactive_job: Arc<Mutex<Option<driver::proactive::BackgroundJob>>>,
+    proactive_joining: Arc<AtomicBool>,
+    proactive_join_done: Arc<Notify>,
 }
 #[cfg(test)]
 impl Default for DriverSlot {
@@ -120,6 +122,8 @@ impl Default for DriverSlot {
             turn: Arc::new(Mutex::new(None)),
             driver_active: Arc::new(AtomicBool::new(true)),
             proactive_job: Arc::new(Mutex::new(None)),
+            proactive_joining: Arc::new(AtomicBool::new(false)),
+            proactive_join_done: Arc::new(Notify::new()),
         }
     }
 }
@@ -1264,35 +1268,22 @@ impl Control {
             if control.stop.is_cancelled() {
                 return;
             }
-            let target_thread = thread_id.clone();
-            let run = control
-                .store
-                .database
-                .call(move |db| {
-                    use rusqlite::OptionalExtension;
-                    Ok(db
-                        .query_row(
-                            "SELECT id FROM run WHERE thread_id=?1 AND state IN ('live','stopping') AND state='live'",
-                            [target_thread],
-                            |row| row.get::<_, String>(0),
-                        )
-                        .optional()?)
-                })
-                .await;
-            let run_id = match run {
-                Ok(Some(run)) => run,
+            let slot = match control
+                .live
+                .register_live_run_driver(
+                    &control.store.database,
+                    &thread_id,
+                    &control.stop,
+                    interrupt,
+                )
+                .await
+            {
+                Ok(Some(slot)) => slot,
                 Ok(None) => return,
                 Err(_) => {
                     control.fail_storage().await;
                     return;
                 }
-            };
-            let Some(slot) = control
-                .live
-                .register_or_nudge_driver(&thread_id, run_id, &control.stop, interrupt)
-                .await
-            else {
-                return;
             };
             tokio::spawn(async move {
                 if let Err(error) =

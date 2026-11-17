@@ -391,6 +391,8 @@ async fn client_initialization_failure_recovers_once_instead_of_rekicking_prepar
 
         driver_active: Arc::new(AtomicBool::new(true)),
         proactive_job: Arc::new(tokio::sync::Mutex::new(None)),
+        proactive_joining: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        proactive_join_done: Arc::new(tokio::sync::Notify::new()),
     };
     assert_eq!(
         crate::test_watchdog::watchdog("src/control/driver/preparation_tests.rs: client_initialization_failure_recovers_once_instead_of_rekicking_preparation",
@@ -1045,6 +1047,8 @@ async fn already_admitted_tool_calls_cannot_create_an_execution_or_spawn_again()
 
             driver_active: Arc::new(AtomicBool::new(true)),
             proactive_job: Arc::new(tokio::sync::Mutex::new(None)),
+            proactive_joining: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            proactive_join_done: Arc::new(tokio::sync::Notify::new()),
         };
         assert_eq!(
             run_shell(
@@ -1192,6 +1196,8 @@ async fn interrupted_reserved_call_finishes_its_pair_without_native_creation() {
 
         driver_active: Arc::new(AtomicBool::new(true)),
         proactive_job: Arc::new(tokio::sync::Mutex::new(None)),
+        proactive_joining: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        proactive_join_done: Arc::new(tokio::sync::Notify::new()),
     };
     let binding = slot.bind_turn(&control, &snapshot.turn).await.unwrap();
     let mut gate = binding.start_gate.lock().await;
@@ -1349,6 +1355,8 @@ async fn interrupted_unfinished_group_waits_for_pairs_instead_of_rechecking() {
 
             driver_active: Arc::new(AtomicBool::new(true)),
             proactive_job: Arc::new(tokio::sync::Mutex::new(None)),
+            proactive_joining: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            proactive_join_done: Arc::new(tokio::sync::Notify::new()),
         };
         let stop = slot.stop.clone();
         let running = tokio::spawn(drive(control.clone(), snapshot.thread.clone(), slot));
@@ -1786,6 +1794,8 @@ async fn unknown_arguments_are_ignored_with_a_warning_and_other_calls_continue()
 
         driver_active: Arc::new(AtomicBool::new(true)),
         proactive_job: Arc::new(tokio::sync::Mutex::new(None)),
+        proactive_joining: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        proactive_join_done: Arc::new(tokio::sync::Notify::new()),
     };
     let turn = snapshot.turn.clone();
     control.store.database.call(move |db| {

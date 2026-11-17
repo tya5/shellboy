@@ -1,3 +1,13 @@
+## Core U2 proactive Driver/Stop causal repair (complete qualification pending)
+
+The clean source delta is six files on parent `49f6c8fdeae90205808f14f7e816fba56a679601`; immutable final patch SHA-256 `f353a7ab28fccde07d0e60fcca43c363c3b6345b1d171c76d724cc1868fc9235` is in `.local/private-reports/studio-current-20261113/closed-stop-uninstrumented-final-clean-20261118/`. The independent bounded source closure is `.local/leader/core-u2-closed-stop-2915ecb-causal-repair-review-20261118.md` (SHA-256 `533d6873e0052714fd9d71f8f0c08accc0559093dcf5ceb48200770cfc7bfad0`); its prior review variants and the instrumented correlated trace remain separate immutable evidence.
+
+The repair serializes live-Run selection with registry publication, retains Thread-owned job join identity across replacement slots, removes slots only when inactive/not joining/job-free, and rechecks exact Run ownership at no-driver Stop's Thread-boundary admission. Exact same-Run active Drivers own their Stop; retained inactive jobs join only after releasing the boundary; different replacement Runs are not cancelled by the old Run. Natural completed Runs retain background work. No new worker, table, public protocol, or production cancellation policy was added. The original integrated contract remains; the invalid direct/manual-FINISH diagnostic fixture is retired from source.
+
+**Clean-source evidence.** On uninstrumented bytes, pinned `fmt --check` and `cargo check --locked --tests` passed in execution `6affffc3-677f-416e-bfb6-2bb276511190` (exit 0, cleanup confirmed). The exact original registered integration selector `runtime_features::proactive_closed_spill_then_cancelled_summary_preserves_adoption` passed in execution `4e022876-0da4-49d0-8a76-4b992d3ddabf` (exit 0, cleanup confirmed; 1 passed, 0 failed, 1432 filtered; 1.59s; max owned RSS 2499.36 MiB/footprint 2706.76 MiB under 8192 MiB). The exact output log SHA-256 is `2e424b13964a2df757a39849d793e168800b6bd7bd4e88d21bc583a5dc8f46b9`. It records report Turn `93b6d31a-b73d-4a21-acd7-05aba8cc1a72`, attempt `3c41e219-0047-4d44-9ea1-b189681d2da2`, GC token `f9181070-0678-4a03-9120-a49868ce2a12`, terminal cancelled/nonprovisional row with matching token, and trigger Run `3e7b2e29-60f3-468e-ad27-b9cdf9763023` stopped. This clean-selector evidence is distinct from the earlier instrumented trace receipt.
+
+Full normal/test suite, DB-observation selector, strict all-target Clippy, complete-unit source review and platform CI are not yet qualified on the final committed SHA. Earlier REDs, the `06c`/`7f4` interruptions, historical misses and unrelated U2 STOP remain separate; no push, release or incident-wide acceptance is recorded.
+
 # Development status
 
 ## CORE301 current-main GC port candidate (not main state)

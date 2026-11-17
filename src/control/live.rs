@@ -15,6 +15,13 @@ use std::{
 use tokio::sync::{Mutex, Notify};
 use tokio_util::sync::CancellationToken;
 
+pub(super) enum StoppedRunBoundary {
+    NoMatchingDriver,
+    MatchingDriverActive,
+    InactiveJobNeedsJoin,
+    InactiveRunClear,
+}
+
 #[derive(Default)]
 pub(super) struct LiveRegistry {
     drivers: Mutex<HashMap<String, DriverSlot>>,
@@ -25,6 +32,7 @@ pub(super) struct LiveRegistry {
 impl LiveRegistry {
     /// The lookup, existing-slot notification and new-slot publication share one
     /// guard. Allocate driver resources only when no slot already owns Thread.
+    #[cfg(test)]
     pub(super) async fn register_or_nudge_driver(
         &self,
         thread: &str,
@@ -33,6 +41,50 @@ impl LiveRegistry {
         interrupt: bool,
     ) -> Option<DriverSlot> {
         let mut drivers = self.drivers.lock().await;
+        self.register_or_nudge_driver_locked(&mut drivers, thread, run, owner_stop, interrupt)
+    }
+
+    /// Select the live Run and publish its slot under one registry admission.
+    /// A concurrent Stop either changes the DB state before this check or finds
+    /// the published slot when it next acquires the registry.
+    pub(super) async fn register_live_run_driver(
+        &self,
+        database: &crate::storage::DbWorker,
+        thread: &str,
+        owner_stop: &CancellationToken,
+        interrupt: bool,
+    ) -> Result<Option<DriverSlot>, crate::storage::StorageError> {
+        if owner_stop.is_cancelled() {
+            return Ok(None);
+        }
+        let mut drivers = self.drivers.lock().await;
+        let target_thread = thread.to_owned();
+        let run = database
+            .call(move |db| {
+                use rusqlite::OptionalExtension;
+                Ok(db
+                    .query_row(
+                        "SELECT id FROM run WHERE thread_id=?1 AND state='live'",
+                        [target_thread],
+                        |row| row.get::<_, String>(0),
+                    )
+                    .optional()?)
+            })
+            .await?;
+        let Some(run) = run.filter(|_| !owner_stop.is_cancelled()) else {
+            return Ok(None);
+        };
+        Ok(self.register_or_nudge_driver_locked(&mut drivers, thread, run, owner_stop, interrupt))
+    }
+
+    fn register_or_nudge_driver_locked(
+        &self,
+        drivers: &mut HashMap<String, DriverSlot>,
+        thread: &str,
+        run: String,
+        owner_stop: &CancellationToken,
+        interrupt: bool,
+    ) -> Option<DriverSlot> {
         if let Some(existing) = drivers.get(thread) {
             if existing.driver_active.load(Ordering::Acquire) {
                 existing.nudge.notify_one();
@@ -54,6 +106,8 @@ impl LiveRegistry {
                 turn: Arc::new(Mutex::new(None)),
                 driver_active: Arc::new(AtomicBool::new(true)),
                 proactive_job: existing.proactive_job.clone(),
+                proactive_joining: existing.proactive_joining.clone(),
+                proactive_join_done: existing.proactive_join_done.clone(),
             };
             drivers.insert(thread.to_owned(), slot.clone());
             return Some(slot);
@@ -67,6 +121,8 @@ impl LiveRegistry {
             turn: Arc::new(Mutex::new(None)),
             driver_active: Arc::new(AtomicBool::new(true)),
             proactive_job: Arc::new(Mutex::new(None)),
+            proactive_joining: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            proactive_join_done: Arc::new(Notify::new()),
         };
         drivers.insert(thread.to_owned(), slot.clone());
         Some(slot)
@@ -85,11 +141,20 @@ impl LiveRegistry {
 
     pub(super) async fn remove_driver_if_current(&self, thread: &str, slot: &str) -> bool {
         let mut drivers = self.drivers.lock().await;
-        if let Some(entry) = drivers.get(thread).filter(|entry| entry.id == slot) {
+        if let Some(entry) = drivers
+            .get(thread)
+            .filter(|entry| entry.id == slot)
+            .cloned()
+        {
             entry.driver_active.store(false, Ordering::Release);
-            if entry.proactive_job.lock().await.is_some() {
+            if entry.proactive_joining.load(Ordering::Acquire) {
                 return false;
             }
+            let jobs = entry.proactive_job.lock().await;
+            if entry.proactive_joining.load(Ordering::Acquire) || jobs.is_some() {
+                return false;
+            }
+            drop(jobs);
             drivers.remove(thread);
             true
         } else {
@@ -99,13 +164,113 @@ impl LiveRegistry {
 
     /// Cancel and join the Thread-owned job on Stop/error or owner shutdown.
     pub(super) async fn cancel_join_proactive_job(&self, thread: &str, slot: &DriverSlot) {
-        let job = slot.proactive_job.lock().await.take();
-        if let Some(mut job) = job {
+        loop {
+            let notified = slot.proactive_join_done.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            let mut jobs = slot.proactive_job.lock().await;
+            if slot.proactive_joining.load(Ordering::Acquire) {
+                drop(jobs);
+                notified.await;
+                break;
+            }
+            let job = jobs.take();
+            if job.is_some() {
+                slot.proactive_joining.store(true, Ordering::Release);
+            }
+            drop(jobs);
+            let Some(mut job) = job else {
+                break;
+            };
             job.cancel();
             let _ = job.join().await;
+            slot.proactive_joining.store(false, Ordering::Release);
+            slot.proactive_join_done.notify_waiters();
+            break;
         }
         self.prune_idle_background(thread, &slot.proactive_job)
             .await;
+    }
+
+    /// A stopped inactive Run can retain a Thread job that still needs the
+    /// boundary. Claim its join while the exact current slot is fenced, then
+    /// release registry/job locks before awaiting producer completion.
+    pub(super) async fn cancel_join_inactive_proactive_job_for_run(
+        &self,
+        thread: &str,
+        run: &str,
+    ) -> bool {
+        loop {
+            let drivers = self.drivers.lock().await;
+            let Some(slot) = drivers
+                .get(thread)
+                .filter(|slot| slot.run_id == run && !slot.driver_active.load(Ordering::Acquire))
+            else {
+                return false;
+            };
+            let slot = slot.clone();
+            let notified = slot.proactive_join_done.clone().notified_owned();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            let mut jobs = slot.proactive_job.lock().await;
+            if slot.proactive_joining.load(Ordering::Acquire) {
+                drop(jobs);
+                drop(drivers);
+                notified.await;
+                continue;
+            }
+            let Some(mut job) = jobs.take() else {
+                return false;
+            };
+            slot.proactive_joining.store(true, Ordering::Release);
+            job.cancel();
+            drop(jobs);
+            drop(drivers);
+            let _ = job.join().await;
+            slot.proactive_joining.store(false, Ordering::Release);
+            slot.proactive_join_done.notify_waiters();
+            self.prune_idle_background(thread, &slot.proactive_job)
+                .await;
+            return true;
+        }
+    }
+
+    /// Revalidate no-driver Stop ownership at the boundary admission point.
+    /// Callers drop the boundary before joining an inactive retained job.
+    pub(super) async fn stopped_run_boundary_state(
+        &self,
+        thread: &str,
+        run: &str,
+    ) -> StoppedRunBoundary {
+        let mut drivers = self.drivers.lock().await;
+        let Some(slot) = drivers
+            .get(thread)
+            .filter(|slot| slot.run_id == run)
+            .cloned()
+        else {
+            return StoppedRunBoundary::NoMatchingDriver;
+        };
+        if slot.driver_active.load(Ordering::Acquire) {
+            return StoppedRunBoundary::MatchingDriverActive;
+        }
+        if slot.proactive_joining.load(Ordering::Acquire) {
+            return StoppedRunBoundary::InactiveJobNeedsJoin;
+        }
+        let jobs = slot.proactive_job.lock().await;
+        if slot.proactive_joining.load(Ordering::Acquire) || jobs.is_some() {
+            return StoppedRunBoundary::InactiveJobNeedsJoin;
+        }
+        drop(jobs);
+        // A stopped inactive slot with no retained job cannot do more Run work.
+        // Remove it at the same boundary cut so drain(None) cannot wait on its
+        // otherwise-idle registry entry; a replacement Run is fenced by run ID.
+        if drivers
+            .get(thread)
+            .is_some_and(|current| current.id == slot.id && current.run_id == run)
+        {
+            drivers.remove(thread);
+        }
+        StoppedRunBoundary::InactiveRunClear
     }
 
     /// Deletion is committed before this effect is applied; cancel only the deleted Thread's job.
@@ -136,15 +301,20 @@ impl LiveRegistry {
         proactive_job: &Arc<Mutex<Option<crate::control::driver::proactive::BackgroundJob>>>,
     ) {
         let mut drivers = self.drivers.lock().await;
-        let Some(entry) = drivers.get(thread) else {
+        let Some(entry) = drivers.get(thread).cloned() else {
             return;
         };
         if !Arc::ptr_eq(&entry.proactive_job, proactive_job)
             || entry.driver_active.load(Ordering::Acquire)
-            || entry.proactive_job.lock().await.is_some()
+            || entry.proactive_joining.load(Ordering::Acquire)
         {
             return;
         }
+        let jobs = entry.proactive_job.lock().await;
+        if entry.proactive_joining.load(Ordering::Acquire) || jobs.is_some() {
+            return;
+        }
+        drop(jobs);
         drivers.remove(thread);
     }
 
