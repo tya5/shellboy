@@ -428,6 +428,7 @@ async fn live_connections_run_pins_proactive_threshold_and_summary_endpoint() {
             "usage":{"input_tokens":150,"output_tokens":1},"output":[{"type":"function_call",
                 "call_id":"summary-tool","name":"shell","arguments":json!({"command":"echo synthetic-summary-tool"}).to_string()}]}))).unwrap();
         let mut summaries=0;
+        let mut run_completed=false;
         for _ in 0..6 {
             let next=incoming(&control,&mut old_receive).await;
             assert_eq!(next.body["synthetic_generation"],"old");
@@ -435,12 +436,24 @@ async fn live_connections_run_pins_proactive_threshold_and_summary_endpoint() {
                 summaries+=1;
                 next.reply.send((200,answer("Synthetic summary. User instructions to keep: none."))).unwrap();
             } else {
+                // The pinned Summary is background work and may arrive after the
+                // current Run's final Ordinary response has already completed.
                 let mut done=answer("old Run complete");done["usage"]=json!({"input_tokens":10,"output_tokens":1});
-                next.reply.send((200,done)).unwrap();break;
+                next.reply.send((200,done)).unwrap();
+                completed_run(&control,&target).await;
+                run_completed=true;
+                break;
             }
         }
-        assert!(summaries>0,"new threshold=0 must not suppress this Run's pinned summary");
-        completed_run(&control,&target).await;
+        if summaries==0 {
+            let late=incoming(&control,&mut old_receive).await;
+            assert_eq!(late.body["synthetic_generation"],"old");
+            assert_eq!(late.body["tools"],json!([]),"the already-admitted pinned report still owns its late Summary request");
+            summaries+=1;
+            late.reply.send((200,answer("Synthetic late summary. User instructions to keep: none."))).unwrap();
+        }
+        assert_eq!(summaries,1,"the pinned report emits one Summary request");
+        if !run_completed { completed_run(&control,&target).await; }
         assert!(new_receive.try_recv().is_err());
         control.shutdown().await.unwrap();owner.shutdown().await.unwrap();old_server.abort();new_server.abort();
     }).await.unwrap();

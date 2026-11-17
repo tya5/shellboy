@@ -53,8 +53,12 @@ def main():
                 else:
                     index = requests.count('ordinary')
                     # #303 #A: the first known report (50000) exceeds the default
-                    # target (200000 x 20%), so the third task summarizes.
+                    # target (200000 x 20%), so the third task opens the gated Summary.
                     text, tokens = 'a' * 1024 + f' fixture answer {index}', (50000 if index == 1 else 203000 if index == 2 else 10)
+                    if index == 3:
+                        # Keep the real current Turn live while the Summary HTTP
+                        # response is gated; release this final answer with the test.
+                        assert release.wait(WATCHDOG_SECONDS), 'foreground request gate timed out'
                 response = {'id': f'fixture-{len(requests)}', 'status': 'completed',
                             'output': [{'type': 'message', 'role': 'assistant', 'status': 'completed',
                                         'content': [{'type': 'output_text', 'text': text}]}],
