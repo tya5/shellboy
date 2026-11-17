@@ -171,13 +171,18 @@ impl LiveRegistry {
         if slot.proactive_joining.load(Ordering::Acquire) {
             drop(jobs);
             notified.await;
-        } else if let Some(mut job) = jobs.take() {
-            slot.proactive_joining.store(true, Ordering::Release);
-            drop(jobs);
-            job.cancel();
-            let _ = job.join().await;
-            slot.proactive_joining.store(false, Ordering::Release);
-            slot.proactive_join_done.notify_waiters();
+        } else {
+            match jobs.take() {
+                Some(mut job) => {
+                    slot.proactive_joining.store(true, Ordering::Release);
+                    drop(jobs);
+                    job.cancel();
+                    let _ = job.join().await;
+                    slot.proactive_joining.store(false, Ordering::Release);
+                    slot.proactive_join_done.notify_waiters();
+                }
+                None => drop(jobs),
+            }
         }
         self.prune_idle_background(thread, &slot.proactive_job)
             .await;
