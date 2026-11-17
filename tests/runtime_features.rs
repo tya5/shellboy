@@ -7193,8 +7193,13 @@ async fn sender_label_reaches_the_request_only_when_present_and_not_human() {
 /// spilled nor summarized by those attempts (§3).
 #[tokio::test]
 async fn proactive_deterministic_closed_failure_stays_suppressed_while_the_turn_grows() {
-    let (summaries, most, attempts, slots, spills, _, _, report_ledger) =
-        bx_growing_turn(true, true, (200, answer(" ")), 19).await;
+    let (summaries, most, attempts, slots, spills, _, _, report_ledger) = bx_growing_turn(
+        true,
+        true,
+        (200, answer(" ")),
+        [100, 100].into_iter().chain(202..=218).collect(),
+    )
+    .await;
     let high_inputs: Vec<u64> = report_ledger
         .iter()
         .filter_map(|report| {
@@ -7243,8 +7248,13 @@ async fn proactive_deterministic_closed_failure_stays_suppressed_while_the_turn_
 /// eligible report retries the active summary exactly once.
 #[tokio::test]
 async fn proactive_growing_active_range_permits_one_summary_per_new_report() {
-    let (summaries, most, attempts, slots, _, _, _, report_ledger) =
-        bx_growing_turn(false, false, (200, answer(" ")), 19).await;
+    let (summaries, most, attempts, slots, _, _, _, report_ledger) = bx_growing_turn(
+        false,
+        false,
+        (200, answer(" ")),
+        [100, 100].into_iter().chain(202..=218).collect(),
+    )
+    .await;
     let high_inputs: Vec<u64> = report_ledger
         .iter()
         .filter_map(|report| {
@@ -7290,7 +7300,7 @@ async fn proactive_provider_500_retries_for_a_new_active_range() {
         json!({"error":{"code":"invalid_request_error","message":"synthetic range-scoped 500"}}),
     );
     let (summaries, _, attempts, slots, spills, scopes, inputs, report_ledger) =
-        bx_growing_turn(false, false, reply, 6).await;
+        bx_growing_turn(false, false, reply, vec![100, 100, 202, 203, 204, 205, 100]).await;
     let high_inputs: Vec<u64> = report_ledger
         .iter()
         .filter_map(|report| {
@@ -7305,9 +7315,32 @@ async fn proactive_provider_500_retries_for_a_new_active_range() {
         "two source ranges are built from four independently named high reports: {report_ledger:#?}"
     );
     let fresh = fresh_growth_attempts(&report_ledger);
+    let fresh_inputs: Vec<u64> = fresh
+        .iter()
+        .map(|report| {
+            report["automatic_attempt"]["trigger"]["input_tokens"]
+                .as_u64()
+                .unwrap()
+        })
+        .collect();
+    assert_eq!(
+        fresh_inputs,
+        [202, 205],
+        "only the independently declared initial and changed active ranges own retry requests: {report_ledger:#?}"
+    );
+    assert_eq!(
+        inputs.len(),
+        2,
+        "exactly two provider500 requests are captured on the live Turn: {inputs:#?}"
+    );
+    let second_capture = inputs[1].to_string();
     assert!(
-        fresh.len() >= 2,
-        "the declared report continuation reaches two current A-boundary ranges: {report_ledger:#?}"
+        second_capture.contains("grow-5"),
+        "the second changed R is captured after its predeclared complete call-5 group: {second_capture}"
+    );
+    assert!(
+        !second_capture.contains("grow-6"),
+        "the predeclared call-6 complete group is the protected latest whole group at the capture cut: {second_capture}"
     );
     assert_eq!(
         summaries as usize,
@@ -7347,16 +7380,13 @@ async fn proactive_provider_500_retries_for_a_new_active_range() {
     );
     assert_eq!(spills, 0, "unknown tool responses do not authorize spills");
 }
-/// A current Turn of 20 tool rounds: reports 100, 100, then 202..=218 (17
-/// eligible reports at threshold 200; the first known report 100 is #A > 40).
-/// Summary reply, final report index, and range scopes are configurable for exact
-/// deterministic failure-memory controls. With `prior_turns`, two earlier Turns
-/// give a closed target; outputs include reports, attempts, slots, scopes and inputs.
+/// Drives one predeclared sequence of ordinary usage reports in a current Turn.
+/// Each report input is independent source data; one natural final response ends the Turn.
 async fn bx_growing_turn(
     prior_turns: bool,
     spilling: bool,
     summary_reply: (u16, Value),
-    final_index: u32,
+    report_inputs: Vec<u32>,
 ) -> (
     u32,
     u32,
@@ -7388,7 +7418,7 @@ async fn bx_growing_turn(
         let (mut summaries, mut most) = (0, 0);
         let mut summary_inputs=Vec::new();
         let mut prepared_reports = Vec::new();
-        for index in 0..=final_index {
+        for (index, input_tokens) in report_inputs.iter().copied().enumerate() {
             let mut run = 0;
             let ordinary = loop {
                 let request = incoming(&control, &mut receive).await;
@@ -7400,22 +7430,16 @@ async fn bx_growing_turn(
                 request.reply.send(summary_reply.clone()).unwrap();
             };
             most = most.max(run);
-            if index == final_index {
-                ordinary.reply.send((200, answer("finished"))).unwrap();
-            } else {
-                let input_tokens = if index < 2 { 100 } else { 200 + index };
-                prepared_reports.push(prepared_report_from_incoming(
-                    &control,
-                    &current_turn,
-                    &ordinary,
-                    input_tokens as u64,
-                ).await);
-                ordinary.reply.send((200, tool(index, input_tokens))).unwrap();
-            }
+            prepared_reports.push(prepared_report_from_incoming(
+                &control, &current_turn, &ordinary, input_tokens as u64,
+            ).await);
+            ordinary.reply.send((200, tool(index as u32, input_tokens))).unwrap();
         }
+        let final_request = incoming_ordinary(&control, &mut receive).await;
+        final_request.reply.send((200, answer("finished"))).unwrap();
         settled(&control, &target).await;
-        assert_eq!(prepared_reports.len(), final_index as usize,
-            "each predeclared response has one separately captured in-flight report owner");
+        assert_eq!(prepared_reports.len(), report_inputs.len(),
+            "each independently declared response has one captured in-flight report owner");
         let owner_ids: Vec<String> = prepared_reports.iter()
             .map(|report| report.owner.attempt_id.clone()).collect();
         assert_eq!(owner_ids.iter().collect::<std::collections::HashSet<_>>().len(), owner_ids.len(),
@@ -7494,6 +7518,15 @@ async fn bx_growing_turn(
         let scopes=control.store.database.call(move|db|Ok(db.prepare("SELECT r.id,t.id,t.generation FROM model_attempt a JOIN turn t ON t.id=a.turn_id JOIN run r ON r.id=t.run_id WHERE t.thread_id=?1 AND json_extract(a.error_json,'$.automatic_trim_attempt') IS NOT NULL ORDER BY a.rowid")?.query_map([scope_thread],|row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,i64>(2)?)))?.collect::<rusqlite::Result<Vec<_>>>()?)).await.unwrap();
         let id = target.clone();
         let spills = control.store.database.call(move |db| proactive_wait_witness(db, &id)).await.unwrap().0.len();
+        if !spilling {
+            let source_turn = current_turn.clone();
+            let shell_executions: i64 = control.store.database.call(move |db| {
+                Ok(db.query_row(
+                    "SELECT count(*) FROM shell_execution s JOIN tool_call c ON c.operation_id=s.operation_id JOIN tool_group g ON g.id=c.group_id WHERE g.turn_id=?1",
+                    [source_turn], |row| row.get(0))?)
+            }).await.unwrap();
+            assert_eq!(shell_executions, 0, "unknown-tool active retry controls perform no shell execution");
+        }
         control.shutdown().await.unwrap(); owner.shutdown().await.unwrap(); server.abort();
         (summaries,most,attempts,slots,spills,scopes,summary_inputs,report_ledger)
     }).await.unwrap()
