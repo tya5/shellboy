@@ -1092,6 +1092,12 @@ async fn committed_selection_witness(control: &Control, thread: &str) -> StageWi
                 if actual_detail_ids.len() as u64 != detail_count {
                     return Err(crate::storage::StorageError::Schema(format!("interruption section {section} detail count disagrees with same-snapshot selected nodes")));
                 }
+                if actual_detail_ids.iter().any(|id| {
+                    full_path.iter().find(|candidate| candidate.1 == *id)
+                        .is_none_or(|detail| detail.0 >= row.0 || detail.2.is_some() || detail.6.is_some())
+                }) {
+                    return Err(crate::storage::StorageError::Schema(format!("interruption section {section} contains a same-batch detail that is not earlier, owned and undeleted")));
+                }
                 let expected_references=actual_detail_ids.iter().take(64).cloned().collect::<Vec<_>>();
                 let saved_references=ids.iter().map(|id|id.as_str().ok_or_else(||crate::storage::StorageError::Schema(format!("interruption section {section} detail reference is not text")))).collect::<Result<Vec<_>,_>>()?;
                 if saved_references.iter().map(|id|id.to_string()).collect::<Vec<_>>()!=expected_references {
