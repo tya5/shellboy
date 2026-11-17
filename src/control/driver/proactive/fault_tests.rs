@@ -988,8 +988,8 @@ async fn committed_selection_witness(control: &Control, thread: &str) -> StageWi
         // Read the complete selected path first. Audit suffix classification must
         // never affect the cursor or hide an unexpected node/order from the witness.
         let full_path = tx.prepare(
-            "SELECT p.ordinal,n.id,n.turn_id,n.kind,n.payload_revision,n.payload_json,n.deleted_reason FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 ORDER BY p.ordinal",
-        )?.query_map([&thread], |row| Ok((row.get::<_, i64>(0)?,row.get::<_,String>(1)?,row.get::<_,Option<String>>(2)?,row.get::<_,String>(3)?,row.get::<_,i64>(4)?,row.get::<_,Option<String>>(5)?,row.get::<_,Option<String>>(6)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
+            "SELECT p.ordinal,n.id,n.turn_id,n.kind,n.payload_revision,n.payload_json,n.deleted_reason,n.created_at FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 ORDER BY p.ordinal",
+        )?.query_map([&thread], |row| Ok((row.get::<_, i64>(0)?,row.get::<_,String>(1)?,row.get::<_,Option<String>>(2)?,row.get::<_,String>(3)?,row.get::<_,i64>(4)?,row.get::<_,Option<String>>(5)?,row.get::<_,Option<String>>(6)?,row.get::<_,String>(7)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
         let is_audit = |kind: &str| matches!(kind,"event"|"interruption_details"|"interruption_context");
         let source_path = full_path.iter().filter(|row| !is_audit(&row.3)).cloned().collect::<Vec<_>>();
         let audit_path = full_path.iter().filter(|row| is_audit(&row.3)).cloned().collect::<Vec<_>>();
@@ -1021,8 +1021,8 @@ async fn committed_selection_witness(control: &Control, thread: &str) -> StageWi
         }
 
         let events = tx.prepare(
-            "SELECT p.ordinal,n.id,n.notification_event_id,e.id,e.kind,e.source_json,e.target_thread_id,e.target_run_id,e.payload_ref_json,e.created_at,(SELECT json_group_array(json_object('recipient_id',d.recipient_id,'state',d.state,'owner_thread_id',r.thread_id,'owner_run_state',r.state,'included_attempt_id',d.included_attempt_id,'included_attempt_thread_id',it.thread_id,'included_attempt_run_id',it.run_id,'processed_attempt_id',d.processed_attempt_id,'processed_attempt_thread_id',pt.thread_id,'processed_attempt_run_id',pt.run_id)) FROM delivery d LEFT JOIN run r ON r.id=d.recipient_id LEFT JOIN model_attempt ia ON ia.id=d.included_attempt_id LEFT JOIN turn it ON it.id=ia.turn_id LEFT JOIN model_attempt pa ON pa.id=d.processed_attempt_id LEFT JOIN turn pt ON pt.id=pa.turn_id WHERE d.event_id=e.id) FROM thread_path p JOIN node n ON n.id=p.node_id LEFT JOIN event e ON e.id=COALESCE(n.notification_event_id,json_extract(n.payload_json,'$.event_id')) WHERE p.thread_id=?1 AND n.kind='event' ORDER BY p.ordinal",
-        )?.query_map([&thread], |row| Ok((row.get::<_,i64>(0)?,row.get::<_,String>(1)?,row.get::<_,Option<String>>(2)?,row.get::<_,Option<String>>(3)?,row.get::<_,Option<String>>(4)?,row.get::<_,Option<String>>(5)?,row.get::<_,Option<String>>(6)?,row.get::<_,Option<String>>(7)?,row.get::<_,Option<String>>(8)?,row.get::<_,Option<String>>(9)?,row.get::<_,Option<String>>(10)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
+            "SELECT p.ordinal,n.id,n.notification_event_id,e.id,e.kind,e.source_json,e.target_thread_id,e.target_run_id,e.payload_ref_json,e.created_at,(SELECT json_group_array(json_object('recipient_id',d.recipient_id,'state',d.state,'owner_thread_id',r.thread_id,'owner_run_state',r.state,'included_attempt_id',d.included_attempt_id,'included_attempt_thread_id',it.thread_id,'included_attempt_run_id',it.run_id,'processed_attempt_id',d.processed_attempt_id,'processed_attempt_thread_id',pt.thread_id,'processed_attempt_run_id',pt.run_id)) FROM delivery d LEFT JOIN run r ON r.id=d.recipient_id LEFT JOIN model_attempt ia ON ia.id=d.included_attempt_id LEFT JOIN turn it ON it.id=ia.turn_id LEFT JOIN model_attempt pa ON pa.id=d.processed_attempt_id LEFT JOIN turn pt ON pt.id=pa.turn_id WHERE d.event_id=e.id),e.semantic_json FROM thread_path p JOIN node n ON n.id=p.node_id LEFT JOIN event e ON e.id=COALESCE(n.notification_event_id,json_extract(n.payload_json,'$.event_id')) WHERE p.thread_id=?1 AND n.kind='event' ORDER BY p.ordinal",
+        )?.query_map([&thread], |row| Ok((row.get::<_,i64>(0)?,row.get::<_,String>(1)?,row.get::<_,Option<String>>(2)?,row.get::<_,Option<String>>(3)?,row.get::<_,Option<String>>(4)?,row.get::<_,Option<String>>(5)?,row.get::<_,Option<String>>(6)?,row.get::<_,Option<String>>(7)?,row.get::<_,Option<String>>(8)?,row.get::<_,Option<String>>(9)?,row.get::<_,Option<String>>(10)?,row.get::<_,Option<String>>(11)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
         let provenance = tx.prepare(
             "SELECT tr.replacement_id,r.output_node_id,out.kind,rs.ordinal,rs.source_node_id,rs.source_revision,rs.source_hash,src.payload_json FROM thread_replacement tr JOIN replacement r ON r.id=tr.replacement_id JOIN node out ON out.id=r.output_node_id LEFT JOIN replacement_source rs ON rs.replacement_id=r.id LEFT JOIN node src ON src.id=rs.source_node_id WHERE tr.thread_id=?1 ORDER BY r.created_at,r.id,rs.ordinal",
         )?.query_map([&thread], |row| Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,String>(2)?,row.get::<_,Option<i64>>(3)?,row.get::<_,Option<String>>(4)?,row.get::<_,Option<i64>>(5)?,row.get::<_,Option<String>>(6)?,row.get::<_,Option<String>>(7)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
@@ -1042,29 +1042,72 @@ async fn committed_selection_witness(control: &Control, thread: &str) -> StageWi
             let text = payload["text"].as_str().ok_or_else(||crate::storage::StorageError::Schema("interruption context has no text envelope".into()))?;
             let context: Value = serde_json::from_str(text)
                 .map_err(|error| crate::storage::StorageError::Schema(error.to_string()))?;
-            if context["snapshot_node_id"] != row.1 || row.2.is_some() || row.6.is_some() {
-                return Err(crate::storage::StorageError::Schema("interruption snapshot identity/owner differs from its selected node".into()));
+            let kind = context["kind"].as_str().ok_or_else(|| crate::storage::StorageError::Schema("interruption snapshot kind is absent".into()))?;
+            let actor = context["actor"].as_object().ok_or_else(|| crate::storage::StorageError::Schema("interruption snapshot actor is not an object".into()))?;
+            let source = actor.get("source").and_then(Value::as_str);
+            let producer_pair = matches!((kind, source),
+                ("app_shutdown", Some("shutdown"))
+                    | ("previous_instance_interrupted", Some("startup"))
+            );
+            if context["snapshot_node_id"] != row.1
+                || row.2.is_some()
+                || row.6.is_some()
+                || !producer_pair
+                || actor.get("kind").and_then(Value::as_str) != Some("shellboy")
+                || context["observed_at"].as_str().is_none()
+                || context["timezone"].as_str().is_none()
+                || context["change"].as_object().is_none()
+                || context["change"]["reason"] != kind
+                || context["change"]["result_uncertain"] != true
+                || context["change"]["automatic_replay"] != false
+                || context["change"]["os_processes_inspected"] != false
+            {
+                return Err(crate::storage::StorageError::Schema(
+                    "interruption snapshot envelope/actor/source differs from its producer contract".into(),
+                ));
             }
-            for section in ["runs","turns","shells","tool_calls","unreflected_messages","cancelled_waits","pending_operations_with_unknown_targets"] {
-                if let Some(ids) = context["change"][section]["detail_node_ids"].as_array() {
-                    for id in ids.iter().filter_map(Value::as_str) {
-                        let detail = full_path.iter().find(|candidate| candidate.1 == id)
-                            .ok_or_else(||crate::storage::StorageError::Schema(format!("interruption detail {id} is not selected")))?;
-                        if detail.0 >= row.0
-                            || detail.3 != "interruption_details"
-                            || detail.2.is_some()
-                            || detail.6.is_some()
-                        {
-                            return Err(crate::storage::StorageError::Schema(format!("interruption detail {id} is not an earlier detail node")));
-                        }
-                        let detail_payload: Value = serde_json::from_str(detail.5.as_deref().expect("detail payload"))
-                            .map_err(|error|crate::storage::StorageError::Schema(error.to_string()))?;
-                        let detail_text = detail_payload["text"].as_str().ok_or_else(||crate::storage::StorageError::Schema("interruption detail has no text envelope".into()))?;
-                        let detail_body: Value = serde_json::from_str(detail_text)
-                            .map_err(|error|crate::storage::StorageError::Schema(error.to_string()))?;
-                        if detail_body["section"] != section {
-                            return Err(crate::storage::StorageError::Schema(format!("interruption detail {id} section mismatch")));
-                        }
+            for section in ["runs", "turns", "shells", "tool_calls", "unreflected_messages", "cancelled_waits", "pending_operations_with_unknown_targets"] {
+                let saved = &context["change"][section];
+                let items = saved["items"].as_array().ok_or_else(|| crate::storage::StorageError::Schema(format!("interruption section {section} has no item array")))?;
+                let count = saved["count"].as_u64().ok_or_else(|| crate::storage::StorageError::Schema(format!("interruption section {section} has no item count")))?;
+                let detail_count = saved["detail_node_count"].as_u64().ok_or_else(|| crate::storage::StorageError::Schema(format!("interruption section {section} has no detail count")))?;
+                let ids = saved["detail_node_ids"].as_array().ok_or_else(|| crate::storage::StorageError::Schema(format!("interruption section {section} has no detail-id array")))?;
+                if saved["section"] != section
+                    || saved["details_kind"] != "interruption_details"
+                    || saved["truncated"] != (count > items.len() as u64)
+                    || detail_count < ids.len() as u64
+                {
+                    return Err(crate::storage::StorageError::Schema(format!("interruption section {section} shape/count mismatch")));
+                }
+                let actual_details = full_path.iter().filter(|candidate| {
+                    candidate.3 == "interruption_details" && candidate.7 == row.7
+                }).filter(|candidate| {
+                    candidate.5.as_deref()
+                        .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+                        .and_then(|payload| payload["text"].as_str().and_then(|text| serde_json::from_str::<Value>(text).ok()))
+                        .is_some_and(|body| body["section"] == section && body["items"].is_array())
+                }).count() as u64;
+                if actual_details != detail_count {
+                    return Err(crate::storage::StorageError::Schema(format!("interruption section {section} detail count disagrees with same-snapshot selected nodes")));
+                }
+                for id in ids.iter().filter_map(Value::as_str) {
+                    let detail = full_path.iter().find(|candidate| candidate.1 == id)
+                        .ok_or_else(|| crate::storage::StorageError::Schema(format!("interruption detail {id} is not selected")))?;
+                    if detail.0 >= row.0
+                        || detail.3 != "interruption_details"
+                        || detail.2.is_some()
+                        || detail.6.is_some()
+                        || detail.7 != row.7
+                    {
+                        return Err(crate::storage::StorageError::Schema(format!("interruption detail {id} is not an earlier same-snapshot detail node")));
+                    }
+                    let detail_payload: Value = serde_json::from_str(detail.5.as_deref().expect("detail payload"))
+                        .map_err(|error| crate::storage::StorageError::Schema(error.to_string()))?;
+                    let detail_text = detail_payload["text"].as_str().ok_or_else(|| crate::storage::StorageError::Schema("interruption detail has no text envelope".into()))?;
+                    let detail_body: Value = serde_json::from_str(detail_text)
+                        .map_err(|error| crate::storage::StorageError::Schema(error.to_string()))?;
+                    if detail_body["section"] != section || !detail_body["items"].is_array() {
+                        return Err(crate::storage::StorageError::Schema(format!("interruption detail {id} section/body mismatch")));
                     }
                 }
             }
@@ -1129,10 +1172,8 @@ async fn committed_selection_witness(control: &Control, thread: &str) -> StageWi
             }
         }
         for event in &events {
-            if event.2.is_some() && event.3.is_none() {
-                return Err(crate::storage::StorageError::Schema(format!("selected event node {} references a missing event",event.1)));
-            }
-            if let Some(event_id) = event.3.as_deref() {
+            let event_id=event.3.as_deref().ok_or_else(||crate::storage::StorageError::Schema(format!("selected event node {} has no backing event row",event.1)))?;
+            {
                 if event.2.as_deref().is_some_and(|marker| marker != event_id) {
                     return Err(crate::storage::StorageError::Schema(format!("event node {} notification marker identity differs from its event row",event.1)));
                 }
@@ -1143,6 +1184,27 @@ async fn committed_selection_witness(control: &Control, thread: &str) -> StageWi
                 }
                 let payload_ref: Value = serde_json::from_str(event.8.as_deref().ok_or_else(||crate::storage::StorageError::Schema("event payload_ref_json is absent".into()))?)
                     .map_err(|error|crate::storage::StorageError::Schema(error.to_string()))?;
+                if let Some(semantic) = event.11.as_deref() {
+                    let fact = crate::history::notification::decode(semantic)
+                        .ok_or_else(||crate::storage::StorageError::Schema(format!("event {event_id} semantic fact is not accepted by the existing typed notification reader")))?;
+                    if event.4.as_deref()==Some("context_changed") && fact["kind"]=="turn_started"
+                        && (!source["kind"].as_str().is_some_and(|kind|matches!(kind,"shellboy"|"human"))
+                            || payload_ref["actor"]!=source
+                            || payload_ref["change"]["run_id"].as_str().is_none()
+                            || payload_ref["change"]["turn_id"].as_str().is_none())
+                    {
+                        return Err(crate::storage::StorageError::Schema(format!("turn-start event {event_id} source/owner differs from its producer envelope")));
+                    }
+                }
+                if event.4.as_deref()==Some("context_changed")
+                    && (payload_ref["kind"].as_str().is_none()
+                        || payload_ref["actor"] != source
+                        || payload_ref["change"].as_object().is_none()
+                        || payload_ref["observed_at"].as_str().is_none()
+                        || payload_ref["timezone"].as_str().is_none())
+                {
+                    return Err(crate::storage::StorageError::Schema(format!("context event {} source/payload does not match its producer envelope",event_id)));
+                }
                 let node = full_path.iter().find(|row| row.1 == event.1)
                     .ok_or_else(||crate::storage::StorageError::Schema(format!("event node {} is absent from the full selected path",event.1)))?;
                 let node_payload: Value = serde_json::from_str(node.5.as_deref().ok_or_else(||crate::storage::StorageError::Schema("selected event node payload is absent".into()))?)
@@ -1736,6 +1798,37 @@ async fn direct_boundary_case(
             actual_final_ids, expected_final_ids,
             "the summary splice preserves the entire checkpoint prefix and suffix, including audit nodes"
         );
+        let retained_ids = checkpoint_witness
+            .full_path
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|row| !expected_r.iter().any(|id| row[1] == *id))
+            .map(|row| row[1].as_str().unwrap().to_owned())
+            .collect::<Vec<_>>();
+        for id in retained_ids {
+            let before = checkpoint_witness
+                .full_path
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|row| row[1] == id)
+                .expect("retained checkpoint row");
+            let after = after_full
+                .iter()
+                .find(|row| row[1] == id)
+                .expect("same retained final row");
+            assert_eq!(
+                (
+                    &before[1], &before[2], &before[3], &before[4], &before[5], &before[6],
+                    &before[7]
+                ),
+                (
+                    &after[1], &after[2], &after[3], &after[4], &after[5], &after[6], &after[7]
+                ),
+                "retained non-R row {id} preserves owner, kind, payload revision/bytes, deletion and creation facts; only ordinal may shift"
+            );
+        }
         assert!(
             after_full
                 .iter()

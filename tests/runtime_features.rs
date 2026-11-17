@@ -4254,7 +4254,10 @@ async fn ax_growing_turn_summary_requests(
         let (url, mut receive, server) = proxy().await;
         let options = "[limits]\ndraft_bytes=2097152\n[compaction]\nauto_at_tokens=200\nsummary_max_chars=4000\n";
         let config = root.path().join("config.toml");
-        std::fs::write(&config, format!("default_connection=\"fixture\"\ndefault_model=\"fixture\"\n[connections.fixture]\nbase_url={url:?}\nresponse_max_retries={retries}\nresponse_retry_max_delay_ms=10\n{options}")).unwrap();
+        // These provider-memory cases exercise one retained summary R across
+        // repeated reports; automatic spills would legitimately consume that
+        // R and turn later reports into no-target, a separate contract.
+        std::fs::write(&config, format!("default_connection=\"fixture\"\ndefault_model=\"fixture\"\n[connections.fixture]\nbase_url={url:?}\nresponse_max_retries={retries}\nresponse_retry_max_delay_ms=10\nspill=false\n{options}")).unwrap();
         let owner = DataOwner::start(Some(config), Some(root.path().join("data")), root.path().into()).await.unwrap();
         let control = Control::new(&owner, root.path().into());
         let target = thread(&control).await;
@@ -4310,6 +4313,30 @@ async fn ax_growing_turn_summary_requests(
             else { ordinary.reply.send((200, tool(index, if index < 2 { 100 } else { 200 + index }))).unwrap(); }
         }
         settled(&control, &target).await;
+        let observed = proactive_events(&control, &target).await;
+        if let Some(first) = observed.first() {
+            let trigger_turn = first["turn_id"].as_str().expect("saved attempt names its Turn").to_owned();
+            assert!(observed.iter().all(|event|event["turn_id"]==trigger_turn), "one Ax scope retains its real Turn");
+            let trigger_turns = [trigger_turn];
+            let mut finish = Box::pin(automatic_attempts_finished_for_turns(&control, &trigger_turns, observed.len()));
+            let terminal = loop {
+                tokio::select! {
+                    attempts = &mut finish => break attempts,
+                    incoming = receive.recv() => {
+                        let incoming = incoming.expect("loopback provider remains open until exact FINISH");
+                        assert_eq!(incoming.kind(), ProviderRequestKind::Summary,
+                            "only an actual background summary request may remain after the named Turns settle");
+                        summaries += 1;
+                        incoming.reply.send(summary_reply()).unwrap();
+                    }
+                }
+            };
+            let mut observed_ids = observed.iter().map(|event|event["attempt_id"].as_str().expect("saved attempt id").to_owned()).collect::<Vec<_>>();
+            let mut terminal_ids = terminal.iter().map(|attempt|attempt.id.clone()).collect::<Vec<_>>();
+            observed_ids.sort_unstable();
+            terminal_ids.sort_unstable();
+            assert_eq!(terminal_ids, observed_ids, "readback attempt identities and exact terminal FINISH set agree");
+        }
         let mut records = Vec::new();
         let mut report_scopes = Vec::new();
         for event in proactive_events(&control, &target).await {
@@ -4367,7 +4394,6 @@ struct ProactiveTrace {
     summary_scopes: Vec<(String, String)>,
     summary_bodies: Vec<Value>,
     admission_report: Option<Value>,
-    a_state_report: Option<Value>,
 }
 
 async fn proactive_third_turn(
@@ -4474,22 +4500,6 @@ async fn proactive_third_turn_after_run(
                 Ok(report.unwrap_or(Value::Null))
             }).await.unwrap()
         );
-        let target = thread.to_owned();
-        trace.a_state_report = Some(control.store.database.call(move |db| {
-            let row = db.query_row(
-                "SELECT json_extract(value,'$.first.attempt'),json_extract(value,'$.first.input_tokens'),
-                    (SELECT t.run_id FROM model_attempt m JOIN turn t ON t.id=m.turn_id
-                     WHERE m.id=json_extract(app_meta.value,'$.first.attempt'))
-                 FROM app_meta WHERE key=?1",
-                [format!("compact.a_state.{target}")],
-                |row| Ok(json!({
-                    "attempt_id": row.get::<_,Option<String>>(0)?,
-                    "input_tokens": row.get::<_,Option<i64>>(1)?,
-                    "run_id": row.get::<_,Option<String>>(2)?
-                })),
-            ).optional()?;
-            Ok(row.unwrap_or(Value::Null))
-        }).await.unwrap());
         let report = trace.admission_report.as_ref().unwrap();
         assert_ne!(
             report["run_id"], prior_run,
