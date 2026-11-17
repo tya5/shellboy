@@ -5282,6 +5282,24 @@ async fn proactive_large_protected_turn_is_a_local_no_target_attempt() {
         json!([]),
         "a large protected message is not a summary request"
     );
+    next.reply
+        .send((200, answer_with_usage("done", 10)))
+        .unwrap();
+    settled(&control, &thread).await;
+    let events = proactive_events(&control, &thread).await;
+    assert_eq!(
+        events.len(),
+        1,
+        "the predeclared 150-token report has one no-target attempt: {events:#?}"
+    );
+    assert_eq!(events[0]["trigger"]["input_tokens"], 150);
+    let trigger_turn = events[0]["turn_id"]
+        .as_str()
+        .expect("saved no-target Turn")
+        .to_owned();
+    let terminal = automatic_attempts_finished_for_turns(&control, &[trigger_turn], 1).await;
+    assert_eq!(terminal.len(), 1);
+    assert_eq!(terminal[0].id, events[0]["attempt_id"]);
     let id = thread.clone();
     let projected = control
         .store
@@ -5291,12 +5309,8 @@ async fn proactive_large_protected_turn_is_a_local_no_target_attempt() {
         .unwrap();
     assert!(
         projected.snapshot.automatic_compaction.is_none(),
-        "a finished no-target attempt is not shown as active"
+        "after the actual no-target FINISH, projection no longer shows compaction active"
     );
-    next.reply
-        .send((200, answer_with_usage("done", 10)))
-        .unwrap();
-    settled(&control, &thread).await;
     let attempts = bx_attempts(&control, &thread).await;
     assert_eq!(attempts.len(), 1, "{attempts:#?}");
     assert_eq!(attempts[0]["outcome"], "no_target");
