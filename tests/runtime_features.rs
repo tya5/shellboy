@@ -105,6 +105,26 @@ impl ProxyInbox {
         }
         None
     }
+    fn take_available_kind(&mut self, expected: ProviderRequestKind) -> Vec<Incoming> {
+        let mut matched = Vec::new();
+        let mut retained = VecDeque::new();
+        while let Some(request) = self.deferred.pop_front() {
+            if request.kind() == expected {
+                matched.push(request);
+            } else {
+                retained.push_back(request);
+            }
+        }
+        self.deferred = retained;
+        while let Ok(request) = self.receiver.try_recv() {
+            if request.kind() == expected {
+                matched.push(request);
+            } else {
+                self.deferred.push_back(request);
+            }
+        }
+        matched
+    }
 }
 
 pub(crate) async fn proxy() -> (String, ProxyInbox, tokio::task::JoinHandle<()>) {
@@ -3612,6 +3632,295 @@ struct ExpectedAutomaticAttempt {
     id: String,
     token: String,
 }
+#[derive(Clone, Debug)]
+struct ReportOwner {
+    attempt_id: String,
+    row_turn_id: String,
+    input_tokens: u64,
+    request_token: String,
+}
+
+#[derive(Clone, Debug)]
+struct PreparedReport {
+    owner: ReportOwner,
+}
+
+#[derive(Clone, Debug)]
+struct TriggerOwner {
+    run_id: String,
+    turn_id: String,
+}
+
+/// One immutable capture: original report owner and current Driver owner stay distinct.
+#[derive(Clone, Debug)]
+struct ReportBoundary {
+    report: ReportOwner,
+    trigger: TriggerOwner,
+    gc_token: String,
+}
+
+#[derive(Clone, Debug)]
+struct FinishedReportBoundary {
+    boundary: ReportBoundary,
+    terminal: ExpectedAutomaticAttempt,
+    outcome: String,
+}
+
+async fn automatic_attempt_record(control: &Control, attempt: String) -> Value {
+    let text: String = control
+        .store
+        .database
+        .call(move |db| {
+            Ok(db.query_row(
+        "SELECT json_extract(error_json,'$.automatic_trim_attempt') FROM model_attempt WHERE id=?1",
+        [attempt], |row| row.get(0)
+    )?)
+        })
+        .await
+        .unwrap();
+    serde_json::from_str::<Value>(&text).unwrap()
+}
+
+async fn prepared_report_from_incoming(
+    control: &Arc<Control>,
+    report_turn_id: &str,
+    request: &Incoming,
+    input_tokens: u64,
+) -> PreparedReport {
+    assert_eq!(
+        request.kind(),
+        ProviderRequestKind::Ordinary,
+        "reports originate from an ordinary request"
+    );
+    let turn = report_turn_id.to_owned();
+    let (attempt_id,request_token):(String,Option<String>)=control.store.database.call(move|db|{
+            let rows=db.prepare("SELECT id,json_extract(input_manifest_json,'$.compaction_report_token') FROM model_attempt WHERE turn_id=?1 AND state='inflight' ORDER BY rowid")?
+                .query_map([turn],|row|Ok((row.get::<_,String>(0)?,row.get::<_,Option<String>>(1)?)))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            assert_eq!(rows.len(),1,"the explicitly named accepted Turn has one in-flight provider request: {rows:?}");
+            Ok(rows.into_iter().next().expect("one inflight request"))
+        }).await.unwrap();
+    PreparedReport {
+        owner: ReportOwner {
+            attempt_id,
+            row_turn_id: report_turn_id.to_owned(),
+            input_tokens,
+            request_token: request_token
+                .filter(|token| !token.is_empty())
+                .expect("saved report request token"),
+        },
+    }
+}
+
+async fn prepare_report_from_thread(
+    control: &Arc<Control>,
+    thread: &str,
+    report_turn_id: &str,
+    input_tokens: u64,
+) -> PreparedReport {
+    let details = request(
+        control,
+        Command::ThreadGet(ThreadTarget {
+            thread_id: Some(thread.to_owned()),
+        }),
+    )
+    .await;
+    let report = &details["context_usage"]["last_successful_attempt"];
+    assert_eq!(
+        report["input_tokens"], input_tokens,
+        "canonical preflight report usage is independently declared"
+    );
+    assert_eq!(
+        report["next_request_pending"], false,
+        "the captured preflight report is eligible before start"
+    );
+    let attempt_id = report["attempt_id"]
+        .as_str()
+        .expect("canonical report attempt id")
+        .to_owned();
+    let query_id = attempt_id.clone();
+    let (turn,request_token):(String,Option<String>)=control.store.database.call(move|db|db.query_row(
+        "SELECT turn_id,json_extract(input_manifest_json,'$.compaction_report_token') FROM model_attempt WHERE id=?1",
+        [query_id],|row|Ok((row.get(0)?,row.get(1)?))
+    ).map_err(Into::into)).await.unwrap();
+    assert_eq!(
+        turn, report_turn_id,
+        "canonical completed report row owns the expected source Turn"
+    );
+    PreparedReport {
+        owner: ReportOwner {
+            attempt_id,
+            row_turn_id: turn,
+            input_tokens,
+            request_token: request_token
+                .filter(|token| !token.is_empty())
+                .expect("saved report request token"),
+        },
+    }
+}
+
+#[derive(Clone, Debug)]
+struct KnownFirstA {
+    report_attempt_id: String,
+    input_tokens: u64,
+}
+
+async fn known_first_a_from_reports(
+    control: &Arc<Control>,
+    thread: &str,
+    candidates: &[&PreparedReport],
+    input_tokens: u64,
+) -> KnownFirstA {
+    assert!(
+        !candidates.is_empty(),
+        "the source ledger names its possible first-A reports"
+    );
+    let thread = thread.to_owned();
+    let (known,owner,token):(Option<u64>,Option<String>,Option<String>)=control.store.database.call(move|db|{
+        let state:Option<String>=db.query_row("SELECT value FROM app_meta WHERE key=?1",[format!("compact.a_state.{thread}")],|row|row.get(0)).optional()?;
+        let (known,owner)=state.map(|text|{
+            let value:Value=serde_json::from_str(&text).expect("bounded #A state is valid JSON");
+            (value["first"]["input_tokens"].as_u64(),value["first"]["attempt"].as_str().map(str::to_owned))
+        }).unwrap_or((None,None));
+        let token:Option<String>=if let Some(owner)=owner.as_deref(){db.query_row("SELECT json_extract(input_manifest_json,'$.compaction_report_token') FROM model_attempt WHERE id=?1",[owner],|row|row.get(0)).optional()?.flatten()}else{None};
+        Ok((known,owner,token))
+    }).await.unwrap();
+    assert_eq!(
+        known,
+        Some(input_tokens),
+        "source report establishes the prescribed first-known #A"
+    );
+    let report = candidates
+        .iter()
+        .copied()
+        .find(|report| owner.as_deref() == Some(report.owner.attempt_id.as_str()))
+        .expect("first-known report is one of the explicitly named bridge requests");
+    assert_eq!(
+        token.as_deref(),
+        Some(report.owner.request_token.as_str()),
+        "first-known report preserves its own manifest token"
+    );
+    KnownFirstA {
+        report_attempt_id: report.owner.attempt_id.clone(),
+        input_tokens,
+    }
+}
+
+fn prepare_report_after_finish(
+    finished: &FinishedReportBoundary,
+    expected_outcome: &str,
+    first_a: &KnownFirstA,
+    expected_first_a: u64,
+    prepared: PreparedReport,
+) -> PreparedReport {
+    assert_eq!(
+        finished.outcome, expected_outcome,
+        "fresh report follows the exact named terminal receipt"
+    );
+    assert_eq!(
+        first_a.input_tokens, expected_first_a,
+        "source transition establishes its prescribed first-A band"
+    );
+    assert_ne!(
+        first_a.report_attempt_id, finished.boundary.report.attempt_id,
+        "the consumed terminal report cannot be misidentified as the explicit first-A source"
+    );
+    assert_ne!(
+        prepared.owner.attempt_id, finished.boundary.report.attempt_id,
+        "fresh threshold eligibility names a report row distinct from the consumed FINISH"
+    );
+    prepared
+}
+
+async fn start_report_boundary(
+    control: &Arc<Control>,
+    event: &Value,
+    prepared: PreparedReport,
+    trigger: &MessageAccepted,
+) -> ReportBoundary {
+    let owner = prepared.owner;
+    assert_eq!(
+        event["attempt_id"], owner.attempt_id,
+        "preflight start consumes the captured report identity"
+    );
+    assert_eq!(
+        event["turn_id"], owner.row_turn_id,
+        "event keeps original report Turn"
+    );
+    assert_eq!(event["trigger"]["input_tokens"], owner.input_tokens);
+    let trigger_owner = TriggerOwner {
+        run_id: trigger
+            .run_id
+            .as_deref()
+            .expect("accepted trigger Run")
+            .to_owned(),
+        turn_id: trigger
+            .turn_id
+            .as_deref()
+            .expect("accepted trigger Turn")
+            .to_owned(),
+    };
+    let saved = automatic_attempt_record(control, owner.attempt_id.clone()).await;
+    assert_eq!(saved["trigger"]["input_tokens"], owner.input_tokens);
+    assert_eq!(
+        saved["trigger"]["run_id"], trigger_owner.run_id,
+        "persisted current Run owns Stop"
+    );
+    assert_eq!(
+        saved["trigger"]["run_id"],
+        trigger.run_id.as_deref().unwrap()
+    );
+    let (usage,request_token):(Option<i64>,String)=control.store.database.call({
+        let attempt=owner.attempt_id.clone();
+        move|db|db.query_row("SELECT json_extract(usage_json,'$.input_tokens'),json_extract(input_manifest_json,'$.compaction_report_token') FROM model_attempt WHERE id=?1",[attempt],|row|Ok((row.get(0)?,row.get(1)?))).map_err(Into::into)
+    }).await.unwrap();
+    assert_eq!(
+        usage,
+        Some(owner.input_tokens as i64),
+        "the named report row saved the expected response usage"
+    );
+    assert_eq!(
+        request_token, owner.request_token,
+        "the saved report request token remains with its original row"
+    );
+    let gc_token = saved["token"]
+        .as_str()
+        .expect("automatic GC token")
+        .to_owned();
+    assert!(!gc_token.is_empty());
+    ReportBoundary {
+        report: owner,
+        trigger: trigger_owner,
+        gc_token,
+    }
+}
+
+impl ReportBoundary {
+    fn finish(self, terminal: &ExpectedAutomaticAttempt, record: &Value) -> FinishedReportBoundary {
+        assert_eq!(
+            terminal.id, self.report.attempt_id,
+            "FINISH retains report row"
+        );
+        assert_eq!(
+            terminal.token, self.gc_token,
+            "FINISH retains automatic GC token"
+        );
+        assert_eq!(record["token"], self.gc_token);
+        assert!(
+            matches!(
+                record["outcome"].as_str(),
+                Some("adopted" | "failed" | "no_target" | "cancelled" | "run_stopped")
+            ),
+            "unexpected terminal: {record:#?}"
+        );
+        FinishedReportBoundary {
+            boundary: self,
+            terminal: terminal.clone(),
+            outcome: record["outcome"].as_str().unwrap().to_owned(),
+        }
+    }
+}
+
 async fn automatic_attempts_finished_for_turns(
     control: &Control,
     turn_ids: &[String],
@@ -3718,99 +4027,139 @@ async fn proactive_active_spill_then_cancelled_summary_preserves_adoption() {
 /// 100 for the summary branch and, for the spill-only variant, exactly the
 /// target 40 (`#A <= target`, §2.6).
 async fn proactive_partial_spill_fixture(oversized: bool, cancel_active: Option<bool>) {
-    crate::test_watchdog::watchdog("proactive partial spill adoption", async move {
-        let root = tempfile::tempdir().unwrap();
-        let (url, mut receive, server) = proxy().await;
-        let options = if oversized {
-            "[limits]\ndraft_bytes=2097152\n[compaction]\nauto_at_tokens=200\nsummary_max_chars=4000\n"
-        } else {
-            "[compaction]\nauto_at_tokens=200\nsummary_max_chars=4000\n"
-        };
-        // Threshold 200 x default 20% = target 40.
-        let first_known_a = if oversized { 100 } else { 40 };
-        let owner = proactive_owner(root.path(), &url, options).await;
-        let control = Control::new(&owner, root.path().into());
-        let target = thread(&control).await;
-        for text in ["hi", "yo"].into_iter().take(if cancel_active == Some(true) { 0 } else { 2 }) {
-            send(&control, &target, text).await;
-            incoming(&control, &mut receive).await.reply.send((200, answer("ok"))).unwrap();
-            settled(&control, &target).await;
-        }
-        let current = if oversized { "protected current ".repeat(70_000) } else { "long current turn".to_owned() };
-        send(&control, &target, &current).await;
-        let tool_response = |index: u32, tokens: u32| json!({"id":format!("small-{index}"),"status":"completed","usage":{"input_tokens":tokens,"output_tokens":1},"output":[{"type":"function_call","call_id":format!("small-{index}"),"name":"shell","arguments":json!({"command":"echo last"}).to_string()}]});
-        let large_command = if cfg!(windows) { "'0' * 50000" } else { "printf '%050000d' 0" };
-        for index in 0..2 {
-            let current = incoming(&control, &mut receive).await;
-            current.reply.send((200, json!({"id":format!("large-{index}"),"status":"completed", "usage":{"input_tokens":first_known_a,"output_tokens":1}, "output":[{
-                "type":"function_call","call_id":format!("large-{index}"),"name":"shell",
-                "arguments":json!({"command":large_command}).to_string()
-            }]}))).unwrap();
-        }
-        let before = incoming(&control, &mut receive).await;
-        let before_size = before.body["input"].as_array().unwrap().iter().filter_map(|item| item.get("output").and_then(Value::as_str)).map(str::len).sum::<usize>();
-        assert!(before_size > 30_000, "fixture must contain both large tool outputs: {before_size}");
-        // Active cancellation triggers at this tool boundary; the other cases
-        // report the threshold on the final answer for a closed-Turn attempt.
-        before.reply.send((200, tool_response(2, if cancel_active == Some(true) { 200 } else { first_known_a }))).unwrap();
-        if cancel_active != Some(true) {
-            incoming(&control, &mut receive).await.reply.send((200, answer_with_usage("long turn done", 200))).unwrap();
-            settled(&control, &target).await;
-        }
-        if !oversized && cancel_active.is_none() {
-            // Preflight consumes the completed report at the next request
-            // boundary. This starts the real next ordinary Run; finish it
-            // before waiting for the Thread-owned spill-only attempt.
-            send(&control,&target,"next turn activates spill-only preflight").await;
-            let boundary_request=incoming_ordinary(&control,&mut receive).await;
-            boundary_request.reply.send((200,answer_with_usage("boundary complete",10))).unwrap();
-            settled(&control,&target).await;
-            // #A is exactly the target: this boundary is spill-only and makes
-            // no summary HTTP request. Wait for the one source-identified
-            // attempt after its foreground Turn has completed, then test the
-            // adopted replay on the next real ordinary request.
-            let events=proactive_events(&control,&target).await;
-            assert_eq!(events.len(),1,"one predeclared threshold report owns one spill-only attempt: {events:#?}");
-            assert_eq!(events[0]["trigger"]["input_tokens"],200);
-            let trigger_turn=events[0]["turn_id"].as_str().expect("saved attempt Turn").to_owned();
-            let terminal=automatic_attempts_finished_for_turns(&control,&[trigger_turn],1).await;
-            assert_eq!(terminal.len(),1);
-            assert_eq!(terminal[0].id,events[0]["attempt_id"]);
-            let attempts=bx_attempts(&control,&target).await;
-            assert_eq!(attempts.len(),1,"{attempts:#?}");
-            let record=&attempts[0];
-            assert_eq!(record["outcome"],"adopted");
-            assert_eq!(record["trigger"]["input_tokens"],200);
-            assert_eq!(record["trigger"]["a_input_tokens"],40);
-            assert_eq!(record["trigger"]["target_tokens"],40);
-            assert_eq!(record["committed_stages"]["closed_spill"]["spilled_groups"],2);
-            assert_eq!(record["committed_stages"].as_object().unwrap().len(),1);
-            assert!(record["committed_stages"]["closed_summary"].is_null());
-            assert!(events[0]["metrics"]["summary_node_id"].is_null());
-            send(&control,&target,"verify spill-only replay after FINISH").await;
-            let resumed=incoming_ordinary(&control,&mut receive).await;
-            let replay_size=resumed.body["input"].as_array().unwrap().iter()
-                .filter_map(|item|item.get("output").and_then(Value::as_str)).map(str::len).sum::<usize>();
-            assert!(replay_size<before_size,"the next request sees the adopted two-spill replay shrink: {before_size}->{replay_size}");
-            resumed.reply.send((200,answer("finished"))).unwrap();
-            settled(&control,&target).await;
-            assert!(receive.try_recv().is_err(),"spill-only path never posts an automatic summary");
-            control.shutdown().await.unwrap(); owner.shutdown().await.unwrap(); server.abort();
-            return;
-        }
-        if cancel_active!=Some(true) { send(&control,&target,"next turn").await; }
-        let summary = incoming_summary(&control, &mut receive).await;
-        let attempt_record = |control: &Arc<Control>, attempt: String| {
-            let control = control.clone();
-            async move {
-                let record: String = control.store.database.call(move |db| Ok(db.query_row("SELECT json_extract(error_json,'$.automatic_trim_attempt') FROM model_attempt WHERE id=?1", [attempt], |r| r.get(0))?)).await.unwrap();
-                serde_json::from_str::<Value>(&record).unwrap()
-            }
-        };
-        if let Some(active) = cancel_active {
-            assert_eq!(summary.body["tools"], json!([]), "cancel at the summary HTTP boundary, after spill commit");
-            let details = request(&control, Command::ThreadGet(ThreadTarget { thread_id: Some(target.clone()) })).await;
-            let run = details["run_id"].as_str().unwrap().to_owned();
+    let entered_phase = std::cell::RefCell::new("fixture setup".to_owned());
+    let completed_phase = std::cell::RefCell::new("fixture setup".to_owned());
+    let result=crate::test_watchdog::watchdog("proactive partial spill adoption", async {
+let root = tempfile::tempdir().unwrap();
+let (url, mut receive, server) = proxy().await;
+let options = if oversized {
+    "[limits]\ndraft_bytes=2097152\n[compaction]\nauto_at_tokens=200\nsummary_max_chars=4000\n"
+} else {
+    "[compaction]\nauto_at_tokens=200\nsummary_max_chars=4000\n"
+};
+// Threshold 200 x default 20% = target 40.
+let first_known_a = if oversized { 100 } else { 40 };
+let owner = proactive_owner(root.path(), &url, options).await;
+let control = Control::new(&owner, root.path().into());
+let target = thread(&control).await;
+for text in ["hi", "yo"].into_iter().take(if cancel_active == Some(true) { 0 } else { 2 }) {
+    *entered_phase.borrow_mut()=format!("starting earlier Turn {text}");
+    send(&control, &target, text).await;
+    *completed_phase.borrow_mut()=entered_phase.borrow().clone();
+    *entered_phase.borrow_mut()=format!("awaiting earlier Turn {text} ordinary request");
+    incoming(&control, &mut receive).await.reply.send((200, answer("ok"))).unwrap();
+    *completed_phase.borrow_mut()=entered_phase.borrow().clone();
+    *entered_phase.borrow_mut()=format!("settling earlier Turn {text}");
+    settled(&control, &target).await;
+    *completed_phase.borrow_mut()=entered_phase.borrow().clone();
+}
+let current = if oversized { "protected current ".repeat(70_000) } else { "long current turn".to_owned() };
+*entered_phase.borrow_mut()="starting oversized/tool-loop current Turn".to_owned();
+let current_accept=send_accepted(&control,&target,&current).await;
+let report_turn_id=current_accept.turn_id.clone().expect("report-owning Turn id");
+let mut trigger_accept=if cancel_active==Some(true){Some(current_accept.clone())}else{None};
+*completed_phase.borrow_mut()=entered_phase.borrow().clone();
+let tool_response = |index: u32, tokens: u32| json!({"id":format!("small-{index}"),"status":"completed","usage":{"input_tokens":tokens,"output_tokens":1},"output":[{"type":"function_call","call_id":format!("small-{index}"),"name":"shell","arguments":json!({"command":"echo last"}).to_string()}]});
+let large_command = if cfg!(windows) { "'0' * 50000" } else { "printf '%050000d' 0" };
+for index in 0..2 {
+    *entered_phase.borrow_mut()=format!("awaiting large tool-loop request index={index}");
+    let current = incoming(&control, &mut receive).await;
+    *completed_phase.borrow_mut()=entered_phase.borrow().clone();
+    current.reply.send((200, json!({"id":format!("large-{index}"),"status":"completed", "usage":{"input_tokens":first_known_a,"output_tokens":1}, "output":[{
+        "type":"function_call","call_id":format!("large-{index}"),"name":"shell",
+        "arguments":json!({"command":large_command}).to_string()
+    }]}))).unwrap();
+}
+*entered_phase.borrow_mut()="awaiting third tool-loop request/final known-A report".to_owned();
+let before = incoming(&control, &mut receive).await;
+*completed_phase.borrow_mut()=entered_phase.borrow().clone();
+let before_size = before.body["input"].as_array().unwrap().iter().filter_map(|item| item.get("output").and_then(Value::as_str)).map(str::len).sum::<usize>();
+assert!(before_size > 30_000, "fixture must contain both large tool outputs: {before_size}");
+// Active cancellation triggers at this tool boundary; the other cases
+// report the threshold on the final answer for a closed-Turn attempt.
+let mut prepared_report=if cancel_active==Some(true) {
+    Some(prepared_report_from_incoming(&control,&report_turn_id,&before,200).await)
+}else{None};
+before.reply.send((200, tool_response(2, if cancel_active == Some(true) { 200 } else { first_known_a }))).unwrap();
+if cancel_active != Some(true) {
+    *entered_phase.borrow_mut()="awaiting final model report after tool completion".to_owned();
+    let final_report=incoming_ordinary(&control,&mut receive).await;
+    prepared_report=Some(prepared_report_from_incoming(&control,&report_turn_id,&final_report,200).await);
+    final_report.reply.send((200, answer_with_usage("long turn done", 200))).unwrap();
+    *completed_phase.borrow_mut()=entered_phase.borrow().clone();
+    *entered_phase.borrow_mut()="settling report-producing foreground Turn".to_owned();
+    settled(&control, &target).await;
+    *completed_phase.borrow_mut()=entered_phase.borrow().clone();
+}
+if !oversized && cancel_active.is_none() {
+    // Preflight consumes the completed report at the next request
+    // boundary. This starts the real next ordinary Run; finish it
+    // before waiting for the Thread-owned spill-only attempt.
+    let spill_trigger=send_accepted(&control,&target,"next turn activates spill-only preflight").await;
+    let boundary_request=incoming_ordinary(&control,&mut receive).await;
+    boundary_request.reply.send((200,answer_with_usage("boundary complete",10))).unwrap();
+    settled(&control,&target).await;
+    // #A is exactly the target: this boundary is spill-only and makes
+    // no summary HTTP request. Wait for the one source-identified
+    // attempt after its foreground Turn has completed, then test the
+    // adopted replay on the next real ordinary request.
+    let events=proactive_events(&control,&target).await;
+    assert_eq!(events.len(),1,"one predeclared threshold report owns one spill-only attempt: {events:#?}");
+    assert_eq!(events[0]["trigger"]["input_tokens"],200);
+    let boundary=start_report_boundary(&control,&events[0],prepared_report.clone().expect("completed spill report was captured before trigger Run"),&spill_trigger).await;
+    let terminal=automatic_attempts_finished_for_turns(&control,std::slice::from_ref(&boundary.report.row_turn_id),1).await;
+    assert_eq!(terminal.len(),1);
+    let attempts=bx_attempts(&control,&target).await;
+    assert_eq!(attempts.len(),1,"{attempts:#?}");
+    let record=&attempts[0];
+    boundary.finish(&terminal[0],record);
+    assert_eq!(record["outcome"],"adopted");
+    assert_eq!(record["trigger"]["input_tokens"],200);
+    assert_eq!(record["trigger"]["a_input_tokens"],40);
+    assert_eq!(record["trigger"]["target_tokens"],40);
+    assert_eq!(record["committed_stages"]["closed_spill"]["spilled_groups"],2);
+    assert_eq!(record["committed_stages"].as_object().unwrap().len(),1);
+    assert!(record["committed_stages"]["closed_summary"].is_null());
+    assert!(events[0]["metrics"]["summary_node_id"].is_null());
+    send(&control,&target,"verify spill-only replay after FINISH").await;
+    let resumed=incoming_ordinary(&control,&mut receive).await;
+    let replay_size=resumed.body["input"].as_array().unwrap().iter()
+        .filter_map(|item|item.get("output").and_then(Value::as_str)).map(str::len).sum::<usize>();
+    assert!(replay_size<before_size,"the next request sees the adopted two-spill replay shrink: {before_size}->{replay_size}");
+    resumed.reply.send((200,answer("finished"))).unwrap();
+    settled(&control,&target).await;
+    assert!(receive.try_recv().is_err(),"spill-only path never posts an automatic summary");
+    *entered_phase.borrow_mut()="shutting down partial-spill control/owner".to_owned();
+control.shutdown().await.unwrap(); owner.shutdown().await.unwrap(); server.abort();
+*completed_phase.borrow_mut()=entered_phase.borrow().clone();
+    return;
+}
+if cancel_active!=Some(true) {
+    *entered_phase.borrow_mut()="starting next Run at the saved report boundary".to_owned();
+    trigger_accept=Some(send_accepted(&control,&target,"next turn").await);
+    *completed_phase.borrow_mut()=entered_phase.borrow().clone();
+}
+*entered_phase.borrow_mut()="awaiting actual Summary HTTP request".to_owned();
+let trigger_accept=trigger_accept.expect("the current report cut has an accepted trigger Run");
+let summary = incoming_summary(&control, &mut receive).await;
+*completed_phase.borrow_mut()=entered_phase.borrow().clone();
+let pending_events=proactive_events(&control,&target).await;
+assert_eq!(pending_events.len(),1,"one exact report owner reaches this Summary boundary: {pending_events:#?}");
+let boundary=start_report_boundary(&control,&pending_events[0],prepared_report.clone().expect("source report captured from its ordinary request before response"),&trigger_accept).await;
+if let Some(active) = cancel_active {
+    assert_eq!(summary.body["tools"], json!([]), "cancel at the summary HTTP boundary, after spill commit");
+    // incoming_summary may have deferred an Ordinary POST admitted before
+    // Stop. Retain its typed custody separately from genuinely later arrivals.
+    let pre_stop_ordinary=receive.take_available_kind(ProviderRequestKind::Ordinary);
+    let pending_id=boundary.report.attempt_id.clone();
+    let pending_record=automatic_attempt_record(&control,pending_id.clone()).await;
+    assert_eq!(pending_record["outcome"],"unknown","RunStop targets an actually pending Thread-owned Summary");
+    assert_eq!(pending_record["provisional"],true);
+    assert_eq!(pending_record["token"],boundary.gc_token);
+    assert_eq!(boundary.trigger.run_id,trigger_accept.run_id.as_deref().unwrap());
+    assert_eq!(boundary.trigger.turn_id,trigger_accept.turn_id.as_deref().unwrap());
+    if active { assert_eq!(boundary.trigger.turn_id,boundary.report.row_turn_id); }
+    else { assert_ne!(boundary.trigger.turn_id,boundary.report.row_turn_id); }
             // §3 summary branch: spill inside the selected region, then summarize it.
             let stage = if active { "active_spill" } else { "closed_spill" };
             let summary_stage = if active { "active_summary" } else { "closed_summary" };
@@ -3819,20 +4168,35 @@ async fn proactive_partial_spill_fixture(oversized: bool, cancel_active: Option<
                 Ok(db.prepare("SELECT n.id FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND n.kind='spill' ORDER BY p.ordinal")?.query_map([path_target], |row| row.get::<_,String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?)
             }).await.unwrap();
             assert_eq!(adopted_ids.len(), 2, "both older large groups are selected spills before cancelling summary");
-            request(&control, Command::RunStop(RunTarget { run_id: run.clone() })).await;
-            // Keep the HTTP response pending until the cancellation record is durable.
-            let record = loop {
-                let thread = target.clone();
-                let record = control.store.database.call(move |db| {
-                    Ok(db.query_row("SELECT a.error_json FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE t.thread_id=?1 AND json_extract(a.error_json,'$.automatic_trim_attempt') IS NOT NULL ORDER BY a.rowid DESC LIMIT 1", [thread], |row| row.get::<_,String>(0)).optional()?)
-                }).await.unwrap();
-                if let Some(record) = record {
-                    // The provisional `unknown` record (#226) exists from the start.
-                    let record = serde_json::from_str::<Value>(&record).unwrap()["automatic_trim_attempt"].clone();
-                    if record["outcome"] != "unknown" { break record; }
-                }
-                tokio::task::yield_now().await;
-            };
+            *entered_phase.borrow_mut()=format!("sending explicit RunStop for trigger Run {}, report attempt {}",boundary.trigger.run_id,boundary.report.attempt_id);
+            request(&control, Command::RunStop(RunTarget { run_id: boundary.trigger.run_id.clone() })).await;
+            *completed_phase.borrow_mut()=entered_phase.borrow().clone();
+            assert!(pre_stop_ordinary.iter().all(|admitted|admitted.kind()==ProviderRequestKind::Ordinary));
+            // These bodies were admitted before Stop, not post-Stop dispatches.
+            // Close their loopback reply channels now instead of retaining HTTP
+            // senders across the exact report FINISH wait.
+            drop(pre_stop_ordinary);
+            // One-shot diagnostic at the existing explicit-Stop cut: distinguish
+            // a still-provisional exact report row from a completed CAS without
+            // polling or extending the original outer watchdog.
+            let diagnostic_attempt=boundary.report.attempt_id.clone();
+            let diagnostic_token=boundary.gc_token.clone();
+            let row=control.store.database.call(move|db|db.query_row(
+                "SELECT state,json_extract(error_json,'$.automatic_trim_attempt.provisional'),json_extract(error_json,'$.automatic_trim_attempt.token'),json_extract(error_json,'$.automatic_trim_attempt.outcome'),usage_json FROM model_attempt WHERE id=?1",
+                [diagnostic_attempt],|row|Ok((row.get::<_,String>(0)?,row.get::<_,Option<bool>>(1)?,row.get::<_,Option<String>>(2)?,row.get::<_,Option<String>>(3)?,row.get::<_,Option<String>>(4)?))
+            ).map_err(Into::into)).await.unwrap();
+            let stopped_run=request(&control,Command::RunGet(RunTarget{run_id:boundary.trigger.run_id.clone()})).await;
+            eprintln!("post-Stop exact report diagnostic: report_turn={} attempt={} gc_token={} row_state={} provisional={:?} saved_gc_token={:?} terminal_outcome={:?} usage={:?} trigger_run={} trigger_run_state={}",boundary.report.row_turn_id,boundary.report.attempt_id,diagnostic_token,row.0,row.1,row.2,row.3,row.4,boundary.trigger.run_id,stopped_run["state"]);
+            // Join the exact attempt and its original token; do not poll the
+            // latest row or infer cancellation from a wait loop.
+            *entered_phase.borrow_mut()=format!("joining exact cancelled FINISH reportTurn={}, reportAttempt={}",boundary.report.row_turn_id,boundary.report.attempt_id);
+            let terminal=automatic_attempts_finished_for_turns(&control,std::slice::from_ref(&boundary.report.row_turn_id),1).await;
+            *completed_phase.borrow_mut()=entered_phase.borrow().clone();
+            assert_eq!(terminal[0].id,boundary.report.attempt_id);
+            let record=automatic_attempt_record(&control,boundary.report.attempt_id.clone()).await;
+            let finished=boundary.finish(&terminal[0],&record);
+            assert_eq!(finished.outcome,record["outcome"]);
+            assert_eq!(record["token"],terminal[0].token,"Stop FINISH belongs to the exact pending report owner");
             // DB stopping and owner-token cancellation are separate from the
             // durable GC receipt; accept only the two correlated outcomes below.
             // Earlier independently committed spills remain adopted.
@@ -3875,27 +4239,38 @@ async fn proactive_partial_spill_fixture(oversized: bool, cancel_active: Option<
                 }
                 Ok(())
             }).await.unwrap();
+            *entered_phase.borrow_mut()="settling explicitly stopped trigger Run".to_owned();
             settled(&control, &target).await;
-            assert_eq!(request(&control, Command::RunGet(RunTarget { run_id: run })).await["state"], "stopped");
+            *completed_phase.borrow_mut()=entered_phase.borrow().clone();
+            assert_eq!(request(&control, Command::RunGet(RunTarget { run_id: finished.boundary.trigger.run_id.clone() })).await["state"], "stopped");
             let _ = summary.reply.send((200, answer("late cancelled summary")));
-            assert!(receive.try_recv().is_err(), "cancel must not continue to a conversation request");
+            assert!(receive.try_recv().is_err(), "no new provider request is dispatched after Stop");
             // §2.1/§2.3: the triggering report is consumed and pre-spill usage is
             // stale, so the resumed Turn starts with an ordinary request.
-            send(&control, &target, "resume after cancelled summary").await;
-            let resumed = incoming(&control, &mut receive).await;
+            let resume_accept=send_accepted(&control,&target,"resume after cancelled summary").await;
+            let resumed = incoming_ordinary(&control, &mut receive).await;
             assert_ne!(resumed.body["tools"], json!([]), "no summary retry from stale pre-spill usage");
-            resumed.reply.send((200, answer_with_usage("fresh post-spill measurement", 200))).unwrap();
-            settled(&control, &target).await;
-            // §6.4: the next eligible fresh report retries the cancelled summary.
-            // #A is the first report after the cancelled attempt (200 > 40).
-            send(&control, &target, "verify partial adoption").await;
+            // This exact first ordinary request supplies fresh #A; retain its
+            // attempt/token before responding, then use a later Run boundary.
+            let prepared_retry=prepared_report_from_incoming(&control,resume_accept.turn_id.as_deref().expect("resumed report Turn"),&resumed,200).await;
+            resumed.reply.send((200,answer_with_usage("fresh post-spill measurement",200))).unwrap();
+            settled(&control,&target).await;
+            let retry_trigger=send_accepted(&control,&target,"verify partial adoption").await;
             let retried = incoming_summary(&control, &mut receive).await;
             assert_eq!(retried.body["tools"], json!([]), "a cancelled summary is retried on the next eligible report");
+            let retry_events=proactive_events(&control,&target).await;
+            let retry_event=retry_events.iter().find(|event|event["attempt_id"]!=pending_id).expect("new report owns the retry attempt");
+            let retry_boundary=start_report_boundary(&control,retry_event,prepared_retry.clone(),&retry_trigger).await;
+            assert_ne!(retry_boundary.report.attempt_id,pending_id);
             retried.reply.send((200, answer("## Goal\nResumed work summarized"))).unwrap();
-            let verified = incoming(&control, &mut receive).await;
+            let verified = incoming_ordinary(&control, &mut receive).await;
             assert_ne!(verified.body["tools"], json!([]));
             verified.reply.send((200, answer_with_usage("verified", 100))).unwrap();
             settled(&control, &target).await;
+            let retry_terminal=automatic_attempts_finished_for_turns(&control,std::slice::from_ref(&retry_boundary.report.row_turn_id),1).await;
+            let retry_record=automatic_attempt_record(&control,retry_boundary.report.attempt_id.clone()).await;
+            let retry_finished=retry_boundary.finish(&retry_terminal[0],&retry_record);
+            assert_eq!(retry_finished.outcome,"adopted");
             let events = proactive_events(&control, &target).await;
             assert_eq!(events.len(), 2, "{events:#?}");
             let retry = events.iter().find(|event| event["state"] == "adopted").expect("adopted retry");
@@ -3909,13 +4284,16 @@ async fn proactive_partial_spill_fixture(oversized: bool, cancel_active: Option<
             assert!(facts.1.contains("summary"), "committed GC FINISH stores its summary facts: {facts:?}");
             assert_eq!(facts.6.as_deref(),retry["metrics"]["summary_node_id"].as_str(),"readback exposes the committed summary node from the current attempt record");
             assert!(retry["metrics"]["summary_node_id"].is_string(), "{retry:#?}");
-            let retry_record = attempt_record(&control, retry["attempt_id"].as_str().unwrap().to_owned()).await;
+            assert_eq!(retry["attempt_id"],retry_finished.boundary.report.attempt_id);
+            let retry_record = automatic_attempt_record(&control, retry_finished.boundary.report.attempt_id.clone()).await;
             assert_eq!(retry_record["trigger"]["a_input_tokens"], 200, "{retry_record:#?}");
             assert!(retry_record["committed_stages"]["closed_summary"].is_object(), "{retry_record:#?}");
             let path_target = target.clone();
             let spills = control.store.database.call(move |db| Ok(db.query_row("SELECT count(*) FROM node WHERE kind='spill' AND id IN (SELECT r.output_node_id FROM thread_replacement tr JOIN replacement r ON r.id=tr.replacement_id WHERE tr.thread_id=?1)", [path_target], |r| r.get::<_, i64>(0))?)).await.unwrap();
             assert_eq!(spills, 2, "the spill adopted before cancellation is kept, not redone");
-            control.shutdown().await.unwrap(); owner.shutdown().await.unwrap(); server.abort();
+            *entered_phase.borrow_mut()="shutting down partial-spill control/owner".to_owned();
+control.shutdown().await.unwrap(); owner.shutdown().await.unwrap(); server.abort();
+*completed_phase.borrow_mut()=entered_phase.borrow().clone();
             return;
         }
         assert_eq!(summary.body["tools"], json!([]));
@@ -3969,124 +4347,23 @@ async fn proactive_partial_spill_fixture(oversized: bool, cancel_active: Option<
         assert_eq!(item["metrics"]["spilled_groups"], 2, "{item:#?}");
         assert_eq!(item["metrics"]["summary_usage"]["input_tokens"]["known_sum"], 321);
         assert_eq!(item["metrics"]["summary_usage"]["output_tokens"]["known_sum"], 123);
-        let saved = attempt_record(&control, item["attempt_id"].as_str().unwrap().to_owned()).await;
+        let saved = automatic_attempt_record(&control, item["attempt_id"].as_str().unwrap().to_owned()).await;
         assert_eq!(saved["outcome"], "failed", "{saved:#?}");
         assert!(saved["error"]["code"].is_string(), "{saved:#?}");
         assert_eq!(saved["committed_stages"]["closed_spill"]["spilled_groups"], 2, "{saved:#?}");
         assert!(saved["committed_stages"]["closed_summary"].is_null(), "{saved:#?}");
         eprintln!("partial-spill replay bytes {before_size} -> {after_size}; summary input=321 output=123; events={events:#?}");
-        control.shutdown().await.unwrap(); owner.shutdown().await.unwrap(); server.abort();
-    }).await.unwrap();
-}
-
-/// #182 order and shape, #303 §4.1: at the threshold (#A = 100 > target 40)
-/// the closed summary of earlier Turns runs first (its edit precedes kept
-/// output, so all earlier reasoning stops); on the next fresh report at or
-/// above the threshold the closed region has no unsummarized node, so the
-/// active-Turn summary covers every tool round through the latest complete
-/// one (③ and ④ are summary input, ④ is also carried as text) while the
-/// prefix through the request stays item-for-item identical.
-#[tokio::test]
-async fn proactive_summarizes_earlier_turns_first_then_the_active_turn() {
-    crate::test_watchdog::watchdog("proactive #182 order", async {
-        let root = tempfile::tempdir().unwrap();
-        let (url, mut receive, server) = proxy().await;
-        let owner = proactive_owner(root.path(), &url, "[compaction]\nauto_at_tokens=200\n").await;
-        let control = Control::new(&owner, root.path().into());
-        let target = thread(&control).await;
-        for text in ["EARLY-ONE", "EARLY-TWO"] {
-            send(&control, &target, text).await;
-            let mut reply = answer("ok");
-            reply["output"].as_array_mut().unwrap().insert(0, json!({"type":"reasoning","id":format!("rs-{text}"),"summary":[],"encrypted_content":"PRIOR"}));
-            incoming(&control, &mut receive).await.reply.send((200, reply)).unwrap();
-            settled(&control, &target).await;
-        }
-        send(&control, &target, "long current turn").await;
-        let step = |index: u32, tokens: u32| json!({"id":format!("step-{index}"),"status":"completed",
-            "usage":{"input_tokens":tokens,"output_tokens":1},
-            "output":[
-                {"type":"reasoning","id":format!("rs-{index}"),"summary":[],"encrypted_content":"E".repeat(4_000)},
-                {"type":"function_call","call_id":format!("step-{index}"),"name":"shell",
-                 "arguments":json!({"command":format!("echo STEP{index}")}).to_string()}
-            ]});
-        for (index, tokens) in [(0, 100), (1, 100), (2, 250)] {
-            incoming_ordinary(&control, &mut receive).await.reply.send((200, step(index, tokens))).unwrap();
-        }
-        // First attempt: the ordinary summary of the earlier Turns.
-        let first = incoming_summary(&control, &mut receive).await;
-        assert_eq!(first.body["tools"], json!([]));
-        let material = first.body["input"].to_string();
-        assert!(material.contains("EARLY-ONE"), "earlier Turn first");
-        assert!(!material.contains("STEP0"), "the active Turn waits");
-        first.reply.send((200, answer("## Goal\nEarly work summarized"))).unwrap();
-        let after_prefix = incoming(&control, &mut receive).await;
-        assert_ne!(after_prefix.body["tools"], json!([]));
-        let input = after_prefix.body["input"].as_array().unwrap();
-        // A closed-summary edit preserves reasoning in the current epoch;
-        // the later active-range edit is the boundary that may drop it.
-        assert!(input.iter().any(|item|item["id"]=="rs-EARLY-ONE"),"closed summary keeps same-epoch earlier reasoning");
-        assert!(input.iter().any(|item|item["id"]=="rs-EARLY-TWO"),"closed summary keeps same-epoch earlier reasoning");
-        assert!(input.iter().any(|item|item["id"]=="rs-2"),"the active Turn reasoning is retained before its own summary stage");
-        assert!(input.iter().any(|item| item["call_id"] == "step-2"));
-        // Still at or above the threshold on a fresh measurement: active Turn.
-        after_prefix.reply.send((200, step(3, 260))).unwrap();
-        let second = incoming(&control, &mut receive).await;
-        if second.body["tools"] != json!([]) {
-            let input = second.body["input"].as_array().unwrap();
-            let request = input.iter().position(|item| item.to_string().contains("long current turn")).unwrap();
-            assert!(input[..=request].iter().any(|item|item.to_string().contains("Early work summarized")),
-                "active request cut includes the already-FINISHed closed summary");
-            assert!(!input[..=request].iter().any(|item|item.to_string().contains("EARLY-ONE")),
-                "active request cut no longer replays the closed source replaced by that summary");
-            assert!(input.iter().any(|item| item["call_id"] == "step-3"), "latest complete tool group is retained");
-            second.reply.send((200, answer("finished"))).unwrap();
-            settled(&control, &target).await;
-            control.shutdown().await.unwrap(); owner.shutdown().await.unwrap(); server.abort();
-            return;
-        }
-        let material = second.body["input"].to_string();
-        // Keep the latest complete tool group as a separate tail, not summary input.
-        assert!(material.contains("Early work summarized"),"the active stage follows the committed closed summary");
-        assert!(!material.contains("EARLY-ONE"),"the replaced closed source is not reselected for active summary");
-        assert!(material.contains("STEP0") && material.contains("STEP2"), "ordinary active prefix is summary input");
-        assert!(!material.contains("STEP3"), "latest complete group is outside the selected range");
-        assert!(!material.contains("EEEE"), "encrypted reasoning is never summary material");
-        second.reply.send((200, answer("## Goal\nRun steps\n## Current state\nSTEP0-2 ran"))).unwrap();
-        let after = incoming(&control, &mut receive).await;
-        assert_ne!(after.body["tools"], json!([]));
-        let input = after.body["input"].as_array().unwrap();
-        let request = input.iter().position(|item| item.to_string().contains("long current turn")).unwrap();
-        let before = after_prefix.body["input"].as_array().unwrap();
-        let before_request = before.iter().position(|item| item.to_string().contains("long current turn")).unwrap();
-        assert_eq!(input[..=request], before[..=before_request], "①② unchanged");
-        let tail=&input[request+1..];
-        let notice=tail.iter().find(|item|item.to_string().contains("Shellboy context notice: the tool work below in the active Turn was summarized")).unwrap_or_else(||panic!("shared active-Turn summary notice for selected middle range missing: {tail:?}"));
-        assert!(!notice.to_string().contains("STEP3"),"latest group is not claimed as summarized");
-        let call=tail.iter().position(|item|item["call_id"]=="step-3").expect("latest call retained outside R");
-        assert_eq!(tail.get(call+1).and_then(|item|item["call_id"].as_str()),Some("step-3"),"its result remains adjacent and unsplit");
-        assert!(tail[call].to_string().contains("STEP3")&&tail[call+1].to_string().contains("STEP3"),"latest complete group remains intact: {tail:?}");
-        after.reply.send((200, answer("finished"))).unwrap();
-        settled(&control, &target).await;
-        let events = proactive_events(&control, &target).await;
-        assert_eq!(events.len(), 2, "{events:#?}");
-        let ids: Vec<String> = events.iter().map(|e| e["attempt_id"].as_str().unwrap().to_owned()).collect();
-        let (records, executions): (Vec<String>, i64) = control.store.database.call(move |db| Ok((
-            ids.iter().map(|id| db.query_row("SELECT json_extract(error_json,'$.automatic_trim_attempt.committed_stages') FROM model_attempt WHERE id=?1", [id], |r| r.get(0))).collect::<Result<Vec<_>, _>>()?,
-            db.query_row("SELECT count(*) FROM shell_execution", [], |r| r.get(0))?,
-        ))).await.unwrap();
-        // One summary operation per attempt (§4.1): closed first, then active.
-        let summarized: Vec<String> = records.iter().map(|r| {
-            let stages: Value = serde_json::from_str(r).unwrap();
-            let summaries: Vec<&String> = stages.as_object().unwrap().keys().filter(|stage| stage.ends_with("_summary")).collect();
-            assert_eq!(summaries.len(), 1, "{stages:#?}");
-            assert!(stages[summaries[0].as_str()]["summary_node_id"].is_string(), "{stages:#?}");
-            summaries[0].clone()
-        }).collect();
-        assert_eq!(summarized, ["closed_summary", "active_summary"],
-            "the background closed stage FINISH precedes the next report's active stage");
-        assert_eq!(executions, 4, "no saved tool is executed again");
-        control.shutdown().await.unwrap(); owner.shutdown().await.unwrap(); server.abort();
-    }).await.unwrap();
+        *entered_phase.borrow_mut()="shutting down partial-spill control/owner".to_owned();
+control.shutdown().await.unwrap(); owner.shutdown().await.unwrap(); server.abort();
+*completed_phase.borrow_mut()=entered_phase.borrow().clone();
+    }).await;
+    if let Err(error) = result {
+        panic!(
+            "partial spill watchdog: entered_phase={} completed_phase={} error={error}",
+            entered_phase.borrow(),
+            completed_phase.borrow()
+        );
+    }
 }
 
 /// #303 §2.6: a first known report (#A) equal to the target selects the
@@ -5125,8 +5402,10 @@ async fn proactive_retries_when_a_new_older_turn_becomes_eligible() {
     let owner = proactive_owner(root.path(), &url, "[compaction]\nauto_at_tokens=100\n").await;
     let control = Control::new(&owner, root.path().into());
     let thread = thread(&control).await;
+    let mut source_turns = Vec::new();
     for (n, tokens) in [(0, 50), (1, 150)] {
-        send(&control, &thread, &format!("task {n}")).await;
+        let accepted = send_accepted(&control, &thread, &format!("task {n}")).await;
+        source_turns.push(accepted.turn_id.expect("completed source Turn"));
         incoming(&control, &mut receive)
             .await
             .reply
@@ -5134,26 +5413,129 @@ async fn proactive_retries_when_a_new_older_turn_becomes_eligible() {
             .unwrap();
         settled(&control, &thread).await;
     }
-    send(&control, &thread, "third task").await;
+    let prepared_old = prepare_report_from_thread(&control, &thread, &source_turns[1], 150).await;
+    let trigger_first = send_accepted(&control, &thread, "third task").await;
     let first = incoming_summary(&control, &mut receive).await;
+    let events_after_first = proactive_events(&control, &thread).await;
+    assert_eq!(
+        events_after_first.len(),
+        1,
+        "the predeclared old report creates one initial attempt"
+    );
+    let first_boundary = start_report_boundary(
+        &control,
+        &events_after_first[0],
+        prepared_old,
+        &trigger_first,
+    )
+    .await;
     assert_eq!(first.body["tools"], json!([]));
     let input = first.body["input"].to_string();
     assert!(input.contains("task 0") && !input.contains("task 1"));
     first.reply.send((200, answer(" "))).unwrap();
     let ordinary = incoming_ordinary(&control, &mut receive).await;
     assert_ne!(ordinary.body["tools"], json!([]));
+    let prepared_after_summary = prepared_report_from_incoming(
+        &control,
+        trigger_first
+            .turn_id
+            .as_deref()
+            .expect("third-task report Turn"),
+        &ordinary,
+        50,
+    )
+    .await;
     ordinary
         .reply
-        .send((200, answer_with_usage("third answer", 150)))
+        .send((200, answer_with_usage("third answer bridge", 50)))
         .unwrap();
     settled(&control, &thread).await;
+    let first_terminal = automatic_attempts_finished_for_turns(
+        &control,
+        std::slice::from_ref(&first_boundary.report.row_turn_id),
+        1,
+    )
+    .await;
+    let first_record =
+        automatic_attempt_record(&control, first_boundary.report.attempt_id.clone()).await;
+    let first_report_attempt = first_boundary.report.attempt_id.clone();
+    let first_finished = first_boundary.finish(&first_terminal[0], &first_record);
+    assert_eq!(first_finished.outcome, "failed");
     let (closed, active) = bx_failure_slots(&control, &thread).await;
     assert!(
         closed.is_some() && active.is_none(),
         "empty summary is deterministic"
     );
-    send(&control, &thread, "fourth task").await;
+    // A below-threshold bridge records a first-known #A above the 40-token
+    // target but below the 100-token trigger. Then a separate fresh measurement
+    // Run supplies the report whose exact request starts the retry on the next
+    // Run; its later 150 usage cannot replace the already-known #A=50.
+    let bridge_accept = send_accepted(&control, &thread, "fourth task bridge").await;
+    let bridge_request = incoming_ordinary(&control, &mut receive).await;
+    let bridge_report = prepared_report_from_incoming(
+        &control,
+        bridge_accept.turn_id.as_deref().expect("bridge Turn"),
+        &bridge_request,
+        50,
+    )
+    .await;
+    bridge_request
+        .reply
+        .send((200, answer_with_usage("bridge answer", 50)))
+        .unwrap();
+    settled(&control, &thread).await;
+    let bridge_a = known_first_a_from_reports(
+        &control,
+        &thread,
+        &[&prepared_after_summary, &bridge_report],
+        50,
+    )
+    .await;
+    assert_ne!(
+        bridge_a.report_attempt_id, first_report_attempt,
+        "failed report FINISH reset prior #A before this bridge"
+    );
+
+    let measurement_accept = send_accepted(&control, &thread, "fifth task fresh measurement").await;
+    let fresh_request = incoming_ordinary(&control, &mut receive).await;
+    let prepared_next = prepared_report_from_incoming(
+        &control,
+        measurement_accept
+            .turn_id
+            .as_deref()
+            .expect("fresh measurement Turn"),
+        &fresh_request,
+        150,
+    )
+    .await;
+    let prepared_next =
+        prepare_report_after_finish(&first_finished, "failed", &bridge_a, 50, prepared_next);
+    fresh_request
+        .reply
+        .send((200, answer_with_usage("fifth answer", 150)))
+        .unwrap();
+    settled(&control, &thread).await;
+    let trigger_second =
+        send_accepted(&control, &thread, "sixth task after fresh measurement").await;
     let second = incoming_summary(&control, &mut receive).await;
+    let events_after_second = proactive_events(&control, &thread).await;
+    assert_eq!(
+        events_after_second.len(),
+        2,
+        "only the original failure and its explicit post-FINISH retry exist: {events_after_second:#?}"
+    );
+    let second_event = events_after_second
+        .iter()
+        .find(|event| event["attempt_id"] == prepared_next.owner.attempt_id)
+        .expect("retry uses the explicit fifth-task post-FINISH report");
+    assert_eq!(first_finished.outcome, "failed");
+    assert_eq!(bridge_a.input_tokens, 50);
+    assert_ne!(
+        prepared_next.owner.request_token, first_finished.boundary.report.request_token,
+        "fresh measurement report is separately captured after exact failed FINISH"
+    );
+    let second_boundary =
+        start_report_boundary(&control, second_event, prepared_next, &trigger_second).await;
     assert_eq!(
         second.body["tools"],
         json!([]),
@@ -5162,8 +5544,12 @@ async fn proactive_retries_when_a_new_older_turn_becomes_eligible() {
     let input = second.body["input"].to_string();
     assert!(input.contains("task 0") && input.contains("task 1"));
     assert!(
-        !input.contains("third task"),
-        "the latest completed Turn stays"
+        input.contains("third task"),
+        "the bridge Run is an older eligible Turn after the fifth-task measurement"
+    );
+    assert!(
+        !input.contains("fifth task fresh measurement"),
+        "the latest completed measurement Turn stays protected"
     );
     second.reply.send((200, answer("short summary"))).unwrap();
     let ordinary = incoming(&control, &mut receive).await;
@@ -5173,6 +5559,19 @@ async fn proactive_retries_when_a_new_older_turn_becomes_eligible() {
         .send((200, answer_with_usage("finished", 10)))
         .unwrap();
     settled(&control, &thread).await;
+    let second_terminal = automatic_attempts_finished_for_turns(
+        &control,
+        std::slice::from_ref(&second_boundary.report.row_turn_id),
+        1,
+    )
+    .await;
+    let second_record =
+        automatic_attempt_record(&control, second_boundary.report.attempt_id.clone()).await;
+    let second_finished = second_boundary.finish(&second_terminal[0], &second_record);
+    assert_ne!(
+        first_finished.boundary.report.row_turn_id, second_finished.boundary.report.row_turn_id,
+        "closed retry uses a fresh source report, not the prior attempt's report Turn"
+    );
     let attempts = bx_attempts(&control, &thread).await;
     let outcomes: Vec<_> = attempts.iter().map(|a| a["outcome"].clone()).collect();
     assert_eq!(
@@ -5210,24 +5609,24 @@ async fn proactive_resumes_when_an_older_complete_tool_group_becomes_reducible()
     let owner = proactive_owner(root.path(), &url, "[compaction]\nauto_at_tokens=100\n").await;
     let control = Control::new(&owner, root.path().into());
     let thread = thread(&control).await;
-    send(&control, &thread, "only completed task").await;
-    incoming(&control, &mut receive)
-        .await
-        .reply
-        .send((200, answer_with_usage("saved", 150)))
-        .unwrap();
-    settled(&control, &thread).await;
-    let accepted = send_accepted(&control, &thread, "current task").await;
-    let trigger_turn = accepted.turn_id.expect("accepted current tool-loop Turn");
+    // The dedicated no-target control covers an earlier report with an empty
+    // current range. This caller owns only the active whole-group selection.
+    let accepted = send_accepted(&control, &thread, "current task with two tool steps").await;
+    let trigger_turn = accepted
+        .turn_id
+        .as_deref()
+        .expect("accepted current tool-loop Turn")
+        .to_owned();
     let command = if cfg!(windows) {
         "powershell -NoProfile -Command \"[Console]::Write(('x' * 50000))\""
     } else {
         "head -c 50000 /dev/zero | tr '\\0' x"
     };
-    // The report 150 is eligible, but the only completed Turn is the latest
-    // and the current Turn has no work yet: a local no-target attempt (§6.2).
-    let first = incoming(&control, &mut receive).await;
-    assert_ne!(first.body["tools"], json!([]), "no target sends no summary");
+    // First response is below threshold; the second exact in-flight request
+    // supplies the sole 200-token report used by the active summary stage.
+    let first = incoming_ordinary(&control, &mut receive).await;
+    assert_ne!(first.body["tools"], json!([]));
+    let prepared_first = prepared_report_from_incoming(&control, &trigger_turn, &first, 50).await;
     first
         .reply
         .send((200, bx_tool("call-0", 50, command)))
@@ -5239,106 +5638,293 @@ async fn proactive_resumes_when_an_older_complete_tool_group_becomes_reducible()
         "below threshold nothing happens"
     );
     assert_strict_append(&first.body, &second.body, "below threshold");
+    let prepared_active =
+        prepared_report_from_incoming(&control, &trigger_turn, &second, 200).await;
     second
         .reply
         .send((200, bx_tool("call-1", 200, command)))
         .unwrap();
-    let mut ordinary_before_summary = None;
-    let summary = loop {
+    let first_a = known_first_a_from_reports(&control, &thread, &[&prepared_first], 50).await;
+    assert_ne!(
+        first_a.report_attempt_id, prepared_active.owner.attempt_id,
+        "the 200-token active report cannot overwrite the first known 50-token A"
+    );
+    let mut next_call = 2;
+    let mut summary_request = None;
+    let mut foreground_finished = false;
+    loop {
         let request = incoming(&control, &mut receive).await;
         match request.kind() {
-            ProviderRequestKind::Summary => break request,
+            ProviderRequestKind::Summary => {
+                summary_request = Some(request);
+                break;
+            }
+            ProviderRequestKind::Ordinary if next_call < 4 => {
+                let previous_call = format!("call-{}", next_call - 1);
+                assert!(
+                    request.body["input"].as_array().is_some_and(|items| items
+                        .iter()
+                        .any(|item| item["call_id"] == previous_call)),
+                    "each natural continuation owns the previous completed call"
+                );
+                request
+                    .reply
+                    .send((200, bx_tool(&format!("call-{next_call}"), 10, command)))
+                    .unwrap();
+                next_call += 1;
+            }
             ProviderRequestKind::Ordinary => {
                 assert!(
-                    ordinary_before_summary.is_none(),
-                    "preserve at most the one current tool-loop continuation before summary"
+                    request.body["input"]
+                        .as_array()
+                        .is_some_and(|items| items.iter().any(|item| item["call_id"] == "call-3")),
+                    "only the natural post-fourth-call request can finish foreground work"
                 );
-                assert!(
-                    request.body["input"].to_string().contains("call-1"),
-                    "latest complete group remains in the ordinary continuation"
-                );
-                let append_thread = thread.clone();
-                control.store.database.call(move |db| {
-                    let tx = db.transaction()?;
-                    let turn: String = tx.query_row(
-                        "SELECT id FROM turn WHERE thread_id=?1 AND state IN ('preparing','running','waiting','recovery_wait') ORDER BY rowid DESC LIMIT 1",
-                        [&append_thread], |row| row.get(0),
-                    )?;
-                    shellboy::history::append_node(&tx, &append_thread, "gc-append-during-provider", Some(&turn), "user", &json!({"role":"user","content":"GC-APPENDED-TAIL"}), "gc-append")?;
-                    tx.commit()?;
-                    Ok(())
-                }).await.unwrap();
-                ordinary_before_summary = Some(request.body.clone());
                 request
                     .reply
                     .send((200, answer_with_usage("done", 10)))
                     .unwrap();
+                foreground_finished = true;
+                break;
             }
         }
-    };
-    assert_eq!(summary.kind(), ProviderRequestKind::Summary);
-    let input = summary.body["input"].to_string();
-    assert!(
-        input.contains("call-0"),
-        "older complete tool group is summary material"
-    );
-    assert!(
-        !input.contains("call-1"),
-        "latest complete group remains outside summary R"
-    );
-    if ordinary_before_summary.is_none() {
-        let append_thread = thread.clone();
-        control.store.database.call(move|db|{
-            let tx=db.transaction()?;
-            let turn:String=tx.query_row("SELECT id FROM turn WHERE thread_id=?1 AND state IN ('preparing','running','waiting','recovery_wait') ORDER BY rowid DESC LIMIT 1",[&append_thread],|row|row.get(0))?;
-            shellboy::history::append_node(&tx,&append_thread,"gc-append-during-provider",Some(&turn),"user",&json!({"role":"user","content":"GC-APPENDED-TAIL"}),"gc-append")?;
-            tx.commit()?;Ok(())
-        }).await.unwrap();
     }
-    summary
-        .reply
-        .send((200, answer("short middle summary")))
-        .unwrap();
-    if ordinary_before_summary.is_none() {
-        let next = incoming_ordinary(&control, &mut receive).await;
-        assert_ne!(
-            next.body["tools"],
-            json!([]),
-            "ordinary work continues after compaction"
-        );
-        let next_input = next.body["input"].to_string();
+
+    let events_before_finish = proactive_events(&control, &thread).await;
+    let active_event = events_before_finish
+        .iter()
+        .find(|event| event["attempt_id"] == prepared_active.owner.attempt_id)
+        .expect("the predeclared current report owns exactly one automatic attempt");
+    let active_boundary =
+        start_report_boundary(&control, active_event, prepared_active, &accepted).await;
+    let mut summary_includes_call1 = None;
+    let mut summary_includes_call2 = None;
+    if let Some(summary) = summary_request {
+        let input = summary.body["input"].to_string();
+        summary_includes_call1 = Some(input.contains("call-1"));
+        summary_includes_call2 = Some(input.contains("call-2"));
         assert!(
-            next_input.contains("call-1"),
-            "the latest round remains outside R"
+            input.contains("call-0"),
+            "the oldest complete group is selected"
+        );
+        assert!(
+            !input.contains("call-3"),
+            "the latest complete group stays protected"
+        );
+        assert!(
+            !summary_includes_call2.unwrap() || summary_includes_call1.unwrap(),
+            "the captured region is one predeclared whole-group prefix: 0, 0+1, or 0+1+2"
+        );
+        let append_thread = thread.clone();
+        let append_turn = trigger_turn.clone();
+        control
+            .store
+            .database
+            .call(move |db| {
+                let tx = db.transaction()?;
+                shellboy::history::append_node(
+                    &tx,
+                    &append_thread,
+                    "gc-append-during-provider",
+                    Some(&append_turn),
+                    "user",
+                    &json!({"role":"user","content":"GC-APPENDED-TAIL"}),
+                    "gc-append",
+                )?;
+                tx.commit()?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        summary
+            .reply
+            .send((200, answer("short middle summary")))
+            .unwrap();
+        while next_call < 4 {
+            let continuation = incoming_ordinary(&control, &mut receive).await;
+            let previous_call = format!("call-{}", next_call - 1);
+            assert!(
+                continuation.body["input"]
+                    .as_array()
+                    .is_some_and(|items| items.iter().any(|item| item["call_id"] == previous_call)),
+                "the natural post-Summary continuation owns its preceding call"
+            );
+            continuation
+                .reply
+                .send((200, bx_tool(&format!("call-{next_call}"), 10, command)))
+                .unwrap();
+            next_call += 1;
+        }
+        if !foreground_finished {
+            let tail = incoming_ordinary(&control, &mut receive).await;
+            assert!(
+                tail.body["input"]
+                    .as_array()
+                    .is_some_and(|items| items.iter().any(|item| item["call_id"] == "call-3")),
+                "the real fourth group completes before the Driver answers foreground work"
+            );
+            tail.reply
+                .send((200, answer_with_usage("done", 10)))
+                .unwrap();
+            foreground_finished = true;
+        }
+    }
+    assert_eq!(
+        next_call, 4,
+        "the four predeclared shell calls execute exactly once"
+    );
+    if foreground_finished {
+        settled(&control, &thread).await;
+    }
+    let actual_calls = control.store.database.call(move |db| {
+        db.prepare("SELECT c.call_id,count(*) FROM tool_call c JOIN shell_execution s ON s.operation_id=c.operation_id GROUP BY c.call_id ORDER BY c.call_id")?
+            .query_map([], |row| Ok((row.get::<_,String>(0)?,row.get::<_,i64>(1)?)))?
+            .collect::<rusqlite::Result<Vec<_>>>().map_err(Into::into)
+    }).await.unwrap();
+    assert_eq!(
+        actual_calls,
+        vec![
+            ("call-0".into(), 1),
+            ("call-1".into(), 1),
+            ("call-2".into(), 1),
+            ("call-3".into(), 1)
+        ],
+        "the four independently named shell calls execute once each"
+    );
+    let finish_turn_id = active_boundary.report.row_turn_id.clone();
+    let finish_wait =
+        automatic_attempts_finished_for_turns(&control, std::slice::from_ref(&finish_turn_id), 1);
+    tokio::pin!(finish_wait);
+    let active_terminal = if foreground_finished && summary_includes_call1.is_none() {
+        loop {
+            tokio::select! {
+                attempts = &mut finish_wait => break attempts,
+                incoming = receive.recv() => {
+                    let incoming = incoming.expect("provider remains available through the exact FINISH");
+                    assert_eq!(incoming.kind(), ProviderRequestKind::Summary,
+                        "after the final Ordinary response only the pending automatic Summary may remain");
+                    let input = incoming.body["input"].to_string();
+                    summary_includes_call1 = Some(input.contains("call-1"));
+                    summary_includes_call2 = Some(input.contains("call-2"));
+                    assert!(input.contains("call-0"));
+                    assert!(!input.contains("call-3"));
+                    assert!(!summary_includes_call2.unwrap() || summary_includes_call1.unwrap(),
+                        "the captured region is one predeclared whole-group prefix: 0, 0+1, or 0+1+2");
+                    let append_thread = thread.clone();
+                    let append_turn = trigger_turn.clone();
+                    control.store.database.call(move |db| {
+                        let tx = db.transaction()?;
+                        shellboy::history::append_node(
+                            &tx, &append_thread, "gc-append-during-provider", Some(&append_turn),
+                            "user", &json!({"role":"user","content":"GC-APPENDED-TAIL"}), "gc-append",
+                        )?;
+                        tx.commit()?;
+                        Ok(())
+                    }).await.unwrap();
+                    incoming.reply.send((200, answer("short middle summary"))).unwrap();
+                }
+            }
+        }
+    } else {
+        finish_wait.await
+    };
+    let active_record =
+        automatic_attempt_record(&control, active_boundary.report.attempt_id.clone()).await;
+    let stages = &active_record["committed_stages"];
+    let spill_stage = stages["active_spill"].as_object();
+    let expected_outcome = if summary_includes_call1.is_some() {
+        let spill = spill_stage.expect("active Summary follows its committed spill stage");
+        let groups = spill["spilled_groups"]
+            .as_u64()
+            .expect("bounded active spill count");
+        assert!(
+            (1..=3).contains(&groups),
+            "the complete four-call ledger allows one to three older whole groups: {stages:#?}"
         );
         assert_eq!(
-            next_input.matches("GC-APPENDED-TAIL").count(),
-            1,
-            "valid tail append during provider wait survives adoption exactly once"
+            spill["source_nodes"],
+            groups * 2,
+            "whole tool groups contribute call+result sources"
         );
-        next.reply
-            .send((200, answer_with_usage("done", 10)))
-            .unwrap();
-    }
-    settled(&control, &thread).await;
-    let terminal = automatic_attempts_finished_for_turns(&control, &[trigger_turn], 2).await;
-    assert_eq!(
-        terminal.len(),
-        2,
-        "both source-eligible attempts for the accepted Turn FINISH"
-    );
+        assert!(
+            stages["active_summary"]["summary_node_id"].is_string(),
+            "{stages:#?}"
+        );
+        "adopted"
+    } else if let Some(spill) = spill_stage {
+        let groups = spill["spilled_groups"]
+            .as_u64()
+            .expect("bounded spill-only count");
+        assert!(
+            (1..=3).contains(&groups),
+            "the complete four-call ledger allows one to three older whole groups: {stages:#?}"
+        );
+        assert_eq!(
+            spill["source_nodes"],
+            groups * 2,
+            "whole tool groups contribute call+result sources"
+        );
+        assert!(stages["active_summary"].is_null());
+        "adopted"
+    } else {
+        assert!(stages["active_summary"].is_null());
+        "no_target"
+    };
+    let active_finished = active_boundary.finish(&active_terminal[0], &active_record);
+    assert_eq!(active_finished.outcome, expected_outcome);
     let attempts = bx_attempts(&control, &thread).await;
-    assert_eq!(attempts.len(), 2, "{attempts:#?}");
-    assert_eq!(attempts[0]["outcome"], "no_target");
-    assert_eq!(attempts[0]["committed_stages"], json!({}));
-    assert_eq!(attempts[1]["outcome"], "adopted");
-    assert_eq!(attempts[1]["trigger"]["a_input_tokens"], 50);
-    let stages = &attempts[1]["committed_stages"];
-    assert_eq!(stages["active_spill"]["spilled_groups"], 1, "{stages:#?}");
-    assert!(
-        stages["active_summary"]["summary_node_id"].is_string(),
-        "{stages:#?}"
+    assert_eq!(
+        attempts.len(),
+        1,
+        "the predeclared active report owns one attempt: {attempts:#?}"
     );
+    let active_event = proactive_events(&control, &thread)
+        .await
+        .into_iter()
+        .find(|event| event["attempt_id"] == active_finished.boundary.report.attempt_id)
+        .expect("the one persisted terminal attempt is the exact named report event");
+    assert_eq!(
+        active_event["attempt_id"],
+        active_finished.boundary.report.attempt_id
+    );
+    assert_eq!(attempts[0]["outcome"], expected_outcome);
+    assert_eq!(attempts[0]["trigger"]["a_input_tokens"], 50);
+    // A new request after exact original report/token FINISH is the canonical
+    // path cut in either ordinary-first or summary-first scheduling.
+    send(&control, &thread, "verify appended tail after FINISH").await;
+    let verified = incoming_ordinary(&control, &mut receive).await;
+    assert_ne!(verified.body["tools"], json!([]));
+    let verified_input = verified.body["input"].to_string();
+    assert!(
+        verified_input.contains("call-3"),
+        "the latest group remains protected after exact FINISH"
+    );
+    for (call, selected) in [
+        ("call-1", summary_includes_call1),
+        ("call-2", summary_includes_call2),
+    ] {
+        if selected == Some(true) {
+            assert!(
+                !verified_input.contains(call),
+                "selected source {call} is replaced only after exact FINISH"
+            );
+        } else {
+            assert!(
+                verified_input.contains(call),
+                "unselected/protected source {call} remains after exact FINISH"
+            );
+        }
+    }
+    assert_eq!(
+        verified_input.matches("GC-APPENDED-TAIL").count(),
+        usize::from(summary_includes_call1.is_some()),
+        "the active provider-wait append is retained exactly once when its Summary was received"
+    );
+    verified
+        .reply
+        .send((200, answer_with_usage("verified appended tail", 10)))
+        .unwrap();
+    settled(&control, &thread).await;
     assert!(receive.try_recv().is_err());
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
