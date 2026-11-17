@@ -4037,7 +4037,17 @@ let options = if oversized {
 };
 // Threshold 200 x default 20% = target 40.
 let first_known_a = if oversized { 100 } else { 40 };
-let owner = proactive_owner(root.path(), &url, options).await;
+let owner = if cancel_active == Some(true) {
+    // Use one source-defined transient Ordinary retry to release the live
+    // boundary during backoff; no tool group or shell execution is added.
+    let config = root.path().join("config.toml");
+    std::fs::write(&config, format!(
+        "default_connection=\"fixture\"\ndefault_model=\"fixture\"\n[connections.fixture]\nbase_url={url:?}\nresponse_max_retries=1\nresponse_retry_max_delay_ms=1000\n{options}"
+    )).unwrap();
+    DataOwner::start(Some(config), Some(root.path().join("data")), root.path().into()).await.unwrap()
+} else {
+    proactive_owner(root.path(), &url, options).await
+};
 let control = Control::new(&owner, root.path().into());
 let target = thread(&control).await;
 for text in ["hi", "yo"].into_iter().take(if cancel_active == Some(true) { 0 } else { 2 }) {
@@ -4139,13 +4149,43 @@ if cancel_active!=Some(true) {
 }
 *entered_phase.borrow_mut()="awaiting actual Summary HTTP request".to_owned();
 let trigger_accept=trigger_accept.expect("the current report cut has an accepted trigger Run");
-let summary = incoming_summary(&control, &mut receive).await;
+let mut retry_admitted = false;
+let summary = if cancel_active == Some(true) {
+    loop {
+        let request = receive.recv().await.expect("provider remains available during active backoff");
+        if request.kind() == ProviderRequestKind::Summary { break request; }
+        assert_eq!(request.kind(), ProviderRequestKind::Ordinary);
+        assert!(!retry_admitted, "one independent transient retry is declared for this live boundary");
+        retry_admitted = true;
+        request.reply.send((500, json!({
+            "error":{"code":"server_error","message":"synthetic ordinary retry releases the Driver boundary"}
+        }))).unwrap();
+    }
+} else {
+    incoming_summary(&control, &mut receive).await
+};
+if cancel_active == Some(true) {
+    assert!(retry_admitted,
+        "the active capture follows the source-defined Ordinary transient-backoff boundary");
+    let live_run = request(&control, Command::RunGet(RunTarget {
+        run_id: trigger_accept.run_id.clone().expect("saved explicit-Stop Run"),
+    })).await;
+    assert_eq!(live_run["state"], "live",
+        "the Driver owner remains live during the retry backoff while active GC captures");
+}
 *completed_phase.borrow_mut()=entered_phase.borrow().clone();
 let pending_events=proactive_events(&control,&target).await;
 assert_eq!(pending_events.len(),1,"one exact report owner reaches this Summary boundary: {pending_events:#?}");
 let boundary=start_report_boundary(&control,&pending_events[0],prepared_report.clone().expect("source report captured from its ordinary request before response"),&trigger_accept).await;
 if let Some(active) = cancel_active {
     assert_eq!(summary.body["tools"], json!([]), "cancel at the summary HTTP boundary, after spill commit");
+    if active {
+        let selected = summary.body["input"].to_string();
+        assert!(selected.contains("large-0") && selected.contains("large-1"),
+            "active R contains exactly the two independently named older source groups: {selected}");
+        assert!(!selected.contains("small-2"),
+            "the latest complete tool group stays protected at the captured active boundary: {selected}");
+    }
     // incoming_summary may have deferred an Ordinary POST admitted before
     // Stop. Retain its typed custody separately from genuinely later arrivals.
     let pre_stop_ordinary=receive.take_available_kind(ProviderRequestKind::Ordinary);
@@ -4166,6 +4206,14 @@ if let Some(active) = cancel_active {
                 Ok(db.prepare("SELECT n.id FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND n.kind='spill' ORDER BY p.ordinal")?.query_map([path_target], |row| row.get::<_,String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?)
             }).await.unwrap();
             assert_eq!(adopted_ids.len(), 2, "both older large groups are selected spills before cancelling summary");
+            if active {
+                let run = boundary.trigger.run_id.clone();
+                let shell_executions: i64 = control.store.database.call(move |db| {
+                    Ok(db.query_row("SELECT count(*) FROM shell_execution WHERE owner_run_id=?1", [run], |row| row.get(0))?)
+                }).await.unwrap();
+                assert_eq!(shell_executions, 3,
+                    "the two large calls and existing small-2 call execute once; retry backoff adds no tool execution");
+            }
             *entered_phase.borrow_mut()=format!("sending explicit RunStop for trigger Run {}, report attempt {}",boundary.trigger.run_id,boundary.report.attempt_id);
             request(&control, Command::RunStop(RunTarget { run_id: boundary.trigger.run_id.clone() })).await;
             *completed_phase.borrow_mut()=entered_phase.borrow().clone();
