@@ -3756,8 +3756,49 @@ async fn proactive_partial_spill_fixture(oversized: bool, cancel_active: Option<
         if cancel_active != Some(true) {
             incoming(&control, &mut receive).await.reply.send((200, answer_with_usage("long turn done", 200))).unwrap();
             settled(&control, &target).await;
-            send(&control, &target, "next turn").await;
         }
+        if !oversized && cancel_active.is_none() {
+            // Preflight consumes the completed report at the next request
+            // boundary. This starts the real next ordinary Run; finish it
+            // before waiting for the Thread-owned spill-only attempt.
+            send(&control,&target,"next turn activates spill-only preflight").await;
+            let boundary_request=incoming_ordinary(&control,&mut receive).await;
+            boundary_request.reply.send((200,answer_with_usage("boundary complete",10))).unwrap();
+            settled(&control,&target).await;
+            // #A is exactly the target: this boundary is spill-only and makes
+            // no summary HTTP request. Wait for the one source-identified
+            // attempt after its foreground Turn has completed, then test the
+            // adopted replay on the next real ordinary request.
+            let events=proactive_events(&control,&target).await;
+            assert_eq!(events.len(),1,"one predeclared threshold report owns one spill-only attempt: {events:#?}");
+            assert_eq!(events[0]["trigger"]["input_tokens"],200);
+            let trigger_turn=events[0]["turn_id"].as_str().expect("saved attempt Turn").to_owned();
+            let terminal=automatic_attempts_finished_for_turns(&control,&[trigger_turn],1).await;
+            assert_eq!(terminal.len(),1);
+            assert_eq!(terminal[0].id,events[0]["attempt_id"]);
+            let attempts=bx_attempts(&control,&target).await;
+            assert_eq!(attempts.len(),1,"{attempts:#?}");
+            let record=&attempts[0];
+            assert_eq!(record["outcome"],"adopted");
+            assert_eq!(record["trigger"]["input_tokens"],200);
+            assert_eq!(record["trigger"]["a_input_tokens"],40);
+            assert_eq!(record["trigger"]["target_tokens"],40);
+            assert_eq!(record["committed_stages"]["closed_spill"]["spilled_groups"],2);
+            assert_eq!(record["committed_stages"].as_object().unwrap().len(),1);
+            assert!(record["committed_stages"]["closed_summary"].is_null());
+            assert!(events[0]["metrics"]["summary_node_id"].is_null());
+            send(&control,&target,"verify spill-only replay after FINISH").await;
+            let resumed=incoming_ordinary(&control,&mut receive).await;
+            let replay_size=resumed.body["input"].as_array().unwrap().iter()
+                .filter_map(|item|item.get("output").and_then(Value::as_str)).map(str::len).sum::<usize>();
+            assert!(replay_size<before_size,"the next request sees the adopted two-spill replay shrink: {before_size}->{replay_size}");
+            resumed.reply.send((200,answer("finished"))).unwrap();
+            settled(&control,&target).await;
+            assert!(receive.try_recv().is_err(),"spill-only path never posts an automatic summary");
+            control.shutdown().await.unwrap(); owner.shutdown().await.unwrap(); server.abort();
+            return;
+        }
+        if cancel_active!=Some(true) { send(&control,&target,"next turn").await; }
         let summary = incoming_summary(&control, &mut receive).await;
         let attempt_record = |control: &Arc<Control>, attempt: String| {
             let control = control.clone();
@@ -3874,26 +3915,6 @@ async fn proactive_partial_spill_fixture(oversized: bool, cancel_active: Option<
             let path_target = target.clone();
             let spills = control.store.database.call(move |db| Ok(db.query_row("SELECT count(*) FROM node WHERE kind='spill' AND id IN (SELECT r.output_node_id FROM thread_replacement tr JOIN replacement r ON r.id=tr.replacement_id WHERE tr.thread_id=?1)", [path_target], |r| r.get::<_, i64>(0))?)).await.unwrap();
             assert_eq!(spills, 2, "the spill adopted before cancellation is kept, not redone");
-            control.shutdown().await.unwrap(); owner.shutdown().await.unwrap(); server.abort();
-            return;
-        }
-        if !oversized {
-            // §2.6 #A <= target: spill only, closed region only (§3).
-            assert_ne!(summary.body["tools"], json!([]), "#A at the target spills only; no summary request");
-            let after_size = summary.body["input"].as_array().unwrap().iter().filter_map(|item| item.get("output").and_then(Value::as_str)).map(str::len).sum::<usize>();
-            assert!(after_size < before_size, "spill must shrink replay: {before_size} -> {after_size}");
-            let events = proactive_events(&control, &target).await;
-            assert_eq!(events.len(), 1, "{events:#?}");
-            assert_eq!(events[0]["state"], "adopted");
-            assert_eq!(events[0]["metrics"]["spilled_groups"], 2, "{events:#?}");
-            assert!(events[0]["metrics"]["summary_node_id"].is_null(), "{events:#?}");
-            let record = attempt_record(&control, events[0]["attempt_id"].as_str().unwrap().to_owned()).await;
-            assert_eq!(record["trigger"]["a_input_tokens"], 40, "{record:#?}");
-            assert_eq!(record["trigger"]["target_tokens"], 40, "{record:#?}");
-            assert_eq!(record["committed_stages"]["closed_spill"]["spilled_groups"], 2, "{record:#?}");
-            assert_eq!(record["committed_stages"].as_object().unwrap().len(), 1, "only the closed spill stage: {record:#?}");
-            summary.reply.send((200, answer("finished"))).unwrap();
-            settled(&control, &target).await;
             control.shutdown().await.unwrap(); owner.shutdown().await.unwrap(); server.abort();
             return;
         }
