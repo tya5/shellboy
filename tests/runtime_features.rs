@@ -7499,6 +7499,7 @@ async fn bx_growing_turn(
             }
         }
         let accepted = send_accepted(&control, &target, "protected current").await;
+        let current_run = accepted.run_id.expect("one declared growing Run");
         let current_turn = accepted.turn_id.expect("one declared growing Turn");
         // An unknown tool name returns a short error, so no spill can shrink it.
         let tool = |index: u32, tokens: u32| json!({"id":format!("grow-{index}"),"status":"completed","usage":{"input_tokens":tokens,"output_tokens":1},"output":[{"type":"function_call","call_id":format!("grow-{index}"),"name":if spilling {"shell"}else{"nope"},"arguments":if spilling {json!({"command":"printf '%02000d' 1"}).to_string()}else{"{}".into()}}]});
@@ -7571,6 +7572,7 @@ async fn bx_growing_turn(
             summary_inputs.push(request.body["input"].clone());
             assert!(summaries < 80, "unbounded automatic summary loop");
             let scope = live_run_turn_scope(&control, &target).await;
+            assert_eq!(scope.0, current_run, "the source-captured Summary belongs to the original report Run");
             assert_eq!(scope.1, current_turn, "the source-captured Summary belongs to the live report Turn");
             assert_eq!(scope.2, "live", "the active source capture precedes natural final completion");
             request.reply.send(summary_reply.clone()).unwrap();
@@ -7585,7 +7587,26 @@ async fn bx_growing_turn(
         } else {
             final_request.reply.send((200, answer("finished"))).unwrap();
         }
-        settled(&control, &target).await;
+        let settle = settled(&control, &target);
+        tokio::pin!(settle);
+        loop {
+            tokio::select! {
+                _ = &mut settle => break,
+                incoming = receive.recv() => {
+                    let incoming = incoming.expect("provider remains available through Run settlement and any joined proactive Summary");
+                    assert_eq!(incoming.kind(), ProviderRequestKind::Summary,
+                        "the final Driver join may wait on one same-Run proactive Summary; service it while the join is pending");
+                    summary_inputs.push(incoming.body["input"].clone());
+                    summaries += 1;
+                    assert!(summaries < 80, "unbounded automatic summary loop");
+                    let scope = live_run_turn_scope(&control, &target).await;
+                    assert_eq!(scope.0, current_run);
+                    assert_eq!(scope.1, current_turn);
+                    assert_eq!(scope.2, "live");
+                    incoming.reply.send(summary_reply.clone()).unwrap();
+                }
+            }
+        }
         assert_eq!(prepared_reports.len(), report_inputs.len(),
             "each independently declared response has one captured in-flight report owner");
         let owner_ids: Vec<String> = prepared_reports.iter()
