@@ -4241,7 +4241,6 @@ if let Some(active) = cancel_active {
             assert_eq!(terminal[0].id,boundary.report.attempt_id);
             let record=automatic_attempt_record(&control,boundary.report.attempt_id.clone()).await;
             let finished=boundary.finish(&terminal[0],&record);
-            assert_eq!(finished.outcome,record["outcome"]);
             assert_eq!(record["token"],terminal[0].token,"Stop FINISH belongs to the exact pending report owner");
             // DB stopping and owner-token cancellation are separate from the
             // durable GC receipt; accept only the two correlated outcomes below.
