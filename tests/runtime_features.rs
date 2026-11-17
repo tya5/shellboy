@@ -7599,10 +7599,23 @@ async fn bx_growing_turn(
                     summary_inputs.push(incoming.body["input"].clone());
                     summaries += 1;
                     assert!(summaries < 80, "unbounded automatic summary loop");
-                    let scope = live_run_turn_scope(&control, &target).await;
-                    assert_eq!(scope.0, current_run);
-                    assert_eq!(scope.1, current_turn);
-                    assert_eq!(scope.2, "live");
+                    if summary_reply.0 == 500 {
+                        // Read the live join-owned scope directly: settled() would
+                        // wait on the same Driver job that is waiting on this reply.
+                        let scope_thread = target.clone();
+                        let scope = control.store.database.call(move |db| {
+                            db.query_row(
+                                "SELECT r.id,t.id,r.state FROM run r JOIN turn t ON t.run_id=r.id WHERE r.thread_id=?1 AND r.state IN ('live','stopping') AND t.state IN ('preparing','running','waiting','recovery_wait') ORDER BY t.rowid DESC LIMIT 1",
+                                [scope_thread],
+                                |row| Ok((row.get::<_,String>(0)?, row.get::<_,String>(1)?, row.get::<_,String>(2)?)),
+                            ).map_err(Into::into)
+                        }).await.unwrap();
+                        assert_eq!(scope.0, current_run);
+                        assert_eq!(scope.1, current_turn);
+                        assert_eq!(scope.2, "live");
+                    }
+                    // A successful Ordinary final response may retire the Turn
+                    // before a retained background Summary reaches this drain.
                     incoming.reply.send(summary_reply.clone()).unwrap();
                 }
             }
