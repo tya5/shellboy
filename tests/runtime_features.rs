@@ -7,7 +7,7 @@ use shellboy::{
     control::{Control, EngineEvent},
     protocol::*,
 };
-use std::{sync::Arc, time::Duration};
+use std::{collections::VecDeque, sync::Arc, time::Duration};
 #[path = "runtime_features/compaction_failure_memory.rs"]
 mod compaction_failure_memory;
 use tokio::{
@@ -53,20 +53,64 @@ pub(crate) struct Incoming {
     pub(crate) session: Option<String>,
     pub(crate) reply: oneshot::Sender<(u16, Value)>,
 }
-pub(crate) async fn proxy() -> (
-    String,
-    mpsc::Receiver<Incoming>,
-    tokio::task::JoinHandle<()>,
-) {
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ProviderRequestKind {
+    Ordinary,
+    Summary,
+}
+
+impl Incoming {
+    pub(crate) fn kind(&self) -> ProviderRequestKind {
+        if self.body["tools"].as_array().is_some_and(Vec::is_empty) {
+            ProviderRequestKind::Summary
+        } else {
+            ProviderRequestKind::Ordinary
+        }
+    }
+}
+
+/// Buffers the other request kind when a test waits for an ordinary or
+/// summary request; this preserves both legal Run/summary arrival orders.
+pub(crate) struct ProxyInbox {
+    pub(crate) receiver: mpsc::Receiver<Incoming>,
+    deferred: VecDeque<Incoming>,
+}
+impl ProxyInbox {
+    pub(crate) async fn recv(&mut self) -> Option<Incoming> {
+        match self.deferred.pop_front() {
+            Some(request) => Some(request),
+            None => self.receiver.recv().await,
+        }
+    }
+    pub(crate) fn try_recv(&mut self) -> Result<Incoming, mpsc::error::TryRecvError> {
+        self.deferred
+            .pop_front()
+            .map(Ok)
+            .unwrap_or_else(|| self.receiver.try_recv())
+    }
+    async fn recv_kind(&mut self, expected: ProviderRequestKind) -> Option<Incoming> {
+        if let Some(index) = self
+            .deferred
+            .iter()
+            .position(|request| request.kind() == expected)
+        {
+            return self.deferred.remove(index);
+        }
+        while let Some(request) = self.receiver.recv().await {
+            if request.kind() == expected {
+                return Some(request);
+            }
+            self.deferred.push_back(request);
+        }
+        None
+    }
+}
+
+pub(crate) async fn proxy() -> (String, ProxyInbox, tokio::task::JoinHandle<()>) {
     proxy_with_sse(false).await
 }
-async fn proxy_with_sse(
-    sse: bool,
-) -> (
-    String,
-    mpsc::Receiver<Incoming>,
-    tokio::task::JoinHandle<()>,
-) {
+async fn proxy_with_sse(sse: bool) -> (String, ProxyInbox, tokio::task::JoinHandle<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let (send, receive) = mpsc::channel(8);
@@ -145,7 +189,14 @@ async fn proxy_with_sse(
             });
         }
     });
-    (format!("http://{address}/v1"), receive, task)
+    (
+        format!("http://{address}/v1"),
+        ProxyInbox {
+            receiver: receive,
+            deferred: VecDeque::new(),
+        },
+        task,
+    )
 }
 pub(crate) async fn owner(root: &std::path::Path, url: &str) -> DataOwner {
     owner_with_retries(root, url, 0).await
@@ -189,7 +240,7 @@ async fn progress(control: &Control) -> Result<Value, shellboy::storage::Storage
 #[track_caller]
 pub(crate) fn incoming<'a>(
     control: &'a Control,
-    receive: &'a mut mpsc::Receiver<Incoming>,
+    receive: &'a mut ProxyInbox,
 ) -> impl std::future::Future<Output = Incoming> + 'a {
     let caller = std::panic::Location::caller();
     async move {
@@ -217,6 +268,56 @@ pub(crate) fn incoming<'a>(
         }
     }
 }
+#[track_caller]
+fn incoming_kind<'a>(
+    control: &'a Control,
+    receive: &'a mut ProxyInbox,
+    expected: ProviderRequestKind,
+) -> impl std::future::Future<Output = Incoming> + 'a {
+    let caller = std::panic::Location::caller();
+    async move {
+        match crate::test_watchdog::watchdog(
+            "tests/runtime_features.rs: classified incoming",
+            receive.recv_kind(expected),
+        )
+        .await
+        {
+            Ok(Some(request)) => request,
+            result => {
+                let diagnostic = crate::test_watchdog::watchdog(
+                    "tests/runtime_features.rs: classified incoming",
+                    progress(control),
+                )
+                .await;
+                panic!(
+                    "classified request watchdog at {}:{} kind={expected:?}; receive={}; saved lifecycle facts={diagnostic:?}",
+                    caller.file(),
+                    caller.line(),
+                    if result.is_err() {
+                        "timeout"
+                    } else {
+                        "sender closed"
+                    }
+                );
+            }
+        }
+    }
+}
+#[track_caller]
+pub(crate) fn incoming_summary<'a>(
+    control: &'a Control,
+    receive: &'a mut ProxyInbox,
+) -> impl std::future::Future<Output = Incoming> + 'a {
+    incoming_kind(control, receive, ProviderRequestKind::Summary)
+}
+#[track_caller]
+pub(crate) fn incoming_ordinary<'a>(
+    control: &'a Control,
+    receive: &'a mut ProxyInbox,
+) -> impl std::future::Future<Output = Incoming> + 'a {
+    incoming_kind(control, receive, ProviderRequestKind::Ordinary)
+}
+
 #[track_caller]
 pub(crate) fn settled<'a>(
     control: &'a Control,
@@ -524,7 +625,7 @@ async fn manual_compact_accepts_during_http_wait_and_adopts_without_starting_an_
     assert_eq!(accepted["status"], "queued");
     assert!(receive.try_recv().is_err());
     ordinary.reply.send((200, answer("last answer"))).unwrap();
-    let summary = incoming(&control, &mut receive).await;
+    let summary = incoming_summary(&control, &mut receive).await;
     assert_eq!(summary.session.as_deref(), Some(thread.as_str()));
     assert!(summary.body.get("prompt_cache_key").is_none());
     assert_eq!(summary.body["tools"], json!([]));
@@ -670,11 +771,7 @@ async fn invalid_second_tool_does_not_prevent_valid_call_and_each_receives_a_res
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn both_overflow_retries_preserve_call_groups_and_never_execute_saved_tools_twice() {
-    async fn next(
-        receive: &mut mpsc::Receiver<Incoming>,
-        control: &Control,
-        phase: &str,
-    ) -> Incoming {
+    async fn next(receive: &mut ProxyInbox, control: &Control, phase: &str) -> Incoming {
         // This boundary includes a real PowerShell launch under concurrent owner tests.
         // Match the native Windows shell fixture's bounded startup/output allowance.
         let _seconds = if cfg!(windows) { 15 } else { 5 };
@@ -729,12 +826,7 @@ async fn both_overflow_retries_preserve_call_groups_and_never_execute_saved_tool
         .unwrap();
     // #182: the tool loop is open, so the overflow falls back to the
     // active-Turn summary instead of spill/trim.
-    let summary = next(
-        &mut receive,
-        &control,
-        "first overflow: active-Turn summary",
-    )
-    .await;
+    let summary = incoming_summary(&control, &mut receive).await;
     assert_eq!(summary.body["tools"], json!([]));
     summary.reply.send((200, answer("OK"))).unwrap();
     let retry_two = next(&mut receive, &control, "first overflow: summary retry").await;
@@ -754,12 +846,7 @@ async fn both_overflow_retries_preserve_call_groups_and_never_execute_saved_tool
     retry_two.reply.send((400, overflow.clone())).unwrap();
     // After the active-Turn summary no tool loop is open, so the existing
     // final overflow stage summarizes once more; the overflow persists.
-    let final_summary = next(
-        &mut receive,
-        &control,
-        "second overflow: final-stage summary",
-    )
-    .await;
+    let final_summary = incoming_summary(&control, &mut receive).await;
     assert_eq!(final_summary.body["tools"], json!([]));
     final_summary.reply.send((200, answer("OK"))).unwrap();
     next(&mut receive, &control, "second overflow: final retry")
@@ -846,7 +933,7 @@ async fn stopping_recovery_cancels_an_inflight_manual_summary_without_adopting_i
         }),
     )
     .await;
-    let summary = incoming(&control, &mut receive).await;
+    let summary = incoming_summary(&control, &mut receive).await;
     assert_eq!(summary.body["tools"], json!([]));
     let details = request(
         &control,
@@ -2711,9 +2798,9 @@ async fn automatic_nonshrinking_summary_enters_recovery_without_adoption_or_rese
         send(&control,&thread,"protected task").await;
         // #182: with the tool loop open, overflow uses the active-Turn summary,
         // which needs an older tool round to summarize besides the latest one.
-        receive.recv().await.unwrap().reply.send((200,json!({"id":"older","status":"completed","output":[{"type":"function_call","call_id":"older-tool","name":"shell","arguments":json!({"command":"echo older"}).to_string()}]}))).unwrap();
-        receive.recv().await.unwrap().reply.send((200,json!({"id":"tool","status":"completed","output":[{"type":"function_call","call_id":"only-tool","name":"shell","arguments":json!({"command":"echo synthetic"}).to_string()}]}))).unwrap();
-        let pending=receive.recv().await.unwrap();let target=thread.clone();
+        incoming(&control,&mut receive).await.reply.send((200,json!({"id":"older","status":"completed","output":[{"type":"function_call","call_id":"older-tool","name":"shell","arguments":json!({"command":"echo older"}).to_string()}]}))).unwrap();
+        incoming(&control,&mut receive).await.reply.send((200,json!({"id":"tool","status":"completed","output":[{"type":"function_call","call_id":"only-tool","name":"shell","arguments":json!({"command":"echo synthetic"}).to_string()}]}))).unwrap();
+        let pending=incoming(&control,&mut receive).await;let target=thread.clone();
         control.store.database.call(move|db| {
             let tx=db.transaction()?;
             let request:String=tx.query_row("SELECT message_node_id FROM receipt WHERE target_thread_id=?1 ORDER BY created_at LIMIT 1",[&target],|r|r.get(0))?;
@@ -2726,7 +2813,7 @@ async fn automatic_nonshrinking_summary_enters_recovery_without_adoption_or_rese
         // #303 §4.2/§4.3: one summary request; an output that does not shrink
         // the source (here far over both the cap and the source) is rejected
         // deterministically, with no second request and no adoption.
-        let request=receive.recv().await.unwrap();assert_eq!(request.body["tools"],json!([]));
+        let request=incoming_summary(&control,&mut receive).await;assert_eq!(request.body["tools"],json!([]));
         use std::io::Write;
         writeln!(std::fs::OpenOptions::new().append(true).open(&log).unwrap(),"{}",request.body).unwrap();
         request.reply.send((200,answer(&"x".repeat(20_000)))).unwrap();
@@ -3392,7 +3479,7 @@ async fn explicit_summary_boundary_waits_after_foreground_and_not_for_background
         };
         let accepted=request(&control,Command::Compact(ThreadTarget {thread_id:Some(thread.clone())})).await;
         request(&control,Command::ShellEof(ExecutionTarget {execution_id:foreground.clone()})).await;
-        let summary=incoming(&control,&mut receive).await;
+        let summary=incoming_summary(&control,&mut receive).await;
         assert_eq!(summary.body["tools"],json!([]),"the boundary owner issues the summary, not a new ordinary attempt");
         let blocked=request(&control,Command::RunGet(RunTarget {run_id:run.clone()})).await;
         assert_eq!(blocked["waiting_reason"]["kind"],"context_edit_boundary");
@@ -3577,7 +3664,7 @@ async fn proactive_partial_spill_fixture(oversized: bool, cancel_active: Option<
             settled(&control, &target).await;
             send(&control, &target, "next turn").await;
         }
-        let summary = incoming(&control, &mut receive).await;
+        let summary = incoming_summary(&control, &mut receive).await;
         let attempt_record = |control: &Arc<Control>, attempt: String| {
             let control = control.clone();
             async move {
@@ -3667,7 +3754,7 @@ async fn proactive_partial_spill_fixture(oversized: bool, cancel_active: Option<
             // §6.4: the next eligible fresh report retries the cancelled summary.
             // #A is the first report after the cancelled attempt (200 > 40).
             send(&control, &target, "verify partial adoption").await;
-            let retried = incoming(&control, &mut receive).await;
+            let retried = incoming_summary(&control, &mut receive).await;
             assert_eq!(retried.body["tools"], json!([]), "a cancelled summary is retried on the next eligible report");
             retried.reply.send((200, answer("## Goal\nResumed work summarized"))).unwrap();
             let verified = incoming(&control, &mut receive).await;
@@ -3723,7 +3810,7 @@ async fn proactive_partial_spill_fixture(oversized: bool, cancel_active: Option<
         let mut rejected = answer(" ");
         rejected["usage"] = json!({"input_tokens":321,"output_tokens":123,"total_tokens":444});
         summary.reply.send((200, rejected)).unwrap();
-        let after = incoming(&control, &mut receive).await;
+        let after = incoming_ordinary(&control, &mut receive).await;
         assert_ne!(after.body["tools"], json!([]), "the measured request must be an ordinary conversation request, not another summary request");
         let context = current_context(&control, &target).await;
         assert_current_context_once(&after.body, &context, "after proactive spill");
@@ -3741,7 +3828,7 @@ async fn proactive_partial_spill_fixture(oversized: bool, cancel_active: Option<
         // A fresh report at the threshold in the same Turn: same closed range
         // and settings, so the deterministic failure is not repeated (§6.3).
         after.reply.send((200, tool_response(3, 205))).unwrap();
-        let gated = incoming(&control, &mut receive).await;
+        let gated = incoming_ordinary(&control, &mut receive).await;
         assert_ne!(gated.body["tools"], json!([]), "the same sources must not trigger another summary");
         gated.reply.send((200, answer("finished"))).unwrap();
         settled(&control, &target).await;
@@ -3796,7 +3883,7 @@ async fn proactive_summarizes_earlier_turns_first_then_the_active_turn() {
             incoming(&control, &mut receive).await.reply.send((200, step(index, tokens))).unwrap();
         }
         // First attempt: the ordinary summary of the earlier Turns.
-        let first = incoming(&control, &mut receive).await;
+        let first = incoming_summary(&control, &mut receive).await;
         assert_eq!(first.body["tools"], json!([]));
         let material = first.body["input"].to_string();
         assert!(material.contains("EARLY-ONE"), "earlier Turn first");
@@ -4120,7 +4207,7 @@ async fn ax_growing_turn_summary_requests(
         for index in 0..=19 {
             let ordinary = loop {
                 let request = incoming(&control, &mut receive).await;
-                if request.body["tools"] != json!([]) { break request; }
+                if request.kind() == ProviderRequestKind::Ordinary { break request; }
                 summaries += 1;
                 assert!(summaries < 80, "unbounded automatic summary loop");
                 request.reply.send(summary_reply()).unwrap();
@@ -4170,7 +4257,7 @@ async fn ax_growing_turn_summary_requests(
         eprintln!("summary_requests={summaries} records={records:#?}");
         // The failure record is automatic-only: an explicit compact still issues a summary.
         request(&control, Command::Compact(ThreadTarget { thread_id: Some(target.clone()) })).await;
-        let explicit = incoming(&control, &mut receive).await;
+        let explicit = incoming_summary(&control, &mut receive).await;
         assert_eq!(explicit.body["tools"], json!([]), "explicit compact is not blocked");
         let _ = explicit.reply.send((200, answer("explicit summary")));
         control.shutdown().await.unwrap(); owner.shutdown().await.unwrap(); server.abort();
@@ -4191,7 +4278,7 @@ struct ProactiveTrace {
 
 async fn proactive_third_turn(
     control: &Arc<Control>,
-    receive: &mut mpsc::Receiver<Incoming>,
+    receive: &mut ProxyInbox,
     thread: &str,
     second: u64,
     summary_reply: (u16, Value),
@@ -4220,7 +4307,7 @@ async fn live_run_turn_scope(control: &Control, thread: &str) -> (String, String
 
 async fn proactive_third_turn_after_run(
     control: &Arc<Control>,
-    receive: &mut mpsc::Receiver<Incoming>,
+    receive: &mut ProxyInbox,
     thread: &str,
     second: u64,
     summary_reply: (u16, Value),
@@ -4243,7 +4330,7 @@ async fn proactive_third_turn_after_run(
                     "warmup Turn is distinct before counting"
                 );
             }
-            if next.body["tools"] == json!([]) {
+            if next.kind() == ProviderRequestKind::Summary {
                 trace.summary_requests += 1;
                 assert!(
                     trace.summary_requests <= 8,
@@ -4344,7 +4431,7 @@ async fn proactive_third_turn_after_run(
                 "actual candidate Turn differs before accounting"
             );
         }
-        if next.body["tools"] == json!([]) {
+        if next.kind() == ProviderRequestKind::Summary {
             trace.summary_requests += 1;
             assert!(trace.summary_requests <= 8, "bounded summary requests");
             trace.summary_scopes.push((scope.0, scope.1));
@@ -4581,7 +4668,7 @@ async fn thread_auto_compact_override_replaces_the_connection_threshold_for_that
     let mut summaries = 0;
     loop {
         let next = incoming(&control, &mut receive).await;
-        if next.body["tools"] == json!([]) {
+        if next.kind() == ProviderRequestKind::Summary {
             summaries += 1;
             assert!(summaries <= 4, "bounded summary requests");
             next.reply
@@ -4633,7 +4720,7 @@ async fn thread_auto_compact_change_waits_for_the_next_boundary_and_never_alters
     let mut summaries = 0;
     loop {
         let next = incoming(&control, &mut receive).await;
-        if next.body["tools"] == json!([]) {
+        if next.kind() == ProviderRequestKind::Summary {
             summaries += 1;
             assert!(summaries <= 4, "bounded summary requests");
             next.reply
@@ -4698,7 +4785,7 @@ async fn bx_token_growth(
         ];
         while let Some(reply) = ordinary.last().cloned() {
             let next = incoming(&control, &mut receive).await;
-            if next.body["tools"] == json!([]) {
+            if next.kind() == ProviderRequestKind::Summary {
                 summaries += 1;
                 assert!(summaries <= 4, "bounded summary requests");
                 let input = next.body["input"].to_string();
@@ -4862,12 +4949,12 @@ async fn proactive_retries_when_a_new_older_turn_becomes_eligible() {
         settled(&control, &thread).await;
     }
     send(&control, &thread, "third task").await;
-    let first = incoming(&control, &mut receive).await;
+    let first = incoming_summary(&control, &mut receive).await;
     assert_eq!(first.body["tools"], json!([]));
     let input = first.body["input"].to_string();
     assert!(input.contains("task 0") && !input.contains("task 1"));
     first.reply.send((200, answer(" "))).unwrap();
-    let ordinary = incoming(&control, &mut receive).await;
+    let ordinary = incoming_ordinary(&control, &mut receive).await;
     assert_ne!(ordinary.body["tools"], json!([]));
     ordinary
         .reply
@@ -4880,7 +4967,7 @@ async fn proactive_retries_when_a_new_older_turn_becomes_eligible() {
         "empty summary is deterministic"
     );
     send(&control, &thread, "fourth task").await;
-    let second = incoming(&control, &mut receive).await;
+    let second = incoming_summary(&control, &mut receive).await;
     assert_eq!(
         second.body["tools"],
         json!([]),
@@ -4969,7 +5056,7 @@ async fn proactive_resumes_when_an_older_complete_tool_group_becomes_reducible()
         .reply
         .send((200, bx_tool("call-1", 200, command)))
         .unwrap();
-    let summary = incoming(&control, &mut receive).await;
+    let summary = incoming_summary(&control, &mut receive).await;
     assert_eq!(
         summary.body["tools"],
         json!([]),
@@ -4995,7 +5082,7 @@ async fn proactive_resumes_when_an_older_complete_tool_group_becomes_reducible()
         .reply
         .send((200, answer("short middle summary")))
         .unwrap();
-    let next = incoming(&control, &mut receive).await;
+    let next = incoming_ordinary(&control, &mut receive).await;
     assert_ne!(
         next.body["tools"],
         json!([]),
@@ -5059,7 +5146,7 @@ async fn active_gc_candidate_mutation_case(mutation: &'static str, expect_adopte
     next.reply
         .send((200, bx_tool("call-1", 200, "echo latest")))
         .unwrap();
-    let summary = incoming(&control, &mut receive).await;
+    let summary = incoming_summary(&control, &mut receive).await;
     assert_eq!(
         summary.body["tools"],
         json!([]),
@@ -5084,7 +5171,7 @@ async fn active_gc_candidate_mutation_case(mutation: &'static str, expect_adopte
         .reply
         .send((200, answer("a deliberately short summary")))
         .unwrap();
-    let ordinary = incoming(&control, &mut receive).await;
+    let ordinary = incoming_ordinary(&control, &mut receive).await;
     assert_ne!(
         ordinary.body["tools"],
         json!([]),
@@ -5894,7 +5981,7 @@ async fn proactive_shallow_summary_does_not_continue_below_threshold() {
             .reply
             .send((200, bx_tool("step-0", 201_061, "echo STEP0")))
             .unwrap();
-        let prefix = incoming(&control, &mut receive).await;
+        let prefix = incoming_summary(&control, &mut receive).await;
         assert_eq!(prefix.body["tools"], json!([]));
         let input = prefix.body["input"].to_string();
         assert!(input.contains("old-0") && !input.contains("old-1"));
@@ -5970,7 +6057,7 @@ async fn proactive_next_closed_summary_resummarizes_prior_summary_with_new_older
             .reply
             .send((200, bx_tool("step-a", 201_061, "echo A")))
             .unwrap();
-        let prefix = incoming(&control, &mut receive).await;
+        let prefix = incoming_summary(&control, &mut receive).await;
         assert_eq!(prefix.body["tools"], json!([]));
         assert!(!prefix.body["input"].to_string().contains("old-1"));
         prefix
@@ -5984,7 +6071,7 @@ async fn proactive_next_closed_summary_resummarizes_prior_summary_with_new_older
             .unwrap();
         settled(&control, &target).await;
         send(&control, &target, "TURN_B_MARKER").await;
-        let first = incoming(&control, &mut receive).await;
+        let first = incoming_ordinary(&control, &mut receive).await;
         assert_ne!(
             first.body["tools"],
             json!([]),
@@ -5994,7 +6081,7 @@ async fn proactive_next_closed_summary_resummarizes_prior_summary_with_new_older
             .reply
             .send((200, bx_tool("step-b", 200_500, "echo B")))
             .unwrap();
-        let resummary = incoming(&control, &mut receive).await;
+        let resummary = incoming_summary(&control, &mut receive).await;
         assert_eq!(
             resummary.body["tools"],
             json!([]),
@@ -6077,7 +6164,7 @@ async fn proactive_attempt_runs_one_summary_operation_and_keeps_its_usage() {
                 ))
                 .unwrap();
         }
-        let prefix = incoming(&control, &mut receive).await;
+        let prefix = incoming_summary(&control, &mut receive).await;
         assert_eq!(prefix.body["tools"], json!([]));
         assert!(
             !prefix.body["input"].to_string().contains("WIDEN0"),
@@ -6087,7 +6174,7 @@ async fn proactive_attempt_runs_one_summary_operation_and_keeps_its_usage() {
             .reply
             .send((200, answer_with_usage("## Goal\nOld work", 11)))
             .unwrap();
-        let after = incoming(&control, &mut receive).await;
+        let after = incoming_ordinary(&control, &mut receive).await;
         assert_ne!(
             after.body["tools"],
             json!([]),
@@ -6380,7 +6467,7 @@ async fn bx_growing_turn(
             let mut run = 0;
             let ordinary = loop {
                 let request = incoming(&control, &mut receive).await;
-                if request.body["tools"] != json!([]) { break request; }
+                if request.kind() == ProviderRequestKind::Ordinary { break request; }
                 summaries += 1;
                 run += 1;
                 summary_inputs.push(request.body["input"].clone());

@@ -1672,10 +1672,34 @@ async fn issue_160_auto_compaction_detached_attachment_and_retry() {
             json!([]),
             "automatic summary: {mode}"
         );
+        let target = thread.clone();
+        let (automatic_attempt, automatic_token): (String, String) = control.store.database.call(move |db| {
+            db.query_row(
+                "SELECT a.id,json_extract(a.error_json,'$.automatic_trim_attempt.token') FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE t.thread_id=?1 AND json_type(a.error_json,'$.automatic_trim_attempt')='object' ORDER BY a.rowid DESC LIMIT 1",
+                [target],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            ).map_err(Into::into)
+        }).await.unwrap();
         summary
             .reply
             .send((200, answer("synthetic summary")))
             .unwrap();
+        // The queued resume may be sent before FINISH; bind completion to this exact attempt/token.
+        crate::test_watchdog::watchdog("issue160 automatic summary FINISH", async {
+            loop {
+                let attempt = automatic_attempt.clone();
+                let token = automatic_token.clone();
+                let adopted = control.store.database.call(move |db| {
+                    Ok(db.query_row(
+                        "SELECT EXISTS(SELECT 1 FROM model_attempt WHERE id=?1 AND state='completed' AND json_extract(error_json,'$.automatic_trim_attempt.token')=?2 AND json_extract(error_json,'$.automatic_trim_attempt.outcome')='adopted')",
+                        rusqlite::params![attempt, token],
+                        |row| row.get::<_, bool>(0),
+                    )?)
+                }).await.unwrap();
+                if adopted { break; }
+                tokio::task::yield_now().await;
+            }
+        }).await.unwrap();
         let next = incoming(&control, &thread, &mut receive).await;
         let target = thread.clone();
         let attachment = id.clone();

@@ -125,6 +125,51 @@ fn trigger_identity(trigger: &Value) -> Value {
 
 async fn record_boundary(fault: Fault, scenario: Scenario) -> Value {
     let receipt = direct_boundary_case(fault, scenario, Some(scenario.target_percent())).await;
+    assert_eq!(
+        receipt.reopened_witness.selection_revision,
+        receipt.after_fault_witness.selection_revision
+            + receipt.reopen_audit_appends.as_array().unwrap().len() as i64,
+        "selection revision tracks only the separately witnessed audit append"
+    );
+    assert_eq!(
+        receipt.reopened_witness.reasoning_epoch,
+        receipt.after_fault_witness.reasoning_epoch
+    );
+    assert_eq!(
+        receipt.reopened_witness.cursor,
+        receipt.after_fault_witness.cursor
+    );
+    assert_eq!(
+        receipt.reopened_witness.selected_path_source_bytes,
+        receipt.after_fault_witness.selected_path_source_bytes
+    );
+    assert!(receipt.reopened_witness.audit_path.is_array());
+    assert!(receipt.reopen_audit_appends.as_array().is_some());
+    assert!(receipt.checkpoint_witness.selection_revision > 0);
+    assert!(receipt.checkpoint_witness.reasoning_epoch >= 0);
+    assert!(receipt.checkpoint_witness.cursor.is_some());
+    assert!(
+        !receipt
+            .checkpoint_witness
+            .selected_path_source_bytes
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        receipt
+            .checkpoint_witness
+            .replacement_provenance_and_source_bytes
+            .is_array()
+    );
+    assert!(receipt.checkpoint_witness.whole_tool_group_facts.is_array());
+    assert!(
+        receipt
+            .checkpoint_witness
+            .protected_request_receipts
+            .is_array()
+    );
+    assert!(receipt.checkpoint_witness.audit_path.is_array());
     let checkpoint_phase = if fault == Fault::RejectFact {
         ObservationPhase::AfterRejectedStageTransaction
     } else {

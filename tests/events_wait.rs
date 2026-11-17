@@ -181,7 +181,7 @@ async fn fixture() -> (
     tempfile::TempDir,
     shellboy::app::DataOwner,
     Arc<Control>,
-    tokio::sync::mpsc::Receiver<crate::runtime_features::Incoming>,
+    crate::runtime_features::ProxyInbox,
     tokio::task::JoinHandle<()>,
 ) {
     let root = tempfile::tempdir().unwrap();
