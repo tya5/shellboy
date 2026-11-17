@@ -3662,7 +3662,6 @@ struct ReportBoundary {
 #[derive(Clone, Debug)]
 struct FinishedReportBoundary {
     boundary: ReportBoundary,
-    terminal: ExpectedAutomaticAttempt,
     outcome: String,
 }
 
@@ -3915,7 +3914,6 @@ impl ReportBoundary {
         );
         FinishedReportBoundary {
             boundary: self,
-            terminal: terminal.clone(),
             outcome: record["outcome"].as_str().unwrap().to_owned(),
         }
     }
