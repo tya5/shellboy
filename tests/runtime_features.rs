@@ -7382,90 +7382,128 @@ async fn proactive_growing_active_range_permits_one_summary_per_new_report() {
 }
 #[tokio::test]
 async fn proactive_provider_500_retries_for_a_new_active_range() {
-    let reply = (
-        500,
-        json!({"error":{"code":"invalid_request_error","message":"synthetic range-scoped 500"}}),
-    );
-    let (summaries, _, attempts, slots, spills, scopes, inputs, report_ledger) =
-        bx_growing_turn(false, false, reply, vec![100, 100, 202, 203, 204, 205, 100]).await;
-    let high_inputs: Vec<u64> = report_ledger
-        .iter()
-        .filter_map(|report| {
-            report["input_tokens"]
-                .as_u64()
-                .filter(|tokens| *tokens >= 200)
-        })
-        .collect();
-    assert_eq!(
-        high_inputs,
-        [202, 203, 204, 205],
-        "two source ranges are built from four independently named high reports: {report_ledger:#?}"
-    );
-    let fresh = fresh_growth_attempts(&report_ledger);
-    let fresh_inputs: Vec<u64> = fresh
-        .iter()
-        .map(|report| {
-            report["automatic_attempt"]["trigger"]["input_tokens"]
-                .as_u64()
-                .unwrap()
-        })
-        .collect();
-    assert_eq!(
-        fresh_inputs,
-        [202, 205],
-        "only the independently declared initial and changed active ranges own retry requests: {report_ledger:#?}"
-    );
-    assert_eq!(
-        inputs.len(),
-        2,
-        "exactly two provider500 requests are captured on the live Turn: {inputs:#?}"
-    );
-    let second_capture = inputs[1].to_string();
-    assert!(
-        second_capture.contains("grow-5"),
-        "the second changed R is captured after its predeclared complete call-5 group: {second_capture}"
-    );
-    assert!(
-        !second_capture.contains("grow-6"),
-        "the predeclared call-6 complete group is the protected latest whole group at the capture cut: {second_capture}"
-    );
-    assert_eq!(
-        summaries as usize,
-        fresh.len(),
-        "one provider POST per source-current changed active range: {report_ledger:#?}"
-    );
-    assert_eq!(
-        scopes.len(),
-        attempts.len(),
-        "every admitted report retains its Run/Turn/generation"
-    );
-    assert!(
-        scopes.iter().all(|scope| *scope == scopes[0]),
-        "same active source scope: {scopes:#?}"
-    );
-    assert_eq!(inputs.len(), summaries as usize);
-    assert!(
-        inputs.windows(2).all(|pair| pair[0] != pair[1]),
-        "each fresh admitted range changes selected R: {inputs:#?}"
-    );
-    assert!(
-        attempts
-            .iter()
-            .all(|attempt| attempt["outcome"] == "failed" || attempt["outcome"] == "no_target"),
-        "stale A and actual provider failures remain separate: {attempts:#?}"
-    );
-    assert!(
-        fresh.iter().all(
-            |report| report["automatic_attempt"]["compaction_outcome"]["outcome"]["reason"]
-                == "provider_error"
-        ),
-        "fresh ranges preserve the actual synthetic HTTP500 negative: {fresh:#?}"
-    );
-    assert!(
-        slots.0.is_none() && slots.1.is_some(),
-        "provider failure remains active-range scoped: {slots:?}"
-    );
-    assert_eq!(spills, 0, "unknown tool responses do not authorize spills");
+    crate::test_watchdog::watchdog("provider500 across source-prescribed A epochs", async {
+        let root = tempfile::tempdir().unwrap();
+        let (url, mut receive, server) = proxy().await;
+        let owner = proactive_owner(
+            root.path(), &url,
+            "[compaction]\nauto_at_tokens=200\nsummary_max_chars=4000\n",
+        ).await;
+        let control = Control::new(&owner, root.path().into());
+        let target = thread(&control).await;
+        let failure = (500, json!({"error":{"code":"invalid_request_error","message":"synthetic range-scoped 500"}}));
+        let declared = [(202_u64, "source-range-first-202"), (205_u64, "source-range-next-205")];
+        let mut report_owners = Vec::new();
+        let mut finished_tokens = Vec::new();
+        let mut captures = Vec::new();
+
+        for (index, (input_tokens, prompt)) in declared.into_iter().enumerate() {
+            let accepted = send_accepted(&control, &target, prompt).await;
+            assert!(accepted.run_id.is_some(), "each report epoch is owned by a real Driver Run");
+            let turn_id = accepted.turn_id.expect("declared report Turn");
+            let seed = incoming_ordinary(&control, &mut receive).await;
+            let seed_id = if index == 0 { "grow-first-seed" } else { "grow-5" };
+            let seed_report = prepared_report_from_incoming(&control, &turn_id, &seed, 100).await;
+            seed.reply.send((200, json!({
+                "id":seed_id, "status":"completed",
+                "usage":{"input_tokens":100,"output_tokens":1},
+                "output":[{"type":"function_call","call_id":seed_id,"name":"nope","arguments":"{}"}]
+            }))).unwrap();
+            let ordinary = incoming_ordinary(&control, &mut receive).await;
+            let report = prepared_report_from_incoming(
+                &control, &turn_id, &ordinary, input_tokens,
+            ).await;
+            let manifest: Value = serde_json::from_str(&report.owner.request_token).unwrap();
+            let meta_key = format!("compact.a_state.{target}");
+            let seed_manifest: Value = serde_json::from_str(&seed_report.owner.request_token).unwrap();
+            let a_state: Value = control.store.database.call(move |db| {
+                let text: String = db.query_row("SELECT value FROM app_meta WHERE key=?1", [meta_key], |row| row.get(0))?;
+                Ok(serde_json::from_str(&text).expect("live A-state"))
+            }).await.unwrap();
+            assert_eq!(manifest["boundary"], index,
+                "new report owner starts only after the prior same-Thread FINISH reset: {manifest:#?}");
+            assert_eq!(manifest["scope"], a_state["scope_generation"]);
+            assert_eq!(manifest["boundary"], a_state["boundary_generation"]);
+            assert_eq!(seed_manifest["scope"], manifest["scope"]);
+            assert_eq!(seed_manifest["boundary"], manifest["boundary"]);
+            assert_eq!(a_state["first"]["attempt"], seed_report.owner.attempt_id,
+                "the independently identified seed response establishes A before the fresh high report");
+            assert_eq!(a_state["first"]["input_tokens"], 100);
+            if index == 1 {
+                assert_eq!(a_state["last_reset_origin"], finished_tokens[0],
+                    "the prior exact original GC FINISH causes this report's new boundary");
+            }
+            let tool_id = if index == 0 { "grow-first" } else { "grow-6" };
+            ordinary.reply.send((200, json!({
+                "id":format!("{tool_id}-owner"), "status":"completed",
+                "usage":{"input_tokens":input_tokens,"output_tokens":1},
+                "output":[{"type":"function_call","call_id":tool_id,"name":"nope","arguments":"{}"}]
+            }))).unwrap();
+
+            let turns = [turn_id.clone()];
+            let finish_wait = automatic_attempts_finished_for_turns(&control, &turns, 1);
+            let settle = settled(&control, &target);
+            tokio::pin!(finish_wait);
+            tokio::pin!(settle);
+            let mut finished = None;
+            let mut is_settled = false;
+            let mut final_sent = false;
+            let mut post_count = 0;
+            while finished.is_none() || !is_settled {
+                tokio::select! {
+                    terminal = &mut finish_wait, if finished.is_none() => finished = Some(terminal),
+                    _ = &mut settle, if !is_settled => is_settled = true,
+                    incoming = receive.recv() => {
+                        let incoming = incoming.expect("same-Thread provider remains available through exact report FINISH");
+                        match incoming.kind() {
+                            ProviderRequestKind::Summary => {
+                                post_count += 1;
+                                captures.push(incoming.body["input"].clone());
+                                incoming.reply.send(failure.clone()).unwrap();
+                            }
+                            ProviderRequestKind::Ordinary => {
+                                assert!(!final_sent, "one source-declared context-limit boundary per completed range");
+                                final_sent = true;
+                                incoming.reply.send((413, json!({"error":{
+                                    "code":"context_length_exceeded","message":"join the exact active range before the next Run"
+                                }}))).unwrap();
+                            }
+                        }
+                    }
+                }
+            }
+            assert!(final_sent, "the current ordinary Run reached its real context-limit join boundary");
+            assert_eq!(post_count, 1, "one real HTTP500 POST per source-prescribed range");
+            let terminal = finished.unwrap();
+            assert_eq!(terminal.len(), 1);
+            assert_eq!(terminal[0].id, report.owner.attempt_id);
+            let record = automatic_attempt_record(&control, report.owner.attempt_id.clone()).await;
+            assert_eq!(record["token"], terminal[0].token, "report identity and original GC FINISH token remain distinct");
+            assert_eq!(record["trigger"]["input_tokens"], input_tokens);
+            assert_eq!(record["outcome"], "failed");
+            assert_eq!(record["compaction_outcome"]["outcome"]["reason"], "provider_error");
+            report_owners.push(report.owner);
+            finished_tokens.push(terminal[0].token.clone());
+            let run = accepted.run_id.expect("same saved report Run for cleanup");
+            request(&control, Command::RunStop(RunTarget { run_id: run.clone() })).await;
+            assert_eq!(request(&control, Command::RunGet(RunTarget { run_id: run })).await["state"], "stopped");
+        }
+
+        assert_eq!(report_owners.iter().map(|report| &report.attempt_id).collect::<std::collections::HashSet<_>>().len(), 2,
+            "the two provider failures belong to independent actual model attempts");
+        assert_ne!(report_owners[0].row_turn_id, report_owners[1].row_turn_id,
+            "each range is a separately completed ordinary Turn, not an assumed within-Turn schedule");
+        assert_ne!(captures[0], captures[1], "the two real provider R bodies are independently changed");
+        let thread = target.clone();
+        let (spills, shell_executions): (usize, i64) = control.store.database.call(move |db| {
+            let spills = proactive_wait_witness(db, &thread)?.0.len();
+            let calls: i64 = db.query_row("SELECT count(*) FROM shell_execution", [], |row| row.get(0))?;
+            Ok((spills, calls))
+        }).await.unwrap();
+        assert_eq!(spills, 0, "provider error ranges authorize no spill");
+        assert_eq!(shell_executions, 0, "provider error ranges execute no shell tools");
+        control.shutdown().await.unwrap(); owner.shutdown().await.unwrap(); server.abort();
+    }).await.unwrap();
 }
 /// Drives one predeclared sequence of ordinary usage reports in a current Turn.
 /// Each report input is independent source data; one natural final response ends the Turn.
