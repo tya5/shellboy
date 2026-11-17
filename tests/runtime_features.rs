@@ -4857,19 +4857,58 @@ async fn proactive_threshold_compacts_once_at_the_next_boundary() {
     let owner = proactive_owner(root.path(), &url, "[compaction]\nauto_at_tokens=100\n").await;
     let control = Control::new(&owner, root.path().into());
     let thread = thread(&control).await;
-    let summaries = proactive_third_turn(
-        &control,
-        &mut receive,
-        &thread,
-        150,
-        (200, {
-            let mut reply = answer("## 目的\nSummarized earlier turns");
-            reply["usage"] = json!({"input_tokens":120,"input_tokens_details":{"cached_tokens":30,"cache_creation_tokens":4},"output_tokens":6});
-            reply
-        }),
-    )
-    .await;
-    assert_eq!(summaries, 1);
+    let summary_reply = (200, {
+        let mut reply = answer("## 目的\nSummarized earlier turns");
+        reply["usage"] = json!({"input_tokens":120,"input_tokens_details":{"cached_tokens":30,"cache_creation_tokens":4},"output_tokens":6});
+        reply
+    });
+    let mut summaries =
+        proactive_third_turn(&control, &mut receive, &thread, 150, summary_reply.clone()).await;
+    let initial_events = proactive_events(&control, &thread).await;
+    assert_eq!(
+        initial_events.len(),
+        1,
+        "one independently triggered threshold report: {initial_events:#?}"
+    );
+    let original_attempt_id = initial_events[0]["attempt_id"]
+        .as_str()
+        .expect("threshold report attempt id")
+        .to_owned();
+    let original_turn_id = initial_events[0]["turn_id"]
+        .as_str()
+        .expect("threshold report Turn id")
+        .to_owned();
+    let finish =
+        automatic_attempts_finished_for_turns(&control, std::slice::from_ref(&original_turn_id), 1);
+    tokio::pin!(finish);
+    let terminal = loop {
+        tokio::select! {
+            attempts = &mut finish => break attempts,
+            incoming = receive.recv() => {
+                let incoming = incoming.expect("threshold provider remains available through original FINISH");
+                assert_eq!(incoming.kind(), ProviderRequestKind::Summary,
+                    "only a retained automatic Summary request may remain after foreground settlement");
+                summaries += 1;
+                incoming.reply.send(summary_reply.clone()).unwrap();
+            }
+        }
+    };
+    assert_eq!(terminal.len(), 1);
+    assert_eq!(
+        terminal[0].id, original_attempt_id,
+        "the completed receipt is the original threshold report owner"
+    );
+    let finished_record = automatic_attempt_record(&control, original_attempt_id.clone()).await;
+    assert_eq!(finished_record["trigger"]["input_tokens"], 150);
+    assert_eq!(
+        finished_record["token"], terminal[0].token,
+        "original GC token survives exact FINISH"
+    );
+    assert_eq!(finished_record["outcome"], "adopted");
+    assert_eq!(
+        summaries, 1,
+        "one request completed in the original threshold attempt"
+    );
     assert!(
         receive.try_recv().is_err(),
         "no further request after settling"
