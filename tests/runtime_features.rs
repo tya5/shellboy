@@ -6096,7 +6096,27 @@ async fn proactive_shallow_summary_does_not_continue_below_threshold() {
             json!([]),
             "no summary below the threshold"
         );
-        assert_strict_append(&first_after.body, &below.body, "below threshold");
+        // The first ordinary request can use the pre-FINISH cut; the later
+        // request must reflect the committed closed-summary replacement while
+        // retaining this newly completed tool result.
+        let before_projection = first_after.body["input"].to_string();
+        let after_projection = below.body["input"].to_string();
+        assert!(
+            before_projection.contains("old-0"),
+            "the earlier request uses its captured pre-adoption cut"
+        );
+        assert!(
+            after_projection.contains("Old work retained"),
+            "the later request contains the adopted summary"
+        );
+        assert!(
+            !after_projection.contains("old-0"),
+            "the replaced closed source is no longer replayed"
+        );
+        assert!(
+            after_projection.contains("STEP1"),
+            "the new ordinary tool result remains in history"
+        );
         below
             .reply
             .send((200, answer_with_usage("done", 140_000)))
