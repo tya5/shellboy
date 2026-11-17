@@ -1,3 +1,5 @@
+# Validation record
+
 ## Core U2 proactive Driver/Stop causal repair (bounded clean-source evidence)
 
 Parent source: `49f6c8fdeae90205808f14f7e816fba56a679601`. Exact clean patch SHA-256: `f353a7ab28fccde07d0e60fcca43c363c3b6345b1d171c76d724cc1868fc9235` (six source/test files; immutable copy under `.local/private-reports/studio-current-20261113/closed-stop-uninstrumented-final-clean-20261118/`). Independent source review closes the three correlated Driver/Stop ownership seams at bounded source scope: `.local/leader/core-u2-closed-stop-2915ecb-causal-repair-review-20261118.md`, SHA-256 `533d6873e0052714fd9d71f8f0c08accc0559093dcf5ceb48200770cfc7bfad0`.
@@ -7,7 +9,6 @@ Parent source: `49f6c8fdeae90205808f14f7e816fba56a679601`. Exact clean patch SHA
 - Separate causal trace: instrumented original-path log/source are preserved under `.local/private-reports/studio-current-20261113/closed-stop-full-publication-fence-trace-49f6c8f/`; that trace was used to select the repair and is not a clean-source test receipt. Original Finish is not replaced by manual SQL in the retained integration contract.
 - Scope limits: these are a bounded source verdict and one exact clean integration control. Full normal suite, DB-observation tests, strict all-target Clippy, complete-unit independent review, platform CI and integration/landing are pending on the final committed SHA. Historical REDs/misses and U2 STOP remain unchanged.
 
-# Validation record
 
 ## CORE301 c0-rooted GC port follow-up (candidate, uncommitted)
 
