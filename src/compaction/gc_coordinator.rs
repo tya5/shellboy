@@ -489,6 +489,78 @@ mod lifecycle_event_tests {
     use super::*;
 
     #[tokio::test]
+    async fn explicit_stop_cancels_and_joins_failed_summary_producer() {
+        let root = tempfile::tempdir().unwrap();
+        let db = crate::storage::DbWorker::open(root.path().join("db"))
+            .await
+            .unwrap();
+        let id = WriterJobId(78);
+        let stop = CancellationToken::new();
+        let producer_stop = stop.clone();
+        let (exit_tx, completion_signal) = tokio::sync::oneshot::channel();
+        let (result_tx, result_rx) = tokio::sync::oneshot::channel();
+        let runtime = tokio::runtime::Handle::current();
+        let wake = db.gc_retirement_wake();
+        let exit_wake = wake.clone();
+        let task = runtime.spawn(async move {
+            producer_stop.cancelled().await;
+            result_tx.send(WriterCompletion::Failed).unwrap();
+            let _ = exit_tx.send(ChildExit::Finished(Some(WriterCompletion::Failed)));
+            let _ = exit_wake.notify(id).await;
+        });
+        let stage = super::super::attempt::GcStage {
+            attempt_id: "stop-attempt".into(),
+            token: "stop-token".into(),
+            thread_id: "stop-thread".into(),
+            profile_id: "p".into(),
+            model_id: "m".into(),
+            effort: None,
+            reasoning_epoch: 0,
+            stage: "closed_summary",
+        };
+        let mut coordinator = WriterGcCoordinator {
+            active: Some(OwnedGcJob {
+                id,
+                cancel: stop.clone(),
+                task: Some(task),
+                completion_signal: Some(completion_signal),
+                retirement_task: None,
+                joined_receiver: None,
+                joined: false,
+                runtime,
+                retirement_wake: wake,
+                phase: WriterJobPhase::Computing,
+                terminal: None,
+                lifecycle: None,
+                adoption_candidate: None,
+                stage,
+                rejection: None,
+            }),
+        };
+
+        assert!(
+            coordinator.cancel_job(id),
+            "explicit RunStop closes the exact writer job"
+        );
+        assert!(stop.is_cancelled());
+        assert_eq!(result_rx.await.unwrap(), WriterCompletion::Failed);
+        let retirement = coordinator
+            .active
+            .as_mut()
+            .unwrap()
+            .retirement_task
+            .take()
+            .expect("cancel starts the producer join reaper");
+        retirement.await.unwrap();
+        assert!(
+            coordinator.process_lifecycle_event(id),
+            "the failed producer's join receipt retires the closed writer before caller FINISH"
+        );
+        assert!(coordinator.active.is_none());
+        db.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
     async fn matching_child_exit_preserves_the_single_ready_completion() {
         let root = tempfile::tempdir().unwrap();
         let db = crate::storage::DbWorker::open(root.path().join("db"))
