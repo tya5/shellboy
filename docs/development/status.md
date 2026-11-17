@@ -1,3 +1,5 @@
+# Development status
+
 ## Core U2 proactive Driver/Stop causal repair (complete qualification pending)
 
 The clean source delta is six files on parent `49f6c8fdeae90205808f14f7e816fba56a679601`; immutable final patch SHA-256 `f353a7ab28fccde07d0e60fcca43c363c3b6345b1d171c76d724cc1868fc9235` is in `.local/private-reports/studio-current-20261113/closed-stop-uninstrumented-final-clean-20261118/`. The independent bounded source closure is `.local/leader/core-u2-closed-stop-2915ecb-causal-repair-review-20261118.md` (SHA-256 `533d6873e0052714fd9d71f8f0c08accc0559093dcf5ceb48200770cfc7bfad0`); its prior review variants and the instrumented correlated trace remain separate immutable evidence.
@@ -8,7 +10,6 @@ The repair serializes live-Run selection with registry publication, retains Thre
 
 Full normal/test suite, DB-observation selector, strict all-target Clippy, complete-unit source review and platform CI are not yet qualified on the final committed SHA. Earlier REDs, the `06c`/`7f4` interruptions, historical misses and unrelated U2 STOP remain separate; no push, release or incident-wide acceptance is recorded.
 
-# Development status
 
 ## CORE301 current-main GC port candidate (not main state)
 
