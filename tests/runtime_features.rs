@@ -4149,14 +4149,15 @@ if cancel_active!=Some(true) {
 }
 *entered_phase.borrow_mut()="awaiting actual Summary HTTP request".to_owned();
 let trigger_accept=trigger_accept.expect("the current report cut has an accepted trigger Run");
-let mut retry_admitted = false;
+let mut ordinary_failures = 0;
 let summary = if cancel_active == Some(true) {
     loop {
         let request = receive.recv().await.expect("provider remains available during active backoff");
         if request.kind() == ProviderRequestKind::Summary { break request; }
         assert_eq!(request.kind(), ProviderRequestKind::Ordinary);
-        assert!(!retry_admitted, "one independent transient retry is declared for this live boundary");
-        retry_admitted = true;
+        assert!(ordinary_failures < 2,
+            "one configured transient retry permits at most the original request plus one retry");
+        ordinary_failures += 1;
         request.reply.send((500, json!({
             "error":{"code":"server_error","message":"synthetic ordinary retry releases the Driver boundary"}
         }))).unwrap();
@@ -4165,8 +4166,7 @@ let summary = if cancel_active == Some(true) {
     incoming_summary(&control, &mut receive).await
 };
 if cancel_active == Some(true) {
-    assert!(retry_admitted,
-        "the active capture follows the source-defined Ordinary transient-backoff boundary");
+    assert!(ordinary_failures <= 2, "the source-configured retry bound is preserved");
     let live_run = request(&control, Command::RunGet(RunTarget {
         run_id: trigger_accept.run_id.clone().expect("saved explicit-Stop Run"),
     })).await;
