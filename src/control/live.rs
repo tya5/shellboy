@@ -164,29 +164,20 @@ impl LiveRegistry {
 
     /// Cancel and join the Thread-owned job on Stop/error or owner shutdown.
     pub(super) async fn cancel_join_proactive_job(&self, thread: &str, slot: &DriverSlot) {
-        loop {
-            let notified = slot.proactive_join_done.notified();
-            tokio::pin!(notified);
-            notified.as_mut().enable();
-            let mut jobs = slot.proactive_job.lock().await;
-            if slot.proactive_joining.load(Ordering::Acquire) {
-                drop(jobs);
-                notified.await;
-                break;
-            }
-            let job = jobs.take();
-            if job.is_some() {
-                slot.proactive_joining.store(true, Ordering::Release);
-            }
+        let notified = slot.proactive_join_done.notified();
+        tokio::pin!(notified);
+        notified.as_mut().enable();
+        let mut jobs = slot.proactive_job.lock().await;
+        if slot.proactive_joining.load(Ordering::Acquire) {
             drop(jobs);
-            let Some(mut job) = job else {
-                break;
-            };
+            notified.await;
+        } else if let Some(mut job) = jobs.take() {
+            slot.proactive_joining.store(true, Ordering::Release);
+            drop(jobs);
             job.cancel();
             let _ = job.join().await;
             slot.proactive_joining.store(false, Ordering::Release);
             slot.proactive_join_done.notify_waiters();
-            break;
         }
         self.prune_idle_background(thread, &slot.proactive_job)
             .await;
