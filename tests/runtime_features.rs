@@ -7575,7 +7575,16 @@ async fn bx_growing_turn(
             assert_eq!(scope.2, "live", "the active source capture precedes natural final completion");
             request.reply.send(summary_reply.clone()).unwrap();
         };
-        final_request.reply.send((200, answer("finished"))).unwrap();
+        if summary_reply.0 == 500 {
+            // A natural context-limit failure uses the existing Driver join on
+            // any retained proactive job before this Run leaves its live Turn.
+            final_request.reply.send((413, json!({"error":{
+                "code":"context_length_exceeded",
+                "message":"synthetic final boundary joins an in-flight proactive Summary"
+            }}))).unwrap();
+        } else {
+            final_request.reply.send((200, answer("finished"))).unwrap();
+        }
         settled(&control, &target).await;
         assert_eq!(prepared_reports.len(), report_inputs.len(),
             "each independently declared response has one captured in-flight report owner");
