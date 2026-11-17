@@ -1036,6 +1036,7 @@ async fn committed_selection_witness(control: &Control, thread: &str) -> StageWi
 
         // Validate persisted interruption-detail/context ownership links against
         // their actual selected positions and source rows, not a kind-filtered suffix.
+        let mut context_owned_detail_nodes = Vec::new();
         for row in full_path.iter().filter(|row| row.3 == "interruption_context") {
             let payload: Value = serde_json::from_str(row.5.as_deref().expect("interruption context payload"))
                 .map_err(|error| crate::storage::StorageError::Schema(error.to_string()))?;
@@ -1075,21 +1076,28 @@ async fn committed_selection_witness(control: &Control, thread: &str) -> StageWi
                 if saved["section"] != section
                     || saved["details_kind"] != "interruption_details"
                     || saved["truncated"] != (count > items.len() as u64)
-                    || detail_count < ids.len() as u64
+                    || items.len() as u64 != count.min(64)
+                    || ids.len() as u64 != detail_count.min(64)
                 {
                     return Err(crate::storage::StorageError::Schema(format!("interruption section {section} shape/count mismatch")));
                 }
-                let actual_details = full_path.iter().filter(|candidate| {
+                let actual_detail_ids = full_path.iter().filter(|candidate| {
                     candidate.3 == "interruption_details" && candidate.7 == row.7
-                }).filter(|candidate| {
-                    candidate.5.as_deref()
-                        .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
-                        .and_then(|payload| payload["text"].as_str().and_then(|text| serde_json::from_str::<Value>(text).ok()))
-                        .is_some_and(|body| body["section"] == section && body["items"].is_array())
-                }).count() as u64;
-                if actual_details != detail_count {
+                }).filter_map(|candidate| {
+                    let payload=candidate.5.as_deref().and_then(|raw|serde_json::from_str::<Value>(raw).ok())?;
+                    let text=payload["text"].as_str()?;
+                    let body=serde_json::from_str::<Value>(text).ok()?;
+                    (body["section"]==section && body["items"].is_array()).then(||candidate.1.clone())
+                }).collect::<Vec<_>>();
+                if actual_detail_ids.len() as u64 != detail_count {
                     return Err(crate::storage::StorageError::Schema(format!("interruption section {section} detail count disagrees with same-snapshot selected nodes")));
                 }
+                let expected_references=actual_detail_ids.iter().take(64).cloned().collect::<Vec<_>>();
+                let saved_references=ids.iter().map(|id|id.as_str().ok_or_else(||crate::storage::StorageError::Schema(format!("interruption section {section} detail reference is not text")))).collect::<Result<Vec<_>,_>>()?;
+                if saved_references.iter().map(|id|id.to_string()).collect::<Vec<_>>()!=expected_references {
+                    return Err(crate::storage::StorageError::Schema(format!("interruption section {section} references are not the producer's exact ordered 64-node prefix")));
+                }
+                context_owned_detail_nodes.extend(actual_detail_ids);
                 for id in ids.iter().filter_map(Value::as_str) {
                     let detail = full_path.iter().find(|candidate| candidate.1 == id)
                         .ok_or_else(|| crate::storage::StorageError::Schema(format!("interruption detail {id} is not selected")))?;
@@ -1169,6 +1177,11 @@ async fn committed_selection_witness(control: &Control, thread: &str) -> StageWi
                         return Err(crate::storage::StorageError::Schema(format!("interrupted wait {operation} identity differs from its original")));
                     }
                 }
+            }
+        }
+        for detail in full_path.iter().filter(|row|row.3=="interruption_details") {
+            if detail.2.is_some() || detail.6.is_some() || !context_owned_detail_nodes.iter().any(|id|id==&detail.1) {
+                return Err(crate::storage::StorageError::Schema(format!("selected interruption detail {} has no earlier same-batch producer context/section owner",detail.1)));
             }
         }
         for event in &events {
