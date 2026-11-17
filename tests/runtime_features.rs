@@ -4837,26 +4837,50 @@ async fn thread_auto_compact_change_waits_for_the_next_boundary_and_never_alters
     server.abort();
 }
 
-/// #303 §6.3: an empty summary is a deterministic failure. Its original closed
-/// range and settings are remembered, so a later report that only adds tokens
-/// in the current Turn starts one attempt but sends no second summary request.
+/// A deterministic closed-summary failure is followed by a stale high-token
+/// tool report. Its report token predates the failed attempt's A-boundary reset,
+/// so usage cannot become #A; the later preflight is spill-only and no-target.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn proactive_summary_failure_does_not_retry_for_token_growth_alone() {
-    let (summaries, _, slots) = bx_token_growth((200, answer(" "))).await;
+async fn proactive_summary_failure_stale_report_is_no_target() {
+    let (summaries, attempts, slots, stale_a_tokens) = bx_token_growth((200, answer(" "))).await;
     assert_eq!(
         summaries, 1,
-        "token growth alone must not retry the same deterministic failure"
+        "the stale report cannot dispatch a second summary"
     );
-    assert!(slots.0.is_some(), "the closed failure slot is recorded");
-    assert!(slots.1.is_none(), "no active summary was attempted");
+    assert_eq!(
+        attempts.len(),
+        2,
+        "one initial closed failure and one later preflight"
+    );
+    assert_eq!(attempts[0]["outcome"], "failed");
+    assert_eq!(attempts[1]["outcome"], "no_target");
+    assert_eq!(attempts[1]["trigger"]["input_tokens"], 9999);
+    assert_eq!(
+        attempts[1]["trigger"]["a_input_tokens"], 0,
+        "the report's captured token is stale across the prior terminal A reset"
+    );
+    assert_ne!(
+        stale_a_tokens.0, stale_a_tokens.1,
+        "the stale 9999 report token differs from the post-FINISH A boundary"
+    );
+    assert!(
+        slots.0.is_some(),
+        "the initial closed deterministic failure remains recorded"
+    );
+    assert!(slots.1.is_none(), "no active failure slot was written");
 }
 
-/// Two completed Turns (first known report 50 > target 20, then 150 >= the
-/// threshold 100), then a Turn whose only tool round reports 9999. Both
-/// eligible reports select the same closed range (the first Turn).
+/// Two completed Turns establish A, one active summary fails, then a later
+/// 9999-token report was started before that failure's FINISH reset. Its saved
+/// report token proves that it cannot become post-reset #A.
 async fn bx_token_growth(
     summary_reply: (u16, Value),
-) -> (u32, Vec<Value>, (Option<String>, Option<String>)) {
+) -> (
+    u32,
+    Vec<Value>,
+    (Option<String>, Option<String>),
+    (String, String),
+) {
     crate::test_watchdog::watchdog("bx token growth", async move {
         let root = tempfile::tempdir().unwrap();
         let (url, mut receive, server) = proxy().await;
@@ -4912,23 +4936,38 @@ async fn bx_token_growth(
         // #A is the first known report after the most recent attempt (§1, §7).
         assert_eq!(
             triggers,
-            [(json!(150), json!(50)), (json!(9999), json!(9999))]
+            [(json!(150), json!(50)), (json!(9999), json!(0))],
+            "the later report started before the prior failure FINISH reset #A"
         );
-        for attempt in &attempts {
-            assert_eq!(attempt["outcome"], "failed", "{attempt:#?}");
-            assert_eq!(attempt["trigger"]["target_tokens"], 20);
-            assert!(attempt["committed_stages"]["closed_summary"].is_null());
-        }
+        let target=thread.clone();
+        let (report_token,a_boundary):(String,String)=control.store.database.call(move|db|{
+            db.query_row(
+                "SELECT json_extract(a.input_manifest_json,'$.compaction_report_token'),json_extract(a.error_json,'$.automatic_trim_attempt.trigger.a_boundary') FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE t.thread_id=?1 AND json_extract(a.usage_json,'$.input_tokens')=9999 AND json_type(a.error_json,'$.automatic_trim_attempt')='object' ORDER BY a.rowid DESC LIMIT 1",
+                [target],
+                |row|Ok((row.get(0)?,row.get(1)?)),
+            ).map_err(Into::into)
+        }).await.unwrap();
+        assert_ne!(report_token,a_boundary,
+            "source report began before the previous FINISH advanced A boundary; completion cannot supply stale #A");
+        assert_eq!(attempts[0]["trigger"]["target_tokens"],20);
+        assert_eq!(attempts[0]["outcome"],"failed");
+        assert!(attempts[0]["committed_stages"]["closed_summary"].is_null());
+        assert_eq!(attempts[1]["trigger"]["target_tokens"],20);
+        assert_eq!(attempts[1]["outcome"],"no_target");
+        assert_eq!(attempts[1]["committed_stages"],json!({}));
         let events = proactive_events(&control, &thread).await;
         assert_eq!(events.len(), 2, "{events:?}");
-        assert!(
-            events.iter().all(|event| event["state"] == "failed"),
-            "{events:?}"
-        );
-        let first = events
+        let first_event = events
             .iter()
             .find(|event| event["trigger"]["input_tokens"] == 150)
             .unwrap();
+        let second_event = events
+            .iter()
+            .find(|event| event["trigger"]["input_tokens"] == 9999)
+            .unwrap();
+        assert_eq!(first_event["state"],"failed","{first_event:#?}");
+        assert_eq!(second_event["state"],"no_target","{second_event:#?}");
+        let first = first_event;
         let usage = &first["metrics"]["summary_usage"];
         assert_eq!(usage["requests"], 1, "{first:#?}");
         assert_eq!(usage["input_tokens"]["unknown_count"], 1);
@@ -4956,10 +4995,20 @@ async fn bx_token_growth(
             "a failed proactive attempt never blocks the Turn"
         );
         let slots = bx_failure_slots(&control, &thread).await;
+        let target=thread.clone();
+        let stale_a_tokens:(String,String)=control.store.database.call(move|db|{
+            db.query_row(
+                "SELECT json_extract(a.input_manifest_json,'$.compaction_report_token'),json_extract(a.error_json,'$.automatic_trim_attempt.trigger.a_boundary') FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE t.thread_id=?1 AND json_extract(a.usage_json,'$.input_tokens')=9999 AND json_type(a.error_json,'$.automatic_trim_attempt')='object' ORDER BY a.rowid DESC LIMIT 1",
+                [target],
+                |row|Ok((row.get(0)?,row.get(1)?)),
+            ).map_err(Into::into)
+        }).await.unwrap();
+        assert_ne!(stale_a_tokens.0,stale_a_tokens.1,
+            "the input manifest token predates the terminal attempt's A-boundary reset");
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
         server.abort();
-        (summaries, attempts, slots)
+        (summaries, attempts, slots, stale_a_tokens)
     })
     .await
     .unwrap()
@@ -6162,7 +6211,23 @@ async fn proactive_next_closed_summary_resummarizes_prior_summary_with_new_older
             assert_eq!(attempt["outcome"], "adopted", "{attempt:#?}");
             assert!(attempt["committed_stages"]["closed_summary"]["summary_node_id"].is_string());
         }
-        assert_eq!(attempts[1]["trigger"]["a_input_tokens"], 184_622);
+        assert_eq!(attempts[1]["trigger"]["input_tokens"],200_500);
+        assert_eq!(attempts[1]["trigger"]["a_input_tokens"],200_500,
+            "the first report completed after the previous terminal A reset is #A");
+        let target=target.clone();
+        let (stale_report_token,current_report_token,current_a_boundary):(String,String,String)=control.store.database.call(move|db|{
+            let stale:String=db.query_row(
+                "SELECT json_extract(input_manifest_json,'$.compaction_report_token') FROM model_attempt WHERE turn_id IN (SELECT id FROM turn WHERE thread_id=?1) AND json_extract(usage_json,'$.input_tokens')=184622 ORDER BY rowid DESC LIMIT 1",
+                [&target],|row|row.get(0))?;
+            let current:(String,String)=db.query_row(
+                "SELECT json_extract(input_manifest_json,'$.compaction_report_token'),json_extract(error_json,'$.automatic_trim_attempt.trigger.a_boundary') FROM model_attempt WHERE turn_id IN (SELECT id FROM turn WHERE thread_id=?1) AND json_extract(usage_json,'$.input_tokens')=200500 AND json_type(error_json,'$.automatic_trim_attempt')='object' ORDER BY rowid DESC LIMIT 1",
+                [&target],|row|Ok((row.get(0)?,row.get(1)?)))?;
+            Ok((stale,current.0,current.1))
+        }).await.unwrap();
+        assert_ne!(stale_report_token,current_a_boundary,
+            "the 184622 response began before FINISH reset A and cannot populate the next boundary");
+        assert_eq!(current_report_token,current_a_boundary,
+            "the 200500 response manifest matches the accepted post-reset A boundary");
         assert!(receive.try_recv().is_err());
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
