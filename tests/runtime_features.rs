@@ -4700,11 +4700,26 @@ async fn compact_list_records_the_summary_parameters_in_effect() {
     )
     .await;
     assert_eq!(summaries, 1);
+    let provisional = proactive_events(&control, &thread).await;
+    assert_eq!(provisional.len(), 1, "{provisional:?}");
+    let expected_attempt = provisional[0]["attempt_id"].as_str().unwrap().to_owned();
+    let trigger_turn = provisional[0]["turn_id"].as_str().unwrap().to_owned();
+    let attempts = automatic_attempts_finished_for_turns(&control, &[trigger_turn], 1).await;
+    assert_eq!(
+        attempts[0].id, expected_attempt,
+        "FINISH is bound to the exact readback attempt"
+    );
     let events = proactive_events(&control, &thread).await;
     assert_eq!(events.len(), 1, "{events:?}");
+    assert_eq!(events[0]["attempt_id"], attempts[0].id);
+    assert_eq!(events[0]["state"], "adopted", "{:?}", events[0]);
     assert_eq!(events[0]["trigger"]["auto_at_tokens"], 100);
     let metrics = &events[0]["metrics"];
-    assert!(metrics["source_characters"].as_u64().is_some(), "{metrics}");
+    assert!(
+        metrics["source_characters"].as_u64().is_some(),
+        "existing CompactList row has no source metric: {}",
+        events[0]
+    );
     assert!(
         metrics["summary_characters"].as_u64().is_some(),
         "{metrics}"

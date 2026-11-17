@@ -1021,7 +1021,7 @@ async fn committed_selection_witness(control: &Control, thread: &str) -> StageWi
         }
 
         let events = tx.prepare(
-            "SELECT p.ordinal,n.id,n.notification_event_id,e.id,e.kind,e.source_json,e.target_thread_id,e.target_run_id,e.payload_ref_json,e.created_at,(SELECT json_group_array(json_object('recipient_id',d.recipient_id,'state',d.state,'owner_thread_id',r.thread_id,'owner_run_state',r.state)) FROM delivery d LEFT JOIN run r ON r.id=d.recipient_id WHERE d.event_id=e.id) FROM thread_path p JOIN node n ON n.id=p.node_id LEFT JOIN event e ON e.id=COALESCE(n.notification_event_id,json_extract(n.payload_json,'$.event_id')) WHERE p.thread_id=?1 AND n.kind='event' ORDER BY p.ordinal",
+            "SELECT p.ordinal,n.id,n.notification_event_id,e.id,e.kind,e.source_json,e.target_thread_id,e.target_run_id,e.payload_ref_json,e.created_at,(SELECT json_group_array(json_object('recipient_id',d.recipient_id,'state',d.state,'owner_thread_id',r.thread_id,'owner_run_state',r.state,'included_attempt_id',d.included_attempt_id,'included_attempt_thread_id',it.thread_id,'included_attempt_run_id',it.run_id,'processed_attempt_id',d.processed_attempt_id,'processed_attempt_thread_id',pt.thread_id,'processed_attempt_run_id',pt.run_id)) FROM delivery d LEFT JOIN run r ON r.id=d.recipient_id LEFT JOIN model_attempt ia ON ia.id=d.included_attempt_id LEFT JOIN turn it ON it.id=ia.turn_id LEFT JOIN model_attempt pa ON pa.id=d.processed_attempt_id LEFT JOIN turn pt ON pt.id=pa.turn_id WHERE d.event_id=e.id) FROM thread_path p JOIN node n ON n.id=p.node_id LEFT JOIN event e ON e.id=COALESCE(n.notification_event_id,json_extract(n.payload_json,'$.event_id')) WHERE p.thread_id=?1 AND n.kind='event' ORDER BY p.ordinal",
         )?.query_map([&thread], |row| Ok((row.get::<_,i64>(0)?,row.get::<_,String>(1)?,row.get::<_,Option<String>>(2)?,row.get::<_,Option<String>>(3)?,row.get::<_,Option<String>>(4)?,row.get::<_,Option<String>>(5)?,row.get::<_,Option<String>>(6)?,row.get::<_,Option<String>>(7)?,row.get::<_,Option<String>>(8)?,row.get::<_,Option<String>>(9)?,row.get::<_,Option<String>>(10)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
         let provenance = tx.prepare(
             "SELECT tr.replacement_id,r.output_node_id,out.kind,rs.ordinal,rs.source_node_id,rs.source_revision,rs.source_hash,src.payload_json FROM thread_replacement tr JOIN replacement r ON r.id=tr.replacement_id JOIN node out ON out.id=r.output_node_id LEFT JOIN replacement_source rs ON rs.replacement_id=r.id LEFT JOIN node src ON src.id=rs.source_node_id WHERE tr.thread_id=?1 ORDER BY r.created_at,r.id,rs.ordinal",
@@ -1029,7 +1029,9 @@ async fn committed_selection_witness(control: &Control, thread: &str) -> StageWi
         let runs = tx.prepare("SELECT id,thread_id,state FROM run WHERE thread_id=?1 ORDER BY created_at,rowid")?.query_map([&thread],|row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,String>(2)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
         let turns = tx.prepare("SELECT id,run_id,state FROM turn WHERE thread_id=?1 ORDER BY created_at,rowid")?.query_map([&thread],|row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,String>(2)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
         let shells = tx.prepare("SELECT s.id,s.owner_run_id,s.turn_id,s.state FROM shell_execution s JOIN run r ON r.id=s.owner_run_id WHERE r.thread_id=?1 ORDER BY s.started_at,s.rowid")?.query_map([&thread],|row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,String>(2)?,row.get::<_,String>(3)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
-        let groups = tx.prepare("SELECT g.id,g.turn_id,g.attempt_id,g.state FROM tool_group g JOIN turn t ON t.id=g.turn_id WHERE t.thread_id=?1 ORDER BY g.rowid")?.query_map([&thread],|row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,String>(2)?,row.get::<_,String>(3)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
+        let groups = tx.prepare(
+            "SELECT g.id,g.turn_id,g.attempt_id,g.state,c.call_id,c.ordinal,c.state,r.node_id,r.status FROM tool_group g JOIN turn t ON t.id=g.turn_id LEFT JOIN tool_call c ON c.group_id=g.id LEFT JOIN tool_result r ON r.group_id=c.group_id AND r.call_id=c.call_id WHERE t.thread_id=?1 ORDER BY g.rowid,c.ordinal,r.node_id",
+        )?.query_map([&thread], |row| Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,String>(2)?,row.get::<_,String>(3)?,row.get::<_,Option<String>>(4)?,row.get::<_,Option<i64>>(5)?,row.get::<_,Option<String>>(6)?,row.get::<_,Option<String>>(7)?,row.get::<_,Option<String>>(8)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
         let receipts = tx.prepare("SELECT id,target_thread_id,run_id,turn_id,message_node_id,state FROM receipt WHERE target_thread_id=?1 ORDER BY created_at,id")?.query_map([&thread],|row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,Option<String>>(2)?,row.get::<_,Option<String>>(3)?,row.get::<_,String>(4)?,row.get::<_,String>(5)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
 
         // Validate persisted interruption-detail/context ownership links against
@@ -1040,15 +1042,19 @@ async fn committed_selection_witness(control: &Control, thread: &str) -> StageWi
             let text = payload["text"].as_str().ok_or_else(||crate::storage::StorageError::Schema("interruption context has no text envelope".into()))?;
             let context: Value = serde_json::from_str(text)
                 .map_err(|error| crate::storage::StorageError::Schema(error.to_string()))?;
-            if context["snapshot_node_id"] != row.1 {
-                return Err(crate::storage::StorageError::Schema("interruption snapshot identity differs from its selected node".into()));
+            if context["snapshot_node_id"] != row.1 || row.2.is_some() || row.6.is_some() {
+                return Err(crate::storage::StorageError::Schema("interruption snapshot identity/owner differs from its selected node".into()));
             }
             for section in ["runs","turns","shells","tool_calls","unreflected_messages","cancelled_waits","pending_operations_with_unknown_targets"] {
                 if let Some(ids) = context["change"][section]["detail_node_ids"].as_array() {
                     for id in ids.iter().filter_map(Value::as_str) {
                         let detail = full_path.iter().find(|candidate| candidate.1 == id)
                             .ok_or_else(||crate::storage::StorageError::Schema(format!("interruption detail {id} is not selected")))?;
-                        if detail.0 >= row.0 || detail.3 != "interruption_details" {
+                        if detail.0 >= row.0
+                            || detail.3 != "interruption_details"
+                            || detail.2.is_some()
+                            || detail.6.is_some()
+                        {
                             return Err(crate::storage::StorageError::Schema(format!("interruption detail {id} is not an earlier detail node")));
                         }
                         let detail_payload: Value = serde_json::from_str(detail.5.as_deref().expect("detail payload"))
@@ -1083,10 +1089,76 @@ async fn committed_selection_witness(control: &Control, thread: &str) -> StageWi
                     return Err(crate::storage::StorageError::Schema(format!("interruption shell {id} has mismatched owner")));
                 }
             }
+            for item in context["change"]["tool_calls"]["items"].as_array().into_iter().flatten() {
+                let group = item["group_id"].as_str().ok_or_else(||crate::storage::StorageError::Schema("interruption tool call has no group id".into()))?;
+                let call = item["call_id"].as_str().ok_or_else(||crate::storage::StorageError::Schema("interruption tool call has no call id".into()))?;
+                let run = item["run_id"].as_str().ok_or_else(||crate::storage::StorageError::Schema("interruption tool call has no Run owner".into()))?;
+                let turn = item["turn_id"].as_str().ok_or_else(||crate::storage::StorageError::Schema("interruption tool call has no Turn owner".into()))?;
+                if !turns.iter().any(|(id,owner,_)|id==turn && owner==run)
+                    || !groups.iter().any(|row|row.0==group && row.1==turn && row.4.as_deref()==Some(call))
+                {
+                    return Err(crate::storage::StorageError::Schema(format!("interruption tool call {group}/{call} has mismatched group or Turn owner")));
+                }
+            }
+            for item in context["change"]["unreflected_messages"]["items"].as_array().into_iter().flatten() {
+                let id = item["receipt_id"].as_str().ok_or_else(||crate::storage::StorageError::Schema("interruption receipt has no id".into()))?;
+                let node = item["message_node_id"].as_str().ok_or_else(||crate::storage::StorageError::Schema("interruption receipt has no message node".into()))?;
+                let run = item["run_id"].as_str();
+                let turn = item["turn_id"].as_str();
+                if !receipts.iter().any(|(receipt,owner,receipt_run,receipt_turn,message,_)|receipt==id && owner==&thread && receipt_run.as_deref()==run && receipt_turn.as_deref()==turn && message==node) {
+                    return Err(crate::storage::StorageError::Schema(format!("interruption receipt {id} has mismatched Thread/Run/Turn/message ownership")));
+                }
+            }
+            for item in context["change"]["cancelled_waits"]["items"].as_array().into_iter().flatten() {
+                let operation = item["operation_id"].as_str().ok_or_else(||crate::storage::StorageError::Schema("interrupted wait has no operation id".into()))?;
+                if let Some(node) = item["node_id"].as_str() {
+                    let saved = full_path.iter().find(|candidate|candidate.1==node)
+                        .ok_or_else(||crate::storage::StorageError::Schema(format!("interrupted wait {operation} points outside the selected path")))?;
+                    if saved.3!="interrupted_wait" {
+                        return Err(crate::storage::StorageError::Schema(format!("interrupted wait {operation} points to a non-wait node")));
+                    }
+                    let saved_payload:Value=serde_json::from_str(saved.5.as_deref().expect("interrupted wait payload"))
+                        .map_err(|error|crate::storage::StorageError::Schema(error.to_string()))?;
+                    let saved_text=saved_payload["text"].as_str().ok_or_else(||crate::storage::StorageError::Schema("interrupted wait has no text".into()))?;
+                    let original:Value=serde_json::from_str(saved_text)
+                        .map_err(|error|crate::storage::StorageError::Schema(error.to_string()))?;
+                    if original["operation_id"]!=operation {
+                        return Err(crate::storage::StorageError::Schema(format!("interrupted wait {operation} identity differs from its original")));
+                    }
+                }
+            }
         }
         for event in &events {
             if event.2.is_some() && event.3.is_none() {
                 return Err(crate::storage::StorageError::Schema(format!("selected event node {} references a missing event",event.1)));
+            }
+            if let Some(event_id) = event.3.as_deref() {
+                if event.2.as_deref().is_some_and(|marker| marker != event_id) {
+                    return Err(crate::storage::StorageError::Schema(format!("event node {} notification marker identity differs from its event row",event.1)));
+                }
+                let source: Value = serde_json::from_str(event.5.as_deref().ok_or_else(||crate::storage::StorageError::Schema("event row source_json is absent".into()))?)
+                    .map_err(|error|crate::storage::StorageError::Schema(error.to_string()))?;
+                if !source.is_object() {
+                    return Err(crate::storage::StorageError::Schema(format!("event {} source_json is not an object",event_id)));
+                }
+                let payload_ref: Value = serde_json::from_str(event.8.as_deref().ok_or_else(||crate::storage::StorageError::Schema("event payload_ref_json is absent".into()))?)
+                    .map_err(|error|crate::storage::StorageError::Schema(error.to_string()))?;
+                let node = full_path.iter().find(|row| row.1 == event.1)
+                    .ok_or_else(||crate::storage::StorageError::Schema(format!("event node {} is absent from the full selected path",event.1)))?;
+                let node_payload: Value = serde_json::from_str(node.5.as_deref().ok_or_else(||crate::storage::StorageError::Schema("selected event node payload is absent".into()))?)
+                    .map_err(|error|crate::storage::StorageError::Schema(error.to_string()))?;
+                if node_payload["event_id"] != event_id {
+                    return Err(crate::storage::StorageError::Schema(format!("event node {} payload identity differs from its event row",event.1)));
+                }
+                let text = node_payload.pointer("/content/0/text").and_then(Value::as_str)
+                    .and_then(|text|text.strip_prefix("Shellboy event v1: "))
+                    .map(|text|text.split_once('\n').map_or(text, |(envelope, _)| envelope))
+                    .ok_or_else(||crate::storage::StorageError::Schema(format!("event node {} has no canonical event-v1 envelope",event.1)))?;
+                let envelope: Value = serde_json::from_str(text)
+                    .map_err(|error|crate::storage::StorageError::Schema(error.to_string()))?;
+                if envelope["event_id"] != event_id || envelope["kind"] != event.4.as_deref().unwrap_or_default() || envelope["payload"] != payload_ref {
+                    return Err(crate::storage::StorageError::Schema(format!("event row and selected envelope disagree at node {}",event.1)));
+                }
             }
             if let Some(target) = event.6.as_deref()
                 && target != thread
@@ -1102,10 +1174,21 @@ async fn committed_selection_witness(control: &Control, thread: &str) -> StageWi
                 let deliveries: Value = serde_json::from_str(serialized)
                     .map_err(|error|crate::storage::StorageError::Schema(error.to_string()))?;
                 for delivery in deliveries.as_array().into_iter().flatten() {
-                    if let Some(owner) = delivery["owner_thread_id"].as_str()
-                        && owner != thread
+                    let recipient = delivery["recipient_id"].as_str().ok_or_else(||crate::storage::StorageError::Schema("event delivery has no recipient Run".into()))?;
+                    if delivery["owner_thread_id"].as_str() != Some(thread.as_str())
+                        || !runs.iter().any(|(run,owner,_)|run==recipient && owner==&thread)
                     {
-                        return Err(crate::storage::StorageError::Schema(format!("event {} delivery recipient belongs to another Thread",event.1)));
+                        return Err(crate::storage::StorageError::Schema(format!("event {} delivery recipient is not a Run owned by its target Thread",event.1)));
+                    }
+                    for (attempt_id, attempt_thread, attempt_run) in [
+                        (&delivery["included_attempt_id"], &delivery["included_attempt_thread_id"], &delivery["included_attempt_run_id"]),
+                        (&delivery["processed_attempt_id"], &delivery["processed_attempt_thread_id"], &delivery["processed_attempt_run_id"]),
+                    ] {
+                        if !attempt_id.is_null()
+                            && (attempt_thread.as_str()!=Some(thread.as_str()) || attempt_run.as_str()!=Some(recipient))
+                        {
+                            return Err(crate::storage::StorageError::Schema(format!("event {} delivery attempt owner disagrees with recipient Run",event.1)));
+                        }
                     }
                 }
             }
@@ -1253,6 +1336,14 @@ async fn direct_boundary_case(
             Ok(())
         }).await.unwrap();
     }
+    // A rejected spill never reaches a provider request, so preserve its
+    // pre-target path here. Summary RejectFact keeps the post-spill,
+    // pre-response baseline captured at the existing provider cut below.
+    let rejected_spill_pre_target = if fault == Fault::RejectFact && !scenario.summary() {
+        Some(committed_selection_witness(&control, fixture.thread_id).await)
+    } else {
+        None
+    };
     let boundary_mutex = tokio::sync::Mutex::new(());
     let guard = boundary_mutex.lock().await;
     let mut boundary = crate::compaction::boundary::Boundary::new(&boundary_mutex, guard);
@@ -1290,9 +1381,10 @@ async fn direct_boundary_case(
                 None => capture_terminal_identity(&control, fixture.thread_id, false).await,
             };
             let checkpoint_record = automatic_attempt_record(&control, &fixture).await;
-            let checkpoint_witness = match rejected_stage_baseline {
-                Some(baseline) => baseline,
-                None => committed_selection_witness(&control, fixture.thread_id).await,
+            let checkpoint_witness = match (rejected_stage_baseline, rejected_spill_pre_target) {
+                (Some(baseline), _) => baseline,
+                (None, Some(baseline)) => baseline,
+                (None, None) => committed_selection_witness(&control, fixture.thread_id).await,
             };
             (result, identity, checkpoint_record, checkpoint_witness)
         } else {
@@ -1597,21 +1689,60 @@ async fn direct_boundary_case(
                 .as_array()
                 .unwrap()
                 .iter()
-                .find(|row| row[1] == source_id);
-            let retained_provenance = checkpoint_witness
-                .replacement_provenance_and_source_bytes
-                .as_array()
-                .unwrap()
-                .iter()
-                .find(|row| {
-                    row[4] == source_id && row[5] == source_revision && row[6] == source_hash
-                });
-            let expected_bytes = selected_source
-                .map(|row| row[5].as_str().unwrap())
-                .or_else(|| retained_provenance.map(|row| row[7].as_str().unwrap()))
-                .expect("source bytes are witnessed directly or by exact prior provenance");
+                .find(|row| row[1] == source_id)
+                .expect("every expected R marker is selected in the pre-summary checkpoint");
+            let checkpoint_revision = selected_source[4]
+                .as_i64()
+                .expect("checkpoint source revision is persisted");
+            assert_eq!(source_revision, checkpoint_revision);
+            let expected_bytes = selected_source[5]
+                .as_str()
+                .expect("checkpoint source bytes are retained");
             assert_eq!(source[7].as_str().unwrap(), expected_bytes);
+            let checkpoint_payload: Value = serde_json::from_str(expected_bytes).unwrap();
+            let expected_hash = crate::digest::sha256_hex(
+                serde_json::to_vec(&(checkpoint_revision, &checkpoint_payload)).unwrap(),
+            );
+            assert_eq!(
+                source_hash, expected_hash,
+                "replacement source hash matches its exact checkpoint revision and payload bytes"
+            );
         }
+        let checkpoint_full_ids = checkpoint_witness
+            .full_path
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row[1].as_str().unwrap().to_owned())
+            .collect::<Vec<_>>();
+        let splice_start = checkpoint_full_ids
+            .iter()
+            .position(|id| id == &expected_r[0])
+            .expect("the first expected R source has its actual full-path position");
+        let splice_end = splice_start + expected_r.len();
+        assert_eq!(
+            checkpoint_full_ids[splice_start..splice_end],
+            expected_r,
+            "the exact expected R is contiguous at the production splice position"
+        );
+        let mut expected_final_ids = checkpoint_full_ids;
+        expected_final_ids.splice(splice_start..splice_end, [summary_id.to_owned()]);
+        let after_full = after_fault_witness.full_path.as_array().unwrap();
+        let actual_final_ids = after_full
+            .iter()
+            .map(|row| row[1].as_str().unwrap().to_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            actual_final_ids, expected_final_ids,
+            "the summary splice preserves the entire checkpoint prefix and suffix, including audit nodes"
+        );
+        assert!(
+            after_full
+                .iter()
+                .enumerate()
+                .all(|(ordinal, row)| row[0].as_i64() == Some(ordinal as i64)),
+            "final full-path ordinals are exact after the splice"
+        );
         let summary_position = final_path
             .iter()
             .position(|row| row[1] == summary_id)
