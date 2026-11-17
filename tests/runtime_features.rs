@@ -4216,6 +4216,10 @@ if let Some(active) = cancel_active {
             }
             *entered_phase.borrow_mut()=format!("sending explicit RunStop for trigger Run {}, report attempt {}",boundary.trigger.run_id,boundary.report.attempt_id);
             request(&control, Command::RunStop(RunTarget { run_id: boundary.trigger.run_id.clone() })).await;
+            // Complete an already-admitted closed Summary after explicit Stop.
+            // Its late success must not be adopted; this lets the producer and
+            // the exact original FINISH unwind without a test-owned HTTP wait.
+            let _late_summary_delivery = summary.reply.send((200, answer("late cancelled summary")));
             *completed_phase.borrow_mut()=entered_phase.borrow().clone();
             assert!(pre_stop_ordinary.iter().all(|admitted|admitted.kind()==ProviderRequestKind::Ordinary));
             // These bodies were admitted before Stop, not post-Stop dispatches.
@@ -4288,7 +4292,6 @@ if let Some(active) = cancel_active {
             settled(&control, &target).await;
             *completed_phase.borrow_mut()=entered_phase.borrow().clone();
             assert_eq!(request(&control, Command::RunGet(RunTarget { run_id: finished.boundary.trigger.run_id.clone() })).await["state"], "stopped");
-            let _ = summary.reply.send((200, answer("late cancelled summary")));
             assert!(receive.try_recv().is_err(), "no new provider request is dispatched after Stop");
             // §2.1/§2.3: the triggering report is consumed and pre-spill usage is
             // stale, so the resumed Turn starts with an ordinary request.
