@@ -22,7 +22,7 @@ def main():
     args = parser.parse_args()
     if args.out.exists():
         raise ValueError('output already exists')
-    entered, release = threading.Event(), threading.Event()
+    entered, summary_release, foreground_release, summary_served = (threading.Event() for _ in range(4))
     requests, failures = [], []
 
     class Handler(BaseHTTPRequestHandler):
@@ -37,8 +37,9 @@ def main():
                 requests.append('summary' if summary else 'ordinary')
                 if summary:
                     entered.set()
-                    assert release.wait(WATCHDOG_SECONDS), 'summary gate timed out'
+                    assert summary_release.wait(WATCHDOG_SECONDS), 'summary gate timed out'
                     if args.cancel:
+                        summary_served.set()
                         return
                     if args.summary_error:
                         payload = json.dumps({'error': {'message': 'synthetic summary rejection'}}).encode()
@@ -48,6 +49,7 @@ def main():
                         self.end_headers()
                         self.wfile.write(payload)
                         self.wfile.flush()
+                        summary_served.set()
                         return
                     text, tokens = 'Synthetic prior conversation summary.', 120
                 else:
@@ -58,7 +60,7 @@ def main():
                     if index == 3:
                         # Keep the real current Turn live while the Summary HTTP
                         # response is gated; release this final answer with the test.
-                        assert release.wait(WATCHDOG_SECONDS), 'foreground request gate timed out'
+                        assert foreground_release.wait(WATCHDOG_SECONDS), 'foreground request gate timed out'
                 response = {'id': f'fixture-{len(requests)}', 'status': 'completed',
                             'output': [{'type': 'message', 'role': 'assistant', 'status': 'completed',
                                         'content': [{'type': 'output_text', 'text': text}]}],
@@ -75,6 +77,8 @@ def main():
                 self.end_headers()
                 self.wfile.write(payload)
                 self.wfile.flush()
+                if summary:
+                    summary_served.set()
             except BaseException as error:
                 failures.append(repr(error))
                 raise
@@ -101,16 +105,29 @@ def main():
             assert label not in screen, screen
         else:
             screen = terminal.expect(lambda text: label in text and '203000' in text and '200000' in text, 'gated summary status')
-        assert requests[:3] == ['ordinary', 'ordinary', 'summary'], requests
+        assert requests[:2] == ['ordinary', 'ordinary'], requests
+        assert requests.count('summary') == 1, requests
+        assert 2 <= requests.count('ordinary') <= 3, requests
         assert 'Waiting for conversation summary' not in screen and '会話要約の完了待ち' not in screen, screen
         if args.cancel:
             terminal.send('\x03')
             stopped = 'Stopped' if args.language == 'en' else '中断済み'
             ended = terminal.expect(lambda text: stopped in text and label not in text, 'stopped during summary')
-            release.set()
+            foreground_release.set()
+            summary_release.set()
         else:
-            release.set()
+            # Complete the already-admitted Ordinary response before returning
+            # the held Summary so FINISH can reacquire its normal boundary.
+            foreground_release.set()
             ended = terminal.expect(lambda text: 'fixture answer 3' in text and completed in text and label not in text, 'after summary')
+            summary_release.set()
+            assert summary_served.wait(WATCHDOG_SECONDS), ('summary response was not serviced', requests, failures)
+        assert requests[:2] == ['ordinary', 'ordinary'], requests
+        assert requests.count('summary') == 1, requests
+        if args.cancel:
+            assert 2 <= requests.count('ordinary') <= 3, requests
+        else:
+            assert requests.count('ordinary') == 3, requests
         root = terminal.root
         # Keep the isolated directory until diagnostics have been flushed by shutdown.
         scratch = terminal.scratch
@@ -134,7 +151,8 @@ def main():
             scratch.cleanup()
         print(json.dumps({'ok': True, 'out': str(args.out), 'requests': requests}))
     finally:
-        release.set()
+        summary_release.set()
+        foreground_release.set()
         if terminal:
             terminal.close(force=True)
         server.shutdown()
