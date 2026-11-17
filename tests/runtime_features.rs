@@ -3936,10 +3936,9 @@ async fn proactive_partial_spill_fixture(oversized: bool, cancel_active: Option<
             .filter_map(|output| serde_json::from_str::<Value>(output).ok())
             .filter(|output| output["omitted"] == true).count();
         assert!(omitted >= 2, "both tool output replacements must be replayed: {omitted}");
-        let first_events = proactive_events(&control, &target).await;
-        assert_eq!(first_events.len(), 1, "{first_events:#?}");
-        assert_eq!(first_events[0]["metrics"]["summary_rejected"], true, "{first_events:#?}");
-        assert_eq!(first_events[0]["metrics"]["summary_usage"]["requests"], 1);
+        let provisional_events = proactive_events(&control, &target).await;
+        assert_eq!(provisional_events.len(),1,"the predeclared report has one GC attempt: {provisional_events:#?}");
+        let first_attempt_id=provisional_events[0]["attempt_id"].as_str().expect("provider request attempt id").to_owned();
         // A fresh report at the threshold in the same Turn: same closed range
         // and settings, so the deterministic failure is not repeated (§6.3).
         after.reply.send((200, tool_response(3, 205))).unwrap();
@@ -3947,8 +3946,24 @@ async fn proactive_partial_spill_fixture(oversized: bool, cancel_active: Option<
         assert_ne!(gated.body["tools"], json!([]), "the same sources must not trigger another summary");
         gated.reply.send((200, answer("finished"))).unwrap();
         settled(&control, &target).await;
-        let events = proactive_events(&control, &target).await;
-        let item = events.iter().find(|event| event["attempt_id"] == first_events[0]["attempt_id"]).unwrap();
+        let observed_events=proactive_events(&control,&target).await;
+        let mut turns=observed_events.iter().filter_map(|event|event["turn_id"].as_str()).map(str::to_owned).collect::<Vec<_>>();
+        turns.sort();
+        turns.dedup();
+        for turn in turns {
+            let expected_ids=observed_events.iter().filter(|event|event["turn_id"]==turn)
+                .map(|event|event["attempt_id"].as_str().expect("saved attempt identity").to_owned()).collect::<Vec<_>>();
+            let turn_ids=[turn];
+            let terminal=automatic_attempts_finished_for_turns(&control,&turn_ids,expected_ids.len()).await;
+            let mut actual_ids=terminal.into_iter().map(|attempt|attempt.id).collect::<Vec<_>>();
+            let mut expected_ids=expected_ids;
+            actual_ids.sort(); expected_ids.sort();
+            assert_eq!(actual_ids,expected_ids,"exact terminal attempts after foreground Turns complete");
+        }
+        let events=proactive_events(&control,&target).await;
+        let item = events.iter().find(|event| event["attempt_id"] == first_attempt_id).unwrap();
+        assert_eq!(item["metrics"]["summary_rejected"],true,"{item:#?}");
+        assert_eq!(item["metrics"]["summary_usage"]["requests"],1);
         assert!(events.iter().all(|event| event["metrics"]["summary_usage"]["requests"].as_u64().unwrap_or(0) == 0 || event["attempt_id"] == item["attempt_id"]), "the rejected summary must not be reissued: {events:#?}");
         assert_eq!(item["metrics"]["summary_rejected"], true);
         assert_eq!(item["metrics"]["spilled_groups"], 2, "{item:#?}");
@@ -3995,7 +4010,7 @@ async fn proactive_summarizes_earlier_turns_first_then_the_active_turn() {
                  "arguments":json!({"command":format!("echo STEP{index}")}).to_string()}
             ]});
         for (index, tokens) in [(0, 100), (1, 100), (2, 250)] {
-            incoming(&control, &mut receive).await.reply.send((200, step(index, tokens))).unwrap();
+            incoming_ordinary(&control, &mut receive).await.reply.send((200, step(index, tokens))).unwrap();
         }
         // First attempt: the ordinary summary of the earlier Turns.
         let first = incoming_summary(&control, &mut receive).await;
@@ -4007,8 +4022,11 @@ async fn proactive_summarizes_earlier_turns_first_then_the_active_turn() {
         let after_prefix = incoming(&control, &mut receive).await;
         assert_ne!(after_prefix.body["tools"], json!([]));
         let input = after_prefix.body["input"].as_array().unwrap();
-        // The edit precedes every kept response: no reasoning from before it.
-        assert!(input.iter().all(|item| item["type"] != "reasoning"), "{input:?}");
+        // A closed-summary edit preserves reasoning in the current epoch;
+        // the later active-range edit is the boundary that may drop it.
+        assert!(input.iter().any(|item|item["id"]=="rs-EARLY-ONE"),"closed summary keeps same-epoch earlier reasoning");
+        assert!(input.iter().any(|item|item["id"]=="rs-EARLY-TWO"),"closed summary keeps same-epoch earlier reasoning");
+        assert!(input.iter().any(|item|item["id"]=="rs-2"),"the active Turn reasoning is retained before its own summary stage");
         assert!(input.iter().any(|item| item["call_id"] == "step-2"));
         // Still at or above the threshold on a fresh measurement: active Turn.
         after_prefix.reply.send((200, step(3, 260))).unwrap();
@@ -4016,9 +4034,10 @@ async fn proactive_summarizes_earlier_turns_first_then_the_active_turn() {
         if second.body["tools"] != json!([]) {
             let input = second.body["input"].as_array().unwrap();
             let request = input.iter().position(|item| item.to_string().contains("long current turn")).unwrap();
-            let before = after_prefix.body["input"].as_array().unwrap();
-            let before_request = before.iter().position(|item| item.to_string().contains("long current turn")).unwrap();
-            assert_eq!(input[..=request], before[..=before_request], "request prefix remains unchanged");
+            assert!(input[..=request].iter().any(|item|item.to_string().contains("Early work summarized")),
+                "active request cut includes the already-FINISHed closed summary");
+            assert!(!input[..=request].iter().any(|item|item.to_string().contains("EARLY-ONE")),
+                "active request cut no longer replays the closed source replaced by that summary");
             assert!(input.iter().any(|item| item["call_id"] == "step-3"), "latest complete tool group is retained");
             second.reply.send((200, answer("finished"))).unwrap();
             settled(&control, &target).await;
@@ -4027,6 +4046,8 @@ async fn proactive_summarizes_earlier_turns_first_then_the_active_turn() {
         }
         let material = second.body["input"].to_string();
         // Keep the latest complete tool group as a separate tail, not summary input.
+        assert!(material.contains("Early work summarized"),"the active stage follows the committed closed summary");
+        assert!(!material.contains("EARLY-ONE"),"the replaced closed source is not reselected for active summary");
         assert!(material.contains("STEP0") && material.contains("STEP2"), "ordinary active prefix is summary input");
         assert!(!material.contains("STEP3"), "latest complete group is outside the selected range");
         assert!(!material.contains("EEEE"), "encrypted reasoning is never summary material");
@@ -4054,15 +4075,15 @@ async fn proactive_summarizes_earlier_turns_first_then_the_active_turn() {
             db.query_row("SELECT count(*) FROM shell_execution", [], |r| r.get(0))?,
         ))).await.unwrap();
         // One summary operation per attempt (§4.1): closed first, then active.
-        let mut summarized: Vec<String> = records.iter().map(|r| {
+        let summarized: Vec<String> = records.iter().map(|r| {
             let stages: Value = serde_json::from_str(r).unwrap();
             let summaries: Vec<&String> = stages.as_object().unwrap().keys().filter(|stage| stage.ends_with("_summary")).collect();
             assert_eq!(summaries.len(), 1, "{stages:#?}");
             assert!(stages[summaries[0].as_str()]["summary_node_id"].is_string(), "{stages:#?}");
             summaries[0].clone()
         }).collect();
-        summarized.sort();
-        assert_eq!(summarized, ["active_summary", "closed_summary"]);
+        assert_eq!(summarized, ["closed_summary", "active_summary"],
+            "the background closed stage FINISH precedes the next report's active stage");
         assert_eq!(executions, 4, "no saved tool is executed again");
         control.shutdown().await.unwrap(); owner.shutdown().await.unwrap(); server.abort();
     }).await.unwrap();
