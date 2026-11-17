@@ -80,7 +80,7 @@ pub(crate) fn cancel_tx(
             items.push(item);
             continue;
         }
-        if admission == "admitted" || selected || state == "applied" {
+        if admission == "admitted" || selected || (state == "applied" && !to_human) {
             if super::reply::cancel_reply_tx(tx, &thread, message, at, &actor, !to_human)? {
                 item.outcome = ReplyCancelled;
                 if !changed.contains(&thread) {
@@ -93,7 +93,11 @@ pub(crate) fn cancel_tx(
             items.push(item);
             continue;
         }
-        if !live || !body || !matches!(state.as_str(), "accepted" | "held") {
+        if !live
+            || !body
+            || !(matches!(state.as_str(), "accepted" | "held")
+                || (to_human && state == "applied" && admission == "unadmitted"))
+        {
             item.outcome = Unavailable;
             items.push(item);
             continue;
@@ -110,9 +114,21 @@ pub(crate) fn cancel_tx(
             items.push(item);
             continue;
         }
+        let reply_cancelled_before_archive =
+            to_human && state == "applied" && admission == "unadmitted";
+        if reply_cancelled_before_archive
+            && !super::reply::cancel_reply_tx(tx, &thread, message, at, &actor, false)?
+        {
+            // A reply that already won its receipt CAS keeps the question eligible for admission.
+            item.outcome = Unavailable;
+            items.push(item);
+            continue;
+        }
         tx.execute("INSERT INTO draft(id,thread_id,revision,body_json,state,updated_at)VALUES(?1,?2,0,?3,'archived',?4)",params![archive,thread,archived,at])?;
         tx.execute("UPDATE receipt SET state='cancelled',hold_reason=?2,updated_at=?3,result_json=json_set(COALESCE(result_json,'{}'),'$.cancellation',json(?4)) WHERE id=?1",params![receipt,if caller.is_none(){"cancelled_by_human"}else{"cancelled_by_sender"},at,json!({"actor":actor,"at":at,"archive_draft_id":archive}).to_string()])?;
-        super::reply::cancel_reply_tx(tx, &thread, message, at, &actor, false)?;
+        if !reply_cancelled_before_archive {
+            super::reply::cancel_reply_tx(tx, &thread, message, at, &actor, false)?;
+        }
         super::submission_retention::collect_operation(tx, &operation)?;
         item.outcome = Cancelled;
         item.archive_draft_id = Some(archive);

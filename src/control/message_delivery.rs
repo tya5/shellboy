@@ -31,12 +31,145 @@ pub(crate) fn mark_admitted_tx(
     Ok(())
 }
 
-/// Preserve immediate message/notice order while retaining ordinary batch semantics.
-pub(crate) fn append_admitted_tx(
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub(crate) struct AdmissionPlan {
+    /// Complete selected path prefix, including any eligible staged questions.
+    pub(crate) admitted_nodes: Vec<String>,
+    /// Caller-owned IDs in the prefix; only these rows may be acknowledged.
+    pub(crate) admitted_callers: Vec<String>,
+    /// Caller-owned IDs withheld behind the earliest blocked question.
+    pub(crate) deferred_callers: Vec<String>,
+    /// Exact caller nodes linked by persisted `reply_to` to a blocked question.
+    pub(crate) deferred_reply_nodes: Vec<String>,
+}
+
+/// Plan the entire eligible question frontier before changing selected path or caller state.
+pub(crate) fn plan_admission_tx(
+    db: &Connection,
+    thread: &str,
+    caller_nodes: &[String],
+    at: &str,
+) -> rusqlite::Result<AdmissionPlan> {
+    let mut ordered = Vec::<(String, i64, String)>::new();
+    let mut seen = std::collections::HashSet::new();
+    for node in caller_nodes {
+        let (created,rowid):(String,i64)=db.query_row(
+            "SELECT COALESCE(r.created_at,n.created_at),n.rowid FROM node n LEFT JOIN receipt r ON r.message_node_id=n.id AND r.target_thread_id=?1 WHERE n.id=?2",
+            params![thread,node],|r|Ok((r.get(0)?,r.get(1)?)),
+        )?;
+        if seen.insert(node.clone()) {
+            ordered.push((created, rowid, node.clone()));
+        }
+    }
+    let frontier = ordered
+        .last()
+        .map(|(created, rowid, _)| (created.clone(), *rowid))
+        .unwrap_or_else(|| (at.to_owned(), i64::MAX));
+    let caller_set = serde_json::to_string(caller_nodes).expect("caller node IDs serialize");
+    // Process a bounded source-order prefix plus one sentinel. If the sentinel
+    // lies before the caller frontier, defer that caller suffix rather than
+    // admitting a reply whose question fell outside this transaction's window.
+    const QUESTION_PREFIX: usize = 129;
+    let questions=db.prepare(
+        "SELECT r.message_node_id, r.created_at, n.rowid FROM receipt r JOIN node n ON n.id=r.message_node_id WHERE r.target_thread_id=?1 AND r.state='applied' AND r.path_admission='unadmitted' AND r.run_id IS NULL AND r.turn_id IS NULL AND json_extract(r.result_json,'$.to_human')=1 AND json_extract(r.result_json,'$.reply.state') IN ('pending','replied') ORDER BY r.created_at,n.rowid LIMIT 130",
+    )?.query_map([thread],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,i64>(2)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut cutoff: Option<(String, i64)> = None;
+    let mut deferred_reply_nodes = Vec::new();
+    for (index, (question, created, rowid)) in questions.into_iter().enumerate() {
+        let key = (created.clone(), rowid);
+        if key > (frontier.0.clone(), frontier.1) {
+            break;
+        }
+        if index == QUESTION_PREFIX {
+            let replies:Vec<String>=db.prepare(
+                "SELECT answer.message_node_id FROM receipt answer WHERE answer.target_thread_id=?1 AND json_extract(answer.result_json,'$.reply_to')=?2 AND answer.message_node_id IN (SELECT value FROM json_each(?3)) ORDER BY answer.created_at,answer.rowid",
+            )?.query_map(params![thread,question,caller_set],|r|r.get(0))?.collect::<rusqlite::Result<_>>()?;
+            deferred_reply_nodes.extend(replies);
+            cutoff = Some(key);
+            break;
+        }
+        if seen.contains(&question) {
+            continue;
+        }
+        let blocked:bool=db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM (SELECT r.message_node_id AS node_id,COALESCE(r.created_at,n.created_at) AS created_at,n.rowid AS source_rowid FROM receipt r JOIN node n ON n.id=r.message_node_id WHERE r.target_thread_id=?1 AND r.state IN ('accepted','held') AND r.path_admission<>'admitted' AND NOT EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id=?1 AND p.node_id=n.id) UNION ALL SELECT d.node_id AS node_id,n.created_at AS created_at,n.rowid AS source_rowid FROM attachment_delivery d JOIN node n ON n.id=d.node_id WHERE d.thread_id=?1 AND d.status IN ('accepted','held') AND NOT EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id=?1 AND p.node_id=d.node_id)) pending WHERE (pending.created_at<?2 OR (pending.created_at=?2 AND pending.source_rowid<?3)) AND pending.node_id NOT IN (SELECT value FROM json_each(?4)))",
+            params![thread,created,rowid,caller_set],|r|r.get(0),
+        )?;
+        if blocked {
+            // Canonical persisted reply_to identifies dependent replies in this caller batch.
+            let replies:Vec<String>=db.prepare(
+                "SELECT answer.message_node_id FROM receipt answer WHERE answer.target_thread_id=?1 AND json_extract(answer.result_json,'$.reply_to')=?2 AND answer.message_node_id IN (SELECT value FROM json_each(?3)) ORDER BY answer.created_at,answer.rowid",
+            )?.query_map(params![thread,question,caller_set],|r|r.get(0))?.collect::<rusqlite::Result<_>>()?;
+            for reply in replies {
+                if !deferred_reply_nodes.contains(&reply) {
+                    deferred_reply_nodes.push(reply);
+                }
+            }
+            cutoff = Some(key);
+            break;
+        }
+        let position = ordered
+            .iter()
+            .position(|(at, id, _)| (at.as_str(), *id) > (created.as_str(), rowid))
+            .unwrap_or(ordered.len());
+        ordered.insert(position, (created, rowid, question.clone()));
+        seen.insert(question);
+    }
+    let mut admitted_callers = Vec::new();
+    let mut deferred_callers = Vec::new();
+    let mut defer_suffix = false;
+    if let Some((created, rowid)) = cutoff.as_ref() {
+        for node in caller_nodes {
+            let key:Option<(String,i64)>=db.query_row(
+                "SELECT COALESCE(r.created_at,n.created_at),n.rowid FROM node n LEFT JOIN receipt r ON r.message_node_id=n.id AND r.target_thread_id=?1 WHERE n.id=?2",
+                params![thread,node],|r|Ok((r.get(0)?,r.get(1)?)),
+            ).optional()?;
+            defer_suffix |=
+                key.is_some_and(|(at, id)| (at.as_str(), id) >= (created.as_str(), *rowid));
+            let destination = if defer_suffix {
+                &mut deferred_callers
+            } else {
+                &mut admitted_callers
+            };
+            if !destination.contains(node) {
+                destination.push(node.clone());
+            }
+        }
+    } else {
+        for node in caller_nodes {
+            if !admitted_callers.contains(node) {
+                admitted_callers.push(node.clone());
+            }
+        }
+    }
+    let admitted_set: std::collections::HashSet<&str> =
+        admitted_callers.iter().map(String::as_str).collect();
+    let admitted_nodes = ordered
+        .iter()
+        .filter(|(at, id, node)| {
+            if caller_nodes.contains(node) {
+                admitted_set.contains(node.as_str())
+            } else {
+                cutoff
+                    .as_ref()
+                    .is_none_or(|(created, rowid)| (at.as_str(), *id) < (created.as_str(), *rowid))
+            }
+        })
+        .map(|(_, _, node)| node.clone())
+        .collect();
+    Ok(AdmissionPlan {
+        admitted_nodes,
+        admitted_callers,
+        deferred_callers,
+        deferred_reply_nodes,
+    })
+}
+
+pub(crate) fn append_admission_plan_tx(
     tx: &Transaction<'_>,
     thread: &str,
     revision: u64,
-    nodes: &[String],
+    plan: &AdmissionPlan,
     at: &str,
 ) -> Result<(), StorageError> {
     if history::selection_revision(tx, thread, history::ThreadScope::Live)? as u64 != revision {
@@ -46,6 +179,7 @@ pub(crate) fn append_admitted_tx(
         )
         .into());
     }
+    let nodes = plan.admitted_nodes.as_slice();
     let mut has_notice = false;
     for node in nodes {
         let sender: Option<String> = tx
@@ -59,7 +193,7 @@ pub(crate) fn append_admitted_tx(
         has_notice |= super::reply::model_thread_identity(&sender).is_some()
             || sender.kind != crate::protocol::SenderKind::Human
                 && sender.label.as_ref().is_some_and(|label| !label.is_empty());
-        has_notice |= tx.query_row("SELECT EXISTS(SELECT 1 FROM receipt WHERE message_node_id=?1 AND (json_extract(result_json,'$.expect_reply')=1 OR json_extract(result_json,'$.reply_to') IS NOT NULL))", [node], |r| r.get::<_, bool>(0))?;
+        has_notice|=tx.query_row("SELECT EXISTS(SELECT 1 FROM receipt WHERE message_node_id=?1 AND (json_extract(result_json,'$.expect_reply')=1 OR json_extract(result_json,'$.reply_to') IS NOT NULL))",[node],|r|r.get::<_,bool>(0))?;
     }
     if has_notice {
         for node in nodes {
@@ -78,6 +212,18 @@ pub(crate) fn append_admitted_tx(
         mark_admitted_tx(tx, thread, nodes)?;
     }
     Ok(())
+}
+
+pub(crate) fn append_admitted_tx(
+    tx: &Transaction<'_>,
+    thread: &str,
+    revision: u64,
+    nodes: &[String],
+    at: &str,
+) -> Result<AdmissionPlan, StorageError> {
+    let plan = plan_admission_tx(tx, thread, nodes, at)?;
+    append_admission_plan_tx(tx, thread, revision, &plan, at)?;
+    Ok(plan)
 }
 
 /// Shared startup, stop-drain and fallback classification. Repeated observations
@@ -147,9 +293,15 @@ pub(crate) fn recover_on_resume_tx(
     if rows.is_empty() {
         return Ok(0);
     }
-    for (receipt, node, old_run, old_turn, _) in &rows {
+    let nodes = rows.iter().map(|row| row.1.clone()).collect::<Vec<_>>();
+    let revision = history::selection_revision(tx, thread, history::ThreadScope::Live)?;
+    let plan = plan_admission_tx(tx, thread, &nodes, at)?;
+    let admitted_rows = rows
+        .iter()
+        .filter(|row| plan.admitted_callers.contains(&row.1))
+        .collect::<Vec<_>>();
+    for (receipt, node, old_run, old_turn, _) in &admitted_rows {
         if old_run.is_none() && old_turn.is_none() {
-            // This is the existing first assignment, never a reassignment.
             tx.execute("UPDATE receipt SET run_id=?2,turn_id=?3,result_json=json_set(COALESCE(result_json,'{}'),'$.assignment','existing_turn','$.delivery_status','applied','$.run_id',?2,'$.turn_id',?3) WHERE id=?1 AND run_id IS NULL AND turn_id IS NULL",params![receipt,run,turn])?;
             tx.execute(
                 "UPDATE node SET turn_id=?2 WHERE id=?1 AND turn_id IS NULL",
@@ -157,13 +309,14 @@ pub(crate) fn recover_on_resume_tx(
             )?;
         }
     }
-    let nodes = rows.iter().map(|row| row.1.clone()).collect::<Vec<_>>();
-    let revision = history::selection_revision(tx, thread, history::ThreadScope::Live)?;
-    append_admitted_tx(tx, thread, revision as u64, &nodes, at)?;
-    for (receipt, _, _, _, current_recovery) in &rows {
-        tx.execute("UPDATE receipt SET state=CASE WHEN ?3 THEN 'accepted' ELSE 'applied' END,hold_reason=CASE WHEN ?3 THEN NULL ELSE 'recovered_at_explicit_resume' END,updated_at=?2 WHERE id=?1 AND state IN ('accepted','held') AND path_admission='admitted'", params![receipt,at,current_recovery])?;
+    append_admission_plan_tx(tx, thread, revision as u64, &plan, at)?;
+    for (receipt, _, _, _, current_recovery) in &admitted_rows {
+        tx.execute("UPDATE receipt SET state=CASE WHEN ?3 THEN 'accepted' ELSE 'applied' END,hold_reason=CASE WHEN ?3 THEN NULL ELSE 'recovered_at_explicit_resume' END,updated_at=?2 WHERE id=?1 AND state IN ('accepted','held') AND path_admission='admitted'",params![receipt,at,current_recovery])?;
     }
-    let sources = rows.iter().map(|(receipt,node,old_run,old_turn,_)|json!({"receipt_id":receipt,"message_id":node,"original_run_id":old_run,"original_turn_id":old_turn})).collect::<Vec<_>>();
+    if admitted_rows.is_empty() {
+        return Ok(0);
+    }
+    let sources=admitted_rows.iter().map(|(receipt,node,old_run,old_turn,_)|json!({"receipt_id":receipt,"message_id":node,"original_run_id":old_run,"original_turn_id":old_turn})).collect::<Vec<_>>();
     super::context::record(
         tx,
         thread,
@@ -172,7 +325,7 @@ pub(crate) fn recover_on_resume_tx(
         json!({"run_id":run,"turn_id":turn,"sources":sources,"meaning":"Earlier interrupted instructions were admitted before the new message; original assignments remain unchanged"}),
         at,
     )?;
-    Ok(rows.len())
+    Ok(admitted_rows.len())
 }
 
 #[cfg(test)]

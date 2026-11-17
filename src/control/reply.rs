@@ -34,6 +34,10 @@ pub(crate) fn admission_notice_tx(
     };
     let saved: Value = serde_json::from_str(&saved)
         .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+    if saved["to_human"] == true {
+        // A human duty is not a model recipient notice, even after path admission.
+        return Ok(());
+    }
     let sender = crate::protocol::MessageSender::from_saved(Some(&sender));
     let identity = identity_text(&sender);
     let payload = if saved["expect_reply"] == true {

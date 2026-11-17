@@ -2119,15 +2119,8 @@ impl Store {
         }
         tx.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,run_id,turn_id,state,created_at,updated_at,hold_reason,result_json) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?9,?10,?11)",params![receipt_id,operation_id,serde_json::to_string(&content.sender).unwrap(),id,message_id,accepted.run_id,accepted.turn_id,state,now,reason,saved_acceptance.to_string()]).map_err(sql_error)?;
         if args.to_human {
+            // Unarchive immediately, but defer only selected-path mutation to a real path boundary.
             crate::control::db::archive::clear_for_question(tx, &id, now).map_err(sql_error)?;
-            tx.execute(
-                "INSERT INTO thread_path(thread_id,ordinal,node_id) SELECT ?1,COALESCE(MAX(ordinal)+1,0),?2 FROM thread_path WHERE thread_id=?1",
-                params![id, message_id],
-            ).map_err(sql_error)?;
-            tx.execute(
-                "UPDATE thread SET cursor_node_id=?2,selection_revision=selection_revision+1 WHERE id=?1",
-                params![id, message_id],
-            ).map_err(sql_error)?;
         }
         tx.execute(
             "UPDATE thread SET revision=revision+1,updated_at=?2 WHERE id=?1",

@@ -48,6 +48,602 @@ fn request(id: &str, ids: &[&str]) -> Request {
         }),
     )
 }
+
+async fn admit_at_real_boundary(store: &Store, nodes: Vec<String>) {
+    store
+        .database
+        .call(move |db| {
+            let tx = db.transaction()?;
+            let revision =
+                crate::history::selection_revision(&tx, "t", crate::history::ThreadScope::Live)?;
+            crate::control::message_delivery::append_admitted_tx(
+                &tx,
+                "t",
+                revision as u64,
+                &nodes,
+                &chrono::Utc::now().to_rfc3339(),
+            )?;
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn human_question_reply_cancel_and_attachment_frontier_preserve_fifo() {
+    let (root, store) = store().await;
+    store
+        .database
+        .call(|db| {
+            db.execute(
+                "UPDATE thread SET archived_at='2026-01-01' WHERE id='t'",
+                [],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let before_counts = store
+        .database
+        .call(|db| {
+            Ok((
+                db.query_row("SELECT count(*) FROM run WHERE thread_id='t'", [], |r| {
+                    r.get::<_, i64>(0)
+                })?,
+                db.query_row("SELECT count(*) FROM turn WHERE thread_id='t'", [], |r| {
+                    r.get::<_, i64>(0)
+                })?,
+            ))
+        })
+        .await
+        .unwrap();
+
+    let ask = |operation: &'static str, text: &'static str| {
+        Request::new(
+            format!("fixture:{operation}"),
+            Command::MessageAsk(MessageAskArgs {
+                thread_id: None,
+                text: text.into(),
+            }),
+        )
+    };
+    let first = store
+        .execute(
+            ask("question-first", "first synthetic question"),
+            Some(origin("t")),
+        )
+        .await
+        .unwrap();
+    assert!(first.wake_threads.is_empty() && first.quiet_wake_threads.is_empty());
+    let first_id = first.result["message_id"].as_str().unwrap().to_owned();
+    let first_before: (String, String, Option<String>, Option<String>, bool, Option<String>) = store.database.call({
+        let id = first_id.clone();
+        move |db| db.query_row(
+            "SELECT r.state,r.path_admission,r.run_id,r.turn_id,EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id='t' AND p.node_id=r.message_node_id),t.archived_at FROM receipt r JOIN thread t ON t.id=r.target_thread_id WHERE r.message_node_id=?1",
+            [&id], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?)),
+        ).map_err(Into::into)
+    }).await.unwrap();
+    assert_eq!(
+        first_before,
+        (
+            "applied".into(),
+            "unadmitted".into(),
+            None,
+            None,
+            false,
+            None
+        )
+    );
+    assert_eq!(
+        store
+            .database
+            .call(|db| Ok((
+                db.query_row("SELECT count(*) FROM run WHERE thread_id='t'", [], |r| r
+                    .get::<_, i64>(0))?,
+                db.query_row("SELECT count(*) FROM turn WHERE thread_id='t'", [], |r| r
+                    .get::<_, i64>(
+                    0
+                ))?,
+            )))
+            .await
+            .unwrap(),
+        before_counts,
+        "asking a human creates no model Run or Turn"
+    );
+
+    // An idle boundary admits the question without creating or waking a model Turn.
+    admit_at_real_boundary(&store, vec![]).await;
+    let first_admitted: (String, bool, i64) = store.database.call({
+        let id = first_id.clone();
+        move |db| Ok(db.query_row(
+            "SELECT r.path_admission,EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id='t' AND p.node_id=r.message_node_id),(SELECT count(*) FROM event WHERE id='reply-admission-'||r.message_node_id) FROM receipt r WHERE r.message_node_id=?1",
+            [&id], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?)),
+        )?)
+    }).await.unwrap();
+    assert_eq!(
+        first_admitted,
+        ("admitted".into(), true, 0),
+        "human question admission is not a self-reply model notice"
+    );
+    let first_reply = store
+        .execute(
+            Request::new(
+                "fixture:reply-after-admission",
+                Command::MessageReply(MessageReplyArgs {
+                    message_id: first_id.clone(),
+                    text: "first synthetic answer".into(),
+                    sender_label: None,
+                }),
+            ),
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(first_reply.result["reply_to"], first_id);
+    let first_reply_id = first_reply.result["message_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    admit_at_real_boundary(&store, vec![first_reply_id.clone()]).await;
+
+    let second = store
+        .execute(
+            ask("question-second", "second synthetic question"),
+            Some(origin("t")),
+        )
+        .await
+        .unwrap();
+    let second_id = second.result["message_id"].as_str().unwrap().to_owned();
+    let second_reply = store
+        .execute(
+            Request::new(
+                "fixture:reply-before-admission",
+                Command::MessageReply(MessageReplyArgs {
+                    message_id: second_id.clone(),
+                    text: "second synthetic answer".into(),
+                    sender_label: None,
+                }),
+            ),
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(second_reply.result["reply_to"], second_id);
+    let second_reply_id = second_reply.result["message_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let late_cancel = store
+        .execute(
+            request("cancel-replied-question", &[second_id.as_str()]),
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(late_cancel.result["items"][0]["outcome"], "unavailable");
+    let before_attachment: (String,String,String,bool,bool) = store.database.call({
+        let id=second_id.clone();
+        move |db| db.query_row(
+            "SELECT r.state,r.path_admission,json_extract(r.result_json,'$.reply.state'),EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id='t' AND p.node_id=r.message_node_id),EXISTS(SELECT 1 FROM draft d WHERE json_extract(d.body_json,'$.source_message_id')=r.message_node_id) FROM receipt r WHERE r.message_node_id=?1",
+            [&id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?)),
+        ).map_err(Into::into)
+    }).await.unwrap();
+    assert_eq!(
+        before_attachment,
+        (
+            "applied".into(),
+            "unadmitted".into(),
+            "replied".into(),
+            false,
+            false
+        )
+    );
+
+    // Accept a real attachment operation after Q and R; driver first-boundary processing
+    // must merge Q/R/A before any of them is selected.
+    let attachment_path = root.path().join("ordering-a.txt");
+    std::fs::write(&attachment_path, b"synthetic attachment A").unwrap();
+    let attachments = crate::attachments::AttachmentService::new(
+        store.database.clone(),
+        &store.config,
+        root.path().into(),
+        "fixture".into(),
+    );
+    let plan = attachments
+        .plan_add(
+            "t",
+            vec![crate::attachments::AttachmentInput {
+                path: attachment_path.clone(),
+                kind: AttachmentKind::File,
+            }],
+            tokio_util::sync::CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    let attachment_operation = "fixture:attachment-a";
+    store
+        .execute_with_plan(
+            Request::new(
+                attachment_operation,
+                Command::AttachmentAdd(AttachmentAddArgs {
+                    thread_id: Some("t".into()),
+                    path: attachment_path.to_string_lossy().into_owned(),
+                    kind: AttachmentKind::File,
+                }),
+            ),
+            None,
+            plan,
+        )
+        .await
+        .unwrap();
+    let attachment_id = store
+        .database
+        .call(|db| {
+            Ok(db.query_row(
+                "SELECT node_id FROM attachment_delivery WHERE thread_id='t' AND operation_id=?1",
+                [attachment_operation],
+                |r| r.get::<_, String>(0),
+            )?)
+        })
+        .await
+        .unwrap();
+    let applied = store
+        .database
+        .call(move |db| {
+            let tx = db.transaction()?;
+            let applied = super::super::attachment_delivery::apply_pending_tx(
+                &tx,
+                "t",
+                &chrono::Utc::now().to_rfc3339(),
+            )?;
+            tx.commit()?;
+            Ok(applied)
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        applied, 1,
+        "the existing eligible attachment frontier applies one A"
+    );
+    let selected: Vec<String> = store
+        .database
+        .call(|db| {
+            let mut statement =
+                db.prepare("SELECT node_id FROM thread_path WHERE thread_id='t' ORDER BY ordinal")?;
+            statement
+                .query_map([], |r| r.get(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .map_err(Into::into)
+        })
+        .await
+        .unwrap();
+    let positions = [
+        first_id.clone(),
+        first_reply_id,
+        second_id.clone(),
+        second_reply_id,
+        attachment_id,
+    ];
+    let indexes: Vec<usize> = positions
+        .iter()
+        .map(|id| selected.iter().position(|node| node == id).unwrap())
+        .collect();
+    assert!(
+        indexes.windows(2).all(|pair| pair[0] < pair[1]),
+        "actual Store Q/R and AttachmentAdd A enter selected path in source order: {selected:?}"
+    );
+    attachments.wait_idle().await.unwrap();
+    let second_notice: i64 = store
+        .database
+        .call({
+            let id = second_id.clone();
+            move |db| {
+                Ok(db.query_row(
+                    "SELECT count(*) FROM event WHERE id='reply-admission-'||?1",
+                    [id],
+                    |r| r.get(0),
+                )?)
+            }
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        second_notice, 0,
+        "admitting a question never directs the model to reply to itself"
+    );
+
+    let cancelled = store
+        .execute(
+            ask("question-cancel", "cancelled synthetic question"),
+            Some(origin("t")),
+        )
+        .await
+        .unwrap();
+    let cancelled_id = cancelled.result["message_id"].as_str().unwrap().to_owned();
+    let outcome = store
+        .execute(request("cancel-question", &[cancelled_id.as_str()]), None)
+        .await
+        .unwrap();
+    assert_eq!(outcome.result["items"][0]["outcome"], "cancelled");
+    let audit: (String,String,String,String,String) = store.database.call({
+        let id=cancelled_id.clone();
+        move |db| db.query_row(
+            "SELECT r.id,r.client_operation_id,r.state,r.path_admission,d.body_json FROM receipt r JOIN draft d ON d.state='archived' AND json_extract(d.body_json,'$.source_message_id')=r.message_node_id WHERE r.message_node_id=?1",
+            [&id], |r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?)),
+        ).map_err(Into::into)
+    }).await.unwrap();
+    assert_eq!(audit.2, "cancelled");
+    assert_eq!(audit.3, "unadmitted");
+    let draft: serde_json::Value = serde_json::from_str(&audit.4).unwrap();
+    assert_eq!(draft["source_message_id"], cancelled_id);
+    assert_eq!(draft["source_receipt_id"], audit.0);
+    assert_eq!(draft["source_operation_id"], audit.1);
+    assert!(!selected.contains(&cancelled_id));
+    store.database.shutdown().await.unwrap();
+    drop(store);
+
+    // This asserts receipt/draft durability only, not the full Control shutdown split.
+    let reopened = DbWorker::open(root.path().join("pending.db"))
+        .await
+        .unwrap();
+    let persisted: (String,String,String,String) = reopened.call({
+        let id=cancelled_id.clone();
+        move |db| db.query_row(
+            "SELECT r.id,r.client_operation_id,r.state,r.path_admission FROM receipt r WHERE r.message_node_id=?1 AND NOT EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id=r.target_thread_id AND p.node_id=r.message_node_id)",
+            [&id], |r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)),
+        ).map_err(Into::into)
+    }).await.unwrap();
+    assert_eq!(persisted.0, audit.0);
+    assert_eq!(persisted.1, audit.1);
+    assert_eq!(persisted.2, "cancelled");
+    assert_eq!(persisted.3, "unadmitted");
+    reopened.shutdown().await.unwrap();
+}
+#[tokio::test]
+async fn held_frontier_defers_the_replied_question_and_later_attachment() {
+    let (root, store) = store().await;
+    let held = store
+        .execute(
+            Request::new(
+                "fixture:held-before-question",
+                Command::MessageSend(MessageSendArgs {
+                    human: true,
+                    resume_recovery: false,
+                    to_human: false,
+                    expect_reply: false,
+                    sender_label: None,
+                    thread_id: Some("t".into()),
+                    text: "held H".into(),
+                    deliver: Deliver::Complete,
+                }),
+            ),
+            None,
+        )
+        .await
+        .unwrap();
+    let held_id = held.result["message_id"].as_str().unwrap().to_owned();
+    assert_eq!(
+        store
+            .database
+            .call({
+                let held_id = held_id.clone();
+                move |db| {
+                    db.query_row(
+                        "SELECT state FROM receipt WHERE message_node_id=?1",
+                        [held_id],
+                        |r| r.get::<_, String>(0),
+                    )
+                    .map_err(Into::into)
+                }
+            })
+            .await
+            .unwrap(),
+        "held"
+    );
+
+    let question = store
+        .execute(
+            Request::new(
+                "fixture:held-frontier-question",
+                Command::MessageAsk(MessageAskArgs {
+                    thread_id: None,
+                    text: "Q behind H".into(),
+                }),
+            ),
+            Some(origin("t")),
+        )
+        .await
+        .unwrap();
+    let question_id = question.result["message_id"].as_str().unwrap().to_owned();
+    let reply = store
+        .execute(
+            Request::new(
+                "fixture:held-frontier-reply",
+                Command::MessageReply(MessageReplyArgs {
+                    message_id: question_id.clone(),
+                    text: "R depends on Q".into(),
+                    sender_label: None,
+                }),
+            ),
+            None,
+        )
+        .await
+        .unwrap();
+    let reply_id = reply.result["message_id"].as_str().unwrap().to_owned();
+
+    let path = root.path().join("held-frontier-a.txt");
+    std::fs::write(&path, b"synthetic attachment behind R").unwrap();
+    let attachments = crate::attachments::AttachmentService::new(
+        store.database.clone(),
+        &store.config,
+        root.path().into(),
+        "fixture".into(),
+    );
+    let plan = attachments
+        .plan_add(
+            "t",
+            vec![crate::attachments::AttachmentInput {
+                path: path.clone(),
+                kind: AttachmentKind::File,
+            }],
+            tokio_util::sync::CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    store
+        .execute_with_plan(
+            Request::new(
+                "fixture:held-frontier-attachment",
+                Command::AttachmentAdd(AttachmentAddArgs {
+                    thread_id: Some("t".into()),
+                    path: path.to_string_lossy().into_owned(),
+                    kind: AttachmentKind::File,
+                }),
+            ),
+            None,
+            plan,
+        )
+        .await
+        .unwrap();
+    let attachment_id = store.database.call(|db| Ok(db.query_row(
+        "SELECT node_id FROM attachment_delivery WHERE thread_id='t' AND operation_id='fixture:held-frontier-attachment'",
+        [], |r| r.get::<_,String>(0),
+    )?)).await.unwrap();
+
+    let (admitted, deferred, deferred_replies, applied, states, selected) = store.database.call({
+        let held_id = held_id.clone();
+        let reply_id = reply_id.clone();
+        let question_id = question_id.clone();
+        let attachment_id = attachment_id.clone();
+        move |db| {
+            let tx = db.transaction()?;
+            let revision = crate::history::selection_revision(&tx,"t",crate::history::ThreadScope::Live)?;
+            let admission = crate::control::message_delivery::plan_admission_tx(
+                &tx,"t",std::slice::from_ref(&reply_id),"bounded",
+            )?;
+            assert!(admission.admitted_nodes.is_empty());
+            assert!(admission.deferred_reply_nodes.contains(&reply_id));
+            crate::control::message_delivery::append_admission_plan_tx(
+                &tx,"t",revision as u64,&admission,"bounded",
+            )?;
+            let applied = super::super::attachment_delivery::apply_pending_tx(&tx,"t","bounded")?;
+            let states: (String,String,String) = tx.query_row(
+                "SELECT (SELECT state FROM receipt WHERE message_node_id=?1),(SELECT path_admission FROM receipt WHERE message_node_id=?2),(SELECT status FROM attachment_delivery WHERE node_id=?3)",
+                params![held_id,question_id,attachment_id],
+                |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?)),
+            )?;
+            let selected: Vec<String> = tx.prepare("SELECT node_id FROM thread_path WHERE thread_id='t' ORDER BY ordinal")?
+                .query_map([],|r|r.get(0))?.collect::<rusqlite::Result<_>>()?;
+            tx.commit()?;
+            Ok((admission.admitted_callers,admission.deferred_callers,admission.deferred_reply_nodes,applied,states,selected))
+        }
+    }).await.unwrap();
+    assert!(admitted.is_empty());
+    assert_eq!(deferred, [reply_id]);
+    assert_eq!(deferred_replies, [reply_id]);
+    assert_eq!(applied, 0);
+    assert_eq!(states.0, "held");
+    assert_eq!(states.1, "unadmitted");
+    assert_eq!(states.2, "accepted");
+    assert!(!selected.contains(&question_id));
+    assert!(!selected.contains(&reply_id));
+    assert!(!selected.contains(&attachment_id));
+    attachments.wait_idle().await.unwrap();
+    store.database.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn bounded_admission_prefix_keeps_the_129th_question_before_its_reply() {
+    const DUTIES: usize = 129;
+    let (_root, store) = store().await;
+    let mut questions = Vec::with_capacity(DUTIES);
+    let mut replies = Vec::with_capacity(DUTIES);
+    for index in 0..DUTIES {
+        let ask = store
+            .execute(
+                Request::new(
+                    format!("fixture:question-{index}"),
+                    Command::MessageAsk(MessageAskArgs {
+                        thread_id: None,
+                        text: format!("Q{index}"),
+                    }),
+                ),
+                Some(origin("t")),
+            )
+            .await
+            .unwrap();
+        let question = ask.result["message_id"].as_str().unwrap().to_owned();
+        let answer = store
+            .execute(
+                Request::new(
+                    format!("fixture:reply-{index}"),
+                    Command::MessageReply(MessageReplyArgs {
+                        message_id: question.clone(),
+                        text: format!("R{index}"),
+                        sender_label: None,
+                    }),
+                ),
+                None,
+            )
+            .await
+            .unwrap();
+        questions.push(question);
+        replies.push(answer.result["message_id"].as_str().unwrap().to_owned());
+    }
+    let (plan, selected) = store
+        .database
+        .call({
+            let replies = replies.clone();
+            let last_question = questions[DUTIES - 1].clone();
+            move |db| {
+                let tx = db.transaction()?;
+                let revision = crate::history::selection_revision(
+                    &tx,
+                    "t",
+                    crate::history::ThreadScope::Live,
+                )?;
+                let plan = crate::control::message_delivery::plan_admission_tx(
+                    &tx, "t", &replies, "bounded",
+                )?;
+                assert_eq!(plan.admitted_callers.len(), DUTIES);
+                assert!(plan.deferred_callers.is_empty());
+                assert!(plan.admitted_nodes.contains(&last_question));
+                crate::control::message_delivery::append_admission_plan_tx(
+                    &tx,
+                    "t",
+                    revision as u64,
+                    &plan,
+                    "bounded",
+                )?;
+                let selected: Vec<String> = tx
+                    .prepare(
+                        "SELECT node_id FROM thread_path WHERE thread_id='t' ORDER BY ordinal",
+                    )?
+                    .query_map([], |r| r.get(0))?
+                    .collect::<rusqlite::Result<_>>()?;
+                tx.commit()?;
+                Ok((plan, selected))
+            }
+        })
+        .await
+        .unwrap();
+    assert_eq!(selected.len(), DUTIES * 2);
+    for (question, reply) in questions.iter().zip(&replies) {
+        let q = selected
+            .iter()
+            .position(|node| node == question)
+            .expect("question admitted");
+        let r = selected
+            .iter()
+            .position(|node| node == reply)
+            .expect("reply admitted");
+        assert!(q < r, "each answer remains after its own question");
+    }
+    assert!(plan.admitted_nodes.contains(&questions[DUTIES - 1]));
+    store.database.shutdown().await.unwrap();
+}
+
 #[tokio::test]
 async fn cancellation_is_partial_unrestricted_archived_idempotent_and_never_wakes_models() {
     let (_root, store) = store().await;

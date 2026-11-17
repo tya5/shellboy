@@ -53,7 +53,9 @@ pub fn apply_pending_tx(tx: &Transaction<'_>, thread: &str, now: &str) -> Result
         return Ok(0);
     }
     let nodes:Vec<String>=tx.prepare(&format!("SELECT d.node_id FROM attachment_delivery d WHERE d.thread_id=?1 AND {ELIGIBLE_PENDING} ORDER BY d.rowid")).map_err(sql)?.query_map([thread],|r|r.get(0)).map_err(sql)?.collect::<rusqlite::Result<_>>().map_err(sql)?;
-    let mut applied = 0;
+    let mut boundary_nodes = Vec::new();
+    let mut selected_attachments = Vec::new();
+    let mut seen = std::collections::HashSet::new();
     for node in nodes {
         // A shell can target another Thread. Its source group must be complete
         // too, even when the destination Thread is currently idle.
@@ -61,91 +63,45 @@ pub fn apply_pending_tx(tx: &Transaction<'_>, thread: &str, now: &str) -> Result
         if origin_pending {
             break;
         }
-        // Control commits receipts before/after attachment operations. Adopt
-        // preceding pending user nodes first without acknowledging model input.
+        // Collect the eligible prefix, but append it once so staged human duties
+        // can be merged before any message/attachment node becomes selected.
         let earlier:Vec<String>=tx.prepare("SELECT r.message_node_id FROM receipt r JOIN node n ON n.id=r.message_node_id WHERE r.target_thread_id=?1 AND r.state='accepted' AND n.rowid<(SELECT rowid FROM node WHERE id=?2) AND NOT EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id=?1 AND p.node_id=n.id) ORDER BY n.rowid").map_err(sql)?.query_map(params![thread,node],|r|r.get(0)).map_err(sql)?.collect::<rusqlite::Result<_>>().map_err(sql)?;
         for message in earlier {
-            append_selected(tx, thread, &message, now)?;
-            super::message_delivery::mark_admitted_tx(tx, thread, &[message]).map_err(sql)?;
+            if seen.insert(message.clone()) {
+                boundary_nodes.push(message);
+            }
         }
-        append_selected(tx, thread, &node, now)?;
-        tx.execute(
-            "UPDATE attachment_delivery SET status='applied' WHERE node_id=?1 AND thread_id=?2",
-            params![node, thread],
+        if seen.insert(node.clone()) {
+            boundary_nodes.push(node.clone());
+        }
+        selected_attachments.push(node);
+    }
+    if selected_attachments.is_empty() {
+        return Ok(0);
+    }
+    let revision: i64 = tx
+        .query_row(
+            "SELECT selection_revision FROM thread WHERE id=?1 AND deleted_at IS NULL",
+            [thread],
+            |r| r.get(0),
         )
         .map_err(sql)?;
-        applied += 1;
+    let plan = super::message_delivery::plan_admission_tx(tx, thread, &boundary_nodes, now)
+        .map_err(sql)?;
+    super::message_delivery::append_admission_plan_tx(tx, thread, revision as u64, &plan, now)
+        .map_err(crate::app::storage_error)?;
+    let mut applied = 0;
+    for node in &selected_attachments {
+        if !plan.admitted_callers.contains(node) {
+            continue;
+        }
+        applied+=tx.execute(
+            "UPDATE attachment_delivery SET status='applied' WHERE node_id=?1 AND thread_id=?2 AND status IN ('accepted','held')",
+            params![node, thread],
+        ).map_err(sql)?;
     }
     Ok(applied)
 }
-fn append_selected(
-    tx: &Transaction<'_>,
-    thread: &str,
-    node: &str,
-    now: &str,
-) -> Result<(), ApiError> {
-    let exists: bool = tx
-        .query_row(
-            "SELECT EXISTS(SELECT 1 FROM thread_path WHERE thread_id=?1 AND node_id=?2)",
-            params![thread, node],
-            |r| r.get(0),
-        )
-        .map_err(sql)?;
-    if exists {
-        return Ok(());
-    }
-    let valid:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM node WHERE id=?1 AND deleted_reason IS NULL AND payload_json IS NOT NULL)",[&node],|r|r.get(0)).map_err(sql)?;
-    if !valid {
-        return Err(ApiError::new(
-            ErrorCode::InvalidState,
-            "Pending attachment provenance is missing",
-        ));
-    }
-    let previous: Option<String> = tx
-        .query_row(
-            "SELECT cursor_node_id FROM thread WHERE id=?1 AND deleted_at IS NULL",
-            [thread],
-            |r| r.get(0),
-        )
-        .optional()
-        .map_err(sql)?
-        .ok_or_else(|| {
-            ApiError::new(
-                ErrorCode::ThreadNotFound,
-                "Attachment target Thread was deleted",
-            )
-        })?;
-    let last: Option<String> = tx
-        .query_row(
-            "SELECT node_id FROM thread_path WHERE thread_id=?1 ORDER BY ordinal DESC LIMIT 1",
-            [thread],
-            |r| r.get(0),
-        )
-        .optional()
-        .map_err(sql)?;
-    if previous != last {
-        return Err(ApiError::new(
-            ErrorCode::InvalidState,
-            "Attachment target cursor differs from selected path",
-        ));
-    }
-    if let Some(previous) = previous {
-        tx.execute(
-            "INSERT INTO edge(src,dst)VALUES(?1,?2)",
-            params![previous, node],
-        )
-        .map_err(sql)?;
-    }
-    tx.execute("INSERT INTO thread_path(thread_id,ordinal,node_id)SELECT ?1,COALESCE(MAX(ordinal),-1)+1,?2 FROM thread_path WHERE thread_id=?1",params![thread,node]).map_err(sql)?;
-    tx.execute("UPDATE thread SET cursor_node_id=?2,selection_revision=selection_revision+1,revision=revision+1,updated_at=?3 WHERE id=?1",params![thread,node,now]).map_err(sql)?;
-    tx.execute(
-        "UPDATE app_meta SET value=CAST(value AS INTEGER)+1 WHERE key='root_revision'",
-        [],
-    )
-    .map_err(sql)?;
-    Ok(())
-}
-
 fn sql(error: rusqlite::Error) -> ApiError {
     crate::storage::save_error(error.to_string())
 }

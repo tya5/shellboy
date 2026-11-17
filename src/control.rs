@@ -1457,6 +1457,31 @@ impl Control {
             self.gc.wait_idle(),
             self.index.wait_idle()
         )?;
+        let capture_threads = self
+            .store
+            .database
+            .call(|db| Ok(interruption::staged_capture_threads(db)?))
+            .await
+            .map_err(storage_error)?;
+        for thread in capture_threads {
+            let boundary = self.boundary(&thread).await;
+            let _guard = boundary.lock().await;
+            let target = thread.clone();
+            self.store
+                .database
+                .call(move |db| {
+                    let tx = db.transaction()?;
+                    interruption::consume_staged_captures(
+                        &tx,
+                        &target,
+                        &chrono::Utc::now().to_rfc3339(),
+                    )?;
+                    tx.commit()?;
+                    Ok(())
+                })
+                .await
+                .map_err(storage_error)?;
+        }
         // Owner releases the lock only after this and DbWorker::shutdown.
         self.store
             .database
@@ -1599,6 +1624,14 @@ mod failure_tests {
             }
             let sent = send.await.unwrap();
             prepare.await.unwrap().unwrap();
+            if !save_failure {
+                owner.db.call(|db| {
+                    assert!(db.query_row("SELECT EXISTS(SELECT 1 FROM event WHERE kind='context_changed' AND json_extract(payload_ref_json,'$.kind')='interruption_capture_header')",[],|r|r.get::<_,bool>(0))?);
+                    assert_eq!(db.query_row("SELECT count(*) FROM node WHERE kind='interruption_context'",[],|r|r.get::<_,i64>(0))?,0,
+                        "pre-cancel capture is durable staging only; no selected history changes before the Run drains");
+                    Ok(())
+                }).await.unwrap();
+            }
             let shutdown = tokio::time::timeout(Duration::from_secs(5), control.shutdown())
                 .await
                 .unwrap();
@@ -1612,6 +1645,11 @@ mod failure_tests {
                 owner.db.call(move |db| {
                     let snapshot:String=db.query_row("SELECT payload_ref_json FROM event WHERE target_thread_id=?1 AND json_extract(payload_ref_json,'$.change.reason')='app_shutdown'",[&thread],|r|r.get(0))?;
                     assert!(snapshot.contains("app_shutdown"));
+                    let snapshot:serde_json::Value=serde_json::from_str(&snapshot).unwrap();
+                    let snapshot_node=snapshot["snapshot_node_id"].as_str().unwrap();
+                    assert_eq!(db.query_row("SELECT kind FROM node WHERE id=?1",[snapshot_node],|r|r.get::<_,String>(0))?,"interruption_context");
+                    assert_eq!(db.query_row("SELECT count(*) FROM event WHERE target_thread_id=?1 AND json_extract(payload_ref_json,'$.kind') LIKE 'interruption_capture_%'",[&thread],|r|r.get::<_,i64>(0))?,0,
+                        "the exact original public event is published and its staged rows are consumed");
                     assert_eq!(db.query_row("SELECT COUNT(*) FROM receipt WHERE target_thread_id=?1",[thread],|r|r.get::<_,i64>(0))?,1);
                     assert_eq!(db.query_row("SELECT COUNT(*) FROM run WHERE state IN ('live','stopping')",[],|r|r.get::<_,i64>(0))?,0);
                     Ok(())
@@ -1621,6 +1659,83 @@ mod failure_tests {
             assert_eq!(control.active_requests.load(Ordering::Acquire), 0);
             owner.shutdown().await.unwrap();
         }
+    }
+
+    #[tokio::test]
+    async fn startup_consumes_the_same_durable_capture_after_shutdown_adoption_fails() {
+        let root = tempfile::tempdir().unwrap();
+        let config = root.path().join("config.toml");
+        let data = root.path().join("data");
+        std::fs::write(&config, "default_connection='fixture'\ndefault_model='fixture'\n[connections.fixture]\nbase_url='http://127.0.0.1:1/v1'\n").unwrap();
+        let owner = DataOwner::start(Some(config.clone()), Some(data.clone()), root.path().into())
+            .await
+            .unwrap();
+        let control = Control::new(&owner, root.path().into());
+        let accepted = control
+            .send_draft(
+                format!("{}:capture-recovery", control.store.instance_id),
+                ThreadCreateArgs {
+                    agents: None,
+                    connection: None,
+                    model: None,
+                    effort: None,
+                    cwd: None,
+                    parent_id: None,
+                },
+                None,
+                "durable pre-cancel source".into(),
+                vec![],
+            )
+            .await
+            .unwrap();
+        let thread = accepted["thread_id"].as_str().unwrap().to_owned();
+        control.prepare_shutdown().await.unwrap();
+        let (capture_id,final_event_id,snapshot_node):(String,String,String)=owner.db.call({
+            let thread=thread.clone();
+            move |db| db.query_row(
+                "SELECT json_extract(payload_ref_json,'$.capture_id'),json_extract(payload_ref_json,'$.final_event_id'),json_extract(payload_ref_json,'$.final_payload.snapshot_node_id') FROM event WHERE target_thread_id=?1 AND json_extract(payload_ref_json,'$.kind')='interruption_capture_header'",
+                [thread],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?)),
+            ).map_err(Into::into)
+        }).await.unwrap();
+        owner.db.call(|db| {
+            db.execute_batch("CREATE TRIGGER reject_capture_adoption BEFORE INSERT ON node WHEN NEW.kind='interruption_context' BEGIN SELECT RAISE(ABORT,'fixture interruption adoption failure'); END;")?;
+            Ok(())
+        }).await.unwrap();
+        assert!(
+            control.shutdown().await.is_err(),
+            "failed adoption must leave the committed capture retryable"
+        );
+        owner.db.call({
+            let thread=thread.clone();
+            let capture_id=capture_id.clone();
+            let snapshot_node=snapshot_node.clone();
+            move |db| {
+                assert!(db.query_row("SELECT count(*) FROM event WHERE target_thread_id=?1 AND json_extract(payload_ref_json,'$.capture_id')=?2",params![thread,capture_id],|row|row.get::<_,i64>(0))?>1);
+                assert_eq!(db.query_row("SELECT count(*) FROM event WHERE target_thread_id=?1 AND json_extract(payload_ref_json,'$.kind')='interruption_capture_header'",[&thread],|row|row.get::<_,i64>(0))?,1);
+                assert_eq!(db.query_row("SELECT count(*) FROM node WHERE id=?1",[snapshot_node],|row|row.get::<_,i64>(0))?,0);
+                db.execute_batch("DROP TRIGGER reject_capture_adoption")?;
+                Ok(())
+            }
+        }).await.unwrap();
+        drop(control);
+        owner.shutdown().await.unwrap();
+
+        let recovered = DataOwner::start(Some(config), Some(data), root.path().into())
+            .await
+            .unwrap();
+        recovered.db.call({
+            let thread=thread.clone();
+            let capture_id=capture_id.clone();
+            let final_event_id=final_event_id.clone();
+            let snapshot_node=snapshot_node.clone();
+            move |db| {
+                assert_eq!(db.query_row("SELECT count(*) FROM event WHERE target_thread_id=?1 AND id=?2 AND kind='context_changed'",params![thread,final_event_id],|row|row.get::<_,i64>(0))?,1);
+                assert_eq!(db.query_row("SELECT count(*) FROM node WHERE id=?1 AND kind='interruption_context'",[snapshot_node],|row|row.get::<_,i64>(0))?,1);
+                assert_eq!(db.query_row("SELECT count(*) FROM event WHERE target_thread_id=?1 AND json_extract(payload_ref_json,'$.capture_id')=?2",params![thread,capture_id],|row|row.get::<_,i64>(0))?,0);
+                Ok(())
+            }
+        }).await.unwrap();
+        recovered.shutdown().await.unwrap();
     }
 
     #[tokio::test]
