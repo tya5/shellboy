@@ -4067,7 +4067,7 @@ async fn proactive_partial_spill_with_oversized_current_does_not_retry_summary()
 /// so no active summary is attempted either.
 #[tokio::test]
 async fn proactive_rejected_summaries_are_not_repeated_as_the_current_turn_grows() {
-    let result = ax_growing_turn_summary_requests(|| (200, answer(" ")), 0, None).await;
+    let result = ax_growing_turn_summary_requests(|| (200, answer(" ")), 0).await;
     assert_eq!(
         result.summaries, 1,
         "one closed summary request: {:#?}",
@@ -4104,7 +4104,6 @@ async fn proactive_provider_rejection_of_summaries_is_not_repeated_either() {
             )
         },
         0,
-        None,
     )
     .await;
     let eligible_reports = (0..19).filter(|index| *index >= 2).count();
@@ -4174,7 +4173,6 @@ async fn proactive_provider_500_is_suppressed_within_same_run_turn() {
             )
         },
         0,
-        None,
     )
     .await;
     let eligible_reports = 17;
@@ -4232,7 +4230,6 @@ struct AxFixtureResult {
     initial_path_ids: Vec<String>,
     final_path_ids: Vec<String>,
     failure_memory_slots: usize,
-    seeded_slot: Option<(String, Vec<u8>)>,
 }
 
 #[derive(Clone, Copy)]
@@ -4247,7 +4244,6 @@ pub(super) enum FailureSlotSeed {
 async fn ax_growing_turn_summary_requests(
     summary_reply: fn() -> (u16, Value),
     retries: u8,
-    slot_seed: Option<FailureSlotSeed>,
 ) -> AxFixtureResult {
     crate::test_watchdog::watchdog("proactive growing Turn summary requests", async move {
         let root = tempfile::tempdir().unwrap();
@@ -4261,31 +4257,6 @@ async fn ax_growing_turn_summary_requests(
         let owner = DataOwner::start(Some(config), Some(root.path().join("data")), root.path().into()).await.unwrap();
         let control = Control::new(&owner, root.path().into());
         let target = thread(&control).await;
-        if let Some(seed) = slot_seed {
-            let thread_id = target.clone();
-            control.store.database.call(move |db| {
-                let key = format!("compact.deterministic_range_failure.closed.{thread_id}");
-                if matches!(seed, FailureSlotSeed::InvalidUtf8) {
-                    db.execute(
-                        "INSERT INTO app_meta(key,value) VALUES(?1,CAST(x'ff' || zeroblob(63) AS TEXT))",
-                        [key],
-                    )?;
-                } else {
-                    let value = match seed {
-                        FailureSlotSeed::Malformed64 => rusqlite::types::Value::Text("g".repeat(64)),
-                        FailureSlotSeed::Uppercase64 => rusqlite::types::Value::Text("A".repeat(64)),
-                        FailureSlotSeed::OversizeText => rusqlite::types::Value::Text("a".repeat(65_536)),
-                        FailureSlotSeed::Blob => rusqlite::types::Value::Blob(vec![0x61; 64]),
-                        FailureSlotSeed::InvalidUtf8 => unreachable!(),
-                    };
-                    db.execute(
-                        "INSERT INTO app_meta(key,value) VALUES(?1,?2)",
-                        rusqlite::params![key, value],
-                    )?;
-                }
-                Ok(())
-            }).await.unwrap();
-        }
         for text in ["hi", "yo"] {
             send(&control, &target, text).await;
             incoming(&control, &mut receive).await.reply.send((200, answer("ok"))).unwrap();
@@ -4367,14 +4338,6 @@ async fn ax_growing_turn_summary_requests(
                 |row| row.get::<_, i64>(0).map(|count| count as usize),
             )?)
         }).await.unwrap();
-        let slot_thread = target.clone();
-        let seeded_slot = control.store.database.call(move |db| {
-            Ok(db.query_row(
-                "SELECT typeof(value),CAST(value AS BLOB) FROM app_meta WHERE key=?1",
-                [format!("compact.deterministic_range_failure.closed.{slot_thread}")],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?)),
-            ).optional()?)
-        }).await.unwrap();
         eprintln!("summary_requests={summaries} records={records:#?}");
         // The failure record is automatic-only: an explicit compact still issues a summary.
         request(&control, Command::Compact(ThreadTarget { thread_id: Some(target.clone()) })).await;
@@ -4382,7 +4345,7 @@ async fn ax_growing_turn_summary_requests(
         assert_eq!(explicit.body["tools"], json!([]), "explicit compact is not blocked");
         let _ = explicit.reply.send((200, answer("explicit summary")));
         control.shutdown().await.unwrap(); owner.shutdown().await.unwrap(); server.abort();
-        AxFixtureResult { summaries, records, owner_instance_id, report_scopes, initial_path_ids, final_path_ids, failure_memory_slots, seeded_slot }
+        AxFixtureResult { summaries, records, owner_instance_id, report_scopes, initial_path_ids, final_path_ids, failure_memory_slots }
     }).await.unwrap()
 }
 

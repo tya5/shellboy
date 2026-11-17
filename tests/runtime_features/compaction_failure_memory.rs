@@ -5,7 +5,7 @@ use super::*;
 /// reuse one provider invocation, even when each request is a terminal veto.
 #[tokio::test]
 async fn provider_veto_is_one_invocation_per_real_scope() {
-    let result = ax_growing_turn_summary_requests(auth_veto_reply, 0, None).await;
+    let result = ax_growing_turn_summary_requests(auth_veto_reply, 0).await;
     assert_scope_trace(&result);
     assert_provider_scope_records(&result, 401, 1);
 }
@@ -17,9 +17,10 @@ async fn provider_veto_is_one_invocation_per_real_scope() {
 /// identity proof gap rather than a fabricated/public DTO assertion.
 fn assert_scope_trace(result: &AxFixtureResult) {
     assert!(!result.owner_instance_id.is_empty());
-    assert!(
-        !result.report_scopes.is_empty(),
-        "eligible automatic attempts were recorded"
+    assert_eq!(
+        result.report_scopes.len(),
+        17,
+        "all predeclared eligible report scopes are recorded"
     );
     let first = result.report_scopes.first().unwrap();
     assert!(
@@ -41,9 +42,11 @@ fn assert_provider_scope_records(result: &AxFixtureResult, status: u16, admitted
         "actual synthetic HTTP summary POST count: {:#?}",
         result.records
     );
-    assert!(
-        !result.records.is_empty(),
-        "every observed eligible attempt has a saved outcome"
+    assert_eq!(
+        result.records.len(),
+        17,
+        "one attempt record per predeclared report: {:#?}",
+        result.records
     );
     let admitted: Vec<_> = result
         .records
@@ -85,8 +88,8 @@ fn assert_provider_scope_records(result: &AxFixtureResult, status: u16, admitted
         .collect();
     assert_eq!(
         suppressed.len(),
-        result.records.len() - 1,
-        "every other admitted same-scope attempt is suppressed: {:#?}",
+        16,
+        "all sixteen later eligible same-scope attempts are suppressed: {:#?}",
         result.records
     );
     for record in suppressed {
@@ -125,7 +128,7 @@ async fn auth_not_found_and_rate_vetoes_share_provider_scope_without_halving() {
         (404, not_found_reply as fn() -> (u16, Value)),
         (429, rate_limit_reply as fn() -> (u16, Value)),
     ] {
-        let result = ax_growing_turn_summary_requests(reply, 0, None).await;
+        let result = ax_growing_turn_summary_requests(reply, 0).await;
         assert_eq!(
             result.summaries, 1,
             "HTTP {status}: one invocation in the real scope"
@@ -159,14 +162,53 @@ fn rate_limit_reply() -> (u16, Value) {
 /// the repeated same-scope report is suppressed without another invocation.
 #[tokio::test]
 async fn provider_scope_counts_invocation_not_transient_posts() {
-    let result = ax_growing_turn_summary_requests(retryable_server_error_reply, 2, None).await;
+    let result = one_provider_invocation(retryable_server_error_reply, 2, None).await;
     assert_eq!(
-        result.summaries, 3,
-        "one invocation has its configured retry vector: {:#?}",
-        result.records
+        result.summary_posts, 3,
+        "one declared invocation makes its exact retry vector"
     );
-    assert_scope_trace(&result);
-    assert_provider_scope_records(&result, 500, 3);
+    assert_eq!(
+        result.scopes.len(),
+        1,
+        "one policy invocation owns one captured Run/Turn scope"
+    );
+    assert_eq!(
+        result.bodies.len(),
+        result.summary_posts,
+        "each actual provider POST retains its request body"
+    );
+    assert!(
+        result.bodies.iter().all(|body| body == &result.bodies[0]),
+        "all retry request bodies are byte-equivalent JSON values"
+    );
+    assert_eq!(result.bodies[0]["tools"], json!([]));
+    let input = result.bodies[0]["input"].to_string();
+    assert!(
+        input.contains("task 0"),
+        "the predeclared older Turn is summarized: {input}"
+    );
+    assert!(
+        !input.contains("task 1"),
+        "the latest completed Turn stays outside R"
+    );
+    assert!(
+        !input.contains("current task"),
+        "the triggering request remains protected"
+    );
+    assert_eq!(result.record["trigger"]["input_tokens"], 150);
+    assert_eq!(
+        result.record["compaction_outcome"]["outcome"]["reason"],
+        "provider_error"
+    );
+    assert_eq!(
+        result.record["compaction_outcome"]["outcome"]["http_status"],
+        500
+    );
+    assert_eq!(result.record["error"]["details"]["model_requests"], 3);
+    assert_eq!(
+        result.record["error"]["details"]["summary_usage"]["requests"],
+        3
+    );
 }
 
 fn retryable_server_error_reply() -> (u16, Value) {
@@ -192,32 +234,208 @@ async fn unknown_slot_values_allow_provider_calls_and_remain_untouched() {
         ),
     ];
     for (seed, expected_type, expected_bytes) in cases {
-        let result = ax_growing_turn_summary_requests(auth_veto_reply, 0, Some(seed)).await;
-        assert!(
-            result.summaries > 0,
-            "unknown slot permits actual provider calls for the reports admitted by preflight"
+        let result = one_provider_invocation(auth_veto_reply, 0, Some(seed)).await;
+        assert_eq!(
+            result.summary_posts, 1,
+            "one predeclared eligible report issues one no-retry POST"
         );
         assert_eq!(
-            result.summaries,
-            result.records.len(),
-            "each admitted no-retry provider call has its own saved attempt outcome"
+            result.record["compaction_outcome"]["outcome"]["reason"],
+            "provider_error"
         );
-        assert_eq!(result.failure_memory_slots, 1, "no second slot was created");
+        assert_eq!(
+            result.record["compaction_outcome"]["outcome"]["http_status"],
+            401
+        );
+        assert_eq!(result.record["error"]["details"]["model_requests"], 1);
+        assert_eq!(
+            result.record["error"]["details"]["summary_usage"]["requests"],
+            1
+        );
+        assert_eq!(
+            result.slot_count, 1,
+            "unknown slot never creates a second provider-memory key"
+        );
         assert_eq!(
             result.seeded_slot,
             Some((expected_type.to_owned(), expected_bytes)),
-            "the original invalid slot must remain byte-for-byte and type-for-type unchanged"
+            "unknown invalid bytes and storage type remain untouched"
         );
-        assert!(
-            result.records.iter().all(|record| {
-                record["compaction_outcome"]["outcome"]["reason"] == "provider_error"
-                    && record["compaction_outcome"]["outcome"]["origin"] == "provider_response"
-                    && record["compaction_outcome"]["outcome"]["http_status"] == 401
-                    && record["error"]["details"]["model_requests"] == 1
-                    && record["error"]["details"]["summary_usage"]["requests"] == 1
-            }),
-            "unknown slot must not create suppressions or falsify request accounting"
-        );
+    }
+}
+
+struct ProviderInvocation {
+    summary_posts: usize,
+    scopes: Vec<(String, String)>,
+    bodies: Vec<Value>,
+    record: Value,
+    slot_count: i64,
+    seeded_slot: Option<(String, Vec<u8>)>,
+}
+
+/// One source-proven eligible threshold report isolates request retries from
+/// the asynchronous `next_request_pending` gate on later ordinary reports.
+async fn one_provider_invocation(
+    summary_reply: fn() -> (u16, Value),
+    retries: u8,
+    slot_seed: Option<FailureSlotSeed>,
+) -> ProviderInvocation {
+    let root = tempfile::tempdir().unwrap();
+    let (url, mut receive, server) = proxy().await;
+    let config = root.path().join("config.toml");
+    std::fs::write(
+        &config,
+        format!("default_connection=\"fixture\"\ndefault_model=\"fixture\"\n[connections.fixture]\nbase_url={url:?}\nresponse_max_retries={retries}\nresponse_retry_max_delay_ms=10\nspill=false\n[compaction]\nauto_at_tokens=100\nsummary_max_chars=4000\n"),
+    ).unwrap();
+    let owner = DataOwner::start(
+        Some(config),
+        Some(root.path().join("data")),
+        root.path().into(),
+    )
+    .await
+    .unwrap();
+    let control = Control::new(&owner, root.path().into());
+    let thread = thread(&control).await;
+    if let Some(seed) = slot_seed {
+        let key_thread = thread.clone();
+        control.store.database.call(move |db| {
+            let key=format!("compact.deterministic_range_failure.closed.{key_thread}");
+            if matches!(seed,FailureSlotSeed::InvalidUtf8) {
+                db.execute("INSERT INTO app_meta(key,value) VALUES(?1,CAST(x'ff' || zeroblob(63) AS TEXT))",[key])?;
+            } else {
+                let value=match seed {
+                    FailureSlotSeed::Malformed64=>rusqlite::types::Value::Text("g".repeat(64)),
+                    FailureSlotSeed::Uppercase64=>rusqlite::types::Value::Text("A".repeat(64)),
+                    FailureSlotSeed::OversizeText=>rusqlite::types::Value::Text("a".repeat(65_536)),
+                    FailureSlotSeed::Blob=>rusqlite::types::Value::Blob(vec![b'a';64]),
+                    FailureSlotSeed::InvalidUtf8=>unreachable!(),
+                };
+                db.execute("INSERT INTO app_meta(key,value) VALUES(?1,?2)",rusqlite::params![key,value])?;
+            }
+            Ok(())
+        }).await.unwrap();
+    }
+    let mut trace =
+        proactive_third_turn_after_run(&control, &mut receive, &thread, 150, summary_reply(), None)
+            .await;
+    let events = proactive_events(&control, &thread).await;
+    assert_eq!(
+        events.len(),
+        1,
+        "the predeclared first threshold boundary has one automatic attempt: {events:#?}"
+    );
+    let event = events[0].clone();
+    let trigger_turn = event["turn_id"]
+        .as_str()
+        .expect("attempt is bound to a Turn")
+        .to_owned();
+    let trigger_turns = [trigger_turn];
+    let mut finish = Box::pin(automatic_attempts_finished_for_turns(
+        &control,
+        &trigger_turns,
+        1,
+    ));
+    let terminal = loop {
+        tokio::select! {
+            attempts = &mut finish => break attempts,
+            incoming = receive.recv() => {
+                let incoming = incoming.expect("provider receiver stays open through the exact FINISH cut");
+                assert_eq!(incoming.kind(), ProviderRequestKind::Summary,
+                    "after the named Turn settles only an actual summary retry remains");
+                assert_eq!(incoming.body, trace.summary_bodies[0], "late retry preserves the exact original request body");
+                trace.summary_requests += 1;
+                trace.summary_bodies.push(incoming.body.clone());
+                incoming.reply.send(summary_reply()).unwrap();
+            }
+        }
+    };
+    assert_eq!(terminal.len(), 1);
+    assert_eq!(terminal[0].id, event["attempt_id"].as_str().unwrap());
+    let finished_events = proactive_events(&control, &thread).await;
+    assert_eq!(
+        finished_events.len(),
+        1,
+        "one predeclared eligible report still owns exactly one attempt"
+    );
+    assert_eq!(finished_events[0]["attempt_id"], terminal[0].id);
+    let attempt_id = terminal[0].id.clone();
+    let record_raw:String=control.store.database.call(move|db|{
+        db.query_row("SELECT json_extract(error_json,'$.automatic_trim_attempt') FROM model_attempt WHERE id=?1",[attempt_id],|row|row.get(0)).map_err(Into::into)
+    }).await.unwrap();
+    let record: Value = serde_json::from_str(&record_raw).unwrap();
+    let trigger_run = record["trigger"]["run_id"]
+        .as_str()
+        .expect("captured trigger Run");
+    assert_eq!(
+        trace
+            .summary_scopes
+            .iter()
+            .collect::<std::collections::HashSet<_>>()
+            .len(),
+        1,
+        "all actual retry POSTs use one real Run/Turn scope"
+    );
+    assert!(
+        trace
+            .summary_scopes
+            .iter()
+            .all(|scope| scope.0 == trigger_run),
+        "summary POSTs and saved trigger identify the same foreground Run"
+    );
+    assert_eq!(
+        trace.summary_requests,
+        retries as usize + 1,
+        "the exact provider POST retry vector is preserved for the one captured scope"
+    );
+    assert_eq!(
+        trace.summary_scopes.len(),
+        1,
+        "retry POSTs retain the one provider invocation scope"
+    );
+    assert_eq!(trace.summary_bodies.len(), trace.summary_requests);
+    assert!(
+        trace
+            .summary_bodies
+            .iter()
+            .all(|body| body == &trace.summary_bodies[0]),
+        "all captured retries retain the same body"
+    );
+    let thread_key = thread.clone();
+    let (slot_count, seeded_slot): (i64, Option<(String, Vec<u8>)>) = control
+        .store
+        .database
+        .call(move |db| {
+            let slot_count = db.query_row(
+                "SELECT count(*) FROM app_meta WHERE key IN (?1,?2)",
+                rusqlite::params![
+                    format!("compact.deterministic_range_failure.closed.{thread_key}"),
+                    format!("compact.deterministic_range_failure.active.{thread_key}")
+                ],
+                |row| row.get(0),
+            )?;
+            let seeded = db
+                .query_row(
+                    "SELECT typeof(value),CAST(value AS BLOB) FROM app_meta WHERE key=?1",
+                    [format!(
+                        "compact.deterministic_range_failure.closed.{thread_key}"
+                    )],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .optional()?;
+            Ok((slot_count, seeded))
+        })
+        .await
+        .unwrap();
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+    server.abort();
+    ProviderInvocation {
+        summary_posts: trace.summary_requests,
+        scopes: trace.summary_scopes,
+        bodies: trace.summary_bodies,
+        record,
+        slot_count,
+        seeded_slot,
     }
 }
 
