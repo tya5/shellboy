@@ -738,7 +738,7 @@ pub(crate) fn consume_staged_captures(
                         && kind == "interruption_context"
                         && payload["text"].as_str() == Some(expected_final_text.as_str());
                 }
-                let existing: Option<(Option<String>,String,String,Option<String>,i64,Option<String>,Option<String>)> = tx
+                let existing: Option<ExistingCaptureNode> = tx
                     .query_row("SELECT turn_id,kind,created_at,payload_json,payload_bytes,body_hash,deleted_reason FROM node WHERE id=?1",[node_id],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?,row.get(5)?,row.get(6)?)))
                     .optional()?;
                 match existing {
