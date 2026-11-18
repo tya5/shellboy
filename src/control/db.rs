@@ -2117,12 +2117,7 @@ impl Store {
         if args.expect_reply {
             saved_acceptance["reply"] = json!({"state":"pending"});
         }
-        let question_duty = if args.to_human && args.expect_reply {
-            "pending"
-        } else {
-            "none"
-        };
-        tx.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,run_id,turn_id,state,created_at,updated_at,hold_reason,result_json,question_duty) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?9,?10,?11,?12)",params![receipt_id,operation_id,serde_json::to_string(&content.sender).unwrap(),id,message_id,accepted.run_id,accepted.turn_id,state,now,reason,saved_acceptance.to_string(),question_duty]).map_err(sql_error)?;
+        tx.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,run_id,turn_id,state,created_at,updated_at,hold_reason,result_json) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?9,?10,?11)",params![receipt_id,operation_id,serde_json::to_string(&content.sender).unwrap(),id,message_id,accepted.run_id,accepted.turn_id,state,now,reason,saved_acceptance.to_string()]).map_err(sql_error)?;
         if args.to_human {
             // Unarchive immediately, but defer only selected-path mutation to a real path boundary.
             crate::control::db::archive::clear_for_question(tx, &id, now).map_err(sql_error)?;
@@ -5669,7 +5664,7 @@ mod message_acknowledgement_state_tests {
     }
 
     #[tokio::test]
-    async fn actual_message_ask_writer_creates_and_append_discharges_question_duty() {
+    async fn actual_message_ask_writer_and_append_preserve_admission_facts() {
         let root = tempfile::tempdir().unwrap();
         let db = DbWorker::open(root.path().join("question-duty.db"))
             .await
@@ -5695,7 +5690,7 @@ mod message_acknowledgement_state_tests {
         let accepted = store
             .execute(
                 Request::new(
-                    "fixture:question-duty",
+                    "fixture:question-admission",
                     Command::MessageAsk(MessageAskArgs {
                         thread_id: None,
                         text: "Choose one".into(),
@@ -5711,12 +5706,12 @@ mod message_acknowledgement_state_tests {
         assert_eq!(accepted.assignment, Assignment::Pending);
         let before = message_id.clone();
         db.call(move |db| {
-            let (state, admission, duty, reply):(String,String,String,String)=db.query_row(
-                "SELECT state,path_admission,question_duty,json_extract(result_json,'$.reply.state') FROM receipt WHERE message_node_id=?1",
+            let (state, admission, reply):(String,String,String)=db.query_row(
+                "SELECT state,path_admission,json_extract(result_json,'$.reply.state') FROM receipt WHERE message_node_id=?1",
                 [&before],
-                |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?)),
+                |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?)),
             )?;
-            assert_eq!((state.as_str(),admission.as_str(),duty.as_str(),reply.as_str()),("applied","unadmitted","pending","pending"));
+            assert_eq!((state.as_str(),admission.as_str(),reply.as_str()),("applied","unadmitted","pending"));
             Ok(())
         }).await.unwrap();
         let target = message_id.clone();
@@ -5741,12 +5736,12 @@ mod message_acknowledgement_state_tests {
         .await
         .unwrap();
         db.call(move |db| {
-            let (duty, admission, selected):(String,String,bool)=db.query_row(
-                "SELECT r.question_duty,r.path_admission,EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id=r.target_thread_id AND p.node_id=r.message_node_id) FROM receipt r WHERE r.message_node_id=?1",
+            let (admission, selected):(String,bool)=db.query_row(
+                "SELECT r.path_admission,EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id=r.target_thread_id AND p.node_id=r.message_node_id) FROM receipt r WHERE r.message_node_id=?1",
                 [message_id],
-                |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?)),
+                |row| Ok((row.get(0)?,row.get(1)?)),
             )?;
-            assert_eq!((duty.as_str(),admission.as_str(),selected),("admitted","admitted",true));
+            assert_eq!((admission.as_str(),selected),("admitted",true));
             Ok(())
         }).await.unwrap();
         db.shutdown().await.unwrap();

@@ -243,7 +243,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     },
     Migration {
         version: 48,
-        sql: include_str!("../../migrations/0048_question_admission_duty.sql"),
+        sql: include_str!("../../migrations/0048_human_question_path_admission.sql"),
         foreign_keys: None,
     },
 ];
@@ -294,12 +294,6 @@ pub(super) fn run(
             }
             if migration.version == 46 {
                 a_state_scope::convert_rows(&transaction)?;
-            }
-            if migration.version == 48 {
-                transaction.execute(
-                    "UPDATE receipt SET path_admission='admitted',question_duty='admitted' WHERE state='applied' AND json_type(result_json,'$.to_human')='true'",
-                    [],
-                )?;
             }
             if migration.version == 4 {
                 migrate_attachment_sources(&transaction)?;
@@ -430,7 +424,7 @@ fn migrate_attachment_sources(tx: &rusqlite::Transaction<'_>) -> Result<(), Stor
 }
 
 #[cfg(test)]
-mod question_duty_migration_tests {
+mod question_admission_migration_tests {
     use super::*;
     use rusqlite::params;
     use serde_json::json;
@@ -438,7 +432,8 @@ mod question_duty_migration_tests {
     fn schema47() -> Connection {
         let db = Connection::open_in_memory().unwrap();
         db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
-        db.execute_batch("ALTER TABLE receipt DROP COLUMN question_duty; DELETE FROM schema_migration WHERE version=48; PRAGMA user_version=47;").unwrap();
+        db.execute_batch("DELETE FROM schema_migration WHERE version=48; PRAGMA user_version=47;")
+            .unwrap();
         db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','','p','m','now')", []).unwrap();
         db
     }
@@ -457,7 +452,7 @@ mod question_duty_migration_tests {
     }
 
     #[test]
-    fn published_applied_human_questions_settle_ever_admitted_across_all_reply_states() {
+    fn published_applied_human_questions_settle_path_admission_across_all_reply_states() {
         let mut db = schema47();
         for (id, reply) in [
             ("pending", Some("pending")),
@@ -510,12 +505,11 @@ mod question_duty_migration_tests {
             "recipient-deleted",
             "missing",
         ] {
-            let (duty, admission, reply): (String, String, Option<String>) = db.query_row(
-                "SELECT question_duty,path_admission,json_extract(result_json,'$.reply.state') FROM receipt WHERE id=?1",
+            let (admission, reply): (String, Option<String>) = db.query_row(
+                "SELECT path_admission,json_extract(result_json,'$.reply.state') FROM receipt WHERE id=?1",
                 [id],
-                |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?)),
+                |row| Ok((row.get(0)?,row.get(1)?)),
             ).unwrap();
-            assert_eq!(duty, "admitted", "{id}");
             assert_eq!(admission, "admitted", "{id}");
             let expected = match id {
                 "pending" => Some("pending"),
@@ -537,13 +531,6 @@ mod question_duty_migration_tests {
             "string-not-bool",
             "nonhuman",
         ] {
-            assert_eq!(
-                db.query_row("SELECT question_duty FROM receipt WHERE id=?1", [id], |r| r
-                    .get::<_, String>(0))
-                    .unwrap(),
-                "none",
-                "{id}"
-            );
             assert_eq!(
                 db.query_row(
                     "SELECT path_admission FROM receipt WHERE id=?1",
@@ -647,18 +634,13 @@ mod question_duty_migration_tests {
 
         migrate(&mut db).unwrap();
         for id in ["legacy-preserve", "legacy-ancestor"] {
-            let state:(String,String,String,String)=db.query_row(
-                "SELECT state,path_admission,question_duty,json_extract(result_json,'$.reply.state') FROM receipt WHERE id=?1",
-                [id],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?)),
+            let state:(String,String,Option<String>)=db.query_row(
+                "SELECT state,path_admission,json_extract(result_json,'$.reply.state') FROM receipt WHERE id=?1",
+                [id],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?)),
             ).unwrap();
             assert_eq!(
                 state,
-                (
-                    "applied".into(),
-                    "admitted".into(),
-                    "admitted".into(),
-                    "pending".into()
-                )
+                ("applied".into(), "admitted".into(), Some("pending".into()))
             );
         }
 
@@ -767,11 +749,11 @@ mod question_duty_migration_tests {
             ("legacy-preserve", "q-preserve"),
             ("legacy-ancestor", "q-off-path"),
         ] {
-            let owner: (String, String, String, Option<String>, Option<String>, String, String, String) = db
+            let owner: (String, String, String, Option<String>, Option<String>, String, String) = db
                 .query_row(
-                    "SELECT id,client_operation_id,target_thread_id,run_id,turn_id,state,path_admission,question_duty FROM receipt WHERE id=?1 AND message_node_id=?2",
+                    "SELECT id,client_operation_id,target_thread_id,run_id,turn_id,state,path_admission FROM receipt WHERE id=?1 AND message_node_id=?2",
                     params![receipt,node],
-                    |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?,row.get(5)?,row.get(6)?,row.get(7)?)),
+                    |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?,row.get(5)?,row.get(6)?)),
                 )
                 .unwrap();
             assert_eq!(
@@ -783,33 +765,27 @@ mod question_duty_migration_tests {
                     None,
                     None,
                     "applied".into(),
-                    "admitted".into(),
                     "admitted".into()
                 )
             );
         }
         for id in ["legacy-preserve", "legacy-ancestor"] {
-            let state: (String, String, String, String) = db
+            let state: (String, String, Option<String>) = db
                 .query_row(
-                    "SELECT state,path_admission,question_duty,json_extract(result_json,'$.reply.state') FROM receipt WHERE id=?1",
+                    "SELECT state,path_admission,json_extract(result_json,'$.reply.state') FROM receipt WHERE id=?1",
                     [id],
-                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
                 )
                 .unwrap();
             assert_eq!(
                 state,
-                (
-                    "applied".into(),
-                    "admitted".into(),
-                    "admitted".into(),
-                    "pending".into()
-                )
+                ("applied".into(), "admitted".into(), Some("pending".into()))
             );
         }
     }
 
     #[test]
-    fn failed_question_duty_step_rolls_back_its_column_ledger_and_version() {
+    fn failed_schema48_step_rolls_back_path_update_ledger_and_version() {
         let mut db = schema47();
         receipt(
             &db,
@@ -817,8 +793,13 @@ mod question_duty_migration_tests {
             "applied",
             json!({"to_human":true,"reply":{"state":"pending"}}),
         );
-        db.execute_batch("CREATE TRIGGER reject_question_duty BEFORE UPDATE OF path_admission ON receipt WHEN NEW.path_admission='admitted' BEGIN SELECT RAISE(ABORT,'synthetic refusal'); END;").unwrap();
-        assert!(migrate(&mut db).is_err());
+        db.execute_batch("CREATE TRIGGER reject_schema48_ledger BEFORE INSERT ON schema_migration WHEN NEW.version=48 AND EXISTS(SELECT 1 FROM receipt WHERE id='historical' AND path_admission='admitted') BEGIN SELECT RAISE(ABORT,'synthetic refusal after path backfill'); END;").unwrap();
+        let error = migrate(&mut db).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("synthetic refusal after path backfill")
+        );
         assert_eq!(
             db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
                 .unwrap(),
@@ -835,21 +816,12 @@ mod question_duty_migration_tests {
         );
         assert_eq!(
             db.query_row(
-                "SELECT count(*) FROM pragma_table_info('receipt') WHERE name='question_duty'",
+                "SELECT path_admission,json_extract(result_json,'$.reply.state') FROM receipt WHERE id='historical'",
                 [],
-                |r| r.get::<_, i64>(0)
+                |r| Ok((r.get::<_, String>(0)?,r.get::<_,String>(1)?))
             )
             .unwrap(),
-            0
-        );
-        assert_eq!(
-            db.query_row(
-                "SELECT path_admission FROM receipt WHERE id='historical'",
-                [],
-                |r| r.get::<_, String>(0)
-            )
-            .unwrap(),
-            "unadmitted"
+            ("unadmitted".into(),"pending".into())
         );
     }
 }

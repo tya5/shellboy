@@ -70,7 +70,7 @@ pub(crate) const MIGRATION_NAMES: &[(i64, &str)] = &[
     (45, "0045_thread_spill_override"),
     (46, "0046_scope_identity_v2"),
     (47, "0047_drop_selection_nonappend_generation"),
-    (48, "0048_question_admission_duty"),
+    (48, "0048_human_question_path_admission"),
 ];
 pub const SCHEMA_VERSION: i64 = MIGRATION_NAMES.len() as i64;
 pub const DEFAULT_QUEUE_CAPACITY: usize = 128;

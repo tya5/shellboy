@@ -78,8 +78,10 @@ snapshot intact and cleans the tool's own temporary file.
 The source-version gate explicitly supports conversation schemas 39 through 48
 (schema48 is the current question-admission schema) and rejects older unsupported or future versions;
 extend this allowlist only after verifying that the bounded queries remain valid.
-Schema48 adds the separate human-question admission duty and does not change the
-catalogue's selected source columns.
+Schema48 is a receipt-data compatibility step: it marks `path_admission='admitted'`
+for applied receipts with strict JSON boolean `to_human=true`, preserving their
+reply facts. It adds no source columns used by this catalogue. Extend this
+allowlist only after verifying the bounded source query against a new schema.
 
 Tests use current-schema synthetic temporary data only. They cover grouping,
 causality/Turn constraints, counts, provenance, canaries, malformed/oversized text,

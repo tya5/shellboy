@@ -3,6 +3,7 @@
 from contextlib import redirect_stderr
 import importlib.util
 import io
+import json
 from pathlib import Path
 import re
 import sqlite3
@@ -44,9 +45,10 @@ class PublicUpgradeArguments(unittest.TestCase):
         self.assertIn('(45, "0045_thread_spill_override")', names)
         self.assertIn('(46, "0046_scope_identity_v2")', names)
         self.assertIn('(47, "0047_drop_selection_nonappend_generation")', names)
-        self.assertEqual(upgrade.CURRENT_SCHEMA_VERSION, 47)
+        self.assertEqual(upgrade.CURRENT_SCHEMA_VERSION, 48)
         self.assertTrue((ROOT / 'migrations/0046_scope_identity_v2.sql').is_file())
         self.assertTrue((ROOT / 'migrations/0047_drop_selection_nonappend_generation.sql').is_file())
+        self.assertTrue((ROOT / 'migrations/0048_human_question_path_admission.sql').is_file())
         self.assertTrue((ROOT / 'migrations/0045_thread_spill_override.sql').is_file())
         self.assertTrue((ROOT / 'migrations/0039_independent_runs.sql').is_file())
 
@@ -62,9 +64,9 @@ class PublicUpgradeArguments(unittest.TestCase):
         db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('old','/','','p','m','now')")
         upgrade.prepare_schema(db, upgrade.CURRENT_SCHEMA_VERSION)
         self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], upgrade.CURRENT_SCHEMA_VERSION)
-        self.assertEqual(db.execute("SELECT version,name FROM schema_migration ORDER BY version DESC LIMIT 1").fetchone(), (upgrade.CURRENT_SCHEMA_VERSION, '0047_drop_selection_nonappend_generation'))
+        self.assertEqual(db.execute("SELECT version,name FROM schema_migration ORDER BY version DESC LIMIT 1").fetchone(), (upgrade.CURRENT_SCHEMA_VERSION, '0048_human_question_path_admission'))
         self.assertIsNone(db.execute("SELECT spill_override FROM thread WHERE id='old'").fetchone()[0])
-        # The spill constraint remains pinned to 45 after schema 46 and 47.
+        # The spill constraint remains pinned to 45 after schema 46 through 48.
         upgrade.check_migration(db, before_45, 44, upgrade.CURRENT_SCHEMA_VERSION)
         columns = [tuple(row) for row in db.execute('PRAGMA table_info(thread)')]
         fresh = sqlite3.connect(':memory:')
@@ -81,6 +83,55 @@ class PublicUpgradeArguments(unittest.TestCase):
         self.assertEqual(db.execute('PRAGMA foreign_key_check').fetchall(), [])
         db.close()
         fresh.close()
+
+    def test_schema47_to48_published_question_admission_replay_preserves_reply_facts(self):
+        fixture = ROOT / 'tests/fixtures/storage-current-schema43.sql'
+        db = sqlite3.connect(':memory:')
+        db.executescript(fixture.read_text())
+        upgrade.prepare_schema(db, 47)
+        db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('questions','/','','p','m','now')")
+        cases = [
+            ('pending', 'applied', True, 'pending'),
+            ('replied', 'applied', True, 'replied'),
+            ('cancelled-reply', 'applied', True, 'cancelled'),
+            ('deleted-reply', 'applied', True, 'recipient_deleted'),
+            ('missing-reply', 'applied', True, None),
+            ('accepted', 'accepted', True, 'pending'),
+            ('held', 'held', True, 'pending'),
+            ('cancelled-receipt', 'cancelled', True, 'pending'),
+            ('string-true', 'applied', 'true', 'pending'),
+            ('nonhuman', 'applied', False, 'pending'),
+        ]
+        for message, state, to_human, reply_state in cases:
+            db.execute(
+                "INSERT INTO node(id,kind,created_at,payload_json) VALUES(?1,'assistant','old','{}')",
+                (message,),
+            )
+            result = {'to_human': to_human}
+            if reply_state is not None:
+                result['reply'] = {'state': reply_state}
+            db.execute(
+                "INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,path_admission,created_at,result_json) VALUES(?1,?1,'null','questions',?1,?2,'unadmitted','old',?3)",
+                (message, state, json.dumps(result, separators=(',', ':'))),
+            )
+        db.commit()
+
+        upgrade.prepare_schema(db, 48)
+        self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 48)
+        self.assertEqual(
+            db.execute("SELECT version,name FROM schema_migration ORDER BY version DESC LIMIT 1").fetchone(),
+            (48, '0048_human_question_path_admission'),
+        )
+        for message, state, to_human, reply_state in cases:
+            admission, saved = db.execute(
+                "SELECT path_admission,result_json FROM receipt WHERE id=?1",
+                (message,),
+            ).fetchone()
+            expected = 'admitted' if state == 'applied' and to_human is True else 'unadmitted'
+            self.assertEqual(admission, expected, message)
+            self.assertEqual(json.loads(saved).get('reply', {}).get('state'), reply_state, message)
+        self.assertEqual(db.execute('PRAGMA foreign_key_check').fetchall(), [])
+        db.close()
 
     def test_sql_only_staging_refuses_44_and_45_facts_before_any_upgrade(self):
         for start in (44, 45):
@@ -123,6 +174,7 @@ class PublicUpgradeArguments(unittest.TestCase):
                 self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], upgrade.CURRENT_SCHEMA_VERSION)
                 self.assertEqual(upgrade.ledger(db)[:len(before)], before)
                 self.assertEqual(db.execute('SELECT count(*) FROM schema_migration WHERE version=47').fetchone()[0], 1)
+                self.assertEqual(db.execute('SELECT count(*) FROM schema_migration WHERE version=48').fetchone()[0], 1)
                 self.assertEqual(db.execute("SELECT count(*) FROM app_meta WHERE key GLOB 'compact.a_state.*'").fetchone()[0], 0)
                 after = upgrade.ledger(db)
                 upgrade.prepare_schema(db, upgrade.CURRENT_SCHEMA_VERSION)

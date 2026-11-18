@@ -937,27 +937,26 @@ sender deliveries; each committed batch dispatches its stable-ID outcomes after
 commit, and no delivery deadline is promised. Asking an archived Thread unarchives it with reason
 `question_asked`, consistent with the reply-resume unarchive behavior.
 
-A human decision has two distinct durable facts: its reply state and its
-current selected-path admission duty. A new `to_human` question with a pending
-reply gets an explicit `question_duty='pending'` in the receipt at creation.
-The duty is discharged to `admitted` in the same transaction that appends the
-question to the recipient's selected path; cancellation of a still-pending
-question records `cancelled`. Neither receipt `state='applied'` nor the generic
-`path_admission` default alone proves that a question was deferred: older
-writers directly appended applied questions without setting that field. Rewind
-removes a question from the current path but does not recreate its duty or
-make it eligible for append again.
+Question admission has no separate persisted duty column. The existing receipt
+facts are sufficient: a current `MessageAsk` is `state='applied'`,
+`path_admission='unadmitted'`, `to_human=true`, and reply `pending`. The bounded
+question frontier selects only applied, unadmitted human questions whose reply
+is still pending or replied, preserving source order ahead of newer caller work.
+Appending the question changes its existing `path_admission` to `admitted` in
+the same transaction. Receipt cancellation changes receipt `state`; cancellation
+or recipient/sender deletion changes the reply state. Those canonical terminal
+facts remove work from the frontier without another per-question state.
 
-The schema-48 migration records the historical published writer contract:
-`state='applied'` and strict JSON boolean `to_human=true` were committed in the
-same transaction as insertion into the selected path. It maps those rows to
-`path_admission='admitted'` and `question_duty='admitted'`, regardless of reply
-state or current path membership; rewind and reply terminalization do not undo
-ever-admission. Other receipt states and non-human messages are not rewritten.
-This supports databases produced by that published writer. It does not claim
-that every database sharing schema47 was produced only by that writer; the
-unpublished staged-question development store is outside this migration contract
-and must not be reset or automatically repaired by this predicate.
+The schema-48 migration records the supported historical published-writer
+contract: `state='applied'` and strict JSON boolean `to_human=true` were
+committed atomically with insertion into the selected path. It maps those rows
+to `path_admission='admitted'`, regardless of reply state or current path
+membership; rewind and reply terminalization do not undo ever-admission. Other
+receipt states and non-human messages are not rewritten. This supports databases
+produced by that published writer. It does not claim that every database sharing
+schema47 was produced only by that writer; the unpublished staged-question
+development store is outside this migration contract and must not be reset or
+automatically repaired by this predicate.
 
 A model that has an outstanding reply duty while asking the human must tell its
 requester it is blocked before ending its Run; the human question itself is not
