@@ -674,14 +674,6 @@
   {
     "file": "tests/frontend.rs",
     "rule": "raw-timeout",
-    "fingerprint": "3d70e4e0df6366ec0d94c859c74b7c7ba496631a537af39b3a029c87b9b54f26",
-    "function": "direct_database_read_failure_also_stops_new_execution",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing direct_database_read_failure_also_stops_new_execution test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "tests/frontend.rs",
-    "rule": "raw-timeout",
     "fingerprint": "541367e5e43d654dfc652c402d0428404ca9c98b43097cd9f77bfb0500c72d8e",
     "function": "quit_accepted_before_frontend_binding_still_drains_queued_send_and_latest_draft",
     "count": 1,

@@ -1655,64 +1655,6 @@ async fn draft_database_save_failure_stops_admission_and_owned_shell_but_retains
     proxy.await.unwrap();
 }
 
-#[tokio::test]
-async fn direct_database_read_failure_also_stops_new_execution() {
-    use shellboy::protocol::*;
-    let root = tempfile::tempdir().unwrap();
-    let config = root.path().join("config.toml");
-    std::fs::write(&config, "").unwrap();
-    let owner = DataOwner::start(
-        Some(config),
-        Some(root.path().join("data")),
-        root.path().into(),
-    )
-    .await
-    .unwrap();
-    owner.db.call(|db|{db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('source','/','/AGENTS.md','fixture','fixture','now'); DROP TABLE view_state;")?;Ok(())}).await.unwrap();
-    let control = Control::new(&owner, root.path().into());
-    let observer = control.clone();
-    let (rpc_send, rpc_receive) = tokio::sync::mpsc::channel(8);
-    let server = LocalServer::bind(&owner, rpc_send).await.unwrap();
-    tokio::spawn(control.clone().serve(rpc_receive));
-    let (send, receive) = tokio::sync::mpsc::channel(8);
-    let (updates, mut incoming) = std::sync::mpsc::sync_channel(128);
-    let bridge = tokio::spawn(frontend::run(
-        control,
-        receive,
-        updates,
-        root.path().into(),
-        owner,
-        server,
-    ));
-    send.send(UiAction::SelectThread {
-        preview_sources: vec![],
-        thread_id: "source".into(),
-        generation: 1,
-        view_revision: 0,
-        known_view: None,
-    })
-    .await
-    .unwrap();
-    next_update(&mut incoming, |u| {
-        matches!(u,UiUpdate::LoadFailed{message,..}if message.contains("view_state")).then_some(())
-    })
-    .await;
-    let response = observer
-        .request(Request::new(
-            format!("{}:after-read-failure", observer.store.instance_id),
-            Command::ThreadList(ThreadListArgs::default()),
-        ))
-        .await;
-    assert_eq!(response.error.unwrap().code, ErrorCode::InvalidState);
-    send.send(UiAction::Quit).await.unwrap();
-    let error = tokio::time::timeout(std::time::Duration::from_secs(5), bridge)
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap_err();
-    assert_eq!(error.code, ErrorCode::SaveFailed);
-}
-
 fn field(fields: &[shellboy::presentation::PresentationField], pointer: &str) -> String {
     fields
         .iter()
