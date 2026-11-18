@@ -4435,12 +4435,21 @@ async fn proactive_partial_spill_with_oversized_current_does_not_retry_summary()
 #[tokio::test]
 async fn proactive_rejected_summaries_are_not_repeated_as_the_current_turn_grows() {
     let result = ax_growing_turn_summary_requests(|| (200, answer(" ")), 0).await;
+    compaction_failure_memory::assert_scope_trace(&result);
     assert_eq!(
         result.summaries, 1,
         "one closed summary request: {:#?}",
         result.records
     );
-    let records = result.records;
+    assert_eq!(
+        result.initial_failure_event["metrics"]["summary_rejected"],
+        true
+    );
+    assert_eq!(
+        result.initial_failure_event["metrics"]["summary_usage"]["requests"],
+        1
+    );
+    let records = &result.records;
     let failed: Vec<&Value> = records
         .iter()
         .filter(|record| {
@@ -4449,7 +4458,30 @@ async fn proactive_rejected_summaries_are_not_repeated_as_the_current_turn_grows
         })
         .collect();
     assert_eq!(failed.len(), 1, "{records:#?}");
+    assert_eq!(
+        failed[0]["trigger"]["input_tokens"], 202,
+        "the first admitted duty owns the rejection"
+    );
     assert_eq!(failed[0]["outcome"], "failed", "{records:#?}");
+    let suppressed = records
+        .iter()
+        .filter(|record| record["compaction_outcome"]["outcome"]["reason"] == "retry_suppressed")
+        .collect::<Vec<_>>();
+    assert!(
+        !suppressed.is_empty(),
+        "a later admitted duty is required for nonvacuous suppression coverage"
+    );
+    assert_eq!(
+        suppressed.len(),
+        records.len() - 1,
+        "all later admitted duties stay suppressed: {records:#?}"
+    );
+    for record in suppressed {
+        let outcome = &record["compaction_outcome"]["outcome"];
+        assert_eq!(outcome["origin"], "preparation");
+        assert!(outcome.get("http_status").is_none());
+        assert!(record["error"].get("details").is_none());
+    }
     assert!(
         records.iter().all(|record| record["committed_stages"]
             .as_object()
@@ -4473,61 +4505,12 @@ async fn proactive_provider_rejection_of_summaries_is_not_repeated_either() {
         0,
     )
     .await;
-    let eligible_reports = (0..19).filter(|index| *index >= 2).count();
-    assert_eq!(eligible_reports, 17);
-    assert_eq!(
-        result.summaries, 1,
-        "one provider invocation per real scope"
-    );
+    compaction_failure_memory::assert_scope_trace(&result);
     assert_eq!(
         result.failure_memory_slots, 1,
         "the actual provider failure is retained only as a bounded private slot"
     );
-    assert_eq!(
-        result.records.len(),
-        eligible_reports,
-        "one report outcome each"
-    );
-
-    let provider_errors: Vec<_> = result
-        .records
-        .iter()
-        .filter(|record| record["compaction_outcome"]["outcome"]["reason"] == "provider_error")
-        .collect();
-    assert_eq!(provider_errors.len(), 1, "one actual HTTP response outcome");
-    let outcome = &provider_errors[0]["compaction_outcome"]["outcome"];
-    assert_eq!(outcome["origin"], "provider_response");
-    assert_eq!(outcome["http_status"], 401);
-    assert!(outcome.get("provider_status").is_none());
-    assert!(outcome.get("final_group_count").is_none());
-    assert!(outcome.get("final_source_nodes").is_none());
-    assert_eq!(provider_errors[0]["error"]["details"]["model_requests"], 1);
-    assert_eq!(
-        provider_errors[0]["error"]["details"]["summary_usage"]["requests"],
-        1
-    );
-
-    let suppressed: Vec<_> = result
-        .records
-        .iter()
-        .filter(|record| record["compaction_outcome"]["outcome"]["reason"] == "retry_suppressed")
-        .collect();
-    assert_eq!(
-        suppressed.len(),
-        16,
-        "one truthful outcome per later report"
-    );
-    for record in suppressed {
-        let outcome = &record["compaction_outcome"]["outcome"];
-        assert_eq!(outcome["origin"], "preparation");
-        assert!(outcome.get("http_status").is_none());
-        assert!(outcome.get("final_group_count").is_none());
-        assert!(outcome.get("final_source_nodes").is_none());
-        assert!(
-            record["error"].get("details").is_none(),
-            "suppression must omit request and usage facts: {record:#?}"
-        );
-    }
+    compaction_failure_memory::assert_provider_scope_records(&result, 401, 1);
 }
 
 #[tokio::test]
@@ -4542,45 +4525,12 @@ async fn proactive_provider_500_is_suppressed_within_same_run_turn() {
         0,
     )
     .await;
-    let eligible_reports = 17;
-    assert_eq!(result.report_scopes.len(), eligible_reports);
-    assert!(
-        result
-            .report_scopes
-            .iter()
-            .all(|scope| scope == &result.report_scopes[0]),
-        "all reports share exact Run/Turn/generation: {:?}",
-        result.report_scopes
-    );
-    assert_eq!(
-        result.summaries, 1,
-        "one provider request for the one exact owner scope"
-    );
+    compaction_failure_memory::assert_scope_trace(&result);
     assert_eq!(
         result.failure_memory_slots, 1,
         "provider digest retained in the closed slot"
     );
-    assert_eq!(result.records.len(), eligible_reports);
-    let provider_errors: Vec<_> = result
-        .records
-        .iter()
-        .filter(|record| record["compaction_outcome"]["outcome"]["reason"] == "provider_error")
-        .collect();
-    assert_eq!(provider_errors.len(), 1, "one actual terminal 500 response");
-    assert_eq!(
-        provider_errors[0]["compaction_outcome"]["outcome"]["http_status"],
-        500
-    );
-    let suppressed: Vec<_> = result
-        .records
-        .iter()
-        .filter(|record| record["compaction_outcome"]["outcome"]["reason"] == "retry_suppressed")
-        .collect();
-    assert_eq!(
-        suppressed.len(),
-        eligible_reports - 1,
-        "later reports retain attempts without another request"
-    );
+    compaction_failure_memory::assert_provider_scope_records(&result, 500, 1);
 }
 
 /// #303 variant of the growing-Turn fixture: an oversized protected request,
@@ -4593,11 +4543,14 @@ struct AxFixtureResult {
     summaries: usize,
     records: Vec<Value>,
     owner_instance_id: String,
+    // Scope is captured for all raw report rows; admitted duties are the subset below.
     report_scopes: Vec<(String, String, i64)>,
     expected_scope: (String, String, i64),
     expected_report_tokens: Vec<u64>,
     report_owners: Vec<ReportOwner>,
     report_attempt_ids: Vec<String>,
+    unadmitted_report_attempt_ids: Vec<String>,
+    initial_failure_event: Value,
     initial_path_ids: Vec<String>,
     final_path_ids: Vec<String>,
     failure_memory_slots: usize,
@@ -4616,7 +4569,13 @@ async fn ax_growing_turn_summary_requests(
     summary_reply: fn() -> (u16, Value),
     retries: u8,
 ) -> AxFixtureResult {
-    crate::test_watchdog::watchdog("proactive growing Turn summary requests", async move {
+    let phase = Arc::new(std::sync::Mutex::new("fixture setup".to_owned()));
+    let phase_for_fixture = phase.clone();
+    let result = crate::test_watchdog::watchdog("proactive growing Turn summary requests", async move {
+        let set_phase = |label: &str| {
+            *phase_for_fixture.lock().unwrap() = label.to_owned();
+        };
+        set_phase("creating owner and protected Turn");
         let root = tempfile::tempdir().unwrap();
         let (url, mut receive, server) = proxy().await;
         let options = "[limits]\ndraft_bytes=2097152\n[compaction]\nauto_at_tokens=200\nsummary_max_chars=4000\n";
@@ -4657,6 +4616,7 @@ async fn ax_growing_turn_summary_requests(
         let mut report_owners = Vec::new();
         for index in 0..=19 {
             let ordinary = loop {
+                set_phase(&format!("ordinary/summary request interleaving at input {index}"));
                 let request = incoming(&control, &mut receive).await;
                 if request.kind() == ProviderRequestKind::Ordinary { break request; }
                 summaries += 1;
@@ -4665,6 +4625,7 @@ async fn ax_growing_turn_summary_requests(
             };
             let input_tokens = if index < 2 { 100 } else { 200 + index };
             if (2..=18).contains(&index) {
+                set_phase("capturing original report ID/token before response");
                 report_owners.push(
                     prepared_report_from_incoming(
                         &control,
@@ -4679,58 +4640,62 @@ async fn ax_growing_turn_summary_requests(
             if index == 19 { ordinary.reply.send((200, answer("finished"))).unwrap(); }
             else { ordinary.reply.send((200, tool(index, input_tokens))).unwrap(); }
         }
+        set_phase("settling foreground Run after all raw report inputs");
         settled(&control, &target).await;
-        assert_eq!(report_owners.len(), 17, "capture each predeclared known-usage ordinary attempt");
-        let trigger_turns = [expected_turn.clone()];
-        let mut finish = Box::pin(automatic_attempts_finished_for_turns(&control, &trigger_turns, 17));
-        let terminal = loop {
+        assert_eq!(report_owners.len(), 17, "retain all predeclared known-usage ordinary rows");
+        let first_report = report_owners
+            .iter()
+            .find(|owner| owner.input_tokens == 202)
+            .expect("the first report row is retained");
+        // The foreground workload has released the Thread boundary; now await
+        // the original report-202 admission/FINISH while servicing queued Summary work.
+        let mut changes = control.subscribe();
+        set_phase("waiting for report-202 attempt_begin after foreground progress");
+        let first_record = loop {
+            let attempt_id = first_report.attempt_id.clone();
+            let saved: Option<String> = control.store.database.call(move |db| {
+                db.query_row(
+                    "SELECT json_extract(error_json,'$.automatic_trim_attempt') FROM model_attempt WHERE id=?1 AND json_type(error_json,'$.automatic_trim_attempt')='object'",
+                    [attempt_id],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(Into::into)
+            }).await.unwrap();
+            if let Some(saved) = saved {
+                set_phase("waiting for report-202 durable FINISH after attempt_begin");
+                let record = serde_json::from_str::<Value>(&saved).unwrap();
+                if record["provisional"] == false {
+                    break record;
+                }
+            }
             tokio::select! {
-                attempts = &mut finish => break attempts,
+                changed = changes.recv() => match changed {
+                    Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {},
+                    Err(error) => panic!("report-202 admission/FINISH notification stream closed: {error}"),
+                },
                 incoming = receive.recv() => {
-                    let incoming = incoming.expect("loopback provider remains open until all 17 exact report FINISHes");
+                    let incoming = incoming.expect("provider remains available while report-202 admission/FINISH is pending");
                     assert_eq!(incoming.kind(), ProviderRequestKind::Summary,
-                        "only a background summary may remain after the final ordinary response");
+                        "all ordinary responses were released before awaiting report-202");
                     summaries += 1;
+                    assert!(summaries < 80, "unbounded automatic summary loop");
                     incoming.reply.send(summary_reply()).unwrap();
                 }
             }
         };
-        let mut expected_ids = report_owners.iter().map(|owner| owner.attempt_id.clone()).collect::<Vec<_>>();
-        let mut terminal_ids = terminal.iter().map(|attempt| attempt.id.clone()).collect::<Vec<_>>();
-        expected_ids.sort_unstable();
-        terminal_ids.sort_unstable();
-        assert_eq!(terminal_ids, expected_ids, "all 17 original report attempts have exact terminal FINISH");
-        let observed = proactive_events(&control, &target).await;
-        assert_eq!(observed.len(), 17, "all independently captured report attempts publish an automatic outcome");
-        let mut records = Vec::new();
-        let mut report_scopes = Vec::new();
-        let mut report_attempt_ids = Vec::new();
-        for event in observed {
-            let attempt = event["attempt_id"].as_str().unwrap().to_owned();
-            report_attempt_ids.push(attempt.clone());
-            let (record, scope): (String, (String, String, i64)) = control.store.database.call(move |db| Ok((
-                db.query_row("SELECT json_extract(error_json,'$.automatic_trim_attempt') FROM model_attempt WHERE id=?1", [&attempt], |r| r.get(0))?,
-                db.query_row("SELECT t.run_id,m.turn_id,m.generation FROM model_attempt m JOIN turn t ON t.id=m.turn_id WHERE m.id=?1", [attempt], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?,
-            ))).await.unwrap();
-            records.push(serde_json::from_str::<Value>(&record).unwrap());
-            report_scopes.push(scope);
-        }
-        for owner in &report_owners {
-            let index = report_attempt_ids.iter().position(|id| id == &owner.attempt_id)
-                .expect("each original known-usage attempt has one saved automatic result");
-            let attempt_id = owner.attempt_id.clone();
-            let (usage, request_token): (Option<i64>, Option<String>) = control.store.database.call(move |db| Ok(db.query_row(
-                "SELECT json_extract(usage_json,'$.input_tokens'),json_extract(input_manifest_json,'$.compaction_report_token') FROM model_attempt WHERE id=?1",
-                [attempt_id], |row| Ok((row.get(0)?, row.get(1)?)),
-            )?)).await.unwrap();
-            assert_eq!(usage, Some(owner.input_tokens as i64), "saved known usage stays on its original attempt");
-            assert_eq!(request_token.as_deref(), Some(owner.request_token.as_str()), "original report token stays with its attempt");
-            assert_eq!(records[index]["trigger"]["input_tokens"], owner.input_tokens);
-            let finished = terminal.iter().find(|attempt| attempt.id == owner.attempt_id)
-                .expect("terminal set contains original report attempt");
-            assert_eq!(records[index]["token"], finished.token, "FINISH retains this attempt's GC token");
-            assert_eq!(records[index]["provisional"], false, "saved attempt is terminal");
-        }
+        assert_eq!(first_record["trigger"]["input_tokens"], 202,
+            "report 202 must be an accepted actual duty");
+        let first_gc_token = first_record["token"].as_str().expect("terminal report-202 GC token");
+        assert_ne!(first_gc_token, first_report.request_token, "report and GC tokens are distinct");
+        assert_eq!(first_record["provisional"], false);
+        set_phase("reading report-202 CompactList event");
+        let initial_failure_event = proactive_events(&control, &target)
+            .await
+            .into_iter()
+            .find(|event| event["attempt_id"] == first_report.attempt_id)
+            .expect("first admitted report remains visible through CompactList");
+        set_phase("capturing pre-explicit path/history snapshot");
         let path_thread = target.clone();
         let final_path_ids = control.store.database.call(move |db| {
             let mut statement = db.prepare("SELECT node_id FROM thread_path WHERE thread_id=?1 ORDER BY ordinal")?;
@@ -4739,6 +4704,7 @@ async fn ax_growing_turn_summary_requests(
             Ok(ids)
         }).await.unwrap();
         let owner_instance_id = owner.instance_id.clone();
+        set_phase("capturing pre-explicit failure-memory snapshot");
         let slot_thread = target.clone();
         let failure_memory_slots = control.store.database.call(move |db| {
             Ok(db.query_row(
@@ -4750,15 +4716,119 @@ async fn ax_growing_turn_summary_requests(
                 |row| row.get::<_, i64>(0).map(|count| count as usize),
             )?)
         }).await.unwrap();
-        eprintln!("summary_requests={summaries} records={records:#?}");
-        // The failure record is automatic-only: an explicit compact still issues a summary.
+        // The deterministic/provider failure is automatic-only: explicit compact remains available.
+        set_phase("issuing explicit Compact");
         request(&control, Command::Compact(ThreadTarget { thread_id: Some(target.clone()) })).await;
+        set_phase("servicing explicit Compact Summary");
         let explicit = incoming_summary(&control, &mut receive).await;
         assert_eq!(explicit.body["tools"], json!([]), "explicit compact is not blocked");
         let _ = explicit.reply.send((200, answer("explicit summary")));
-        control.shutdown().await.unwrap(); owner.shutdown().await.unwrap(); server.abort();
-        AxFixtureResult { summaries, records, owner_instance_id, report_scopes, expected_scope, expected_report_tokens, report_owners, report_attempt_ids, initial_path_ids, final_path_ids, failure_memory_slots }
-    }).await.unwrap()
+        // This existing owner boundary closes admission and joins every retained producer before readback.
+        set_phase("draining retained producers through Control.shutdown");
+        control.shutdown().await.unwrap();
+        assert!(
+            receive.try_recv().is_err(),
+            "all admitted provider traffic is serviced before final readback"
+        );
+
+        set_phase("final 17-row admission/unadmitted partition readback after producer drain");
+        let mut records = Vec::new();
+        let mut raw_report_scopes = Vec::new();
+        let mut report_attempt_ids = Vec::new();
+        let mut unadmitted_report_attempt_ids = Vec::new();
+        for owner in &report_owners {
+            let attempt_id = owner.attempt_id.clone();
+            let (usage, request_token, automatic, scope): (
+                Option<i64>,
+                Option<String>,
+                Option<String>,
+                (String, String, i64),
+            ) = control.store.database.call(move |db| Ok(db.query_row(
+                "SELECT json_extract(a.usage_json,'$.input_tokens'),json_extract(a.input_manifest_json,'$.compaction_report_token'),CASE WHEN json_type(a.error_json,'$.automatic_trim_attempt')='object' THEN json_extract(a.error_json,'$.automatic_trim_attempt') END,r.id,t.id,t.generation FROM model_attempt a JOIN turn t ON t.id=a.turn_id JOIN run r ON r.id=t.run_id WHERE a.id=?1",
+                [attempt_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, (row.get(3)?, row.get(4)?, row.get(5)?))),
+            )?)).await.unwrap();
+            assert_eq!(usage, Some(owner.input_tokens as i64), "saved known usage stays on its original attempt");
+            assert_eq!(request_token.as_deref(), Some(owner.request_token.as_str()), "original report token stays with its attempt");
+            raw_report_scopes.push(scope);
+            if let Some(automatic) = automatic {
+                let record = serde_json::from_str::<Value>(&automatic).unwrap();
+                assert_eq!(record["trigger"]["input_tokens"], owner.input_tokens);
+                assert_eq!(record["provisional"], false, "producer drain leaves every admitted duty terminal");
+                report_attempt_ids.push(owner.attempt_id.clone());
+                records.push(record);
+            } else {
+                unadmitted_report_attempt_ids.push(owner.attempt_id.clone());
+            }
+        }
+        assert!(
+            report_attempt_ids.len() >= 2,
+            "nonvacuous same-scope suppression coverage: no later admitted attempt followed report 202; raw reports are not duties"
+        );
+        let mut accepted_ids = report_attempt_ids.clone();
+        let mut unadmitted_ids = unadmitted_report_attempt_ids.clone();
+        accepted_ids.sort_unstable();
+        unadmitted_ids.sort_unstable();
+        assert!(accepted_ids.iter().all(|id| !unadmitted_ids.contains(id)), "accepted/unadmitted partition overlaps");
+        let mut partition_ids = accepted_ids.clone();
+        partition_ids.extend(unadmitted_ids);
+        partition_ids.sort_unstable();
+        let mut raw_ids = report_owners.iter().map(|owner| owner.attempt_id.clone()).collect::<Vec<_>>();
+        raw_ids.sort_unstable();
+        assert_eq!(partition_ids, raw_ids, "drained admission partition covers exactly the 17 original raw rows");
+        set_phase("checking exact terminal FINISH set for durable attempt_begin rows");
+        let trigger_turns = [expected_turn.clone()];
+        let terminal = automatic_attempts_finished_for_turns(
+            &control,
+            &trigger_turns,
+            report_attempt_ids.len(),
+        ).await;
+        let mut terminal_ids = terminal.iter().map(|attempt| attempt.id.clone()).collect::<Vec<_>>();
+        terminal_ids.sort_unstable();
+        assert_eq!(terminal_ids, accepted_ids, "every durable attempt_begin row has exact terminal FINISH");
+        for owner in &report_owners {
+            let Some(index) = report_attempt_ids.iter().position(|id| id == &owner.attempt_id) else {
+                continue;
+            };
+            let finished = terminal.iter().find(|attempt| attempt.id == owner.attempt_id)
+                .expect("FINISH for admitted source attempt");
+            assert_eq!(records[index]["token"], finished.token,
+                "FINISH GC token remains on original source attempt");
+            assert_eq!(records[index]["provisional"], false, "all accepted duties are terminal after drain");
+        }
+        let durable_attempt_ids = control.store.database.call(move |db| {
+            Ok(db.prepare("SELECT id FROM model_attempt WHERE turn_id=?1 AND json_type(error_json,'$.automatic_trim_attempt')='object' ORDER BY rowid")?
+                .query_map([&expected_turn], |row| row.get::<_, String>(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?)
+        }).await.unwrap();
+        let mut durable_attempt_ids = durable_attempt_ids;
+        durable_attempt_ids.sort_unstable();
+        assert_eq!(durable_attempt_ids, accepted_ids, "no automatic attempt exists outside the drained raw-owner partition");
+        eprintln!("raw_reports=17 admitted={} unadmitted={} summary_requests={summaries} records={records:#?}", report_attempt_ids.len(), unadmitted_report_attempt_ids.len());
+        set_phase("shutting down Owner after durable automatic record readback");
+        owner.shutdown().await.unwrap(); server.abort();
+        AxFixtureResult {
+            summaries,
+            records,
+            owner_instance_id,
+            report_scopes: raw_report_scopes,
+            expected_scope,
+            expected_report_tokens,
+            report_owners,
+            report_attempt_ids,
+            unadmitted_report_attempt_ids,
+            initial_path_ids,
+            final_path_ids,
+            failure_memory_slots,
+            initial_failure_event,
+        }
+    }).await;
+    match result {
+        Ok(result) => result,
+        Err(error) => panic!(
+            "proactive growing Turn summary fixture watchdog at phase {:?}: {error}",
+            *phase.lock().unwrap()
+        ),
+    }
 }
 
 /// Repeated Turns may produce summary requests even during warmup; trace those

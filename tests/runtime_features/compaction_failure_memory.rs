@@ -15,63 +15,90 @@ async fn provider_veto_is_one_invocation_per_real_scope() {
 /// not in public trace payloads; unchanged original history is checked here via
 /// the captured path prefix, so the exact private E digest remains a fixture-only
 /// identity proof gap rather than a fabricated/public DTO assertion.
-fn assert_scope_trace(result: &AxFixtureResult) {
+pub(super) fn assert_scope_trace(result: &AxFixtureResult) {
     assert!(!result.owner_instance_id.is_empty());
     assert_eq!(
         result.report_owners.len(),
         17,
-        "all predeclared report rows were captured before response"
+        "all 17 raw known-usage rows were captured before response"
     );
-    let mut expected_ids = result
+    let mut raw_ids = result
         .report_owners
         .iter()
         .map(|owner| owner.attempt_id.clone())
         .collect::<Vec<_>>();
-    let mut actual_ids = result.report_attempt_ids.clone();
-    expected_ids.sort_unstable();
-    actual_ids.sort_unstable();
+    let mut admitted_ids = result.report_attempt_ids.clone();
+    let mut unadmitted_ids = result.unadmitted_report_attempt_ids.clone();
+    raw_ids.sort_unstable();
+    assert!(
+        raw_ids.windows(2).all(|pair| pair[0] != pair[1]),
+        "each ordinary input has a distinct original attempt row"
+    );
+    admitted_ids.sort_unstable();
+    unadmitted_ids.sort_unstable();
     assert_eq!(
-        actual_ids, expected_ids,
-        "automatic outcomes belong to the 17 original ordinary attempts"
+        result.records.len(),
+        admitted_ids.len(),
+        "one terminal outcome per durable attempt_begin"
+    );
+    assert!(
+        admitted_ids.len() >= 2,
+        "nonvacuous provider-suppression coverage requires a later admitted report"
+    );
+    assert!(
+        admitted_ids.iter().all(|id| !unadmitted_ids.contains(id)),
+        "admission partition is disjoint"
+    );
+    let mut partition_ids = admitted_ids.clone();
+    partition_ids.extend(unadmitted_ids);
+    partition_ids.sort_unstable();
+    assert_eq!(
+        partition_ids, raw_ids,
+        "every raw report is explicitly admitted or unadmitted after producer drain"
     );
     assert_eq!(
         result.report_scopes.len(),
         17,
-        "all predeclared eligible report scopes are recorded"
+        "all predeclared raw report rows are retained"
     );
-    let first = result.report_scopes.first().unwrap();
     assert!(
-        result.report_scopes.iter().all(|scope| scope == first),
-        "actual Run/Turn/generation changed: {:?}",
+        result
+            .report_scopes
+            .iter()
+            .all(|scope| scope == &result.expected_scope),
+        "raw report Run/Turn/generation changed: {:?}",
         result.report_scopes
     );
-    assert_eq!(
-        first, &result.expected_scope,
-        "scopes equal the accepted trigger Run/Turn/generation"
-    );
     let mut report_tokens = result
-        .records
+        .report_owners
         .iter()
-        .map(|record| {
-            record["trigger"]["input_tokens"]
-                .as_u64()
-                .expect("saved attempt has provider input tokens")
-        })
+        .map(|owner| owner.input_tokens)
         .collect::<Vec<_>>();
     report_tokens.sort_unstable();
     assert_eq!(
         report_tokens, result.expected_report_tokens,
-        "attempt identity set matches the 17 predeclared eligible inputs"
+        "all original known usage values 202..218 remain present"
+    );
+    assert!(
+        result
+            .report_owners
+            .iter()
+            .any(|owner| owner.input_tokens == 202 && admitted_ids.contains(&owner.attempt_id)),
+        "first threshold-crossing report 202 must be an actual accepted duty"
     );
     assert!(
         result.final_path_ids.starts_with(&result.initial_path_ids),
-        "the original path prefix changed during report growth"
+        "the original path prefix changed before explicit compact/shutdown"
     );
 }
 
-/// Assert all admitted and suppressed reports, not only the aggregate HTTP
-/// count. Suppression is an honest preparation outcome with no request facts.
-fn assert_provider_scope_records(result: &AxFixtureResult, status: u16, admitted_requests: u64) {
+/// Assert every actually admitted duty while keeping the predeclared raw-report
+/// input set distinct. Suppression is tested only after the real first FINISH.
+pub(super) fn assert_provider_scope_records(
+    result: &AxFixtureResult,
+    status: u16,
+    admitted_requests: u64,
+) {
     assert_eq!(
         result.summaries, admitted_requests as usize,
         "actual synthetic HTTP summary POST count: {:#?}",
@@ -79,9 +106,12 @@ fn assert_provider_scope_records(result: &AxFixtureResult, status: u16, admitted
     );
     assert_eq!(
         result.records.len(),
-        17,
-        "one attempt record per predeclared report: {:#?}",
-        result.records
+        result.report_attempt_ids.len(),
+        "all and only durable accepted duties have records"
+    );
+    assert!(
+        result.records.len() >= 2,
+        "failure-memory negative requires a later admitted suppression duty"
     );
     let admitted: Vec<_> = result
         .records
@@ -94,8 +124,22 @@ fn assert_provider_scope_records(result: &AxFixtureResult, status: u16, admitted
         "one provider response outcome: {:#?}",
         result.records
     );
-    let record = admitted[0];
-    let outcome = &record["compaction_outcome"]["outcome"];
+    let first_owner = result
+        .report_owners
+        .iter()
+        .find(|owner| owner.input_tokens == 202)
+        .expect("captured first known-usage report");
+    let first_index = result
+        .report_attempt_ids
+        .iter()
+        .position(|id| id == &first_owner.attempt_id)
+        .expect("first 202 report was accepted");
+    assert_eq!(
+        admitted[0], &result.records[first_index],
+        "the first admitted report owns the provider response"
+    );
+    assert_eq!(admitted[0]["trigger"]["input_tokens"], 202);
+    let outcome = &admitted[0]["compaction_outcome"]["outcome"];
     assert_eq!(outcome["kind"], "failed");
     assert_eq!(outcome["origin"], "provider_response");
     assert_eq!(outcome["http_status"], status);
@@ -108,11 +152,19 @@ fn assert_provider_scope_records(result: &AxFixtureResult, status: u16, admitted
         assert!(outcome.get(field).is_none(), "{field}: {outcome:#?}");
     }
     assert_eq!(
-        record["error"]["details"]["model_requests"],
+        admitted[0]["error"]["details"]["model_requests"],
         admitted_requests
     );
     assert_eq!(
-        record["error"]["details"]["summary_usage"]["requests"],
+        admitted[0]["error"]["details"]["summary_usage"]["requests"],
+        admitted_requests
+    );
+    assert_eq!(
+        result.initial_failure_event["attempt_id"],
+        first_owner.attempt_id
+    );
+    assert_eq!(
+        result.initial_failure_event["metrics"]["summary_usage"]["requests"],
         admitted_requests
     );
 
@@ -123,9 +175,13 @@ fn assert_provider_scope_records(result: &AxFixtureResult, status: u16, admitted
         .collect();
     assert_eq!(
         suppressed.len(),
-        16,
-        "all sixteen later eligible same-scope attempts are suppressed: {:#?}",
+        result.records.len() - 1,
+        "every later admitted same-scope duty is suppressed: {:#?}",
         result.records
+    );
+    assert!(
+        !suppressed.is_empty(),
+        "a later accepted duty is required to prove same-scope suppression"
     );
     for record in suppressed {
         let outcome = &record["compaction_outcome"]["outcome"];
