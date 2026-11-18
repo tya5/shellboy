@@ -540,8 +540,8 @@ async fn held_frontier_defers_the_replied_question_and_later_attachment() {
         }
     }).await.unwrap();
     assert!(admitted.is_empty());
-    assert_eq!(deferred, [reply_id.clone()]);
-    assert_eq!(deferred_replies, [reply_id.clone()]);
+    assert_eq!(deferred.as_slice(), std::slice::from_ref(&reply_id));
+    assert_eq!(deferred_replies.as_slice(), std::slice::from_ref(&reply_id));
     assert_eq!(applied, 0);
     assert_eq!(states.0, "held");
     assert_eq!(states.1, "unadmitted");
