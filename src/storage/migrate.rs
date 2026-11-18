@@ -1716,6 +1716,7 @@ mod generated_summary_role_migration_tests {
     use serde_json::{Value, json};
 
     const FORMAT: &str = "shellboy-summary-v1";
+    type NegativeSnapshot = (String, Option<String>, i64, Option<String>, i64);
 
     fn node(db: &Connection, id: &str, kind: &str, payload: Option<&Value>, deleted: Option<&str>) {
         let raw = payload.map(Value::to_string);
@@ -1976,7 +1977,7 @@ mod generated_summary_role_migration_tests {
             "source-mismatch",
             "duplicate-key",
         ];
-        let negative_before: Vec<(String, Option<String>, i64, Option<String>, i64)> = negative_ids
+        let negative_before: Vec<NegativeSnapshot> = negative_ids
             .iter()
             .map(|id| {
                 let row = db.query_row(
