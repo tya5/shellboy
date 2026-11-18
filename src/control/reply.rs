@@ -213,7 +213,7 @@ pub(crate) fn cancel_reply_tx(
     actor: &Value,
     admitted: bool,
 ) -> rusqlite::Result<bool> {
-    let changed = db.execute("UPDATE receipt SET result_json=json_set(result_json,'$.reply',json(?2)),updated_at=?3 WHERE message_node_id=?1 AND json_extract(result_json,'$.reply.state')='pending'",params![message,json!({"state":"cancelled","at":at,"cancelled_by":actor,"cancel_reason":"sender"}).to_string(),at])?;
+    let changed = db.execute("UPDATE receipt SET result_json=json_set(result_json,'$.reply',json(?2)),question_duty=CASE WHEN question_duty='pending' THEN 'cancelled' ELSE question_duty END,updated_at=?3 WHERE message_node_id=?1 AND json_extract(result_json,'$.reply.state')='pending'",params![message,json!({"state":"cancelled","at":at,"cancelled_by":actor,"cancel_reason":"sender"}).to_string(),at])?;
     if changed == 1 {
         let sender: String = db.query_row(
             "SELECT sender_json FROM receipt WHERE message_node_id=?1",
@@ -629,7 +629,7 @@ pub(crate) fn deleted_threads_tx(
             .collect::<rusqlite::Result<Vec<_>>>()?;
         budget = budget.saturating_sub(rows.len());
         for (message, sender, saved) in rows {
-            if db.execute("UPDATE receipt SET result_json=json_set(result_json,'$.reply.state','recipient_deleted','$.reply.at',?2),updated_at=?2 WHERE message_node_id=?1 AND json_extract(result_json,'$.reply.state')='pending'",params![message,at])? == 1 {
+            if db.execute("UPDATE receipt SET result_json=json_set(result_json,'$.reply.state','recipient_deleted','$.reply.at',?2),question_duty=CASE WHEN question_duty='pending' THEN 'cancelled' ELSE question_duty END,updated_at=?2 WHERE message_node_id=?1 AND json_extract(result_json,'$.reply.state')='pending'",params![message,at])? == 1 {
                 let saved: Value = serde_json::from_str(&saved)
                     .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
                 if saved["to_human"] != true
@@ -659,7 +659,7 @@ pub(crate) fn deleted_recipient_receipt_tx(
         return Ok(None);
     };
     let mut wake = None;
-    if db.execute("UPDATE receipt SET result_json=json_set(result_json,'$.reply.state','recipient_deleted','$.reply.at',?2),updated_at=?2 WHERE id=?1 AND json_extract(result_json,'$.reply.state')='pending'", params![receipt, at])? == 1 {
+    if db.execute("UPDATE receipt SET result_json=json_set(result_json,'$.reply.state','recipient_deleted','$.reply.at',?2),question_duty=CASE WHEN question_duty='pending' THEN 'cancelled' ELSE question_duty END,updated_at=?2 WHERE id=?1 AND json_extract(result_json,'$.reply.state')='pending'", params![receipt, at])? == 1 {
         let saved: Value = serde_json::from_str(&saved)
             .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
         if saved["to_human"] != true {
@@ -688,7 +688,7 @@ pub(crate) fn deleted_sender_receipt_tx(
         return Ok(());
     };
     let actor = json!({"kind":"thread_deletion","thread_id":crate::protocol::MessageSender::from_saved(Some(&sender)).thread_id});
-    if db.execute("UPDATE receipt SET result_json=json_set(result_json,'$.reply',json(?2)),updated_at=?3 WHERE id=?1 AND json_extract(result_json,'$.reply.state')='pending'",params![receipt,json!({"state":"cancelled","at":at,"cancelled_by":actor,"cancel_reason":"sender_deleted"}).to_string(),at])? == 1 {
+    if db.execute("UPDATE receipt SET result_json=json_set(result_json,'$.reply',json(?2)),question_duty=CASE WHEN question_duty='pending' THEN 'cancelled' ELSE question_duty END,updated_at=?3 WHERE id=?1 AND json_extract(result_json,'$.reply.state')='pending'",params![receipt,json!({"state":"cancelled","at":at,"cancelled_by":actor,"cancel_reason":"sender_deleted"}).to_string(),at])? == 1 {
         if admission == "admitted" { cancelled_notice_tx(db,&target,&message,at)?; }
         db.execute("UPDATE thread SET revision=revision+1 WHERE id=?1", [target])?;
     }
@@ -1268,6 +1268,63 @@ mod tests {
             tx.commit().unwrap();
             assert_eq!(db.query_row("SELECT count(*) FROM receipt WHERE json_extract(result_json,'$.reply.state')='recipient_deleted'", [], |r| r.get::<_, i64>(0)).unwrap(), 16);
             assert_eq!(db.query_row("SELECT count(*) FROM receipt WHERE json_extract(result_json,'$.reply.state')='pending'", [], |r| r.get::<_, i64>(0)).unwrap(), count as i64 - 16);
+        }
+    }
+
+    #[test]
+    fn all_existing_question_reply_terminal_writers_discharge_current_duty() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at,deleted_at) VALUES('bulk-target','','','p','m','now','now'),('gc-target','','','p','m','now','now'),('live-target','','','p','m','now',NULL),('deleted-sender','','','p','m','now','now');").unwrap();
+        let add = |message: &str, target: &str, sender: &str| {
+            db.execute("INSERT INTO node(id,kind,created_at,payload_json)VALUES(?1,'assistant','now','{}')",[message]).unwrap();
+            db.execute(r#"INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,path_admission,question_duty,created_at,result_json)VALUES(?1,?1,?2,?3,?1,'applied','unadmitted','pending','now','{"to_human":true,"reply":{"state":"pending"}}')"#,rusqlite::params![message,sender,target]).unwrap();
+        };
+        add(
+            "bulk-question",
+            "bulk-target",
+            &json!({"kind":"model","thread_id":"sender"}).to_string(),
+        );
+        add(
+            "gc-question",
+            "gc-target",
+            &json!({"kind":"model","thread_id":"sender"}).to_string(),
+        );
+        add(
+            "sender-question",
+            "live-target",
+            &json!({"kind":"model","thread_id":"deleted-sender"}).to_string(),
+        );
+        add("cancel-question", "live-target", r#"{"kind":"human"}"#);
+        let tx = db.transaction().unwrap();
+        deleted_threads_tx(&tx, &["bulk-target".into()], "now").unwrap();
+        deleted_recipient_receipt_tx(&tx, "gc-question", "now").unwrap();
+        deleted_sender_receipt_tx(&tx, "sender-question", "now").unwrap();
+        assert!(
+            cancel_reply_tx(
+                &tx,
+                "live-target",
+                "cancel-question",
+                "now",
+                &json!({"kind":"human"}),
+                false
+            )
+            .unwrap()
+        );
+        tx.commit().unwrap();
+        for message in [
+            "bulk-question",
+            "gc-question",
+            "sender-question",
+            "cancel-question",
+        ] {
+            let (reply, duty): (String, String) = db.query_row(
+                "SELECT json_extract(result_json,'$.reply.state'),question_duty FROM receipt WHERE message_node_id=?1",
+                [message],
+                |row| Ok((row.get(0)?,row.get(1)?)),
+            ).unwrap();
+            assert_ne!(reply, "pending", "{message}");
+            assert_eq!(duty, "cancelled", "{message}");
         }
     }
 

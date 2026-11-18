@@ -1361,6 +1361,8 @@ async fn run_with_delivery(
             },
             _=tokio::time::sleep_until(refresh_deadline.unwrap_or_else(||tokio::time::Instant::now()+Duration::from_secs(86400))),
                 if refresh_deadline.is_some() && !updates.backpressured() && read_slots.available_permits()>0=>{},
+            // Fatal Control persistence stops enter the same draft/worker drain as Quit.
+            _ = control.stopping() => break,
             _=control.gc.availability_changed()=> {
                 management.inspection.availability_changed();
                 if let Some(thread)=selection.active_thread.as_ref()

@@ -241,6 +241,11 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         sql: include_str!("../../migrations/0047_drop_selection_nonappend_generation.sql"),
         foreign_keys: None,
     },
+    Migration {
+        version: 48,
+        sql: include_str!("../../migrations/0048_question_admission_duty.sql"),
+        foreign_keys: None,
+    },
 ];
 
 pub(super) fn run(
@@ -289,6 +294,12 @@ pub(super) fn run(
             }
             if migration.version == 46 {
                 a_state_scope::convert_rows(&transaction)?;
+            }
+            if migration.version == 48 {
+                transaction.execute(
+                    "UPDATE receipt SET path_admission='admitted',question_duty='admitted' WHERE state='applied' AND json_type(result_json,'$.to_human')='true'",
+                    [],
+                )?;
             }
             if migration.version == 4 {
                 migrate_attachment_sources(&transaction)?;
@@ -416,6 +427,431 @@ fn migrate_attachment_sources(tx: &rusqlite::Transaction<'_>) -> Result<(), Stor
         tx.execute("UPDATE node SET payload_json=?2,payload_bytes=?3,body_hash=?4,payload_revision=payload_revision+1 WHERE id=?1",params![source,payload,payload.len() as i64,Sha256::digest(payload.as_bytes()).iter().map(|b|format!("{b:02x}")).collect::<String>()])?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod question_duty_migration_tests {
+    use super::*;
+    use rusqlite::params;
+    use serde_json::json;
+
+    fn schema47() -> Connection {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        db.execute_batch("ALTER TABLE receipt DROP COLUMN question_duty; DELETE FROM schema_migration WHERE version=48; PRAGMA user_version=47;").unwrap();
+        db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','','p','m','now')", []).unwrap();
+        db
+    }
+
+    fn receipt(db: &Connection, id: &str, state: &str, result: serde_json::Value) {
+        db.execute(
+            "INSERT INTO node(id,kind,created_at,payload_json)VALUES(?1,'assistant','now','{}')",
+            [id],
+        )
+        .unwrap();
+        db.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,path_admission,created_at,result_json)VALUES(?1,?1,'null','t',?1,?2,'unadmitted','now',?3)",params![id,state,result.to_string()]).unwrap();
+    }
+
+    fn migrate(db: &mut Connection) -> Result<(), StorageError> {
+        run(db, 47, &|_, _| {}, &|| {})
+    }
+
+    #[test]
+    fn published_applied_human_questions_settle_ever_admitted_across_all_reply_states() {
+        let mut db = schema47();
+        for (id, reply) in [
+            ("pending", Some("pending")),
+            ("replied", Some("replied")),
+            ("cancelled", Some("cancelled")),
+            ("recipient-deleted", Some("recipient_deleted")),
+            ("missing", None),
+        ] {
+            let mut value = json!({"to_human":true});
+            if let Some(reply) = reply {
+                value["reply"] = json!({"state":reply});
+            }
+            receipt(&db, id, "applied", value);
+        }
+        receipt(
+            &db,
+            "accepted",
+            "accepted",
+            json!({"to_human":true,"reply":{"state":"pending"}}),
+        );
+        receipt(
+            &db,
+            "held",
+            "held",
+            json!({"to_human":true,"reply":{"state":"pending"}}),
+        );
+        receipt(
+            &db,
+            "cancelled-receipt",
+            "cancelled",
+            json!({"to_human":true,"reply":{"state":"pending"}}),
+        );
+        receipt(
+            &db,
+            "string-not-bool",
+            "applied",
+            json!({"to_human":"true","reply":{"state":"pending"}}),
+        );
+        receipt(
+            &db,
+            "nonhuman",
+            "applied",
+            json!({"to_human":false,"reply":{"state":"pending"}}),
+        );
+        migrate(&mut db).unwrap();
+        for id in [
+            "pending",
+            "replied",
+            "cancelled",
+            "recipient-deleted",
+            "missing",
+        ] {
+            let (duty, admission, reply): (String, String, Option<String>) = db.query_row(
+                "SELECT question_duty,path_admission,json_extract(result_json,'$.reply.state') FROM receipt WHERE id=?1",
+                [id],
+                |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?)),
+            ).unwrap();
+            assert_eq!(duty, "admitted", "{id}");
+            assert_eq!(admission, "admitted", "{id}");
+            let expected = match id {
+                "pending" => Some("pending"),
+                "replied" => Some("replied"),
+                "cancelled" => Some("cancelled"),
+                "recipient-deleted" => Some("recipient_deleted"),
+                _ => None,
+            };
+            assert_eq!(
+                reply.as_deref(),
+                expected,
+                "reply fact is preserved for {id}"
+            );
+        }
+        for id in [
+            "accepted",
+            "held",
+            "cancelled-receipt",
+            "string-not-bool",
+            "nonhuman",
+        ] {
+            assert_eq!(
+                db.query_row("SELECT question_duty FROM receipt WHERE id=?1", [id], |r| r
+                    .get::<_, String>(0))
+                    .unwrap(),
+                "none",
+                "{id}"
+            );
+            assert_eq!(
+                db.query_row(
+                    "SELECT path_admission FROM receipt WHERE id=?1",
+                    [id],
+                    |r| r.get::<_, String>(0)
+                )
+                .unwrap(),
+                "unadmitted",
+                "{id}"
+            );
+        }
+    }
+
+    #[test]
+    fn v48_migration_and_real_rewind_do_not_reappend_legacy_question_ancestor() {
+        let mut db = schema47();
+        {
+            let tx = db.transaction().unwrap();
+            tx.execute_batch(
+                "INSERT INTO run(id,thread_id,state,created_at) VALUES('legacy-run','t','completed','2020-01-01');\
+                 INSERT INTO turn(id,thread_id,run_id,state,created_at) VALUES('legacy-turn','t','legacy-run','completed','2020-01-01');",
+            ).unwrap();
+            // Published MessageAsk rows use assistant nodes with no Run/Turn owner.
+            for (id, kind, turn_id, at) in [
+                (
+                    "root",
+                    "message",
+                    Some("legacy-turn"),
+                    "2020-01-01T00:00:00Z",
+                ),
+                (
+                    "cursor",
+                    "message",
+                    Some("legacy-turn"),
+                    "2020-01-01T00:00:02Z",
+                ),
+                (
+                    "tail",
+                    "message",
+                    Some("legacy-turn"),
+                    "2020-01-01T00:00:03Z",
+                ),
+                ("q-preserve", "assistant", None, "2020-01-01T00:00:01Z"),
+                ("q-off-path", "assistant", None, "2020-01-01T00:00:00Z"),
+                (
+                    "q-off-path-successor",
+                    "message",
+                    Some("legacy-turn"),
+                    "2020-01-01T00:00:01Z",
+                ),
+            ] {
+                let payload = json!({"text":id});
+                tx.execute(
+                    "INSERT INTO node(id,turn_id,kind,created_at,payload_json) VALUES(?1,?2,?3,?4,?5)",
+                    params![id,turn_id,kind,at,payload.to_string()],
+                ).unwrap();
+            }
+            tx.execute_batch(
+                "INSERT INTO edge(src,dst) VALUES('root','cursor'),('cursor','q-preserve'),('q-preserve','tail'),('q-off-path','q-off-path-successor'),('q-off-path-successor','cursor');\
+                 INSERT INTO thread_path(thread_id,ordinal,node_id) VALUES('t',0,'root'),('t',1,'cursor'),('t',2,'q-preserve'),('t',3,'tail');\
+                 UPDATE thread SET cursor_node_id='tail' WHERE id='t';",
+            ).unwrap();
+            for (receipt, node) in [
+                ("legacy-preserve", "q-preserve"),
+                ("legacy-ancestor", "q-off-path"),
+            ] {
+                let result = json!({"to_human":true,"reply":{"state":"pending"}}).to_string();
+                tx.execute(
+                    "INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,path_admission,created_at,result_json) VALUES(?1,?1,'{\"kind\":\"model\",\"thread_id\":\"sender\"}','t',?2,'applied','unadmitted','2020-01-01T00:00:01Z',?3)",
+                    params![receipt,node,result],
+                ).unwrap();
+            }
+            tx.commit().unwrap();
+        }
+
+        // Both rows satisfy the old writer's positive migration inputs and sort
+        // before the later current-work frontier. The off-path Q really reaches
+        // the selected cursor through graph ancestry, despite not being selected.
+        let legacy_candidates: Vec<String> = db.prepare(
+            "SELECT r.message_node_id FROM receipt r JOIN node n ON n.id=r.message_node_id WHERE r.target_thread_id='t' AND r.state='applied' AND r.path_admission='unadmitted' AND r.run_id IS NULL AND r.turn_id IS NULL AND n.kind='assistant' AND n.turn_id IS NULL AND r.created_at<'2021-01-01T00:00:01Z' AND json_type(r.result_json,'$.to_human')='true' AND json_extract(r.result_json,'$.reply.state') IN ('pending','replied') ORDER BY r.created_at,r.rowid",
+        ).unwrap().query_map([],|row|row.get(0)).unwrap().collect::<rusqlite::Result<_>>().unwrap();
+        assert_eq!(legacy_candidates, ["q-preserve", "q-off-path"]);
+        assert!(
+            db.query_row(
+                "WITH RECURSIVE reachable(id) AS (SELECT dst FROM edge WHERE src='q-off-path' UNION SELECT e.dst FROM edge e JOIN reachable r ON e.src=r.id) SELECT EXISTS(SELECT 1 FROM reachable WHERE id='cursor')",
+                [],
+                |row| row.get::<_, bool>(0),
+            )
+            .unwrap(),
+            "cursor must be reachable from the off-selected-path Q before the rewind"
+        );
+        assert_eq!(
+            db.query_row(
+                "SELECT count(*) FROM thread_path WHERE thread_id='t' AND node_id='q-off-path'",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0
+        );
+
+        migrate(&mut db).unwrap();
+        for id in ["legacy-preserve", "legacy-ancestor"] {
+            let state:(String,String,String,String)=db.query_row(
+                "SELECT state,path_admission,question_duty,json_extract(result_json,'$.reply.state') FROM receipt WHERE id=?1",
+                [id],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?)),
+            ).unwrap();
+            assert_eq!(
+                state,
+                (
+                    "applied".into(),
+                    "admitted".into(),
+                    "admitted".into(),
+                    "pending".into()
+                )
+            );
+        }
+
+        let branch = "rewind-branch";
+        {
+            let tx = db.transaction().unwrap();
+            crate::history::rewind::rewind_thread(
+                &tx,
+                "t",
+                "cursor",
+                false,
+                false,
+                branch,
+                "2021-01-01T00:00:00Z",
+            )
+            .unwrap();
+            tx.commit().unwrap();
+        }
+        assert!(
+            db.query_row(
+                "WITH RECURSIVE reachable(id) AS (SELECT dst FROM edge WHERE src='q-off-path' UNION SELECT e.dst FROM edge e JOIN reachable r ON e.src=r.id) SELECT EXISTS(SELECT 1 FROM reachable WHERE id='cursor')",
+                [],
+                |row| row.get::<_, bool>(0),
+            )
+            .unwrap(),
+            "real rewind preserves graph ancestry from the off-path Q to the retained cursor"
+        );
+        assert!(!db.query_row(
+            "WITH RECURSIVE reachable(id) AS (SELECT dst FROM edge WHERE src='q-preserve' UNION SELECT e.dst FROM edge e JOIN reachable r ON e.src=r.id) SELECT EXISTS(SELECT 1 FROM reachable WHERE id='cursor')",
+            [],
+            |row| row.get::<_, bool>(0),
+        ).unwrap(), "removed preservation Q does not point back to the retained cursor");
+        let parent_path: Vec<String> = db
+            .prepare("SELECT node_id FROM thread_path WHERE thread_id='t' ORDER BY ordinal")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        let branch_path: Vec<String> = db
+            .prepare("SELECT node_id FROM thread_path WHERE thread_id=?1 ORDER BY ordinal")
+            .unwrap()
+            .query_map([branch], |row| row.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(parent_path, ["root", "cursor"]);
+        assert_eq!(branch_path, ["root", "cursor", "q-preserve", "tail"]);
+        assert!(!parent_path.contains(&"q-preserve".to_owned()));
+        assert!(branch_path.contains(&"q-preserve".to_owned()));
+
+        db.execute("INSERT INTO node(id,kind,created_at,payload_json) VALUES('current-input','user','2021-01-01T00:00:01Z','{}')",[]).unwrap();
+        db.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,path_admission,created_at,result_json) VALUES('current-input','current-input','{\"kind\":\"human\"}','t','current-input','accepted','unadmitted','2021-01-01T00:00:01Z','{}')",[]).unwrap();
+        let tx = db.transaction().unwrap();
+        let revision =
+            crate::history::selection_revision(&tx, "t", crate::history::ThreadScope::Live)
+                .unwrap();
+        let current = vec!["current-input".to_owned()];
+        let plan = crate::control::message_delivery::plan_admission_tx(
+            &tx,
+            "t",
+            &current,
+            "2021-01-01T00:00:01Z",
+        )
+        .unwrap();
+        assert_eq!(plan.admitted_nodes, current);
+        assert_eq!(plan.admitted_callers, ["current-input"]);
+        crate::control::message_delivery::append_admission_plan_tx(
+            &tx,
+            "t",
+            revision as u64,
+            &plan,
+            "2021-01-01T00:00:01Z",
+        )
+        .unwrap();
+        tx.commit().unwrap();
+
+        let final_path: Vec<String> = db
+            .prepare("SELECT node_id FROM thread_path WHERE thread_id='t' ORDER BY ordinal")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(final_path, ["root", "cursor", "current-input"]);
+        let branch_after_append: Vec<String> = db
+            .prepare("SELECT node_id FROM thread_path WHERE thread_id=?1 ORDER BY ordinal")
+            .unwrap()
+            .query_map([branch], |row| row.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(
+            branch_after_append,
+            ["root", "cursor", "q-preserve", "tail"]
+        );
+        assert!(branch_after_append.contains(&"q-preserve".to_owned()));
+        assert!(!final_path.contains(&"q-preserve".to_owned()));
+        assert!(!final_path.contains(&"q-off-path".to_owned()));
+        let current_state:(String,String,bool)=db.query_row(
+            "SELECT r.state,r.path_admission,EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id='t' AND p.node_id=r.message_node_id) FROM receipt r WHERE r.id='current-input'",
+            [],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?)),
+        ).unwrap();
+        assert_eq!(current_state, ("accepted".into(), "admitted".into(), true));
+        for (receipt, node) in [
+            ("legacy-preserve", "q-preserve"),
+            ("legacy-ancestor", "q-off-path"),
+        ] {
+            let owner: (String, String, String, Option<String>, Option<String>, String, String, String) = db
+                .query_row(
+                    "SELECT id,client_operation_id,target_thread_id,run_id,turn_id,state,path_admission,question_duty FROM receipt WHERE id=?1 AND message_node_id=?2",
+                    params![receipt,node],
+                    |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?,row.get(5)?,row.get(6)?,row.get(7)?)),
+                )
+                .unwrap();
+            assert_eq!(
+                owner,
+                (
+                    receipt.into(),
+                    receipt.into(),
+                    "t".into(),
+                    None,
+                    None,
+                    "applied".into(),
+                    "admitted".into(),
+                    "admitted".into()
+                )
+            );
+        }
+        for id in ["legacy-preserve", "legacy-ancestor"] {
+            let state: (String, String, String, String) = db
+                .query_row(
+                    "SELECT state,path_admission,question_duty,json_extract(result_json,'$.reply.state') FROM receipt WHERE id=?1",
+                    [id],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                )
+                .unwrap();
+            assert_eq!(
+                state,
+                (
+                    "applied".into(),
+                    "admitted".into(),
+                    "admitted".into(),
+                    "pending".into()
+                )
+            );
+        }
+    }
+
+    #[test]
+    fn failed_question_duty_step_rolls_back_its_column_ledger_and_version() {
+        let mut db = schema47();
+        receipt(
+            &db,
+            "historical",
+            "applied",
+            json!({"to_human":true,"reply":{"state":"pending"}}),
+        );
+        db.execute_batch("CREATE TRIGGER reject_question_duty BEFORE UPDATE OF path_admission ON receipt WHEN NEW.path_admission='admitted' BEGIN SELECT RAISE(ABORT,'synthetic refusal'); END;").unwrap();
+        assert!(migrate(&mut db).is_err());
+        assert_eq!(
+            db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            47
+        );
+        assert_eq!(
+            db.query_row(
+                "SELECT count(*) FROM schema_migration WHERE version=48",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0
+        );
+        assert_eq!(
+            db.query_row(
+                "SELECT count(*) FROM pragma_table_info('receipt') WHERE name='question_duty'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0
+        );
+        assert_eq!(
+            db.query_row(
+                "SELECT path_admission FROM receipt WHERE id='historical'",
+                [],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+            "unadmitted"
+        );
+    }
 }
 
 #[cfg(test)]

@@ -19,7 +19,7 @@ pub(crate) fn mark_admitted_tx(
     nodes: &[String],
 ) -> rusqlite::Result<()> {
     for node in nodes {
-        let changed = db.execute("UPDATE receipt SET path_admission='admitted' WHERE target_thread_id=?1 AND message_node_id=?2 AND path_admission<>'admitted' AND EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id=?1 AND p.node_id=?2)", params![thread,node])?;
+        let changed = db.execute("UPDATE receipt SET path_admission='admitted',question_duty=CASE WHEN question_duty='pending' THEN 'admitted' ELSE question_duty END WHERE target_thread_id=?1 AND message_node_id=?2 AND (path_admission<>'admitted' OR question_duty='pending') AND EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id=?1 AND p.node_id=?2)", params![thread,node])?;
         if changed > 0 {
             super::reply::admission_notice_tx(db, thread, node)?;
         }
@@ -71,7 +71,7 @@ pub(crate) fn plan_admission_tx(
     // admitting a reply whose question fell outside this transaction's window.
     const QUESTION_PREFIX: usize = 129;
     let questions=db.prepare(
-        "SELECT r.message_node_id, r.created_at, n.rowid FROM receipt r JOIN node n ON n.id=r.message_node_id WHERE r.target_thread_id=?1 AND r.state='applied' AND r.path_admission='unadmitted' AND r.run_id IS NULL AND r.turn_id IS NULL AND json_extract(r.result_json,'$.to_human')=1 AND json_extract(r.result_json,'$.reply.state') IN ('pending','replied') ORDER BY r.created_at,n.rowid LIMIT 130",
+        "SELECT r.message_node_id, r.created_at, n.rowid FROM receipt r JOIN node n ON n.id=r.message_node_id WHERE r.target_thread_id=?1 AND r.state='applied' AND r.question_duty='pending' AND r.run_id IS NULL AND r.turn_id IS NULL AND json_extract(r.result_json,'$.to_human')=1 AND json_extract(r.result_json,'$.reply.state') IN ('pending','replied') ORDER BY r.created_at,n.rowid LIMIT 130",
     )?.query_map([thread],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,i64>(2)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
     let mut cutoff: Option<(String, i64)> = None;
     let mut deferred_reply_nodes = Vec::new();

@@ -445,6 +445,36 @@ mod tests {
         holds
     }
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn storage_failure_observer_enters_existing_frontend_shutdown_and_propagates_error() {
+        let (_root, owner, control, server) = control_tests::fixture().await;
+        let (tx, _rx) = std::sync::mpsc::sync_channel(256);
+        tx.send(UiUpdate::RecoveryBell).unwrap();
+        let updates = BufferedUpdates::new(tx);
+        let (sender, receiver) = crate::ui::actions::channel(8);
+        let task = tokio::spawn(run_with_delivery(
+            control.clone(),
+            receiver,
+            updates,
+            std::env::current_dir().unwrap(),
+            owner,
+            server,
+            Arc::new(ClipboardAdapter::new().unwrap()),
+            Arc::new(Semaphore::new(32)),
+            Some(receipt_delivery::Startup::default()),
+        ));
+        tokio::task::yield_now().await;
+        control.fail_storage().await;
+        let error =
+            crate::test_watchdog::watchdog("TUI observes fatal Control stop and drains", task)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap_err();
+        assert_eq!(error.code, ErrorCode::SaveFailed);
+        drop(sender);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn real_frontend_cancel_quit_and_one_force_survive_full_reserve_and_retained_batch() {
         let (root, owner, control, server) = control_tests::fixture().await;
         let _held_projections = hold_projection_slots().await;

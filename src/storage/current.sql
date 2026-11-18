@@ -93,7 +93,7 @@ CREATE TABLE receipt(
  turn_id TEXT REFERENCES turn(id), state TEXT NOT NULL CHECK(state IN ('accepted','held','applied','cancelled')),
  created_at TEXT NOT NULL, updated_at TEXT NOT NULL DEFAULT '',
  generation INTEGER NOT NULL DEFAULT 0 CHECK(generation>=0), hold_reason TEXT,
- result_json TEXT CHECK(result_json IS NULL OR json_valid(result_json)), path_admission TEXT NOT NULL DEFAULT 'unadmitted' CHECK(path_admission IN ('unadmitted','admitted','unknown')),
+ result_json TEXT CHECK(result_json IS NULL OR json_valid(result_json)), path_admission TEXT NOT NULL DEFAULT 'unadmitted' CHECK(path_admission IN ('unadmitted','admitted','unknown')), question_duty TEXT NOT NULL DEFAULT 'none' CHECK(question_duty IN ('none','pending','admitted','cancelled')),
  CHECK(turn_id IS NULL OR run_id IS NOT NULL));
 
 CREATE TRIGGER immutable_receipt_assignment BEFORE UPDATE OF run_id,turn_id ON receipt
@@ -763,3 +763,6 @@ INSERT INTO schema_migration(version,name) VALUES(46,'0046_scope_identity_v2');
 PRAGMA user_version=46;
 INSERT INTO schema_migration(version,name) VALUES(47,'0047_drop_selection_nonappend_generation');
 PRAGMA user_version=47;
+
+INSERT INTO schema_migration(version,name) VALUES(48,'0048_question_admission_duty');
+PRAGMA user_version=48;

@@ -32,7 +32,7 @@ pub(crate) fn cancel_tx(
     let mut items = Vec::with_capacity(args.message_ids.len());
     let mut changed = Vec::new();
     for message in &args.message_ids {
-        let row = tx.query_row("SELECT r.id,r.target_thread_id,r.sender_json,r.state,r.path_admission,r.client_operation_id,EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id=r.target_thread_id AND p.node_id=r.message_node_id),EXISTS(SELECT 1 FROM thread t WHERE t.id=r.target_thread_id AND t.deleted_at IS NULL),EXISTS(SELECT 1 FROM node n WHERE n.id=r.message_node_id AND n.payload_json IS NOT NULL AND n.deleted_reason IS NULL),r.created_at,COALESCE(json_extract(r.result_json,'$.to_human'),0)=1 FROM receipt r WHERE r.message_node_id=?1",[message],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,String>(3)?,r.get::<_,String>(4)?,r.get::<_,String>(5)?,r.get::<_,bool>(6)?,r.get::<_,bool>(7)?,r.get::<_,bool>(8)?,r.get::<_,String>(9)?,r.get::<_,bool>(10)?))).optional()?;
+        let row = tx.query_row("SELECT r.id,r.target_thread_id,r.sender_json,r.state,r.path_admission,r.client_operation_id,EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id=r.target_thread_id AND p.node_id=r.message_node_id),EXISTS(SELECT 1 FROM thread t WHERE t.id=r.target_thread_id AND t.deleted_at IS NULL),EXISTS(SELECT 1 FROM node n WHERE n.id=r.message_node_id AND n.payload_json IS NOT NULL AND n.deleted_reason IS NULL),r.created_at,COALESCE(json_extract(r.result_json,'$.to_human'),0)=1,r.question_duty FROM receipt r WHERE r.message_node_id=?1",[message],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,String>(3)?,r.get::<_,String>(4)?,r.get::<_,String>(5)?,r.get::<_,bool>(6)?,r.get::<_,bool>(7)?,r.get::<_,bool>(8)?,r.get::<_,String>(9)?,r.get::<_,bool>(10)?,r.get::<_,String>(11)?))).optional()?;
         let mut item = MessageCancelItem {
             message_id: message.clone(),
             outcome: NotFound,
@@ -51,6 +51,7 @@ pub(crate) fn cancel_tx(
             body,
             created,
             to_human,
+            question_duty,
         )) = row
         else {
             items.push(item);
@@ -80,7 +81,11 @@ pub(crate) fn cancel_tx(
             items.push(item);
             continue;
         }
-        if admission == "admitted" || selected || (state == "applied" && !to_human) {
+        if admission == "admitted"
+            || selected
+            || (state == "applied" && !to_human)
+            || (to_human && question_duty == "admitted")
+        {
             if super::reply::cancel_reply_tx(tx, &thread, message, at, &actor, !to_human)? {
                 item.outcome = ReplyCancelled;
                 if !changed.contains(&thread) {
@@ -96,7 +101,7 @@ pub(crate) fn cancel_tx(
         if !live
             || !body
             || !(matches!(state.as_str(), "accepted" | "held")
-                || (to_human && state == "applied" && admission == "unadmitted"))
+                || (to_human && state == "applied" && question_duty == "pending"))
         {
             item.outcome = Unavailable;
             items.push(item);
@@ -115,7 +120,7 @@ pub(crate) fn cancel_tx(
             continue;
         }
         let reply_cancelled_before_archive =
-            to_human && state == "applied" && admission == "unadmitted";
+            to_human && state == "applied" && question_duty == "pending";
         if reply_cancelled_before_archive
             && !super::reply::cancel_reply_tx(tx, &thread, message, at, &actor, false)?
         {
@@ -125,7 +130,7 @@ pub(crate) fn cancel_tx(
             continue;
         }
         tx.execute("INSERT INTO draft(id,thread_id,revision,body_json,state,updated_at)VALUES(?1,?2,0,?3,'archived',?4)",params![archive,thread,archived,at])?;
-        tx.execute("UPDATE receipt SET state='cancelled',hold_reason=?2,updated_at=?3,result_json=json_set(COALESCE(result_json,'{}'),'$.cancellation',json(?4)) WHERE id=?1",params![receipt,if caller.is_none(){"cancelled_by_human"}else{"cancelled_by_sender"},at,json!({"actor":actor,"at":at,"archive_draft_id":archive}).to_string()])?;
+        tx.execute("UPDATE receipt SET state='cancelled',question_duty=CASE WHEN ?5 THEN 'cancelled' ELSE question_duty END,hold_reason=?2,updated_at=?3,result_json=json_set(COALESCE(result_json,'{}'),'$.cancellation',json(?4)) WHERE id=?1",params![receipt,if caller.is_none(){"cancelled_by_human"}else{"cancelled_by_sender"},at,json!({"actor":actor,"at":at,"archive_draft_id":archive}).to_string(),to_human])?;
         if !reply_cancelled_before_archive {
             super::reply::cancel_reply_tx(tx, &thread, message, at, &actor, false)?;
         }

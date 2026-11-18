@@ -2117,7 +2117,12 @@ impl Store {
         if args.expect_reply {
             saved_acceptance["reply"] = json!({"state":"pending"});
         }
-        tx.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,run_id,turn_id,state,created_at,updated_at,hold_reason,result_json) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?9,?10,?11)",params![receipt_id,operation_id,serde_json::to_string(&content.sender).unwrap(),id,message_id,accepted.run_id,accepted.turn_id,state,now,reason,saved_acceptance.to_string()]).map_err(sql_error)?;
+        let question_duty = if args.to_human && args.expect_reply {
+            "pending"
+        } else {
+            "none"
+        };
+        tx.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,run_id,turn_id,state,created_at,updated_at,hold_reason,result_json,question_duty) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?9,?10,?11,?12)",params![receipt_id,operation_id,serde_json::to_string(&content.sender).unwrap(),id,message_id,accepted.run_id,accepted.turn_id,state,now,reason,saved_acceptance.to_string(),question_duty]).map_err(sql_error)?;
         if args.to_human {
             // Unarchive immediately, but defer only selected-path mutation to a real path boundary.
             crate::control::db::archive::clear_for_question(tx, &id, now).map_err(sql_error)?;
@@ -5660,6 +5665,90 @@ mod message_acknowledgement_state_tests {
         let replay: MessageAccepted = serde_json::from_value(replay.result).unwrap();
         assert_eq!(replay.deliver, Deliver::Now);
         assert_eq!(replay.delivery_status, DeliveryStatus::Accepted);
+        db.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn actual_message_ask_writer_creates_and_append_discharges_question_duty() {
+        let root = tempfile::tempdir().unwrap();
+        let db = DbWorker::open(root.path().join("question-duty.db"))
+            .await
+            .unwrap();
+        db.call(|db| {
+            db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('model-thread','/','/','fixture','synthetic','now')", [])?;
+            Ok(())
+        }).await.unwrap();
+        let store = Store::new(
+            db.clone(),
+            Arc::new(Config::default()),
+            root.path().into(),
+            "fixture".into(),
+        );
+        let origin = Origin {
+            instance_id: "fixture".into(),
+            thread_id: "model-thread".into(),
+            run_id: "model-run".into(),
+            turn_id: "model-turn".into(),
+            execution_id: "model-shell".into(),
+            token: "synthetic-private-token".into(),
+        };
+        let accepted = store
+            .execute(
+                Request::new(
+                    "fixture:question-duty",
+                    Command::MessageAsk(MessageAskArgs {
+                        thread_id: None,
+                        text: "Choose one".into(),
+                    }),
+                ),
+                Some(origin),
+            )
+            .await
+            .unwrap();
+        let accepted: MessageAccepted = serde_json::from_value(accepted.result).unwrap();
+        let message_id = accepted.message_id;
+        assert_eq!(accepted.delivery_status, DeliveryStatus::Accepted);
+        assert_eq!(accepted.assignment, Assignment::Pending);
+        let before = message_id.clone();
+        db.call(move |db| {
+            let (state, admission, duty, reply):(String,String,String,String)=db.query_row(
+                "SELECT state,path_admission,question_duty,json_extract(result_json,'$.reply.state') FROM receipt WHERE message_node_id=?1",
+                [&before],
+                |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?)),
+            )?;
+            assert_eq!((state.as_str(),admission.as_str(),duty.as_str(),reply.as_str()),("applied","unadmitted","pending","pending"));
+            Ok(())
+        }).await.unwrap();
+        let target = message_id.clone();
+        db.call(move |db| {
+            let tx = db.transaction()?;
+            let revision = crate::history::selection_revision(
+                &tx,
+                "model-thread",
+                crate::history::ThreadScope::Live,
+            )?;
+            let plan = crate::control::message_delivery::append_admitted_tx(
+                &tx,
+                "model-thread",
+                revision as u64,
+                &[],
+                &chrono::Utc::now().to_rfc3339(),
+            )?;
+            assert_eq!(plan.admitted_nodes, vec![target.clone()]);
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        db.call(move |db| {
+            let (duty, admission, selected):(String,String,bool)=db.query_row(
+                "SELECT r.question_duty,r.path_admission,EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id=r.target_thread_id AND p.node_id=r.message_node_id) FROM receipt r WHERE r.message_node_id=?1",
+                [message_id],
+                |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?)),
+            )?;
+            assert_eq!((duty.as_str(),admission.as_str(),selected),("admitted","admitted",true));
+            Ok(())
+        }).await.unwrap();
         db.shutdown().await.unwrap();
     }
 }

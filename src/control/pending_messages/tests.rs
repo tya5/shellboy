@@ -116,12 +116,15 @@ async fn human_question_reply_cancel_and_attachment_frontier_preserve_fifo() {
         .await
         .unwrap();
     assert!(first.wake_threads.is_empty() && first.quiet_wake_threads.is_empty());
-    let first_id = first.result["message_id"].as_str().unwrap().to_owned();
-    let first_before: (String, String, Option<String>, Option<String>, bool, Option<String>) = store.database.call({
+    let first_accepted: MessageAccepted = serde_json::from_value(first.result.clone()).unwrap();
+    assert_eq!(first_accepted.delivery_status, DeliveryStatus::Accepted);
+    assert_eq!(first_accepted.assignment, Assignment::Pending);
+    let first_id = first_accepted.message_id;
+    let first_before: (String, String, Option<String>, Option<String>, bool, Option<String>, String) = store.database.call({
         let id = first_id.clone();
         move |db| db.query_row(
-            "SELECT r.state,r.path_admission,r.run_id,r.turn_id,EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id='t' AND p.node_id=r.message_node_id),t.archived_at FROM receipt r JOIN thread t ON t.id=r.target_thread_id WHERE r.message_node_id=?1",
-            [&id], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?)),
+            "SELECT r.state,r.path_admission,r.run_id,r.turn_id,EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id='t' AND p.node_id=r.message_node_id),t.archived_at,r.question_duty FROM receipt r JOIN thread t ON t.id=r.target_thread_id WHERE r.message_node_id=?1",
+            [&id], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?,r.get(6)?)),
         ).map_err(Into::into)
     }).await.unwrap();
     assert_eq!(
@@ -132,7 +135,8 @@ async fn human_question_reply_cancel_and_attachment_frontier_preserve_fifo() {
             None,
             None,
             false,
-            None
+            None,
+            "pending".into()
         )
     );
     assert_eq!(
@@ -154,16 +158,16 @@ async fn human_question_reply_cancel_and_attachment_frontier_preserve_fifo() {
 
     // An idle boundary admits the question without creating or waking a model Turn.
     admit_at_real_boundary(&store, vec![]).await;
-    let first_admitted: (String, bool, i64) = store.database.call({
+    let first_admitted: (String, bool, i64, String) = store.database.call({
         let id = first_id.clone();
         move |db| Ok(db.query_row(
-            "SELECT r.path_admission,EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id='t' AND p.node_id=r.message_node_id),(SELECT count(*) FROM event WHERE id='reply-admission-'||r.message_node_id) FROM receipt r WHERE r.message_node_id=?1",
-            [&id], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?)),
+            "SELECT r.path_admission,EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id='t' AND p.node_id=r.message_node_id),(SELECT count(*) FROM event WHERE id='reply-admission-'||r.message_node_id),r.question_duty FROM receipt r WHERE r.message_node_id=?1",
+            [&id], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)),
         )?)
     }).await.unwrap();
     assert_eq!(
         first_admitted,
-        ("admitted".into(), true, 0),
+        ("admitted".into(), true, 0, "admitted".into()),
         "human question admission is not a self-reply model notice"
     );
     let first_reply = store
@@ -222,6 +226,15 @@ async fn human_question_reply_cancel_and_attachment_frontier_preserve_fifo() {
         .await
         .unwrap();
     assert_eq!(late_cancel.result["items"][0]["outcome"], "unavailable");
+    let late_cancel_state: (String, String) = store.database.call({
+        let id = second_id.clone();
+        move |db| db.query_row(
+            "SELECT question_duty,json_extract(result_json,'$.reply.state') FROM receipt WHERE message_node_id=?1",
+            [&id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        ).map_err(Into::into)
+    }).await.unwrap();
+    assert_eq!(late_cancel_state, ("pending".into(), "replied".into()));
     let before_attachment: (String,String,String,bool,bool) = store.database.call({
         let id=second_id.clone();
         move |db| db.query_row(
@@ -366,15 +379,16 @@ async fn human_question_reply_cancel_and_attachment_frontier_preserve_fifo() {
         .await
         .unwrap();
     assert_eq!(outcome.result["items"][0]["outcome"], "cancelled");
-    let audit: (String,String,String,String,String) = store.database.call({
+    let audit: (String,String,String,String,String,String) = store.database.call({
         let id=cancelled_id.clone();
         move |db| db.query_row(
-            "SELECT r.id,r.client_operation_id,r.state,r.path_admission,d.body_json FROM receipt r JOIN draft d ON d.state='archived' AND json_extract(d.body_json,'$.source_message_id')=r.message_node_id WHERE r.message_node_id=?1",
-            [&id], |r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?)),
+            "SELECT r.id,r.client_operation_id,r.state,r.path_admission,d.body_json,r.question_duty FROM receipt r JOIN draft d ON d.state='archived' AND json_extract(d.body_json,'$.source_message_id')=r.message_node_id WHERE r.message_node_id=?1",
+            [&id], |r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?)),
         ).map_err(Into::into)
     }).await.unwrap();
     assert_eq!(audit.2, "cancelled");
     assert_eq!(audit.3, "unadmitted");
+    assert_eq!(audit.5, "cancelled");
     let draft: serde_json::Value = serde_json::from_str(&audit.4).unwrap();
     assert_eq!(draft["source_message_id"], cancelled_id);
     assert_eq!(draft["source_receipt_id"], audit.0);
@@ -573,7 +587,10 @@ async fn bounded_admission_prefix_keeps_the_129th_question_before_its_reply() {
             )
             .await
             .unwrap();
-        let question = ask.result["message_id"].as_str().unwrap().to_owned();
+        let accepted: MessageAccepted = serde_json::from_value(ask.result).unwrap();
+        assert_eq!(accepted.delivery_status, DeliveryStatus::Accepted);
+        assert_eq!(accepted.assignment, Assignment::Pending);
+        let question = accepted.message_id;
         let answer = store
             .execute(
                 Request::new(
@@ -591,6 +608,13 @@ async fn bounded_admission_prefix_keeps_the_129th_question_before_its_reply() {
         questions.push(question);
         replies.push(answer.result["message_id"].as_str().unwrap().to_owned());
     }
+    let before_plan: (i64, i64) = store.database.call(|db| {
+        Ok((
+            db.query_row("SELECT count(*) FROM receipt WHERE target_thread_id='t' AND question_duty='pending' AND json_extract(result_json,'$.to_human')=1", [], |row| row.get(0))?,
+            db.query_row("SELECT count(*) FROM receipt WHERE target_thread_id='t' AND state='applied' AND path_admission='unadmitted' AND question_duty='pending' AND json_extract(result_json,'$.to_human')=1", [], |row| row.get(0))?,
+        ))
+    }).await.unwrap();
+    assert_eq!(before_plan, (DUTIES as i64, DUTIES as i64));
     let (plan, selected) = store
         .database
         .call({
@@ -660,6 +684,22 @@ async fn bounded_admission_prefix_keeps_the_129th_question_before_its_reply() {
         );
     }
     assert!(plan.admitted_nodes.contains(&questions[DUTIES - 1]));
+    let after_plan = store.database.call({
+        let questions = questions.clone();
+        move |db| {
+            questions.into_iter().map(|question| db.query_row(
+                "SELECT r.question_duty,r.path_admission,EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id=r.target_thread_id AND p.node_id=r.message_node_id) FROM receipt r WHERE r.message_node_id=?1",
+                [question],
+                |row| Ok((row.get::<_,String>(0)?, row.get::<_,String>(1)?, row.get::<_,bool>(2)?)),
+            )).collect::<rusqlite::Result<Vec<_>>>().map_err(Into::into)
+        }
+    }).await.unwrap();
+    assert_eq!(after_plan.len(), DUTIES);
+    assert!(
+        after_plan
+            .iter()
+            .all(|state| state == &("admitted".into(), "admitted".into(), true))
+    );
     store.database.shutdown().await.unwrap();
 }
 
