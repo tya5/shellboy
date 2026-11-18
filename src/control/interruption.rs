@@ -582,6 +582,15 @@ fn capture_context(
 }
 
 const CAPTURE_PAGE: usize = 64;
+type ExistingCaptureNode = (
+    Option<String>,
+    String,
+    String,
+    Option<String>,
+    i64,
+    Option<String>,
+    Option<String>,
+);
 
 pub(crate) fn staged_capture_threads(db: &Connection) -> rusqlite::Result<Vec<String>> {
     let mut statement = db.prepare("SELECT DISTINCT target_thread_id FROM event WHERE kind='context_changed' AND json_extract(payload_ref_json,'$.kind')='interruption_capture_header' ORDER BY target_thread_id")?;
