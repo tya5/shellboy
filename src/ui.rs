@@ -9194,6 +9194,21 @@ mod thread_view_boundary_tests {
         });
     }
     #[test]
+    fn storage_failure_preserves_unsaved_draft_and_disables_retry() {
+        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+        ui.select_thread("old".into());
+        ui.view_mut().draft.text = "unsaved input".into();
+        ui.view_mut().save_retry = true;
+        ui.apply(UiUpdate::StorageFailed {
+            thread_id: "old".into(),
+            message: "storage stopped".into(),
+        });
+        assert_eq!(ui.view().draft.text, "unsaved input");
+        assert_eq!(ui.view().status, "storage stopped");
+        assert!(!ui.view().save_retry);
+    }
+
+    #[test]
     fn draft_status_and_source_anchor_edits_reuse_layout_but_source_and_width_do_not() {
         let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
         ui.select_thread("old".into());

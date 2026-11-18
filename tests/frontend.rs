@@ -1542,7 +1542,7 @@ async fn draft_database_save_failure_stops_admission_and_owned_shell_but_retains
     let server = LocalServer::bind(&owner, rpc_send).await.unwrap();
     tokio::spawn(control.clone().serve(rpc_receive));
     let (send, receive) = tokio::sync::mpsc::channel(16);
-    let (updates, mut incoming) = std::sync::mpsc::sync_channel(128);
+    let (updates, incoming) = std::sync::mpsc::sync_channel(128);
     let observer = control.clone();
     let bridge = tokio::spawn(frontend::run(
         control,
@@ -1552,6 +1552,13 @@ async fn draft_database_save_failure_stops_admission_and_owned_shell_but_retains
         owner,
         server,
     ));
+    assert_eq!(
+        unsafe { libc::kill(pid, 0) },
+        0,
+        "owned shell must still be live when the save fault is submitted"
+    );
+    // Anchor the process-stop contract to fault submission, before any await.
+    let shell_deadline = std::time::Instant::now() + Duration::from_secs(5);
     send.send(UiAction::SaveDraft {
         thread_id: thread,
         draft: ui.view().draft.clone(),
@@ -1560,14 +1567,46 @@ async fn draft_database_save_failure_stops_admission_and_owned_shell_but_retains
     })
     .await
     .unwrap();
-    let failure = next_update(&mut incoming, |u| {
-        matches!(u, UiUpdate::StorageFailed { .. }).then_some(u)
-    })
-    .await;
-    ui.apply(failure);
+    // Fatal persistence stops the frontend before a StorageFailed update is
+    // guaranteed to reach this channel. Keep it alive while the real frontend
+    // drains; the local unsaved input remains in the owner's UiState.
+    // Start the existing shell-stop bound independently while the local task
+    // drains the UI receiver; drain_to_completion uses block_in_place and holds
+    // a non-Sync receiver borrow, so its future must not be spawned/joined.
+    let shell_reaped = tokio::task::spawn_blocking(move || {
+        loop {
+            let reaped = unsafe { libc::kill(pid, 0) } == -1
+                && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH);
+            if std::time::Instant::now() > shell_deadline {
+                return false;
+            }
+            if reaped {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    });
+    let ended = crate::test_watchdog::watchdog(
+        "frontend draft-save storage failure drains the real frontend",
+        crate::test_watchdog::drain_to_completion(
+            bridge,
+            &incoming,
+            crate::test_watchdog::WATCHDOG,
+        ),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(
+        shell_reaped.await.unwrap(),
+        "owned shell must be reaped within five seconds"
+    );
+    assert_eq!(ended.unwrap_err().code, ErrorCode::SaveFailed);
     assert_eq!(ui.view().draft.text, "未保存😀 input");
-    assert!(ui.view().status.contains("新規実行を停止"));
-    assert!(!ui.view().save_retry);
+    assert!(
+        send.is_closed(),
+        "fatal frontend stop closes action admission"
+    );
     let response = observer
         .request(Request::new(
             format!("{}:after-failure", observer.store.instance_id),
@@ -1582,10 +1621,6 @@ async fn draft_database_save_failure_stops_admission_and_owned_shell_but_retains
         ))
         .await;
     assert_eq!(response.error.unwrap().code, ErrorCode::InvalidState);
-    tokio::time::timeout(Duration::from_secs(5),async {loop {
-        let id=execution.clone();let done=observer.store.database.call(move|db|Ok(db.query_row("SELECT state NOT IN ('starting','running','stopping') AND output_complete FROM shell_execution WHERE id=?1",[id],|r|r.get::<_,bool>(0))?)).await.unwrap();
-        if done {break;}tokio::time::sleep(Duration::from_millis(5)).await;
-    }}).await.unwrap();
     assert_eq!(
         unsafe { libc::kill(pid, 0) },
         -1,
@@ -1595,13 +1630,23 @@ async fn draft_database_save_failure_stops_admission_and_owned_shell_but_retains
         std::io::Error::last_os_error().raw_os_error(),
         Some(libc::ESRCH)
     );
-    send.send(UiAction::Quit).await.unwrap();
-    let error = tokio::time::timeout(Duration::from_secs(8), bridge)
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap_err();
-    assert_eq!(error.code, ErrorCode::SaveFailed);
+    let persisted = rusqlite::Connection::open_with_flags(
+        root.path().join("data/shellboy.db"),
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .unwrap();
+    let (state, output_complete): (String, Option<bool>) = persisted
+        .query_row(
+            "SELECT state,output_complete FROM shell_execution WHERE id=?1",
+            [execution],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert!(!matches!(
+        state.as_str(),
+        "starting" | "running" | "stopping"
+    ));
+    assert_eq!(output_complete, Some(true));
     proxy.await.unwrap();
 }
 
