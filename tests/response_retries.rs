@@ -923,7 +923,7 @@ async fn stalled_permanent_error_body_is_not_retried() {
         let attempts = fixture.attempts().await;
         assert_eq!(attempts.len(), 1, "status {status}: {attempts:?}");
         assert_eq!(
-            usage_limit_log_lines(&fixture),
+            fixture_request_log_lines(&fixture),
             1,
             "one actual HTTP request"
         );
@@ -1770,7 +1770,7 @@ async fn usage_limit_new_conversation(f: &mut Fixture) {
     )
     .unwrap();
 }
-fn usage_limit_log_lines(f: &Fixture) -> usize {
+fn fixture_request_log_lines(f: &Fixture) -> usize {
     std::fs::read_to_string(f._root.path().join("requests.jsonl"))
         .unwrap()
         .lines()
@@ -1783,7 +1783,7 @@ async fn explicit_usage_limit_recovers_without_resend_blocks_other_thread_and_ex
         eprintln!("synthetic usage-limit shape {shape}");
         let mut f = Fixture::new(8, 60_000, 120_000).await;
         let first = f.incoming().await;
-        assert_eq!(usage_limit_log_lines(&f), 1);
+        assert_eq!(fixture_request_log_lines(&f), 1);
         let resets_at = chrono::Utc::now().timestamp() + 3600;
         let fact = json!({"error":{"type":"usage_limit_reached","resets_at":resets_at,"limit_window_minutes":10080}});
         let body = match shape {
@@ -1877,7 +1877,7 @@ async fn explicit_usage_limit_recovers_without_resend_blocks_other_thread_and_ex
         );
         usage_limit_new_conversation(&mut f).await;
         assert_eq!(f.settled().await, "recovery_wait");
-        assert_eq!(usage_limit_log_lines(&f), 1);
+        assert_eq!(fixture_request_log_lines(&f), 1);
         let run = request(
             &f.control,
             Command::RunGet(RunTarget {
@@ -1901,7 +1901,7 @@ async fn explicit_usage_limit_recovers_without_resend_blocks_other_thread_and_ex
             .ok()
             .unwrap();
         assert_eq!(f.settled().await, "completed");
-        assert_eq!(usage_limit_log_lines(&f), 2);
+        assert_eq!(fixture_request_log_lines(&f), 2);
         f.close().await;
     }
 }
@@ -1924,7 +1924,7 @@ async fn short_explicit_usage_limit_keeps_the_normal_retry_schedule() {
         .ok()
         .unwrap();
     assert_eq!(f.settled().await, "completed");
-    assert_eq!(usage_limit_log_lines(&f), 2);
+    assert_eq!(fixture_request_log_lines(&f), 2);
     let attempts = f.attempts().await;
     assert_eq!(attempts.len(), 2);
     assert_eq!(
@@ -1951,7 +1951,7 @@ async fn unknown_429_keeps_retry_policy_without_inferred_usage_limit() {
         .ok()
         .unwrap();
     assert_eq!(f.settled().await, "completed");
-    assert_eq!(usage_limit_log_lines(&f), 2);
+    assert_eq!(fixture_request_log_lines(&f), 2);
     let attempts = f.attempts().await;
     assert_eq!(attempts.len(), 2);
     assert_eq!(
@@ -2815,6 +2815,289 @@ async fn successful_connection_probe_releases_queued_threads_without_serializing
     fixture.close().await;
 }
 
+const TERMINAL_SSE_500: &str = r#"{"error":{"code":"500","message":"fixture"}}"#;
+
+fn terminal_sse(prefix: &str, event: &str, headers: &str) -> Reply {
+    Reply::http(
+        200,
+        "text/event-stream",
+        &format!("{prefix}data: {event}\n\n"),
+        headers,
+    )
+}
+
+fn assert_terminal_stream_failure(failure: &Value, witness: Option<u16>) {
+    assert_eq!(failure["error"]["kind"], "provider");
+    assert_eq!(failure["rate_observation"]["status"], 200);
+    assert!(failure["error"]["status"].is_null());
+    assert!(
+        failure["error"]
+            .get("untyped_stream_error_without_output_prefix")
+            .is_none()
+    );
+    if let Some(code) = witness {
+        assert_eq!(
+            failure["error"]["stream_provider_status"],
+            json!({"value":code,"source":"stream_error_code"})
+        );
+    } else {
+        assert!(failure["error"].get("stream_provider_status").is_none());
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn untyped_terminal_sse_retries_without_output_and_saves_failure_before_post() {
+    for (code, prefix) in [
+        (500, ""),
+        (
+            429,
+            concat!(
+                ": keepalive\n\n",
+                "data: {\"type\":\"response.created\",\"sequence_number\":0,\"response\":{\"output\":[]}}\n\n",
+                "data: {\"type\":\"response.in_progress\"}\n\n",
+            ),
+        ),
+    ] {
+        let mut fixture = Fixture::with_partial_policy(2, 10, 5_000, false).await;
+        let first = fixture.incoming().await;
+        let event = json!({"error":{"code":code.to_string(),"message":"fixture"}});
+        first
+            .reply
+            .send(terminal_sse(prefix, &event.to_string(), ""))
+            .ok()
+            .unwrap();
+        let second = fixture.incoming().await;
+        assert_eq!(second.body, first.body);
+        // Observe the committed attempt while the second request still awaits its reply.
+        let attempts = fixture.attempts().await;
+        assert_eq!(attempts.len(), 2);
+        assert_eq!(attempts[0].0, "failed");
+        let failure = attempts[0].1.as_ref().unwrap();
+        assert_terminal_stream_failure(failure, Some(code));
+        assert_eq!(failure["raw_response"], event);
+        assert_eq!(failure["partial_text"], "");
+        assert_eq!(failure["partial_reasoning"], "");
+        assert_eq!(failure["completed_items"], json!({}));
+        assert_eq!(failure["rate_observation"]["retry_after_present"], false);
+        assert_eq!(
+            failure["automatic_retry"],
+            json!({"number":1,"limit":2,"delay_ms":10,"partial_response_discarded":false,
+                "possible_duplicate_charge":true})
+        );
+        second.reply.send(Reply::success()).ok().unwrap();
+        assert_eq!(fixture.settled().await, "completed");
+        let attempts = fixture.attempts().await;
+        assert_eq!(attempts.len(), 2);
+        assert_eq!(attempts[1].0, "completed");
+        assert!(attempts[1].1.is_none());
+        assert_eq!(fixture_request_log_lines(&fixture), 2);
+        fixture.no_more_requests().await;
+        fixture.close().await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn untyped_terminal_sse_retry_fails_closed_for_ambiguous_or_nontransient_errors() {
+    let collision = r#"{"type":"response.failed","response":{"output":[{"type":"reasoning"}]},"response":{"error":{"code":"500","message":"fixture"}}}"#;
+    let ambiguous_prefix = "data: {\"type\":\"response.created\",\"response\":{\"output\":[{}]},\"response\":{\"output\":[]}}\n\n";
+    let malformed_prefix = "data: {\"type\":\"response.in_progress\",\"response\":{\"output\":null}}\n\n";
+    let duplicate_output = "data: {\"type\":\"response.created\",\"response\":{\"output\":[{}],\"output\":[]}}\n\n";
+    let unknown_prefix = "data: {\"type\":\"response.future_output\",\"delta\":\"opaque\"}\n\n";
+    for (prefix, event, witness) in [
+        ("", collision, Some(500)),
+        (
+            "",
+            r#"{"type":"response.failed","response":{"output":[{"type":"reasoning"}],"error":{"code":"500"}}}"#,
+            Some(500),
+        ),
+        (ambiguous_prefix, TERMINAL_SSE_500, Some(500)),
+        (malformed_prefix, TERMINAL_SSE_500, Some(500)),
+        (duplicate_output, TERMINAL_SSE_500, Some(500)),
+        (unknown_prefix, TERMINAL_SSE_500, Some(500)),
+        ("", r#"{"type":"error","error":{"code":"500"}}"#, Some(500)),
+        ("", r#"{"error":{"code":"400"}}"#, Some(400)),
+        ("", r#"{"error":{"code":"401"}}"#, Some(401)),
+        ("", r#"{"error":{"code":"403"}}"#, Some(403)),
+        ("", r#"{"error":{"code":"408"}}"#, Some(408)),
+        ("", r#"{"error":{"code":500}}"#, None),
+        ("", r#"{"error":{"message":"HTTP 500"}}"#, None),
+        ("", r#"{"error":{"code":"0500"}}"#, None),
+        ("", r#"{"error":{"code":"400","code":"500"}}"#, None),
+        ("", r#"{"error":{"code":"400"},"error":{"code":"500"}}"#, None),
+        ("", r#"{"type":"other","type":"error","error":{"code":"500"}}"#, None),
+    ] {
+        let mut fixture = Fixture::new(2, 10, 5_000).await;
+        fixture
+            .incoming()
+            .await
+            .reply
+            .send(terminal_sse(prefix, event, ""))
+            .ok()
+            .unwrap();
+        assert_eq!(fixture.settled().await, "recovery_wait", "{prefix}{event}");
+        let attempts = fixture.attempts().await;
+        assert_eq!(attempts.len(), 1);
+        let failure = attempts[0].1.as_ref().unwrap();
+        assert_terminal_stream_failure(failure, witness);
+        if event == collision {
+            assert_eq!(
+                failure["raw_response"],
+                serde_json::from_str::<Value>(TERMINAL_SSE_500).unwrap()
+            );
+            assert_eq!(failure["partial_reasoning"], "");
+            assert_eq!(failure["completed_items"], json!({}));
+        }
+        assert!(failure.get("automatic_retry").is_none());
+        assert!(failure.get("automatic_retry_exhausted").is_none());
+        assert_eq!(fixture_request_log_lines(&fixture), 1);
+        fixture.no_more_requests().await;
+        fixture.close().await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn untyped_terminal_sse_retry_does_not_apply_to_http_200_json() {
+    let mut fixture = Fixture::new(2, 10, 5_000).await;
+    fixture
+        .incoming()
+        .await
+        .reply
+        .send(Reply::http(200, "application/json", TERMINAL_SSE_500, ""))
+        .ok()
+        .unwrap();
+    assert_eq!(fixture.settled().await, "recovery_wait");
+    let attempts = fixture.attempts().await;
+    assert_eq!(attempts.len(), 1);
+    let failure = attempts[0].1.as_ref().unwrap();
+    assert_eq!(failure["rate_observation"]["status"], 200);
+    assert_eq!(failure["error"]["provider_code"], "500");
+    assert!(failure["error"].get("stream_provider_status").is_none());
+    assert!(failure.get("automatic_retry").is_none());
+    assert_eq!(fixture_request_log_lines(&fixture), 1);
+    fixture.no_more_requests().await;
+    fixture.close().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn untyped_terminal_sse_does_not_retry_after_reasoning_or_tool_fragments() {
+    let reasoning = "data: {\"type\":\"response.reasoning_text.delta\",\"delta\":\"visible reasoning\"}\n\n";
+    let arguments = "data: {\"type\":\"response.function_call_arguments.delta\",\"delta\":\"{\"}\n\n";
+    for (prefix, retained_reasoning) in [(reasoning, "visible reasoning"), (arguments, "")] {
+        let mut fixture = Fixture::new(2, 10, 5_000).await;
+        fixture
+            .incoming()
+            .await
+            .reply
+            .send(terminal_sse(prefix, TERMINAL_SSE_500, ""))
+            .ok()
+            .unwrap();
+        assert_eq!(fixture.settled().await, "recovery_wait");
+        let attempts = fixture.attempts().await;
+        assert_eq!(attempts.len(), 1);
+        let failure = attempts[0].1.as_ref().unwrap();
+        assert_terminal_stream_failure(failure, Some(500));
+        assert_eq!(failure["partial_reasoning"], retained_reasoning);
+        let tools: i64 = fixture
+            .control
+            .store
+            .database
+            .call(|db| {
+                Ok(db.query_row("SELECT count(*) FROM shell_execution", [], |row| row.get(0))?)
+            })
+            .await
+            .unwrap();
+        assert_eq!(tools, 0);
+        assert_eq!(fixture_request_log_lines(&fixture), 1);
+        fixture.no_more_requests().await;
+        fixture.close().await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn untyped_terminal_sse_uses_the_same_budget_including_zero_and_exhaustion() {
+    for limit in [0, 2] {
+        let mut fixture = Fixture::new(limit, 10, 5_000).await;
+        for _ in 0..=limit {
+            fixture
+                .incoming()
+                .await
+                .reply
+                .send(terminal_sse("", TERMINAL_SSE_500, ""))
+                .ok()
+                .unwrap();
+        }
+        assert_eq!(fixture.settled().await, "recovery_wait");
+        let attempts = fixture.attempts().await;
+        assert_eq!(attempts.len(), limit as usize + 1);
+        for (index, (_, error)) in attempts.iter().enumerate() {
+            let failure = error.as_ref().unwrap();
+            assert_terminal_stream_failure(failure, Some(500));
+            if index < limit as usize {
+                assert_eq!(failure["automatic_retry"]["number"], index + 1);
+                assert_eq!(failure["automatic_retry"]["limit"], limit);
+                assert_eq!(failure["automatic_retry"]["delay_ms"], 10);
+            } else {
+                assert!(failure.get("automatic_retry").is_none());
+                assert_eq!(
+                    failure.get("automatic_retry_exhausted").cloned(),
+                    (limit > 0).then(|| json!({"retries":limit,"limit":limit}))
+                );
+            }
+        }
+        assert_eq!(fixture_request_log_lines(&fixture), limit as usize + 1);
+        fixture.no_more_requests().await;
+        fixture.close().await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn untyped_terminal_sse_honors_real_retry_after_and_stop() {
+    for seconds in [30, 601] {
+        let mut fixture = Fixture::new(2, 10, 5_000).await;
+        let header = format!("Retry-After: {seconds}\r\n");
+        fixture
+            .incoming()
+            .await
+            .reply
+            .send(terminal_sse("", TERMINAL_SSE_500, &header))
+            .ok()
+            .unwrap();
+        if seconds == 30 {
+            fixture.waiting_for_retry().await;
+            crate::test_watchdog::watchdog(
+                "tests/response_retries.rs: untyped_terminal_sse_honors_real_retry_after_and_stop",
+                request(
+                    &fixture.control,
+                    Command::RunStop(RunTarget {
+                        run_id: fixture.accepted.run_id.clone().unwrap(),
+                    }),
+                ),
+            )
+            .await
+            .expect("stop did not finish within fixture watchdog");
+            assert_eq!(fixture.settled().await, "stopped");
+        } else {
+            assert_eq!(fixture.settled().await, "recovery_wait");
+        }
+        let attempts = fixture.attempts().await;
+        assert_eq!(attempts.len(), 1);
+        let failure = attempts[0].1.as_ref().unwrap();
+        assert_terminal_stream_failure(failure, Some(500));
+        assert_eq!(
+            failure["rate_observation"]["retry_after_ms"],
+            seconds * 1_000
+        );
+        if seconds == 30 {
+            assert_eq!(failure["automatic_retry"]["delay_ms"], 30_000);
+        } else {
+            assert_eq!(failure["automatic_retry_deferred"]["retry_after_ms"], 601_000);
+        }
+        assert_eq!(fixture_request_log_lines(&fixture), 1);
+        fixture.no_more_requests().await;
+        fixture.close().await;
+    }
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn terminal_sse_error_vetoes_partial_retries_but_preserves_partial_facts() {
     for retry_partial in [false, true] {
@@ -2823,7 +3106,7 @@ async fn terminal_sse_error_vetoes_partial_retries_but_preserves_partial_facts()
             "data: {}\n\ndata: {}\n\ndata: {}\n\n",
             json!({"type":"response.output_text.delta","delta":"visible partial text"}),
             json!({"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","call_id":"partial-call","name":"shell","arguments":"{\"command\":\"echo never\"}"}}),
-            json!({"error":{"code":"400","message":"SECRET_STREAM_ERROR"}}),
+            json!({"error":{"code":"503","message":"SECRET_STREAM_ERROR"}}),
         );
         fixture
             .incoming()
@@ -2842,7 +3125,7 @@ async fn terminal_sse_error_vetoes_partial_retries_but_preserves_partial_facts()
         let failure = attempts[0].1.as_ref().unwrap();
         assert_eq!(failure["partial_text"], "visible partial text");
         assert_eq!(failure["completed_items"]["0"]["call_id"], "partial-call");
-        assert_eq!(failure["error"]["stream_provider_status"]["value"], 400);
+        assert_eq!(failure["error"]["stream_provider_status"]["value"], 503);
         assert_eq!(
             failure["error"]["stream_provider_status"]["source"],
             "stream_error_code"

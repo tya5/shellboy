@@ -4469,6 +4469,20 @@ cannot restore a live parser witness. Partial output, completed tool IDs, usage
 knownness, attempt identity and recovery CAS retain their existing rules.
 
 
+## #313 Conversation-only retry with live terminal provenance
+
+This supersedes S1b's no-retry statement only for the narrow conversation case
+in [the HTTP design](../design/model-http.md#conversation-only-terminal-stream-retry-313).
+A typed terminal can retain the same raw response and provider status as an
+untyped terminal: the earlier parser does not flag a repeated root `response`
+container, so a later container can overwrite one carrying output. The driver
+cannot prove that distinction from normalized or saved data. Carry a private,
+Serde-skipped live fact from the parser instead. The existing terminal recognition,
+status/source pair, serialized failure, and shared summary policy are unchanged.
+Broaden the allowed envelope or metadata prefix only with positive provenance and
+output-absence proofs for the new shapes. No new dependency, table, queue, worker
+or event is introduced.
+
 ## Automatic spill preference (S6a, 2026-11-13)
 
 Decision: persist one nullable raw Thread boolean (`spill_override`) and one

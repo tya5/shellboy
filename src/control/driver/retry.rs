@@ -1,9 +1,41 @@
 //! Consecutive conversation retries; the HTTP client reports facts only.
 use super::*;
-use model::http::{ResponseFacts, ResponseReceived};
+use model::http::{AttemptFailure, ResponseFacts, ResponseReceived};
 use std::time::Duration;
 
 pub(super) use crate::model::retry_class::{MAX_RETRY_AFTER, RetryPolicy, classify_retry};
+
+fn classify_conversation_retry(failure: &AttemptFailure, retry_partial: bool) -> RetryPolicy {
+    let AttemptFailure { error, facts, .. } = failure;
+    if facts.terminal_received
+        && matches!(facts.status, Some(200..=299))
+        && facts.received != ResponseReceived::Output
+        && failure.partial_text.is_empty()
+        && failure.partial_reasoning.is_empty()
+        && failure.completed_items.is_empty()
+        && error.kind == "provider"
+        && !error.is_context_limit()
+        && !error.is_thinking_binding()
+        && error.usage_limit.is_none()
+        && matches!(
+            error.untyped_stream_error_witness(),
+            Some(model::StreamProviderStatus {
+                value: 429 | 500..=599,
+                source: model::StreamProviderStatusSource::StreamErrorCode,
+            })
+        )
+    {
+        if let Some(delay) = facts.retry_after
+            && delay > MAX_RETRY_AFTER
+        {
+            return RetryPolicy::Deferred(delay);
+        }
+        return RetryPolicy::Retry {
+            partial_output: false,
+        };
+    }
+    classify_retry(error, facts, retry_partial)
+}
 
 /// Large-input activation is distinct from the ordinary transient retry list:
 /// every 5xx may benefit, but terminal output, partial opt-out and deferred
@@ -233,11 +265,7 @@ pub(super) async fn retry_or_recover<'a>(
             return Ok(());
         }
     }
-    let policy = classify_retry(
-        &failure.error,
-        &failure.facts,
-        connection.response_retry_partial,
-    );
+    let policy = classify_conversation_retry(&failure, connection.response_retry_partial);
     // Only defer explicit provider reset facts beyond the complete remaining
     // retry schedule; missing or short reset data keeps the ordinary policy.
     let retryable_usage_limit = failure
@@ -476,6 +504,50 @@ pub(super) async fn retry_or_recover<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn live_untyped_terminal_authority_is_conversation_only_and_not_restorable() {
+        let mut stream = model::ResponseStream::default();
+        stream
+            .push(b"data: {\"error\":{\"code\":\"599\"}}\n\n")
+            .unwrap();
+        let mut failure = AttemptFailure::from(stream.finish(false).unwrap_err());
+        failure.facts = ResponseFacts {
+            status: Some(200),
+            terminal_received: true,
+            received: ResponseReceived::Metadata,
+            ..Default::default()
+        };
+        assert_eq!(
+            classify_conversation_retry(&failure, false),
+            RetryPolicy::Retry {
+                partial_output: false,
+            }
+        );
+        assert_eq!(
+            classify_retry(&failure.error, &failure.facts, true),
+            RetryPolicy::Ineligible,
+            "the shared summary classifier still vetoes the same live terminal"
+        );
+        let mut saved = serde_json::to_value(&failure.error).unwrap();
+        assert_eq!(
+            saved["stream_provider_status"],
+            json!({"value":599,"source":"stream_error_code"})
+        );
+        assert!(
+            saved
+                .get("untyped_stream_error_without_output_prefix")
+                .is_none()
+        );
+        saved["untyped_stream_error_without_output_prefix"] = json!(true);
+        failure.error = serde_json::from_value(saved).unwrap();
+        assert!(failure.error.untyped_stream_error_witness().is_none());
+        assert_eq!(
+            classify_conversation_retry(&failure, true),
+            RetryPolicy::Ineligible
+        );
+    }
+
     #[test]
     fn consecutive_budget_resets_only_after_adoption_or_turn_generation_change() {
         let mut budget = RetryBudget::default();

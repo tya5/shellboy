@@ -11845,6 +11845,31 @@ exact-source review, and normal/all-OS CI on the same commit remain pending. Exi
 retry classifier and S2/S3 production code remain unchanged.
 
 
+## #313 Conversation terminal stream retry (source only)
+
+Baseline: `53b13af6d1cc3082dc4764dbb1165861ca126878`. The source patch limits
+resend to a positively identified untyped Responses SSE error with a live
+429/5xx witness, a proven output-free prefix, and no retained output. It uses the
+existing conversation policy/state transitions. The HTTP status, durable witness,
+and shared summary policy are separate from the live-only envelope discriminator.
+
+Synthetic localhost test source covers 500 before output and metadata-only 429,
+unchanged request bodies, failed-attempt evidence visible at the next POST, exact
+POST count and terminal success. Negative cases include the duplicate root
+`response` collision (same saved raw response and 500 witness, no resend),
+malformed/duplicate metadata and error fields, ordinary 4xx, HTTP 200 JSON,
+text/reasoning/tool output, and no tool execution. Additional source covers
+zero/exhausted budgets, header-directed defer and stop, and the shared summary
+classifier and saved-error authority vetoes.
+
+Source-only validation: `git diff --check`, exact path scope, and a Python JSON
+fixture/collision check. No Rust build, formatting check, test, CI, provider,
+profile or real database run was performed on this change. After native admission,
+run `cargo test --locked --lib live_untyped_terminal_authority_is_conversation_only_and_not_restorable`,
+`cargo test --locked --test integration response_retries::untyped_terminal_sse`,
+and `cargo test --locked --test integration response_retries::terminal_sse_error_vetoes_partial_retries_but_preserves_partial_facts`.
+These selectors are pending, not passing evidence.
+
 ## S6a public settings baseline RED (2026-11-13; not product qualification)
 
 Pinned source base: `9baa554e2fc0f8a7dfdaf51e7de705835adce638`.

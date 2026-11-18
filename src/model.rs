@@ -79,6 +79,8 @@ pub struct ModelError {
     pub status: Option<u16>,
     #[serde(default, skip_deserializing, skip_serializing_if = "Option::is_none")]
     pub(crate) stream_provider_status: Option<StreamProviderStatus>,
+    #[serde(skip)]
+    untyped_stream_error_without_output_prefix: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub http_observation: Option<Box<http::HttpObservation>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -94,6 +96,7 @@ impl ModelError {
             http_observation: None,
             usage_limit: None,
             stream_provider_status: None,
+            untyped_stream_error_without_output_prefix: false,
         }
     }
     pub fn is_context_limit(&self) -> bool {
@@ -152,6 +155,7 @@ impl ModelError {
             provider_code: error.get("code").and_then(Value::as_str).map(str::to_owned),
             status,
             stream_provider_status: None,
+            untyped_stream_error_without_output_prefix: false,
             http_observation: None,
             usage_limit: usage_limit::UsageLimit::parse_for_status(
                 value,
@@ -173,6 +177,14 @@ impl ModelError {
         error.stream_provider_status =
             stream_error::status_from_event(event, duplicate_relevant_key);
         error
+    }
+
+    pub(crate) fn untyped_stream_error_witness(&self) -> Option<StreamProviderStatus> {
+        if self.untyped_stream_error_without_output_prefix {
+            self.stream_provider_status
+        } else {
+            None
+        }
     }
 }
 
@@ -527,11 +539,74 @@ impl ModelResponse {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum StreamRetryFrame {
+    EmptyMetadata,
+    UntypedError,
+    Other,
+}
+
+impl StreamRetryFrame {
+    // Inspect the bounded frame rather than its last-key-wins Value. Serde's
+    // struct decoder rejects repeated fields, including response and output.
+    fn prove(bytes: &[u8], event: &Value) -> Self {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Metadata {
+            #[serde(rename = "type")]
+            _kind: String,
+            #[serde(rename = "sequence_number")]
+            _sequence_number: Option<u64>,
+            #[serde(rename = "response")]
+            _response: Option<EmptyResponse>,
+        }
+        #[derive(Deserialize)]
+        struct EmptyResponse {
+            #[serde(default, rename = "output")]
+            _output: [serde::de::IgnoredAny; 0],
+        }
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Untyped {
+            #[serde(rename = "error")]
+            _error: ErrorObject,
+        }
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct ErrorObject {
+            #[serde(rename = "code")]
+            _code: String,
+            #[serde(rename = "message")]
+            _message: Option<String>,
+            #[serde(rename = "type")]
+            _kind: Option<String>,
+            #[serde(rename = "param")]
+            _param: Option<String>,
+        }
+
+        match event.get("type").and_then(Value::as_str) {
+            Some("response.created" | "response.in_progress")
+                if event.get("response").is_none_or(Value::is_object)
+                    && serde_json::from_slice::<Metadata>(bytes).is_ok() =>
+            {
+                Self::EmptyMetadata
+            }
+            None if event.get("error").is_some_and(Value::is_object)
+                && serde_json::from_slice::<Untyped>(bytes).is_ok() =>
+            {
+                Self::UntypedError
+            }
+            _ => Self::Other,
+        }
+    }
+}
+
 #[derive(Clone)]
 struct DecodedEvent {
     value: Value,
     duplicate_relevant_key: bool,
     untyped_error_candidate: bool,
+    retry_frame: StreamRetryFrame,
 }
 struct DecodeFailure {
     error: ModelError,
@@ -551,7 +626,7 @@ pub struct SseDecoder {
 }
 impl SseDecoder {
     pub fn push(&mut self, bytes: &[u8]) -> Result<Vec<Value>, ModelError> {
-        self.push_until(bytes, |_| false)
+        self.decode(bytes, |_| false, false)
             .map(|events| events.into_iter().map(|event| event.value).collect())
             .map_err(|failure| failure.error)
     }
@@ -559,15 +634,24 @@ impl SseDecoder {
     fn push_until(
         &mut self,
         bytes: &[u8],
-        mut terminal: impl FnMut(&DecodedEvent) -> bool,
+        terminal: impl FnMut(&DecodedEvent) -> bool,
     ) -> Result<Vec<DecodedEvent>, DecodeFailure> {
-        self.decode(bytes, &mut terminal, false)
+        self.decode_frames(bytes, terminal, false, true)
     }
     fn decode(
         &mut self,
         bytes: &[u8],
+        terminal: impl FnMut(&DecodedEvent) -> bool,
+        stop_done: bool,
+    ) -> Result<Vec<DecodedEvent>, DecodeFailure> {
+        self.decode_frames(bytes, terminal, stop_done, false)
+    }
+    fn decode_frames(
+        &mut self,
+        bytes: &[u8],
         mut terminal: impl FnMut(&DecodedEvent) -> bool,
         stop_done: bool,
+        prove_retry_frames: bool,
     ) -> Result<Vec<DecodedEvent>, DecodeFailure> {
         let mut events = Vec::new();
         self.total = self
@@ -636,6 +720,11 @@ impl SseDecoder {
                             };
                         self.json_events += 1;
                         let decoded = DecodedEvent {
+                            retry_frame: if prove_retry_frames && !duplicate_relevant_key {
+                                StreamRetryFrame::prove(&self.data, &event)
+                            } else {
+                                StreamRetryFrame::Other
+                            },
                             value: event,
                             duplicate_relevant_key,
                             untyped_error_candidate,
@@ -731,6 +820,7 @@ pub struct ResponseStream {
     total_differences: usize,
     last_event: Option<&'static str>,
     output_observed: bool,
+    unproven_retry_prefix: bool,
 }
 impl ResponseStream {
     /// Parsed events can be persisted/previewed. Tools are never started here.
@@ -763,6 +853,7 @@ impl ResponseStream {
             let event = decoded.value;
             let classification = classify_stream_event(&event);
             self.output_observed |= classification != StreamEventKind::Metadata;
+            self.unproven_retry_prefix |= decoded.retry_frame == StreamRetryFrame::Other;
             if let Some(delta) = event.get("delta").and_then(Value::as_str) {
                 match classification {
                     StreamEventKind::TextDelta => self.partial_text.push_str(delta),
@@ -855,10 +946,15 @@ impl ResponseStream {
                     || (decoded.untyped_error_candidate && event.get("type").is_none()) =>
                 {
                     self.failed_response = Some(event.clone());
-                    self.terminal = Some(Err(ModelError::stream_provider(
-                        &event,
-                        decoded.duplicate_relevant_key,
-                    )));
+                    let mut error =
+                        ModelError::stream_provider(&event, decoded.duplicate_relevant_key);
+                    error.untyped_stream_error_without_output_prefix = decoded.retry_frame
+                        == StreamRetryFrame::UntypedError
+                        && !self.unproven_retry_prefix
+                        && !self.has_output()
+                        && self.decoder.done_markers == 0
+                        && error.stream_provider_status.is_some();
+                    self.terminal = Some(Err(error));
                 }
                 _ => {}
             }

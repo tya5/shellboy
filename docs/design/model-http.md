@@ -70,7 +70,36 @@ transportのheader/非空body受信は、driver向けの既存32枠event channel
 
 ## 会話の連続一時失敗の再試行（Issue #7、#11）
 
-HTTP clientは一要求一POSTを維持し、会話Driverが追加試行を管理する。HTTP429/500/502/503/504の通常エラーと、正常な終端に至る前のtransport切断・EOF・受信停滞timeoutを対象にする。取消し、protocol/JSON不正、失敗terminal、未知/不正な完成response、その他status、HTTP200内のproviderエラーは自動再試行しない。HTTP失敗本文のtimeout・切断でも429/500/502/503/504は対象とし、その他statusは復旧へ進む。
+The HTTP client makes one POST per request. The conversation driver owns any
+additional attempt. The shared policy covers ordinary HTTP 429/all 5xx (including
+interrupted error bodies) and transport loss, EOF or timeout before a terminal
+response, subject to the existing eligibility checks. Cancellation, malformed
+protocol/JSON, unsupported completed responses and other HTTP failures are not
+ordinary transient retries. Existing specialized context-limit and quota policies
+are unchanged.
+
+### Conversation-only terminal stream retry (#313)
+
+A successful HTTP Responses SSE exchange can end in a retryable provider error.
+The conversation driver may retry only when the live parser positively identifies
+an untyped terminal object containing only an `error` object with an exact
+`stream_error_code` witness of 429 or 500-599. Apart from `code`, the nested
+error object permits only optional string/null `message`, `type`, and `param`.
+The prefix may contain only SSE framing/comments and unambiguous
+`response.created`/`response.in_progress` metadata with no output. No output observation, retained text/reasoning or
+completed items are allowed, even if `response_retry_partial` is enabled. Typed
+terminals, malformed or ambiguous envelopes, unrecognized prefix events, JSON
+errors and ordinary 4xx do not acquire this exception. In particular, a typed
+terminal with duplicate root `response` containers must not qualify even if its
+retained response looks identical to an untyped error.
+
+The parser records live envelope provenance separately from the existing provider
+status witness. The live discriminator is neither serialized nor restored.
+The error remains terminal, and the real HTTP status and existing durable witness
+are preserved separately. The shared summary classifier and the conversation trim
+veto are unchanged. Only the genuine HTTP header can set Retry-After; the embedded
+code does not establish a cooldown or quota. The unchanged conversation budget,
+backoff/defer limit, failure transaction, stop and readmission apply before resend.
 
 SSEのresponse.created/in_progress、コメント・heartbeatだけは生成出力として数えない。output_item/content_partの追加・完了、本文/refusal/推論/tool引数のdelta等を観測した時点で出力ありとする。HTTPの生存観測と再試行用の出力観測を区別する。JSONの完成前に通信が切れた場合は、非空の本文を保守的に部分出力とする。接続別response_retry_partialは既定trueで、部分出力がある場合も同じ条件で再試行する。falseなら部分出力後は復旧待ちとし、metadataのみ/出力なしの一時失敗は引き続き対象とする。
 
@@ -90,7 +119,10 @@ TUIは既存projectionで同generationの最新failed attemptを読み、通常�
 
 AttemptFailureはModelErrorと受信原文に加え、非永続のResponseFactsを返す。受信段階（未受信/metadata/出力）、HTTP status、Retry-After、応答境界到達を記録するだけで、HTTP層は再送の許可を返さない。応答境界はSSEのtyped terminal又は完全にparseされたJSON responseであり、その後の完成検証失敗を通信中断と混同しない。HTTPエラー本文のtimeoutなどもstatusを保持して会話Driverへ返す。
 
-Driver/retry.rsのclassify_retryが、error kind・status・受信段階・応答境界・partial optout・Retry-After上限を一度判定する。予算/待機計算と永続保存・取消しは従来のDriver責務に残す。ModelError.kindの保存形式は変更しない。ResponseFactsをDBの新しい正本状態にしない。
+The conversation driver applies the #313 exception to the live `AttemptFailure`
+only; all other cases use the existing shared `classify_retry`. Retry budgeting,
+waiting, persistence and cancellation remain driver responsibilities. Neither the
+stored `ModelError.kind` nor the database authority for response facts changes.
 
 model.rsのclassify_stream_eventをResponseStreamと表示用Driverが共用し、本文/推論delta、その他の出力、metadataを分類する。期限のDeadlineは時間だけを所有し、本文受信フラグを持たない。全体/停滞/無効はenumで表し、モデル一覧の20秒上限とエラー文字数上限は各定数を共用する。
 
