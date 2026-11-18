@@ -918,6 +918,50 @@ mod output_failure_tests {
     use super::*;
     use tokio::io::AsyncWriteExt;
 
+    #[test]
+    fn drain_only_failure_keeps_successful_process_exited_but_output_incomplete() {
+        let failure = Arc::new(StdMutex::new(ShellFailures::default()));
+        record_failure(
+            &failure,
+            FailureKind::Drain,
+            "output drain incomplete".into(),
+        );
+        let failure = failure.lock().unwrap();
+        assert_eq!(failure.completion_state(false), ShellState::Exited);
+        assert_eq!(failure.reason().as_deref(), Some("output drain incomplete"));
+        assert!(!failure.output_complete(true));
+    }
+
+    #[test]
+    fn non_drain_process_wait_failure_is_failed_not_successful_exit() {
+        let failure = Arc::new(StdMutex::new(ShellFailures::default()));
+        record_failure(
+            &failure,
+            FailureKind::ProcessWait,
+            "Unix shell reap was not confirmed".into(),
+        );
+        {
+            let failure = failure.lock().unwrap();
+            assert_eq!(failure.completion_state(false), ShellState::Failed);
+            assert!(
+                failure.output_complete(true),
+                "process wait failure does not imply output loss"
+            );
+        }
+        record_failure(
+            &failure,
+            FailureKind::Drain,
+            "output drain incomplete".into(),
+        );
+        let failure = failure.lock().unwrap();
+        assert_eq!(
+            failure.completion_state(false),
+            ShellState::Failed,
+            "a non-drain process failure remains Failed when drain also fails"
+        );
+        assert!(!failure.output_complete(true));
+    }
+
     #[tokio::test]
     async fn raw_limit_preserves_truncation_after_an_initial_stdin_failure() {
         let failure = Arc::new(StdMutex::new(ShellFailures::default()));
