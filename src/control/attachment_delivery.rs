@@ -1,6 +1,6 @@
 //! Dedicated attachment provenance is adopted only between complete tool groups.
-use crate::protocol::{ApiError, ErrorCode};
-use rusqlite::{OptionalExtension, Transaction, params};
+use crate::protocol::ApiError;
+use rusqlite::{Transaction, params};
 
 // Held inputs keep their original Run assignment. Explicit retry resumes the
 // same live Run; a new Run must neither inherit nor wait on an old held source.

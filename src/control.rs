@@ -1507,6 +1507,7 @@ impl Control {
 #[cfg(all(test, unix))]
 mod failure_tests {
     use super::*;
+    use rusqlite::params;
     use std::{collections::BTreeMap, time::Duration};
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
