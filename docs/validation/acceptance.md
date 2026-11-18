@@ -11860,10 +11860,16 @@ POST count and terminal success. Negative cases include the duplicate root
 malformed/duplicate metadata and error fields, ordinary 4xx, HTTP 200 JSON,
 text/reasoning/tool output, and no tool execution. Additional source covers
 zero/exhausted budgets, header-directed defer and stop, and the shared summary
-classifier and saved-error authority vetoes.
+classifier and saved-error authority vetoes. The follow-up to `74504f2148`
+adds a positive queued-to-in-progress metadata prefix and no-resend controls
+for nested failure, terminal/conflicting status, duplicate status/error,
+unknown fields and wrapped frames. Those syntactically valid prefixes retain
+the later genuine 500 witness. An invalid JSON prefix yields a protocol failure
+with no witness from the unread terminal. Each negative fixture expects one POST.
 
 Source-only validation: `git diff --check`, exact path scope, and a Python JSON
-fixture/collision check. No Rust build, formatting check, test, CI, provider,
+fixture/collision check, including classification of the deliberately malformed
+fixture as invalid JSON. No Rust build, formatting check, test, CI, provider,
 profile or real database run was performed on this change. After native admission,
 run `cargo test --locked --lib live_untyped_terminal_authority_is_conversation_only_and_not_restorable`,
 `cargo test --locked --test integration response_retries::untyped_terminal_sse`,

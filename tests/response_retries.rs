@@ -2853,8 +2853,10 @@ async fn untyped_terminal_sse_retries_without_output_and_saves_failure_before_po
             429,
             concat!(
                 ": keepalive\n\n",
-                "data: {\"type\":\"response.created\",\"sequence_number\":0,\"response\":{\"output\":[]}}\n\n",
-                "data: {\"type\":\"response.in_progress\"}\n\n",
+                "data: {\"type\":\"response.created\",\"sequence_number\":0,",
+                "\"response\":{\"id\":\"resp_fixture\",\"model\":\"fixture\",\"object\":\"response\",",
+                "\"created_at\":1,\"status\":\"queued\",\"error\":null,\"incomplete_details\":null,\"output\":[]}}\n\n",
+                "data: {\"type\":\"response.in_progress\",\"response\":{\"status\":\"in_progress\"}}\n\n",
             ),
         ),
     ] {
@@ -2915,6 +2917,16 @@ async fn untyped_terminal_sse_retry_fails_closed_for_ambiguous_or_nontransient_e
         (duplicate_output, TERMINAL_SSE_500, Some(500)),
         (unknown_prefix, TERMINAL_SSE_500, Some(500)),
         ("", r#"{"type":"error","error":{"code":"500"}}"#, Some(500)),
+        (
+            "",
+            r#"{"response":{"status":"in_progress"},"error":{"code":"500"}}"#,
+            Some(500),
+        ),
+        (
+            "",
+            r#"{"error":{"code":"500","message":{"wrapped":"fixture"}}}"#,
+            Some(500),
+        ),
         ("", r#"{"error":{"code":"400"}}"#, Some(400)),
         ("", r#"{"error":{"code":"401"}}"#, Some(401)),
         ("", r#"{"error":{"code":"403"}}"#, Some(403)),
@@ -2946,6 +2958,90 @@ async fn untyped_terminal_sse_retry_fails_closed_for_ambiguous_or_nontransient_e
             );
             assert_eq!(failure["partial_reasoning"], "");
             assert_eq!(failure["completed_items"], json!({}));
+        }
+        assert!(failure.get("automatic_retry").is_none());
+        assert!(failure.get("automatic_retry_exhausted").is_none());
+        assert_eq!(fixture_request_log_lines(&fixture), 1);
+        fixture.no_more_requests().await;
+        fixture.close().await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn untyped_terminal_sse_rejects_contradictory_nested_metadata_without_losing_witness() {
+    let event: Value = serde_json::from_str(TERMINAL_SSE_500).unwrap();
+    for (kind, response) in [
+        ("response.created", r#"{"output":[],"error":{"code":"400"}}"#),
+        ("response.created", r#"{"status":"failed","output":[]}"#),
+        ("response.in_progress", r#"{"status":"completed","output":[]}"#),
+        ("response.in_progress", r#"{"status":"queued","output":[]}"#),
+        ("response.created", r#"{"status":"failed","status":"in_progress","output":[]}"#),
+        ("response.created", r#"{"status":"in_progress","status":"in_progress"}"#),
+        ("response.created", r#"{"error":{},"error":null,"output":[]}"#),
+        ("response.created", r#"{"incomplete_details":{"reason":"max_output_tokens"}}"#),
+        ("response.created", r#"{"output":[],"unknown":{}}"#),
+        ("response.created", r#"[{"output":[]}]"#),
+        ("response.created", r#"{"status":{"in_progress":null}}"#),
+        ("response.created", r#"{"object":{"response":null}}"#),
+    ] {
+        let prefix = format!("data: {{\"type\":\"{kind}\",\"response\":{response}}}\n\n");
+        let mut fixture = Fixture::new(2, 10, 5_000).await;
+        fixture
+            .incoming()
+            .await
+            .reply
+            .send(terminal_sse(&prefix, TERMINAL_SSE_500, ""))
+            .ok()
+            .unwrap();
+        assert_eq!(fixture.settled().await, "recovery_wait", "{prefix}");
+        let attempts = fixture.attempts().await;
+        assert_eq!(attempts.len(), 1);
+        assert_eq!(attempts[0].0, "incomplete");
+        let failure = attempts[0].1.as_ref().unwrap();
+        assert_terminal_stream_failure(failure, Some(500));
+        assert_eq!(failure["raw_response"], event);
+        assert_eq!(failure["partial_text"], "");
+        assert_eq!(failure["partial_reasoning"], "");
+        assert_eq!(failure["completed_items"], json!({}));
+        assert!(failure.get("automatic_retry").is_none());
+        assert!(failure.get("automatic_retry_exhausted").is_none());
+        assert_eq!(fixture_request_log_lines(&fixture), 1);
+        fixture.no_more_requests().await;
+        fixture.close().await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn untyped_terminal_sse_rejects_wrapped_or_malformed_raw_frames() {
+    let valid_terminal: Value = serde_json::from_str(TERMINAL_SSE_500).unwrap();
+    for (frame, error_kind) in [
+        (json!([&valid_terminal]).to_string(), "provider"),
+        (json!(TERMINAL_SSE_500).to_string(), "provider"),
+        (r#"{"wrapper":{"error":{"code":"503"}}}"#.into(), "provider"),
+        (r#"{"error":{"code":"599"}"#.into(), "protocol"),
+    ] {
+        let mut fixture = Fixture::new(2, 10, 5_000).await;
+        let prefix = format!("data: {frame}\n\n");
+        fixture
+            .incoming()
+            .await
+            .reply
+            .send(terminal_sse(&prefix, TERMINAL_SSE_500, ""))
+            .ok()
+            .unwrap();
+        assert_eq!(fixture.settled().await, "recovery_wait", "{frame}");
+        let attempts = fixture.attempts().await;
+        assert_eq!(attempts.len(), 1);
+        let failure = attempts[0].1.as_ref().unwrap();
+        assert_eq!(failure["error"]["kind"], error_kind);
+        assert_eq!(failure["rate_observation"]["status"], 200);
+        if error_kind == "provider" {
+            assert_terminal_stream_failure(failure, Some(500));
+            assert_eq!(failure["raw_response"], valid_terminal);
+        } else {
+            // Invalid JSON fails before the following terminal can supply a witness.
+            assert!(failure["error"].get("stream_provider_status").is_none());
+            assert!(failure["raw_response"].is_null());
         }
         assert!(failure.get("automatic_retry").is_none());
         assert!(failure.get("automatic_retry_exhausted").is_none());

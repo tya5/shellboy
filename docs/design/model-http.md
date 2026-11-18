@@ -86,12 +86,20 @@ an untyped terminal object containing only an `error` object with an exact
 `stream_error_code` witness of 429 or 500-599. Apart from `code`, the nested
 error object permits only optional string/null `message`, `type`, and `param`.
 The prefix may contain only SSE framing/comments and unambiguous
-`response.created`/`response.in_progress` metadata with no output. No output observation, retained text/reasoning or
-completed items are allowed, even if `response_retry_partial` is enabled. Typed
-terminals, malformed or ambiguous envelopes, unrecognized prefix events, JSON
-errors and ordinary 4xx do not acquire this exception. In particular, a typed
-terminal with duplicate root `response` containers must not qualify even if its
-retained response looks identical to an untyped error.
+`response.created`/`response.in_progress` metadata. A metadata frame permits
+an optional unsigned `sequence_number` and optional object `response`. That
+object has a closed set of optional fields: string `id` and `model`, `object`
+equal to `"response"`, unsigned `created_at`, `status` of `"in_progress"`
+(`"queued"` is also allowed for `response.created`), null `error` and
+`incomplete_details`, and empty array `output`. Repeated fields, unsupported
+fields, non-null failure facts, or conflicting status veto only this retry.
+
+No output observation, retained text/reasoning or completed items are allowed,
+even if `response_retry_partial` is enabled. Typed terminals, wrapped,
+malformed or ambiguous envelopes, unrecognized prefix events, JSON errors and
+ordinary 4xx do not acquire this exception. In particular, a typed terminal with
+duplicate root `response` containers must not qualify even if its retained
+response looks identical to an untyped error.
 
 The parser records live envelope provenance separately from the existing provider
 status witness. The live discriminator is neither serialized nor restored.

@@ -555,15 +555,42 @@ impl StreamRetryFrame {
         struct Metadata {
             #[serde(rename = "type")]
             _kind: String,
-            #[serde(rename = "sequence_number")]
-            _sequence_number: Option<u64>,
-            #[serde(rename = "response")]
-            _response: Option<EmptyResponse>,
+            #[serde(default, rename = "sequence_number")]
+            _sequence_number: u64,
+            response: Option<EmptyResponse>,
         }
         #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
         struct EmptyResponse {
+            #[serde(default, rename = "id")]
+            _id: String,
+            #[serde(default, rename = "model")]
+            _model: String,
+            #[serde(default, rename = "object")]
+            _object: ResponseObject,
+            #[serde(default, rename = "created_at")]
+            _created_at: u64,
+            #[serde(default)]
+            status: ActiveStatus,
+            #[serde(default, rename = "error")]
+            _error: (),
+            #[serde(default, rename = "incomplete_details")]
+            _incomplete_details: (),
             #[serde(default, rename = "output")]
             _output: [serde::de::IgnoredAny; 0],
+        }
+        #[derive(Default, Deserialize)]
+        #[serde(rename_all = "snake_case")]
+        enum ResponseObject {
+            #[default]
+            Response,
+        }
+        #[derive(Default, Deserialize)]
+        #[serde(rename_all = "snake_case")]
+        enum ActiveStatus {
+            #[default]
+            InProgress,
+            Queued,
         }
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
@@ -585,9 +612,17 @@ impl StreamRetryFrame {
         }
 
         match event.get("type").and_then(Value::as_str) {
-            Some("response.created" | "response.in_progress")
-                if event.get("response").is_none_or(Value::is_object)
-                    && serde_json::from_slice::<Metadata>(bytes).is_ok() =>
+            Some(kind @ ("response.created" | "response.in_progress"))
+                if event.get("response").is_none_or(|response| {
+                    response.is_object()
+                        && response.get("object").is_none_or(Value::is_string)
+                        && response.get("status").is_none_or(Value::is_string)
+                }) && serde_json::from_slice::<Metadata>(bytes).is_ok_and(|metadata| {
+                        kind == "response.created"
+                            || metadata.response.is_none_or(|response| {
+                                matches!(response.status, ActiveStatus::InProgress)
+                            })
+                    }) =>
             {
                 Self::EmptyMetadata
             }
