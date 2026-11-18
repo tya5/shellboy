@@ -690,26 +690,10 @@
   {
     "file": "tests/frontend.rs",
     "rule": "raw-timeout",
-    "fingerprint": "61d7ca4414f2d18b79c1231683636e72ef81badcd3c91b1ad725a2cdd168f9ec",
-    "function": "draft_database_save_failure_stops_admission_and_owned_shell_but_retains_input",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing draft_database_save_failure_stops_admission_and_owned_shell_but_retains_input test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "tests/frontend.rs",
-    "rule": "raw-timeout",
     "fingerprint": "7a96bfd34ba329080a13d8320c21b5919ae33c10c7b4927d21e08fe66706d558",
     "function": "work_overview_follows_the_saved_execution_to_get_and_raw_output",
     "count": 1,
     "reason": "Deferred #41/shared-read: existing work_overview_follows_the_saved_execution_to_get_and_raw_output test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "tests/frontend.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "7f88ca4b7853a553d4355c2800ed24fa43d62b7cc2d17dfb63d16335d85e3af7",
-    "function": "draft_database_save_failure_stops_admission_and_owned_shell_but_retains_input",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing draft_database_save_failure_stops_admission_and_owned_shell_but_retains_input test occurrence only; migrate on #41 integration, no file-wide exemption."
   },
   {
     "file": "tests/frontend.rs",
@@ -870,14 +854,6 @@
     "function": "bounded_admission_and_shared_shutdown_drain_accepted_jobs",
     "count": 1,
     "reason": "Deferred #41/shared-read: existing bounded_admission_and_shared_shutdown_drain_accepted_jobs test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "tests/support/watchdog.rs",
-    "rule": "elapsed-comparison",
-    "fingerprint": "31a3713c94c8d6e61c96c0b3c2501293edf1ef8b7576e82232986cde2000dbe6",
-    "function": "expired",
-    "count": 1,
-    "reason": "Single shared deadlock-watchdog implementation; all async, sync and blocking guards use the one WATCHDOG constant."
   },
   {
     "file": "tests/support/watchdog.rs",

@@ -27,19 +27,24 @@ pub fn watchdog<F: Future>(
 #[allow(dead_code)]
 pub struct Deadline {
     started: std::time::Instant,
+    budget: Duration,
     waiting_for: &'static str,
 }
 #[allow(dead_code)]
 impl Deadline {
     pub fn new(waiting_for: &'static str) -> Self {
+        Self::with_budget(waiting_for, WATCHDOG)
+    }
+    pub fn with_budget(waiting_for: &'static str, budget: Duration) -> Self {
         Self {
             started: std::time::Instant::now(),
+            budget,
             waiting_for,
         }
     }
     /// Pass the same safety budget to APIs that require an absolute deadline.
     pub fn at(&self) -> std::time::Instant {
-        self.started + WATCHDOG
+        self.started + self.budget
     }
     /// Wait for the next fixture event within this one shared safety budget.
     #[track_caller]
@@ -61,7 +66,9 @@ impl Deadline {
         result
     }
     pub fn expired(&self) -> bool {
-        self.started.elapsed() >= WATCHDOG
+        self.at()
+            .saturating_duration_since(std::time::Instant::now())
+            .is_zero()
     }
     #[track_caller]
     pub fn check(&self) {

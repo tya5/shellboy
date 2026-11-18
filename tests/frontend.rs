@@ -1558,7 +1558,11 @@ async fn draft_database_save_failure_stops_admission_and_owned_shell_but_retains
         "owned shell must still be live when the save fault is submitted"
     );
     // Anchor the process-stop contract to fault submission, before any await.
-    let shell_deadline = std::time::Instant::now() + Duration::from_secs(5);
+    let shell_deadline = crate::test_watchdog::Deadline::with_budget(
+        "owned shell stop after draft-save failure",
+        Duration::from_secs(5),
+    )
+    .at();
     send.send(UiAction::SaveDraft {
         thread_id: thread,
         draft: ui.view().draft.clone(),
@@ -1577,11 +1581,12 @@ async fn draft_database_save_failure_stops_admission_and_owned_shell_but_retains
         loop {
             let reaped = unsafe { libc::kill(pid, 0) } == -1
                 && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH);
-            if std::time::Instant::now() > shell_deadline {
-                return false;
-            }
+            let remaining = shell_deadline.saturating_duration_since(std::time::Instant::now());
             if reaped {
-                return true;
+                return !remaining.is_zero();
+            }
+            if remaining.is_zero() {
+                return false;
             }
             std::thread::sleep(Duration::from_millis(5));
         }
