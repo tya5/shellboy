@@ -283,10 +283,8 @@ mod tests {
             "../../../migrations/0040_selection_nonappend_generation.sql"
         ))
         .unwrap();
-        db.execute_batch(
-            "DELETE FROM schema_migration WHERE version IN (46,47,48); PRAGMA user_version=45;",
-        )
-        .unwrap();
+        db.execute_batch("DELETE FROM schema_migration WHERE version>45; PRAGMA user_version=45;")
+            .unwrap();
         db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('t','/','','p','m','now')",[]).unwrap();
         db.execute(
             "INSERT INTO app_meta VALUES('compact.a_state.t',?1)",
@@ -340,6 +338,7 @@ mod tests {
         assert_eq!(db.query_row("SELECT count(*) FROM schema_migration WHERE version=46 AND name='0046_scope_identity_v2'",[],|r|r.get::<_,i64>(0)).unwrap(),1);
         assert_eq!(db.query_row("SELECT count(*) FROM schema_migration WHERE version=47 AND name='0047_drop_selection_nonappend_generation'",[],|r|r.get::<_,i64>(0)).unwrap(),1);
         assert_eq!(db.query_row("SELECT count(*) FROM schema_migration WHERE version=48 AND name='0048_human_question_path_admission'",[],|r|r.get::<_,i64>(0)).unwrap(),1);
+        assert_eq!(db.query_row("SELECT count(*) FROM schema_migration WHERE version=49 AND name='0049_generated_summary_user_role'",[],|r|r.get::<_,i64>(0)).unwrap(),1);
         let state = crate::compaction::a_state::read(&db, "t").unwrap().unwrap();
         assert_eq!(
             state.reading(),
@@ -466,6 +465,7 @@ mod tests {
             db.query_row("SELECT count(*) FROM schema_migration WHERE version=48 AND name='0048_human_question_path_admission'", [], |r| r.get::<_, i64>(0)).unwrap(),
             1
         );
+        assert_eq!(db.query_row("SELECT count(*) FROM schema_migration WHERE version=49 AND name='0049_generated_summary_user_role'", [], |r| r.get::<_,i64>(0)).unwrap(),1);
         let t = crate::compaction::a_state::read(&db, "t").unwrap();
         let u = crate::compaction::a_state::read(&db, "u").unwrap();
         super::super::run(&mut db, crate::storage::SCHEMA_VERSION, &|_, _| {}, &|| {}).unwrap();

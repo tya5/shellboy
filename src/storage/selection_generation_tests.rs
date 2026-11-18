@@ -19,7 +19,7 @@ fn column_exists(db: &Connection) -> bool {
 fn v46_database() -> Connection {
     let db = fresh();
     db.execute_batch(
-        "DELETE FROM schema_migration WHERE version IN (47,48);
+        "DELETE FROM schema_migration WHERE version>46;
          DELETE FROM schema_migration WHERE version=40;
          DROP TRIGGER selection_thread_conflict;
          PRAGMA user_version=39;",
@@ -126,6 +126,40 @@ fn migration_47_drops_runtime_generation_with_rollback_and_preserves_history_and
         )
         .unwrap(),
         "0048_human_question_path_admission"
+    );
+    assert_eq!(
+        db.query_row(
+            "SELECT name FROM schema_migration WHERE version=49",
+            [],
+            |row| row.get::<_, String>(0)
+        )
+        .unwrap(),
+        "0049_generated_summary_user_role"
+    );
+    let path_before_rerun: Vec<String> = db
+        .prepare("SELECT node_id FROM thread_path WHERE thread_id='t' ORDER BY ordinal")
+        .unwrap()
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap();
+    super::migrate::run(&mut db, SCHEMA_VERSION, &|_, _| {}, &|| {}).unwrap();
+    let path_after_rerun: Vec<String> = db
+        .prepare("SELECT node_id FROM thread_path WHERE thread_id='t' ORDER BY ordinal")
+        .unwrap()
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap();
+    assert_eq!(path_after_rerun, path_before_rerun);
+    assert_eq!(
+        db.query_row(
+            "SELECT count(*) FROM schema_migration WHERE version=49",
+            [],
+            |r| r.get::<_, i64>(0)
+        )
+        .unwrap(),
+        1
     );
     assert_eq!(
         db.query_row(

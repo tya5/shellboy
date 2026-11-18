@@ -578,7 +578,7 @@ mod question_admission_migration_tests {
     fn schema47() -> Connection {
         let db = Connection::open_in_memory().unwrap();
         db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
-        db.execute_batch("DELETE FROM schema_migration WHERE version=48; PRAGMA user_version=47;")
+        db.execute_batch("DELETE FROM schema_migration WHERE version>47; PRAGMA user_version=47;")
             .unwrap();
         db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','','p','m','now')", []).unwrap();
         db
@@ -644,6 +644,12 @@ mod question_admission_migration_tests {
             json!({"to_human":false,"reply":{"state":"pending"}}),
         );
         migrate(&mut db).unwrap();
+        assert_eq!(
+            db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            49
+        );
+        assert_eq!(db.query_row("SELECT count(*) FROM schema_migration WHERE version=49 AND name='0049_generated_summary_user_role'", [], |r| r.get::<_, i64>(0)).unwrap(), 1);
         for id in [
             "pending",
             "replied",
@@ -688,6 +694,22 @@ mod question_admission_migration_tests {
                 "{id}"
             );
         }
+        let admitted_before_rerun: Vec<(String,String,Option<String>)> = db
+            .prepare("SELECT id,path_admission,json_extract(result_json,'$.reply.state') FROM receipt ORDER BY id")
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        run(&mut db, 49, &|_, _| {}, &|| {}).unwrap();
+        let admitted_after_rerun: Vec<(String,String,Option<String>)> = db
+            .prepare("SELECT id,path_admission,json_extract(result_json,'$.reply.state') FROM receipt ORDER BY id")
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(admitted_after_rerun, admitted_before_rerun);
     }
 
     #[test]
@@ -928,6 +950,43 @@ mod question_admission_migration_tests {
                 ("applied".into(), "admitted".into(), Some("pending".into()))
             );
         }
+        assert_eq!(
+            db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            49
+        );
+        assert_eq!(db.query_row("SELECT count(*) FROM schema_migration WHERE version=49 AND name='0049_generated_summary_user_role'", [], |r| r.get::<_, i64>(0)).unwrap(), 1);
+        let path_before_rerun: Vec<String> = db
+            .prepare("SELECT node_id FROM thread_path WHERE thread_id='t' ORDER BY ordinal")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        let receipts_before_rerun: Vec<(String, String)> = db
+            .prepare("SELECT id,path_admission FROM receipt WHERE id IN ('legacy-preserve','legacy-ancestor') ORDER BY id")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?,r.get(1)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        run(&mut db, 49, &|_, _| {}, &|| {}).unwrap();
+        let path_after_rerun: Vec<String> = db
+            .prepare("SELECT node_id FROM thread_path WHERE thread_id='t' ORDER BY ordinal")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        let receipts_after_rerun: Vec<(String, String)> = db
+            .prepare("SELECT id,path_admission FROM receipt WHERE id IN ('legacy-preserve','legacy-ancestor') ORDER BY id")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?,r.get(1)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(path_after_rerun, path_before_rerun);
+        assert_eq!(receipts_after_rerun, receipts_before_rerun);
     }
 
     #[test]
@@ -954,6 +1013,15 @@ mod question_admission_migration_tests {
         assert_eq!(
             db.query_row(
                 "SELECT count(*) FROM schema_migration WHERE version=48",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0
+        );
+        assert_eq!(
+            db.query_row(
+                "SELECT count(*) FROM schema_migration WHERE version=49",
                 [],
                 |r| r.get::<_, i64>(0)
             )
