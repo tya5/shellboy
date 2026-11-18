@@ -3660,7 +3660,7 @@ struct ReportBoundary {
 }
 
 #[derive(Clone, Debug)]
-struct FinishedReportBoundary {
+pub(super) struct FinishedReportBoundary {
     boundary: ReportBoundary,
     outcome: String,
 }
@@ -3892,6 +3892,126 @@ async fn start_report_boundary(
         trigger: trigger_owner,
         gc_token,
     }
+}
+
+async fn admitted_summary_boundary(
+    control: &Control,
+    reports: &[ReportOwner],
+    trigger: TriggerOwner,
+) -> ReportBoundary {
+    let mut active = Vec::new();
+    for report in reports {
+        let attempt_id = report.attempt_id.clone();
+        let saved: Option<String> = control.store.database.call(move |db| {
+            db.query_row(
+                "SELECT json_extract(error_json,'$.automatic_trim_attempt') FROM model_attempt WHERE id=?1 AND json_type(error_json,'$.automatic_trim_attempt')='object'",
+                [attempt_id], |row| row.get(0),
+            ).optional().map_err(Into::into)
+        }).await.unwrap();
+        let Some(saved) = saved else { continue };
+        let record: Value = serde_json::from_str(&saved).unwrap();
+        if record["provisional"] != true {
+            continue;
+        }
+        let attempt_id = report.attempt_id.clone();
+        let (usage, request_token): (Option<i64>, Option<String>) = control.store.database.call(move |db| {
+            db.query_row(
+                "SELECT json_extract(usage_json,'$.input_tokens'),json_extract(input_manifest_json,'$.compaction_report_token') FROM model_attempt WHERE id=?1",
+                [attempt_id], |row| Ok((row.get(0)?, row.get(1)?)),
+            ).map_err(Into::into)
+        }).await.unwrap();
+        assert_eq!(
+            usage,
+            Some(report.input_tokens as i64),
+            "admitted summary retains original report usage"
+        );
+        assert_eq!(
+            request_token.as_deref(),
+            Some(report.request_token.as_str()),
+            "admitted summary retains original request token"
+        );
+        assert_eq!(
+            record["trigger"]["run_id"], trigger.run_id,
+            "saved automatic duty retains the independently observed accepted Run"
+        );
+        let gc_token = record["token"]
+            .as_str()
+            .expect("attempt_begin GC token")
+            .to_owned();
+        assert!(!gc_token.is_empty());
+        active.push(ReportBoundary {
+            report: report.clone(),
+            trigger: trigger.clone(),
+            gc_token,
+        });
+    }
+    assert_eq!(
+        active.len(),
+        1,
+        "the actual Summary request has exactly one active accepted source duty: {active:#?}"
+    );
+    active.pop().expect("one accepted source duty")
+}
+
+pub(super) async fn finish_proactive_trace(
+    control: &Arc<Control>,
+    receive: &mut ProxyInbox,
+    thread: &str,
+    trace: &mut ProactiveTrace,
+    summary_reply: &(u16, Value),
+) -> Vec<FinishedReportBoundary> {
+    let mut finished = Vec::new();
+    let mut index = 0;
+    while index < trace.admitted_summaries.len() {
+        let boundary = trace.admitted_summaries[index].clone();
+        let report_turns = [boundary.report.row_turn_id.clone()];
+        let mut finish = Box::pin(automatic_attempts_finished_for_turns(
+            control,
+            &report_turns,
+            1,
+        ));
+        let terminal = loop {
+            tokio::select! {
+                attempts = &mut finish => break attempts,
+                incoming = receive.recv() => {
+                    let incoming = incoming.expect("provider remains available while captured automatic duties FINISH");
+                    let scope = live_run_turn_scope(control, thread).await;
+                    match incoming.kind() {
+                        ProviderRequestKind::Summary => {
+                            let admitted = admitted_summary_boundary(
+                                control,
+                                &trace.report_owners,
+                                TriggerOwner { run_id: scope.0.clone(), turn_id: scope.1.clone() },
+                            ).await;
+                            if !trace.admitted_summaries.iter().any(|known| known.report.attempt_id == admitted.report.attempt_id) {
+                                trace.admitted_summaries.push(admitted);
+                            }
+                            trace.summary_requests += 1;
+                            trace.summary_scopes.push((scope.0, scope.1));
+                            trace.summary_bodies.push(incoming.body.clone());
+                            incoming.reply.send(summary_reply.clone()).unwrap();
+                        }
+                        ProviderRequestKind::Ordinary => {
+                            let report = prepared_report_from_incoming(control, &scope.1, &incoming, 10).await;
+                            trace.report_owners.push(report.owner);
+                            incoming.reply.send((200, answer_with_usage("drained ordinary request", 10))).unwrap();
+                        }
+                    }
+                }
+            }
+        };
+        assert_eq!(
+            terminal.len(),
+            1,
+            "each observed Summary maps to its exact accepted duty"
+        );
+        assert_eq!(terminal[0].id, boundary.report.attempt_id);
+        assert_eq!(terminal[0].token, boundary.gc_token);
+        let record = automatic_attempt_record(control, boundary.report.attempt_id.clone()).await;
+        finished.push(boundary.finish(&terminal[0], &record));
+        index += 1;
+    }
+    finished
 }
 
 impl ReportBoundary {
@@ -4843,10 +4963,12 @@ async fn ax_growing_turn_summary_requests(
 /// Repeated Turns may produce summary requests even during warmup; trace those
 /// separately from ordinary model requests so provider accounting is truthful.
 #[derive(Default)]
-struct ProactiveTrace {
+pub(super) struct ProactiveTrace {
     summary_requests: usize,
     summary_scopes: Vec<(String, String)>,
     summary_bodies: Vec<Value>,
+    report_owners: Vec<ReportOwner>,
+    admitted_summaries: Vec<ReportBoundary>,
     admission_report: Option<Value>,
 }
 
@@ -4905,6 +5027,22 @@ async fn proactive_third_turn_after_run(
                 );
             }
             if next.kind() == ProviderRequestKind::Summary {
+                let admitted = admitted_summary_boundary(
+                    control,
+                    &trace.report_owners,
+                    TriggerOwner {
+                        run_id: scope.0.clone(),
+                        turn_id: scope.1.clone(),
+                    },
+                )
+                .await;
+                if !trace
+                    .admitted_summaries
+                    .iter()
+                    .any(|known| known.report.attempt_id == admitted.report.attempt_id)
+                {
+                    trace.admitted_summaries.push(admitted);
+                }
                 trace.summary_requests += 1;
                 assert!(
                     trace.summary_requests <= 8,
@@ -4920,6 +5058,8 @@ async fn proactive_third_turn_after_run(
                 &current_context(control, thread).await,
                 "warmup ordinary request",
             );
+            let report = prepared_report_from_incoming(control, &scope.1, &next, tokens).await;
+            trace.report_owners.push(report.owner);
             next.reply
                 .send((200, answer_with_usage("saved answer", tokens)))
                 .unwrap();
@@ -4990,6 +5130,22 @@ async fn proactive_third_turn_after_run(
             );
         }
         if next.kind() == ProviderRequestKind::Summary {
+            let admitted = admitted_summary_boundary(
+                control,
+                &trace.report_owners,
+                TriggerOwner {
+                    run_id: scope.0.clone(),
+                    turn_id: scope.1.clone(),
+                },
+            )
+            .await;
+            if !trace
+                .admitted_summaries
+                .iter()
+                .any(|known| known.report.attempt_id == admitted.report.attempt_id)
+            {
+                trace.admitted_summaries.push(admitted);
+            }
             trace.summary_requests += 1;
             assert!(trace.summary_requests <= 8, "bounded summary requests");
             trace.summary_scopes.push((scope.0, scope.1));

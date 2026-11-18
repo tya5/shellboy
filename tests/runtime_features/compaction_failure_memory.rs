@@ -558,6 +558,19 @@ async fn legal_new_run_reopens_provider_failure_memory() {
         !first_trace.summary_scopes.is_empty(),
         "initial real Run admits provider summary requests"
     );
+    let mut first_trace = first_trace;
+    let first_finished = finish_proactive_trace(
+        &control,
+        &mut receive,
+        &target,
+        &mut first_trace,
+        &auth_veto_reply(),
+    )
+    .await;
+    assert!(
+        !first_finished.is_empty(),
+        "first real Run has an exact served provider duty"
+    );
     let first_events = proactive_events(&control, &target).await;
     let first_attempt = first_events
         .iter()
@@ -630,7 +643,7 @@ async fn legal_new_run_reopens_provider_failure_memory() {
         "actual current path should have a normal closed target"
     );
 
-    let second = proactive_third_turn_after_run(
+    let mut second = proactive_third_turn_after_run(
         &control,
         &mut receive,
         &target,
@@ -639,6 +652,18 @@ async fn legal_new_run_reopens_provider_failure_memory() {
         Some((&first_run, &first_scope.1)),
     )
     .await;
+    let second_finished = finish_proactive_trace(
+        &control,
+        &mut receive,
+        &target,
+        &mut second,
+        &auth_veto_reply(),
+    )
+    .await;
+    assert!(
+        !second_finished.is_empty(),
+        "new real Run has an exact served provider duty"
+    );
     let all_events = proactive_events(&control, &target).await;
     // Count durable model-attempt records after RunStop, not only requests
     // observed after the helper's current-turn boundary; warmup can compact.
