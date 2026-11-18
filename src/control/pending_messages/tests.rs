@@ -628,7 +628,15 @@ async fn bounded_admission_prefix_keeps_the_129th_question_before_its_reply() {
         })
         .await
         .unwrap();
-    assert_eq!(selected.len(), DUTIES * 2);
+    assert_eq!(selected.len(), DUTIES * 3);
+    assert_eq!(
+        selected
+            .iter()
+            .filter(|node| node.starts_with("event-reply-admission-"))
+            .count(),
+        DUTIES,
+        "each admitted reply keeps its existing admission notice"
+    );
     for (question, reply) in questions.iter().zip(&replies) {
         let q = selected
             .iter()
@@ -638,7 +646,18 @@ async fn bounded_admission_prefix_keeps_the_129th_question_before_its_reply() {
             .iter()
             .position(|node| node == reply)
             .expect("reply admitted");
-        assert!(q < r, "each answer remains after its own question");
+        let notice = selected
+            .iter()
+            .position(|node| node == &format!("event-reply-admission-{reply}"))
+            .expect("reply admission notice retained");
+        assert!(
+            q < r && r < notice,
+            "each answer and its notice follow its own question"
+        );
+        assert!(
+            !selected.contains(&format!("event-reply-admission-{question}")),
+            "a human question does not create a self-reply notice"
+        );
     }
     assert!(plan.admitted_nodes.contains(&questions[DUTIES - 1]));
     store.database.shutdown().await.unwrap();
