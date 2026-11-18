@@ -213,6 +213,45 @@ mod refresh_scope_tests {
             }],
         }
     }
+    #[tokio::test]
+    async fn nonterminal_activity_read_failure_publishes_unavailable_and_status() {
+        let mut selected = Selection::default();
+        selected.select_thread("t".into(), 7);
+        let epoch = selected.progress_epoch;
+        let (updates, incoming) = std::sync::mpsc::sync_channel(4);
+        selected
+            .publish_activity(
+                &updates,
+                "t".into(),
+                7,
+                epoch,
+                Err(ApiError::new(
+                    crate::protocol::ErrorCode::IoFailed,
+                    "synthetic observation failure",
+                )),
+            )
+            .await;
+        match incoming.try_recv().unwrap() {
+            UiUpdate::ActivityUnavailable {
+                thread_id,
+                generation,
+                epoch: actual_epoch,
+            } => assert_eq!(
+                (thread_id.as_str(), generation, actual_epoch),
+                ("t", 7, epoch)
+            ),
+            update => panic!("expected nonterminal ActivityUnavailable, got {update:?}"),
+        }
+        match incoming.try_recv().unwrap() {
+            UiUpdate::Status { thread_id, text } => {
+                assert_eq!(thread_id.as_deref(), Some("t"));
+                assert!(text.contains("synthetic observation failure"));
+            }
+            update => panic!("expected scoped status after observation loss, got {update:?}"),
+        }
+        assert!(!selected.progress_running);
+    }
+
     #[test]
     fn periodic_ticks_during_an_idle_changed_read_do_not_queue_a_second_observation() {
         let mut selected = Selection::default();

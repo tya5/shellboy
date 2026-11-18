@@ -494,7 +494,7 @@ async fn wall_clock_changes_do_not_change_ui_observation_time_or_saved_shell_mea
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn failed_activity_read_delivers_observation_loss_through_the_real_frontend() {
+async fn failed_activity_read_stops_the_real_frontend_with_storage_error() {
     use shellboy::{
         app::DataOwner,
         control::Control,
@@ -541,7 +541,7 @@ async fn failed_activity_read_delivers_observation_loss_through_the_real_fronten
     })
     .await
     .unwrap();
-    crate::test_watchdog::watchdog("tests/frontend_activity.rs: failed_activity_read_delivers_observation_loss_through_the_real_frontend", async {
+    crate::test_watchdog::watchdog("tests/frontend_activity.rs: failed_activity_read_stops_the_real_frontend_with_storage_error", async {
         loop {
             if let Ok(UiUpdate::Activity { snapshot, .. }) = incoming.try_recv() {
                 assert!(snapshot.turn_in_progress);
@@ -560,33 +560,25 @@ async fn failed_activity_read_delivers_observation_loss_through_the_real_fronten
     })
     .await
     .unwrap();
-    let lost = crate::test_watchdog::watchdog("tests/frontend_activity.rs: failed_activity_read_delivers_observation_loss_through_the_real_frontend", async {
-        loop {
-            if let Ok(UiUpdate::ActivityUnavailable {
-                thread_id,
-                generation,
-                ..
-            }) = incoming.try_recv()
-            {
-                break (thread_id, generation);
-            }
-            tokio::task::yield_now().await;
-        }
-    })
-    .await;
-    db.call(|db| {
-        db.execute_batch("ALTER TABLE hidden_attempt RENAME TO model_attempt")?;
-        Ok(())
-    })
+    // A failed activity read is fatal to the owner; it does not promise that a
+    // nonterminal ActivityUnavailable update reaches the bounded UI channel.
+    // Keep the action sender open and drain updates until the real frontend joins.
+    let ended = crate::test_watchdog::watchdog(
+        "tests/frontend_activity.rs: failed_activity_read_stops_the_real_frontend_with_storage_error",
+        crate::test_watchdog::drain_to_completion(
+            bridge,
+            &incoming,
+            crate::test_watchdog::WATCHDOG,
+        ),
+    )
     .await
+    .unwrap()
     .unwrap();
-    send.send(UiAction::Quit).await.unwrap();
-    let ended = crate::test_watchdog::watchdog("tests/frontend_activity.rs: failed_activity_read_delivers_observation_loss_through_the_real_frontend", bridge)
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(lost.unwrap(), ("a".into(), 1));
     assert!(ended.unwrap_err().is_storage_failure());
+    assert!(
+        send.is_closed(),
+        "frontend teardown closes its action receiver"
+    );
 }
 
 #[tokio::test]
