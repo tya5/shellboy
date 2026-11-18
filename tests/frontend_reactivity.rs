@@ -37,6 +37,7 @@ struct Fixture {
     held_detail_hints: Option<Vec<UiUpdate>>,
     load_failures: usize,
     held_load_failures: Option<Vec<UiUpdate>>,
+    last_applied_load_failure: Option<(String, u64)>,
     detail_trace: std::collections::VecDeque<Value>,
     browser_sequences: Vec<u64>,
     browser_pages: usize,
@@ -152,6 +153,7 @@ impl Fixture {
             held_detail_hints: None,
             load_failures: 0,
             held_load_failures: None,
+            last_applied_load_failure: None,
             detail_trace: std::collections::VecDeque::new(),
             browser_sequences: Vec::new(),
             browser_pages: 0,
@@ -240,6 +242,14 @@ impl Fixture {
                 return;
             }
             self.load_failures += 1;
+            if let UiUpdate::LoadFailed {
+                thread_id,
+                generation,
+                ..
+            } = &update
+            {
+                self.last_applied_load_failure = Some((thread_id.clone(), *generation));
+            }
         }
 
         if matches!(&update, UiUpdate::CurrentView { .. })
@@ -370,6 +380,20 @@ impl Fixture {
         // Painting can produce observation/viewport actions. Send them before
         // awaiting the very update that those actions will produce.
         for action in self.ui.take_deferred_actions() {
+            // Record post-paint detail reads too, so their responses remain bound
+            // to the request ID issued after the availability hint.
+            if let UiAction::LoadDetailLinks {
+                thread_id,
+                generation,
+                request_id,
+                ..
+            } = &action
+            {
+                self.detail_trace.push_back(json!({"event":"snapshot_requested","thread":thread_id,"generation":generation,"request_id":request_id}));
+                while self.detail_trace.len() > 128 {
+                    self.detail_trace.pop_front();
+                }
+            }
             self.actions.send(action).await.unwrap();
         }
         let mut screen = String::new();
@@ -947,14 +971,187 @@ async fn real_history_gc_f7_last_hint_precedes_deleted_thread_failure() {
     history_gc_f7_ordering(true).await;
 }
 
+#[derive(Clone, Copy, Default)]
+struct F7GcProgress {
+    jobs_completed: u64,
+    steps: u64,
+    nodes_tombstoned: u64,
+}
+
+async fn f7_source_rows(fixture: &Fixture) -> [(Option<String>, Option<String>); 2] {
+    fixture
+        .control
+        .store
+        .database
+        .call(|db| {
+            let row = |id: &str| {
+                db.query_row(
+                    "SELECT payload_json,deleted_reason FROM node WHERE id=?1",
+                    [id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+            };
+            Ok([row("f7-shared-call")?, row("f7-parent-result")?])
+        })
+        .await
+        .unwrap()
+}
+
+async fn f7_next_history_job(fixture: &Fixture) -> Option<String> {
+    fixture
+        .control
+        .store
+        .database
+        .call(|db| {
+            use rusqlite::OptionalExtension;
+            Ok(db.query_row(
+                "SELECT id FROM gc_job WHERE kind='history' AND state IN ('pending','running') ORDER BY rowid LIMIT 1",
+                [],
+                |row| row.get(0),
+            ).optional()?)
+        })
+        .await
+        .unwrap()
+}
+
+async fn f7_step_next_history_job(
+    fixture: &Fixture,
+    hold: &mut shellboy::gc::GcHold<'_>,
+    progress: &mut F7GcProgress,
+) -> bool {
+    let Some(expected_job) = f7_next_history_job(fixture).await else {
+        return false;
+    };
+    let job = fixture
+        .control
+        .gc
+        .start_history_with(hold)
+        .await
+        .unwrap()
+        .expect("pending history row must be discoverable under its held GcService");
+    assert!(
+        job == expected_job,
+        "history GC must step the earliest active fixture job"
+    );
+    loop {
+        let step = fixture
+            .control
+            .gc
+            .history_step_with(hold, &job)
+            .await
+            .unwrap();
+        progress.steps = progress.steps.saturating_add(1);
+        progress.nodes_tombstoned = progress
+            .nodes_tombstoned
+            .saturating_add(step.nodes_tombstoned);
+        if step.complete {
+            progress.jobs_completed = progress.jobs_completed.saturating_add(1);
+            return true;
+        }
+    }
+}
+
+fn f7_latest_child_request_id(fixture: &Fixture, child: &str) -> Option<u64> {
+    fixture.detail_trace.iter().rev().find_map(|entry| {
+        (entry.get("event").and_then(Value::as_str) == Some("snapshot_requested")
+            && entry.get("thread").and_then(Value::as_str) == Some(child)
+            && entry.get("generation").and_then(Value::as_u64) == Some(2))
+        .then(|| entry.get("request_id").and_then(Value::as_u64))
+        .flatten()
+    })
+}
+
+fn f7_successful_snapshot_after_latest_hint(
+    fixture: &Fixture,
+    child: &str,
+    previous_request: u64,
+    unavailable: bool,
+) -> bool {
+    let latest_hint = fixture
+        .detail_trace
+        .iter()
+        .enumerate()
+        .rposition(|(_, entry)| {
+            entry.get("event").and_then(Value::as_str) == Some("hint_received")
+                && entry.get("thread").and_then(Value::as_str) == Some(child)
+                && entry.get("generation").and_then(Value::as_u64) == Some(2)
+        });
+    let Some(latest_hint) = latest_hint else {
+        return false;
+    };
+
+    let expected = ["f7-shared-call", "f7-parent-result"]
+        .into_iter()
+        .collect::<std::collections::BTreeSet<_>>();
+    for (request_index, request) in fixture
+        .detail_trace
+        .iter()
+        .enumerate()
+        .skip(latest_hint + 1)
+    {
+        if request.get("event").and_then(Value::as_str) != Some("snapshot_requested")
+            || request.get("thread").and_then(Value::as_str) != Some(child)
+            || request.get("generation").and_then(Value::as_u64) != Some(2)
+        {
+            continue;
+        }
+        let Some(request_id) = request.get("request_id").and_then(Value::as_u64) else {
+            continue;
+        };
+        if request_id == previous_request {
+            continue;
+        }
+        let received = fixture
+            .detail_trace
+            .iter()
+            .enumerate()
+            .skip(request_index + 1)
+            .any(|(_, result)| {
+                if result.get("event").and_then(Value::as_str) != Some("snapshot_received")
+                    || result.get("thread").and_then(Value::as_str) != Some(child)
+                    || result.get("generation").and_then(Value::as_u64) != Some(2)
+                    || result.get("request_id").and_then(Value::as_u64) != Some(request_id)
+                    || !result.get("revision").is_some_and(Value::is_number)
+                {
+                    return false;
+                }
+                let Some(sources) = result.get("sources").and_then(Value::as_array) else {
+                    return false;
+                };
+                let nodes = sources
+                    .iter()
+                    .filter_map(|source| source.get("node").and_then(Value::as_str))
+                    .collect::<std::collections::BTreeSet<_>>();
+                sources.len() == 2
+                    && nodes == expected
+                    && sources.iter().all(|source| {
+                        source.get("unavailable").and_then(Value::as_bool) == Some(unavailable)
+                            && if unavailable {
+                                source.get("links").and_then(Value::as_u64) == Some(0)
+                            } else {
+                                source
+                                    .get("links")
+                                    .and_then(Value::as_u64)
+                                    .is_some_and(|n| n > 0)
+                            }
+                    })
+            });
+        if received {
+            return true;
+        }
+    }
+    false
+}
+
 // Failure-only metadata: never print saved bodies, error strings, paths or random IDs.
 fn f7_barrier_failure(
     fixture: &Fixture,
     child: &str,
     hint_first: bool,
-    baseline: usize,
-    collected_nodes: Option<u64>,
-    collect_deferred: Option<bool>,
+    phase: &str,
+    parent_gc: F7GcProgress,
+    deleted_child_gc: F7GcProgress,
+    final_sources_tombstoned: bool,
 ) {
     let alias = |id: Option<&str>| match id {
         Some(id) if id == child => "fixture-child",
@@ -996,9 +1193,14 @@ fn f7_barrier_failure(
     eprintln!(
         "F7_BARRIER_FAILURE {}",
         json!({
-            "hint_first":hint_first,"load_failures_before":baseline,
-            "load_failures_current":fixture.load_failures,
-            "collect_nodes_tombstoned":collected_nodes,"collect_deferred":collect_deferred,
+            "hint_first":hint_first,
+            "load_failures_current":fixture.load_failures,"phase":phase,
+            "parent_gc_jobs":parent_gc.jobs_completed,"parent_gc_steps":parent_gc.steps,
+            "parent_gc_nodes_tombstoned":parent_gc.nodes_tombstoned,
+            "deleted_child_gc_jobs":deleted_child_gc.jobs_completed,
+            "deleted_child_gc_steps":deleted_child_gc.steps,
+            "deleted_child_gc_nodes_tombstoned":deleted_child_gc.nodes_tombstoned,
+            "final_sources_tombstoned":final_sources_tombstoned,
             "held_detail_hints":fixture.held_detail_hints.as_ref().map(Vec::len),
             "held_load_failures":fixture.held_load_failures.as_ref().map(Vec::len),
             "current_thread":alias(fixture.ui.view().thread_id.as_deref()),
@@ -1098,150 +1300,231 @@ async fn history_gc_f7_ordering(hint_first: bool) {
             .all(|source| source.unavailable_reason.is_none())
     );
     let read_before = first.read_revision;
-    // No more UI input after F7 opens. Deleting only the parent must not delete
-    // the live child, and the child's complete prefix roots BOTH source nodes.
-    fixture
-        .cli_only(&["thread", "delete", "--thread", "f7-parent"])
-        .await;
-    fixture
-        .cli_only(&["storage", "collect", "--category", "history"])
-        .await;
-    let protected = fixture.pump().await;
-    assert!(
-        protected.contains(CALL_URL) && protected.contains(RESULT_URL),
-        "live fork source links must survive parent collection: {protected}"
-    );
-    let expected_call = saved_call.clone();
-    let expected_result = saved_result.clone();
-    let kept_child = child.clone();
-    fixture
-        .control
-        .store
-        .database
-        .call(move |db| {
-            for (id, payload) in [(CALL, expected_call), (RESULT, expected_result)] {
-                let (saved, reason): (Option<String>, Option<String>) = db.query_row(
-                    "SELECT payload_json,deleted_reason FROM node WHERE id=?1",
-                    [id],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
-                )?;
-                assert_eq!(saved.as_deref(), Some(payload.as_str()));
-                assert!(reason.is_none());
-            }
-            assert!(db.query_row(
-                "SELECT deleted_at IS NULL FROM thread WHERE id=?1",
-                [kept_child],
-                |row| row.get::<_, bool>(0)
-            )?);
-            Ok(())
-        })
-        .await
-        .unwrap();
-    let failures_before_delete = fixture.load_failures;
-    if hint_first {
-        fixture.held_load_failures = Some(Vec::new());
-    } else {
-        fixture.held_detail_hints = Some(Vec::new());
-    }
-    // Now the final consumer is genuinely deleted. The real history collector
-    // must tombstone the sources and its notification must refresh this popup.
-    fixture
-        .cli_only(&["thread", "delete", "--thread", &child])
-        .await;
-    // The deletion signal starts the maintenance pass at once (#171), so it
-    // may tombstone the sources before this explicit collect does. Either
-    // way the committed tombstones must refresh the open popup.
-    let (collected, started) = fixture
-        .cli_only(&["storage", "collect", "--category", "history"])
-        .await;
-    assert_eq!(collected["ok"], true, "{collected}");
-    if hint_first {
-        let barrier = watchdog("last GC hint before deleted Thread failure", async {
-            loop {
-                fixture.pump().await;
-                let collected = fixture.source_snapshots.last().is_some_and(|snapshot| {
-                    snapshot
-                        .sources
-                        .iter()
-                        .any(|source| source.unavailable_reason.is_some())
-                });
-                if collected
-                    && fixture
-                        .held_load_failures
-                        .as_ref()
-                        .is_some_and(|updates| !updates.is_empty())
-                {
-                    break;
-                }
-                fixture.wait_update_or_action().await;
-            }
-        })
-        .await;
-        if barrier.is_err() {
-            f7_barrier_failure(
+    let mut parent_gc = F7GcProgress::default();
+    let mut deleted_child_gc = F7GcProgress::default();
+    let mut failure_phase = "parent-delete-gc";
+    let mut final_sources_tombstoned = false;
+    let run = watchdog("F7 deletion GC and real frontend refresh", async {
+        // Hold the fixture owner's existing GcService across both deletes so
+        // its production worker cannot race the job-specific history steps.
+        let gc_owner = fixture.control.gc.clone();
+        let mut gc_hold = Some(gc_owner.hold().await);
+        let parent_request_before = f7_latest_child_request_id(&fixture, &child)
+            .expect("initial child DetailLinks request must be recorded");
+        fixture
+            .cli_only(&["thread", "delete", "--thread", "f7-parent"])
+            .await;
+        assert!(
+            f7_step_next_history_job(
                 &fixture,
-                &child,
-                hint_first,
-                failures_before_delete,
-                collected
-                    .pointer("/result/nodes_tombstoned")
-                    .and_then(Value::as_u64),
-                collected
-                    .pointer("/result/deferred")
-                    .and_then(Value::as_bool),
-            );
-        }
-        barrier.unwrap();
-        for failure in fixture.held_load_failures.take().unwrap() {
-            fixture.accept_update(failure);
-        }
-    } else {
-        let barrier = watchdog("GC hint and deleted Thread failure barrier", async {
-            loop {
-                fixture.pump().await;
-                if fixture.load_failures > failures_before_delete
-                    && fixture
-                        .held_detail_hints
-                        .as_ref()
-                        .is_some_and(|hints| !hints.is_empty())
-                {
-                    break;
-                }
-                fixture.wait_update_or_action().await;
-            }
-        })
-        .await;
-        if barrier.is_err() {
-            f7_barrier_failure(
-                &fixture,
-                &child,
-                hint_first,
-                failures_before_delete,
-                collected
-                    .pointer("/result/nodes_tombstoned")
-                    .and_then(Value::as_u64),
-                collected
-                    .pointer("/result/deferred")
-                    .and_then(Value::as_bool),
-            );
-        }
-        barrier.unwrap();
-        for hint in fixture.held_detail_hints.take().unwrap() {
-            fixture.accept_update(hint);
-        }
-    }
-    fixture
-        .until(
-            "history GC clears unavailable F7 targets without input",
-            |ui, screen| {
-                ui.view().thread_id.as_deref() == Some(child.as_str())
-                    && screen.contains("リンク")
-                    && screen.contains("参照元が利用不可")
-                    && !screen.contains(CALL_URL)
-                    && !screen.contains(RESULT_URL)
-            },
+                gc_hold.as_mut().expect("parent GC hold remains owned"),
+                &mut parent_gc,
+            )
+            .await,
+            "real parent deletion must enqueue its history GC job"
+        );
+        while f7_step_next_history_job(
+            &fixture,
+            gc_hold.as_mut().expect("parent GC hold remains owned"),
+            &mut parent_gc,
         )
-        .await;
+        .await
+        {}
+
+        let protected = fixture.pump().await;
+        assert!(
+            protected.contains(CALL_URL) && protected.contains(RESULT_URL),
+            "live fork source links must survive parent collection: {protected}"
+        );
+        let parent_rows = f7_source_rows(&fixture).await;
+        assert!(
+            parent_rows[0].0.as_deref() == Some(saved_call.as_str())
+                && parent_rows[0].1.is_none()
+                && parent_rows[1].0.as_deref() == Some(saved_result.as_str())
+                && parent_rows[1].1.is_none(),
+            "parent GC must preserve exact source payloads while child is live"
+        );
+        let kept_child = child.clone();
+        fixture
+            .control
+            .store
+            .database
+            .call(move |db| {
+                assert!(db.query_row(
+                    "SELECT deleted_at IS NULL FROM thread WHERE id=?1",
+                    [kept_child],
+                    |row| row.get::<_, bool>(0)
+                )?);
+                Ok(())
+            })
+            .await
+            .unwrap();
+
+        // Drain the parent job's real hint before starting the final-consumer
+        // phase, so a coalesced pre-delete Notify cannot satisfy the later gate.
+        if parent_gc.nodes_tombstoned > 0 {
+            loop {
+                fixture.pump().await;
+                if f7_successful_snapshot_after_latest_hint(
+                    &fixture,
+                    &child,
+                    parent_request_before,
+                    false,
+                ) {
+                    break;
+                }
+                fixture.wait_update_or_action().await;
+            }
+        }
+
+        let request_before_final_delete = f7_latest_child_request_id(&fixture, &child)
+            .expect("child DetailLinks request must be recorded before final deletion");
+        fixture.last_applied_load_failure = None;
+        if hint_first {
+            fixture.held_load_failures = Some(Vec::new());
+        } else {
+            fixture.held_detail_hints = Some(Vec::new());
+        }
+
+        // Start the five-second-independent causal phase at the real CLI delete;
+        // the source test's existing shared watchdog remains the sole safety cap.
+        failure_phase = if hint_first {
+            "deleted-child-held-gc"
+        } else {
+            "deleted-child-natural-maintenance"
+        };
+        if !hint_first {
+            // This arm proves the normal delete wake -> maintenance -> commit path.
+            drop(gc_hold.take());
+        }
+        let (_, started) = fixture
+            .cli_only(&["thread", "delete", "--thread", &child])
+            .await;
+        if hint_first {
+            loop {
+                let rows = f7_source_rows(&fixture).await;
+                final_sources_tombstoned = rows[0].0.is_none()
+                    && rows[0].1.as_deref() == Some("thread_deleted_unreachable")
+                    && rows[1].0.is_none()
+                    && rows[1].1.as_deref() == Some("thread_deleted_unreachable");
+                if final_sources_tombstoned {
+                    break;
+                }
+                assert!(
+                    f7_step_next_history_job(
+                        &fixture,
+                        gc_hold.as_mut().expect("hint-first GC hold remains owned"),
+                        &mut deleted_child_gc,
+                    )
+                    .await,
+                    "F7 source payloads remain but no pending/running history GC job is eligible"
+                );
+            }
+            assert!(
+                deleted_child_gc.jobs_completed > 0,
+                "the final source tombstones must follow a completed held history job"
+            );
+            drop(gc_hold.take());
+        } else {
+            assert!(gc_hold.is_none());
+            loop {
+                fixture.pump().await;
+                let rows = f7_source_rows(&fixture).await;
+                final_sources_tombstoned = rows[0].0.is_none()
+                    && rows[0].1.as_deref() == Some("thread_deleted_unreachable")
+                    && rows[1].0.is_none()
+                    && rows[1].1.as_deref() == Some("thread_deleted_unreachable");
+                let applied_child_failure = fixture
+                    .last_applied_load_failure
+                    .as_ref()
+                    .is_some_and(|(thread_id, generation)| thread_id == &child && *generation == 2);
+                let held_hint = fixture.held_detail_hints.as_ref().is_some_and(|updates| {
+                    updates.iter().any(|update| {
+                        matches!(update,
+                        UiUpdate::DetailSourcesChanged { thread_id, generation }
+                            if thread_id == &child && *generation == 2)
+                    })
+                });
+                if final_sources_tombstoned && applied_child_failure && held_hint {
+                    break;
+                }
+                fixture.wait_update_or_action().await;
+            }
+        }
+
+        failure_phase = "postcommit-hint-and-load-failure";
+        if hint_first {
+            loop {
+                fixture.pump().await;
+                let snapshot_after_hint = f7_successful_snapshot_after_latest_hint(
+                    &fixture,
+                    &child,
+                    request_before_final_delete,
+                    true,
+                );
+                let held_failure = fixture.held_load_failures.as_ref().is_some_and(|updates| {
+                    updates.iter().any(|update| {
+                        matches!(update,
+                        UiUpdate::LoadFailed { thread_id, generation, .. }
+                            if thread_id == &child && *generation == 2)
+                    })
+                });
+                if snapshot_after_hint && held_failure {
+                    break;
+                }
+                fixture.wait_update_or_action().await;
+            }
+            for failure in fixture.held_load_failures.take().unwrap() {
+                fixture.accept_update(failure);
+            }
+        } else {
+            // Natural-maintenance loop above already latched the applied failure
+            // and held hint; now release it and require its matching refresh.
+            let request_before_hint_release = f7_latest_child_request_id(&fixture, &child)
+                .expect("child DetailLinks request must be recorded before hint release");
+            for hint in fixture.held_detail_hints.take().unwrap() {
+                fixture.accept_update(hint);
+            }
+            loop {
+                fixture.pump().await;
+                if f7_successful_snapshot_after_latest_hint(
+                    &fixture,
+                    &child,
+                    request_before_hint_release,
+                    true,
+                ) {
+                    break;
+                }
+                fixture.wait_update_or_action().await;
+            }
+        }
+        fixture
+            .until(
+                "history GC clears unavailable F7 targets without input",
+                |ui, screen| {
+                    ui.view().thread_id.as_deref() == Some(child.as_str())
+                        && screen.contains("リンク")
+                        && screen.contains("参照元が利用不可")
+                        && !screen.contains(CALL_URL)
+                        && !screen.contains(RESULT_URL)
+                },
+            )
+            .await;
+        started
+    })
+    .await;
+    if run.is_err() {
+        f7_barrier_failure(
+            &fixture,
+            &child,
+            hint_first,
+            failure_phase,
+            parent_gc,
+            deleted_child_gc,
+            final_sources_tombstoned,
+        );
+    }
+    let started = run.unwrap();
     println!(
         "F7_ORDERING_TRACE hint_first={hint_first} {}",
         serde_json::to_string(&fixture.detail_trace).unwrap()
