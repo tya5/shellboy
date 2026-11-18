@@ -195,20 +195,61 @@ pub(super) async fn acknowledge(
         let phase = if interrupted_attempt.is_some() {"model_attempt_interrupted"} else {"turn_interrupted"};
         let meaning = "A human interrupted this Turn. Any response not adopted before interruption is retained audit-only and is absent from model history. Saved tool-call results are authoritative; cancelled calls did not execute. Inspect continuing execution IDs before repeating work.";
         let event=format!("turn-interrupted-{turn}");
-        let payload=json!({"kind":"turn_interrupted","actor":{"kind":"human"},"change":{"turn_id":turn,"run_id":run,"requested_at":requested_at,"phase":phase,"meaning":meaning,"had_adopted_groups":adopted_group,"interrupted_attempt_id":interrupted_attempt,"new_turn_id":new_turn,"carried_count":carried_count,"carried_sources":carried_sources,"carried_sources_truncated":carried_count>128,"first_carried_message_id":carried_sources.first().and_then(|s|s.get("message_id")),"last_carried_message_id":last_carried},"observed_at":at});
+        let mut payload=json!({"kind":"turn_interrupted","actor":{"kind":"human"},"change":{"turn_id":turn,"run_id":run,"requested_at":requested_at,"phase":phase,"meaning":meaning,"had_adopted_groups":adopted_group,"interrupted_attempt_id":interrupted_attempt,"new_turn_id":new_turn,"carried_count":carried_count,"carried_sources":carried_sources,"carried_sources_truncated":carried_count>128,"first_carried_message_id":carried_sources.first().and_then(|s|s.get("message_id")),"last_carried_message_id":last_carried},"observed_at":at});
         tx.execute("INSERT INTO event(id,kind,source_json,target_thread_id,payload_ref_json,created_at)VALUES(?1,'context_changed','{\"kind\":\"human\"}',?2,?3,?4)",params![event,thread,payload.to_string(),at])?;
         let envelope=json!({"event_id":event,"kind":"context_changed","payload":payload});
         crate::history::append_node(&tx,&thread,&format!("event-{event}"),Some(&turn),"event",&json!({"role":"developer","content":[{"type":"input_text","text":format!("Shellboy event v1: {envelope}")}],"event_id":event}),&at)?;
         tx.execute("INSERT INTO delivery(event_id,recipient_id,state)VALUES(?1,?2,'processed')",params![event,run])?;
+        let mut admitted_count=0_i64;
+        let mut admitted_ids=Vec::new();
+        let mut deferred_ids=Vec::new();
         if let Some(new_turn)=&new_turn {
             loop {
                 let rows=tx.prepare("SELECT id,message_node_id FROM receipt WHERE turn_id=?1 AND target_thread_id=?2 AND state='held' AND path_admission='unadmitted' ORDER BY created_at,rowid LIMIT 128")?.query_map(params![turn,thread],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
                 if rows.is_empty(){break;}
                 let nodes=rows.iter().map(|r|r.1.clone()).collect::<Vec<_>>();
                 let revision=crate::history::selection_revision(&tx,&thread,crate::history::ThreadScope::Live)?;
-                message_delivery::append_admitted_tx(&tx,&thread,revision as u64,&nodes,&at)?;
-                for(receipt,_)in rows {tx.execute("UPDATE receipt SET state='applied',hold_reason='carried_after_turn_interruption',updated_at=?2,result_json=json_set(COALESCE(result_json,'{}'),'$.delivery_context',json(?3)) WHERE id=?1",params![receipt,at,json!({"run_id":run,"turn_id":new_turn,"reason":"carried_after_turn_interruption","interrupted_turn_id":turn,"admitted_at":at}).to_string()])?;}
+                let plan=message_delivery::append_admitted_tx(&tx,&thread,revision as u64,&nodes,&at)?;
+                let mut admitted_in_batch=0;
+                for (receipt,node) in &rows {
+                    if plan.admitted_callers.contains(node) {
+                        let changed=tx.execute("UPDATE receipt SET state='applied',hold_reason='carried_after_turn_interruption',updated_at=?2,result_json=json_set(COALESCE(result_json,'{}'),'$.delivery_context',json(?3)) WHERE id=?1 AND state='held' AND path_admission='admitted' AND EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id=?4 AND p.node_id=?5)",params![receipt,at,json!({"run_id":run,"turn_id":new_turn,"reason":"carried_after_turn_interruption","interrupted_turn_id":turn,"admitted_at":at}).to_string(),thread,node])?;
+                        if changed!=1{return Err(crate::storage::StorageError::Schema("carried receipt was not admitted to the selected path".into()));}
+                        admitted_count+=1;
+                        admitted_in_batch+=1;
+                        if admitted_ids.len()<128 {admitted_ids.push(node.clone());}
+                    } else if deferred_ids.len()<128 {
+                        deferred_ids.push(node.clone());
+                    }
+                }
+                // A deferred FIFO suffix cannot make progress in this transaction. Leave it
+                // held with its original Run/Turn so the existing resume path can recover it.
+                if admitted_in_batch<rows.len(){break;}
             }
+        }
+        if admitted_count>carried_count{return Err(crate::storage::StorageError::Schema("carried admission count exceeds source count".into()));}
+        let deferred_count=carried_count-admitted_count;
+        payload["change"]["carried_admission"]=json!({"admitted_count":admitted_count,"admitted_message_ids":admitted_ids,"admitted_message_ids_truncated":admitted_count>128,"deferred_count":deferred_count,"deferred_message_ids":deferred_ids,"deferred_message_ids_truncated":deferred_count>deferred_ids.len() as i64,"deferred_state":"held_unadmitted_with_original_assignment"});
+        // Finalize the new, uncommitted audit node with actual selected/deferred outcomes.
+        let final_envelope=json!({"event_id":event,"kind":"context_changed","payload":payload});
+        let final_payload=payload.to_string();
+        let node_body=json!({"role":"developer","content":[{"type":"input_text","text":format!("Shellboy event v1: {final_envelope}")}],"event_id":event}).to_string();
+        let body_hash=crate::digest::sha256_hex(node_body.as_bytes());
+        if tx.execute(
+            "UPDATE event SET payload_ref_json=?2 WHERE id=?1 AND target_thread_id=?3 AND kind='context_changed'",
+            params![event,final_payload,thread],
+        )? != 1 {
+            return Err(crate::storage::StorageError::Schema(
+                "turn interruption event disappeared before commit".into(),
+            ));
+        }
+        if tx.execute(
+            "UPDATE node SET payload_json=?2,payload_bytes=?3,body_hash=?4 WHERE id=?1 AND kind='event'",
+            params![format!("event-{event}"),node_body,node_body.len() as i64,body_hash],
+        )? != 1 {
+            return Err(crate::storage::StorageError::Schema(
+                "turn interruption audit node disappeared before commit".into(),
+            ));
         }
         tx.execute("UPDATE thread SET revision=revision+1,updated_at=?2 WHERE id=?1",params![thread,at])?;
         tx.commit()?;Ok(true)
@@ -347,6 +388,135 @@ mod tests {
         assert_eq!(result["requested"], true);
         assert!(driver.cancel.is_cancelled());
         assert!(*driver.start_gate.lock().await);
+        control
+            .live
+            .remove_driver_if_current(&thread, &slot.id)
+            .await;
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn interruption_leaves_reply_held_when_older_held_question_blocks_its_carry() {
+        let (_directory, owner, control, thread, run, turn) = fixture().await;
+        let slot = control
+            .live
+            .register_or_nudge_driver(&thread, run.clone(), &control.stop, false)
+            .await
+            .unwrap();
+        slot.bind_turn(&control, &turn).await.unwrap();
+        let held = control
+            .store
+            .execute(
+                Request::new(
+                    format!("{}:held-before-question", owner.instance_id),
+                    Command::MessageSend(MessageSendArgs {
+                        resume_recovery: false,
+                        human: true,
+                        to_human: false,
+                        expect_reply: false,
+                        sender_label: None,
+                        thread_id: Some(thread.clone()),
+                        text: "held H".into(),
+                        deliver: crate::protocol::Deliver::Complete,
+                    }),
+                ),
+                None,
+            )
+            .await
+            .unwrap();
+        let held_id = held.result["message_id"].as_str().unwrap().to_owned();
+        let origin = crate::protocol::Origin {
+            instance_id: control.store.instance_id.clone(),
+            thread_id: thread.clone(),
+            run_id: run.clone(),
+            turn_id: turn.clone(),
+            execution_id: "question-producer".into(),
+            token: "question-producer-token".into(),
+        };
+        let question = control
+            .store
+            .execute(
+                Request::new(
+                    format!("{}:held-frontier-question", owner.instance_id),
+                    Command::MessageAsk(MessageAskArgs {
+                        thread_id: None,
+                        text: "Q behind held H".into(),
+                    }),
+                ),
+                Some(origin),
+            )
+            .await
+            .unwrap();
+        let question_id = question.result["message_id"].as_str().unwrap().to_owned();
+        let reply = control
+            .store
+            .execute(
+                Request::new(
+                    format!("{}:held-frontier-reply", owner.instance_id),
+                    Command::MessageReply(MessageReplyArgs {
+                        message_id: question_id.clone(),
+                        text: "R depends on Q".into(),
+                        sender_label: None,
+                    }),
+                ),
+                None,
+            )
+            .await
+            .unwrap();
+        let reply_id = reply.result["message_id"].as_str().unwrap().to_owned();
+
+        let interrupt = control
+            .live
+            .admit_turn_interrupt(&control, &thread, &turn)
+            .await
+            .unwrap();
+        assert_eq!(interrupt["requested"], true);
+        let (held_state, question_selected, reply_state, reply_admission, reply_run, reply_turn, reply_selected, audit) = owner.db.call({
+            let thread = thread.clone();
+            let held_id = held_id.clone();
+            let question_id = question_id.clone();
+            let reply_id = reply_id.clone();
+            let event_id = format!("turn-interrupted-{turn}");
+            move |db| {
+                let held_state: String = db.query_row("SELECT state FROM receipt WHERE message_node_id=?1",[&held_id],|row|row.get(0))?;
+                let question_selected: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM thread_path WHERE thread_id=?1 AND node_id=?2)",rusqlite::params![thread,question_id],|row|row.get(0))?;
+                let (reply_state,reply_admission,reply_run,reply_turn,reply_selected):(String,String,Option<String>,Option<String>,bool) = db.query_row(
+                    "SELECT r.state,r.path_admission,r.run_id,r.turn_id,EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id=r.target_thread_id AND p.node_id=r.message_node_id) FROM receipt r WHERE r.message_node_id=?1",
+                    [&reply_id],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?)),
+                )?;
+                let audit: String = db.query_row("SELECT payload_ref_json FROM event WHERE id=?1",[event_id],|row|row.get(0))?;
+                Ok((held_state,question_selected,reply_state,reply_admission,reply_run,reply_turn,reply_selected,audit))
+            }
+        }).await.unwrap();
+        assert_eq!(held_state, "held");
+        assert!(!question_selected);
+        assert_eq!(reply_state, "held");
+        assert_eq!(reply_admission, "unadmitted");
+        assert_eq!(reply_run.as_deref(), Some(run.as_str()));
+        assert_eq!(reply_turn.as_deref(), Some(turn.as_str()));
+        assert!(
+            !reply_selected,
+            "a deferred reply stays absent from selected history"
+        );
+        let audit: serde_json::Value = serde_json::from_str(&audit).unwrap();
+        assert_eq!(audit["change"]["carried_admission"]["deferred_count"], 1);
+        assert_eq!(
+            audit["change"]["carried_admission"]["deferred_message_ids"],
+            json!([reply_id])
+        );
+        let carried = audit["change"]["carried_count"].as_i64().unwrap();
+        let admitted = audit["change"]["carried_admission"]["admitted_count"]
+            .as_i64()
+            .unwrap();
+        let deferred = audit["change"]["carried_admission"]["deferred_count"]
+            .as_i64()
+            .unwrap();
+        assert_eq!(
+            admitted + deferred,
+            carried,
+            "the interruption audit separates selected from still-held carried sources"
+        );
         control
             .live
             .remove_driver_if_current(&thread, &slot.id)
