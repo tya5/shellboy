@@ -4535,10 +4535,9 @@ async fn proactive_provider_500_is_suppressed_within_same_run_turn() {
 
 /// #303 variant of the growing-Turn fixture: an oversized protected request,
 /// unknown-tool rounds whose short error output cannot shrink, the first
-/// known report (#A) 100 over target 40, then 17 reports at or above the
-/// threshold 200. Returns the summary (tool-free) request count and every
-/// proactive attempt record. An explicit compact afterwards is not subject
-/// to the automatic failure record.
+/// known report (#A) 100 over target 40, then 17 raw reports at or above the
+/// threshold. Automatic outcomes are limited to duties actually admitted by
+/// attempt_begin; an explicit compact remains independent of that memory.
 struct AxFixtureResult {
     summaries: usize,
     records: Vec<Value>,
@@ -4554,6 +4553,13 @@ struct AxFixtureResult {
     initial_path_ids: Vec<String>,
     final_path_ids: Vec<String>,
     failure_memory_slots: usize,
+}
+
+struct RawReportReadback {
+    input_tokens: Option<i64>,
+    request_token: Option<String>,
+    automatic_record: Option<String>,
+    scope: (String, String, i64),
 }
 
 #[derive(Clone, Copy)]
@@ -4738,19 +4744,22 @@ async fn ax_growing_turn_summary_requests(
         let mut unadmitted_report_attempt_ids = Vec::new();
         for owner in &report_owners {
             let attempt_id = owner.attempt_id.clone();
-            let (usage, request_token, automatic, scope): (
-                Option<i64>,
-                Option<String>,
-                Option<String>,
-                (String, String, i64),
-            ) = control.store.database.call(move |db| Ok(db.query_row(
-                "SELECT json_extract(a.usage_json,'$.input_tokens'),json_extract(a.input_manifest_json,'$.compaction_report_token'),CASE WHEN json_type(a.error_json,'$.automatic_trim_attempt')='object' THEN json_extract(a.error_json,'$.automatic_trim_attempt') END,r.id,t.id,t.generation FROM model_attempt a JOIN turn t ON t.id=a.turn_id JOIN run r ON r.id=t.run_id WHERE a.id=?1",
-                [attempt_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, (row.get(3)?, row.get(4)?, row.get(5)?))),
-            )?)).await.unwrap();
-            assert_eq!(usage, Some(owner.input_tokens as i64), "saved known usage stays on its original attempt");
-            assert_eq!(request_token.as_deref(), Some(owner.request_token.as_str()), "original report token stays with its attempt");
-            raw_report_scopes.push(scope);
-            if let Some(automatic) = automatic {
+            let facts: RawReportReadback = control.store.database.call(move |db| {
+                Ok(db.query_row(
+                    "SELECT json_extract(a.usage_json,'$.input_tokens'),json_extract(a.input_manifest_json,'$.compaction_report_token'),CASE WHEN json_type(a.error_json,'$.automatic_trim_attempt')='object' THEN json_extract(a.error_json,'$.automatic_trim_attempt') END,r.id,t.id,t.generation FROM model_attempt a JOIN turn t ON t.id=a.turn_id JOIN run r ON r.id=t.run_id WHERE a.id=?1",
+                    [attempt_id],
+                    |row| Ok(RawReportReadback {
+                        input_tokens: row.get(0)?,
+                        request_token: row.get(1)?,
+                        automatic_record: row.get(2)?,
+                        scope: (row.get(3)?, row.get(4)?, row.get(5)?),
+                    }),
+                )?)
+            }).await.unwrap();
+            assert_eq!(facts.input_tokens, Some(owner.input_tokens as i64), "saved known usage stays on its original attempt");
+            assert_eq!(facts.request_token.as_deref(), Some(owner.request_token.as_str()), "original report token stays with its attempt");
+            raw_report_scopes.push(facts.scope);
+            if let Some(automatic) = facts.automatic_record {
                 let record = serde_json::from_str::<Value>(&automatic).unwrap();
                 assert_eq!(record["trigger"]["input_tokens"], owner.input_tokens);
                 assert_eq!(record["provisional"], false, "producer drain leaves every admitted duty terminal");
