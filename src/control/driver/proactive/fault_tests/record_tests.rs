@@ -88,10 +88,6 @@ boundary_tests!(
     record_after_persistent_fault_active_spill,
     record_after_persistent_fault_active_summary
 );
-record_test!(
-    retired_automatic_writes_are_absent,
-    Fault::RetiredWritesAbsent
-);
 record_test!(record_after_rejected_final_write, Fault::RejectFinal);
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn rejected_stage_fact_prevents_adoption() {

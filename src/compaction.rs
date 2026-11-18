@@ -21,6 +21,8 @@ pub(crate) mod boundary;
 pub(crate) mod context_usage;
 pub mod discard;
 mod retry;
+#[cfg(test)]
+pub(crate) mod test_fixture;
 pub(crate) use attempt::{
     ABoundaryObservation, AutomaticStage, GcStage, GcStageFact, begin_tx as attempt_begin_tx,
     finish_tx as attempt_finish_tx,
@@ -2529,7 +2531,7 @@ mod tests {
         assert_eq!(server.await.unwrap(), 1);
         db.shutdown().await.unwrap();
     }
-    use crate::control::compaction_test_fixture::{active_turn_fixture, active_turn_fixture_with};
+    use super::test_fixture::{active_turn_fixture, active_turn_fixture_with};
     #[tokio::test]
     async fn cancelled_active_spill_preserves_path_and_epoch() {
         let (_root, db) = database().await;
