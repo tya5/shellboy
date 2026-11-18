@@ -402,7 +402,7 @@ async fn shutdown_context_save_failure_is_cached_but_wait_and_run_still_drain() 
     let owner = owner(root.path()).await;
     let control = Control::new(&owner, root.path().into());
     bounded(control.start()).await.unwrap();
-    owner.db.call(|db|{db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','/AGENTS.md','','','now'); INSERT INTO run(id,thread_id,state,stop_reason,created_at)VALUES('r','t','live','explicit_stop','now'); INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','t','r','running','now'); CREATE TRIGGER reject_shutdown_context BEFORE INSERT ON node WHEN NEW.kind='interruption_context' BEGIN SELECT RAISE(ABORT,'fixture capture failed'); END;")?;Ok(())}).await.unwrap();
+    owner.db.call(|db|{db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','/AGENTS.md','','','now'); INSERT INTO run(id,thread_id,state,stop_reason,created_at)VALUES('r','t','live','explicit_stop','now'); INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','t','r','running','now'); CREATE TRIGGER reject_shutdown_context BEFORE INSERT ON event WHEN NEW.kind='context_changed' AND json_extract(NEW.payload_ref_json,'$.kind')='interruption_capture_row' BEGIN SELECT RAISE(ABORT,'fixture capture failed'); END;")?;Ok(())}).await.unwrap();
     let operation = format!("{}:failed-context-wait", owner.instance_id);
     let mut wait = tokio::spawn({
         let control = control.clone();

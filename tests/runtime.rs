@@ -2476,6 +2476,28 @@ async fn graceful_shutdown_captures_real_shell_wait_once_and_replays_context_aft
         let raw:String=db.query_row("SELECT CAST(bytes AS TEXT) FROM output_chunk WHERE stream='stdout' ORDER BY sequence LIMIT 1",[],|r|r.get(0))?;assert!(raw.contains("SHUTDOWN_READY"));
         let nodes=db.prepare("SELECT id,payload_json FROM node WHERE kind IN ('interruption_context','interruption_details','interrupted_wait') ORDER BY id")?.query_map([],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;Ok(nodes)
     }).await.unwrap();
+    control
+        .store
+        .database
+        .call({
+            let target = accepted.thread_id.clone();
+            let ids = snapshot_nodes
+                .iter()
+                .map(|(id, _)| id.clone())
+                .collect::<Vec<_>>();
+            move |db| {
+                for id in ids {
+                    assert!(db.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM thread_path WHERE thread_id=?1 AND node_id=?2)",
+                    rusqlite::params![target,id],
+                    |row|row.get::<_,bool>(0),
+                )?,"post-drain shutdown capture is selected before compaction starts");
+                }
+                Ok(())
+            }
+        })
+        .await
+        .unwrap();
     let compactor = shellboy::compaction::Compactor::new(
         control.store.database.clone(),
         control.store.config.clone(),
@@ -2485,13 +2507,8 @@ async fn graceful_shutdown_captures_real_shell_wait_once_and_replays_context_aft
         spill.spilled_groups, 1,
         "audit nodes must not split one call/result group"
     );
-    assert!(
-        spill
-            .original_node_ids
-            .iter()
-            .any(|id| snapshot_nodes.iter().any(|(source, _)| source == id)),
-        "interleaved audit sources remain reachable through replacement provenance"
-    );
+    // Shutdown now appends its audit records after the completed call/result group.
+    // They remain rooted at the selected tail or by later compaction provenance.
     let job = "shutdown-gc".to_owned();
     control.store.database.call(|db| {db.execute("INSERT INTO gc_job(id,kind,root_revision,state)VALUES('shutdown-gc','history',(SELECT CAST(value AS INTEGER) FROM app_meta WHERE key='root_revision'),'pending')",[])?;Ok(())}).await.unwrap();
     control.gc.start_history().await.unwrap().unwrap();
@@ -2513,7 +2530,20 @@ async fn graceful_shutdown_captures_real_shell_wait_once_and_replays_context_aft
         .collect(StorageCategory::History, chrono::Utc::now())
         .await
         .unwrap();
-    control.store.database.call(move|db|{for (id,body) in snapshot_nodes {assert_eq!(db.query_row("SELECT payload_json FROM node WHERE id=?1",[id],|r|r.get::<_,String>(0))?,body);}assert_eq!(db.query_row("SELECT COUNT(*) FROM event WHERE json_extract(payload_ref_json,'$.change.reason')='app_shutdown'",[],|r|r.get::<_,i64>(0))?,1);Ok(())}).await.unwrap();
+    control.store.database.call({
+        let target=accepted.thread_id.clone();
+        move|db|{
+            for (id,body) in snapshot_nodes {
+                assert_eq!(db.query_row("SELECT payload_json FROM node WHERE id=?1",[&id],|r|r.get::<_,String>(0))?,body);
+                assert!(db.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM thread_path WHERE thread_id=?1 AND node_id=?2) OR EXISTS(SELECT 1 FROM thread_replacement tr JOIN replacement_source rs ON rs.replacement_id=tr.replacement_id WHERE tr.thread_id=?1 AND rs.source_node_id=?2)",
+                    rusqlite::params![target,id],|r|r.get::<_,bool>(0),
+                )?,"each original shutdown source remains rooted by selected history or replacement provenance");
+            }
+            assert_eq!(db.query_row("SELECT COUNT(*) FROM event WHERE json_extract(payload_ref_json,'$.change.reason')='app_shutdown'",[],|r|r.get::<_,i64>(0))?,1);
+            Ok(())
+        }
+    }).await.unwrap();
     command(
         &control,
         Command::MessageSend(MessageSendArgs {
