@@ -18,6 +18,23 @@ async fn provider_veto_is_one_invocation_per_real_scope() {
 fn assert_scope_trace(result: &AxFixtureResult) {
     assert!(!result.owner_instance_id.is_empty());
     assert_eq!(
+        result.report_owners.len(),
+        17,
+        "all predeclared report rows were captured before response"
+    );
+    let mut expected_ids = result
+        .report_owners
+        .iter()
+        .map(|owner| owner.attempt_id.clone())
+        .collect::<Vec<_>>();
+    let mut actual_ids = result.report_attempt_ids.clone();
+    expected_ids.sort_unstable();
+    actual_ids.sort_unstable();
+    assert_eq!(
+        actual_ids, expected_ids,
+        "automatic outcomes belong to the 17 original ordinary attempts"
+    );
+    assert_eq!(
         result.report_scopes.len(),
         17,
         "all predeclared eligible report scopes are recorded"

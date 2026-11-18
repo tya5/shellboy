@@ -4596,6 +4596,8 @@ struct AxFixtureResult {
     report_scopes: Vec<(String, String, i64)>,
     expected_scope: (String, String, i64),
     expected_report_tokens: Vec<u64>,
+    report_owners: Vec<ReportOwner>,
+    report_attempt_ids: Vec<String>,
     initial_path_ids: Vec<String>,
     final_path_ids: Vec<String>,
     failure_memory_slots: usize,
@@ -4639,7 +4641,7 @@ async fn ax_growing_turn_summary_requests(
             db.query_row("SELECT generation FROM turn WHERE id=?1", [turn_id], |row| row.get::<_,i64>(0))
                 .map_err(Into::into)
         }).await.unwrap();
-        let expected_scope = (expected_run, expected_turn, expected_generation);
+        let expected_scope = (expected_run, expected_turn.clone(), expected_generation);
         // Reports 202..=218 are the 17 known-usage boundaries; index 19 is
         // the final ordinary answer and intentionally carries no usage report.
         let expected_report_tokens = (202..=218).collect::<Vec<u64>>();
@@ -4652,6 +4654,7 @@ async fn ax_growing_turn_summary_requests(
         }).await.unwrap();
         let tool = |index: u32, tokens: u32| json!({"id":format!("grow-{index}"),"status":"completed","usage":{"input_tokens":tokens,"output_tokens":1},"output":[{"type":"function_call","call_id":format!("grow-{index}"),"name":"nope","arguments":"{}"}]});
         let mut summaries = 0;
+        let mut report_owners = Vec::new();
         for index in 0..=19 {
             let ordinary = loop {
                 let request = incoming(&control, &mut receive).await;
@@ -4660,44 +4663,73 @@ async fn ax_growing_turn_summary_requests(
                 assert!(summaries < 80, "unbounded automatic summary loop");
                 request.reply.send(summary_reply()).unwrap();
             };
+            let input_tokens = if index < 2 { 100 } else { 200 + index };
+            if (2..=18).contains(&index) {
+                report_owners.push(
+                    prepared_report_from_incoming(
+                        &control,
+                        &expected_turn,
+                        &ordinary,
+                        input_tokens as u64,
+                    )
+                    .await
+                    .owner,
+                );
+            }
             if index == 19 { ordinary.reply.send((200, answer("finished"))).unwrap(); }
-            else { ordinary.reply.send((200, tool(index, if index < 2 { 100 } else { 200 + index }))).unwrap(); }
+            else { ordinary.reply.send((200, tool(index, input_tokens))).unwrap(); }
         }
         settled(&control, &target).await;
-        let observed = proactive_events(&control, &target).await;
-        if let Some(first) = observed.first() {
-            let trigger_turn = first["turn_id"].as_str().expect("saved attempt names its Turn").to_owned();
-            assert!(observed.iter().all(|event|event["turn_id"]==trigger_turn), "one Ax scope retains its real Turn");
-            let trigger_turns = [trigger_turn];
-            let mut finish = Box::pin(automatic_attempts_finished_for_turns(&control, &trigger_turns, observed.len()));
-            let terminal = loop {
-                tokio::select! {
-                    attempts = &mut finish => break attempts,
-                    incoming = receive.recv() => {
-                        let incoming = incoming.expect("loopback provider remains open until exact FINISH");
-                        assert_eq!(incoming.kind(), ProviderRequestKind::Summary,
-                            "only an actual background summary request may remain after the named Turns settle");
-                        summaries += 1;
-                        incoming.reply.send(summary_reply()).unwrap();
-                    }
+        assert_eq!(report_owners.len(), 17, "capture each predeclared known-usage ordinary attempt");
+        let trigger_turns = [expected_turn.clone()];
+        let mut finish = Box::pin(automatic_attempts_finished_for_turns(&control, &trigger_turns, 17));
+        let terminal = loop {
+            tokio::select! {
+                attempts = &mut finish => break attempts,
+                incoming = receive.recv() => {
+                    let incoming = incoming.expect("loopback provider remains open until all 17 exact report FINISHes");
+                    assert_eq!(incoming.kind(), ProviderRequestKind::Summary,
+                        "only a background summary may remain after the final ordinary response");
+                    summaries += 1;
+                    incoming.reply.send(summary_reply()).unwrap();
                 }
-            };
-            let mut observed_ids = observed.iter().map(|event|event["attempt_id"].as_str().expect("saved attempt id").to_owned()).collect::<Vec<_>>();
-            let mut terminal_ids = terminal.iter().map(|attempt|attempt.id.clone()).collect::<Vec<_>>();
-            observed_ids.sort_unstable();
-            terminal_ids.sort_unstable();
-            assert_eq!(terminal_ids, observed_ids, "readback attempt identities and exact terminal FINISH set agree");
-        }
+            }
+        };
+        let mut expected_ids = report_owners.iter().map(|owner| owner.attempt_id.clone()).collect::<Vec<_>>();
+        let mut terminal_ids = terminal.iter().map(|attempt| attempt.id.clone()).collect::<Vec<_>>();
+        expected_ids.sort_unstable();
+        terminal_ids.sort_unstable();
+        assert_eq!(terminal_ids, expected_ids, "all 17 original report attempts have exact terminal FINISH");
+        let observed = proactive_events(&control, &target).await;
+        assert_eq!(observed.len(), 17, "all independently captured report attempts publish an automatic outcome");
         let mut records = Vec::new();
         let mut report_scopes = Vec::new();
-        for event in proactive_events(&control, &target).await {
+        let mut report_attempt_ids = Vec::new();
+        for event in observed {
             let attempt = event["attempt_id"].as_str().unwrap().to_owned();
+            report_attempt_ids.push(attempt.clone());
             let (record, scope): (String, (String, String, i64)) = control.store.database.call(move |db| Ok((
                 db.query_row("SELECT json_extract(error_json,'$.automatic_trim_attempt') FROM model_attempt WHERE id=?1", [&attempt], |r| r.get(0))?,
                 db.query_row("SELECT t.run_id,m.turn_id,m.generation FROM model_attempt m JOIN turn t ON t.id=m.turn_id WHERE m.id=?1", [attempt], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?,
             ))).await.unwrap();
             records.push(serde_json::from_str::<Value>(&record).unwrap());
             report_scopes.push(scope);
+        }
+        for owner in &report_owners {
+            let index = report_attempt_ids.iter().position(|id| id == &owner.attempt_id)
+                .expect("each original known-usage attempt has one saved automatic result");
+            let attempt_id = owner.attempt_id.clone();
+            let (usage, request_token): (Option<i64>, Option<String>) = control.store.database.call(move |db| Ok(db.query_row(
+                "SELECT json_extract(usage_json,'$.input_tokens'),json_extract(input_manifest_json,'$.compaction_report_token') FROM model_attempt WHERE id=?1",
+                [attempt_id], |row| Ok((row.get(0)?, row.get(1)?)),
+            )?)).await.unwrap();
+            assert_eq!(usage, Some(owner.input_tokens as i64), "saved known usage stays on its original attempt");
+            assert_eq!(request_token.as_deref(), Some(owner.request_token.as_str()), "original report token stays with its attempt");
+            assert_eq!(records[index]["trigger"]["input_tokens"], owner.input_tokens);
+            let finished = terminal.iter().find(|attempt| attempt.id == owner.attempt_id)
+                .expect("terminal set contains original report attempt");
+            assert_eq!(records[index]["token"], finished.token, "FINISH retains this attempt's GC token");
+            assert_eq!(records[index]["provisional"], false, "saved attempt is terminal");
         }
         let path_thread = target.clone();
         let final_path_ids = control.store.database.call(move |db| {
@@ -4725,7 +4757,7 @@ async fn ax_growing_turn_summary_requests(
         assert_eq!(explicit.body["tools"], json!([]), "explicit compact is not blocked");
         let _ = explicit.reply.send((200, answer("explicit summary")));
         control.shutdown().await.unwrap(); owner.shutdown().await.unwrap(); server.abort();
-        AxFixtureResult { summaries, records, owner_instance_id, report_scopes, expected_scope, expected_report_tokens, initial_path_ids, final_path_ids, failure_memory_slots }
+        AxFixtureResult { summaries, records, owner_instance_id, report_scopes, expected_scope, expected_report_tokens, report_owners, report_attempt_ids, initial_path_ids, final_path_ids, failure_memory_slots }
     }).await.unwrap()
 }
 

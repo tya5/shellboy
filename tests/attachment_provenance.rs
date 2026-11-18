@@ -1,4 +1,5 @@
 //! Cross-service operation boundaries using a real owner and loopback proxy.
+use crate::runtime_features::ProviderRequestKind;
 use serde_json::{Value, json};
 use shellboy::{app::DataOwner, attachments::AttachmentInput, control::Control, protocol::*};
 use std::{sync::Arc, time::Duration};
@@ -10,6 +11,15 @@ use tokio::{
 struct Incoming {
     body: Value,
     reply: oneshot::Sender<(u16, Value)>,
+}
+impl Incoming {
+    fn kind(&self) -> ProviderRequestKind {
+        if self.body["tools"].as_array().is_some_and(Vec::is_empty) {
+            ProviderRequestKind::Summary
+        } else {
+            ProviderRequestKind::Ordinary
+        }
+    }
 }
 async fn proxy() -> (
     String,
@@ -1678,11 +1688,25 @@ async fn issue_160_auto_compaction_detached_attachment_and_retry() {
             }),
         )
         .await;
-        let summary = incoming(&control, &thread, &mut receive).await;
+        let mut third_body = None;
+        let summary = loop {
+            let request = incoming(&control, &thread, &mut receive).await;
+            match request.kind() {
+                ProviderRequestKind::Summary => break request,
+                ProviderRequestKind::Ordinary => {
+                    assert!(
+                        third_body.is_none(),
+                        "retain only the one ordinary request from the third message"
+                    );
+                    third_body = Some(request.body.clone());
+                    request.reply.send((200, answer("third answer"))).unwrap();
+                }
+            }
+        };
         assert_eq!(
             summary.body["tools"],
             json!([]),
-            "automatic summary: {mode}"
+            "actual automatic summary: {mode}"
         );
         let attempt = trigger_attempt.clone();
         let (automatic_attempt, automatic_token): (String, String) = control.store.database.call(move |db| {
@@ -1694,7 +1718,6 @@ async fn issue_160_auto_compaction_detached_attachment_and_retry() {
         }).await.unwrap();
         // Subscribe before replying so the exact terminal FINISH notification cannot be missed.
         let mut changes = control.subscribe();
-        let mut third_body = None;
         summary
             .reply
             .send((200, answer("synthetic summary")))
