@@ -670,7 +670,7 @@ impl SseDecoder {
         &mut self,
         bytes: &[u8],
         terminal: impl FnMut(&DecodedEvent) -> bool,
-    ) -> Result<Vec<DecodedEvent>, DecodeFailure> {
+    ) -> Result<Vec<DecodedEvent>, Box<DecodeFailure>> {
         self.decode_frames(bytes, terminal, false, true)
     }
     fn decode(
@@ -678,7 +678,7 @@ impl SseDecoder {
         bytes: &[u8],
         terminal: impl FnMut(&DecodedEvent) -> bool,
         stop_done: bool,
-    ) -> Result<Vec<DecodedEvent>, DecodeFailure> {
+    ) -> Result<Vec<DecodedEvent>, Box<DecodeFailure>> {
         self.decode_frames(bytes, terminal, stop_done, false)
     }
     fn decode_frames(
@@ -687,28 +687,27 @@ impl SseDecoder {
         mut terminal: impl FnMut(&DecodedEvent) -> bool,
         stop_done: bool,
         prove_retry_frames: bool,
-    ) -> Result<Vec<DecodedEvent>, DecodeFailure> {
+    ) -> Result<Vec<DecodedEvent>, Box<DecodeFailure>> {
         let mut events = Vec::new();
-        self.total = self
-            .total
-            .checked_add(bytes.len())
-            .ok_or_else(|| DecodeFailure {
+        self.total = self.total.checked_add(bytes.len()).ok_or_else(|| {
+            Box::new(DecodeFailure {
                 error: ModelError::new("input_limit", "Response length overflow"),
                 events: vec![],
-            })?;
+            })
+        })?;
         for &byte in bytes {
             let Some(parsed_total) = self.parsed_total.checked_add(1) else {
-                return Err(DecodeFailure {
+                return Err(Box::new(DecodeFailure {
                     error: ModelError::new("input_limit", "Response length overflow"),
                     events,
-                });
+                }));
             };
             self.parsed_total = parsed_total;
             if self.parsed_total > MAX_RESPONSE_BYTES {
-                return Err(DecodeFailure {
+                return Err(Box::new(DecodeFailure {
                     error: ModelError::new("input_limit", "Response byte limit exceeded"),
                     events,
-                });
+                }));
             }
             if self.after_cr {
                 self.after_cr = false;
@@ -719,10 +718,10 @@ impl SseDecoder {
             if byte != b'\n' && byte != b'\r' {
                 self.line.push(byte);
                 if self.line.len() + self.data.len() > MAX_EVENT_BYTES {
-                    return Err(DecodeFailure {
+                    return Err(Box::new(DecodeFailure {
                         error: ModelError::new("input_limit", "SSE event byte limit exceeded"),
                         events,
-                    });
+                    }));
                 }
                 continue;
             }
@@ -744,13 +743,13 @@ impl SseDecoder {
                             match stream_error::parse_frame(&self.data) {
                                 Ok(parsed) => parsed,
                                 Err(_) => {
-                                    return Err(DecodeFailure {
+                                    return Err(Box::new(DecodeFailure {
                                         error: ModelError::new(
                                             "protocol",
                                             "Malformed UTF-8/JSON in SSE",
                                         ),
                                         events,
-                                    });
+                                    }));
                                 }
                             };
                         self.json_events += 1;
@@ -784,10 +783,10 @@ impl SseDecoder {
                     .extend_from_slice(data.strip_prefix(b" ").unwrap_or(data));
                 self.data.push(b'\n');
                 if self.data.len() > MAX_EVENT_BYTES {
-                    return Err(DecodeFailure {
+                    return Err(Box::new(DecodeFailure {
                         error: ModelError::new("input_limit", "SSE event byte limit exceeded"),
                         events,
-                    });
+                    }));
                 }
             }
         }
