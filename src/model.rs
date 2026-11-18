@@ -618,11 +618,11 @@ impl StreamRetryFrame {
                         && response.get("object").is_none_or(Value::is_string)
                         && response.get("status").is_none_or(Value::is_string)
                 }) && serde_json::from_slice::<Metadata>(bytes).is_ok_and(|metadata| {
-                        kind == "response.created"
-                            || metadata.response.is_none_or(|response| {
-                                matches!(response.status, ActiveStatus::InProgress)
-                            })
-                    }) =>
+                    kind == "response.created"
+                        || metadata.response.is_none_or(|response| {
+                            matches!(response.status, ActiveStatus::InProgress)
+                        })
+                }) =>
             {
                 Self::EmptyMetadata
             }

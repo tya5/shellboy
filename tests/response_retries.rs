@@ -2902,8 +2902,10 @@ async fn untyped_terminal_sse_retries_without_output_and_saves_failure_before_po
 async fn untyped_terminal_sse_retry_fails_closed_for_ambiguous_or_nontransient_errors() {
     let collision = r#"{"type":"response.failed","response":{"output":[{"type":"reasoning"}]},"response":{"error":{"code":"500","message":"fixture"}}}"#;
     let ambiguous_prefix = "data: {\"type\":\"response.created\",\"response\":{\"output\":[{}]},\"response\":{\"output\":[]}}\n\n";
-    let malformed_prefix = "data: {\"type\":\"response.in_progress\",\"response\":{\"output\":null}}\n\n";
-    let duplicate_output = "data: {\"type\":\"response.created\",\"response\":{\"output\":[{}],\"output\":[]}}\n\n";
+    let malformed_prefix =
+        "data: {\"type\":\"response.in_progress\",\"response\":{\"output\":null}}\n\n";
+    let duplicate_output =
+        "data: {\"type\":\"response.created\",\"response\":{\"output\":[{}],\"output\":[]}}\n\n";
     let unknown_prefix = "data: {\"type\":\"response.future_output\",\"delta\":\"opaque\"}\n\n";
     for (prefix, event, witness) in [
         ("", collision, Some(500)),
@@ -2935,8 +2937,16 @@ async fn untyped_terminal_sse_retry_fails_closed_for_ambiguous_or_nontransient_e
         ("", r#"{"error":{"message":"HTTP 500"}}"#, None),
         ("", r#"{"error":{"code":"0500"}}"#, None),
         ("", r#"{"error":{"code":"400","code":"500"}}"#, None),
-        ("", r#"{"error":{"code":"400"},"error":{"code":"500"}}"#, None),
-        ("", r#"{"type":"other","type":"error","error":{"code":"500"}}"#, None),
+        (
+            "",
+            r#"{"error":{"code":"400"},"error":{"code":"500"}}"#,
+            None,
+        ),
+        (
+            "",
+            r#"{"type":"other","type":"error","error":{"code":"500"}}"#,
+            None,
+        ),
     ] {
         let mut fixture = Fixture::new(2, 10, 5_000).await;
         fixture
@@ -2971,14 +2981,32 @@ async fn untyped_terminal_sse_retry_fails_closed_for_ambiguous_or_nontransient_e
 async fn untyped_terminal_sse_rejects_contradictory_nested_metadata_without_losing_witness() {
     let event: Value = serde_json::from_str(TERMINAL_SSE_500).unwrap();
     for (kind, response) in [
-        ("response.created", r#"{"output":[],"error":{"code":"400"}}"#),
+        (
+            "response.created",
+            r#"{"output":[],"error":{"code":"400"}}"#,
+        ),
         ("response.created", r#"{"status":"failed","output":[]}"#),
-        ("response.in_progress", r#"{"status":"completed","output":[]}"#),
+        (
+            "response.in_progress",
+            r#"{"status":"completed","output":[]}"#,
+        ),
         ("response.in_progress", r#"{"status":"queued","output":[]}"#),
-        ("response.created", r#"{"status":"failed","status":"in_progress","output":[]}"#),
-        ("response.created", r#"{"status":"in_progress","status":"in_progress"}"#),
-        ("response.created", r#"{"error":{},"error":null,"output":[]}"#),
-        ("response.created", r#"{"incomplete_details":{"reason":"max_output_tokens"}}"#),
+        (
+            "response.created",
+            r#"{"status":"failed","status":"in_progress","output":[]}"#,
+        ),
+        (
+            "response.created",
+            r#"{"status":"in_progress","status":"in_progress"}"#,
+        ),
+        (
+            "response.created",
+            r#"{"error":{},"error":null,"output":[]}"#,
+        ),
+        (
+            "response.created",
+            r#"{"incomplete_details":{"reason":"max_output_tokens"}}"#,
+        ),
         ("response.created", r#"{"output":[],"unknown":{}}"#),
         ("response.created", r#"[{"output":[]}]"#),
         ("response.created", r#"{"status":{"in_progress":null}}"#),
@@ -3076,8 +3104,10 @@ async fn untyped_terminal_sse_retry_does_not_apply_to_http_200_json() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn untyped_terminal_sse_does_not_retry_after_reasoning_or_tool_fragments() {
-    let reasoning = "data: {\"type\":\"response.reasoning_text.delta\",\"delta\":\"visible reasoning\"}\n\n";
-    let arguments = "data: {\"type\":\"response.function_call_arguments.delta\",\"delta\":\"{\"}\n\n";
+    let reasoning =
+        "data: {\"type\":\"response.reasoning_text.delta\",\"delta\":\"visible reasoning\"}\n\n";
+    let arguments =
+        "data: {\"type\":\"response.function_call_arguments.delta\",\"delta\":\"{\"}\n\n";
     for (prefix, retained_reasoning) in [(reasoning, "visible reasoning"), (arguments, "")] {
         let mut fixture = Fixture::new(2, 10, 5_000).await;
         fixture
@@ -3186,7 +3216,10 @@ async fn untyped_terminal_sse_honors_real_retry_after_and_stop() {
         if seconds == 30 {
             assert_eq!(failure["automatic_retry"]["delay_ms"], 30_000);
         } else {
-            assert_eq!(failure["automatic_retry_deferred"]["retry_after_ms"], 601_000);
+            assert_eq!(
+                failure["automatic_retry_deferred"]["retry_after_ms"],
+                601_000
+            );
         }
         assert_eq!(fixture_request_log_lines(&fixture), 1);
         fixture.no_more_requests().await;
