@@ -122,3 +122,8 @@ provisional attempt. Current summary request profile/model/effort/epoch are
 captured coherently from the Thread inside the capture transaction, not vetoed
 against the origin receipt configuration. Receipt Thread/attempt/token identity
 and provisional FINISH ownership remain mandatory.
+
+
+## Persisted summary message role
+
+The summary-generation request continues to use a developer instruction. The generated summary artifact is persisted as a user conversation message; these roles are intentionally distinct. Schema 49 changes only old nodes positively identified by the canonical `summary` kind, `shellboy-summary-v1` payload, and one matching completed replacement with the same output node, format, and exact source ordering. It preserves summary text, source/replacement provenance, and ordinals while refreshing payload byte count, body hash, and payload revision in the startup migration transaction. Ambiguous, malformed, pending, mismatched, tombstoned, or non-summary developer records remain unchanged.

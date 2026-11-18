@@ -45,10 +45,12 @@ class PublicUpgradeArguments(unittest.TestCase):
         self.assertIn('(45, "0045_thread_spill_override")', names)
         self.assertIn('(46, "0046_scope_identity_v2")', names)
         self.assertIn('(47, "0047_drop_selection_nonappend_generation")', names)
-        self.assertEqual(upgrade.CURRENT_SCHEMA_VERSION, 48)
+        self.assertEqual(upgrade.CURRENT_SCHEMA_VERSION, 49)
         self.assertTrue((ROOT / 'migrations/0046_scope_identity_v2.sql').is_file())
         self.assertTrue((ROOT / 'migrations/0047_drop_selection_nonappend_generation.sql').is_file())
         self.assertTrue((ROOT / 'migrations/0048_human_question_path_admission.sql').is_file())
+        self.assertIn('(49, "0049_generated_summary_user_role")', names)
+        self.assertTrue((ROOT / 'migrations/0049_generated_summary_user_role.sql').is_file())
         self.assertTrue((ROOT / 'migrations/0045_thread_spill_override.sql').is_file())
         self.assertTrue((ROOT / 'migrations/0039_independent_runs.sql').is_file())
 
@@ -64,9 +66,9 @@ class PublicUpgradeArguments(unittest.TestCase):
         db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('old','/','','p','m','now')")
         upgrade.prepare_schema(db, upgrade.CURRENT_SCHEMA_VERSION)
         self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], upgrade.CURRENT_SCHEMA_VERSION)
-        self.assertEqual(db.execute("SELECT version,name FROM schema_migration ORDER BY version DESC LIMIT 1").fetchone(), (upgrade.CURRENT_SCHEMA_VERSION, '0048_human_question_path_admission'))
+        self.assertEqual(db.execute("SELECT version,name FROM schema_migration ORDER BY version DESC LIMIT 1").fetchone(), (upgrade.CURRENT_SCHEMA_VERSION, '0049_generated_summary_user_role'))
         self.assertIsNone(db.execute("SELECT spill_override FROM thread WHERE id='old'").fetchone()[0])
-        # The spill constraint remains pinned to 45 after schema 46 through 48.
+        # The spill constraint remains pinned to 45 through the current schema.
         upgrade.check_migration(db, before_45, 44, upgrade.CURRENT_SCHEMA_VERSION)
         columns = [tuple(row) for row in db.execute('PRAGMA table_info(thread)')]
         fresh = sqlite3.connect(':memory:')
@@ -83,6 +85,39 @@ class PublicUpgradeArguments(unittest.TestCase):
         self.assertEqual(db.execute('PRAGMA foreign_key_check').fetchall(), [])
         db.close()
         fresh.close()
+
+    def test_sql_only_schema49_staging_refuses_positive_summary_conversion_before_mutation(self):
+        db = sqlite3.connect(':memory:')
+        self.addCleanup(db.close)
+        db.executescript((ROOT / 'src/storage/current.sql').read_text())
+        db.execute("DELETE FROM schema_migration WHERE version=49")
+        db.execute('PRAGMA user_version=48')
+        db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('t','/','','p','m','now')")
+        for node_id in ('src-a', 'src-b'):
+            db.execute("INSERT INTO node(id,kind,created_at,payload_json) VALUES(?,'message','now','{}')", (node_id,))
+        payload = {'item': {'role': 'developer', 'content': [{'type': 'input_text', 'text': 'legacy canonical summary'}]},
+                   'source_node_ids': ['src-a', 'src-b'], 'summary_format': 'shellboy-summary-v1'}
+        db.execute("INSERT INTO node(id,kind,created_at,payload_json) VALUES('summary','summary','now',?)",
+                   (json.dumps(payload, separators=(',', ':')),))
+        db.execute("INSERT INTO replacement(id,output_node_id,input_key,format_version,prompt_version,state,created_at) VALUES('r','summary','k','shellboy-summary-v1','shellboy-summary-prompt-v3','completed','now')")
+        db.executemany("INSERT INTO replacement_source(replacement_id,ordinal,source_node_id,source_revision,source_hash) VALUES('r',?,?,0,'h')",
+                       [(0, 'src-a'), (1, 'src-b')])
+        duplicate_raw = '{"item":{"role":"developer","role":"developer","content":[{"type":"input_text","text":"duplicate"}]},"source_node_ids":["src-a"],"summary_format":"shellboy-summary-v1"}'
+        db.execute("INSERT INTO node(id,kind,created_at,payload_json) VALUES('duplicate-summary','summary','now',?)", (duplicate_raw,))
+        db.execute("INSERT INTO replacement(id,output_node_id,input_key,format_version,prompt_version,state,created_at) VALUES('duplicate-r','duplicate-summary','k','shellboy-summary-v1','shellboy-summary-prompt-v3','completed','now')")
+        db.execute("INSERT INTO replacement_source(replacement_id,ordinal,source_node_id,source_revision,source_hash) VALUES('duplicate-r',0,'src-a',0,'h')")
+        db.commit()
+        before_ledger = upgrade.ledger(db)
+        before_payload = db.execute("SELECT payload_json,payload_bytes,body_hash,payload_revision FROM node WHERE id='summary'").fetchone()
+        with self.assertRaisesRegex(AssertionError, 'native Rust SHA-256 payload converter'):
+            upgrade.prepare_schema(db, 49)
+        self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 48)
+        self.assertEqual(upgrade.ledger(db), before_ledger)
+        self.assertEqual(db.execute("SELECT payload_json,payload_bytes,body_hash,payload_revision FROM node WHERE id='summary'").fetchone(), before_payload)
+        with self.assertRaisesRegex(AssertionError, 'native Rust SHA-256 payload converter'):
+            upgrade.apply_migration(db, 49)
+        self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 48)
+        self.assertEqual(upgrade.ledger(db), before_ledger)
 
     def test_schema47_to48_published_question_admission_replay_preserves_reply_facts(self):
         fixture = ROOT / 'tests/fixtures/storage-current-schema43.sql'

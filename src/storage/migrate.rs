@@ -246,6 +246,11 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         sql: include_str!("../../migrations/0048_human_question_path_admission.sql"),
         foreign_keys: None,
     },
+    Migration {
+        version: 49,
+        sql: include_str!("../../migrations/0049_generated_summary_user_role.sql"),
+        foreign_keys: None,
+    },
 ];
 
 pub(super) fn run(
@@ -294,6 +299,9 @@ pub(super) fn run(
             }
             if migration.version == 46 {
                 a_state_scope::convert_rows(&transaction)?;
+            }
+            if migration.version == 49 {
+                migrate_generated_summary_user_roles(&transaction)?;
             }
             if migration.version == 4 {
                 migrate_attachment_sources(&transaction)?;
@@ -349,6 +357,144 @@ fn with_foreign_keys_disabled<T>(
     guard.connection.pragma_update(None, "foreign_keys", true)?;
     guard.restored = true;
     result
+}
+
+/// Convert only canonical, completed generated summaries. Replacement source
+/// snapshots are immutable; the history node payload is the mutable presentation.
+fn migrate_generated_summary_user_roles(
+    tx: &rusqlite::Transaction<'_>,
+) -> Result<(), StorageError> {
+    use rusqlite::params;
+    use serde_json::Value;
+
+    const FORMAT: &str = "shellboy-summary-v1";
+    let nodes = tx
+        .prepare(
+            "SELECT id,payload_json,payload_bytes,body_hash,payload_revision \
+             FROM node WHERE kind='summary' AND payload_json IS NOT NULL \
+             AND deleted_reason IS NULL ORDER BY id",
+        )?
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, i64>(4)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+
+    for (node_id, raw, payload_bytes, body_hash, revision) in nodes {
+        let Ok(mut payload) = serde_json::from_str::<Value>(&raw) else {
+            continue;
+        };
+        if payload.get("summary_format").and_then(Value::as_str) != Some(FORMAT) {
+            continue;
+        }
+        let Some(item) = payload.get("item").and_then(Value::as_object) else {
+            continue;
+        };
+        if item.get("role").and_then(Value::as_str) != Some("developer") {
+            continue;
+        }
+        let item_keys_valid = item
+            .keys()
+            .all(|key| matches!(key.as_str(), "role" | "content" | "reasoning_epoch"));
+        let content = item.get("content").and_then(Value::as_array);
+        let content_valid = content.is_some_and(|parts| {
+            parts.len() == 1
+                && parts[0].as_object().is_some_and(|part| {
+                    part.len() == 2
+                        && part.get("type").and_then(Value::as_str) == Some("input_text")
+                        && part.get("text").and_then(Value::as_str).is_some()
+                })
+        });
+        if !item_keys_valid
+            || !content_valid
+            || item
+                .get("reasoning_epoch")
+                .is_some_and(|epoch| !epoch.is_i64())
+        {
+            continue;
+        }
+        let Some(source_ids) = payload.get("source_node_ids").and_then(Value::as_array) else {
+            continue;
+        };
+        let Some(source_ids) = source_ids
+            .iter()
+            .map(Value::as_str)
+            .collect::<Option<Vec<_>>>()
+        else {
+            continue;
+        };
+        // The output-node ID is not unique. Any duplicate/contradictory replacement
+        // makes the legacy role ambiguous and must remain unchanged.
+        let replacements = tx
+            .prepare(
+                "SELECT id,format_version,state FROM replacement \
+                 WHERE output_node_id=?1 ORDER BY id",
+            )?
+            .query_map([&node_id], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let [(replacement_id, format, state)] = replacements.as_slice() else {
+            continue;
+        };
+        if format.as_str() != FORMAT || state.as_str() != "completed" {
+            continue;
+        }
+        let recorded_sources = tx
+            .prepare(
+                "SELECT ordinal,source_node_id FROM replacement_source \
+                 WHERE replacement_id=?1 ORDER BY ordinal",
+            )?
+            .query_map([replacement_id], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        if recorded_sources.len() != source_ids.len()
+            || recorded_sources.iter().enumerate().any(
+                |(ordinal, (recorded_ordinal, source_id))| {
+                    *recorded_ordinal != ordinal as i64 || source_id.as_str() != source_ids[ordinal]
+                },
+            )
+        {
+            continue;
+        }
+        let encoded = serde_json::to_vec(&payload)
+            .map_err(|error| StorageError::Schema(error.to_string()))?;
+        if encoded.as_slice() != raw.as_bytes() {
+            continue;
+        }
+        let expected_hash = crate::digest::sha256_hex(&encoded);
+        if payload_bytes != raw.len() as i64 || body_hash.as_deref() != Some(expected_hash.as_str())
+        {
+            continue;
+        }
+
+        payload["item"]["role"] = Value::String("user".into());
+        let updated = serde_json::to_string(&payload)
+            .map_err(|error| StorageError::Schema(error.to_string()))?;
+        let bytes = updated.len() as i64;
+        let hash = crate::digest::sha256_hex(updated.as_bytes());
+        let changed = tx.execute(
+            "UPDATE node SET payload_json=?2,payload_bytes=?3,body_hash=?4, \
+             payload_revision=payload_revision+1 WHERE id=?1 AND payload_revision=?5 AND payload_json=?6",
+            params![node_id, updated, bytes, hash, revision, raw],
+        )?;
+        if changed != 1 {
+            return Err(StorageError::Schema(
+                "generated summary changed during startup migration".into(),
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Preserve known user provenance; unknown legacy origins stay pending and are
@@ -1491,5 +1637,431 @@ mod activity_migration_tests {
                 "{index}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod generated_summary_role_migration_tests {
+    use super::run;
+    use crate::storage::CURRENT_SCHEMA;
+    use rusqlite::{Connection, params};
+    use serde_json::{Value, json};
+
+    const FORMAT: &str = "shellboy-summary-v1";
+
+    fn node(db: &Connection, id: &str, kind: &str, payload: Option<&Value>, deleted: Option<&str>) {
+        let raw = payload.map(Value::to_string);
+        let bytes = raw.as_ref().map_or(0, |value| value.len() as i64);
+        let hash = raw
+            .as_ref()
+            .map(|value| crate::digest::sha256_hex(value.as_bytes()));
+        db.execute(
+            "INSERT INTO node(id,kind,created_at,payload_json,payload_bytes,body_hash,deleted_reason) VALUES(?1,?2,'now',?3,?4,?5,?6)",
+            params![id, kind, raw, bytes, hash, deleted],
+        ).unwrap();
+    }
+
+    fn replacement(
+        db: &Connection,
+        node_id: &str,
+        id: &str,
+        format: &str,
+        state: &str,
+        sources: &[&str],
+    ) {
+        db.execute(
+            "INSERT INTO replacement(id,output_node_id,input_key,format_version,prompt_version,state,created_at) VALUES(?1,?2,'key',?3,'shellboy-summary-prompt-v3',?4,'now')",
+            params![id, node_id, format, state],
+        ).unwrap();
+        for (ordinal, source_id) in sources.iter().enumerate() {
+            db.execute(
+                "INSERT INTO replacement_source(replacement_id,ordinal,source_node_id,source_revision,source_hash) VALUES(?1,?2,?3,0,'source-hash')",
+                params![id, ordinal as i64, source_id],
+            ).unwrap();
+        }
+    }
+
+    fn fixture_on(db: Connection) -> Connection {
+        db.execute_batch(CURRENT_SCHEMA).unwrap();
+        db.execute_batch("DELETE FROM schema_migration WHERE version=49; PRAGMA user_version=48;")
+            .unwrap();
+        db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('t','/','/a','p','m','now')", []).unwrap();
+        node(
+            &db,
+            "source-a",
+            "message",
+            Some(&json!({"role":"user","content":"A"})),
+            None,
+        );
+        node(
+            &db,
+            "source-b",
+            "message",
+            Some(&json!({"role":"user","content":"B"})),
+            None,
+        );
+
+        let canonical = json!({"item":{"role":"developer","content":[{"type":"input_text","text":"summary body"}],"reasoning_epoch":4},"source_node_ids":["source-a","source-b"],"summary_format":FORMAT,"summary_usage":{"requests":1},"reasoning_epoch":4});
+        node(&db, "positive", "summary", Some(&canonical), None);
+        replacement(
+            &db,
+            "positive",
+            "replacement-good",
+            FORMAT,
+            "completed",
+            &["source-a", "source-b"],
+        );
+
+        let actual_developer = json!({"item":{"role":"developer","content":[{"type":"input_text","text":"instruction"}]},"source_node_ids":["source-a"],"summary_format":FORMAT});
+        node(
+            &db,
+            "ordinary-developer",
+            "message",
+            Some(&actual_developer),
+            None,
+        );
+        node(
+            &db,
+            "ordinary-kind-summary",
+            "summary",
+            Some(
+                &json!({"item":{"role":"developer","content":[{"type":"input_text","text":"ordinary"}]},"source_node_ids":["source-a"]}),
+            ),
+            None,
+        );
+        node(
+            &db,
+            "already-user",
+            "summary",
+            Some(
+                &json!({"item":{"role":"user","content":[{"type":"input_text","text":"already user"}]},"source_node_ids":["source-a"],"summary_format":FORMAT}),
+            ),
+            None,
+        );
+        replacement(
+            &db,
+            "already-user",
+            "replacement-user",
+            FORMAT,
+            "completed",
+            &["source-a"],
+        );
+
+        node(
+            &db,
+            "wrong-format",
+            "summary",
+            Some(
+                &json!({"item":{"role":"developer","content":[{"type":"input_text","text":"wrong format"}]},"source_node_ids":["source-a"],"summary_format":"other"}),
+            ),
+            None,
+        );
+        replacement(
+            &db,
+            "wrong-format",
+            "replacement-wrong-format",
+            "other",
+            "completed",
+            &["source-a"],
+        );
+        node(
+            &db,
+            "pending",
+            "summary",
+            Some(
+                &json!({"item":{"role":"developer","content":[{"type":"input_text","text":"pending"}]},"source_node_ids":["source-a"],"summary_format":FORMAT}),
+            ),
+            None,
+        );
+        replacement(
+            &db,
+            "pending",
+            "replacement-pending",
+            FORMAT,
+            "running",
+            &["source-a"],
+        );
+        node(
+            &db,
+            "no-replacement",
+            "summary",
+            Some(
+                &json!({"item":{"role":"developer","content":[{"type":"input_text","text":"no replacement"}]},"source_node_ids":["source-a"],"summary_format":FORMAT}),
+            ),
+            None,
+        );
+        node(
+            &db,
+            "malformed",
+            "summary",
+            Some(
+                &json!({"item":{"role":"developer","content":"not canonical"},"source_node_ids":["source-a"],"summary_format":FORMAT}),
+            ),
+            None,
+        );
+        replacement(
+            &db,
+            "malformed",
+            "replacement-malformed",
+            FORMAT,
+            "completed",
+            &["source-a"],
+        );
+        node(&db, "tombstone", "summary", None, Some("collected"));
+        node(
+            &db,
+            "ambiguous",
+            "summary",
+            Some(
+                &json!({"item":{"role":"developer","content":[{"type":"input_text","text":"ambiguous"}]},"source_node_ids":["source-a"],"summary_format":FORMAT}),
+            ),
+            None,
+        );
+        replacement(
+            &db,
+            "ambiguous",
+            "replacement-ambiguous-a",
+            FORMAT,
+            "completed",
+            &["source-a"],
+        );
+        replacement(
+            &db,
+            "ambiguous",
+            "replacement-ambiguous-b",
+            FORMAT,
+            "completed",
+            &["source-a"],
+        );
+        // Contradictory source ordering must not be normalized or guessed.
+        node(
+            &db,
+            "source-mismatch",
+            "summary",
+            Some(
+                &json!({"item":{"role":"developer","content":[{"type":"input_text","text":"mismatch"}]},"source_node_ids":["source-a","source-b"],"summary_format":FORMAT}),
+            ),
+            None,
+        );
+        replacement(
+            &db,
+            "source-mismatch",
+            "replacement-source-mismatch",
+            FORMAT,
+            "completed",
+            &["source-b", "source-a"],
+        );
+        let duplicate_raw = r#"{"item":{"role":"developer","role":"developer","content":[{"type":"input_text","text":"duplicate key"}]},"source_node_ids":["source-a"],"summary_format":"shellboy-summary-v1"}"#;
+        let normalized: Value = serde_json::from_str(duplicate_raw).unwrap();
+        let normalized_hash = crate::digest::sha256_hex(serde_json::to_vec(&normalized).unwrap());
+        db.execute(
+            "INSERT INTO node(id,kind,created_at,payload_json,payload_bytes,body_hash) VALUES('duplicate-key','summary','now',?1,?2,?3)",
+            params![duplicate_raw, duplicate_raw.len() as i64, normalized_hash],
+        ).unwrap();
+        replacement(
+            &db,
+            "duplicate-key",
+            "replacement-duplicate-key",
+            FORMAT,
+            "completed",
+            &["source-a"],
+        );
+        db
+    }
+
+    fn fixture() -> Connection {
+        fixture_on(Connection::open_in_memory().unwrap())
+    }
+
+    #[test]
+    fn schema49_converts_only_positive_canonical_generated_summary_and_reopens_idempotently() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("schema49.sqlite");
+        let mut db = fixture_on(Connection::open(&path).unwrap());
+        let before_sources: Vec<(String,i64,String)> = db.prepare("SELECT source_node_id,ordinal,source_hash FROM replacement_source WHERE replacement_id='replacement-good' ORDER BY ordinal").unwrap().query_map([],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap().collect::<rusqlite::Result<_>>().unwrap();
+        let before_source_payloads: Vec<(String, String)> = db
+            .prepare(
+                "SELECT id,payload_json FROM node WHERE id IN ('source-a','source-b') ORDER BY id",
+            )
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        let before_payload: String = db
+            .query_row(
+                "SELECT payload_json FROM node WHERE id='positive'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let negative_ids = [
+            "ordinary-developer",
+            "ordinary-kind-summary",
+            "already-user",
+            "wrong-format",
+            "pending",
+            "no-replacement",
+            "malformed",
+            "tombstone",
+            "ambiguous",
+            "source-mismatch",
+            "duplicate-key",
+        ];
+        let negative_before: Vec<(String, Option<String>, i64, Option<String>, i64)> = negative_ids
+            .iter()
+            .map(|id| {
+                let row = db.query_row(
+                    "SELECT payload_json,payload_bytes,body_hash,payload_revision FROM node WHERE id=?1",
+                    [id],
+                    |r| Ok((r.get::<_,Option<String>>(0)?,r.get::<_,i64>(1)?,r.get::<_,Option<String>>(2)?,r.get::<_,i64>(3)?)),
+                ).unwrap();
+                ((*id).to_owned(), row.0, row.1, row.2, row.3)
+            })
+            .collect();
+        let before_usage: i64 = db
+            .query_row(
+                "SELECT logical_bytes FROM quota_counter WHERE category='logical.history'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        run(&mut db, 48, &|_, _| {}, &|| {}).unwrap();
+        assert_eq!(
+            db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            49
+        );
+        let (payload,bytes,hash,revision):(String,i64,String,i64)=db.query_row("SELECT payload_json,payload_bytes,body_hash,payload_revision FROM node WHERE id='positive'",[],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).unwrap();
+        let parsed: Value = serde_json::from_str(&payload).unwrap();
+        assert_eq!(parsed["item"]["role"], "user");
+        assert_eq!(parsed["item"]["content"][0]["text"], "summary body");
+        assert_eq!(parsed["source_node_ids"], json!(["source-a", "source-b"]));
+        assert_eq!(bytes, payload.len() as i64);
+        assert_eq!(hash, crate::digest::sha256_hex(payload.as_bytes()));
+        assert_eq!(revision, 1);
+        for (id, raw, bytes, hash, revision) in negative_before {
+            let after: (Option<String>, i64, Option<String>, i64) = db
+                .query_row(
+                    "SELECT payload_json,payload_bytes,body_hash,payload_revision FROM node WHERE id=?1",
+                    [&id],
+                    |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)),
+                )
+                .unwrap();
+            assert_eq!(
+                after,
+                (raw, bytes, hash, revision),
+                "negative candidate changed: {id}"
+            );
+        }
+        let after_sources: Vec<(String,i64,String)> = db.prepare("SELECT source_node_id,ordinal,source_hash FROM replacement_source WHERE replacement_id='replacement-good' ORDER BY ordinal").unwrap().query_map([],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap().collect::<rusqlite::Result<_>>().unwrap();
+        assert_eq!(after_sources, before_sources);
+        let after_source_payloads: Vec<(String, String)> = db
+            .prepare(
+                "SELECT id,payload_json FROM node WHERE id IN ('source-a','source-b') ORDER BY id",
+            )
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(after_source_payloads, before_source_payloads);
+        let after_usage: i64 = db
+            .query_row(
+                "SELECT logical_bytes FROM quota_counter WHERE category='logical.history'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            after_usage,
+            before_usage + payload.len() as i64 - before_payload.len() as i64
+        );
+        run(&mut db, 49, &|_, _| {}, &|| {}).unwrap();
+        assert_eq!(
+            db.query_row(
+                "SELECT payload_revision FROM node WHERE id='positive'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            1
+        );
+        drop(db);
+        for _ in 0..2 {
+            let mut reopened = Connection::open(&path).unwrap();
+            run(&mut reopened, 49, &|_, _| {}, &|| {}).unwrap();
+            let saved: String = reopened
+                .query_row(
+                    "SELECT payload_json FROM node WHERE id='positive'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(saved, payload);
+            assert_eq!(
+                reopened
+                    .query_row(
+                        "SELECT payload_revision FROM node WHERE id='positive'",
+                        [],
+                        |r| r.get::<_, i64>(0)
+                    )
+                    .unwrap(),
+                1
+            );
+        }
+    }
+
+    #[test]
+    fn schema49_payload_write_failure_rolls_back_role_ledger_version_and_accounting() {
+        let mut db = fixture();
+        let before: String = db
+            .query_row(
+                "SELECT payload_json FROM node WHERE id='positive'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let usage: i64 = db
+            .query_row(
+                "SELECT logical_bytes FROM quota_counter WHERE category='logical.history'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        db.execute_batch("CREATE TRIGGER reject_summary_role BEFORE UPDATE OF payload_json ON node WHEN OLD.id='positive' BEGIN SELECT RAISE(ABORT,'injected summary payload fault'); END;").unwrap();
+        assert!(run(&mut db, 48, &|_, _| {}, &|| {}).is_err());
+        assert_eq!(
+            db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            48
+        );
+        assert_eq!(
+            db.query_row(
+                "SELECT count(*) FROM schema_migration WHERE version=49",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0
+        );
+        assert_eq!(
+            db.query_row(
+                "SELECT payload_json FROM node WHERE id='positive'",
+                [],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+            before
+        );
+        assert_eq!(
+            db.query_row(
+                "SELECT logical_bytes FROM quota_counter WHERE category='logical.history'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            usage
+        );
     }
 }

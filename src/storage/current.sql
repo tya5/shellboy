@@ -765,4 +765,5 @@ INSERT INTO schema_migration(version,name) VALUES(47,'0047_drop_selection_nonapp
 PRAGMA user_version=47;
 
 INSERT INTO schema_migration(version,name) VALUES(48,'0048_human_question_path_admission');
-PRAGMA user_version=48;
+INSERT INTO schema_migration(version,name) VALUES(49,'0049_generated_summary_user_role');
+PRAGMA user_version=49;

@@ -114,7 +114,7 @@ pub(super) fn summary_artifact(input: SummaryArtifactInput<'_>) -> SummaryArtifa
         input.epoch,
         input.sources,
     );
-    let mut payload = json!({"item":{"role":"developer","content":[{"type":"input_text","text":input.text}]},"source_node_ids":input.source_ids,"summary_format":FORMAT,"summary_usage":input.usage,"summary_output_limit_exceeded":input.output_limit_exceeded});
+    let mut payload = json!({"item":{"role":"user","content":[{"type":"input_text","text":input.text}]},"source_node_ids":input.source_ids,"summary_format":FORMAT,"summary_usage":input.usage,"summary_output_limit_exceeded":input.output_limit_exceeded});
     if let Some(scope) = input.scope {
         payload["summary_scope"] = json!(scope);
     }
@@ -1665,6 +1665,7 @@ mod tests {
             kept_reasoning_ids: &kept_reasoning_ids,
             reasoning_epoch: Some(snapshot.epoch),
         });
+        assert_eq!(artifact.payload["item"]["role"], "user");
         assert_eq!(
             artifact.input_key,
             summary_key(&snapshot, std::slice::from_ref(&original))
