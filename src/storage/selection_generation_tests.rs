@@ -19,7 +19,7 @@ fn column_exists(db: &Connection) -> bool {
 fn v46_database() -> Connection {
     let db = fresh();
     db.execute_batch(
-        "DELETE FROM schema_migration WHERE version=47;
+        "DELETE FROM schema_migration WHERE version IN (47,48);
          DELETE FROM schema_migration WHERE version=40;
          DROP TRIGGER selection_thread_conflict;
          PRAGMA user_version=39;",
@@ -93,7 +93,7 @@ fn migration_47_drops_runtime_generation_with_rollback_and_preserves_history_and
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
             .unwrap(),
-        47
+        SCHEMA_VERSION
     );
     assert!(!column_exists(&db));
     assert_eq!(
@@ -117,6 +117,15 @@ fn migration_47_drops_runtime_generation_with_rollback_and_preserves_history_and
         )
         .unwrap(),
         "0047_drop_selection_nonappend_generation"
+    );
+    assert_eq!(
+        db.query_row(
+            "SELECT name FROM schema_migration WHERE version=48",
+            [],
+            |row| { row.get::<_, String>(0) }
+        )
+        .unwrap(),
+        "0048_human_question_path_admission"
     );
     assert_eq!(
         db.query_row(
