@@ -151,7 +151,7 @@ async fn incomplete_output_preserves_native_facts_and_cancels_unexecuted_calls()
     );
     assert_eq!(results[0]["exit_code"], json!(saved.1));
     assert_eq!(results[0]["output_complete"], saved.2);
-    assert_eq!(saved.2, false, "the bounded pipe lost output: {saved:#?}");
+    assert!(!saved.2, "the bounded pipe lost output: {saved:#?}");
     assert_eq!(results[0]["reason"].as_str(), saved.3.as_deref());
     let reason = saved
         .3
@@ -178,5 +178,5 @@ async fn incomplete_output_preserves_native_facts_and_cancels_unexecuted_calls()
         !marker.exists(),
         "missing observation must not allow the next side effect"
     );
-    assert_eq!(saved.2, false);
+    assert!(!saved.2);
 }
