@@ -433,7 +433,7 @@ pub fn summary_message_ids(
            SELECT s.source_node_id,src.depth+1,src.sort||'.'||printf('%08d',s.ordinal) FROM src JOIN replacement r ON r.output_node_id=src.node JOIN replacement_source s ON s.replacement_id=r.id WHERE src.depth<8
            LIMIT ?2)
          SELECT n.id FROM src JOIN node n ON n.id=src.node
-         WHERE n.kind NOT IN ('tool_result','assistant_response')
+         WHERE n.kind NOT IN ('tool_result','assistant_response','summary')
            AND (json_extract(n.payload_json,'$.role')='user' OR json_extract(n.payload_json,'$.item.role')='user')
          ORDER BY src.sort",
     )?;

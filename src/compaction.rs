@@ -2938,7 +2938,7 @@ mod tests {
             assert_eq!(after[..=request], before[..=request]);
             assert!(after[..request].iter().any(crate::model::opaque::is_opaque));
             assert_eq!(after.len(), request + 2);
-            assert_eq!(after[request + 1]["role"], "developer");
+            assert_eq!(after[request + 1]["role"], "user");
             // Encoded Anthropic request: the bytes up to the request are a
             // prefix of the old request; nothing signed or tool-shaped follows.
             let (old, new) = (anthropic_wire(&before), anthropic_wire(&after));
