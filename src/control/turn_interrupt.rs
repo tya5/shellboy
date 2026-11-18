@@ -472,6 +472,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(interrupt["requested"], true);
+        acknowledge(&control, &thread, &run).await.unwrap();
         let (held_state, question_selected, reply_state, reply_admission, reply_run, reply_turn, reply_selected, audit) = owner.db.call({
             let thread = thread.clone();
             let held_id = held_id.clone();
