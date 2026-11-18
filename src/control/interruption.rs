@@ -772,9 +772,22 @@ pub(crate) fn consume_staged_captures(
                     .ok_or_else(|| StorageError::Schema("capture row count overflow".into()))?;
                 after = event_id.clone();
             }
-            let revision =
-                crate::history::selection_revision(tx, thread, crate::history::ThreadScope::Live)?;
-            crate::history::append_existing_nodes(tx, thread, revision as u64, &node_ids, at)?;
+            // Preserve the original per-node revision/witness semantics while keeping
+            // records streamed through a bounded page inside this single transaction.
+            for node in &node_ids {
+                let revision = crate::history::selection_revision(
+                    tx,
+                    thread,
+                    crate::history::ThreadScope::Live,
+                )?;
+                crate::history::append_existing_nodes(
+                    tx,
+                    thread,
+                    revision as u64,
+                    std::slice::from_ref(node),
+                    at,
+                )?;
+            }
         }
         if ordinal != row_count || !saw_final_node {
             return Err(StorageError::Schema(

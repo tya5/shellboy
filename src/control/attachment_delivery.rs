@@ -1,5 +1,5 @@
 //! Dedicated attachment provenance is adopted only between complete tool groups.
-use crate::protocol::ApiError;
+use crate::protocol::{ApiError, ErrorCode};
 use rusqlite::{Transaction, params};
 
 // Held inputs keep their original Run assignment. Explicit retry resumes the
@@ -62,6 +62,19 @@ pub fn apply_pending_tx(tx: &Transaction<'_>, thread: &str, now: &str) -> Result
         let origin_pending:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM attachment_delivery d WHERE d.node_id=?1 AND d.thread_id=?2 AND json_extract(d.origin_json,'$.kind')='shell' AND NOT EXISTS(SELECT 1 FROM shell_execution s JOIN tool_call c ON c.operation_id=s.id JOIN tool_group g ON g.id=c.group_id WHERE s.id=json_extract(d.origin_json,'$.execution_id') AND s.owner_run_id=json_extract(d.origin_json,'$.run_id') AND g.state='completed'))",params![node,thread],|r|r.get(0)).map_err(sql)?;
         if origin_pending {
             break;
+        }
+        let valid_source: bool = tx
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM node WHERE id=?1 AND deleted_reason IS NULL AND payload_json IS NOT NULL)",
+                [&node],
+                |row| row.get(0),
+            )
+            .map_err(sql)?;
+        if !valid_source {
+            return Err(ApiError::new(
+                ErrorCode::InvalidState,
+                "Pending attachment provenance is missing",
+            ));
         }
         // Collect the eligible prefix, but append it once so staged human duties
         // can be merged before any message/attachment node becomes selected.
