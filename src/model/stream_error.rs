@@ -25,10 +25,11 @@ enum Context {
     Other,
 }
 
-struct ParsedValue {
-    value: Value,
-    duplicate_relevant_key: bool,
-    untyped_error_candidate: bool,
+pub(super) struct ParsedValue {
+    pub(super) value: Value,
+    pub(super) duplicate_relevant_key: bool,
+    pub(super) untyped_error_candidate: bool,
+    pub(super) ambiguous_output_keys: bool,
 }
 struct ValueSeed(Context);
 
@@ -53,6 +54,7 @@ impl<'de> Visitor<'de> for ValueVisitor {
             value: Value::Bool(value),
             duplicate_relevant_key: false,
             untyped_error_candidate: false,
+            ambiguous_output_keys: false,
         })
     }
     fn visit_i64<E: serde::de::Error>(self, value: i64) -> Result<Self::Value, E> {
@@ -60,6 +62,7 @@ impl<'de> Visitor<'de> for ValueVisitor {
             value: Value::Number(value.into()),
             duplicate_relevant_key: false,
             untyped_error_candidate: false,
+            ambiguous_output_keys: false,
         })
     }
     fn visit_u64<E: serde::de::Error>(self, value: u64) -> Result<Self::Value, E> {
@@ -67,6 +70,7 @@ impl<'de> Visitor<'de> for ValueVisitor {
             value: Value::Number(value.into()),
             duplicate_relevant_key: false,
             untyped_error_candidate: false,
+            ambiguous_output_keys: false,
         })
     }
     fn visit_f64<E: serde::de::Error>(self, value: f64) -> Result<Self::Value, E> {
@@ -75,6 +79,7 @@ impl<'de> Visitor<'de> for ValueVisitor {
             value: Value::Number(number),
             duplicate_relevant_key: false,
             untyped_error_candidate: false,
+            ambiguous_output_keys: false,
         })
     }
     fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<Self::Value, E> {
@@ -82,6 +87,7 @@ impl<'de> Visitor<'de> for ValueVisitor {
             value: Value::String(value.to_owned()),
             duplicate_relevant_key: false,
             untyped_error_candidate: false,
+            ambiguous_output_keys: false,
         })
     }
     fn visit_string<E: serde::de::Error>(self, value: String) -> Result<Self::Value, E> {
@@ -89,6 +95,7 @@ impl<'de> Visitor<'de> for ValueVisitor {
             value: Value::String(value),
             duplicate_relevant_key: false,
             untyped_error_candidate: false,
+            ambiguous_output_keys: false,
         })
     }
     fn visit_none<E: serde::de::Error>(self) -> Result<Self::Value, E> {
@@ -96,6 +103,7 @@ impl<'de> Visitor<'de> for ValueVisitor {
             value: Value::Null,
             duplicate_relevant_key: false,
             untyped_error_candidate: false,
+            ambiguous_output_keys: false,
         })
     }
     fn visit_unit<E: serde::de::Error>(self) -> Result<Self::Value, E> {
@@ -103,6 +111,7 @@ impl<'de> Visitor<'de> for ValueVisitor {
             value: Value::Null,
             duplicate_relevant_key: false,
             untyped_error_candidate: false,
+            ambiguous_output_keys: false,
         })
     }
     fn visit_some<D: serde::Deserializer<'de>>(
@@ -122,12 +131,14 @@ impl<'de> Visitor<'de> for ValueVisitor {
             value: Value::Array(values),
             duplicate_relevant_key: duplicate,
             untyped_error_candidate: false,
+            ambiguous_output_keys: false,
         })
     }
     fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
         let mut values = Map::new();
         let mut duplicate = false;
         let mut untyped_error_candidate = false;
+        let mut ambiguous_output_keys = false;
         while let Some(key) = map.next_key::<String>()? {
             let relevant = match self.0 {
                 Context::Root => matches!(key.as_str(), "type" | "error"),
@@ -135,8 +146,13 @@ impl<'de> Visitor<'de> for ValueVisitor {
                 Context::Error => key == "code",
                 Context::Other => false,
             };
-            if relevant && values.contains_key(&key) {
-                duplicate = true;
+            let output_key = matches!(
+                (self.0, key.as_str()),
+                (Context::Root, "type" | "response") | (Context::Response, "output")
+            );
+            if (relevant || output_key) && values.contains_key(&key) {
+                duplicate |= relevant;
+                ambiguous_output_keys |= output_key;
             }
             let child_context = match (self.0, key.as_str()) {
                 (Context::Root, "error") | (Context::Response, "error") => Context::Error,
@@ -145,6 +161,7 @@ impl<'de> Visitor<'de> for ValueVisitor {
             };
             let value = map.next_value_seed(ValueSeed(child_context))?;
             duplicate |= value.duplicate_relevant_key;
+            ambiguous_output_keys |= value.ambiguous_output_keys;
             if matches!(self.0, Context::Root)
                 && key == "error"
                 && matches!(value.value, Value::Object(_) | Value::String(_))
@@ -158,20 +175,17 @@ impl<'de> Visitor<'de> for ValueVisitor {
             value: Value::Object(values),
             duplicate_relevant_key: duplicate,
             untyped_error_candidate,
+            ambiguous_output_keys,
         })
     }
 }
 
-/// Parse a bounded SSE frame once, retaining only ambiguity in envelope/status keys.
-pub(super) fn parse_frame(bytes: &[u8]) -> Result<(Value, bool, bool), serde_json::Error> {
+/// Parse a bounded SSE frame, retaining key ambiguity before values are overwritten.
+pub(super) fn parse_frame(bytes: &[u8]) -> Result<ParsedValue, serde_json::Error> {
     let mut deserializer = serde_json::Deserializer::from_slice(bytes);
     let parsed = ValueSeed(Context::Root).deserialize(&mut deserializer)?;
     deserializer.end()?;
-    Ok((
-        parsed.value,
-        parsed.duplicate_relevant_key,
-        parsed.untyped_error_candidate,
-    ))
+    Ok(parsed)
 }
 
 pub(super) fn recognized_untyped_error(value: &Value) -> bool {

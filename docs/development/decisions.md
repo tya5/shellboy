@@ -4493,6 +4493,10 @@ metadata with empty `output` on `response.created` and `response.in_progress`;
 a closed key set rejects ordinary metadata without improving output detection
 for supported events. Remove the proof rather than expanding the allowlist.
 Keep the strict live terminal envelope and the parser/driver no-output checks.
+An independent source review found that last-key-wins decoding can hide output
+behind a duplicate `type`, `response`, or `response.output`. Retain a retry-only
+ambiguity veto for those keys in the existing frame decoder, not a new metadata
+grammar. Do not use that veto to change the retained output or provider status.
 Unknown event shapes are not proof of output; an unobserved partial response
 may be discarded and the provider may charge twice, as with HTTP 5xx retry.
 Retry does not execute an incomplete tool call.

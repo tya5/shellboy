@@ -2970,6 +2970,36 @@ async fn untyped_terminal_sse_retry_fails_closed_for_ambiguous_or_nontransient_e
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn untyped_terminal_sse_does_not_retry_after_output_key_overwrite() {
+    // Each duplicate can hide output behind a metadata-only normalized event.
+    for metadata in [
+        r#"{"type":"response.created","response":{"output":[{}]},"response":{"output":[]}}"#,
+        r#"{"type":"response.created","response":{"output":[{}],"output":[]}}"#,
+        r#"{"type":"response.output_item.added","type":"response.created","response":{"output":[]}}"#,
+    ] {
+        let prefix = format!("data: {metadata}\n\n");
+        let mut fixture = Fixture::new(2, 10, 5_000).await;
+        fixture
+            .incoming()
+            .await
+            .reply
+            .send(terminal_sse(&prefix, TERMINAL_SSE_500, ""))
+            .ok()
+            .unwrap();
+        assert_eq!(fixture.settled().await, "recovery_wait", "{metadata}");
+        let attempts = fixture.attempts().await;
+        assert_eq!(attempts.len(), 1);
+        let failure = attempts[0].1.as_ref().unwrap();
+        assert_terminal_stream_failure(failure, Some(500));
+        assert_eq!(failure["completed_items"], json!({}));
+        assert!(failure.get("automatic_retry").is_none());
+        assert_eq!(fixture_request_log_lines(&fixture), 1);
+        fixture.no_more_requests().await;
+        fixture.close().await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn untyped_terminal_sse_does_not_retry_after_invalid_json() {
     let prefix = "data: {\"error\":{\"code\":\"599\"}\n\n";
     let mut fixture = Fixture::new(2, 10, 5_000).await;

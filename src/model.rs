@@ -570,6 +570,7 @@ struct DecodedEvent {
     duplicate_relevant_key: bool,
     untyped_error_candidate: bool,
     strict_untyped_error: bool,
+    ambiguous_output_keys: bool,
 }
 struct DecodeFailure {
     error: ModelError,
@@ -667,28 +668,28 @@ impl SseDecoder {
                 if !self.data.is_empty() {
                     self.data.pop();
                     if self.data != b"[DONE]" {
-                        let (event, duplicate_relevant_key, untyped_error_candidate) =
-                            match stream_error::parse_frame(&self.data) {
-                                Ok(parsed) => parsed,
-                                Err(_) => {
-                                    return Err(Box::new(DecodeFailure {
-                                        error: ModelError::new(
-                                            "protocol",
-                                            "Malformed UTF-8/JSON in SSE",
-                                        ),
-                                        events,
-                                    }));
-                                }
-                            };
+                        let parsed = match stream_error::parse_frame(&self.data) {
+                            Ok(parsed) => parsed,
+                            Err(_) => {
+                                return Err(Box::new(DecodeFailure {
+                                    error: ModelError::new(
+                                        "protocol",
+                                        "Malformed UTF-8/JSON in SSE",
+                                    ),
+                                    events,
+                                }));
+                            }
+                        };
                         self.json_events += 1;
                         let decoded = DecodedEvent {
                             strict_untyped_error: check_untyped_envelope
-                                && !duplicate_relevant_key
-                                && stream_error::recognized_untyped_error(&event)
+                                && !parsed.duplicate_relevant_key
+                                && stream_error::recognized_untyped_error(&parsed.value)
                                 && is_strict_untyped_stream_error(&self.data),
-                            value: event,
-                            duplicate_relevant_key,
-                            untyped_error_candidate,
+                            value: parsed.value,
+                            duplicate_relevant_key: parsed.duplicate_relevant_key,
+                            untyped_error_candidate: parsed.untyped_error_candidate,
+                            ambiguous_output_keys: parsed.ambiguous_output_keys,
                         };
                         let stop = terminal(&decoded);
                         events.push(decoded);
@@ -781,6 +782,7 @@ pub struct ResponseStream {
     total_differences: usize,
     last_event: Option<&'static str>,
     output_observed: bool,
+    ambiguous_output_keys: bool,
 }
 impl ResponseStream {
     /// Parsed events can be persisted/previewed. Tools are never started here.
@@ -813,6 +815,8 @@ impl ResponseStream {
             let event = decoded.value;
             let classification = classify_stream_event(&event);
             self.output_observed |= classification != StreamEventKind::Metadata;
+            // Duplicate output-bearing keys can hide output in the normalized event.
+            self.ambiguous_output_keys |= decoded.ambiguous_output_keys;
             if let Some(delta) = event.get("delta").and_then(Value::as_str) {
                 match classification {
                     StreamEventKind::TextDelta => self.partial_text.push_str(delta),
@@ -908,6 +912,7 @@ impl ResponseStream {
                     let mut error =
                         ModelError::stream_provider(&event, decoded.duplicate_relevant_key);
                     error.untyped_stream_error_without_output_prefix = decoded.strict_untyped_error
+                        && !self.ambiguous_output_keys
                         && !self.has_output()
                         && self.decoder.done_markers == 0
                         && error.stream_provider_status.is_some();

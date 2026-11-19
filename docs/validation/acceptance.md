@@ -12,11 +12,13 @@ below describes a historical prefix policy, not the #315 contract.
 Authored, not run: `full_response_metadata_before_untyped_500_uses_conversation_retry_budget`
 feeds both full active metadata frames and the terminal error, checks the
 conversation retry decision and existing budget, and does not use a provider.
-Integration source retires the superseded prefix-only veto expectations and
-retains terminal/invalid JSON vetoes, with explicit `[DONE]` and item/part
-observation controls. No build, formatting, test execution, CI, or real provider
-validation has been performed for #315. Native validation requires separate
-admission.
+Integration source retires the superseded metadata grammar vetoes and retains
+terminal/invalid JSON vetoes, with explicit `[DONE]` and item/part observation
+controls. The source-review follow-up restores the hidden-output no-resend
+cases for duplicate root `response` and nested `output`, and adds duplicate
+root `type`, without suppressing the later terminal's status witness. No build,
+formatting, test execution, CI, or real provider validation has been performed
+for #315. Native validation requires separate admission.
 
 ## Core U2 proactive Driver/Stop causal repair (bounded clean-source evidence)
 

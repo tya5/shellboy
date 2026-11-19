@@ -87,7 +87,10 @@ an untyped terminal object containing only an `error` object with an exact
 error object permits only optional string/null `message`, `type`, and `param`.
 Earlier frames are evaluated by the existing output observation, not by a
 separate metadata grammar (#315). Full Response metadata on `response.created`
-and `response.in_progress` is not itself output.
+and `response.in_progress` is not itself output. Duplicate keys that can hide
+output (`type` or `response` at the event root, or `response.output`) are detected
+before JSON normalization and veto this exception without changing partial-output
+handling.
 
 No output observation, retained text/reasoning or completed items are allowed,
 even if `response_retry_partial` is enabled. A preceding `[DONE]` marker, typed
