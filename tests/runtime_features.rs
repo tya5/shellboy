@@ -4682,15 +4682,6 @@ struct RawReportReadback {
     scope: (String, String, i64),
 }
 
-#[derive(Clone, Copy)]
-pub(super) enum FailureSlotSeed {
-    Malformed64,
-    Uppercase64,
-    OversizeText,
-    Blob,
-    InvalidUtf8,
-}
-
 async fn ax_growing_turn_summary_requests(
     summary_reply: fn() -> (u16, Value),
     retries: u8,

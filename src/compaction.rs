@@ -2484,6 +2484,147 @@ mod tests {
         db.shutdown().await.unwrap();
     }
     #[tokio::test]
+    async fn unknown_closed_failure_slot_survives_eligible_provider_veto() {
+        use tokio::{
+            io::{AsyncReadExt, AsyncWriteExt},
+            net::TcpListener,
+        };
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut bytes = Vec::new();
+            let mut chunk = [0; 4096];
+            let request = loop {
+                let n = stream.read(&mut chunk).await.unwrap();
+                assert!(n > 0);
+                bytes.extend_from_slice(&chunk[..n]);
+                if let Some(at) = bytes.windows(4).position(|part| part == b"\r\n\r\n") {
+                    let headers = String::from_utf8_lossy(&bytes[..at]);
+                    let length: usize = headers
+                        .lines()
+                        .find_map(|line| {
+                            line.to_lowercase()
+                                .strip_prefix("content-length:")
+                                .map(|value| value.trim().parse().unwrap())
+                        })
+                        .unwrap();
+                    if bytes.len() >= at + 4 + length {
+                        assert!(headers.starts_with("POST /v1/responses "));
+                        break serde_json::from_slice::<Value>(&bytes[at + 4..at + 4 + length])
+                            .unwrap();
+                    }
+                }
+            };
+            let body =
+                r#"{"error":{"code":"invalid_request_error","message":"synthetic auth veto"}}"#;
+            stream
+                .write_all(format!("HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes())
+                .await
+                .unwrap();
+            request
+        });
+        let (_root, db) = database().await;
+        db.call(|db| {
+            let tx = db.transaction()?;
+            tx.execute_batch("INSERT INTO run(id,thread_id,state,created_at)VALUES('old-run','t','completed','now'),('live-run','t','live','now');
+                INSERT INTO turn(id,thread_id,run_id,state,created_at,generation)VALUES('old-turn','t','old-run','completed','now',0),('current','t','live-run','running','now',7);")?;
+            for id in ["one", "two"] {
+                history::append_node(
+                    &tx,
+                    "t",
+                    id,
+                    Some("old-turn"),
+                    "message",
+                    &json!({"role":"user","content":id.repeat(100)}),
+                    "now",
+                )?;
+            }
+            let key = single_request::Region::Closed.key("t");
+            tx.execute(
+                "INSERT INTO app_meta(key,value) VALUES(?1,?2)",
+                params![key, "g".repeat(64)],
+            )?;
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        let mut config = summary_config(format!("http://{address}/v1"));
+        config
+            .connections
+            .get_mut("fixture")
+            .unwrap()
+            .response_max_retries = 2;
+        let owner_lifetime = CancellationToken::new();
+        let compactor = Compactor::with_owner_instance(
+            db.clone(),
+            Arc::new(config.clone()),
+            Arc::new(HttpClients::new(&config)),
+            "synthetic-owner".into(),
+            owner_lifetime,
+        );
+        let snapshot = compactor.snapshot("t", true).await.unwrap();
+        assert_eq!(snapshot.run_fence.as_deref(), Some("live-run"));
+        assert_eq!(
+            snapshot.turn_fence.as_ref().map(|fence| fence.0.as_str()),
+            Some("current")
+        );
+        assert_eq!(snapshot.turn_fence.as_ref().map(|fence| fence.1), Some(7));
+        let error = compactor
+            .summarize_snapshot(
+                snapshot,
+                0..2,
+                CancellationToken::new(),
+                None,
+                Some(AutomaticStage {
+                    attempt_id: "trigger-attempt".into(),
+                    token: "synthetic-token".into(),
+                    stage: "closed_summary",
+                }),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, ErrorCode::InvalidState);
+        assert!(matches!(
+            discard::cause(&error),
+            discard::Outcome::Failed {
+                reason: discard::FailureReason::ProviderError,
+                origin: discard::FailureOrigin::ProviderResponse,
+                http_status: Some(401),
+                ..
+            }
+        ));
+        let request = server.await.unwrap();
+        assert_eq!(request["store"], false);
+        assert_eq!(request["tools"], json!([]));
+        assert_eq!(error.details.as_ref().unwrap()["model_requests"], 1);
+        let key = single_request::Region::Closed.key("t");
+        db.call(move |db| {
+            let (storage_type, bytes): (String, Vec<u8>) = db.query_row(
+                "SELECT typeof(value),CAST(value AS BLOB) FROM app_meta WHERE key=?1",
+                [&key],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )?;
+            assert_eq!(storage_type, "text");
+            assert_eq!(bytes, vec![b'g'; 64]);
+            assert_eq!(
+                db.query_row(
+                    "SELECT count(*) FROM app_meta WHERE key IN ('compact.deterministic_range_failure.closed.t','compact.deterministic_range_failure.active.t')",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )?,
+                1,
+                "the invalid closed slot stays the only failure-memory slot"
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+        db.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
     async fn explicit_middle_summary_retains_prefix_suffix_and_exact_provenance() {
         let raw = json!({"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"## Goal\nTask\n## Constraints\nNone\n## Current state\nActive\n## Open issues and next steps\nContinue\n## Key references\nSource"}]}]});
         let (url, server) = summary_proxy(vec![raw]).await;

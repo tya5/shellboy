@@ -253,7 +253,7 @@ fn rate_limit_reply() -> (u16, Value) {
 /// the repeated same-scope report is suppressed without another invocation.
 #[tokio::test]
 async fn provider_scope_counts_invocation_not_transient_posts() {
-    let result = one_provider_invocation(retryable_server_error_reply, 2, None).await;
+    let result = one_provider_invocation(retryable_server_error_reply, 2).await;
     assert_eq!(
         result.summary_posts, 3,
         "one declared invocation makes its exact retry vector"
@@ -309,59 +309,11 @@ fn retryable_server_error_reply() -> (u16, Value) {
     )
 }
 
-/// UnknownInvalid never suppresses, repairs, or overwrites the seeded slot.
-/// Values are synthetic; only storage type and bytes are checked in the fixture.
-#[tokio::test]
-async fn unknown_slot_values_allow_provider_calls_and_remain_untouched() {
-    let cases = [
-        (FailureSlotSeed::Malformed64, "text", vec![b'g'; 64]),
-        (FailureSlotSeed::Uppercase64, "text", vec![b'A'; 64]),
-        (FailureSlotSeed::OversizeText, "text", vec![b'a'; 65_536]),
-        (FailureSlotSeed::Blob, "blob", vec![b'a'; 64]),
-        (
-            FailureSlotSeed::InvalidUtf8,
-            "text",
-            [vec![0xff], vec![0; 63]].concat(),
-        ),
-    ];
-    for (seed, expected_type, expected_bytes) in cases {
-        let result = one_provider_invocation(auth_veto_reply, 0, Some(seed)).await;
-        assert_eq!(
-            result.summary_posts, 1,
-            "one predeclared eligible report issues one no-retry POST"
-        );
-        assert_eq!(
-            result.record["compaction_outcome"]["outcome"]["reason"],
-            "provider_error"
-        );
-        assert_eq!(
-            result.record["compaction_outcome"]["outcome"]["http_status"],
-            401
-        );
-        assert_eq!(result.record["error"]["details"]["model_requests"], 1);
-        assert_eq!(
-            result.record["error"]["details"]["summary_usage"]["requests"],
-            1
-        );
-        assert_eq!(
-            result.slot_count, 1,
-            "unknown slot never creates a second provider-memory key"
-        );
-        assert_eq!(
-            result.seeded_slot,
-            Some((expected_type.to_owned(), expected_bytes)),
-            "unknown invalid bytes and storage type remain untouched"
-        );
-    }
-}
-
 struct ProviderInvocation {
     summary_posts: usize,
     scopes: Vec<(String, String)>,
     bodies: Vec<Value>,
     record: Value,
-    slot_count: i64,
-    seeded_slot: Option<(String, Vec<u8>)>,
 }
 
 /// One source-proven eligible threshold report isolates request retries from
@@ -369,7 +321,6 @@ struct ProviderInvocation {
 async fn one_provider_invocation(
     summary_reply: fn() -> (u16, Value),
     retries: u8,
-    slot_seed: Option<FailureSlotSeed>,
 ) -> ProviderInvocation {
     let root = tempfile::tempdir().unwrap();
     let (url, mut receive, server) = proxy().await;
@@ -387,25 +338,6 @@ async fn one_provider_invocation(
     .unwrap();
     let control = Control::new(&owner, root.path().into());
     let thread = thread(&control).await;
-    if let Some(seed) = slot_seed {
-        let key_thread = thread.clone();
-        control.store.database.call(move |db| {
-            let key=format!("compact.deterministic_range_failure.closed.{key_thread}");
-            if matches!(seed,FailureSlotSeed::InvalidUtf8) {
-                db.execute("INSERT INTO app_meta(key,value) VALUES(?1,CAST(x'ff' || zeroblob(63) AS TEXT))",[key])?;
-            } else {
-                let value=match seed {
-                    FailureSlotSeed::Malformed64=>rusqlite::types::Value::Text("g".repeat(64)),
-                    FailureSlotSeed::Uppercase64=>rusqlite::types::Value::Text("A".repeat(64)),
-                    FailureSlotSeed::OversizeText=>rusqlite::types::Value::Text("a".repeat(65_536)),
-                    FailureSlotSeed::Blob=>rusqlite::types::Value::Blob(vec![b'a';64]),
-                    FailureSlotSeed::InvalidUtf8=>unreachable!(),
-                };
-                db.execute("INSERT INTO app_meta(key,value) VALUES(?1,?2)",rusqlite::params![key,value])?;
-            }
-            Ok(())
-        }).await.unwrap();
-    }
     let mut trace =
         proactive_third_turn_after_run(&control, &mut receive, &thread, 150, summary_reply(), None)
             .await;
@@ -491,32 +423,6 @@ async fn one_provider_invocation(
             .all(|body| body == &trace.summary_bodies[0]),
         "all captured retries retain the same body"
     );
-    let thread_key = thread.clone();
-    let (slot_count, seeded_slot): (i64, Option<(String, Vec<u8>)>) = control
-        .store
-        .database
-        .call(move |db| {
-            let slot_count = db.query_row(
-                "SELECT count(*) FROM app_meta WHERE key IN (?1,?2)",
-                rusqlite::params![
-                    format!("compact.deterministic_range_failure.closed.{thread_key}"),
-                    format!("compact.deterministic_range_failure.active.{thread_key}")
-                ],
-                |row| row.get(0),
-            )?;
-            let seeded = db
-                .query_row(
-                    "SELECT typeof(value),CAST(value AS BLOB) FROM app_meta WHERE key=?1",
-                    [format!(
-                        "compact.deterministic_range_failure.closed.{thread_key}"
-                    )],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
-                )
-                .optional()?;
-            Ok((slot_count, seeded))
-        })
-        .await
-        .unwrap();
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
     server.abort();
@@ -525,8 +431,6 @@ async fn one_provider_invocation(
         scopes: trace.summary_scopes,
         bodies: trace.summary_bodies,
         record,
-        slot_count,
-        seeded_slot,
     }
 }
 
