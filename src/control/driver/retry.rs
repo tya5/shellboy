@@ -5,14 +5,10 @@ use std::time::Duration;
 
 pub(super) use crate::model::retry_class::{MAX_RETRY_AFTER, RetryPolicy, classify_retry};
 
-fn classify_conversation_retry(failure: &AttemptFailure, retry_partial: bool) -> RetryPolicy {
+fn classify_conversation_retry(failure: &AttemptFailure) -> RetryPolicy {
     let AttemptFailure { error, facts, .. } = failure;
     if facts.terminal_received
         && matches!(facts.status, Some(200..=299))
-        && facts.received != ResponseReceived::Output
-        && failure.partial_text.is_empty()
-        && failure.partial_reasoning.is_empty()
-        && failure.completed_items.is_empty()
         && error.kind == "provider"
         && !error.is_context_limit()
         && !error.is_thinking_binding()
@@ -31,23 +27,18 @@ fn classify_conversation_retry(failure: &AttemptFailure, retry_partial: bool) ->
             return RetryPolicy::Deferred(delay);
         }
         return RetryPolicy::Retry {
-            partial_output: false,
+            partial_output: facts.received == ResponseReceived::Output,
         };
     }
-    classify_retry(error, facts, retry_partial)
+    classify_retry(error, facts)
 }
 
 /// Large-input activation is distinct from the ordinary transient retry list:
-/// every 5xx may benefit, but terminal output, partial opt-out and deferred
+/// every 5xx may benefit, but terminal reception and deferred
 /// Retry-After still prohibit an automatic new request.
-fn eligible_trim_failure(
-    error: &model::ModelError,
-    facts: &ResponseFacts,
-    retry_partial: bool,
-) -> bool {
+fn eligible_trim_failure(error: &model::ModelError, facts: &ResponseFacts) -> bool {
     if facts.terminal_received
         || error.is_context_limit()
-        || (facts.received == ResponseReceived::Output && !retry_partial)
         || facts
             .retry_after
             .is_some_and(|delay| delay > MAX_RETRY_AFTER)
@@ -265,7 +256,7 @@ pub(super) async fn retry_or_recover<'a>(
             return Ok(());
         }
     }
-    let policy = classify_conversation_retry(&failure, connection.response_retry_partial);
+    let policy = classify_conversation_retry(&failure);
     // Only defer explicit provider reset facts beyond the complete remaining
     // retry schedule; missing or short reset data keeps the ordinary policy.
     let retryable_usage_limit = failure
@@ -389,11 +380,7 @@ pub(super) async fn retry_or_recover<'a>(
             trim_not_applied = Some(observation);
         } else if budget.used >= 1
             && connection.auto_trim_on_disconnect
-            && eligible_trim_failure(
-                &failure.error,
-                &failure.facts,
-                connection.response_retry_partial,
-            )
+            && eligible_trim_failure(&failure.error, &failure.facts)
         {
             trim_not_applied = Some(if open_loop {
                 // #182: the large-input trim is a selective edit; it waits.
@@ -519,13 +506,13 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            classify_conversation_retry(&failure, false),
+            classify_conversation_retry(&failure),
             RetryPolicy::Retry {
                 partial_output: false,
             }
         );
         assert_eq!(
-            classify_retry(&failure.error, &failure.facts, true),
+            classify_retry(&failure.error, &failure.facts),
             RetryPolicy::Ineligible,
             "the shared summary classifier still vetoes the same live terminal"
         );
@@ -534,67 +521,14 @@ mod tests {
             saved["stream_provider_status"],
             json!({"value":599,"source":"stream_error_code"})
         );
-        assert!(
-            saved
-                .get("untyped_stream_error_without_output_prefix")
-                .is_none()
-        );
-        saved["untyped_stream_error_without_output_prefix"] = json!(true);
+        assert!(saved.get("strict_untyped_stream_error_before_done").is_none());
+        saved["strict_untyped_stream_error_before_done"] = json!(true);
         failure.error = serde_json::from_value(saved).unwrap();
         assert!(failure.error.untyped_stream_error_witness().is_none());
         assert_eq!(
-            classify_conversation_retry(&failure, true),
+            classify_conversation_retry(&failure),
             RetryPolicy::Ineligible
         );
-    }
-
-    #[test]
-    fn full_response_metadata_before_untyped_500_uses_conversation_retry_budget() {
-        let response = json!({
-            "id": "resp_fixture", "object": "response", "created_at": 1,
-            "model": "fixture", "status": "in_progress", "output": [],
-            "error": null, "incomplete_details": null, "usage": null,
-            "instructions": "Fixture instructions", "tools": [],
-            "tool_choice": "auto", "parallel_tool_calls": true,
-            "reasoning": {"effort": "medium", "summary": null},
-            "text": {"format": {"type": "text"}}, "metadata": {},
-            "temperature": 1.0, "top_p": 1.0, "max_output_tokens": null,
-            "previous_response_id": null, "store": false, "truncation": "disabled"
-        });
-        let created =
-            json!({"type": "response.created", "sequence_number": 0, "response": &response});
-        let in_progress =
-            json!({"type": "response.in_progress", "sequence_number": 1, "response": &response});
-        let error = r#"{"error":{"code":"500","message":"Fixture upstream closed","param":"None","type":"None"}}"#;
-        let mut stream = model::ResponseStream::default();
-        stream
-            .push(format!("data: {created}\n\ndata: {in_progress}\n\ndata: {error}\n\n").as_bytes())
-            .unwrap();
-        assert!(!stream.has_output());
-        assert!(stream.partial_text.is_empty());
-        assert!(stream.partial_reasoning.is_empty());
-        assert!(stream.completed_items.is_empty());
-        let facts = ResponseFacts {
-            status: Some(200),
-            terminal_received: stream.is_terminal(),
-            received: ResponseReceived::Metadata,
-            ..Default::default()
-        };
-        let mut failure = AttemptFailure::from(stream.finish(false).unwrap_err());
-        failure.facts = facts;
-        assert_eq!(
-            classify_conversation_retry(&failure, false),
-            RetryPolicy::Retry {
-                partial_output: false,
-            }
-        );
-        let budget = RetryBudget::default();
-        let cap = Duration::from_secs(60);
-        assert_eq!(
-            budget.delay(8, cap, facts.retry_after),
-            Some(Duration::from_secs(1))
-        );
-        assert_eq!(budget.delay(0, cap, facts.retry_after), None);
     }
 
     #[test]
@@ -696,7 +630,7 @@ mod tests {
         }
     }
     #[test]
-    fn one_policy_classifies_error_status_reception_terminal_and_connection_optout() {
+    fn one_policy_classifies_error_status_reception_and_terminal() {
         use ResponseReceived::{Metadata, None as NoResponse, Output};
         for kind in [
             "http",
@@ -725,43 +659,40 @@ mod tests {
             ] {
                 for received in [NoResponse, Metadata, Output] {
                     for terminal_received in [false, true] {
-                        for partial_enabled in [false, true] {
-                            let facts = ResponseFacts {
-                                status,
-                                received,
-                                terminal_received,
-                                http_error_complete: false,
-                                admission_wait_ms: None,
-                                retry_after: None,
-                                retry_after_present: false,
-                                http_observation: None,
+                        let facts = ResponseFacts {
+                            status,
+                            received,
+                            terminal_received,
+                            http_error_complete: false,
+                            admission_wait_ms: None,
+                            retry_after: None,
+                            retry_after_present: false,
+                            http_observation: None,
+                        };
+                        let error = model::ModelError::new(kind, "fixture");
+                        let expected = !terminal_received
+                            && match kind {
+                                "http" | "provider" => {
+                                    matches!(status, Some(429 | 500..=599))
+                                }
+                                "transport" | "timeout" | "incomplete" => {
+                                    status.is_none()
+                                        || status == Some(200)
+                                        || matches!(status, Some(429 | 500..=599))
+                                }
+                                _ => false,
                             };
-                            let error = model::ModelError::new(kind, "fixture");
-                            let expected = !terminal_received
-                                && (received != Output || partial_enabled)
-                                && match kind {
-                                    "http" | "provider" => {
-                                        matches!(status, Some(429 | 500..=599))
-                                    }
-                                    "transport" | "timeout" | "incomplete" => {
-                                        status.is_none()
-                                            || status == Some(200)
-                                            || matches!(status, Some(429 | 500..=599))
-                                    }
-                                    _ => false,
-                                };
-                            assert_eq!(
-                                classify_retry(&error, &facts, partial_enabled),
-                                if expected {
-                                    RetryPolicy::Retry {
-                                        partial_output: received == Output,
-                                    }
-                                } else {
-                                    RetryPolicy::Ineligible
-                                },
-                                "{kind} {facts:?} partial={partial_enabled}"
-                            );
-                        }
+                        assert_eq!(
+                            classify_retry(&error, &facts),
+                            if expected {
+                                RetryPolicy::Retry {
+                                    partial_output: received == Output,
+                                }
+                            } else {
+                                RetryPolicy::Ineligible
+                            },
+                            "{kind} {facts:?}"
+                        );
                     }
                 }
             }
@@ -773,7 +704,7 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            classify_retry(&error, &facts, true),
+            classify_retry(&error, &facts),
             RetryPolicy::Retry {
                 partial_output: false
             }
@@ -791,14 +722,14 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            classify_retry(&limit_error, &limit_facts, true),
+            classify_retry(&limit_error, &limit_facts),
             RetryPolicy::Retry {
                 partial_output: false
             }
         );
         limit_error.usage_limit = None;
         assert_eq!(
-            classify_retry(&limit_error, &limit_facts, true),
+            classify_retry(&limit_error, &limit_facts),
             RetryPolicy::Ineligible
         );
         limit_error.usage_limit = Some(Box::new(crate::model::usage_limit::UsageLimit {
@@ -809,14 +740,14 @@ mod tests {
         }));
         limit_facts.retry_after = Some(Duration::from_secs(601));
         assert_eq!(
-            classify_retry(&limit_error, &limit_facts, true),
+            classify_retry(&limit_error, &limit_facts),
             RetryPolicy::Deferred(Duration::from_secs(601))
         );
         error.provider_code = None;
         for seconds in [0, 600, 601] {
             facts.retry_after = Some(Duration::from_secs(seconds));
             assert_eq!(
-                classify_retry(&error, &facts, true),
+                classify_retry(&error, &facts),
                 if seconds > 600 {
                     RetryPolicy::Deferred(Duration::from_secs(seconds))
                 } else {
@@ -838,19 +769,24 @@ mod trim_budget_tests {
         e.provider_code = Some("context_length_exceeded".into());
         let mut facts = ResponseFacts::default();
         assert_eq!(
-            classify_retry(&e, &facts, true),
+            classify_retry(&e, &facts),
             RetryPolicy::Retry {
                 partial_output: false
             }
         );
         facts.retry_after = Some(Duration::from_secs(601));
         assert_eq!(
-            classify_retry(&e, &facts, true),
+            classify_retry(&e, &facts),
             RetryPolicy::Deferred(Duration::from_secs(601))
         );
         facts.retry_after = None;
         facts.received = ResponseReceived::Output;
-        assert_eq!(classify_retry(&e, &facts, false), RetryPolicy::Ineligible);
+        assert_eq!(
+            classify_retry(&e, &facts),
+            RetryPolicy::Retry {
+                partial_output: true,
+            }
+        );
         let mut b = RetryBudget::default();
         b.observe("t", 0);
         b.used = 8;
@@ -877,32 +813,27 @@ mod trim_budget_tests {
             assert!(eligible_trim_failure(
                 &model::ModelError::new("provider", "fixture"),
                 &facts,
-                true
             ));
             assert!(eligible_trim_failure(
                 &model::ModelError::new("timeout", "error body stalled"),
                 &facts,
-                true
             ));
         }
         facts.status = Some(429);
         assert!(!eligible_trim_failure(
             &model::ModelError::new("timeout", "rate limit body stalled"),
             &facts,
-            true
         ));
         facts.status = Some(200);
         assert!(!eligible_trim_failure(
             &model::ModelError::new("timeout", "body idle"),
             &facts,
-            true
         ));
         facts.status = None;
         facts.http_observation.as_mut().unwrap().phase = HttpPhase::AwaitingHeadersDeliveryUnknown;
         assert!(eligible_trim_failure(
             &model::ModelError::new("timeout", "header timeout"),
             &facts,
-            true
         ));
         facts.http_observation.as_mut().unwrap().phase = HttpPhase::UploadSourceIncomplete;
         facts
@@ -913,7 +844,6 @@ mod trim_budget_tests {
         assert!(eligible_trim_failure(
             &model::ModelError::new("timeout", "upload incomplete"),
             &facts,
-            true
         ));
         facts.http_observation.as_mut().unwrap().phase = HttpPhase::BeforeBodySource;
         facts
@@ -924,15 +854,14 @@ mod trim_budget_tests {
         assert!(!eligible_trim_failure(
             &model::ModelError::new("transport", "connect failed"),
             &facts,
-            true
         ));
         let setup = ResponseFacts::default();
         let setup_error =
             model::ModelError::new("transport", "client reconstruction failed before sending");
-        assert!(!eligible_trim_failure(&setup_error, &setup, true));
+        assert!(!eligible_trim_failure(&setup_error, &setup));
         assert!(
             matches!(
-                classify_retry(&setup_error, &setup, true),
+                classify_retry(&setup_error, &setup),
                 RetryPolicy::Retry { .. }
             ),
             "failure before transport observation retains ordinary retry without spending trim"
@@ -943,21 +872,18 @@ mod trim_budget_tests {
         assert!(!eligible_trim_failure(
             &model::ModelError::new("provider", "fixture"),
             &facts,
-            true
         ));
         facts.retry_after = None;
         facts.received = ResponseReceived::Output;
-        assert!(!eligible_trim_failure(
+        assert!(eligible_trim_failure(
             &model::ModelError::new("provider", "fixture"),
             &facts,
-            false
         ));
         facts.received = ResponseReceived::None;
         facts.terminal_received = true;
         assert!(!eligible_trim_failure(
             &model::ModelError::new("provider", "fixture"),
             &facts,
-            true
         ));
     }
 }

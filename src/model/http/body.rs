@@ -145,7 +145,7 @@ pub(super) async fn http_error_observed(
                 })
                 .map(Box::new),
             stream_provider_status: None,
-            untyped_stream_error_without_output_prefix: false,
+            strict_untyped_stream_error_before_done: false,
         },
     };
     if error.message.is_empty() {

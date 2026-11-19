@@ -510,14 +510,12 @@ fn response_retries_have_defaults_and_independent_connection_overrides() {
     let defaults = Connection::default();
     assert_eq!(defaults.response_max_retries, 8);
     assert_eq!(defaults.response_retry_max_delay_ms, 60_000);
-    assert!(defaults.response_retry_partial);
     let direct: Connection = toml::from_str("base_url='https://example.test/v1'").unwrap();
     assert_eq!(direct.response_max_retries, 8);
     assert_eq!(direct.response_retry_max_delay_ms, 60_000);
-    assert!(direct.response_retry_partial);
     let config = Config::parse(
         "[connections.defaulted]\nbase_url='https://example.test/v1'\n\
-         [connections.disabled]\nbase_url='https://example.test/v1'\nresponse_max_retries=0\nresponse_retry_max_delay_ms=1\nresponse_retry_partial=false\n\
+         [connections.disabled]\nbase_url='https://example.test/v1'\nresponse_max_retries=0\nresponse_retry_max_delay_ms=1\n\
          [connections.maximum]\nbase_url='https://example.test/v1'\nresponse_max_retries=20\nresponse_retry_max_delay_ms=300000\n",
     )
     .unwrap();
@@ -526,8 +524,6 @@ fn response_retries_have_defaults_and_independent_connection_overrides() {
         config.connections["defaulted"].response_retry_max_delay_ms,
         60_000
     );
-    assert!(config.connections["defaulted"].response_retry_partial);
-    assert!(!config.connections["disabled"].response_retry_partial);
     assert_eq!(config.connections["disabled"].response_max_retries, 0);
     assert_eq!(
         config.connections["disabled"].response_retry_max_delay_ms,
@@ -546,7 +542,6 @@ fn response_retries_have_defaults_and_independent_connection_overrides() {
     let debug = format!("{:?}", config.connections["maximum"]);
     assert!(debug.contains("response_max_retries: 20"));
     assert!(debug.contains("response_retry_max_delay_ms: 300000"));
-    assert!(debug.contains("response_retry_partial: true"));
     assert!(!debug.contains("https://example.test"));
 }
 
@@ -584,19 +579,31 @@ fn response_retries_reject_invalid_values_without_clamping() {
 }
 
 #[test]
-fn response_partial_retry_and_ui_bell_are_strict_default_on_booleans() {
+fn removed_response_retry_partial_is_an_unknown_connection_key() {
+    for value in [true, false] {
+        let source = format!(
+            "[connections.proxy]\nbase_url='https://example.test/v1'\nresponse_retry_partial={value}\n"
+        );
+        let error = Config::parse(&source).unwrap_err();
+        assert!(
+            matches!(
+                error,
+                ConfigError::Invalid { ref message, .. }
+                    if message.starts_with("unknown field")
+                        && message.contains("response_retry_partial")
+            ),
+            "unexpected diagnostic for {value}: {error}"
+        );
+    }
+}
+
+#[test]
+fn ui_bell_is_a_strict_default_on_boolean() {
     assert!(Config::default().ui.bell);
     assert!(Config::parse("").unwrap().ui.bell);
-    let config = Config::parse(
-        "[connections.proxy]\nbase_url='https://example.test/v1'\nresponse_retry_partial=false\n[ui]\nbell=false\n",
-    ).unwrap();
-    assert!(!config.connections["proxy"].response_retry_partial);
-    assert!(!config.ui.bell);
+    assert!(!Config::parse("[ui]\nbell=false\n").unwrap().ui.bell);
     for value in ["'false'", "0", "1", "[]", "{}"] {
         assert!(Config::parse(&format!("[ui]\nbell={value}\n")).is_err());
-        assert!(Config::parse(&format!(
-            "[connections.proxy]\nbase_url='https://example.test/v1'\nresponse_retry_partial={value}\n"
-        )).is_err());
     }
 }
 

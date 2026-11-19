@@ -78,36 +78,34 @@ protocol/JSON, unsupported completed responses and other HTTP failures are not
 ordinary transient retries. Existing specialized context-limit and quota policies
 are unchanged.
 
-### Conversation-only terminal stream retry (#313)
+### Conversation-only terminal stream retry (#313, #315)
 
-A successful HTTP Responses SSE exchange can end in a retryable provider error.
-The conversation driver may retry only when the live parser positively identifies
-an untyped terminal object containing only an `error` object with an exact
-`stream_error_code` witness of 429 or 500-599. Apart from `code`, the nested
-error object permits only optional string/null `message`, `type`, and `param`.
-Earlier frames are evaluated by the existing output observation, not by a
-separate metadata grammar (#315). Full Response metadata on `response.created`
-and `response.in_progress` is not itself output. Duplicate keys that can hide
-output (`type` or `response` at the event root, or `response.output`) are detected
-before JSON normalization and veto this exception without changing partial-output
-handling.
+On a successful HTTP Responses SSE exchange, the conversation driver may retry
+when the live parser identifies a strict untyped terminal object containing only
+an `error` object with an exact `stream_error_code` witness of 429 or 500-599.
+Apart from `code`, that object permits only optional string/null `message`,
+`type`, and `param`. A preceding `[DONE]` marker, typed terminals, wrapped,
+malformed or ambiguous terminal envelopes, JSON errors and other 4xx do not
+acquire this exception. A typed terminal with duplicate root `response`
+containers still cannot qualify even if its retained response looks identical.
+Earlier metadata shape, output observation and retained partial content are not
+eligibility gates. No prefix proof or prefix ambiguity rejection is used.
 
-No output observation, retained text/reasoning or completed items are allowed,
-even if `response_retry_partial` is enabled. A preceding `[DONE]` marker, typed
-terminals, wrapped, malformed or ambiguous terminal envelopes, JSON errors and
-ordinary 4xx do not acquire this exception. In particular, a typed terminal with
-duplicate root `response` containers must not qualify even if its retained
-response looks identical to an untyped error.
+The live envelope discriminator is neither serialized nor restored. The error
+remains terminal; actual HTTP status and durable stream status remain separate.
+The summary classifier does not consume this live authority and keeps its own
+budget. Otherwise eligible conversation and summary failures are not blocked by
+partial output. Conversation large-input trim still excludes terminal errors.
+Only a genuine HTTP header sets Retry-After; the embedded code establishes no
+cooldown or quota. Existing budget, backoff, defer, persistence, stop and
+readmission boundaries still apply.
 
-The parser records live envelope provenance separately from the existing provider
-status witness. The live discriminator is neither serialized nor restored.
-The error remains terminal, and the real HTTP status and existing durable witness
-are preserved separately. The shared summary classifier and the conversation trim
-veto are unchanged. Only the genuine HTTP header can set Retry-After; the embedded
-code does not establish a cooldown or quota. The unchanged conversation budget,
-backoff/defer limit, failure transaction, stop and readmission apply before resend.
-
-SSEのresponse.created/in_progress、コメント・heartbeatだけは生成出力として数えない。output_item/content_partの追加・完了、本文/refusal/推論/tool引数のdelta等を観測した時点で出力ありとする。HTTPの生存観測と再試行用の出力観測を区別する。JSONの完成前に通信が切れた場合は、非空の本文を保守的に部分出力とする。接続別response_retry_partialは既定trueで、部分出力がある場合も同じ条件で再試行する。falseなら部分出力後は復旧待ちとし、metadataのみ/出力なしの一時失敗は引き続き対象とする。
+Created/in-progress metadata, comments and heartbeats are not generated output.
+Item and content-part additions/completions, text/refusal/reasoning deltas and
+function argument fragments still count as output for audit, even with no visible
+text. Partial output is retained for inspection and discarded from retry input;
+failed-attempt tool calls are never executed. For interrupted non-streamed JSON,
+nonempty body bytes still count conservatively as output.
 
 response_max_retriesは既定8、0〜20。連続した失敗に対する追加試行回数で、最終responseを検証・DBへ採用した後だけ0へ戻す。受信開始、tool実行だけ、context超過圧縮だけでは補充しない。Turn/generation変更でもリセットする。指数待機は1秒開始で倍にし、response_retry_max_delay_ms（既定60000、範囲1〜300000）で上限を設ける。既定8回では1/2/4/8/16/32/60/60秒、合計183秒となる。
 

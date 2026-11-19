@@ -157,7 +157,6 @@ fn connection_fields(out: &mut Fields, name: &str, connection: &Connection) {
         request_timeout_ms,
         response_max_retries,
         response_retry_max_delay_ms,
-        response_retry_partial,
         auto_trim_on_disconnect,
         auto_at_tokens,
         auto_compact_target_percent,
@@ -197,7 +196,6 @@ fn connection_fields(out: &mut Fields, name: &str, connection: &Connection) {
         &at("response_retry_max_delay_ms"),
         response_retry_max_delay_ms,
     );
-    out.plain(&at("response_retry_partial"), response_retry_partial);
     out.plain(&at("auto_trim_on_disconnect"), auto_trim_on_disconnect);
     out.plain(&at("auto_at_tokens"), auto_at_tokens);
     out.plain(

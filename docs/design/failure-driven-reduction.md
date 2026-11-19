@@ -7,7 +7,7 @@ activation threshold, once-per-Turn reduction and first-resumption stop guard.
   Remove compact_hint_tokens rather than add an override mode. There is no
   pre-POST compaction. Context edits report projected characters, not tokens;
   thread get reports the last successful measured usage and its timestamps.
-- Existing retry eligibility, cancellation, partial-output opt-out, Retry-After
+- Existing retry eligibility, cancellation, Retry-After
   and configured consecutive retry limit (default eight resends) remain. First
   transport/header/5xx failure retries unchanged; from the second consecutive
   failure an eligible failure may maximally reduce input. Ordinary 429 and

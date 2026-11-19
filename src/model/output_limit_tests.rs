@@ -63,7 +63,7 @@ fn exact_output_limit_reasons_are_typed_and_keep_partial_text_for_each_dialect()
         ..Default::default()
     };
     assert_eq!(
-        retry_class::classify_retry(&retained_error, &facts, true),
+        retry_class::classify_retry(&retained_error, &facts),
         retry_class::RetryPolicy::Ineligible,
         "provider terminal output-limit signal must never be retried"
     );

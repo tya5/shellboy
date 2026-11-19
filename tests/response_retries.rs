@@ -151,21 +151,10 @@ struct Fixture {
 
 impl Fixture {
     async fn new(retries: u32, max_delay_ms: u64, idle_ms: u64) -> Self {
-        Self::with_partial_policy(retries, max_delay_ms, idle_ms, true).await
-    }
-
-    async fn with_partial_policy(
-        retries: u32,
-        max_delay_ms: u64,
-        idle_ms: u64,
-        partial: bool,
-    ) -> Self {
         Self::with_history(
             retries,
             max_delay_ms,
             idle_ms,
-            partial,
-            None,
             true,
             None,
             "synthetic retry regression",
@@ -173,13 +162,10 @@ impl Fixture {
         .await
     }
 
-    #[allow(clippy::too_many_arguments)]
     async fn with_history(
         retries: u32,
         max_delay_ms: u64,
         idle_ms: u64,
-        partial: bool,
-        hint: Option<u64>,
         trim_enabled: bool,
         seed_chars: Option<usize>,
         text: &str,
@@ -187,12 +173,11 @@ impl Fixture {
         let root = tempfile::tempdir().unwrap();
         let (url, requests, server) = proxy(root.path().join("requests.jsonl")).await;
         let config = root.path().join("config.toml");
-        let _ = hint;
         let trim_settings = format!("auto_trim_on_disconnect={trim_enabled}\n");
         std::fs::write(
             &config,
             format!(
-                "default_connection=\"fixture\"\ndefault_model=\"fixture\"\n[connections.fixture]\nbase_url={url:?}\nresponse_max_retries={retries}\nresponse_retry_max_delay_ms={max_delay_ms}\nstream_idle_timeout_ms={idle_ms}\nresponse_header_timeout_ms={idle_ms}\nresponse_retry_partial={partial}\n{trim_settings}"
+                "default_connection=\"fixture\"\ndefault_model=\"fixture\"\n[connections.fixture]\nbase_url={url:?}\nresponse_max_retries={retries}\nresponse_retry_max_delay_ms={max_delay_ms}\nstream_idle_timeout_ms={idle_ms}\nresponse_header_timeout_ms={idle_ms}\n{trim_settings}"
             ),
         )
         .unwrap();
@@ -778,22 +763,13 @@ async fn permanent_http_and_successful_protocol_failures_are_not_retried() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn stalled_empty_or_partial_response_retries_but_partial_optout_waits_for_recovery() {
-    for (body, partial, should_retry) in [
-        ("", false, true),
-        (": heartbeat\n\n", false, true),
-        (
-            "data: {\"type\":\"response.output_text.delta\",\"delta\":\"timeout-partial\"}\n\n",
-            true,
-            true,
-        ),
-        (
-            "data: {\"type\":\"response.output_text.delta\",\"delta\":\"timeout-partial\"}\n\n",
-            false,
-            false,
-        ),
+async fn stalled_empty_or_partial_response_retries() {
+    for body in [
+        "",
+        ": heartbeat\n\n",
+        "data: {\"type\":\"response.output_text.delta\",\"delta\":\"timeout-partial\"}\n\n",
     ] {
-        let mut fixture = Fixture::with_partial_policy(2, 10, 300, partial).await;
+        let mut fixture = Fixture::new(2, 10, 300).await;
         fixture
             .incoming()
             .await
@@ -801,20 +777,15 @@ async fn stalled_empty_or_partial_response_retries_but_partial_optout_waits_for_
             .send(Reply::partial(body, true))
             .ok()
             .unwrap();
-        if should_retry {
-            fixture
-                .incoming()
-                .await
-                .reply
-                .send(Reply::success())
-                .ok()
-                .unwrap();
-            assert_eq!(fixture.settled().await, "completed");
-            assert_eq!(fixture.attempts().await.len(), 2);
-        } else {
-            assert_eq!(fixture.settled().await, "recovery_wait");
-            assert_eq!(fixture.attempts().await.len(), 1);
-        }
+        fixture
+            .incoming()
+            .await
+            .reply
+            .send(Reply::success())
+            .ok()
+            .unwrap();
+        assert_eq!(fixture.settled().await, "completed");
+        assert_eq!(fixture.attempts().await.len(), 2);
         let attempts = fixture.attempts().await;
         assert!(
             attempts[0]
@@ -1040,44 +1011,44 @@ async fn server_retry_after_over_ten_minutes_is_deferred_instead_of_shortened() 
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn partial_retry_is_audited_outside_selected_history_and_never_replayed_or_executed() {
-    for partial_policy in [true, false] {
-        let mut fixture = Fixture::with_partial_policy(2, 10, 5_000, partial_policy).await;
-        let tool = json!({"type":"function_call","id":"unadopted_call","call_id":"must_not_execute",
-            "name":"shell","arguments":"{\"command\":\"echo never-run\"}"});
-        let body = format!(
-            "data: {}\n\ndata: {}\n\n",
-            json!({"type":"response.output_text.delta","delta":"paid-partial-fixture"}),
-            json!({"type":"response.output_item.done","output_index":0,"item":tool})
-        );
-        fixture
-            .incoming()
-            .await
-            .reply
-            .send(Reply::partial(&body, false))
-            .ok()
-            .unwrap();
-        if partial_policy {
-            let next = fixture.incoming().await;
-            assert!(!next.body.to_string().contains("paid-partial-fixture"));
-            assert!(!next.body.to_string().contains("must_not_execute"));
-            next.reply.send(Reply::success()).ok().unwrap();
-            assert_eq!(fixture.settled().await, "completed");
-        } else {
-            assert_eq!(fixture.settled().await, "recovery_wait");
-        }
-        fixture.control.store.database.call(|db| {
-            let (saved, selected): (String, i64) = db.query_row(
-                "SELECT n.payload_json, EXISTS(SELECT 1 FROM thread_path p WHERE p.node_id=n.id) FROM node n WHERE n.kind='incomplete_response'",
-                [], |row| Ok((row.get(0)?, row.get(1)?)))?;
-            assert!(saved.contains("paid-partial-fixture"));
-            assert!(saved.contains("must_not_execute"));
-            assert_eq!(selected, 0, "failed partial response entered model replay");
-            assert_eq!(db.query_row("SELECT count(*) FROM shell_execution", [], |row| row.get::<_, i64>(0))?, 0);
-            Ok(())
-        }).await.unwrap();
-        fixture.no_more_requests().await;
-        fixture.close().await;
-    }
+    let mut fixture = Fixture::new(2, 10, 5_000).await;
+    let tool = json!({"type":"function_call","id":"unadopted_call","call_id":"must_not_execute",
+        "name":"shell","arguments":"{\"command\":\"echo never-run\"}"});
+    let body = format!(
+        "data: {}\n\ndata: {}\n\n",
+        json!({"type":"response.output_text.delta","delta":"paid-partial-fixture"}),
+        json!({"type":"response.output_item.done","output_index":0,"item":tool})
+    );
+    fixture
+        .incoming()
+        .await
+        .reply
+        .send(terminal_sse(&body, TERMINAL_SSE_500, ""))
+        .ok()
+        .unwrap();
+    let next = fixture.incoming().await;
+    assert!(!next.body.to_string().contains("paid-partial-fixture"));
+    assert!(!next.body.to_string().contains("must_not_execute"));
+    next.reply.send(Reply::success()).ok().unwrap();
+    assert_eq!(fixture.settled().await, "completed");
+    let attempts = fixture.attempts().await;
+    let failure = attempts[0].1.as_ref().unwrap();
+    assert_terminal_stream_failure(failure, Some(500));
+    let retry = &failure["automatic_retry"];
+    assert_eq!(retry["partial_response_discarded"], true);
+    assert_eq!(retry["possible_duplicate_charge"], true);
+    fixture.control.store.database.call(|db| {
+        let (saved, selected): (String, i64) = db.query_row(
+            "SELECT n.payload_json, EXISTS(SELECT 1 FROM thread_path p WHERE p.node_id=n.id) FROM node n WHERE n.kind='incomplete_response'",
+            [], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        assert!(saved.contains("paid-partial-fixture"));
+        assert!(saved.contains("must_not_execute"));
+        assert_eq!(selected, 0, "failed partial response entered model replay");
+        assert_eq!(db.query_row("SELECT count(*) FROM shell_execution", [], |row| row.get::<_, i64>(0))?, 0);
+        Ok(())
+    }).await.unwrap();
+    fixture.no_more_requests().await;
+    fixture.close().await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1119,8 +1090,6 @@ async fn second_eligible_failure_reduces_but_first_retry_is_unchanged() {
             8,
             10,
             500,
-            true,
-            None,
             true,
             Some(10_000),
             "current request",
@@ -1181,8 +1150,6 @@ async fn reduced_and_unreducible_inputs_share_the_eight_retry_budget() {
             10,
             5000,
             true,
-            None,
-            true,
             old,
             "current protected input",
         )
@@ -1241,8 +1208,6 @@ async fn explicit_overflow_reduces_immediately_within_the_same_retry_budget() {
         10,
         5000,
         true,
-        None,
-        true,
         Some(10_000),
         "current request",
     )
@@ -1271,7 +1236,7 @@ async fn explicit_overflow_reduces_immediately_within_the_same_retry_budget() {
 async fn disabled_automatic_reduction_and_rate_limits_preserve_input() {
     for (enabled, status) in [(false, 503), (true, 429)] {
         let mut f =
-            Fixture::with_history(3, 10, 5000, true, None, enabled, Some(10_000), "current").await;
+            Fixture::with_history(3, 10, 5000, enabled, Some(10_000), "current").await;
         for _ in 0..3 {
             let request = f.incoming().await;
             assert!(request.body.to_string().contains("DENSE_OLD_CONTEXT"));
@@ -1288,7 +1253,7 @@ async fn disabled_automatic_reduction_and_rate_limits_preserve_input() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn manual_maximum_is_api_free_and_recovery_retry_uses_the_new_model() {
     use shellboy::protocol::{ContextEditAction, ContextEditArgs, ThreadSetArgs};
-    let mut f = Fixture::with_history(0, 10, 5000, true, None, true, Some(10_000), "current").await;
+    let mut f = Fixture::with_history(0, 10, 5000, true, Some(10_000), "current").await;
     f.incoming()
         .await
         .reply
@@ -1387,8 +1352,6 @@ async fn a_long_turn_defers_the_large_input_trim_while_its_tool_loop_is_open() {
         10,
         5000,
         true,
-        None,
-        true,
         Some(10_000),
         "protected current request",
     )
@@ -1480,7 +1443,7 @@ async fn overflow_trim_keeps_every_user_input_of_the_active_turn() {
         }]}).to_string(),"")
     }
     let mut f =
-        Fixture::with_history(8, 10, 5000, true, None, true, None, "TURN_REQUEST_MARKER").await;
+        Fixture::with_history(8, 10, 5000, true, None, "TURN_REQUEST_MARKER").await;
     let thread = f.accepted.thread_id.clone();
     let mut sent = Vec::new();
     for (index, work) in ["early-work", "middle-work", "late-work"]
@@ -1661,8 +1624,6 @@ async fn unreducible_explicit_overflow_recovers_without_any_resend() {
         8,
         10,
         5000,
-        true,
-        None,
         true,
         None,
         "only protected request",
@@ -2289,8 +2250,6 @@ async fn manual_summary_waits_for_connection_cooldown_and_shutdown_cancels_it() 
         10,
         5_000,
         true,
-        None,
-        true,
         Some(1_000),
         "synthetic summary wait",
     )
@@ -2382,8 +2341,6 @@ async fn manual_summary_adopts_fixed_r_after_model_change_during_connection_wait
         0,
         10,
         5_000,
-        true,
-        None,
         true,
         Some(1_000),
         "synthetic summary validation",
@@ -2579,8 +2536,6 @@ async fn summary_connection_wait_is_recorded_in_existing_usage() {
         0,
         10,
         5_000,
-        true,
-        None,
         true,
         Some(1_000),
         "summary wait usage",
@@ -2832,7 +2787,7 @@ fn assert_terminal_stream_failure(failure: &Value, witness: Option<u16>) {
     assert!(failure["error"]["status"].is_null());
     assert!(
         failure["error"]
-            .get("untyped_stream_error_without_output_prefix")
+            .get("strict_untyped_stream_error_before_done")
             .is_none()
     );
     if let Some(code) = witness {
@@ -2846,26 +2801,37 @@ fn assert_terminal_stream_failure(failure: &Value, witness: Option<u16>) {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn untyped_terminal_sse_retries_without_output_and_saves_failure_before_post() {
-    for (code, prefix) in [
-        (500, ""),
-        (
-            429,
-            concat!(
-                ": keepalive\n\n",
-                "data: {\"type\":\"response.created\",\"sequence_number\":0,",
-                "\"response\":{\"id\":\"resp_fixture\",\"model\":\"fixture\",\"object\":\"response\",",
-                "\"created_at\":1,\"status\":\"queued\",\"error\":null,\"incomplete_details\":null,\"output\":[]}}\n\n",
-                "data: {\"type\":\"response.in_progress\",\"response\":{\"status\":\"in_progress\"}}\n\n",
-            ),
-        ),
-    ] {
-        let mut fixture = Fixture::with_partial_policy(2, 10, 5_000, false).await;
+async fn strict_untyped_terminal_after_full_response_and_reasoning_item_retries() {
+    let response = json!({
+        "id": "resp_fixture", "object": "response", "created_at": 1,
+        "model": "fixture", "status": "in_progress", "output": [],
+        "error": null, "incomplete_details": null, "usage": null,
+        "instructions": "Fixture instructions", "tools": [],
+        "tool_choice": "auto", "parallel_tool_calls": true,
+        "reasoning": {"effort": "medium", "summary": null},
+        "text": {"format": {"type": "text"}}, "metadata": {},
+        "temperature": 1.0, "top_p": 1.0, "max_output_tokens": null,
+        "previous_response_id": null, "store": false, "truncation": "disabled"
+    });
+    let created =
+        json!({"type": "response.created", "sequence_number": 0, "response": &response});
+    let in_progress =
+        json!({"type": "response.in_progress", "sequence_number": 1, "response": &response});
+    let reasoning = json!({
+        "type": "response.output_item.added", "sequence_number": 2, "output_index": 0,
+        "item": {"id": "rs_fixture", "type": "reasoning", "summary": []}
+    });
+    let prefix = format!("data: {created}\n\ndata: {in_progress}\n\ndata: {reasoning}\n\n");
+    for code in [500, 429] {
+        let mut fixture = Fixture::new(2, 10, 5_000).await;
         let first = fixture.incoming().await;
-        let event = json!({"error":{"code":code.to_string(),"message":"fixture"}});
+        let event = json!({"error":{
+            "code":code.to_string(), "message":"Fixture upstream closed",
+            "param":"None", "type":"None"
+        }});
         first
             .reply
-            .send(terminal_sse(prefix, &event.to_string(), ""))
+            .send(terminal_sse(&prefix, &event.to_string(), ""))
             .ok()
             .unwrap();
         let second = fixture.incoming().await;
@@ -2883,7 +2849,7 @@ async fn untyped_terminal_sse_retries_without_output_and_saves_failure_before_po
         assert_eq!(failure["rate_observation"]["retry_after_present"], false);
         assert_eq!(
             failure["automatic_retry"],
-            json!({"number":1,"limit":2,"delay_ms":10,"partial_response_discarded":false,
+            json!({"number":1,"limit":2,"delay_ms":10,"partial_response_discarded":true,
                 "possible_duplicate_charge":true})
         );
         second.reply.send(Reply::success()).ok().unwrap();
@@ -2970,36 +2936,6 @@ async fn untyped_terminal_sse_retry_fails_closed_for_ambiguous_or_nontransient_e
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn untyped_terminal_sse_does_not_retry_after_output_key_overwrite() {
-    // Each duplicate can hide output behind a metadata-only normalized event.
-    for metadata in [
-        r#"{"type":"response.created","response":{"output":[{}]},"response":{"output":[]}}"#,
-        r#"{"type":"response.created","response":{"output":[{}],"output":[]}}"#,
-        r#"{"type":"response.output_item.added","type":"response.created","response":{"output":[]}}"#,
-    ] {
-        let prefix = format!("data: {metadata}\n\n");
-        let mut fixture = Fixture::new(2, 10, 5_000).await;
-        fixture
-            .incoming()
-            .await
-            .reply
-            .send(terminal_sse(&prefix, TERMINAL_SSE_500, ""))
-            .ok()
-            .unwrap();
-        assert_eq!(fixture.settled().await, "recovery_wait", "{metadata}");
-        let attempts = fixture.attempts().await;
-        assert_eq!(attempts.len(), 1);
-        let failure = attempts[0].1.as_ref().unwrap();
-        assert_terminal_stream_failure(failure, Some(500));
-        assert_eq!(failure["completed_items"], json!({}));
-        assert!(failure.get("automatic_retry").is_none());
-        assert_eq!(fixture_request_log_lines(&fixture), 1);
-        fixture.no_more_requests().await;
-        fixture.close().await;
-    }
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn untyped_terminal_sse_does_not_retry_after_invalid_json() {
     let prefix = "data: {\"error\":{\"code\":\"599\"}\n\n";
     let mut fixture = Fixture::new(2, 10, 5_000).await;
@@ -3047,50 +2983,6 @@ async fn untyped_terminal_sse_retry_does_not_apply_to_http_200_json() {
     assert_eq!(fixture_request_log_lines(&fixture), 1);
     fixture.no_more_requests().await;
     fixture.close().await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn untyped_terminal_sse_does_not_retry_after_observed_output() {
-    let reasoning =
-        "data: {\"type\":\"response.reasoning_text.delta\",\"delta\":\"visible reasoning\"}\n\n";
-    let arguments =
-        "data: {\"type\":\"response.function_call_arguments.delta\",\"delta\":\"{\"}\n\n";
-    let item = "data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"reasoning\",\"summary\":[]}}\n\n";
-    let part = "data: {\"type\":\"response.content_part.added\",\"output_index\":0,\"content_index\":0,\"part\":{\"type\":\"output_text\",\"text\":\"\"}}\n\n";
-    for (prefix, retained_reasoning) in [
-        (reasoning, "visible reasoning"),
-        (arguments, ""),
-        (item, ""),
-        (part, ""),
-    ] {
-        let mut fixture = Fixture::new(2, 10, 5_000).await;
-        fixture
-            .incoming()
-            .await
-            .reply
-            .send(terminal_sse(prefix, TERMINAL_SSE_500, ""))
-            .ok()
-            .unwrap();
-        assert_eq!(fixture.settled().await, "recovery_wait");
-        let attempts = fixture.attempts().await;
-        assert_eq!(attempts.len(), 1);
-        let failure = attempts[0].1.as_ref().unwrap();
-        assert_terminal_stream_failure(failure, Some(500));
-        assert_eq!(failure["partial_reasoning"], retained_reasoning);
-        let tools: i64 = fixture
-            .control
-            .store
-            .database
-            .call(|db| {
-                Ok(db.query_row("SELECT count(*) FROM shell_execution", [], |row| row.get(0))?)
-            })
-            .await
-            .unwrap();
-        assert_eq!(tools, 0);
-        assert_eq!(fixture_request_log_lines(&fixture), 1);
-        fixture.no_more_requests().await;
-        fixture.close().await;
-    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -3182,94 +3074,86 @@ async fn untyped_terminal_sse_honors_real_retry_after_and_stop() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn terminal_sse_error_vetoes_partial_retries_but_preserves_partial_facts() {
-    for retry_partial in [false, true] {
-        let mut fixture = Fixture::with_partial_policy(2, 1, 5_000, retry_partial).await;
-        let partial = format!(
-            "data: {}\n\ndata: {}\n\ndata: {}\n\n",
-            json!({"type":"response.output_text.delta","delta":"visible partial text"}),
-            json!({"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","call_id":"partial-call","name":"shell","arguments":"{\"command\":\"echo never\"}"}}),
-            json!({"error":{"code":"503","message":"SECRET_STREAM_ERROR"}}),
-        );
-        fixture
-            .incoming()
-            .await
-            .reply
-            .send(Reply::partial(&partial, false))
-            .ok()
-            .unwrap();
-        assert_eq!(fixture.settled().await, "recovery_wait");
-        let attempts = fixture.attempts().await;
-        assert_eq!(
-            attempts.len(),
-            1,
-            "terminal stream failure cannot retry under either partial policy"
-        );
-        let failure = attempts[0].1.as_ref().unwrap();
-        assert_eq!(failure["partial_text"], "visible partial text");
-        assert_eq!(failure["completed_items"]["0"]["call_id"], "partial-call");
-        assert_eq!(failure["error"]["stream_provider_status"]["value"], 503);
-        assert_eq!(
-            failure["error"]["stream_provider_status"]["source"],
-            "stream_error_code"
-        );
-        let tools: i64 = fixture
-            .control
-            .store
-            .database
-            .call(|db| {
-                Ok(db.query_row("SELECT count(*) FROM shell_execution", [], |row| row.get(0))?)
-            })
-            .await
-            .unwrap();
-        assert_eq!(
-            tools, 0,
-            "partial completed tool items are recorded but never executed"
-        );
-        fixture.no_more_requests().await;
-        fixture.close().await;
-    }
+async fn typed_terminal_sse_error_does_not_retry_and_preserves_partial_facts() {
+    let mut fixture = Fixture::new(2, 1, 5_000).await;
+    let partial = format!(
+        "data: {}\n\ndata: {}\n\ndata: {}\n\n",
+        json!({"type":"response.output_text.delta","delta":"visible partial text"}),
+        json!({"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","call_id":"partial-call","name":"shell","arguments":"{\"command\":\"echo never\"}"}}),
+        json!({"type":"response.failed","response":{"error":{"code":"503","message":"SECRET_STREAM_ERROR"}}}),
+    );
+    fixture
+        .incoming()
+        .await
+        .reply
+        .send(Reply::partial(&partial, false))
+        .ok()
+        .unwrap();
+    assert_eq!(fixture.settled().await, "recovery_wait");
+    let attempts = fixture.attempts().await;
+    assert_eq!(attempts.len(), 1, "typed terminal stream failure cannot retry");
+    let failure = attempts[0].1.as_ref().unwrap();
+    assert_eq!(failure["partial_text"], "visible partial text");
+    assert_eq!(failure["completed_items"]["0"]["call_id"], "partial-call");
+    assert_eq!(failure["error"]["stream_provider_status"]["value"], 503);
+    assert_eq!(
+        failure["error"]["stream_provider_status"]["source"],
+        "stream_error_code"
+    );
+    let tools: i64 = fixture
+        .control
+        .store
+        .database
+        .call(|db| {
+            Ok(db.query_row("SELECT count(*) FROM shell_execution", [], |row| row.get(0))?)
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        tools, 0,
+        "partial completed tool items are recorded but never executed"
+    );
+    fixture.no_more_requests().await;
+    fixture.close().await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn genuine_eof_partial_output_obeys_retry_partial_and_never_executes_saved_tools() {
-    for (retry_partial, expected_attempts) in [(false, 1usize), (true, 3usize)] {
-        let mut fixture = Fixture::with_partial_policy(2, 1, 5_000, retry_partial).await;
-        let body = format!(
-            "data: {}\n\ndata: {}\n\n",
-            json!({"type":"response.output_text.delta","delta":"S1B_PARTIAL_SENTINEL"}),
-            json!({"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","call_id":"S1B_PARTIAL_CALL","name":"shell","arguments":"{\"command\":\"echo never\"}"}}),
-        );
-        for _ in 0..expected_attempts {
-            let request = fixture.incoming().await;
-            assert!(!request.body.to_string().contains("S1B_PARTIAL_SENTINEL"));
-            assert!(!request.body.to_string().contains("S1B_PARTIAL_CALL"));
-            request
-                .reply
-                .send(Reply::http(200, "text/event-stream", &body, ""))
-                .ok()
-                .unwrap();
-        }
-        assert_eq!(fixture.settled().await, "recovery_wait");
-        let attempts = fixture.attempts().await;
-        assert_eq!(attempts.len(), expected_attempts);
-        let last = attempts.last().unwrap().1.as_ref().unwrap();
-        assert_eq!(last["partial_text"], "S1B_PARTIAL_SENTINEL");
-        assert_eq!(last["completed_items"]["0"]["call_id"], "S1B_PARTIAL_CALL");
-        let tool_executions: i64 = fixture
-            .control
-            .store
-            .database
-            .call(|db| {
-                Ok(db.query_row("SELECT count(*) FROM shell_execution", [], |row| row.get(0))?)
-            })
-            .await
+async fn genuine_eof_partial_output_retries_and_never_executes_saved_tools() {
+    let mut fixture = Fixture::new(2, 1, 5_000).await;
+    let body = format!(
+        "data: {}\n\ndata: {}\n\n",
+        json!({"type":"response.output_text.delta","delta":"S1B_PARTIAL_SENTINEL"}),
+        json!({"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","call_id":"S1B_PARTIAL_CALL","name":"shell","arguments":"{\"command\":\"echo never\"}"}}),
+    );
+    for _ in 0..3 {
+        let request = fixture.incoming().await;
+        assert!(!request.body.to_string().contains("S1B_PARTIAL_SENTINEL"));
+        assert!(!request.body.to_string().contains("S1B_PARTIAL_CALL"));
+        request
+            .reply
+            .send(Reply::http(200, "text/event-stream", &body, ""))
+            .ok()
             .unwrap();
-        assert_eq!(
-            tool_executions, 0,
-            "partial completed tool items are retained but not run"
-        );
-        fixture.no_more_requests().await;
-        fixture.close().await;
     }
+    assert_eq!(fixture.settled().await, "recovery_wait");
+    let attempts = fixture.attempts().await;
+    assert_eq!(attempts.len(), 3);
+    let last = attempts.last().unwrap().1.as_ref().unwrap();
+    assert_eq!(last["partial_text"], "S1B_PARTIAL_SENTINEL");
+    assert_eq!(last["completed_items"]["0"]["call_id"], "S1B_PARTIAL_CALL");
+    let tool_executions: i64 = fixture
+        .control
+        .store
+        .database
+        .call(|db| {
+            Ok(db.query_row("SELECT count(*) FROM shell_execution", [], |row| row.get(0))?)
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        tool_executions, 0,
+        "partial completed tool items are retained but not run"
+    );
+    fixture.no_more_requests().await;
+    fixture.close().await;
 }

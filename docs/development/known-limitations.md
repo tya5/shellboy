@@ -14,8 +14,7 @@ loopback measurements do not establish suitable limits for every provider or slo
 upload. A large upload can reach the header deadline before its source is fully
 consumed. See [configuration](../guides/configuration.md#http-timeouts).
 
-Eligible conversation failures can retry even after partial output by default;
-`response_retry_partial=false` disables retry after output was observed. The
+Eligible conversation failures can retry even after partial output. The
 ordinary consecutive budget remains eight additional attempts, resets after a
 validated response is durably adopted, and does not limit the total duration of a
 long tool conversation. Connection setup or zero-consumption failures retain that

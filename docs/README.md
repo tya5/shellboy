@@ -12,6 +12,6 @@ English is the default for documentation. Only the User Guide has a Japanese tra
 | `development/` | Setup, status, and decision records | Exclude personal configuration, credentials, and private logs. |
 | `validation/` | Verification procedures and observations | Separate source, environment, results, and untested cases. A procedure alone is not a passing result. |
 
-Use the [design index](design/README.md), [setup](development/setup.md), [status](development/status.md), [decision log](development/decisions.md), [publication layout](development/publication.md), and [verification record](validation/acceptance.md) as needed.
+Use the [design index](design/README.md), [setup](development/setup.md), [status](development/status.md), [decision log](development/decisions.md), [publication layout](development/publication.md), [unreleased notes](development/release-notes.md), and [verification record](validation/acceptance.md) as needed.
 
 The public repository's adopted designs are the development baseline. Private handoff material and old review ledgers are not prerequisites for building, developing, or using Shellboy. Moving code does not change a contract; previous results do not fill gaps in current validation.

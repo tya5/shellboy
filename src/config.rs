@@ -212,7 +212,6 @@ pub struct Connection {
     pub request_timeout_ms: u64,
     pub response_max_retries: u32,
     pub response_retry_max_delay_ms: u64,
-    pub response_retry_partial: bool,
     pub auto_trim_on_disconnect: bool,
     /// Overrides `[compaction] auto_at_tokens` for this connection; 0 disables.
     pub auto_at_tokens: Option<u64>,
@@ -259,7 +258,6 @@ impl Default for Connection {
             request_timeout_ms: 60_000,
             response_max_retries: 8,
             response_retry_max_delay_ms: 60_000,
-            response_retry_partial: true,
             auto_trim_on_disconnect: true,
             auto_at_tokens: None,
             auto_compact_target_percent: None,
@@ -301,7 +299,6 @@ impl fmt::Debug for Connection {
                 "response_retry_max_delay_ms",
                 &self.response_retry_max_delay_ms,
             )
-            .field("response_retry_partial", &self.response_retry_partial)
             .field("auto_trim_on_disconnect", &self.auto_trim_on_disconnect)
             .field("auto_at_tokens", &self.auto_at_tokens)
             .field(

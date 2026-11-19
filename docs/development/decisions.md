@@ -4486,26 +4486,25 @@ later valid terminal witness. Broaden the allowlist only with positive provenanc
 and output-absence proofs for the new shapes. No new dependency, table, queue,
 worker or event is introduced.
 
-## #315 Use existing output observation for untyped terminal retry
+## #315 Retry eligible failures after partial output
 
-Supersede only #313's prefix-proof decision. LiteLLM sends full Response
-metadata with empty `output` on `response.created` and `response.in_progress`;
-a closed key set rejects ordinary metadata without improving output detection
-for supported events. Remove the proof rather than expanding the allowlist.
-Keep the strict live terminal envelope and the parser/driver no-output checks.
-An independent source review found that last-key-wins decoding can hide output
-behind a duplicate `type`, `response`, or `response.output`. Retain a retry-only
-ambiguity veto for those keys in the existing frame decoder, not a new metadata
-grammar. Do not use that veto to change the retained output or provider status.
-Unknown event shapes are not proof of output; an unobserved partial response
-may be discarded and the provider may charge twice, as with HTTP 5xx retry.
-Retry does not execute an incomplete tool call.
+The [latest owner decision](https://github.com/tya5/shellboy/issues/315#issuecomment-7025093685)
+supersedes the previous #315 deferral and the earlier proposal to keep the false
+opt-out. Remove `response_retry_partial` outright; an explicit true or false is
+an ordinary unknown key, not a compatibility alias. The old opt-out only waited
+for a human to start over, without making the incomplete output reusable or
+avoiding duplicate charges.
 
-Do not align partial terminal errors with interrupted transport in #315:
-those paths have different terminal evidence, and extending eligibility after
-observed output would change #313's policy independently of this metadata fix.
-Revisit only as a separate partial-retry policy decision. Summary policy and
-the existing conversation budget and backoff are unchanged.
+Keep the strict untyped terminal grammar and live-only discriminator, but remove
+the prefix grammar, output-absence proof, and prefix duplicate-output-key veto.
+Full Response metadata and a reasoning item can precede a retryable terminal.
+Duplicate terminal-envelope keys remain disqualifying; they are distinct from
+duplicate keys in an earlier frame. Output observation remains an audit fact.
+Retain partial output without replay or intermediate tool execution and report
+possible duplicate charges. Conversation and summary eligibility no longer
+opts out on partial output; summary does not inherit the live SSE exception,
+and both retain their existing budgets and wait/authority boundaries. No new
+worker, queue, table or dependency.
 
 ## Automatic spill preference (S6a, 2026-11-13)
 

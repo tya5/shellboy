@@ -37,7 +37,6 @@ api_key_env = "SHELLBOY_API_KEY"
 # Exponential backoff cap; Retry-After uses a separate fixed 10-minute cap.
 # response_retry_max_delay_ms = 60000
 # Retry interrupted partial streams; false keeps partial failures for manual recovery.
-# response_retry_partial = true
 # From the second eligible consecutive failure, maximally reduce safe context.
 # auto_trim_on_disconnect = true
 # No input-size threshold or pre-POST reduction; all resends share the retry budget.

@@ -126,7 +126,7 @@ Logs are bounded/rotated, not a complete durable provider audit.
 References refer to inspected base `291f298f03`; later changes may move lines.
 
 - `src/control/driver/retry.rs:17`: `classify_retry` recognizes 429/all 5xx,
-  checks error kind, terminal response and partial-output opt-out. A valid
+  checks error kind and terminal response. A valid
   Retry-After above 600 seconds defers rather than retrying early. Budget and
   exponential delay are per Driver/Turn/generation (`:208`, `:229`): retry count
   resets only after durable success or changed Turn/generation. Defaults are
@@ -222,7 +222,7 @@ Never fingerprint credentials or expose keys, headers or provider URLs in usage.
    probe was cancelled/timed out. A failed/cancelled probe clears its ownership
    via RAII so another eligible future can probe; it does not clear the latest
    cooldown. No timer task launches requests autonomously.
-4. Preserve per-caller retry classification, output boundaries, partial opt-out,
+4. Preserve per-caller retry classification, terminal boundaries,
    receipt/CAS, duplicate-charge warning and exhausted/deferred recovery. Take
    `max(caller_backoff_deadline, shared_deadline)`, not additive double sleeps.
    Waiting itself is not a new HTTP attempt and consumes no request slot.
@@ -322,9 +322,10 @@ differ, these rules govern.
 ### Summary retry
 
 - Map and reduce requests use `classify_retry` (now shared in
-  `model::retry_class`) with the profile's `response_retry_partial`. A retry is
-  taken only for `Retry`; `Ineligible` and `Deferred` fail the summary. Context
-  limits keep the existing splitting and are never retried unchanged.
+  `model::retry_class`). Partial output does not veto an otherwise eligible retry.
+  The conversation-only untyped SSE terminal exception does not apply here. A
+  retry is taken only for `Retry`; `Ineligible` and `Deferred` fail the summary.
+  Context limits keep the existing splitting and are never retried unchanged.
 - Any failure carrying a usage limit (including the wrapped LiteLLM
   `usage_limit_reached` form recognised for HTTP 429, and a local quota block)
   is never retried: the summary fails and the original path is retained.

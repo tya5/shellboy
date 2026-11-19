@@ -80,7 +80,7 @@ pub struct ModelError {
     #[serde(default, skip_deserializing, skip_serializing_if = "Option::is_none")]
     pub(crate) stream_provider_status: Option<StreamProviderStatus>,
     #[serde(skip)]
-    untyped_stream_error_without_output_prefix: bool,
+    strict_untyped_stream_error_before_done: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub http_observation: Option<Box<http::HttpObservation>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -96,7 +96,7 @@ impl ModelError {
             http_observation: None,
             usage_limit: None,
             stream_provider_status: None,
-            untyped_stream_error_without_output_prefix: false,
+            strict_untyped_stream_error_before_done: false,
         }
     }
     pub fn is_context_limit(&self) -> bool {
@@ -155,7 +155,7 @@ impl ModelError {
             provider_code: error.get("code").and_then(Value::as_str).map(str::to_owned),
             status,
             stream_provider_status: None,
-            untyped_stream_error_without_output_prefix: false,
+            strict_untyped_stream_error_before_done: false,
             http_observation: None,
             usage_limit: usage_limit::UsageLimit::parse_for_status(
                 value,
@@ -180,7 +180,7 @@ impl ModelError {
     }
 
     pub(crate) fn untyped_stream_error_witness(&self) -> Option<StreamProviderStatus> {
-        if self.untyped_stream_error_without_output_prefix {
+        if self.strict_untyped_stream_error_before_done {
             self.stream_provider_status
         } else {
             None
@@ -570,7 +570,6 @@ struct DecodedEvent {
     duplicate_relevant_key: bool,
     untyped_error_candidate: bool,
     strict_untyped_error: bool,
-    ambiguous_output_keys: bool,
 }
 struct DecodeFailure {
     error: ModelError,
@@ -689,7 +688,6 @@ impl SseDecoder {
                             value: parsed.value,
                             duplicate_relevant_key: parsed.duplicate_relevant_key,
                             untyped_error_candidate: parsed.untyped_error_candidate,
-                            ambiguous_output_keys: parsed.ambiguous_output_keys,
                         };
                         let stop = terminal(&decoded);
                         events.push(decoded);
@@ -782,7 +780,6 @@ pub struct ResponseStream {
     total_differences: usize,
     last_event: Option<&'static str>,
     output_observed: bool,
-    ambiguous_output_keys: bool,
 }
 impl ResponseStream {
     /// Parsed events can be persisted/previewed. Tools are never started here.
@@ -815,8 +812,6 @@ impl ResponseStream {
             let event = decoded.value;
             let classification = classify_stream_event(&event);
             self.output_observed |= classification != StreamEventKind::Metadata;
-            // Duplicate output-bearing keys can hide output in the normalized event.
-            self.ambiguous_output_keys |= decoded.ambiguous_output_keys;
             if let Some(delta) = event.get("delta").and_then(Value::as_str) {
                 match classification {
                     StreamEventKind::TextDelta => self.partial_text.push_str(delta),
@@ -911,9 +906,7 @@ impl ResponseStream {
                     self.failed_response = Some(event.clone());
                     let mut error =
                         ModelError::stream_provider(&event, decoded.duplicate_relevant_key);
-                    error.untyped_stream_error_without_output_prefix = decoded.strict_untyped_error
-                        && !self.ambiguous_output_keys
-                        && !self.has_output()
+                    error.strict_untyped_stream_error_before_done = decoded.strict_untyped_error
                         && self.decoder.done_markers == 0
                         && error.stream_provider_status.is_some();
                     self.terminal = Some(Err(error));

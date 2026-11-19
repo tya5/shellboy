@@ -8,7 +8,8 @@ use crate::model::{
 use std::time::Duration;
 
 /// The wait before resending after `failure`, or `None` when it must not be
-/// resent. Uses the conversation classifier. A usage limit is never retried,
+/// resent. Uses the shared classifier, not the conversation SSE exception.
+/// A usage limit is never retried,
 /// and a context limit is split, not resent unchanged. After a 429 the gate's
 /// cooldown is the wait; otherwise the conversation schedule applies.
 pub(super) fn retry_delay(
@@ -22,11 +23,7 @@ pub(super) fn retry_delay(
     {
         return None;
     }
-    let policy = classify_retry(
-        &failure.error,
-        &failure.facts,
-        connection.response_retry_partial,
-    );
+    let policy = classify_retry(&failure.error, &failure.facts);
     if !matches!(policy, RetryPolicy::Retry { .. }) {
         return None;
     }

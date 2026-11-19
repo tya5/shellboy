@@ -1,11 +1,11 @@
 # Development status
 
-## #315 Conversation stream retry (source candidate)
+## #315 Retry after partial output (owner-policy successor)
 
-Removed the #313 prefix proof on the isolated task branch. The full-metadata
-untyped-500 unit fixture is authored; independent source review and separately
-admitted native validation are the next gates. No partial-policy or summary
-change is included.
+The latest owner decision removes `response_retry_partial` and permits strict
+untyped Responses SSE terminal retries after output for conversations. The
+previous local/CI candidate is historical, not validation of this successor.
+Independent source review and separately admitted validation are the next gates.
 
 ## Core U2 proactive Driver/Stop causal repair (complete qualification pending)
 

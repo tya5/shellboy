@@ -1,24 +1,22 @@
 # Validation record
 
-## #315 Conversation stream retry (source only)
+## #315 Retry after partial output (source only)
 
-Baseline: `6bba2428c6f9162bd6713b19f89aa3f5c133adda`. Source inspection on
-macOS traces item/part/delta observation to the live witness veto and the HTTP
-`Output` fact, and the published untyped 500 envelope to the unchanged strict
-terminal grammar and stream-code witness. The conversation classifier, budget,
-backoff, and summary classifier are unchanged. The older #313 acceptance record
-below describes a historical prefix policy, not the #315 contract.
+The previous candidate `6d4e7b970203dbff3ccf71a2bf8fb5266566f72a` and CI runs
+44635923404 / 44635928278 are historical, not evidence for the owner-policy
+successor. Source inspection traces strict live envelope authority to only the
+conversation classifier, output observation to the existing discard audit,
+and removal of the config field to ordinary strict unknown-field validation.
 
-Authored, not run: `full_response_metadata_before_untyped_500_uses_conversation_retry_budget`
-feeds both full active metadata frames and the terminal error, checks the
-conversation retry decision and existing budget, and does not use a provider.
-Integration source retires the superseded metadata grammar vetoes and retains
-terminal/invalid JSON vetoes, with explicit `[DONE]` and item/part observation
-controls. The source-review follow-up restores the hidden-output no-resend
-cases for duplicate root `response` and nested `output`, and adds duplicate
-root `type`, without suppressing the later terminal's status witness. No build,
-formatting, test execution, CI, or real provider validation has been performed
-for #315. Native validation requires separate admission.
+Authored, not run: a full created/in-progress prefix, reasoning item and strict
+500/429 assert an actual retry and its audit record; controls retain non-retry
+for typed terminals, other 4xx, `[DONE]`, malformed and duplicate terminal fields.
+Partial text and completed tool items are audited outside selected history and
+not executed or replayed. Both booleans for the retired key are rejected in the
+config fixture. The shared summary classifier still excludes the live terminal
+exception. The earlier #313 acceptance entries below are historical.
+
+No formatting, build, tests, CI or provider validation was run for this successor.
 
 ## Core U2 proactive Driver/Stop causal repair (bounded clean-source evidence)
 

@@ -110,10 +110,10 @@ async fn runtime_with_io_and_drain_timeout(
     drain_timeout_ms: u64,
 ) -> (tempfile::TempDir, DataOwner, Arc<Control>) {
     // These vertical paths exercise explicit recovery/retry and its saved facts.
-    // Default automatic partial retries are covered by response_retries instead.
+    // Disable automatic resend here; response_retries exercises that policy.
     let directory = tempfile::tempdir().unwrap();
     let config = directory.path().join("config.toml");
-    std::fs::write(&config,format!("default_connection='test'\ndefault_model='fixture'\n[connections.test]\nbase_url='{url}'\nresponse_retry_partial=false\n[io]\nterm_grace_ms=100\ndrain_timeout_ms={drain_timeout_ms}\nself_reply_grace_ms=10\nshutdown_grace_ms=2000\n{io}")).unwrap();
+    std::fs::write(&config,format!("default_connection='test'\ndefault_model='fixture'\n[connections.test]\nbase_url='{url}'\nresponse_max_retries=0\n[io]\nterm_grace_ms=100\ndrain_timeout_ms={drain_timeout_ms}\nself_reply_grace_ms=10\nshutdown_grace_ms=2000\n{io}")).unwrap();
     let owner = DataOwner::start(
         Some(config),
         Some(directory.path().join("data")),
@@ -2861,7 +2861,7 @@ async fn stalled_stream_enters_durable_recovery_and_preserves_received_text_with
     });
     let directory = tempfile::tempdir().unwrap();
     let config = directory.path().join("config.toml");
-    std::fs::write(&config, format!("default_connection='test'\ndefault_model='fixture'\n[connections.test]\nbase_url='{url}'\nresponse_retry_partial=false\nstream_idle_timeout_ms=1000\n")).unwrap();
+    std::fs::write(&config, format!("default_connection='test'\ndefault_model='fixture'\n[connections.test]\nbase_url='{url}'\nresponse_max_retries=0\nstream_idle_timeout_ms=1000\n")).unwrap();
     let owner = DataOwner::start(
         Some(config),
         Some(directory.path().join("data")),

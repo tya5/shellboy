@@ -15,11 +15,7 @@ pub(crate) enum RetryPolicy {
 
 /// The single policy boundary for a new chargeable conversation request.
 /// Transport readers report observations, not permission to resend.
-pub(crate) fn classify_retry(
-    error: &ModelError,
-    facts: &ResponseFacts,
-    retry_partial: bool,
-) -> RetryPolicy {
+pub(crate) fn classify_retry(error: &ModelError, facts: &ResponseFacts) -> RetryPolicy {
     if facts.terminal_received && !error.is_context_limit() {
         return RetryPolicy::Ineligible;
     }
@@ -29,12 +25,8 @@ pub(crate) fn classify_retry(
         {
             return RetryPolicy::Deferred(delay);
         }
-        return if facts.received == ResponseReceived::Output && !retry_partial {
-            RetryPolicy::Ineligible
-        } else {
-            RetryPolicy::Retry {
-                partial_output: facts.received == ResponseReceived::Output,
-            }
+        return RetryPolicy::Retry {
+            partial_output: facts.received == ResponseReceived::Output,
         };
     }
     let transient_status = matches!(facts.status, Some(429 | 500..=599));
@@ -52,7 +44,7 @@ pub(crate) fn classify_retry(
         _ => false,
     };
     let partial_output = facts.received == ResponseReceived::Output;
-    if !eligible || (partial_output && !retry_partial) {
+    if !eligible {
         return RetryPolicy::Ineligible;
     }
     if let Some(delay) = facts.retry_after

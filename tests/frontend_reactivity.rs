@@ -69,7 +69,7 @@ impl Fixture {
         let root = tempfile::tempdir().unwrap();
         let config = root.path().join("config.toml");
         let data = root.path().join("data");
-        std::fs::write(&config,format!("default_connection='fixture'\ndefault_model='fixture0'\n[connections.fixture]\nbase_url='{url}'\nresponse_max_retries=0\nresponse_retry_partial=false\n[connections.alternate]\nbase_url='{url}'\nresponse_max_retries=0\n[io]\nself_reply_grace_ms=10\nshutdown_grace_ms=2000\n")).unwrap();
+        std::fs::write(&config,format!("default_connection='fixture'\ndefault_model='fixture0'\n[connections.fixture]\nbase_url='{url}'\nresponse_max_retries=0\n[connections.alternate]\nbase_url='{url}'\nresponse_max_retries=0\n[io]\nself_reply_grace_ms=10\nshutdown_grace_ms=2000\n")).unwrap();
         std::fs::write(
             &config,
             format!(
