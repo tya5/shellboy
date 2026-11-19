@@ -229,6 +229,20 @@ Adds `thread set --max-tokens` (schema 44). See [release notes](release-v0.13.0-
 Independent review found no correctness bug; its documentation and early-clash
 follow-ups are included. Tag and publication follow exact-SHA all-OS CI.
 
+### v0.13.1 Candidate (release-only preparation)
+
+The published `v0.13.0` tag (`c212ecb8e3f56e2f7e8cee0ee49f9e7bd942c3bd`) is an
+ancestor of current remote main `3cbc9a1f295dc246d2dab9d3e0a603a32caa1de0`. This
+candidate changes only the Cargo package/lock version and release documentation;
+protocol remains 5 and schema is 49. See [release notes](release-v0.13.1-draft.md).
+No build, test, hosted CI or candidate workflow was run for this preparation.
+
+The intended tag is `v0.13.1`, on the final exact main SHA. Qualification requires
+independent review and same-SHA three-OS CI, followed by `.github/workflows/release.yml`
+with `release_tag=v0.13.1` and `candidate_ref=<exact main SHA>` for native
+build/package, smoke, installer checks and candidate provenance. This candidate
+route does not tag or publish. Tag/publication require separate explicit approval.
+
 ### v0.12.0 Candidate (#303 single-request compaction)
 
 #303 landed on main at cf9b662d0c (exact-SHA all-OS CI success, two independent
