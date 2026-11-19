@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
-pub const PROTOCOL_VERSION: u32 = 5;
+pub const PROTOCOL_VERSION: u32 = 6;
 pub const PROTOCOL_CAPABILITIES: &[&str] = &["events.reasoning_activity"];
 pub const MAX_FRAME_BYTES: usize = 8 * 1024 * 1024;
 pub const MAX_PENDING_REPLY_DUTIES: u64 = 16;
@@ -272,8 +272,8 @@ pub fn schema_json() -> String {
     remove_nested_definitions(&mut operation_results);
     let document = serde_json::json!({
         "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "$id": "https://shellboy.dev/schema/protocol-v5.json",
-        "title": "Shellboy local RPC protocol v5",
+        "$id": "https://shellboy.dev/schema/protocol-v6.json",
+        "title": "Shellboy local RPC protocol v6",
         "protocol_version": PROTOCOL_VERSION,
         "capabilities": PROTOCOL_CAPABILITIES,
         "operation_results": operation_results,
@@ -872,7 +872,9 @@ args!(ThreadRewindArgs {
     #[serde(default, skip_serializing_if = "is_false")]
     exclude_node: bool,
     #[serde(default, skip_serializing_if = "is_false")]
-    dry_run: bool
+    dry_run: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    recovery_run_id: Option<String>
 });
 args!(#[derive(Default)] ThreadSetArgs { #[serde(default, skip_serializing_if = "Option::is_none")] agents: Option<String>, #[serde(default)] connection: Option<String>, #[serde(default)] thread_id: Option<String>, #[serde(default)] cwd: Option<String>, #[serde(default)] model: Option<String>, #[serde(default)] effort: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] title: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] auto_compact_at: Option<String>, #[serde(default, skip_serializing_if="Option::is_none")] auto_compact_target_percent: Option<String>, #[serde(default, skip_serializing_if="Option::is_none")] summary_max_chars: Option<String>, #[serde(default, skip_serializing_if="Option::is_none")] max_tokens: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] spill: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] parent_id: Option<String> });
 impl ThreadSetArgs {
@@ -2446,5 +2448,36 @@ mod message_acknowledgement_tests {
         wire["future_delivery_flag"] = serde_json::json!(true);
         let additive: MessageAccepted = serde_json::from_value(wire).unwrap();
         assert_eq!(additive.deliver, Deliver::Next);
+    }
+}
+
+#[cfg(test)]
+mod recovery_rewind_args_tests {
+    use super::*;
+
+    fn request(thread_id: Option<&str>, dry_run: bool) -> Request {
+        Request::new(
+            "instance:recovery-rewind-validation",
+            Command::ThreadRewind(ThreadRewindArgs {
+                thread_id: thread_id.map(str::to_owned),
+                node_id: "node".into(),
+                exclude_node: false,
+                dry_run,
+                recovery_run_id: Some("exact-run".into()),
+            }),
+        )
+    }
+
+    #[test]
+    fn recovery_selector_requires_explicit_thread_and_forbids_dry_run() {
+        assert_eq!(
+            request(None, false).validate().unwrap_err().code,
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            request(Some("thread"), true).validate().unwrap_err().code,
+            ErrorCode::InvalidArgument
+        );
+        request(Some("thread"), false).validate().unwrap();
     }
 }

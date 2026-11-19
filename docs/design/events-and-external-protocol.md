@@ -90,7 +90,7 @@ tool start (no condition matches it). Nothing was measured; see §3.
 
 ### 1.5 Versioning and decode strictness (current main)
 
-Protocol 5 is current in this branch (`src/protocol.rs:11`); protocol 4 was the pre-#262 baseline. It adds independently
+Protocol 6 is current in this branch (`src/protocol.rs:11`); protocol 4 was the pre-#262 baseline. It adds independently
 opt-in `events.reasoning_activity` to the protocol-3 baseline. Owner and client
 require an exact version match; no protocol-2/3 downgrade or version range is
 supported (`src/ipc.rs`, `src/app.rs`). Request argument records remain strict: unknown
@@ -401,7 +401,7 @@ validation and are documented in prose.
 - The owner keeps accepting exactly one version (current-only, Issue #33);
   supporting a range is open (Q2).
 
-### 4.3 Capability advertisement (historical proposal; protocol 5 is current)
+### 4.3 Capability advertisement (historical proposal; protocol 6 is current)
 
 `Welcome` gained `capabilities: Vec<String>` with protocol 3 (names like `events.wait`,
 `message.send.human`); protocol 4 adds `events.reasoning_activity`. Welcome arrives before the request, so a client can

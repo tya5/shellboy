@@ -142,6 +142,7 @@ impl UiState {
                 node_id,
                 exclude_node: true,
                 dry_run: true,
+                recovery_run_id: None,
             },
         }]
     }
@@ -552,6 +553,7 @@ mod tests {
                 node_id: "req".into(),
                 exclude_node: true,
                 dry_run: true,
+                recovery_run_id: None,
             },
             result: Ok(facts_json(0, 0, 0)),
         });

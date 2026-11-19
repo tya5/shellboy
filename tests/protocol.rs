@@ -1221,10 +1221,13 @@ fn exported_schema_local_references_resolve() {
 }
 
 #[test]
-fn protocol_v5_handshake_and_typed_results_cover_existing_wire_modes() {
-    let welcome: Value = serde_json::from_str(
-        r#"{"protocol_version":5,"instance_id":"i","capabilities":["events.reasoning_activity"],"future_metadata":true}"#,
-    ).unwrap();
+fn protocol_v6_handshake_and_typed_results_cover_existing_wire_modes() {
+    let welcome = serde_json::json!({
+        "protocol_version": PROTOCOL_VERSION,
+        "instance_id": "i",
+        "capabilities": ["events.reasoning_activity"],
+        "future_metadata": true,
+    });
     let decoded: shellboy::ipc::Welcome = serde_json::from_value(welcome).unwrap();
     assert_eq!(decoded.protocol_version, PROTOCOL_VERSION);
     assert_eq!(decoded.capabilities, ["events.reasoning_activity"]);

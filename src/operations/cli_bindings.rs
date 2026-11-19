@@ -167,6 +167,7 @@ const MEANINGS: &[Meaning] = &[
             ("node_id", FieldId::Node),
             ("exclude_node", FieldId::ExcludeNode),
             ("dry_run", FieldId::DryRun),
+            ("run_id", FieldId::RecoveryRun),
         ],
         None,
     ),

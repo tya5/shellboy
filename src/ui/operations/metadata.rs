@@ -33,6 +33,7 @@ impl Form {
     pub(super) fn metadata_id(&self, name: &str) -> Option<FieldId> {
         Some(match name {
             "thread" => FieldId::Thread,
+            "run" if self.operation == OpKind::ThreadRewind => FieldId::RecoveryRun,
             "run" => FieldId::Run,
             "turn" => FieldId::Turn,
             "attempt" => FieldId::Attempt,
@@ -804,8 +805,8 @@ fn operation_meaning_for(id: OperationId, language: crate::config::UiLanguage) -
         ),
         OperationId::ThreadRewind => local!(
             language,
-            "指定ノードまでの履歴に選択経路を戻します。切り取った部分は子Threadとして残り、シェルの副作用は戻りません。",
-            "Cut the selected path back to the specified node. The removed part is kept as a child Thread; shell side effects are not undone."
+            "指定ノードまでの履歴に選択経路を戻します。切り取った部分は子Threadとして残り、シェルの副作用は戻りません。明示run指定時は復旧待ちの停止と巻き戻しを一括します。",
+            "Cut the selected path back to the specified node. The removed part is kept as a child Thread; shell side effects are not undone. An explicit Run atomically combines recovery Stop and rewind."
         ),
         OperationId::ThreadArchive => local!(
             language,
@@ -1102,6 +1103,7 @@ fn field_label_for(id: FieldId, language: crate::config::UiLanguage) -> &'static
         FieldId::ExitCode => local!(language, "終了コード", "Exit code"),
         FieldId::Thread => local!(language, "会話ID", "Thread ID"),
         FieldId::Run => local!(language, "作業ID（Run）", "Run ID"),
+        FieldId::RecoveryRun => local!(language, "復旧停止対象Run ID", "Recovery Run to stop"),
         FieldId::Attempt => local!(
             language,
             "モデル試行ID（単独指定）",
@@ -1311,6 +1313,11 @@ fn field_help_for(id: FieldId, language: crate::config::UiLanguage) -> &'static 
             language,
             "対象Runを指定します。人のCLIは明示IDが必要です。",
             "Specify the target Run. A human CLI must supply an ID."
+        ),
+        FieldId::RecoveryRun => local!(
+            language,
+            "--run指定時だけ、このrecovery_wait Runを同一操作で停止します。空欄に既定Runは入りません。",
+            "When supplied, atomically stop this exact recovery_wait Run. Blank never infers a default Run."
         ),
         FieldId::Attempt => local!(
             language,

@@ -130,6 +130,7 @@ impl Fixture {
                 node_id: node.into(),
                 exclude_node,
                 dry_run,
+                recovery_run_id: None,
             }),
         );
         self.store

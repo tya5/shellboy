@@ -235,6 +235,19 @@ pub(crate) fn repair_terminal_tx(db: &Connection, at: &str) -> rusqlite::Result<
     Ok(())
 }
 
+/// Classify only one Thread's accepted/held receipts during an exact-run Stop.
+/// Ordinary shutdown keeps the existing global startup/terminal repair sweep.
+pub(crate) fn repair_terminal_thread_tx(
+    db: &Connection,
+    thread: &str,
+    at: &str,
+) -> rusqlite::Result<()> {
+    db.execute("UPDATE receipt SET state='cancelled',hold_reason='target_or_source_unavailable',updated_at=?1 WHERE target_thread_id=?2 AND state IN ('accepted','held') AND (NOT EXISTS(SELECT 1 FROM thread t WHERE t.id=receipt.target_thread_id AND t.deleted_at IS NULL) OR NOT EXISTS(SELECT 1 FROM node n WHERE n.id=receipt.message_node_id AND n.payload_json IS NOT NULL AND n.deleted_reason IS NULL))",params![at,thread])?;
+    db.execute("UPDATE receipt SET hold_reason='uncertain_path_admission',updated_at=?1 WHERE target_thread_id=?2 AND state='held' AND path_admission='unknown' AND run_id IS NULL AND turn_id IS NULL AND hold_reason IS NOT 'uncertain_path_admission'",params![at,thread])?;
+    db.execute(&format!("UPDATE receipt SET state=CASE WHEN path_admission='admitted' THEN 'applied' ELSE 'held' END,hold_reason=CASE path_admission WHEN 'admitted' THEN 'terminal_after_path_admission' WHEN 'unadmitted' THEN 'terminal_before_path_admission' ELSE 'uncertain_path_admission' END,updated_at=?1 WHERE target_thread_id=?2 AND state IN ('accepted','held') AND {TERMINAL} AND (state<>CASE WHEN path_admission='admitted' THEN 'applied' ELSE 'held' END OR hold_reason IS NOT CASE path_admission WHEN 'admitted' THEN 'terminal_after_path_admission' WHEN 'unadmitted' THEN 'terminal_before_path_admission' ELSE 'uncertain_path_admission' END)"),params![at,thread])?;
+    Ok(())
+}
+
 /// Repair only this recipient's oldest 128 rows needing a state change.
 /// The global startup repair must never run inside foreground reply admission.
 fn repair_thread_batch_tx(db: &Connection, thread: &str, at: &str) -> rusqlite::Result<()> {
@@ -400,6 +413,39 @@ mod tests {
                 .unwrap(),
             0
         );
+    }
+
+    #[test]
+    fn exact_thread_terminal_repair_does_not_classify_an_unrelated_thread() {
+        let db = fixture();
+        input(&db, "current-admitted", "admitted", "0");
+        db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('other','/','/a','p','m','before'); INSERT INTO run(id,thread_id,state,created_at)VALUES('other-run','other','stopped','before'); INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('other-turn','other','other-run','stopped','before'); INSERT INTO node(id,turn_id,kind,created_at,payload_json)VALUES('other-held','other-turn','user','1','{}'); INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,run_id,turn_id,state,created_at,updated_at,path_admission)VALUES('other-held','other-op','null','other','other-held','other-run','other-turn','held','1','other-before','unadmitted');").unwrap();
+
+        repair_terminal_thread_tx(&db, "t", "scoped-stop").unwrap();
+
+        let current: (String, Option<String>, String) = db
+            .query_row(
+                "SELECT state,hold_reason,updated_at FROM receipt WHERE id='current-admitted'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            current,
+            (
+                "applied".into(),
+                Some("terminal_after_path_admission".into()),
+                "scoped-stop".into()
+            )
+        );
+        let unrelated: (String, Option<String>, String) = db
+            .query_row(
+                "SELECT state,hold_reason,updated_at FROM receipt WHERE id='other-held'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(unrelated, ("held".into(), None, "other-before".into()));
     }
 
     #[test]

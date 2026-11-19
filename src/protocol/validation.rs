@@ -288,6 +288,19 @@ impl ThreadBranchesArgs {
 impl ThreadRewindArgs {
     fn validate(&self) -> Result<(), ApiError> {
         optional_nonempty(self.thread_id.as_deref(), "thread_id")?;
+        optional_nonempty(self.recovery_run_id.as_deref(), "run_id")?;
+        if self.recovery_run_id.is_some() && self.thread_id.is_none() {
+            return Err(ApiError::new(
+                ErrorCode::InvalidArgument,
+                "recovery rewind requires an explicit Thread ID",
+            ));
+        }
+        if self.recovery_run_id.is_some() && self.dry_run {
+            return Err(ApiError::new(
+                ErrorCode::InvalidArgument,
+                "recovery rewind cannot be a dry run",
+            ));
+        }
         nonempty(&self.node_id, "node_id")
     }
 }

@@ -804,6 +804,56 @@ impl Control {
         }
         outcome
     }
+    async fn recovery_rewind(
+        self: &Arc<Self>,
+        request: Request,
+        origin: Option<Origin>,
+        thread: String,
+    ) -> Result<MutationResult, ApiError> {
+        if let Some(saved) = self.store.replay(&request, &origin).await? {
+            return Ok(saved);
+        }
+        let boundary = self.boundary(&thread).await;
+        let _boundary = boundary.lock().await;
+        let compact_tasks = self.compact_tasks.lock().await;
+        if compact_tasks.contains_key(&thread) {
+            return Err(ApiError::new(
+                ErrorCode::InvalidState,
+                "Thread has retained compaction ownership; recovery rewind was not applied",
+            ));
+        }
+        let run = match &request.command {
+            Command::ThreadRewind(args) => args.recovery_run_id.clone().unwrap(),
+            _ => unreachable!(),
+        };
+        let thread_for_runs = thread.clone();
+        let thread_runs = self
+            .store
+            .database
+            .call(move |db| {
+                let mut statement = db.prepare("SELECT id FROM run WHERE thread_id=?1")?;
+                let rows = statement.query_map([thread_for_runs], |row| row.get::<_, String>(0))?;
+                Ok(rows.collect::<rusqlite::Result<std::collections::HashSet<_>>>()?)
+            })
+            .await
+            .map_err(storage_error)?;
+        let Some(_owners) = self
+            .live
+            .recovery_rewind_owner_guard(&thread, &run, &thread_runs)
+            .await
+        else {
+            return Err(ApiError::new(
+                ErrorCode::InvalidState,
+                "Thread has live or retained Run/shell ownership; recovery rewind was not applied",
+            ));
+        };
+        let result = self.store.execute(request, origin).await;
+        drop(_owners);
+        drop(compact_tasks);
+        drop(_boundary);
+        result
+    }
+
     async fn boundary(&self, thread: &str) -> Arc<Mutex<()>> {
         let mut boundaries = self.boundaries.lock().await;
         boundaries.retain(|_, value| value.strong_count() > 0);
@@ -1047,6 +1097,15 @@ impl Control {
                             )
                             .await?;
                         self.store.execute_with_plan(request, origin, plan).await
+                    }
+                    Command::ThreadRewind(args) if args.recovery_run_id.is_some() => {
+                        let thread = args.thread_id.clone().ok_or_else(|| {
+                            ApiError::new(
+                                ErrorCode::InvalidArgument,
+                                "recovery rewind requires an explicit Thread ID",
+                            )
+                        })?;
+                        self.recovery_rewind(request, origin, thread).await
                     }
                     Command::ThreadGet(_) => {
                         let mut effects = self.store.execute(request, origin).await?;

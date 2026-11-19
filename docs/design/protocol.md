@@ -334,13 +334,13 @@ request and never deletes a space. `index.remove` takes `space_id` and optional 
 one inactive space. Index status adds an optional `shrink` (source_space, target_space, phase,
 source_segments, target_segments, started_at, error), an optional `retained_vector_payload_bytes`,
 and per space an optional `int8_scale` and `retained_remove_with`; `vector_payload_bytes` follows
-the element size. At that time the change was additive and left protocol version unchanged; protocol 3 was introduced later by Issue #244 A2; protocol 5 is current after #276. See
+the element size. At that time the change was additive and left protocol version unchanged; protocol 3 was introduced later by Issue #244 A2; protocol 6 is current after #288. See
 [search and relations](search-and-relations.md#int8-conversion-253).
 
 ## Instruction references (#51)
 
 thread.create/set/fork accept optional `agents`; thread.get returns required
-`agents_path`. At the time of this change, protocol 2 was retained for this pre-1.0 additive change; protocol 3 was introduced later by Issue #244 A2; protocol 5 is current after #276.
+`agents_path`. At the time of this change, protocol 2 was retained for this pre-1.0 additive change; protocol 3 was introduced later by Issue #244 A2; protocol 6 is current after #288.
 See [the reference contract](agents-reference.md) for validation, relative paths,
 atomic mutation and context_changed/agents_reference delivery.
 
@@ -915,7 +915,7 @@ This is additive to protocol 5. Before this change `status` result was an opaque
 Visibility lifetime: intermediate `assistant_response` rows are appended to the selected `thread_path` in the same transaction as their `output_item` links, so every published `node_id` is immediately a valid `history.window` anchor. A rewind/fork may later remove a node from that selected path; as with other positional history anchors, `history.window` then returns its normal stale-anchor error. No lookup is performed by body text or timestamp. Response adoption calls `Control::changed(thread_id)` after the commit; it records a durable thread change on the `events.wait` clock before notifying waiters, so the persisted-ref change is observable without polling or guessing.
 
 
-## Protocol 5 (Issue #262)
+## Protocol 5 (Issue #262; historical)
 
 `ThreadSummary.awaiting_human_count` is exact through 16. Value 17 with
 `awaiting_human_count_exact=false` means 17 or more. The bool defaults to true
@@ -954,3 +954,8 @@ presentation. Structured sender DTOs remain the client interface; clients must
 not parse this presentation text. Current title lookup belongs to the UI and
 does not rewrite sender facts or labels. No DTO field, event subtype, schema
 migration or protocol version is added.
+
+
+## Protocol 6 (Issue #288)
+
+The existing `thread.rewind` args gain optional `recovery_run_id` (CLI `--run`). It is valid only with an explicit `thread_id`, selects that exact live Run's `recovery_wait` Turn, and requests one atomic stop-and-rewind. It refuses any retained owner/work or stale recovery target without cancelling it. Plain rewind, plain Run Stop, and protocol-v5 requests without this field are unchanged. The protocol version is bumped because request args are strict; there is no v5 downgrade.

@@ -12,8 +12,13 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
 };
-use tokio::sync::{Mutex, Notify};
+use tokio::sync::{Mutex, MutexGuard, Notify};
 use tokio_util::sync::CancellationToken;
+
+pub(super) struct RecoveryRewindOwnerGuard<'a> {
+    _drivers: MutexGuard<'a, HashMap<String, DriverSlot>>,
+    _shells: MutexGuard<'a, HashMap<String, LiveShell>>,
+}
 
 pub(super) enum StoppedRunBoundary {
     NoMatchingDriver,
@@ -30,6 +35,30 @@ pub(super) struct LiveRegistry {
     pub(super) test_registration: Mutex<()>,
 }
 impl LiveRegistry {
+    /// Hold driver and shell publication closed across a recovery rewind commit.
+    /// Any retained slot is refused; callers must not cancel or join here.
+    pub(super) async fn recovery_rewind_owner_guard(
+        &self,
+        thread: &str,
+        run: &str,
+        thread_runs: &HashSet<String>,
+    ) -> Option<RecoveryRewindOwnerGuard<'_>> {
+        let drivers = self.drivers.lock().await;
+        if drivers.contains_key(thread) {
+            return None;
+        }
+        let shells = self.shells.lock().await;
+        if shells
+            .values()
+            .any(|shell| thread_runs.contains(&shell.run_id) || shell.run_id == run)
+        {
+            return None;
+        }
+        Some(RecoveryRewindOwnerGuard {
+            _drivers: drivers,
+            _shells: shells,
+        })
+    }
     /// The lookup, existing-slot notification and new-slot publication share one
     /// guard. Allocate driver resources only when no slot already owns Thread.
     #[cfg(test)]

@@ -45,6 +45,25 @@ fn thread_set_spill_has_a_real_typed_cli_binding_and_clear_choice() {
 }
 
 #[test]
+fn recovery_rewind_cli_run_binding_is_explicit_and_has_no_selected_run_default() {
+    let spec = OperationId::ThreadRewind.spec();
+    let field = spec
+        .field(FieldId::RecoveryRun)
+        .expect("recovery-only Run selector");
+    assert_eq!(field.field.default_origin, DefaultOrigin::None);
+    assert_eq!(field.field.kind, FieldType::Id(IdKind::Run));
+    let binding = OperationId::ThreadRewind.primary_cli();
+    let argument = binding
+        .arguments
+        .iter()
+        .find(|argument| argument.spelling == "--run")
+        .expect("explicit recovery selector flag");
+    assert_eq!(argument.field, FieldId::RecoveryRun);
+    assert!(argument.takes_value);
+    assert_eq!(argument.default, None);
+}
+
+#[test]
 fn fresh_clap_executable_paths_and_every_option_match_the_catalogue_bindings() {
     let mut parser = Cli::command();
     parser.build();

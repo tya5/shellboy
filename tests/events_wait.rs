@@ -479,6 +479,7 @@ async fn thread_create_set_fork_rewind_prune_and_delete_advance_the_clock() {
             node_id: nodes[1].clone(),
             exclude_node: false,
             dry_run: false,
+            recovery_run_id: None,
         }),
     )
     .await

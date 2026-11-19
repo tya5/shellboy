@@ -1,5 +1,5 @@
 {
-  "$id": "https://shellboy.dev/schema/protocol-v5.json",
+  "$id": "https://shellboy.dev/schema/protocol-v6.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "capabilities": [
     "events.reasoning_activity"
@@ -8296,6 +8296,12 @@
         "node_id": {
           "type": "string"
         },
+        "recovery_run_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "thread_id": {
           "default": null,
           "type": [
@@ -11777,6 +11783,6 @@
       "type": "object"
     }
   },
-  "protocol_version": 5,
-  "title": "Shellboy local RPC protocol v5"
+  "protocol_version": 6,
+  "title": "Shellboy local RPC protocol v6"
 }

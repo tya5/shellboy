@@ -1361,6 +1361,12 @@ impl Form {
                         Boolean,
                     ),
                     f("dry_run", "実行対象だけを確認", "false".into(), Boolean),
+                    f(
+                        "run",
+                        "復旧停止対象Run（任意・明示のみ）",
+                        String::new(),
+                        Text,
+                    ),
                 ],
                 |form, _cwd| {
                     Ok(Command::ThreadRewind(ThreadRewindArgs {
@@ -1368,6 +1374,7 @@ impl Form {
                         node_id: form.owned("node")?,
                         exclude_node: form.boolean("exclude_node")?,
                         dry_run: form.boolean("dry_run")?,
+                        recovery_run_id: form.optional("run")?,
                     }))
                 },
             ),

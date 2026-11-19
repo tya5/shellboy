@@ -2028,3 +2028,724 @@ async fn ordinary_admission_and_completion_preserve_long_model_names_with_gc_ena
         }
     }
 }
+
+async fn enter_synthetic_recovery_wait(
+    control: &Arc<Control>,
+    accepted: &MessageAccepted,
+    snapshot: &Snapshot,
+) -> String {
+    let prepared = Arc::new(
+        control
+            .attachments
+            .prepare_at_revision(
+                &accepted.thread_id,
+                CancellationToken::new(),
+                false,
+                snapshot.selection,
+            )
+            .await
+            .unwrap(),
+    );
+    let attempt = id();
+    assert!(
+        admit_attempt(control, snapshot, &attempt, prepared, 0, 0)
+            .await
+            .unwrap()
+    );
+    let thread = accepted.thread_id.clone();
+    let run = accepted.run_id.clone().unwrap();
+    let turn = accepted.turn_id.clone().unwrap();
+    let saved_attempt = attempt.clone();
+    control
+        .store
+        .database
+        .call(move |db| {
+            let tx = db.transaction()?;
+            assert_eq!(
+                super::super::state::fail_attempt(
+                    &tx,
+                    &saved_attempt,
+                    &json!({"kind":"network","message":"synthetic pre-response failure"}),
+                    "synthetic-failure",
+                )?,
+                super::super::state::AttemptTransition::Applied,
+            );
+            assert!(super::super::state::recover_turn_tx(
+                &tx,
+                &thread,
+                &run,
+                &turn,
+                0,
+                &ApiError::new(ErrorCode::IoFailed, "synthetic recovery boundary"),
+            )?);
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    attempt
+}
+
+async fn seed_completed_outgoing_attachment(
+    control: &Arc<Control>,
+    instance: &str,
+    root: &std::path::Path,
+    accepted: &MessageAccepted,
+    attempt: &str,
+) -> (String, String, String, String) {
+    let destination = control
+        .store
+        .execute(
+            Request::new(
+                format!("{instance}:attachment-destination"),
+                Command::ThreadCreate(ThreadCreateArgs {
+                    agents: None,
+                    connection: None,
+                    cwd: None,
+                    model: None,
+                    effort: None,
+                    parent_id: None,
+                }),
+            ),
+            None,
+        )
+        .await
+        .unwrap()
+        .result["thread_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let node = id();
+    let attachment = id();
+    let group = id();
+    let call = "settlement-attachment-call".to_owned();
+    let execution = id();
+    let operation = format!("{instance}:outgoing-attachment-{}", id());
+    let origin = json!({
+        "kind":"shell","thread_id":accepted.thread_id,"run_id":accepted.run_id,
+        "turn_id":accepted.turn_id,"execution_id":execution
+    })
+    .to_string();
+    let run = accepted.run_id.clone().unwrap();
+    let turn = accepted.turn_id.clone().unwrap();
+    let attempt = attempt.to_owned();
+    let target = destination.clone();
+    let path = root
+        .join("synthetic-outgoing.txt")
+        .to_string_lossy()
+        .into_owned();
+    let source = node.clone();
+    let saved_node = node.clone();
+    let saved_operation = operation.clone();
+    let saved_origin = origin.clone();
+    control.store.database.call(move |db| {
+        let tx = db.transaction()?;
+        crate::history::append_node(
+            &tx, &target, &saved_node, None, "event",
+            &json!({"kind":"synthetic_outgoing_attachment","content":"OUTGOING_ATTACHMENT_BODY"}),
+            "synthetic-outgoing",
+        )?;
+        tx.execute("INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES(?1,?2,?3,'completed','synthetic-group')",rusqlite::params![group,attempt,turn])?;
+        tx.execute("INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state,operation_id)VALUES(?1,?2,0,'shell','{}','completed',?3)",rusqlite::params![group,call,execution])?;
+        tx.execute("INSERT INTO tool_result(group_id,call_id,node_id,status)VALUES(?1,?2,?3,'completed')",rusqlite::params![group,call,source])?;
+        tx.execute("INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at,ended_at,output_complete,end_reason)VALUES(?1,?2,?3,?1,'exited','/','{}','UTF-8','UTF-8','closed','synthetic-start','synthetic-end',1,'exited')",rusqlite::params![execution,run,turn])?;
+        tx.execute("INSERT INTO attachment_ref(id,source_node_id,absolute_path,input_kind,ownership,created_at)VALUES(?1,?2,?3,'file','external','synthetic-attachment')",rusqlite::params![attachment,source,path])?;
+        tx.execute("INSERT INTO attachment_selection(thread_id,attachment_id,state,selected_at,selected_order,protected)VALUES(?1,?2,'active','synthetic-selection',0,1)",rusqlite::params![target,attachment])?;
+        tx.execute("INSERT INTO attachment_delivery(node_id,thread_id,status,operation_id,origin_json,created_at,target_run_id)VALUES(?1,?2,'accepted',?3,?4,'synthetic-delivery',NULL)",rusqlite::params![source,target,saved_operation,saved_origin])?;
+        assert_eq!(tx.query_row("SELECT status FROM attachment_delivery WHERE operation_id=?1", [&saved_operation], |r|r.get::<_,String>(0))?, "accepted");
+        assert!(
+            !tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM tool_group_recovery_candidate WHERE group_id=?1)",
+                [&group],
+                |r| r.get::<_, bool>(0)
+            )?
+        );
+        tx.commit()?;
+        Ok(())
+    }).await.unwrap();
+    (destination, node, operation, origin)
+}
+
+#[tokio::test]
+async fn recovery_rewind_stops_exact_waiting_run_and_preserves_held_input_body_and_receipt() {
+    let (root, owner, control, accepted) = fixture("http://127.0.0.1:1/v1").await;
+    let _snapshot = ready(&control, &accepted).await;
+    let thread = accepted.thread_id.clone();
+    let turn = accepted.turn_id.clone().unwrap();
+    control
+        .store
+        .database
+        .call(move |db| {
+            let tx = db.transaction()?;
+            crate::history::append_node(
+                &tx,
+                &thread,
+                "recovery-tail",
+                Some(&turn),
+                "assistant_response",
+                &json!({"role":"assistant","content":"tail"}),
+                "synthetic-tail",
+            )?;
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let accepted_input = control
+        .store
+        .execute(
+            Request::new(
+                format!("{}:admitted-input", owner.instance_id),
+                Command::MessageSend(MessageSendArgs {
+                    resume_recovery: false,
+                    human: true,
+                    to_human: false,
+                    expect_reply: false,
+                    sender_label: None,
+                    deliver: crate::protocol::Deliver::Next,
+                    thread_id: Some(accepted.thread_id.clone()),
+                    text: "ADMITTED_NOT_APPLIED_SENTINEL".into(),
+                }),
+            ),
+            None,
+        )
+        .await
+        .unwrap()
+        .result;
+    let admitted_id = accepted_input["message_id"].as_str().unwrap().to_owned();
+    let snapshot = match next(
+        &control,
+        &accepted.thread_id,
+        accepted.run_id.as_deref().unwrap(),
+    )
+    .await
+    .unwrap()
+    {
+        Next::Ready(snapshot) => snapshot,
+        _ => panic!("human input should keep the synthetic Run ready"),
+    };
+    let receipt_id = admitted_id.clone();
+    let admitted_before = control.store.database.call(move |db| Ok(db.query_row(
+        "SELECT state,path_admission,run_id,turn_id,result_json FROM receipt WHERE message_node_id=?1",
+        [&receipt_id], |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,Option<String>>(2)?,r.get::<_,Option<String>>(3)?,r.get::<_,Option<String>>(4)?))
+    )?)).await.unwrap();
+    assert_eq!(admitted_before.0, "accepted");
+    assert_eq!(admitted_before.1, "admitted");
+    let admitted_payload_id = admitted_id.clone();
+    let admitted_body_before: String = control
+        .store
+        .database
+        .call(move |db| {
+            Ok(db.query_row(
+                "SELECT payload_json FROM node WHERE id=?1",
+                [&admitted_payload_id],
+                |r| r.get(0),
+            )?)
+        })
+        .await
+        .unwrap();
+    let failed_attempt = enter_synthetic_recovery_wait(&control, &accepted, &snapshot).await;
+    let finish_id = failed_attempt.clone();
+    let finish_before = control
+        .store
+        .database
+        .call(move |db| {
+            Ok(db.query_row(
+                "SELECT state,error_json,ended_at FROM model_attempt WHERE id=?1",
+                [&finish_id],
+                |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, Option<String>>(1)?,
+                        r.get::<_, Option<String>>(2)?,
+                    ))
+                },
+            )?)
+        })
+        .await
+        .unwrap();
+    let held = control
+        .store
+        .execute(
+            Request::new(
+                format!("{}:held", owner.instance_id),
+                Command::MessageSend(MessageSendArgs {
+                    resume_recovery: false,
+                    human: false,
+                    to_human: false,
+                    expect_reply: false,
+                    sender_label: None,
+                    deliver: crate::protocol::Deliver::Next,
+                    thread_id: Some(accepted.thread_id.clone()),
+                    text: "RECOVERY_INPUT_SENTINEL".into(),
+                }),
+            ),
+            None,
+        )
+        .await
+        .unwrap()
+        .result;
+    let held_id = held["message_id"].as_str().unwrap().to_owned();
+    let before_held = {
+        let id = held_id.clone();
+        control.store.database.call(move |db| Ok((
+            db.query_row("SELECT payload_json FROM node WHERE id=?1", [&id], |r| r.get::<_,String>(0))?,
+            db.query_row("SELECT state,run_id,turn_id,result_json FROM receipt WHERE message_node_id=?1", [&id], |r| Ok((r.get::<_,String>(0)?,r.get::<_,Option<String>>(1)?,r.get::<_,Option<String>>(2)?,r.get::<_,Option<String>>(3)?)))?,
+        ))).await.unwrap()
+    };
+    let (destination, outgoing_node, outgoing_operation, outgoing_origin) =
+        seed_completed_outgoing_attachment(
+            &control,
+            &owner.instance_id,
+            root.path(),
+            &accepted,
+            &failed_attempt,
+        )
+        .await;
+    let outgoing_body_id = outgoing_node.clone();
+    let outgoing_body_before = control
+        .store
+        .database
+        .call(move |db| {
+            Ok(db.query_row(
+                "SELECT payload_json FROM node WHERE id=?1",
+                [&outgoing_body_id],
+                |row| row.get::<_, String>(0),
+            )?)
+        })
+        .await
+        .unwrap();
+    let response = control
+        .request(Request::new(
+            format!("{}:atomic-rewind", owner.instance_id),
+            Command::ThreadRewind(crate::protocol::ThreadRewindArgs {
+                thread_id: Some(accepted.thread_id.clone()),
+                node_id: accepted.message_id.clone(),
+                exclude_node: false,
+                dry_run: false,
+                recovery_run_id: accepted.run_id.clone(),
+            }),
+        ))
+        .await;
+    assert!(response.ok, "{response:?}");
+    let branch = response.result.as_ref().unwrap()["branch_thread_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let thread = accepted.thread_id.clone();
+    let run = accepted.run_id.clone().unwrap();
+    let tail = branch.clone();
+    let before_body = before_held.0;
+    let before_receipt = before_held.1;
+    let original_message = accepted.message_id.clone();
+    let original_turn = accepted.turn_id.clone().unwrap();
+    let finish_after_id = failed_attempt.clone();
+    let pending_message = held_id.clone();
+    let admitted_after_id = admitted_id.clone();
+    let admitted_body_expected = admitted_body_before.clone();
+    let admitted_receipt_expected = admitted_before.clone();
+    let outgoing_operation_after = outgoing_operation.clone();
+    let outgoing_origin_expected = outgoing_origin.clone();
+    let outgoing_node_expected = outgoing_node.clone();
+    let outgoing_destination = destination.clone();
+    let outgoing_body_expected = outgoing_body_before.clone();
+    control.store.database.call(move |db| {
+        let state: (String, String, i64) = db.query_row("SELECT r.state,u.state,u.generation FROM run r JOIN turn u ON u.run_id=r.id WHERE r.id=?1", [&run], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?)))?;
+        assert_eq!(state, ("stopped".into(), "stopped".into(), 1));
+        let path: Vec<String> = db.prepare("SELECT node_id FROM thread_path WHERE thread_id=?1 ORDER BY ordinal")?.query_map([&thread], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
+        assert_eq!(path, [original_message]);
+        let body: String = db.query_row("SELECT payload_json FROM node WHERE id=?1", [&held_id], |r| r.get(0))?;
+        let receipt: (String, Option<String>, Option<String>, Option<String>) = db.query_row("SELECT state,run_id,turn_id,result_json FROM receipt WHERE message_node_id=?1", [&held_id], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)))?;
+        assert_eq!(receipt.2.as_deref(), Some(original_turn.as_str()));
+        assert_eq!((body, receipt), (before_body, before_receipt));
+        let admitted_body: String = db.query_row("SELECT payload_json FROM node WHERE id=?1", [&admitted_after_id], |r|r.get(0))?;
+        let admitted_receipt: (String,String,Option<String>,Option<String>,Option<String>,Option<String>) = db.query_row(
+            "SELECT state,path_admission,hold_reason,run_id,turn_id,result_json FROM receipt WHERE message_node_id=?1",
+            [&admitted_after_id], |r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?))
+        )?;
+        assert_eq!(admitted_receipt.0, "applied");
+        assert_eq!(admitted_receipt.1, "admitted");
+        assert_eq!(admitted_receipt.2.as_deref(), Some("terminal_after_path_admission"));
+        assert_eq!(admitted_receipt.3.as_deref(), Some(run.as_str()));
+        assert_eq!(admitted_receipt.4.as_deref(), Some(original_turn.as_str()));
+        assert_eq!(admitted_receipt.5, admitted_receipt_expected.4);
+        assert_eq!(admitted_body, admitted_body_expected);
+        assert_eq!(db.query_row("SELECT count(*) FROM thread_path WHERE thread_id=?1 AND node_id=?2", [&tail,&admitted_after_id], |r|r.get::<_,i64>(0))?, 1);
+        let delivery: (String,String,String) = db.query_row("SELECT status,thread_id,origin_json FROM attachment_delivery WHERE operation_id=?1", [&outgoing_operation_after], |r|Ok((r.get(0)?,r.get(1)?,r.get(2)?)))?;
+        assert_eq!(delivery, ("held".into(), outgoing_destination, outgoing_origin_expected));
+        let outgoing_body_after: String = db.query_row("SELECT payload_json FROM node WHERE id=?1", [&outgoing_node_expected], |r|r.get(0))?;
+        assert_eq!(outgoing_body_after, outgoing_body_expected);
+        let finish_after = db.query_row("SELECT state,error_json,ended_at FROM model_attempt WHERE id=?1", [&finish_after_id], |r|Ok((r.get::<_,String>(0)?,r.get::<_,Option<String>>(1)?,r.get::<_,Option<String>>(2)?)))?;
+        assert_eq!(finish_after, finish_before, "original failed attempt FINISH is immutable");
+        assert_eq!(db.query_row("SELECT count(*) FROM thread_path WHERE thread_id=?1 AND node_id='recovery-tail'", [&tail], |r| r.get::<_,i64>(0))?, 1);
+        Ok(())
+    }).await.unwrap();
+    let replacement = control
+        .store
+        .execute(
+            Request::new(
+                format!("{}:after-rewind", owner.instance_id),
+                Command::MessageSend(MessageSendArgs {
+                    resume_recovery: false,
+                    human: true,
+                    to_human: false,
+                    expect_reply: false,
+                    sender_label: None,
+                    deliver: crate::protocol::Deliver::Next,
+                    thread_id: Some(accepted.thread_id.clone()),
+                    text: "AFTER_REWIND_SENTINEL".into(),
+                }),
+            ),
+            None,
+        )
+        .await
+        .unwrap()
+        .result;
+    let replacement_run = replacement["run_id"].as_str().unwrap().to_owned();
+    let replacement_message = replacement["message_id"].as_str().unwrap().to_owned();
+    assert_ne!(replacement_run, accepted.run_id.as_deref().unwrap());
+    assert!(matches!(
+        next(&control, &accepted.thread_id, &replacement_run)
+            .await
+            .unwrap(),
+        Next::Ready(_)
+    ));
+    let thread = accepted.thread_id.clone();
+    let original_message = accepted.message_id.clone();
+    control
+        .store
+        .database
+        .call(move |db| {
+            let path: Vec<String> = db
+                .prepare("SELECT node_id FROM thread_path WHERE thread_id=?1 ORDER BY ordinal")?
+                .query_map([&thread], |r| r.get(0))?
+                .collect::<rusqlite::Result<_>>()?;
+            let original_at = path
+                .iter()
+                .position(|node| node == &original_message)
+                .unwrap();
+            let pending_at = path
+                .iter()
+                .position(|node| node == &pending_message)
+                .unwrap();
+            let replacement_at = path
+                .iter()
+                .position(|node| node == &replacement_message)
+                .unwrap();
+            assert!(
+                original_at < pending_at && pending_at < replacement_at,
+                "{path:?}"
+            );
+            assert!(
+                !path.iter().any(|node| node == "recovery-tail"),
+                "old tail survived rewind: {path:?}"
+            );
+            let live_runs: i64 = db.query_row(
+                "SELECT count(*) FROM run WHERE thread_id=?1 AND state='live'",
+                [&thread],
+                |r| r.get(0),
+            )?;
+            assert_eq!(live_runs, 1, "one replacement Run only");
+            Ok(())
+        })
+        .await
+        .unwrap();
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn recovery_rewind_refuses_retained_driver_without_cancelling_or_mutating() {
+    let (_root, owner, control, accepted) = fixture("http://127.0.0.1:1/v1").await;
+    let _snapshot = ready(&control, &accepted).await;
+    let failed_attempt = enter_synthetic_recovery_wait(&control, &accepted, &_snapshot).await;
+    let thread = accepted.thread_id.clone();
+    let run = accepted.run_id.clone().unwrap();
+    let slot = control
+        .live
+        .register_or_nudge_driver(&thread, run.clone(), &control.stop, false)
+        .await
+        .unwrap();
+    let response = control
+        .request(Request::new(
+            format!("{}:refused-rewind", owner.instance_id),
+            Command::ThreadRewind(crate::protocol::ThreadRewindArgs {
+                thread_id: Some(thread.clone()),
+                node_id: accepted.message_id.clone(),
+                exclude_node: false,
+                dry_run: false,
+                recovery_run_id: Some(run.clone()),
+            }),
+        ))
+        .await;
+    assert!(!response.ok);
+    assert!(
+        !slot.stop.is_cancelled(),
+        "refusal must not cancel retained owner"
+    );
+    let attempt = failed_attempt.clone();
+    let state: (String, String, i64, String) = control.store.database.call(move |db| Ok(db.query_row(
+        "SELECT r.state,u.state,u.generation,(SELECT state FROM model_attempt WHERE id=?2) FROM run r JOIN turn u ON u.run_id=r.id WHERE r.id=?1", rusqlite::params![run,attempt], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))
+    )?)).await.unwrap();
+    assert_eq!(
+        state,
+        ("live".into(), "recovery_wait".into(), 0, "failed".into())
+    );
+    assert!(
+        control
+            .live
+            .remove_driver_if_current(&thread, &slot.id)
+            .await
+    );
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn recovery_rewind_group_boundary_failure_rolls_back_stop_path_branch_and_receipt() {
+    let (_root, owner, control, accepted) = fixture("http://127.0.0.1:1/v1").await;
+    let _snapshot = ready(&control, &accepted).await;
+    let turn = accepted.turn_id.clone().unwrap();
+    let thread = accepted.thread_id.clone();
+    control.store.database.call(move |db| {
+        let tx = db.transaction()?;
+        crate::history::append_node(&tx, &thread, "synthetic-call", Some(&turn), "assistant_response",
+            &json!({"item":{"type":"function_call","call_id":"atomic-call","name":"shell","arguments":"{}"}}), "call")?;
+        crate::history::append_node(&tx, &thread, "synthetic-result", Some(&turn), "tool_result",
+            &json!({"item":{"type":"function_call_output","call_id":"atomic-call","output":"done"}}), "result")?;
+        tx.commit()?;
+        Ok(())
+    }).await.unwrap();
+    let snapshot = ready(&control, &accepted).await;
+    let failed_attempt = enter_synthetic_recovery_wait(&control, &accepted, &snapshot).await;
+    let held = control
+        .store
+        .execute(
+            Request::new(
+                format!("{}:rollback-held", owner.instance_id),
+                Command::MessageSend(MessageSendArgs {
+                    resume_recovery: false,
+                    human: false,
+                    to_human: false,
+                    expect_reply: false,
+                    sender_label: None,
+                    deliver: crate::protocol::Deliver::Next,
+                    thread_id: Some(accepted.thread_id.clone()),
+                    text: "ROLLBACK_BODY_SENTINEL".into(),
+                }),
+            ),
+            None,
+        )
+        .await
+        .unwrap()
+        .result;
+    let held_id = held["message_id"].as_str().unwrap().to_owned();
+    let held_before_id = held_id.clone();
+    let held_before = control
+        .store
+        .database
+        .call(move |db| {
+            Ok((
+                db.query_row(
+                    "SELECT payload_json FROM node WHERE id=?1",
+                    [&held_before_id],
+                    |r| r.get::<_, String>(0),
+                )?,
+                db.query_row(
+                    "SELECT state,run_id,turn_id,result_json FROM receipt WHERE message_node_id=?1",
+                    [&held_before_id],
+                    |r| {
+                        Ok((
+                            r.get::<_, String>(0)?,
+                            r.get::<_, Option<String>>(1)?,
+                            r.get::<_, Option<String>>(2)?,
+                            r.get::<_, Option<String>>(3)?,
+                        ))
+                    },
+                )?,
+            ))
+        })
+        .await
+        .unwrap();
+    let (_destination, _outgoing_node, outgoing_operation, _outgoing_origin) =
+        seed_completed_outgoing_attachment(
+            &control,
+            &owner.instance_id,
+            _root.path(),
+            &accepted,
+            &failed_attempt,
+        )
+        .await;
+    let outgoing_operation_before = outgoing_operation.clone();
+    let outgoing_before = control.store.database.call(move |db| Ok(db.query_row(
+        "SELECT status,thread_id,origin_json,(SELECT payload_json FROM node WHERE id=attachment_delivery.node_id) FROM attachment_delivery WHERE operation_id=?1",
+        [&outgoing_operation_before], |r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,String>(3)?))
+    )?)).await.unwrap();
+    assert_eq!(outgoing_before.0, "accepted");
+    let before_path = accepted.thread_id.clone();
+    let before_run = accepted.run_id.clone().unwrap();
+    let before = control.store.database.call(move |db| {
+        let path: Vec<String> = db.prepare("SELECT node_id FROM thread_path WHERE thread_id=?1 ORDER BY ordinal")?.query_map([&before_path], |r|r.get(0))?.collect::<rusqlite::Result<_>>()?;
+        let state: (String,String,i64) = db.query_row("SELECT r.state,u.state,u.generation FROM run r JOIN turn u ON u.run_id=r.id WHERE r.id=?1", [&before_run], |r|Ok((r.get(0)?,r.get(1)?,r.get(2)?)))?;
+        let branches: i64 = db.query_row("SELECT count(*) FROM thread WHERE parent_thread_id=?1 AND branch_kind='rewind'", [&before_path], |r|r.get(0))?;
+        let finish: (String,Option<String>,Option<String>) = db.query_row("SELECT state,error_json,ended_at FROM model_attempt WHERE turn_id=(SELECT id FROM turn WHERE run_id=?1)", [&before_run], |r|Ok((r.get(0)?,r.get(1)?,r.get(2)?)))?;
+        Ok((path,state,branches,finish))
+    }).await.unwrap();
+    let response = control
+        .request(Request::new(
+            format!("{}:rollback-rewind", owner.instance_id),
+            Command::ThreadRewind(crate::protocol::ThreadRewindArgs {
+                thread_id: Some(accepted.thread_id.clone()),
+                node_id: "synthetic-call".into(),
+                exclude_node: false,
+                dry_run: false,
+                recovery_run_id: accepted.run_id.clone(),
+            }),
+        ))
+        .await;
+    assert!(!response.ok, "cutting an incomplete tool group must refuse");
+    let error = response.error.as_ref().unwrap();
+    assert_eq!(error.code, ErrorCode::InvalidState);
+    assert_eq!(
+        error.message,
+        "fork would split tool calls from their complete results"
+    );
+    let after_thread = accepted.thread_id.clone();
+    let run = accepted.run_id.clone().unwrap();
+    let after = control.store.database.call(move |db| {
+        let path: Vec<String> = db.prepare("SELECT node_id FROM thread_path WHERE thread_id=?1 ORDER BY ordinal")?.query_map([&after_thread], |r|r.get(0))?.collect::<rusqlite::Result<_>>()?;
+        let state: (String,String,i64) = db.query_row("SELECT r.state,u.state,u.generation FROM run r JOIN turn u ON u.run_id=r.id WHERE r.id=?1", [&run], |r|Ok((r.get(0)?,r.get(1)?,r.get(2)?)))?;
+        let branches: i64 = db.query_row("SELECT count(*) FROM thread WHERE parent_thread_id=?1 AND branch_kind='rewind'", [&after_thread], |r|r.get(0))?;
+        let finish: (String,Option<String>,Option<String>) = db.query_row("SELECT state,error_json,ended_at FROM model_attempt WHERE turn_id=(SELECT id FROM turn WHERE run_id=?1)", [&run], |r|Ok((r.get(0)?,r.get(1)?,r.get(2)?)))?;
+        let attachment: (String,String,String,String) = db.query_row("SELECT status,thread_id,origin_json,(SELECT payload_json FROM node WHERE id=attachment_delivery.node_id) FROM attachment_delivery WHERE operation_id=?1", [&outgoing_operation], |r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)))?;
+        assert_eq!(attachment,outgoing_before);
+        let body: String = db.query_row("SELECT payload_json FROM node WHERE id=?1", [&held_id], |r|r.get(0))?;
+        let receipt: (String,Option<String>,Option<String>,Option<String>) = db.query_row("SELECT state,run_id,turn_id,result_json FROM receipt WHERE message_node_id=?1", [&held_id], |r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)))?;
+        assert_eq!((body,receipt),held_before);
+        Ok((path,state,branches,finish))
+    }).await.unwrap();
+    assert_eq!(
+        after, before,
+        "all writes before canonical group validation must roll back"
+    );
+    drop(snapshot);
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn recovery_rewind_terminal_reply_creates_run_after_path_rewrite() {
+    let (_root, owner, control, accepted) = fixture("http://127.0.0.1:1/v1").await;
+    let _initial = ready(&control, &accepted).await;
+    let thread = accepted.thread_id.clone();
+    let turn = accepted.turn_id.clone().unwrap();
+    control
+        .store
+        .database
+        .call(move |db| {
+            let tx = db.transaction()?;
+            crate::history::append_node(
+                &tx,
+                &thread,
+                "reply-rewind-tail",
+                Some(&turn),
+                "assistant_response",
+                &json!({"role":"assistant","content":"tail"}),
+                "tail",
+            )?;
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let snapshot = ready(&control, &accepted).await;
+    let _failed_attempt = enter_synthetic_recovery_wait(&control, &accepted, &snapshot).await;
+    let origin = crate::protocol::Origin {
+        instance_id: owner.instance_id.clone(),
+        thread_id: accepted.thread_id.clone(),
+        run_id: accepted.run_id.clone().unwrap(),
+        turn_id: accepted.turn_id.clone().unwrap(),
+        execution_id: "synthetic-reply-sender".into(),
+        token: "synthetic-token".into(),
+    };
+    let sender = crate::protocol::MessageSender::recorded(Some(&origin), None, false);
+    let sender_json = serde_json::to_string(&sender).unwrap();
+    let reply_node = id();
+    let reply_id = reply_node.clone();
+    let source_thread = accepted.thread_id.clone();
+    let source_turn = accepted.turn_id.clone().unwrap();
+    let old_run = accepted.run_id.clone().unwrap();
+    control.store.database.call(move |db| {
+        let tx = db.transaction()?;
+        crate::history::append_node(&tx, &source_thread, &reply_node, Some(&source_turn), "user",
+            &json!({"role":"user","content":[{"type":"input_text","text":"pending model reply duty"}]}), "reply")?;
+        tx.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,run_id,turn_id,state,path_admission,created_at,result_json)VALUES(?1,?1,?2,?3,?1,?4,?5,'applied','admitted','synthetic-reply',?6)",rusqlite::params![reply_node,sender_json,source_thread,old_run,source_turn,json!({"expect_reply":true,"to_human":false,"reply":{"state":"pending"}}).to_string()])?;
+        tx.commit()?;
+        Ok(())
+    }).await.unwrap();
+
+    // Run the saved writer transaction without applying wakes so no driver/provider starts.
+    let effects = control
+        .store
+        .execute(
+            Request::new(
+                format!("{}:reply-order-rewind", owner.instance_id),
+                Command::ThreadRewind(crate::protocol::ThreadRewindArgs {
+                    thread_id: Some(accepted.thread_id.clone()),
+                    node_id: accepted.message_id.clone(),
+                    exclude_node: false,
+                    dry_run: false,
+                    recovery_run_id: accepted.run_id.clone(),
+                }),
+            ),
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        effects.wake_threads.as_slice(),
+        std::slice::from_ref(&accepted.thread_id)
+    );
+    let thread = accepted.thread_id.clone();
+    let old_run = accepted.run_id.clone().unwrap();
+    let reply_node_after = reply_id.clone();
+    let (new_run, path, receipt, event) = control.store.database.call(move |db| {
+        let new_run: String = db.query_row("SELECT id FROM run WHERE thread_id=?1 AND state='live'", [&thread], |r|r.get(0))?;
+        let path: Vec<String> = db.prepare("SELECT node_id FROM thread_path WHERE thread_id=?1 ORDER BY ordinal")?.query_map([&thread], |r|r.get(0))?.collect::<rusqlite::Result<_>>()?;
+        let old_state: String = db.query_row("SELECT state FROM run WHERE id=?1", [&old_run], |r|r.get(0))?;
+        assert_eq!(old_state, "stopped");
+        let receipt: (String,Option<String>,Option<String>,String,String) = db.query_row("SELECT state,run_id,turn_id,sender_json,result_json FROM receipt WHERE message_node_id=?1", [&reply_node_after], |r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?)))?;
+        let event: (String,Option<String>,String) = db.query_row("SELECT kind,target_run_id,payload_ref_json FROM event WHERE id=?1", [format!("reply-outcome-{reply_node_after}")], |r|Ok((r.get(0)?,r.get(1)?,r.get(2)?)))?;
+        Ok((new_run,path,receipt,event))
+    }).await.unwrap();
+    assert_eq!(
+        path.as_slice(),
+        std::slice::from_ref(&accepted.message_id),
+        "new Run is created only after canonical rewind"
+    );
+    assert_eq!(receipt.0, "applied");
+    assert_eq!(
+        receipt.1.as_deref(),
+        Some(accepted.run_id.as_deref().unwrap())
+    );
+    assert_eq!(
+        receipt.2.as_deref(),
+        Some(accepted.turn_id.as_deref().unwrap())
+    );
+    assert_eq!(
+        serde_json::from_str::<crate::protocol::MessageSender>(&receipt.3).unwrap(),
+        sender
+    );
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&receipt.4).unwrap()["reply"]["state"],
+        "ignored"
+    );
+    assert_eq!(event.0, "reply_outcome");
+    assert_eq!(event.1.as_deref(), Some(new_run.as_str()));
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&event.2).unwrap()["message_id"],
+        reply_id
+    );
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+}

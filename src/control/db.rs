@@ -1429,23 +1429,31 @@ impl Store {
             Command::ThreadRewind(args) => {
                 let id = target(args.thread_id.as_deref(), caller)?;
                 let branch = uuid::Uuid::new_v4().to_string();
-                let mut value = history::rewind::rewind_thread(
-                    tx,
-                    &id,
-                    &args.node_id,
-                    args.exclude_node,
-                    args.dry_run,
-                    &branch,
-                    now,
-                )?;
+                let mut result = if let Some(run) = args.recovery_run_id.as_deref() {
+                    recovery_rewind_tx(tx, &id, run, args, &branch, now)?
+                } else {
+                    let value = history::rewind::rewind_thread(
+                        tx,
+                        &id,
+                        &args.node_id,
+                        args.exclude_node,
+                        args.dry_run,
+                        &branch,
+                        now,
+                    )?;
+                    MutationResult::value(value)?
+                };
                 let stored: String = tx
                     .query_row("SELECT title FROM thread WHERE id=?1", [&id], |r| r.get(0))
                     .map_err(sql_error)?;
-                value["title"] = json!(thread_display_title(tx, &id, &stored)?);
-                let mut result = MutationResult::value(value)?;
+                result.result["title"] = json!(thread_display_title(tx, &id, &stored)?);
                 if !args.dry_run {
-                    result.changed_threads.push(id);
-                    result.changed_threads.push(branch);
+                    if !result.changed_threads.contains(&id) {
+                        result.changed_threads.push(id);
+                    }
+                    if !result.changed_threads.contains(&branch) {
+                        result.changed_threads.push(branch);
+                    }
                 }
                 Ok(result)
             }
@@ -2491,6 +2499,102 @@ pub(crate) fn title_from_user_payload(payload: &Value) -> Option<String> {
 /// Display-only fallback. Never rewrite an explicit title or the user's history.
 /// The selected path, rather than a Run's latest assistant/tool output, defines
 /// the earliest meaningful user text, including on a forked/shared history.
+pub(crate) fn recovery_rewind_tx(
+    tx: &Transaction<'_>,
+    thread: &str,
+    run: &str,
+    args: &crate::protocol::ThreadRewindArgs,
+    branch: &str,
+    now: &str,
+) -> Result<MutationResult> {
+    if args.dry_run {
+        return Err(error(
+            ErrorCode::InvalidArgument,
+            "recovery rewind cannot be a dry run",
+        ));
+    }
+    let state: Option<(String, String, String, i64)> = tx
+        .query_row(
+            "SELECT r.state,u.id,u.state,u.generation FROM run r JOIN turn u ON u.run_id=r.id AND u.thread_id=r.thread_id WHERE r.id=?1 AND r.thread_id=?2 AND u.state='recovery_wait'",
+            params![run, thread],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .optional()
+        .map_err(sql_error)?;
+    let Some((run_state, turn_id, _turn_state, generation)) = state else {
+        return Err(error(
+            ErrorCode::InvalidState,
+            "The selected Run has no recovery_wait Turn on this Thread",
+        ));
+    };
+    if run_state != "live" {
+        return Err(error(
+            ErrorCode::InvalidState,
+            "The selected recovery Run is no longer live",
+        ));
+    }
+    let busy: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM model_attempt a JOIN turn u ON u.id=a.turn_id WHERE u.thread_id=?1 AND a.state IN ('preparing','inflight')) OR EXISTS(SELECT 1 FROM shell_execution s JOIN run r ON r.id=s.owner_run_id WHERE r.thread_id=?1 AND s.state IN ('starting','running','stopping')) OR EXISTS(SELECT 1 FROM tool_group_recovery_candidate c JOIN tool_group g ON g.id=c.group_id JOIN turn u ON u.id=g.turn_id WHERE u.thread_id=?1) OR EXISTS(SELECT 1 FROM app_meta WHERE key IN (?2,?3,?4,?5))",
+        params![thread,
+            crate::compaction::CompactionKeys::new(thread).pending(),
+            crate::compaction::CompactionKeys::new(thread).inflight(),
+            crate::compaction::CompactionKeys::new(thread).automatic_active(),
+            crate::compaction::CompactionKeys::new(thread).automatic_guard()],
+        |row| row.get(0),
+    ).map_err(sql_error)?;
+    if busy {
+        return Err(error(
+            ErrorCode::InvalidState,
+            "Recovery Run still owns an attempt, shell, tool, or compaction operation",
+        ));
+    }
+    // Reuse ordinary Stop before canonical terminal settlement. The owner gate
+    // proved that no shell/driver can still mutate while the writer commits.
+    let mut result = stop_run(tx, run, now)?;
+    if !result.stop_runs.iter().any(|stopped| stopped == run) {
+        return Err(error(
+            ErrorCode::InvalidState,
+            "Recovery Run changed before Stop",
+        ));
+    }
+    super::state::stop_drained_run_tx(tx, run, thread).map_err(storage_error)?;
+    let terminal: (String, i64) = tx
+        .query_row(
+            "SELECT state,generation FROM turn WHERE id=?1 AND run_id=?2",
+            params![turn_id, run],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(sql_error)?;
+    if terminal.0 != "stopped" || terminal.1 != generation + 1 {
+        return Err(error(
+            ErrorCode::InvalidState,
+            "Recovery Turn did not settle at its original Stop generation",
+        ));
+    }
+
+    // Keep terminal reply effects after canonical path validation: outcome_tx can start a Run.
+    let value = history::rewind::rewind_thread(
+        tx,
+        thread,
+        &args.node_id,
+        args.exclude_node,
+        false,
+        branch,
+        now,
+    )?;
+    result.result = serde_json::to_value(value)
+        .map_err(|_| error(ErrorCode::InvalidState, "cannot encode rewind result"))?;
+    if !result
+        .changed_threads
+        .iter()
+        .any(|changed| changed == branch)
+    {
+        result.changed_threads.push(branch.to_owned());
+    }
+    result.wake_threads = super::reply::terminal_tx(tx, run, now).map_err(sql_error)?;
+    Ok(result)
+}
+
 pub(crate) fn thread_display_title(
     connection: &Connection,
     id: &str,

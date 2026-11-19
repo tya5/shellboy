@@ -132,6 +132,7 @@ impl Fixture {
                 node_id: node.into(),
                 exclude_node: false,
                 dry_run: false,
+                recovery_run_id: None,
             }))
             .await
             .unwrap();

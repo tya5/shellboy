@@ -454,6 +454,30 @@ pub(super) fn stop_drained_runs(
     owned: &[(String, String)],
     stopping_for_shutdown: bool,
 ) -> Result<(), StorageError> {
+    stop_drained_runs_inner(tx, owned, stopping_for_shutdown, None)
+}
+
+/// Exact Run stop settlement; unlike startup/owner shutdown this repairs only
+/// the Thread whose Run is being stopped.
+pub(super) fn stop_drained_run_tx(
+    tx: &rusqlite::Transaction<'_>,
+    run: &str,
+    thread: &str,
+) -> Result<(), StorageError> {
+    stop_drained_runs_inner(
+        tx,
+        &[(run.to_owned(), thread.to_owned())],
+        false,
+        Some(thread),
+    )
+}
+
+fn stop_drained_runs_inner(
+    tx: &rusqlite::Transaction<'_>,
+    owned: &[(String, String)],
+    stopping_for_shutdown: bool,
+    repair_thread: Option<&str>,
+) -> Result<(), StorageError> {
     for (run, thread) in owned {
         // The same held input a send to this stopping Run would have produced.
         super::revisit::hand_off_tx(
@@ -474,7 +498,11 @@ pub(super) fn stop_drained_runs(
 
         tx.execute("UPDATE receipt SET state='held',hold_reason='stopped',updated_at=?2 WHERE run_id=?1 AND state='accepted'",params![run,now()])?;
     }
-    super::message_delivery::repair_terminal_tx(tx, &now())?;
+    if let Some(thread) = repair_thread {
+        super::message_delivery::repair_terminal_thread_tx(tx, thread, &now())?;
+    } else {
+        super::message_delivery::repair_terminal_tx(tx, &now())?;
+    }
     Ok(())
 }
 
