@@ -5,9 +5,10 @@ the conversation schema advances from 44 to 49.
 
 ## What changes for users
 
-- Retryable conversation stream failures are retried only when the response facts
-  prove that no assistant output was emitted. Missing or contradictory terminal
-  metadata fails closed rather than authorizing a retry.
+- A narrow retry now applies to a supported untyped terminal provider error (429
+  or 500-599) inside a successful HTTP 200 Responses SSE exchange. It requires a
+  parser-proven metadata-only prefix with no output; ambiguous or conflicting facts
+  fail closed rather than authorizing a retry.
 - Human questions are durably admitted to the canonical Thread history. Question
   request acceptance, durable receipt completion and later path admission remain
   distinct; answering is still a separate human reply.
@@ -21,9 +22,11 @@ the conversation schema advances from 44 to 49.
 ## Conversation schema 49
 
 Migrations 45-49 add the Thread spill-preference setting, update compaction scope
-identity records, remove obsolete selection-generation state, admit previously
-applied human-question receipts to the canonical history path, and convert eligible
-canonical generated summaries to the user role. Ambiguous summary rows fail closed.
+identity records, remove obsolete selection-generation state, and mark as admitted
+historical applied human-question receipts that the supported published writer had
+already appended to the selected path (no path append occurs). They also convert
+eligible canonical generated summaries to the user role. Ambiguous summary rows fail
+closed.
 The upgrade is forward-only: an older binary cannot open a migrated database. Back
 up the data directory before first startup with this version.
 
