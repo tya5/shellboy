@@ -3055,8 +3055,7 @@ async fn untyped_terminal_sse_does_not_retry_after_observed_output() {
         "data: {\"type\":\"response.reasoning_text.delta\",\"delta\":\"visible reasoning\"}\n\n";
     let arguments =
         "data: {\"type\":\"response.function_call_arguments.delta\",\"delta\":\"{\"}\n\n";
-    let item =
-        "data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"reasoning\",\"summary\":[]}}\n\n";
+    let item = "data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"reasoning\",\"summary\":[]}}\n\n";
     let part = "data: {\"type\":\"response.content_part.added\",\"output_index\":0,\"content_index\":0,\"part\":{\"type\":\"output_text\",\"text\":\"\"}}\n\n";
     for (prefix, retained_reasoning) in [
         (reasoning, "visible reasoning"),
