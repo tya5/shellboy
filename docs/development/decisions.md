@@ -4486,6 +4486,23 @@ later valid terminal witness. Broaden the allowlist only with positive provenanc
 and output-absence proofs for the new shapes. No new dependency, table, queue,
 worker or event is introduced.
 
+## #315 Use existing output observation for untyped terminal retry
+
+Supersede only #313's prefix-proof decision. LiteLLM sends full Response
+metadata with empty `output` on `response.created` and `response.in_progress`;
+a closed key set rejects ordinary metadata without improving output detection
+for supported events. Remove the proof rather than expanding the allowlist.
+Keep the strict live terminal envelope and the parser/driver no-output checks.
+Unknown event shapes are not proof of output; an unobserved partial response
+may be discarded and the provider may charge twice, as with HTTP 5xx retry.
+Retry does not execute an incomplete tool call.
+
+Do not align partial terminal errors with interrupted transport in #315:
+those paths have different terminal evidence, and extending eligibility after
+observed output would change #313's policy independently of this metadata fix.
+Revisit only as a separate partial-retry policy decision. Summary policy and
+the existing conversation budget and backoff are unchanged.
+
 ## Automatic spill preference (S6a, 2026-11-13)
 
 Decision: persist one nullable raw Thread boolean (`spill_override`) and one

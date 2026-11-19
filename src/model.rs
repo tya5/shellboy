@@ -539,101 +539,29 @@ impl ModelResponse {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum StreamRetryFrame {
-    EmptyMetadata,
-    UntypedError,
-    Other,
-}
-
-impl StreamRetryFrame {
-    // Inspect the bounded frame rather than its last-key-wins Value. Serde's
-    // struct decoder rejects repeated fields, including response and output.
-    fn prove(bytes: &[u8], event: &Value) -> Self {
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct Metadata {
-            #[serde(rename = "type")]
-            _kind: String,
-            #[serde(default, rename = "sequence_number")]
-            _sequence_number: u64,
-            response: Option<EmptyResponse>,
-        }
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct EmptyResponse {
-            #[serde(default, rename = "id")]
-            _id: String,
-            #[serde(default, rename = "model")]
-            _model: String,
-            #[serde(default, rename = "object")]
-            _object: ResponseObject,
-            #[serde(default, rename = "created_at")]
-            _created_at: u64,
-            #[serde(default)]
-            status: ActiveStatus,
-            #[serde(default, rename = "error")]
-            _error: (),
-            #[serde(default, rename = "incomplete_details")]
-            _incomplete_details: (),
-            #[serde(default, rename = "output")]
-            _output: [serde::de::IgnoredAny; 0],
-        }
-        #[derive(Default, Deserialize)]
-        #[serde(rename_all = "snake_case")]
-        enum ResponseObject {
-            #[default]
-            Response,
-        }
-        #[derive(Default, Deserialize)]
-        #[serde(rename_all = "snake_case")]
-        enum ActiveStatus {
-            #[default]
-            InProgress,
-            Queued,
-        }
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct Untyped {
-            #[serde(rename = "error")]
-            _error: ErrorObject,
-        }
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct ErrorObject {
-            #[serde(rename = "code")]
-            _code: String,
-            #[serde(rename = "message")]
-            _message: Option<String>,
-            #[serde(rename = "type")]
-            _kind: Option<String>,
-            #[serde(rename = "param")]
-            _param: Option<String>,
-        }
-
-        match event.get("type").and_then(Value::as_str) {
-            Some(kind @ ("response.created" | "response.in_progress"))
-                if event.get("response").is_none_or(|response| {
-                    response.is_object()
-                        && response.get("object").is_none_or(Value::is_string)
-                        && response.get("status").is_none_or(Value::is_string)
-                }) && serde_json::from_slice::<Metadata>(bytes).is_ok_and(|metadata| {
-                    kind == "response.created"
-                        || metadata.response.is_none_or(|response| {
-                            matches!(response.status, ActiveStatus::InProgress)
-                        })
-                }) =>
-            {
-                Self::EmptyMetadata
-            }
-            None if event.get("error").is_some_and(Value::is_object)
-                && serde_json::from_slice::<Untyped>(bytes).is_ok() =>
-            {
-                Self::UntypedError
-            }
-            _ => Self::Other,
-        }
+// Inspect the bounded terminal frame rather than its last-key-wins Value.
+// Serde's struct decoder rejects repeated or unknown envelope fields.
+fn is_strict_untyped_stream_error(bytes: &[u8]) -> bool {
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Untyped {
+        #[serde(rename = "error")]
+        _error: ErrorObject,
     }
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct ErrorObject {
+        #[serde(rename = "code")]
+        _code: String,
+        #[serde(rename = "message")]
+        _message: Option<String>,
+        #[serde(rename = "type")]
+        _kind: Option<String>,
+        #[serde(rename = "param")]
+        _param: Option<String>,
+    }
+
+    serde_json::from_slice::<Untyped>(bytes).is_ok()
 }
 
 #[derive(Clone)]
@@ -641,7 +569,7 @@ struct DecodedEvent {
     value: Value,
     duplicate_relevant_key: bool,
     untyped_error_candidate: bool,
-    retry_frame: StreamRetryFrame,
+    strict_untyped_error: bool,
 }
 struct DecodeFailure {
     error: ModelError,
@@ -686,7 +614,7 @@ impl SseDecoder {
         bytes: &[u8],
         mut terminal: impl FnMut(&DecodedEvent) -> bool,
         stop_done: bool,
-        prove_retry_frames: bool,
+        check_untyped_envelope: bool,
     ) -> Result<Vec<DecodedEvent>, Box<DecodeFailure>> {
         let mut events = Vec::new();
         self.total = self.total.checked_add(bytes.len()).ok_or_else(|| {
@@ -754,11 +682,10 @@ impl SseDecoder {
                             };
                         self.json_events += 1;
                         let decoded = DecodedEvent {
-                            retry_frame: if prove_retry_frames && !duplicate_relevant_key {
-                                StreamRetryFrame::prove(&self.data, &event)
-                            } else {
-                                StreamRetryFrame::Other
-                            },
+                            strict_untyped_error: check_untyped_envelope
+                                && !duplicate_relevant_key
+                                && stream_error::recognized_untyped_error(&event)
+                                && is_strict_untyped_stream_error(&self.data),
                             value: event,
                             duplicate_relevant_key,
                             untyped_error_candidate,
@@ -854,7 +781,6 @@ pub struct ResponseStream {
     total_differences: usize,
     last_event: Option<&'static str>,
     output_observed: bool,
-    unproven_retry_prefix: bool,
 }
 impl ResponseStream {
     /// Parsed events can be persisted/previewed. Tools are never started here.
@@ -887,7 +813,6 @@ impl ResponseStream {
             let event = decoded.value;
             let classification = classify_stream_event(&event);
             self.output_observed |= classification != StreamEventKind::Metadata;
-            self.unproven_retry_prefix |= decoded.retry_frame == StreamRetryFrame::Other;
             if let Some(delta) = event.get("delta").and_then(Value::as_str) {
                 match classification {
                     StreamEventKind::TextDelta => self.partial_text.push_str(delta),
@@ -982,9 +907,7 @@ impl ResponseStream {
                     self.failed_response = Some(event.clone());
                     let mut error =
                         ModelError::stream_provider(&event, decoded.duplicate_relevant_key);
-                    error.untyped_stream_error_without_output_prefix = decoded.retry_frame
-                        == StreamRetryFrame::UntypedError
-                        && !self.unproven_retry_prefix
+                    error.untyped_stream_error_without_output_prefix = decoded.strict_untyped_error
                         && !self.has_output()
                         && self.decoder.done_markers == 0
                         && error.stream_provider_status.is_some();

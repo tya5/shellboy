@@ -1,5 +1,23 @@
 # Validation record
 
+## #315 Conversation stream retry (source only)
+
+Baseline: `6bba2428c6f9162bd6713b19f89aa3f5c133adda`. Source inspection on
+macOS traces item/part/delta observation to the live witness veto and the HTTP
+`Output` fact, and the published untyped 500 envelope to the unchanged strict
+terminal grammar and stream-code witness. The conversation classifier, budget,
+backoff, and summary classifier are unchanged. The older #313 acceptance record
+below describes a historical prefix policy, not the #315 contract.
+
+Authored, not run: `full_response_metadata_before_untyped_500_uses_conversation_retry_budget`
+feeds both full active metadata frames and the terminal error, checks the
+conversation retry decision and existing budget, and does not use a provider.
+Integration source retires the superseded prefix-only veto expectations and
+retains terminal/invalid JSON vetoes, with explicit `[DONE]` and item/part
+observation controls. No build, formatting, test execution, CI, or real provider
+validation has been performed for #315. Native validation requires separate
+admission.
+
 ## Core U2 proactive Driver/Stop causal repair (bounded clean-source evidence)
 
 Parent source: `49f6c8fdeae90205808f14f7e816fba56a679601`. Exact clean patch SHA-256: `f353a7ab28fccde07d0e60fcca43c363c3b6345b1d171c76d724cc1868fc9235` (six source/test files; immutable copy under `.local/private-reports/studio-current-20261113/closed-stop-uninstrumented-final-clean-20261118/`). Independent source review closes the three correlated Driver/Stop ownership seams at bounded source scope: `.local/leader/core-u2-closed-stop-2915ecb-causal-repair-review-20261118.md`, SHA-256 `533d6873e0052714fd9d71f8f0c08accc0559093dcf5ceb48200770cfc7bfad0`.

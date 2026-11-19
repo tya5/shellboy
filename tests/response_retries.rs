@@ -2901,12 +2901,7 @@ async fn untyped_terminal_sse_retries_without_output_and_saves_failure_before_po
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn untyped_terminal_sse_retry_fails_closed_for_ambiguous_or_nontransient_errors() {
     let collision = r#"{"type":"response.failed","response":{"output":[{"type":"reasoning"}]},"response":{"error":{"code":"500","message":"fixture"}}}"#;
-    let ambiguous_prefix = "data: {\"type\":\"response.created\",\"response\":{\"output\":[{}]},\"response\":{\"output\":[]}}\n\n";
-    let malformed_prefix =
-        "data: {\"type\":\"response.in_progress\",\"response\":{\"output\":null}}\n\n";
-    let duplicate_output =
-        "data: {\"type\":\"response.created\",\"response\":{\"output\":[{}],\"output\":[]}}\n\n";
-    let unknown_prefix = "data: {\"type\":\"response.future_output\",\"delta\":\"opaque\"}\n\n";
+    let done_prefix = "data: [DONE]\n\n";
     for (prefix, event, witness) in [
         ("", collision, Some(500)),
         (
@@ -2914,10 +2909,7 @@ async fn untyped_terminal_sse_retry_fails_closed_for_ambiguous_or_nontransient_e
             r#"{"type":"response.failed","response":{"output":[{"type":"reasoning"}],"error":{"code":"500"}}}"#,
             Some(500),
         ),
-        (ambiguous_prefix, TERMINAL_SSE_500, Some(500)),
-        (malformed_prefix, TERMINAL_SSE_500, Some(500)),
-        (duplicate_output, TERMINAL_SSE_500, Some(500)),
-        (unknown_prefix, TERMINAL_SSE_500, Some(500)),
+        (done_prefix, TERMINAL_SSE_500, Some(500)),
         ("", r#"{"type":"error","error":{"code":"500"}}"#, Some(500)),
         (
             "",
@@ -2978,105 +2970,30 @@ async fn untyped_terminal_sse_retry_fails_closed_for_ambiguous_or_nontransient_e
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn untyped_terminal_sse_rejects_contradictory_nested_metadata_without_losing_witness() {
-    let event: Value = serde_json::from_str(TERMINAL_SSE_500).unwrap();
-    for (kind, response) in [
-        (
-            "response.created",
-            r#"{"output":[],"error":{"code":"400"}}"#,
-        ),
-        ("response.created", r#"{"status":"failed","output":[]}"#),
-        (
-            "response.in_progress",
-            r#"{"status":"completed","output":[]}"#,
-        ),
-        ("response.in_progress", r#"{"status":"queued","output":[]}"#),
-        (
-            "response.created",
-            r#"{"status":"failed","status":"in_progress","output":[]}"#,
-        ),
-        (
-            "response.created",
-            r#"{"status":"in_progress","status":"in_progress"}"#,
-        ),
-        (
-            "response.created",
-            r#"{"error":{},"error":null,"output":[]}"#,
-        ),
-        (
-            "response.created",
-            r#"{"incomplete_details":{"reason":"max_output_tokens"}}"#,
-        ),
-        ("response.created", r#"{"output":[],"unknown":{}}"#),
-        ("response.created", r#"[{"output":[]}]"#),
-        ("response.created", r#"{"status":{"in_progress":null}}"#),
-        ("response.created", r#"{"object":{"response":null}}"#),
-    ] {
-        let prefix = format!("data: {{\"type\":\"{kind}\",\"response\":{response}}}\n\n");
-        let mut fixture = Fixture::new(2, 10, 5_000).await;
-        fixture
-            .incoming()
-            .await
-            .reply
-            .send(terminal_sse(&prefix, TERMINAL_SSE_500, ""))
-            .ok()
-            .unwrap();
-        assert_eq!(fixture.settled().await, "recovery_wait", "{prefix}");
-        let attempts = fixture.attempts().await;
-        assert_eq!(attempts.len(), 1);
-        assert_eq!(attempts[0].0, "incomplete");
-        let failure = attempts[0].1.as_ref().unwrap();
-        assert_terminal_stream_failure(failure, Some(500));
-        assert_eq!(failure["raw_response"], event);
-        assert_eq!(failure["partial_text"], "");
-        assert_eq!(failure["partial_reasoning"], "");
-        assert_eq!(failure["completed_items"], json!({}));
-        assert!(failure.get("automatic_retry").is_none());
-        assert!(failure.get("automatic_retry_exhausted").is_none());
-        assert_eq!(fixture_request_log_lines(&fixture), 1);
-        fixture.no_more_requests().await;
-        fixture.close().await;
-    }
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn untyped_terminal_sse_rejects_wrapped_or_malformed_raw_frames() {
-    let valid_terminal: Value = serde_json::from_str(TERMINAL_SSE_500).unwrap();
-    for (frame, error_kind) in [
-        (json!([&valid_terminal]).to_string(), "provider"),
-        (json!(TERMINAL_SSE_500).to_string(), "provider"),
-        (r#"{"wrapper":{"error":{"code":"503"}}}"#.into(), "provider"),
-        (r#"{"error":{"code":"599"}"#.into(), "protocol"),
-    ] {
-        let mut fixture = Fixture::new(2, 10, 5_000).await;
-        let prefix = format!("data: {frame}\n\n");
-        fixture
-            .incoming()
-            .await
-            .reply
-            .send(terminal_sse(&prefix, TERMINAL_SSE_500, ""))
-            .ok()
-            .unwrap();
-        assert_eq!(fixture.settled().await, "recovery_wait", "{frame}");
-        let attempts = fixture.attempts().await;
-        assert_eq!(attempts.len(), 1);
-        let failure = attempts[0].1.as_ref().unwrap();
-        assert_eq!(failure["error"]["kind"], error_kind);
-        assert_eq!(failure["rate_observation"]["status"], 200);
-        if error_kind == "provider" {
-            assert_terminal_stream_failure(failure, Some(500));
-            assert_eq!(failure["raw_response"], valid_terminal);
-        } else {
-            // Invalid JSON fails before the following terminal can supply a witness.
-            assert!(failure["error"].get("stream_provider_status").is_none());
-            assert!(failure["raw_response"].is_null());
-        }
-        assert!(failure.get("automatic_retry").is_none());
-        assert!(failure.get("automatic_retry_exhausted").is_none());
-        assert_eq!(fixture_request_log_lines(&fixture), 1);
-        fixture.no_more_requests().await;
-        fixture.close().await;
-    }
+async fn untyped_terminal_sse_does_not_retry_after_invalid_json() {
+    let prefix = "data: {\"error\":{\"code\":\"599\"}\n\n";
+    let mut fixture = Fixture::new(2, 10, 5_000).await;
+    fixture
+        .incoming()
+        .await
+        .reply
+        .send(terminal_sse(prefix, TERMINAL_SSE_500, ""))
+        .ok()
+        .unwrap();
+    assert_eq!(fixture.settled().await, "recovery_wait");
+    let attempts = fixture.attempts().await;
+    assert_eq!(attempts.len(), 1);
+    let failure = attempts[0].1.as_ref().unwrap();
+    assert_eq!(failure["error"]["kind"], "protocol");
+    assert_eq!(failure["rate_observation"]["status"], 200);
+    // Invalid JSON fails before the following terminal can supply a witness.
+    assert!(failure["error"].get("stream_provider_status").is_none());
+    assert!(failure["raw_response"].is_null());
+    assert!(failure.get("automatic_retry").is_none());
+    assert!(failure.get("automatic_retry_exhausted").is_none());
+    assert_eq!(fixture_request_log_lines(&fixture), 1);
+    fixture.no_more_requests().await;
+    fixture.close().await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -3103,12 +3020,20 @@ async fn untyped_terminal_sse_retry_does_not_apply_to_http_200_json() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn untyped_terminal_sse_does_not_retry_after_reasoning_or_tool_fragments() {
+async fn untyped_terminal_sse_does_not_retry_after_observed_output() {
     let reasoning =
         "data: {\"type\":\"response.reasoning_text.delta\",\"delta\":\"visible reasoning\"}\n\n";
     let arguments =
         "data: {\"type\":\"response.function_call_arguments.delta\",\"delta\":\"{\"}\n\n";
-    for (prefix, retained_reasoning) in [(reasoning, "visible reasoning"), (arguments, "")] {
+    let item =
+        "data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"reasoning\",\"summary\":[]}}\n\n";
+    let part = "data: {\"type\":\"response.content_part.added\",\"output_index\":0,\"content_index\":0,\"part\":{\"type\":\"output_text\",\"text\":\"\"}}\n\n";
+    for (prefix, retained_reasoning) in [
+        (reasoning, "visible reasoning"),
+        (arguments, ""),
+        (item, ""),
+        (part, ""),
+    ] {
         let mut fixture = Fixture::new(2, 10, 5_000).await;
         fixture
             .incoming()

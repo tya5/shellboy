@@ -549,6 +549,55 @@ mod tests {
     }
 
     #[test]
+    fn full_response_metadata_before_untyped_500_uses_conversation_retry_budget() {
+        let response = json!({
+            "id": "resp_fixture", "object": "response", "created_at": 1,
+            "model": "fixture", "status": "in_progress", "output": [],
+            "error": null, "incomplete_details": null, "usage": null,
+            "instructions": "Fixture instructions", "tools": [],
+            "tool_choice": "auto", "parallel_tool_calls": true,
+            "reasoning": {"effort": "medium", "summary": null},
+            "text": {"format": {"type": "text"}}, "metadata": {},
+            "temperature": 1.0, "top_p": 1.0, "max_output_tokens": null,
+            "previous_response_id": null, "store": false, "truncation": "disabled"
+        });
+        let created =
+            json!({"type": "response.created", "sequence_number": 0, "response": &response});
+        let in_progress =
+            json!({"type": "response.in_progress", "sequence_number": 1, "response": &response});
+        let error = r#"{"error":{"code":"500","message":"Fixture upstream closed","param":"None","type":"None"}}"#;
+        let mut stream = model::ResponseStream::default();
+        stream
+            .push(format!("data: {created}\n\ndata: {in_progress}\n\ndata: {error}\n\n").as_bytes())
+            .unwrap();
+        assert!(!stream.has_output());
+        assert!(stream.partial_text.is_empty());
+        assert!(stream.partial_reasoning.is_empty());
+        assert!(stream.completed_items.is_empty());
+        let facts = ResponseFacts {
+            status: Some(200),
+            terminal_received: stream.is_terminal(),
+            received: ResponseReceived::Metadata,
+            ..Default::default()
+        };
+        let mut failure = AttemptFailure::from(stream.finish(false).unwrap_err());
+        failure.facts = facts;
+        assert_eq!(
+            classify_conversation_retry(&failure, false),
+            RetryPolicy::Retry {
+                partial_output: false,
+            }
+        );
+        let budget = RetryBudget::default();
+        let cap = Duration::from_secs(60);
+        assert_eq!(
+            budget.delay(8, cap, facts.retry_after),
+            Some(Duration::from_secs(1))
+        );
+        assert_eq!(budget.delay(0, cap, facts.retry_after), None);
+    }
+
+    #[test]
     fn consecutive_budget_resets_only_after_adoption_or_turn_generation_change() {
         let mut budget = RetryBudget::default();
         budget.observe("t", 1);
