@@ -521,7 +521,11 @@ mod tests {
             saved["stream_provider_status"],
             json!({"value":599,"source":"stream_error_code"})
         );
-        assert!(saved.get("strict_untyped_stream_error_before_done").is_none());
+        assert!(
+            saved
+                .get("strict_untyped_stream_error_before_done")
+                .is_none()
+        );
         saved["strict_untyped_stream_error_before_done"] = json!(true);
         failure.error = serde_json::from_value(saved).unwrap();
         assert!(failure.error.untyped_stream_error_witness().is_none());

@@ -1086,15 +1086,7 @@ async fn default_retry_budget_survives_seven_explicit_proxy_failures() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn second_eligible_failure_reduces_but_first_retry_is_unchanged() {
     for mode in ["500", "501", "503", "disconnect", "header_timeout"] {
-        let mut f = Fixture::with_history(
-            8,
-            10,
-            500,
-            true,
-            Some(10_000),
-            "current request",
-        )
-        .await;
+        let mut f = Fixture::with_history(8, 10, 500, true, Some(10_000), "current request").await;
         for index in 0..2 {
             let pending = f.incoming().await;
             assert!(
@@ -1145,15 +1137,7 @@ async fn second_eligible_failure_reduces_but_first_retry_is_unchanged() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn reduced_and_unreducible_inputs_share_the_eight_retry_budget() {
     for old in [None, Some(10_000)] {
-        let mut f = Fixture::with_history(
-            8,
-            10,
-            5000,
-            true,
-            old,
-            "current protected input",
-        )
-        .await;
+        let mut f = Fixture::with_history(8, 10, 5000, true, old, "current protected input").await;
         for _ in 0..9 {
             f.incoming()
                 .await
@@ -1203,15 +1187,7 @@ async fn reduced_and_unreducible_inputs_share_the_eight_retry_budget() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn explicit_overflow_reduces_immediately_within_the_same_retry_budget() {
-    let mut f = Fixture::with_history(
-        1,
-        10,
-        5000,
-        true,
-        Some(10_000),
-        "current request",
-    )
-    .await;
+    let mut f = Fixture::with_history(1, 10, 5000, true, Some(10_000), "current request").await;
     f.incoming()
         .await
         .reply
@@ -1235,8 +1211,7 @@ async fn explicit_overflow_reduces_immediately_within_the_same_retry_budget() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn disabled_automatic_reduction_and_rate_limits_preserve_input() {
     for (enabled, status) in [(false, 503), (true, 429)] {
-        let mut f =
-            Fixture::with_history(3, 10, 5000, enabled, Some(10_000), "current").await;
+        let mut f = Fixture::with_history(3, 10, 5000, enabled, Some(10_000), "current").await;
         for _ in 0..3 {
             let request = f.incoming().await;
             assert!(request.body.to_string().contains("DENSE_OLD_CONTEXT"));
@@ -1347,15 +1322,8 @@ async fn a_long_turn_defers_the_large_input_trim_while_its_tool_loop_is_open() {
             "type":"function_call","call_id":name,"name":"shell","arguments":json!({"command":command}).to_string()
         }]}).to_string(),"")
     }
-    let mut f = Fixture::with_history(
-        8,
-        10,
-        5000,
-        true,
-        Some(10_000),
-        "protected current request",
-    )
-    .await;
+    let mut f =
+        Fixture::with_history(8, 10, 5000, true, Some(10_000), "protected current request").await;
     for _ in 0..2 {
         f.incoming()
             .await
@@ -1442,8 +1410,7 @@ async fn overflow_trim_keeps_every_user_input_of_the_active_turn() {
             "type":"function_call","call_id":name,"name":"shell","arguments":json!({"command":command}).to_string()
         }]}).to_string(),"")
     }
-    let mut f =
-        Fixture::with_history(8, 10, 5000, true, None, "TURN_REQUEST_MARKER").await;
+    let mut f = Fixture::with_history(8, 10, 5000, true, None, "TURN_REQUEST_MARKER").await;
     let thread = f.accepted.thread_id.clone();
     let mut sent = Vec::new();
     for (index, work) in ["early-work", "middle-work", "late-work"]
@@ -1620,15 +1587,7 @@ async fn overflow_trim_keeps_every_user_input_of_the_active_turn() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn unreducible_explicit_overflow_recovers_without_any_resend() {
-    let mut f = Fixture::with_history(
-        8,
-        10,
-        5000,
-        true,
-        None,
-        "only protected request",
-    )
-    .await;
+    let mut f = Fixture::with_history(8, 10, 5000, true, None, "only protected request").await;
     let first = f.incoming().await;
     let target = f.accepted.thread_id.clone();
     let turn = f.accepted.turn_id.clone().unwrap();
@@ -2245,15 +2204,8 @@ async fn connection_cooldown_revalidates_model_before_second_thread_sends() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn manual_summary_waits_for_connection_cooldown_and_shutdown_cancels_it() {
-    let mut fixture = Fixture::with_history(
-        0,
-        10,
-        5_000,
-        true,
-        Some(1_000),
-        "synthetic summary wait",
-    )
-    .await;
+    let mut fixture =
+        Fixture::with_history(0, 10, 5_000, true, Some(1_000), "synthetic summary wait").await;
     fixture
         .incoming()
         .await
@@ -2532,15 +2484,8 @@ async fn shared_connection_wait_is_recorded_on_successful_attempt() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn summary_connection_wait_is_recorded_in_existing_usage() {
-    let mut fixture = Fixture::with_history(
-        0,
-        10,
-        5_000,
-        true,
-        Some(1_000),
-        "summary wait usage",
-    )
-    .await;
+    let mut fixture =
+        Fixture::with_history(0, 10, 5_000, true, Some(1_000), "summary wait usage").await;
     fixture
         .incoming()
         .await
@@ -2813,8 +2758,7 @@ async fn strict_untyped_terminal_after_full_response_and_reasoning_item_retries(
         "temperature": 1.0, "top_p": 1.0, "max_output_tokens": null,
         "previous_response_id": null, "store": false, "truncation": "disabled"
     });
-    let created =
-        json!({"type": "response.created", "sequence_number": 0, "response": &response});
+    let created = json!({"type": "response.created", "sequence_number": 0, "response": &response});
     let in_progress =
         json!({"type": "response.in_progress", "sequence_number": 1, "response": &response});
     let reasoning = json!({
@@ -3091,7 +3035,11 @@ async fn typed_terminal_sse_error_does_not_retry_and_preserves_partial_facts() {
         .unwrap();
     assert_eq!(fixture.settled().await, "recovery_wait");
     let attempts = fixture.attempts().await;
-    assert_eq!(attempts.len(), 1, "typed terminal stream failure cannot retry");
+    assert_eq!(
+        attempts.len(),
+        1,
+        "typed terminal stream failure cannot retry"
+    );
     let failure = attempts[0].1.as_ref().unwrap();
     assert_eq!(failure["partial_text"], "visible partial text");
     assert_eq!(failure["completed_items"]["0"]["call_id"], "partial-call");
@@ -3104,9 +3052,7 @@ async fn typed_terminal_sse_error_does_not_retry_and_preserves_partial_facts() {
         .control
         .store
         .database
-        .call(|db| {
-            Ok(db.query_row("SELECT count(*) FROM shell_execution", [], |row| row.get(0))?)
-        })
+        .call(|db| Ok(db.query_row("SELECT count(*) FROM shell_execution", [], |row| row.get(0))?))
         .await
         .unwrap();
     assert_eq!(
@@ -3145,9 +3091,7 @@ async fn genuine_eof_partial_output_retries_and_never_executes_saved_tools() {
         .control
         .store
         .database
-        .call(|db| {
-            Ok(db.query_row("SELECT count(*) FROM shell_execution", [], |row| row.get(0))?)
-        })
+        .call(|db| Ok(db.query_row("SELECT count(*) FROM shell_execution", [], |row| row.get(0))?))
         .await
         .unwrap();
     assert_eq!(
