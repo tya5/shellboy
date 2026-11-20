@@ -1184,23 +1184,50 @@ impl Control {
                         Ok(crate::control::db::MutationResult{result:json!({"schedules":schedules}),..Default::default()})
                     }
                     Command::ThreadDelete(args) => {
-                        let selection=args.clone();
-                        let targets=self.store.database.call(move|db|{
-                            let targets=crate::deletion::guarded_targets(db,&selection).map_err(crate::storage::StorageError::from)?;
-                            targets.ok_or_else(||crate::storage::StorageError::InvalidInput("Thread deletion selection exceeds its guarded target bound".into()))
+                        // Authenticated receipt replay must precede fresh target admission: a
+                        // committed delete has already removed its target from the live tree.
+                        if let Some(saved) = self.store.replay(&request, &origin).await? {
+                            return Ok(saved);
+                        }
+                        let selection = args.clone();
+                        let (targets, root_exists) = self.store.database.call(move |db| {
+                            let tx = db.unchecked_transaction()?;
+                            let targets = crate::deletion::guarded_targets(&tx, &selection)
+                                .map_err(crate::storage::StorageError::from)?;
+                            let root_exists = tx.query_row(
+                                "SELECT EXISTS(SELECT 1 FROM thread WHERE id=?1 AND deleted_at IS NULL)",
+                                [&selection.thread_id],
+                                |row| row.get::<_, bool>(0),
+                            )?;
+                            tx.commit()?;
+                            Ok((targets, root_exists))
                         }).await.map_err(storage_error)?;
-                        let mut guards=Vec::new();
-                        for thread in &targets {
-                            let boundary=self.boundary(thread).await;
-                            guards.push(boundary.try_lock_owned().map_err(|_|ApiError::new(ErrorCode::InvalidState,"A Thread-owned edit is active; retry deletion after it ends"))?);
+                        let checked_targets = match targets {
+                            Some(targets) => targets,
+                            None if args.preview_marker.is_some() || !root_exists => Vec::new(),
+                            None => return Err(ApiError::new(
+                                ErrorCode::InvalidArgument,
+                                "Thread deletion selection exceeds its guarded target bound",
+                            )),
+                        };
+                        let mut guards = Vec::new();
+                        for thread in &checked_targets {
+                            let boundary = self.boundary(thread).await;
+                            guards.push(boundary.try_lock_owned().map_err(|_| ApiError::new(
+                                ErrorCode::InvalidState,
+                                "A Thread-owned edit is active; retry deletion after it ends",
+                            ))?);
                         }
                         {
-                            let active=self.scheduled_active.lock().unwrap_or_else(|poison|poison.into_inner());
-                            if targets.iter().any(|thread|active.values().any(|owner|owner==thread)) {
-                                return Err(ApiError::new(ErrorCode::InvalidState,"A scheduled shell is active for this Thread; wait until it finishes before deleting"));
+                            let active = self.scheduled_active.lock().unwrap_or_else(|poison| poison.into_inner());
+                            if checked_targets.iter().any(|thread| active.values().any(|owner| owner == thread)) {
+                                return Err(ApiError::new(
+                                    ErrorCode::InvalidState,
+                                    "A scheduled shell is active for this Thread; wait until it finishes before deleting",
+                                ));
                             }
                         }
-                        self.store.execute(request,origin).await
+                        self.store.execute_with_checked_delete_targets(request, origin, checked_targets).await
                     }
                     Command::ThreadGet(_) => {
                         let mut effects = self.store.execute(request, origin).await?;

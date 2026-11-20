@@ -368,6 +368,32 @@ impl Store {
         request: Request,
         caller: Option<Origin>,
     ) -> Result<MutationResult> {
+        self.execute_with_delete_targets(request, caller, None)
+            .await
+    }
+
+    pub(crate) async fn execute_with_checked_delete_targets(
+        &self,
+        request: Request,
+        caller: Option<Origin>,
+        checked_targets: Vec<String>,
+    ) -> Result<MutationResult> {
+        if !matches!(&request.command, Command::ThreadDelete(_)) {
+            return Err(error(
+                ErrorCode::InvalidState,
+                "Checked deletion targets require a ThreadDelete request",
+            ));
+        }
+        self.execute_with_delete_targets(request, caller, Some(checked_targets))
+            .await
+    }
+
+    async fn execute_with_delete_targets(
+        &self,
+        request: Request,
+        caller: Option<Origin>,
+        checked_delete_targets: Option<Vec<String>>,
+    ) -> Result<MutationResult> {
         request.validate()?;
         if matches!(&request.command, Command::Status(a) if a.memory) {
             return Err(error(
@@ -480,6 +506,7 @@ impl Store {
                         caller.as_ref(),
                         &request.operation_id,
                         &chrono::Utc::now().to_rfc3339(),
+                        None,
                     );
                     tx.commit().map_err(sql_error)?;
                     value
@@ -505,12 +532,13 @@ impl Store {
             "external"
         });
         self.receipt_job(Some(kind), requester, move |connection, pressure| {
-            Ok(store.execute_transaction(
+            Ok(store.execute_transaction_with_checked_targets(
                 connection,
                 &request,
                 caller.as_ref(),
                 plan.as_ref().as_ref(),
                 &fingerprint,
+                checked_delete_targets.as_deref(),
                 pressure,
             ))
         })
@@ -1045,6 +1073,27 @@ impl Store {
         fingerprint: &std::sync::OnceLock<Result<String>>,
         pressure: &mut bool,
     ) -> Result<MutationResult> {
+        self.execute_transaction_with_checked_targets(
+            connection,
+            request,
+            caller,
+            plan,
+            fingerprint,
+            None,
+            pressure,
+        )
+    }
+
+    fn execute_transaction_with_checked_targets(
+        &self,
+        connection: &mut Connection,
+        request: &Request,
+        caller: Option<&Origin>,
+        plan: Option<&AgentsPlan>,
+        fingerprint: &std::sync::OnceLock<Result<String>>,
+        checked_delete_targets: Option<&[String]>,
+        pressure: &mut bool,
+    ) -> Result<MutationResult> {
         let fingerprint = request_fingerprint(fingerprint, request, caller)?;
         self.transact(
             connection,
@@ -1059,9 +1108,9 @@ impl Store {
                         let revision: Option<i64> = tx.query_row("SELECT revision FROM thread WHERE id=?1 AND deleted_at IS NULL", [thread], |r|r.get(0)).optional().map_err(sql_error)?;
                         if revision != Some(*expected) { return Err(error(ErrorCode::OperationConflict, "Thread settings changed during AGENTS validation; retry with a new operation ID")); }
                     }
-                    self.dispatch(tx, &plan.command, caller, &request.operation_id, now)
+                    self.dispatch(tx, &plan.command, caller, &request.operation_id, now, checked_delete_targets)
                 } else {
-                    self.dispatch(tx, &request.command, caller, &request.operation_id, now)
+                    self.dispatch(tx, &request.command, caller, &request.operation_id, now, checked_delete_targets)
                 }
             },
         )
@@ -1215,6 +1264,7 @@ impl Store {
         caller: Option<&Origin>,
         operation_id: &str,
         now: &str,
+        checked_delete_targets: Option<&[String]>,
     ) -> Result<MutationResult> {
         match command {
             Command::OwnerShutdown(args) => {
@@ -1508,7 +1558,7 @@ impl Store {
                 Ok(result)
             }
             Command::ThreadDelete(args) => {
-                let result = delete_thread(tx, args, now);
+                let result = delete_thread(tx, args, now, checked_delete_targets);
                 if result.is_ok() {
                     // The single writer runs no maintenance unit before this job
                     // commits or rolls back, so marking here cannot be missed;
@@ -3287,6 +3337,7 @@ fn delete_thread(
     tx: &Transaction<'_>,
     args: &ThreadDeleteArgs,
     now: &str,
+    checked_targets: Option<&[String]>,
 ) -> Result<MutationResult> {
     if args.preview_marker.is_none() {
         thread_details(tx, &args.thread_id)?;
@@ -3317,6 +3368,23 @@ fn delete_thread(
     };
     if args.preview_marker.is_some() {
         thread_details(tx, &args.thread_id)?;
+    }
+    if let Some(checked) = checked_targets {
+        let checked = checked.iter().collect::<std::collections::BTreeSet<_>>();
+        let actual = targets.iter().collect::<std::collections::BTreeSet<_>>();
+        if checked != actual {
+            return Err(if args.preview_marker.is_some() {
+                error(
+                    ErrorCode::PreviewStale,
+                    "deletion target set changed during guarded admission; request a new preview",
+                )
+            } else {
+                error(
+                    ErrorCode::InvalidState,
+                    "deletion target set changed during guarded admission; retry deletion",
+                )
+            });
+        }
     }
     for id in &targets {
         if count(
@@ -6012,6 +6080,180 @@ mod thread_deletion_notification_tests {
                 descendants,
             }),
         )
+    }
+
+    #[tokio::test]
+    async fn missing_thread_delete_error_is_saved_and_replayed_before_fresh_admission() {
+        let (root, owner) = fixture().await;
+        let control = Control::new(&owner, root.path().into());
+        let request = Request::new(
+            format!("{}:missing-thread-delete", owner.instance_id),
+            Command::ThreadDelete(ThreadDeleteArgs {
+                preview_marker: None,
+                thread_id: "missing-thread".into(),
+                descendants: false,
+            }),
+        );
+        let first = control.request(request.clone()).await;
+        assert_eq!(first.error.unwrap().code, ErrorCode::ThreadNotFound);
+        let replay = control.request(request).await;
+        assert_eq!(replay.error.unwrap().code, ErrorCode::ThreadNotFound);
+        owner
+            .db
+            .call(|db| {
+                assert_eq!(
+                    db.query_row(
+                        "SELECT count(*) FROM operation_receipt WHERE operation_id=?1 AND state='failed' AND result_ref_json IS NOT NULL",
+                        [format!("{}:missing-thread-delete", owner.instance_id)],
+                        |row| row.get::<_, i64>(0),
+                    )?,
+                    1,
+                    "missing-root error is committed once and replayed from its original receipt",
+                );
+                assert_eq!(
+                    db.query_row("SELECT count(*) FROM gc_job WHERE kind='history'", [], |row| row.get::<_, i64>(0))?,
+                    0,
+                    "missing-root receipt replay never schedules deletion work",
+                );
+                Ok(())
+            })
+            .await
+            .unwrap();
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn checked_delete_rejects_writer_expansion_before_any_effect_and_replays_saved_error() {
+        let (root, owner) = fixture().await;
+        seed(&owner.db).await;
+        owner.db
+            .call(|db| {
+                db.execute(
+                    "INSERT INTO scheduled_command(id,thread_id,command,cwd,at,next_at) VALUES('child-schedule','child','true','/',100,100)",
+                    [],
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let store = Store::new(
+            owner.db.clone(),
+            Arc::new(owner.loaded.config.clone()),
+            root.path().into(),
+            owner.instance_id.clone(),
+        );
+        let request = Request::new(
+            format!("{}:checked-delete-expansion", owner.instance_id),
+            Command::ThreadDelete(ThreadDeleteArgs {
+                preview_marker: None,
+                thread_id: "parent".into(),
+                descendants: true,
+            }),
+        );
+
+        // The admission snapshot contains only the root; the writer's actual
+        // recursive selection contains the already-added child and grandchild.
+        let error = store
+            .execute_with_checked_delete_targets(request.clone(), None, vec!["parent".into()])
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, ErrorCode::InvalidState);
+        assert!(error.message.contains("target set changed"));
+        owner
+            .db
+            .call(|db| {
+                assert_eq!(
+                    db.query_row(
+                        "SELECT count(*) FROM thread WHERE id IN ('parent','child','grandchild') AND deleted_at IS NULL",
+                        [],
+                        |row| row.get::<_, i64>(0),
+                    )?,
+                    3,
+                    "rejected expansion must not soft-delete any Thread",
+                );
+                assert_eq!(
+                    db.query_row(
+                        "SELECT count(*) FROM scheduled_command WHERE id='child-schedule'",
+                        [],
+                        |row| row.get::<_, i64>(0),
+                    )?,
+                    1,
+                    "rejected expansion must retain scheduled registrations",
+                );
+                assert_eq!(
+                    db.query_row(
+                        "SELECT count(*) FROM gc_job WHERE kind='history'",
+                        [],
+                        |row| row.get::<_, i64>(0),
+                    )?,
+                    0,
+                    "rejected expansion must not enqueue deletion maintenance",
+                );
+                let (state, saved): (String, String) = db.query_row(
+                    "SELECT state,result_ref_json FROM operation_receipt WHERE operation_id=?1",
+                    [format!("{}:checked-delete-expansion", owner.instance_id)],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )?;
+                assert_eq!(state, "failed");
+                let saved: SavedOutcome = serde_json::from_str(&saved).unwrap();
+                assert_eq!(saved.error.unwrap().code, ErrorCode::InvalidState);
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let replay = store.replay(&request, &None).await.unwrap_err();
+        assert_eq!(replay.code, ErrorCode::InvalidState);
+
+        // Deterministically model a root absent at the read snapshot but present
+        // by the writer transaction: an empty checked set must reject the writer.
+        owner
+            .db
+            .call(|db| {
+                db.execute(
+                    "INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at) VALUES('late-root','late root','/','','fixture','synthetic','now')",
+                    [],
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let late_request = Request::new(
+            format!("{}:late-root-appeared", owner.instance_id),
+            Command::ThreadDelete(ThreadDeleteArgs {
+                preview_marker: None,
+                thread_id: "late-root".into(),
+                descendants: false,
+            }),
+        );
+        let late_error = store
+            .execute_with_checked_delete_targets(late_request.clone(), None, vec![])
+            .await
+            .unwrap_err();
+        assert_eq!(late_error.code, ErrorCode::InvalidState);
+        assert!(late_error.message.contains("target set changed"));
+        owner
+            .db
+            .call(|db| {
+                assert_eq!(
+                    db.query_row(
+                        "SELECT deleted_at IS NULL FROM thread WHERE id='late-root'",
+                        [],
+                        |row| row.get::<_, bool>(0)
+                    )?,
+                    true,
+                    "a root appearing after an empty admission snapshot is not deleted",
+                );
+                Ok(())
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            store.replay(&late_request, &None).await.unwrap_err().code,
+            ErrorCode::InvalidState,
+            "the rejected late-root request retains the original receipt fingerprint",
+        );
+        owner.shutdown().await.unwrap();
     }
 
     #[tokio::test]
