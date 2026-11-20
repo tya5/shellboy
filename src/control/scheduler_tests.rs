@@ -51,6 +51,7 @@ async fn config_set_updates_scheduler_bound_and_notifies_registered_waiter() {
             .await
             .unwrap();
             let control = Control::new(&owner, root.path().into());
+            control.start().await.unwrap();
             let got = control
                 .request(Request::new(
                     "config-get-scheduler-bound",
