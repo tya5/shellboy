@@ -262,20 +262,26 @@ async fn execute(
             let mut tail = VecDeque::with_capacity(OUTPUT_TAIL_BYTES);
             let mut truncated = false;
             let mut events_open = true;
+            let mut completion_open = true;
             let mut stop_sent = false;
             loop {
                 tokio::select! { biased;
                     _=stop.cancelled(), if !stop_sent=>{execution.handle.stop();stop_sent=true;},
                     event=execution.events.recv(), if events_open=>match event {Some(ShellEvent::Output(chunk))=>for byte in chunk.bytes.iter().copied() { if tail.len()==OUTPUT_TAIL_BYTES {tail.pop_front();truncated=true;} tail.push_back(byte); },Some(ShellEvent::Stdin{..})=>{},None=>events_open=false},
-                    changed=execution.completion.changed()=>{ if changed.is_err() { break; } },
+                    changed=execution.completion.changed(), if completion_open=>{ if changed.is_err() { completion_open=false; } },
                 }
-                if execution.completion.borrow().is_some() {
+                let completed = execution.completion.borrow().is_some();
+                if completed && !events_open {
+                    break;
+                }
+                if !completion_open && !completed {
                     break;
                 }
             }
             let Some(completion) = execution.completion.borrow().clone() else {
                 return Err(());
             };
+            truncated |= !completion.output_complete;
             let mut output =
                 String::from_utf8_lossy(&tail.into_iter().collect::<Vec<_>>()).into_owned();
             while output.len() > OUTPUT_TAIL_BYTES {

@@ -121,7 +121,7 @@ async fn scheduled_at_runs_shared_shell_and_list_reports_latest_result() {
         let started=root.path().join("started");
         let release=root.path().join("release");
         let finished=root.path().join("finished");
-        let command=format!("touch '{}' ; while [ ! -e '{}' ]; do sleep 0.01; done; printf 'scheduled-ok\\n%s\\n%s\\n' \"$SHELLBOY_THREAD_ID\" \"$PWD\"; touch '{}'",started.display(),release.display(),finished.display());
+        let command=format!("touch '{}' ; while [ ! -e '{}' ]; do sleep 0.01; done; printf 'scheduled-ok\\n%s\\n%s\\n' \"$SHELLBOY_THREAD_ID\" \"$PWD\"; printf 'scheduled-stderr-final\\n' >&2; touch '{}'",started.display(),release.display(),finished.display());
         let due_at=chrono::Utc::now().timestamp()-1;
         let add=control.request(current_request(&control, "schedule-add",Command::ScheduleAdd(ScheduleAddArgs{thread_id:Some(thread_id.clone()),command,cwd:None,cron:None,at:Some(due_at)}))).await;
         assert!(add.ok,"{add:?}");
@@ -153,7 +153,9 @@ async fn scheduled_at_runs_shared_shell_and_list_reports_latest_result() {
                 let tail=row["latest"]["output_tail"].as_str().unwrap_or("");
                 row["schedule_id"]==schedule_id && row["thread_id"]==thread_id && row["cwd"].is_null()
                     && row["next_at"].is_null() && row["latest"]["status"]=="finished"
-                    && row["latest"]["scheduled_at"]==due_at && tail.contains("scheduled-ok") && tail.contains(&thread_id) && tail.contains(root.path().to_str().unwrap())
+                    && row["latest"]["scheduled_at"]==due_at && tail.contains("scheduled-ok") && tail.contains("scheduled-stderr-final")
+                    && tail.contains(&thread_id) && tail.contains(root.path().to_str().unwrap())
+                    && row["latest"]["output_truncated"]==false
             }) { break; }
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
@@ -181,6 +183,84 @@ async fn scheduled_at_runs_shared_shell_and_list_reports_latest_result() {
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
     }).await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn scheduler_marks_shell_producer_incompleteness_as_truncated() {
+    crate::test_watchdog::watchdog(
+        "scheduled latest result reflects shared shell output completeness",
+        async {
+            let root = tempfile::tempdir().unwrap();
+            let config_path = root.path().join("config.toml");
+            let config = format!(
+                "{}\n[limits]\nshell_raw_bytes=256\n",
+                scheduler_thread_config()
+            );
+            std::fs::write(&config_path, config).unwrap();
+            let owner = DataOwner::start(
+                Some(config_path),
+                Some(root.path().join("data")),
+                root.path().into(),
+            )
+            .await
+            .unwrap();
+            let control = Control::new(&owner, root.path().into());
+            let thread_id =
+                create_test_thread(&control, root.path(), "create-incomplete-output-thread").await;
+            let command = "printf '%0257d' 0".to_string();
+            let due_at = chrono::Utc::now().timestamp() - 1;
+            let added = control
+                .request(current_request(
+                    &control,
+                    "schedule-incomplete-output",
+                    Command::ScheduleAdd(ScheduleAddArgs {
+                        thread_id: Some(thread_id.clone()),
+                        command,
+                        cwd: None,
+                        cron: None,
+                        at: Some(due_at),
+                    }),
+                ))
+                .await;
+            assert!(added.ok, "{added:?}");
+            let schedule_id = added.result.unwrap()["schedule_id"]
+                .as_str()
+                .unwrap()
+                .to_owned();
+            loop {
+                let listed = control
+                    .request(Request::new(
+                        "list-incomplete-output",
+                        Command::ScheduleList(ScheduleListArgs {
+                            thread_id: Some(thread_id.clone()),
+                        }),
+                    ))
+                    .await;
+                assert!(listed.ok, "{listed:?}");
+                let rows = listed.result.unwrap()["schedules"]
+                    .as_array()
+                    .unwrap()
+                    .clone();
+                if let Some(row) = rows.iter().find(|row| {
+                    row["schedule_id"] == schedule_id && row["latest"]["status"] == "finished"
+                }) {
+                    let tail = row["latest"]["output_tail"]
+                        .as_str()
+                        .expect("retained bounded producer bytes");
+                    assert_eq!(tail.len(), 256);
+                    assert!(tail.bytes().all(|byte| byte == b'0'));
+                    assert_eq!(row["latest"]["output_truncated"], true);
+                    assert_eq!(row["latest"]["scheduled_at"], due_at);
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            control.shutdown().await.unwrap();
+            owner.shutdown().await.unwrap();
+        },
+    )
+    .await
+    .unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

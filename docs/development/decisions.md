@@ -4585,7 +4585,7 @@ code. The dispatcher continues to other rows. Advancing
 `next_at` transactionally is the at-most-once boundary; active IDs exist only in
 the owner process. No persisted claim/reaper/retry/fault quarantine, timezone column,
 job queue, `schedule.once`, parallel scheduler, argv reconstruction, or host/service
-action is part of the contract. Same-ID overlap is tracked only in owner memory. A global shell capacity limit is not added because the shared shell runner currently exposes no such admission bound; that acceptance remains explicitly unresolved pending an owner decision.
+action is part of the contract. Same-ID overlap is tracked only in owner memory. A global shell capacity limit or scheduler-local substitute is not added because the shared shell runner exposes no capacity-admission contract. The Issue’s conditional capacity-skip behavior is inactive until the shared runner provides a real admission API; no owner decision is pending.
 
 Bounds for the first source slice: command 16 KiB UTF-8, cwd 4 KiB, cron text 256
 bytes, retained output tail 4 KiB; latest-only result storage. The shared shell runner
