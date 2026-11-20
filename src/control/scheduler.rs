@@ -143,8 +143,9 @@ pub(super) async fn run(control: Weak<Control>, stop: CancellationToken) {
                     } else {
                         active.insert(due.id);
                         let schedule_id = due.id;
+                        let child_stop = stop.clone();
                         children.spawn(async move {
-                            execute(owner, due, stop).await.unwrap_or(schedule_id)
+                            execute(owner, due, child_stop).await.unwrap_or(schedule_id)
                         });
                     }
                 }
