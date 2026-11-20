@@ -418,7 +418,7 @@ pub enum MessageCommand {
         after_help = "Submit and follow the returned assignment:\n  shellboy message send --thread THREAD_ID --text 'Summarize the findings'\n  shellboy message get --message MESSAGE_ID\n  shellboy turn get --turn TURN_ID\n  shellboy history get --node END_MESSAGE_NODE_ID\n\nUse only IDs returned for this request. pending has no assigned Turn yet; inspect the same message instead of sending it again. Guide: shellboy docs get --id shellboy/delegation"
     )]
     Send(MessageSendOptions),
-    /// Ask the human a question; the current Turn ends without waiting.
+    /// Ask the human a question; the answer arrives in this Thread.
     Ask(MessageAskOptions),
     /// Reply once to a received reply-expected message.
     Reply(MessageReplyOptions),

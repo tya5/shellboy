@@ -226,7 +226,11 @@ See [Delegation](delegation.md#waiting-for-replies) for reminders and wait state
 
 ### Ask the human for a decision
 
-When only the user can decide, run `shellboy message ask --text 'Question and options'`, then end your Turn; do not poll or wait. The request reuses a pending reply receipt but does not start a Run or deliver input to a model. Its answer arrives in this Thread and starts a Run if needed. Questions have no deadline and are not reminded or marked ignored. A recipient Thread may have at most 16 unanswered requests; `reply_limit` rejects the 17th ask/send with the limit and current count. On rejection, inspect pending requests, reply to completed ones or cancel obsolete ones, then retry. A reply duty you already owe remains active: tell its requester you are blocked before ending the Run. The TUI shows pending replies for the displayed Thread; choose one and press Enter to answer.
+`shellboy message ask --text 'Question and options'` saves a question for the
+human. The answer arrives as input in this Thread and starts a Run if needed.
+The Thread can have at most 16 unanswered requests, shared with reply-expected
+sends. To withdraw a pending question, use
+`shellboy message cancel --message MESSAGE_ID`.
 
 The bounded Web/API inbox is `thread get --thread THREAD_ID` → `awaiting_replies` (up to 16, for only that Thread; legacy excess is retained but not listed). Each item includes `message_id`, `recipient_kind` (`human` or `thread`), `recipient_thread_id`, `excerpt`, `created_at`, `elapsed_ms`, `delivery_status`, and `reminded`. On `events wait --thread THREAD_ID` change hints, reread that Thread. Answer with `shellboy message reply --message MESSAGE_ID --text 'Decision'`; never notify a person for `recipient_kind: "thread"`.
 
@@ -602,11 +606,6 @@ resume after restart; when the Run enters `recovery_wait`, it joins the held
 input that an explicit retry sends. After a human Esc interruption the Run still
 completes, so the message is delivered then; check the latest human direction
 first.
-
-Before asking the user a question and ending your Turn, cancel any waiting
-complete-delivery message. Core cannot identify questions. If one arrives while
-waiting for the user, end briefly without starting extra work. A false trigger
-can cost an additional model request.
 
 There are no automatic child Turn/Run lifecycle notices. Request a specific reply with `--expect-reply`, end the
 sender Turn, and inspect the saved reply/message when it is delivered. Progress is an ordinary message.

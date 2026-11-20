@@ -216,7 +216,7 @@ Root cwd defaults to owner startup cwd; child cwd to the parent's. Relative cwd 
 |---|---|
 | `message send [--thread THREAD] [--deliver now\|complete] [--resume-recovery] [--expect-reply] [--sender-label TEXT] (--text TEXT | --text-stdin)` | message_id/thread_id/delivery_status/assignment/run_id/turn_id, plus `deliver` when not the default. `--sender-label` is self-asserted (not verified); non-human messages include it as a notice without changing saved text. `--expect-reply` accepts any target, including the caller's own Thread; only the 16-pending-duty cap rejects it (`reply_limit`), with the limit and current count in error details. When rejected, reply to completed requests or cancel obsolete ones before retrying. A recipient Thread only gets Run-end reminders for duties requiring another Thread, not human questions. `thread get` returns the unified `awaiting_replies` list with recipient tags; the three legacy duplicate lists are removed. Active work takes additions at safe boundaries; stopping can yield held/pending. Machine messages hold at `recovery_wait` unless `--resume-recovery` explicitly resumes; the event records `external_cli` or authenticated shell Origin. Human input/reply explicitly resumes; model-origin replies remain non-human |
 
-| `message ask (--text TEXT | --text-stdin)` | Model-only; asks the human on the current Thread and ends the Turn without waiting; creates no model Run/wake |
+| `message ask (--text TEXT | --text-stdin)` | Model-only; saves a question for the human, whose answer arrives in the current Thread |
 | `message reply --message MESSAGE (--text TEXT | --text-stdin) [--sender-label TEXT]` | Reply once to an applied pending reply request; returns `reply_to`/reply message ID and optional delivery |
 | `message get --message MESSAGE` | Original immutable assignment, current delivery_status, sender facts, and `expect_reply`, `reply` state/node, or `reply_to` when applicable; `end_message_node_id` remains available when present |
 | `message cancel --message MESSAGE [--message MESSAGE ...]` | Cancel 1..128 fixed message IDs. Queued input can be archived; an admitted pending reply duty returns `reply_cancelled` without removing history. Other outcomes are `cancelled`/`already_cancelled`/`already_admitted`/`not_found`/`forbidden`/`unavailable`. Does not wake the model |
@@ -1101,7 +1101,9 @@ storage status for logical index bytes. Reclamation resumes after restart.
 
 ## Message Ask
 
-`message ask --text TEXT` asks the human for a decision and ends the current Turn without waiting. The question is available in `thread get` → `awaiting_replies`; answer with `message reply`.
+`message ask --text TEXT` saves a question for the human. The answer arrives as
+input in the current Thread and starts a Run if needed. The question is available
+in `thread get` → `awaiting_replies`; answer with `message reply`.
 
 ### Spill tool sources (#274)
 
