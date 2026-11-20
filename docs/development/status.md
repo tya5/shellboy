@@ -6,7 +6,7 @@ Current source implements owner-wide transactional limit 16 across all Threads, 
 
 Not yet covered synthetically: unmodified persisted due state from real downtime (the restart test injects its cursor while closed), config-set hot reload of the sleep bound, zero-schedule idle/no-wake, deterministic forward/backward wall-clock and sleep-resume integration beyond the small helper, independent child group cleanup. Fork/rewind witness source exists but remains unrun. The sleep-bound power measurement/default remains open. No shared execution capacity limit/state is implemented; the Issue expressly excludes a scheduler-only pool/cap/queue. The protocol source is v7 while `docs/reference/protocol.schema.json` remains v6; schema exporter/parity is unperformed and is a separate blocker. No current-source build/test/CI, installed/live owner, provider, release, DST, or power evidence is claimed.
 
-The branch is rebased onto exact `116e82e5965dbc2c736849659f9f48db21788873`; current uncommitted edits add restart/latest-missed and active-child shutdown source witnesses. `git diff --check` passes. Historical validation logs remain tied to earlier source bytes and do not transfer.
+The branch is rebased onto exact `116e82e5965dbc2c736849659f9f48db21788873`. Commit `195a2131609c27a3cb2e7fd53d7b912d85f9fba3` adds fork/rewind source coverage; commit `89ed9d0ddb12cd11ef7b955255ee5e25f23b52e9` adds restart/shutdown witnesses. Commit `2065c323e8` is the pinned-format successor and `36c35f0693` fixes the exporter-discovered join result type. These source tests are unrun. Historical validation logs remain tied to earlier source bytes and do not transfer.
 
 # Development status
 
