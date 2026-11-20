@@ -83,9 +83,7 @@ async fn config_set_updates_bound_and_notifies_prearmed_waiter() {
             assert_eq!(applied["written"], true);
             notified.await;
             assert_eq!(
-                control
-                    .schedule_max_sleep_seconds
-                    .load(Ordering::SeqCst),
+                control.schedule_max_sleep_seconds.load(Ordering::SeqCst),
                 37
             );
             control.shutdown().await.unwrap();
