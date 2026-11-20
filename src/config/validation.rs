@@ -6,6 +6,9 @@ impl Config {
     pub fn validate(&self) -> Result<(), ConfigError> {
         // Keep first-error precedence: numeric bounds, local relationships,
         // connection contents/references, then environment/path/key checks.
+        if self.schedule.max_sleep_seconds.is_some_and(|v| v==0 || v>i64::MAX as u64) {
+            return Err(invalid("schedule.max_sleep_seconds", "must be positive and fit a signed clock interval when set"));
+        }
         if !self.compaction.valid() {
             return Err(invalid(
                 "compaction",

@@ -66,6 +66,13 @@ pub struct Config {
     pub ui: Ui,
     pub logging: Logging,
     pub compaction: Compaction,
+    pub schedule: Schedule,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct Schedule {
+    pub max_sleep_seconds: Option<u64>,
 }
 
 #[derive(

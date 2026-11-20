@@ -4577,7 +4577,7 @@ The controlling Issue replaces the previous unmerged branch design. Start from m
 and keep only three operations (`schedule add`, `schedule list`, `schedule remove`),
 one owner-local timer, `chrono::Local` plus `croner`, one indexed `next_at`, and
 two durable tables: registration and one latest result. The latest statuses are
-`finished`, `overlap_skipped`, `capacity_skipped`, and `launch_failed`. A cron
+`finished`, `overlap_skipped`, and `launch_failed`. A cron
 occurrence that was valid at registration but cannot be calculated later is stopped
 by setting `next_at` NULL and recording a clearly labeled scheduler diagnostic in the
 bounded result tail in the same transaction; it is not child output and has no exit
@@ -4585,16 +4585,22 @@ code. The dispatcher continues to other rows. Advancing
 `next_at` transactionally is the at-most-once boundary; active IDs exist only in
 the owner process. No persisted claim/reaper/retry/fault quarantine, timezone column,
 job queue, `schedule.once`, parallel scheduler, argv reconstruction, or host/service
-action is part of the contract. Shell capacity exhaustion records a skip and advances.
+action is part of the contract. Same-ID overlap is tracked only in owner memory. A global shell capacity limit is not added because the shared shell runner currently exposes no such admission bound; that acceptance remains explicitly unresolved pending an owner decision.
 
 Bounds for the first source slice: command 16 KiB UTF-8, cwd 4 KiB, cron text 256
 bytes, retained output tail 4 KiB; latest-only result storage. The shared shell runner
 remains the execution authority. The owner timer must wait on the existing Notify
 when the schedule is empty and shutdown must settle/stop owned children. `croner` is
 selected only for expression parsing/next occurrence; it introduces no job engine.
-The requested sleep-limit energy comparison (one minute, five minutes, no periodic
-timer) remains a later measured acceptance gate and no default is selected here.
+The optional `schedule.max_sleep_seconds` accepts only positive signed-clock-range values and reloads through existing `config.set`; schedules cannot be added unless one is supplied, and it cannot be unset while schedule rows remain. No shipped value is selected. The one timer uses this bound for wall-clock rechecks; empty schedules still wait only on Control Notify. The required one-minute/five-minute/no-periodic-timer energy comparison remains pending.
 The owner's ordinary `Control::start` attaches the same single dispatcher; no enable
 setting or separate scheduler implementation is added. This is source behavior only,
 not evidence from an installed or live owner. Forced-owner-death overlap, DST
 behavior, and requested power measurements remain unverified.
+
+
+## Core #281 Thread ownership addendum (2026-11-20)
+
+Every schedule belongs to exactly one `thread_id` with `ON DELETE CASCADE` to both registration and latest-result rows. External `schedule.add`/`schedule.list` must name the Thread; an authenticated model shell may omit it and Control fills only the trusted origin Thread ID. `cwd` defaults to the Thread cwd captured during registration; only `SHELLBOY_THREAD_ID` is added to the command environment, never Origin/auth. Limit registrations to 16 total across the owner in the same transaction, counting archived and completed rows until remove or Thread deletion. Rationale: a row is conservatively under 32 KiB when its 4096-scalar tail is worst-case JSON escaped 6x plus cron, UUIDs, IDs and metadata; 16 rows remain under 512 KiB plus envelope, well below the actual 8 MiB `MAX_FRAME_BYTES`. The list remains one-Thread scoped and complete; all-Thread listing is explicitly out of scope.
+
+The existing per-Thread Control boundary is acquired only for launch admission, then released before the command runs. A busy boundary retires the due occurrence as `launch_failed` with the owner-approved bounded `Thread admission busy; command not started` diagnostic and no child. The active Thread-to-schedule map blocks deletion until shell settlement; deletion never holds a boundary while waiting for a child. Preview includes the registration count; FK cascade removes schedules and latest results. Archive does not change due scanning, fork has no schedule-copy path, and rewind is orthogonal. These are source design statements; final synthetic acceptance is pending.

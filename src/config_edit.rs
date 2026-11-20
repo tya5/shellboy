@@ -109,6 +109,7 @@ fn fields(config: &Config) -> BTreeMap<String, Leaf> {
         ui,
         logging,
         compaction,
+        schedule,
     } = config;
     let mut out = Fields::default();
     out.plain(&["data_dir"], data_dir);
@@ -132,6 +133,7 @@ fn fields(config: &Config) -> BTreeMap<String, Leaf> {
     out.section("ui", ui);
     out.section("logging", logging);
     out.section("compaction", compaction);
+    out.section("schedule", schedule);
     out.0
 }
 fn connection_fields(out: &mut Fields, name: &str, connection: &Connection) {

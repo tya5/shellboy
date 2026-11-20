@@ -1402,12 +1402,12 @@ pub(crate) use command::CommandRoute;
 pub(crate) mod validation;
 pub(crate) use validation::rfc3339;
 
-args!(ScheduleAddArgs { command: String, cwd: String, #[serde(default)] cron: Option<String>, #[serde(default)] at: Option<i64> });
+args!(ScheduleAddArgs { #[serde(default)] thread_id: Option<String>, command: String, #[serde(default)] cwd: Option<String>, #[serde(default)] cron: Option<String>, #[serde(default)] at: Option<i64> });
 args!(ScheduleRemoveArgs {
     schedule_id: String
 });
-args!(ScheduleListArgs {});
-record!(ScheduleItem { schedule_id: String, #[serde(default)] cron: Option<String>, #[serde(default)] at: Option<i64>, next_at: Option<i64>, #[serde(default)] latest: Option<serde_json::Value> });
+args!(ScheduleListArgs { #[serde(default)] thread_id: Option<String> });
+record!(ScheduleItem { schedule_id: String, thread_id: String, #[serde(default)] cron: Option<String>, #[serde(default)] at: Option<i64>, next_at: Option<i64>, #[serde(default)] latest: Option<serde_json::Value> });
 record!(ScheduleListResult { schedules: Vec<ScheduleItem> });
 args!(ShellToolArgs { command: String, #[serde(default, deserialize_with = "crate::tool_description::deserialize", skip_serializing_if = "Option::is_none")] #[schemars(with = "Option<crate::tool_description::DescriptionSchema>")] description: Option<String>, #[serde(default)] background: bool, #[serde(default)] stdin_open: bool, #[serde(default)] initial_stdin: Option<String>, #[serde(default = "utf8")] input_encoding: String, #[serde(default = "utf8")] output_encoding: String });
 impl ShellToolArgs {

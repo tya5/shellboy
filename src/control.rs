@@ -60,7 +60,7 @@ use std::{
     path::PathBuf,
     sync::{
         Arc,
-        atomic::{AtomicBool, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
     },
 };
 use tokio::sync::{Mutex, Notify, broadcast, mpsc};
@@ -158,12 +158,14 @@ pub struct Control {
     pub gc: Arc<crate::gc::GcService>,
     maintenance: tokio::sync::OnceCell<Mutex<Option<tokio::task::JoinHandle<()>>>>,
     scheduler: tokio::sync::OnceCell<Mutex<Option<tokio::task::JoinHandle<()>>>>,
+    schedule_max_sleep_seconds: Arc<AtomicU64>,
     index_workers: tokio::sync::OnceCell<Mutex<Option<crate::index::IndexWorkers>>>,
     shutdown_context: tokio::sync::OnceCell<Result<(), ApiError>>,
     owner_shutdown: std::sync::OnceLock<CancellationToken>,
     compactor: crate::compaction::Compactor,
     compact_tasks: Mutex<HashMap<String, CancellationToken>>,
     boundaries: Mutex<HashMap<String, std::sync::Weak<Mutex<()>>>>,
+    scheduled_active: std::sync::Mutex<HashMap<uuid::Uuid,String>>,
     shell: ShellSupervisor,
     instructions: InstructionLoader,
     replay: replay::ReplayCache,
@@ -174,7 +176,7 @@ pub struct Control {
     origins: Mutex<HashMap<String, Origin>>,
     events: broadcast::Sender<EngineEvent>,
     ui_events: ui_events::UiEvents,
-    changed: Notify,
+    changed: Arc<Notify>,
     change_clock: Arc<change_clock::ChangeClock>,
     /// Wakes only `events.wait` calls that asked for text; everything else sleeps through deltas.
     text_changed: Notify,
@@ -403,12 +405,14 @@ impl Control {
             gc,
             maintenance: tokio::sync::OnceCell::new(),
             scheduler: tokio::sync::OnceCell::new(),
+            schedule_max_sleep_seconds: Arc::new(AtomicU64::new(config.schedule.max_sleep_seconds.unwrap_or(0))),
             index,
             index_workers: tokio::sync::OnceCell::new(),
             shutdown_context: tokio::sync::OnceCell::new(),
             owner_shutdown: std::sync::OnceLock::new(),
             compactor,
             boundaries: Mutex::new(HashMap::new()),
+            scheduled_active: std::sync::Mutex::new(HashMap::new()),
             compact_tasks: Mutex::new(HashMap::new()),
             shell: ShellSupervisor::new(&config),
             instructions,
@@ -420,7 +424,7 @@ impl Control {
             origins: Mutex::new(HashMap::new()),
             events,
             ui_events: ui_events::UiEvents::new(),
-            changed: Notify::new(),
+            changed: Arc::new(Notify::new()),
             change_clock: Arc::new(change_clock::ChangeClock::new()),
             text_changed: Notify::new(),
             shell_output_changed: Notify::new(),
@@ -513,10 +517,8 @@ impl Control {
         Ok(())
     }
 
-    async fn schedule_list(&self) -> Result<Vec<crate::storage::schedule::ScheduledRow>, ApiError> {
-        crate::storage::schedule::list(&self.store.database)
-            .await
-            .map_err(storage_error)
+    async fn schedule_list(&self, thread_id:String) -> Result<Vec<crate::storage::schedule::ScheduledRow>, ApiError> {
+        crate::storage::schedule::list(&self.store.database,thread_id).await.map_err(storage_error)
     }
     /// Read-only accounting of retained conversion buffers and in-flight pins.
     pub fn replay_cache_stats(&self) -> replay::ReplayStats {
@@ -1125,24 +1127,70 @@ impl Control {
                         })?;
                         self.recovery_rewind(request, origin, thread).await
                     }
-                    Command::ScheduleAdd(_) => {
+                    Command::ThreadDeletePreview(args) => {
+                        let selection=args.clone();
+                        let mut effects=self.store.execute(request,origin).await?;
+                        let targets=self.store.database.call(move|db|{
+                            let targets=crate::deletion::guarded_targets(db,&selection).map_err(crate::storage::StorageError::from)?;
+                            targets.ok_or_else(||crate::storage::StorageError::InvalidInput("Thread deletion selection exceeds its guarded target bound".into()))
+                        }).await.map_err(storage_error)?;
+                        let active=self.scheduled_active.lock().unwrap_or_else(|poison|poison.into_inner());
+                        let active_count=active.values().filter(|thread|targets.contains(thread)).count();
+                        if let Some(result)=effects.result.as_object_mut(){
+                            let blocker=result.entry("blockers").or_insert_with(||json!({}));
+                            blocker["scheduled_shell_count"]=json!(active_count);
+                            if active_count>0 { result["deletable_now"]=json!(false); }
+                        }
+                        Ok(effects)
+                    }
+                    Command::ScheduleAdd(args) => {
+                        let _config_guard=self.config_write.lock().await;
+                        if self.schedule_max_sleep_seconds.load(Ordering::SeqCst)==0 { return Err(ApiError::new(ErrorCode::InvalidState,"Set schedule.max_sleep_seconds to a positive measured bound before registering schedules")); }
+                        let thread=args.thread_id.clone().or_else(||origin.as_ref().map(|o|o.thread_id.clone())).ok_or_else(||ApiError::new(ErrorCode::InvalidArgument,"external schedule.add requires --thread"))?;
+                        let boundary=self.boundary(&thread).await;
+                        let _boundary=boundary.lock().await;
+                        let mut request=request;
+                        if let Command::ScheduleAdd(args)=&mut request.command { args.thread_id=Some(thread); }
                         let effects=self.store.execute(request,origin).await?;
-                        self.changed.notify_waiters(); Ok(effects)
+                        drop(_boundary);
+                        self.changed.notify_waiters();
+                        Ok(effects)
                     }
                     Command::ScheduleRemove(_) => {
                         let effects=self.store.execute(request,origin).await?;
                         self.changed.notify_waiters(); Ok(effects)
                     }
-                    Command::ScheduleList(_) => {
-                        let rows=self.schedule_list().await?;
+                    Command::ScheduleList(args) => {
+                        let thread=args.thread_id.clone().or_else(||origin.as_ref().map(|o|o.thread_id.clone())).ok_or_else(||ApiError::new(ErrorCode::InvalidArgument,"external schedule.list requires --thread"))?;
+                        let rows=self.schedule_list(thread).await?;
                         let schedules:Vec<Value>=rows.into_iter().map(|row|{
                             let latest=row.result.map(|(scheduled,finished,status,code,tail,truncated)|{
-                                let diagnostic=tail.as_deref().filter(|s|s.starts_with("Scheduler:")).map(str::to_owned);
-                                json!({"scheduled_at":scheduled,"finished_at":finished,"status":status,"exit_code":code,"output_tail":if diagnostic.is_none(){tail}else{None},"scheduler_diagnostic":diagnostic,"output_truncated":truncated})
+                                let diagnostic=if status=="launch_failed" { tail.clone() } else { None };
+                                let child_tail=if status=="launch_failed" { None } else { tail };
+                                json!({"scheduled_at":scheduled,"finished_at":finished,"status":status,"exit_code":code,"output_tail":child_tail,"scheduler_diagnostic":diagnostic,"output_truncated":truncated})
                             });
-                            json!({"schedule_id":row.id,"cron":row.cron_expression,"at":row.at,"next_at":row.next_at,"latest":latest})
+                            json!({"schedule_id":row.id,"thread_id":row.thread_id,"cron":row.cron_expression,"at":row.at,"next_at":row.next_at,"latest":latest})
                         }).collect();
                         Ok(crate::control::db::MutationResult{result:json!({"schedules":schedules}),..Default::default()})
+                    }
+                    Command::ThreadDelete(args) => {
+                        let selection=args.clone();
+                        let targets=self.store.database.call(move|db|{
+                            let targets=crate::deletion::guarded_targets(db,&selection).map_err(crate::storage::StorageError::from)?;
+                            targets.ok_or_else(||crate::storage::StorageError::InvalidInput("Thread deletion selection exceeds its guarded target bound".into()))
+                        }).await.map_err(storage_error)?;
+                        let mut guards=Vec::new();
+                        for thread in &targets {
+                            let boundary=self.boundary(thread).await;
+                            guards.push(boundary.try_lock_owned().map_err(|_|ApiError::new(ErrorCode::InvalidState,"A Thread-owned edit is active; retry deletion after it ends"))?);
+                        }
+                        {
+                            let active=self.scheduled_active.lock().unwrap_or_else(|poison|poison.into_inner());
+                            if targets.iter().any(|thread|active.values().any(|owner|owner==thread)) {
+                                return Err(ApiError::new(ErrorCode::InvalidState,"A scheduled shell is active for this Thread; wait until it finishes before deleting"));
+                            }
+                        }
+                        self.store.execute(request,origin).await
                     }
                     Command::ThreadGet(_) => {
                         let mut effects = self.store.execute(request, origin).await?;
@@ -1542,6 +1590,7 @@ impl Control {
         }
         // An admitted startup may have published workers while shutdown first
         // inspected its OnceCell. Drain any such late publication as well.
+        if let Some(worker)=self.scheduler.get() && let Some(worker)=worker.lock().await.take() { let _=worker.await; }
         if let Some(worker) = self.maintenance.get()
             && let Some(worker) = worker.lock().await.take()
         {

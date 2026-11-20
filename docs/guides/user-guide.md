@@ -601,12 +601,14 @@ and font and report whether this option helps.
 
 A running owner can keep a small persistent schedule of shell-text commands:
 
+Before adding schedules, configure a positive measured `schedule.max_sleep_seconds` with `shellboy config get` followed by `shellboy config set --expected-hash HASH --set schedule.max_sleep_seconds=SECONDS`. It hot-reloads and caps wall-clock recheck delay. No shipped default is chosen until the required energy measurements are complete.
+
 ```sh
-shellboy schedule add --cron '*/15 * * * *' -- 'shellboy message send --thread THREAD_ID --text "check the queue"'
-shellboy schedule add --in 10m -- 'printf %s done'
-shellboy schedule add --at 2026-11-20T14:00:00Z --cwd /path/to/project -- 'git status --short'
-shellboy schedule list
+shellboy schedule add --thread THREAD_ID --cron '*/15 * * * *' -- 'shellboy message send --thread THREAD_ID --text "check the queue"'
+shellboy schedule add --thread THREAD_ID --in 10m -- 'printf %s done'
+shellboy schedule add --thread THREAD_ID --at 2026-11-20T14:00:00Z --cwd /path/to/project -- 'git status --short'
+shellboy schedule list --thread THREAD_ID
 shellboy schedule remove --schedule SCHEDULE_UUID
 ```
 
-The command runs through the shared shell supervisor without conversation context. The list shows schedule metadata and the latest result, not command text or cwd. Removing a schedule prevents future runs but does not stop one already running. Normal owner shutdown stops owned children; if the owner is forcibly killed, a child may survive, and a restarted owner cannot determine whether it is still running or guarantee no overlap.
+Each schedule belongs to a Thread. External CLI calls must give `--thread`; model shell calls may omit it and use their authenticated Thread. The default cwd is resolved from that Thread when registered. The shared shell supervisor runs without conversation context and receives only `SHELLBOY_THREAD_ID`, not authentication or Origin. The list is per Thread and shows metadata/latest result, not command text or cwd. Removing a schedule prevents future runs but does not stop one already running. Thread deletion cascades schedules/results and is refused while a scheduled shell holds that Thread boundary; archive does not pause schedules, fork does not copy them, and rewind leaves them unchanged. Normal owner shutdown stops owned children; if the owner is forcibly killed, a child may survive, and a restarted owner cannot determine whether it is still running or guarantee no overlap.

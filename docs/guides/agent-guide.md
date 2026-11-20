@@ -725,15 +725,17 @@ Owner binary replacement does not inherit live tools or automatically resume wor
 
 A running owner can register one shell-text command, inspect metadata/latest outcome, or remove a future registration:
 
+Before adding schedules, configure a positive measured `schedule.max_sleep_seconds` with `shellboy config get` followed by `shellboy config set --expected-hash HASH --set schedule.max_sleep_seconds=SECONDS`. It hot-reloads and caps wall-clock recheck delay. No shipped default is chosen until the required energy measurements are complete.
+
 ```sh
-shellboy schedule add --cron '*/15 * * * *' -- 'shellboy message send --thread THREAD_ID --text "check the queue"'
-shellboy schedule add --in 10m -- 'printf %s done'
-shellboy schedule add --at 2026-11-20T14:00:00Z --cwd /path/to/project -- 'git status --short'
-shellboy schedule list
+shellboy schedule add --thread THREAD_ID --cron '*/15 * * * *' -- 'shellboy message send --thread THREAD_ID --text "check the queue"'
+shellboy schedule add --thread THREAD_ID --in 10m -- 'printf %s done'
+shellboy schedule add --thread THREAD_ID --at 2026-11-20T14:00:00Z --cwd /path/to/project -- 'git status --short'
+shellboy schedule list --thread THREAD_ID
 shellboy schedule remove --schedule SCHEDULE_UUID
 ```
 
-The owner runs the command through its shared shell supervisor without a Thread conversation context; `schedule list` omits command text and cwd, but may show the bounded latest output tail. A scheduler calculation diagnostic is shown separately from child output. Removal affects future runs only and does not stop a shell already owned by the supervisor. A normal owner shutdown stops and joins its live children. After forced owner death, a child may remain; restart cannot reliably discover it and does not prevent a later overlapping run. Do not treat schedule registration as a hard real-time or exactly-once external-side-effect guarantee.
+Each schedule is owned by one Thread; an external CLI must pass `--thread`, while a model shell may omit it and uses its authenticated Thread. The default cwd is resolved and saved from that Thread at registration. The shared shell supervisor runs without conversation context, passing only `SHELLBOY_THREAD_ID` (no auth/Origin); the command can call `shellboy message send --thread "$SHELLBOY_THREAD_ID"` conditionally. `schedule list --thread` omits command text and cwd and shows every schedule for that Thread, including a bounded latest output tail. A scheduler calculation diagnostic is shown separately from child output. At most 16 schedules are registered across the owner; excess registration is refused so scoped lists never silently truncate. Removal affects future runs only and does not stop a shell already owned by the supervisor. A normal owner shutdown stops and joins its live children. After forced owner death, a child may remain; restart cannot reliably discover it and does not prevent a later overlapping run. Do not treat schedule registration as a hard real-time or exactly-once external-side-effect guarantee.
 
 ### Shell tool parameters
 
