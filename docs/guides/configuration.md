@@ -323,9 +323,10 @@ Set the process environment with `export SHELLBOY_PROXY_API_KEY='…'` in Bash o
 
 Use this to talk to Anthropic's own Messages API (`POST {base_url}/messages`),
 for example with an Anthropic Console API key (the way a Claude plan's API credit
-is used), which exposes native prompt caching and signed thinking. Through a LiteLLM
-or similar gateway, the gateway's own dialect (`responses`/`chat_completions`) is
-what Shellboy sees; this setting is for the native API.
+is used), which exposes native prompt caching and signed thinking. For a gateway
+such as LiteLLM, select the dialect the gateway endpoint exposes: `responses`,
+`chat_completions`, or `anthropic_messages`. Use `anthropic_messages` when the
+endpoint accepts native Messages requests, whether direct or through a gateway.
 
 ```toml
 default_connection = "claude"
@@ -441,7 +442,7 @@ extra_headers = { "X-Beta-Feature" = "alpha" }
 
 - `extra_body` is a TOML table. Its keys are added to the top level of each conversation and summary request body. It never replaces a field Shellboy sends.
 - `extra_headers` is a table of strings added to each conversation and summary request. It is not sent to model-list or embedding requests.
-- Both apply to every dialect (`responses`, `chat_completions`, and later ones). With neither set, the request is exactly what it was before.
+- Both apply to `responses`, `chat_completions`, and `anthropic_messages`. With neither set, the request is exactly what it was before.
 - Shellboy checks only three things: the value is representable as JSON (no TOML dates or times), it is small (`extra_body` at most 64 KiB serialized, `extra_headers` at most 32 entries of at most 8 KiB each), and it does not collide with a field Shellboy owns. Anything else is passed through and judged by the provider. A rejected value reports `config_invalid` at `shellboy config check` and at startup.
 - Reserved `extra_body` top-level keys (rejected, not overridden). `responses`: `model`, `input`, `tools`, `stream`, `store`, `include`, `reasoning`, `previous_response_id`, `prompt_cache_key`. `chat_completions`: `model`, `messages`, `tools`, `stream`, `stream_options`, `reasoning_effort`. `anthropic_messages`: `model`, `max_tokens`, `stream`, `messages`, `system`, `tools`, `output_config`, `cache_control`. A name reserved for one dialect is ordinary for the other.
 - `extra_headers` rejects credential-like and transport-owned names (`Authorization`, `Proxy-Authorization`, `Cookie`, `Host`, `Content-Type`, `Content-Length`, `Accept`, `X-Shellboy-Session-Id`, and any name containing `api-key`, `apikey`, `secret`, `token` or `credential`). Use `api_key_env` or `headers` for credentials. A name may not repeat an entry of `headers`.
@@ -536,16 +537,15 @@ and attempt details for actual reported cached tokens versus unknown counts.
 Fixture counts verify the mapping, **not** real-provider cache effectiveness;
 provider caching must be qualified separately with explicit paid-test approval.
 
-Anthropic's OpenAI-compatible facade is **not a supported target**: Anthropic
-states it is mainly for comparison/testing, lacks prompt caching there and does
-not faithfully support the relevant reasoning controls. Long conversations
-without caching can be much slower/more expensive. Use `anthropic_messages`
-(next section) for the native Anthropic API. Native Gemini APIs are not added. References: [Gemini OpenAI compatibility](https://ai.google.dev/gemini-api/docs/openai)
+For Claude on Anthropic's own API, use [`anthropic_messages`](#anthropic-messages-api--anthropic_messages).
+Anthropic's separate OpenAI-compatible endpoint is intended for comparison and
+testing. It lacks prompt caching and does not faithfully support the native
+reasoning controls. Native Gemini APIs are not added. References: [Gemini OpenAI compatibility](https://ai.google.dev/gemini-api/docs/openai)
 and [Anthropic compatibility limits](https://platform.claude.com/docs/en/api/openai-sdk).
 
 ## Per-Thread session identity
 
-With default `connections.<name>.session_header = true`, conversation and summary requests in either dialect send the Thread UUID in `x-shellboy-session-id`. It remains stable across retries and model changes in the same conversation; child conversations and forks have different Thread UUIDs. The value contains no conversation body, title, or working directory. It is not automatically attached to embedding or model-list requests.
+With default `connections.<name>.session_header = true`, conversation and summary requests in `responses`, `chat_completions`, and `anthropic_messages` send the Thread UUID in `x-shellboy-session-id`. It remains stable across retries and model changes in the same conversation; child conversations and forks have different Thread UUIDs. The value contains no conversation body, title, or working directory. It is not automatically attached to embedding or model-list requests.
 
 `connections.<name>.session_header_names` is a list of header names; the default is `["X-Shellboy-Session-Id", "x-litellm-session-id"]`. With `session_header = true`, the same Thread UUID is sent under every listed name on the same requests (conversation and summary). Providers ignore headers they do not know, so the extra name is harmless elsewhere. Override the list to change or drop names; an empty list (`[]`) sends nothing, like `session_header = false`.
 

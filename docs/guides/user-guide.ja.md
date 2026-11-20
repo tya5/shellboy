@@ -140,14 +140,29 @@ shellboy --config /path/to/config.toml --data-dir /path/to/shellboy-data
 
 ### 会話の形式を選ぶ
 
-接続の既定は`api = "responses"`です。Chat形式のOpenAI互換の入口では
-`api = "chat_completions"`を指定してownerを起動し直します。[形式のガイド](configuration.md#conversation-api-dialect)
+接続の既定は `api = "responses"` です。OpenAI 互換の Chat エンドポイントには
+`api = "chat_completions"`、Anthropic のネイティブ Messages API に直接接続するには
+`api = "anthropic_messages"` を指定します。設定ファイルを編集したら owner を再起動します。
+[形式のガイド](configuration.md#conversation-api-dialect)
 に**未検証**のGemini例と使えない機能を記載しています。Responsesの推論項目・暗号化
 推論はChatへ持ち回さず、vendorの`reasoning_content`も使いません。確認したのは
 合成SSEとloopback mockだけで、実プロバイダはすべて未検証です。`usage get`とF6の
 キャッシュ使用量は返った値だけで、不明を0にはしません。F6と`usage get`は送った要求の入力のバイト数（UTF-8）を種類別に実測して並べますが、トークンへは換算しません。一覧の確認だけでは
-キャッシュの実効性は分かりません。Anthropicの互換の入口はキャッシュが使えないため
-対象外です。長い会話には本来のAPIに対応するproxyを使ってください。
+キャッシュの実効性は分かりません。
+
+LiteLLM など 1 つの proxy が GPT 向けの Responses と Claude 向けの Messages の両方を公開している場合は、接続を 2 つに分けます。たとえば、proxy が公開する API ルートを指定します（末尾の `/responses` や `/messages` は含めません）。
+
+```toml
+[connections.proxy_gpt]
+api = "responses"
+base_url = "https://proxy.example/v1"
+
+[connections.proxy_claude]
+api = "anthropic_messages"
+base_url = "https://proxy.example/v1"
+```
+
+例の URL を実際の proxy の API ルートに置き換え、各接続の認証情報は proxy の要件に合わせて設定します。
 
 ## 2. 最初の依頼を送る
 

@@ -146,16 +146,34 @@ A new root Thread uses the startup directory as its cwd. Opening a saved Thread 
 
 ### Choosing a conversation format
 
-Connections default to `api = "responses"`; set `api = "chat_completions"` for an
-OpenAI-compatible Chat endpoint, then restart the owner. The [dialect guide](configuration.md#conversation-api-dialect)
+Connections default to `api = "responses"`. Set `api = "chat_completions"` for
+an OpenAI-compatible Chat endpoint or `api = "anthropic_messages"` to use
+Anthropic's native Messages API directly. Restart the owner after editing the
+configuration file. The [dialect guide](configuration.md#conversation-api-dialect)
 contains an **unverified** Gemini example and the unavailable features. Responses
 reasoning/encrypted replay is not sent to Chat, and vendor reasoning content is
 unused. All real providers remain unverified: only synthetic SSE and loopback
 mocks were used. Cache usage shown by `usage get` and F6 is reported fact, with
 missing details unknown; F6 and `usage get` also show the request's measured
-input bytes by source, which are never converted into tokens; a catalog check cannot prove caching. Anthropic's
-OpenAI facade is excluded because prompt caching is unavailable there; use a
-suitable native-API proxy rather than assume it supports long cached sessions.
+input bytes by source, which are never converted into tokens; a catalog check
+cannot prove caching.
+
+If a single proxy such as LiteLLM exposes both Responses for GPT and Messages
+for Claude, define two connections. For example, use the API roots that your
+proxy exposes (not the final `/responses` or `/messages` paths):
+
+```toml
+[connections.proxy_gpt]
+api = "responses"
+base_url = "https://proxy.example/v1"
+
+[connections.proxy_claude]
+api = "anthropic_messages"
+base_url = "https://proxy.example/v1"
+```
+
+Replace the example URLs with the proxy's API roots and configure credentials
+for each connection as required by that proxy.
 
 ## 2. Send your first request
 
