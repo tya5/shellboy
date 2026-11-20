@@ -36,9 +36,9 @@ async fn create_test_thread(
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn config_set_updates_scheduler_bound_and_notifies_registered_waiter() {
+async fn config_set_updates_bound_and_notifies_prearmed_waiter() {
     crate::test_watchdog::watchdog(
-        "config.set updates scheduler bound and notifies registered waiter",
+        "config.set saves scheduler bound and notifies prearmed waiter",
         async {
             let root = tempfile::tempdir().unwrap();
             let config_path = root.path().join("config.toml");
@@ -51,7 +51,6 @@ async fn config_set_updates_scheduler_bound_and_notifies_registered_waiter() {
             .await
             .unwrap();
             let control = Control::new(&owner, root.path().into());
-            control.start().await.unwrap();
             let got = control
                 .request(Request::new(
                     "config-get-scheduler-bound",
@@ -64,23 +63,24 @@ async fn config_set_updates_scheduler_bound_and_notifies_registered_waiter() {
                 .unwrap()
                 .to_owned();
 
-            // notify_waiters does not retain a permit for late subscribers.
+            // Call the production config worker directly to exclude RequestGuard's generic wake.
             let notified = control.changed.notified();
             tokio::pin!(notified);
             notified.as_mut().enable();
-            let changed = control
-                .request(Request::new(
-                    "config-set-scheduler-bound",
-                    Command::ConfigSet(ConfigSetArgs {
+            let applied = control
+                .config_set(
+                    ConfigSetArgs {
                         expected_hash,
                         changes: vec![ConfigChange {
                             field: "schedule.max_sleep_seconds".into(),
                             value: Some(serde_json::json!(37)),
                         }],
-                    }),
-                ))
-                .await;
-            assert!(changed.ok, "{changed:?}");
+                    },
+                    None,
+                )
+                .await
+                .unwrap();
+            assert_eq!(applied["written"], true);
             notified.await;
             assert_eq!(
                 control
