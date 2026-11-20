@@ -147,6 +147,16 @@ struct AgentsPlan {
     source: Option<(String, i64)>,
 }
 
+struct ExecuteTransaction<'a> {
+    connection: &'a mut Connection,
+    request: &'a Request,
+    caller: Option<&'a Origin>,
+    plan: Option<&'a AgentsPlan>,
+    fingerprint: &'a std::sync::OnceLock<Result<String>>,
+    checked_delete_targets: Option<&'a [String]>,
+    pressure: &'a mut bool,
+}
+
 #[derive(Serialize, Deserialize)]
 struct SavedOutcome {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -532,15 +542,15 @@ impl Store {
             "external"
         });
         self.receipt_job(Some(kind), requester, move |connection, pressure| {
-            Ok(store.execute_transaction_with_checked_targets(
+            Ok(store.execute_transaction(ExecuteTransaction {
                 connection,
-                &request,
-                caller.as_ref(),
-                plan.as_ref().as_ref(),
-                &fingerprint,
-                checked_delete_targets.as_deref(),
+                request: &request,
+                caller: caller.as_ref(),
+                plan: plan.as_ref().as_ref(),
+                fingerprint: &fingerprint,
+                checked_delete_targets: checked_delete_targets.as_deref(),
                 pressure,
-            ))
+            }))
         })
         .await
     }
@@ -1064,36 +1074,16 @@ impl Store {
         self.database.call(move|db|{db.execute("UPDATE operation_receipt SET state=?2,result_ref_json=?3,reserved_bytes=0 WHERE operation_id=?1 AND state='pending'",params![operation,if saved.error.is_some(){"failed"}else{"completed"},serde_json::to_string(&saved).unwrap()])?;Ok(())}).await.map_err(storage_error)
     }
 
-    fn execute_transaction(
-        &self,
-        connection: &mut Connection,
-        request: &Request,
-        caller: Option<&Origin>,
-        plan: Option<&AgentsPlan>,
-        fingerprint: &std::sync::OnceLock<Result<String>>,
-        pressure: &mut bool,
-    ) -> Result<MutationResult> {
-        self.execute_transaction_with_checked_targets(
+    fn execute_transaction(&self, execution: ExecuteTransaction<'_>) -> Result<MutationResult> {
+        let ExecuteTransaction {
             connection,
             request,
             caller,
             plan,
             fingerprint,
-            None,
+            checked_delete_targets,
             pressure,
-        )
-    }
-
-    fn execute_transaction_with_checked_targets(
-        &self,
-        connection: &mut Connection,
-        request: &Request,
-        caller: Option<&Origin>,
-        plan: Option<&AgentsPlan>,
-        fingerprint: &std::sync::OnceLock<Result<String>>,
-        checked_delete_targets: Option<&[String]>,
-        pressure: &mut bool,
-    ) -> Result<MutationResult> {
+        } = execution;
         let fingerprint = request_fingerprint(fingerprint, request, caller)?;
         self.transact(
             connection,
@@ -5399,14 +5389,17 @@ mod agents_reference_tests {
         let conflict = store
             .database
             .call(move |db| {
-                Ok(cloned.execute_transaction(
-                    db,
-                    &request,
-                    None,
-                    Some(&plan),
-                    &std::sync::OnceLock::new(),
-                    &mut false,
-                ))
+                let fingerprint = std::sync::OnceLock::new();
+                let mut pressure = false;
+                Ok(cloned.execute_transaction(ExecuteTransaction {
+                    connection: db,
+                    request: &request,
+                    caller: None,
+                    plan: Some(&plan),
+                    fingerprint: &fingerprint,
+                    checked_delete_targets: None,
+                    pressure: &mut pressure,
+                }))
             })
             .await
             .unwrap()
@@ -6086,8 +6079,9 @@ mod thread_deletion_notification_tests {
     async fn missing_thread_delete_error_is_saved_and_replayed_before_fresh_admission() {
         let (root, owner) = fixture().await;
         let control = Control::new(&owner, root.path().into());
+        let operation_id = format!("{}:missing-thread-delete", owner.instance_id);
         let request = Request::new(
-            format!("{}:missing-thread-delete", owner.instance_id),
+            operation_id.clone(),
             Command::ThreadDelete(ThreadDeleteArgs {
                 preview_marker: None,
                 thread_id: "missing-thread".into(),
@@ -6098,13 +6092,14 @@ mod thread_deletion_notification_tests {
         assert_eq!(first.error.unwrap().code, ErrorCode::ThreadNotFound);
         let replay = control.request(request).await;
         assert_eq!(replay.error.unwrap().code, ErrorCode::ThreadNotFound);
+        let receipt_operation_id = operation_id;
         owner
             .db
-            .call(|db| {
+            .call(move |db| {
                 assert_eq!(
                     db.query_row(
                         "SELECT count(*) FROM operation_receipt WHERE operation_id=?1 AND state='failed' AND result_ref_json IS NOT NULL",
-                        [format!("{}:missing-thread-delete", owner.instance_id)],
+                        [receipt_operation_id],
                         |row| row.get::<_, i64>(0),
                     )?,
                     1,
@@ -6143,8 +6138,9 @@ mod thread_deletion_notification_tests {
             root.path().into(),
             owner.instance_id.clone(),
         );
+        let operation_id = format!("{}:checked-delete-expansion", owner.instance_id);
         let request = Request::new(
-            format!("{}:checked-delete-expansion", owner.instance_id),
+            operation_id.clone(),
             Command::ThreadDelete(ThreadDeleteArgs {
                 preview_marker: None,
                 thread_id: "parent".into(),
@@ -6160,9 +6156,10 @@ mod thread_deletion_notification_tests {
             .unwrap_err();
         assert_eq!(error.code, ErrorCode::InvalidState);
         assert!(error.message.contains("target set changed"));
+        let receipt_operation_id = operation_id.clone();
         owner
             .db
-            .call(|db| {
+            .call(move |db| {
                 assert_eq!(
                     db.query_row(
                         "SELECT count(*) FROM thread WHERE id IN ('parent','child','grandchild') AND deleted_at IS NULL",
@@ -6192,7 +6189,7 @@ mod thread_deletion_notification_tests {
                 );
                 let (state, saved): (String, String) = db.query_row(
                     "SELECT state,result_ref_json FROM operation_receipt WHERE operation_id=?1",
-                    [format!("{}:checked-delete-expansion", owner.instance_id)],
+                    [receipt_operation_id],
                     |row| Ok((row.get(0)?, row.get(1)?)),
                 )?;
                 assert_eq!(state, "failed");
