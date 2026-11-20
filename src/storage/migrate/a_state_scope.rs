@@ -277,6 +277,8 @@ mod tests {
     fn schema45_with_generation_column() -> Connection {
         let db = Connection::open_in_memory().unwrap();
         db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        db.execute_batch(crate::storage::REWIND_CURRENT_TO_49)
+            .unwrap();
         db.execute("DELETE FROM schema_migration WHERE version=40", [])
             .unwrap();
         db.execute_batch(include_str!(

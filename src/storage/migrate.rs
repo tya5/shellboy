@@ -583,6 +583,8 @@ mod question_admission_migration_tests {
     fn schema47() -> Connection {
         let db = Connection::open_in_memory().unwrap();
         db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        db.execute_batch(crate::storage::REWIND_CURRENT_TO_49)
+            .unwrap();
         db.execute_batch("DELETE FROM schema_migration WHERE version>47; PRAGMA user_version=47;")
             .unwrap();
         db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','','p','m','now')", []).unwrap();
@@ -1757,6 +1759,8 @@ mod generated_summary_role_migration_tests {
 
     fn fixture_on(db: Connection) -> Connection {
         db.execute_batch(CURRENT_SCHEMA).unwrap();
+        db.execute_batch(crate::storage::REWIND_CURRENT_TO_49)
+            .unwrap();
         db.execute_batch("DELETE FROM schema_migration WHERE version=49; PRAGMA user_version=48;")
             .unwrap();
         db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('t','/','/a','p','m','now')", []).unwrap();

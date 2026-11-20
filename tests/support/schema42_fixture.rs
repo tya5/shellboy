@@ -17,9 +17,21 @@ pub(crate) fn open_schema42_fixture(path: &Path) -> Connection {
     db
 }
 
-/// Rewind a database freshly created by current production code (schema 45)
-/// to the schema-42 shape, so hand-built older fixtures can exercise upgrades.
-pub(crate) const REWIND_CURRENT_TO_42: &str = "ALTER TABLE thread DROP COLUMN spill_override;
+/// Remove the schema-50-only objects from a freshly bootstrapped database.
+/// The caller can then construct a real predecessor fixture without leaving
+/// current scheduler tables behind under an older ledger/user_version.
+pub(crate) const REWIND_CURRENT_TO_49: &str = "DROP TABLE scheduled_command_result;
+ DROP TABLE scheduled_command;
+ DELETE FROM schema_migration WHERE version=50;
+ PRAGMA user_version=49;";
+
+/// Rewind current schema 50 to the schema-42 shape, so hand-built historical
+/// fixtures can exercise upgrades without retaining later scheduler objects.
+pub(crate) const REWIND_CURRENT_TO_42: &str = "DROP TABLE scheduled_command_result;
+ DROP TABLE scheduled_command;
+ DELETE FROM schema_migration WHERE version=50;
+ PRAGMA user_version=49;
+ ALTER TABLE thread DROP COLUMN spill_override;
  DELETE FROM schema_migration WHERE version=45;
  ALTER TABLE thread DROP COLUMN max_tokens;
  DELETE FROM schema_migration WHERE version=44;

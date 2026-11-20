@@ -136,7 +136,7 @@ mod migration_startup_tests;
 pub(crate) mod statement_observation;
 pub(crate) const CURRENT_SCHEMA: &str = include_str!("storage/current.sql");
 #[cfg(test)]
-pub(crate) use schema42_test_fixture::REWIND_CURRENT_TO_42;
+pub(crate) use schema42_test_fixture::{REWIND_CURRENT_TO_42, REWIND_CURRENT_TO_49};
 
 #[derive(Debug, thiserror::Error)]
 pub enum StorageError {
