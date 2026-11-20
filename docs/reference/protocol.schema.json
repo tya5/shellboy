@@ -334,6 +334,54 @@
         {
           "properties": {
             "args": {
+              "$ref": "#/definitions/ScheduleAddArgs"
+            },
+            "command": {
+              "const": "schedule.add",
+              "type": "string"
+            }
+          },
+          "required": [
+            "command",
+            "args"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "args": {
+              "$ref": "#/definitions/ScheduleListArgs"
+            },
+            "command": {
+              "const": "schedule.list",
+              "type": "string"
+            }
+          },
+          "required": [
+            "command",
+            "args"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "args": {
+              "$ref": "#/definitions/ScheduleRemoveArgs"
+            },
+            "command": {
+              "const": "schedule.remove",
+              "type": "string"
+            }
+          },
+          "required": [
+            "command",
+            "args"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "args": {
               "$ref": "#/definitions/ThreadCreateArgs"
             },
             "command": {
@@ -5009,6 +5057,93 @@
           "additionalProperties": false,
           "properties": {
             "args": {
+              "$ref": "#/definitions/ScheduleAddArgs"
+            },
+            "command": {
+              "const": "schedule.add",
+              "type": "string"
+            },
+            "operation_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "origin": true,
+            "protocol_version": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "args",
+            "command",
+            "operation_id",
+            "protocol_version"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "args": {
+              "$ref": "#/definitions/ScheduleListArgs"
+            },
+            "command": {
+              "const": "schedule.list",
+              "type": "string"
+            },
+            "operation_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "origin": true,
+            "protocol_version": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "args",
+            "command",
+            "operation_id",
+            "protocol_version"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "args": {
+              "$ref": "#/definitions/ScheduleRemoveArgs"
+            },
+            "command": {
+              "const": "schedule.remove",
+              "type": "string"
+            },
+            "operation_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "origin": true,
+            "protocol_version": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "args",
+            "command",
+            "operation_id",
+            "protocol_version"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "args": {
               "$ref": "#/definitions/ThreadCreateArgs"
             },
             "command": {
@@ -6808,6 +6943,72 @@
         "action",
         "accepted_at",
         "operation_count"
+      ],
+      "type": "object"
+    },
+    "ScheduleAddArgs": {
+      "additionalProperties": false,
+      "properties": {
+        "at": {
+          "default": null,
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "command": {
+          "type": "string"
+        },
+        "cron": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cwd": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "thread_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "command"
+      ],
+      "type": "object"
+    },
+    "ScheduleListArgs": {
+      "additionalProperties": false,
+      "properties": {
+        "thread_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ScheduleRemoveArgs": {
+      "additionalProperties": false,
+      "properties": {
+        "schedule_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "schedule_id"
       ],
       "type": "object"
     },
@@ -11783,6 +11984,6 @@
       "type": "object"
     }
   },
-  "protocol_version": 6,
+  "protocol_version": 7,
   "title": "Shellboy local RPC protocol v6"
 }
