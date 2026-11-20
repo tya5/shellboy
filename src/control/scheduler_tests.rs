@@ -10,13 +10,21 @@ use crate::{
 use chrono::{Datelike, TimeZone};
 use std::time::Duration;
 
+fn current_request(control: &Control, operation: impl AsRef<str>, command: Command) -> Request {
+    Request::new(
+        format!("{}:{}", control.store.instance_id, operation.as_ref()),
+        command,
+    )
+}
+
 async fn create_test_thread(
     control: &Arc<Control>,
     cwd: &std::path::Path,
     operation: &'static str,
 ) -> String {
     let response = control
-        .request(Request::new(
+        .request(current_request(
+            control,
             operation,
             Command::ThreadCreate(ThreadCreateArgs {
                 agents: None,
@@ -103,7 +111,7 @@ async fn scheduled_at_runs_shared_shell_and_list_reports_latest_result() {
         let owner = DataOwner::start(Some(config_path), Some(root.path().join("data")), root.path().into())
             .await.unwrap();
         let control = Control::new(&owner, root.path().into());
-        let created=control.request(Request::new("thread-create",Command::ThreadCreate(ThreadCreateArgs{agents:None,connection:None,cwd:Some(root.path().to_string_lossy().into_owned()),model:None,effort:None,parent_id:None}))).await;
+        let created=control.request(current_request(&control, "thread-create",Command::ThreadCreate(ThreadCreateArgs{agents:None,connection:None,cwd:Some(root.path().to_string_lossy().into_owned()),model:None,effort:None,parent_id:None}))).await;
         assert!(created.ok,"{created:?}");
         let thread_id=created.result.unwrap()["thread_id"].as_str().unwrap().to_owned();
         let started=root.path().join("started");
@@ -111,7 +119,7 @@ async fn scheduled_at_runs_shared_shell_and_list_reports_latest_result() {
         let finished=root.path().join("finished");
         let command=format!("touch '{}' ; while [ ! -e '{}' ]; do sleep 0.01; done; printf 'scheduled-ok\\n%s\\n%s\\n' \"$SHELLBOY_THREAD_ID\" \"$PWD\"; touch '{}'",started.display(),release.display(),finished.display());
         let due_at=chrono::Utc::now().timestamp()-1;
-        let add=control.request(Request::new("schedule-add",Command::ScheduleAdd(ScheduleAddArgs{thread_id:Some(thread_id.clone()),command,cwd:None,cron:None,at:Some(due_at)}))).await;
+        let add=control.request(current_request(&control, "schedule-add",Command::ScheduleAdd(ScheduleAddArgs{thread_id:Some(thread_id.clone()),command,cwd:None,cron:None,at:Some(due_at)}))).await;
         assert!(add.ok,"{add:?}");
         let schedule_id=add.result.unwrap()["schedule_id"].as_str().unwrap().to_owned();
         loop {
@@ -121,17 +129,17 @@ async fn scheduled_at_runs_shared_shell_and_list_reports_latest_result() {
         let active_preview=control.request(Request::new("preview-active",Command::ThreadDeletePreview(ThreadDeleteArgs{thread_id:thread_id.clone(),descendants:false,preview_marker:None}))).await;
         assert!(active_preview.ok,"{active_preview:?}");
         assert_eq!(active_preview.result.unwrap()["blockers"]["scheduled_shell_count"],1);
-        let active_delete=control.request(Request::new("delete-active",Command::ThreadDelete(ThreadDeleteArgs{thread_id:thread_id.clone(),descendants:false,preview_marker:None}))).await;
+        let active_delete=control.request(current_request(&control, "delete-active",Command::ThreadDelete(ThreadDeleteArgs{thread_id:thread_id.clone(),descendants:false,preview_marker:None}))).await;
         assert!(!active_delete.ok,"active scheduled shell must block Thread deletion");
         assert!(active_delete.error.as_ref().is_some_and(|error|error.message.contains("scheduled shell")),"unexpected deletion blocker: {active_delete:?}");
-        let archived=control.request(Request::new("archive-active",Command::ThreadArchive(ThreadArchiveArgs{thread_ids:vec![thread_id.clone()],descendants:false}))).await;
+        let archived=control.request(current_request(&control, "archive-active",Command::ThreadArchive(ThreadArchiveArgs{thread_ids:vec![thread_id.clone()],descendants:false}))).await;
         assert!(archived.ok,"{archived:?}");
         let hidden=control.request(Request::new("list-archived",Command::ScheduleList(ScheduleListArgs{thread_id:Some(thread_id.clone())}))).await;
         assert!(hidden.ok,"{hidden:?}");
         assert!(hidden.result.unwrap()["schedules"].as_array().unwrap().is_empty());
         std::fs::write(&release,"").unwrap();
         loop { if tokio::fs::try_exists(&finished).await.unwrap(){break;} tokio::time::sleep(Duration::from_millis(10)).await; }
-        let unarchived=control.request(Request::new("unarchive-active",Command::ThreadUnarchive(ThreadArchiveArgs{thread_ids:vec![thread_id.clone()],descendants:false}))).await;
+        let unarchived=control.request(current_request(&control, "unarchive-active",Command::ThreadUnarchive(ThreadArchiveArgs{thread_ids:vec![thread_id.clone()],descendants:false}))).await;
         assert!(unarchived.ok,"{unarchived:?}");
         loop {
             let list=control.request(Request::new("schedule-list",Command::ScheduleList(ScheduleListArgs{thread_id:Some(thread_id.clone())}))).await;
@@ -157,7 +165,7 @@ async fn scheduled_at_runs_shared_shell_and_list_reports_latest_result() {
         };
         assert_eq!(preview["scheduled_command_count"],1);
         let marker=preview["preview_marker"].clone();
-        let deleted=control.request(Request::new("thread-delete",Command::ThreadDelete(ThreadDeleteArgs{thread_id:thread_id.clone(),descendants:false,preview_marker:Some(serde_json::from_value(marker).unwrap())}))).await;
+        let deleted=control.request(current_request(&control, "thread-delete",Command::ThreadDelete(ThreadDeleteArgs{thread_id:thread_id.clone(),descendants:false,preview_marker:Some(serde_json::from_value(marker).unwrap())}))).await;
         assert!(deleted.ok,"{deleted:?}");
         let check_id=schedule_id.clone();
         let (registrations,results)=owner.db.call(move|db|Ok((
@@ -192,7 +200,8 @@ async fn busy_thread_admission_retires_one_due_row_and_dispatches_another() {
             let no_child = root.path().join("must-not-run");
             let future_at = chrono::Utc::now().timestamp() + 86_400;
             let blocked = control
-                .request(Request::new(
+                .request(current_request(
+                    &control,
                     "blocked-schedule-add",
                     Command::ScheduleAdd(ScheduleAddArgs {
                         thread_id: Some(busy_thread.clone()),
@@ -210,7 +219,8 @@ async fn busy_thread_admission_retires_one_due_row_and_dispatches_another() {
                 .to_owned();
             let did_run = root.path().join("other-ran");
             let other = control
-                .request(Request::new(
+                .request(current_request(
+                    &control,
                     "free-schedule-add",
                     Command::ScheduleAdd(ScheduleAddArgs {
                         thread_id: Some(free_thread.clone()),
@@ -320,14 +330,14 @@ async fn owner_schedule_cap_is_atomic_across_threads_and_scoped_list_is_complete
         let mut second_ids=Vec::new();
         for index in 0..15 {
             let thread=if index%2==0 {first.clone()} else {second.clone()};
-            let response=control.request(Request::new(format!("fill-{index}"),Command::ScheduleAdd(ScheduleAddArgs{thread_id:Some(thread.clone()),command:"true".into(),cwd:None,cron:None,at:Some(at)}))).await;
+            let response=control.request(current_request(&control, format!("fill-{index}"),Command::ScheduleAdd(ScheduleAddArgs{thread_id:Some(thread.clone()),command:"true".into(),cwd:None,cron:None,at:Some(at)}))).await;
             assert!(response.ok,"{response:?}");
             let id=response.result.unwrap()["schedule_id"].as_str().unwrap().to_owned();
             if thread==first { first_ids.push(id); } else { second_ids.push(id); }
         }
         let (a,b)=tokio::join!(
-            control.request(Request::new("last-slot-a",Command::ScheduleAdd(ScheduleAddArgs{thread_id:Some(first.clone()),command:"true".into(),cwd:None,cron:None,at:Some(at)}))),
-            control.request(Request::new("last-slot-b",Command::ScheduleAdd(ScheduleAddArgs{thread_id:Some(second.clone()),command:"true".into(),cwd:None,cron:None,at:Some(at)}))),
+            control.request(current_request(&control, "last-slot-a",Command::ScheduleAdd(ScheduleAddArgs{thread_id:Some(first.clone()),command:"true".into(),cwd:None,cron:None,at:Some(at)}))),
+            control.request(current_request(&control, "last-slot-b",Command::ScheduleAdd(ScheduleAddArgs{thread_id:Some(second.clone()),command:"true".into(),cwd:None,cron:None,at:Some(at)}))),
         );
         assert_ne!(a.ok,b.ok,"exactly one concurrent registration may occupy the owner-wide last slot: {a:?} {b:?}");
         let (accepted_thread,accepted_id,rejected_error)=if a.ok {
@@ -348,18 +358,18 @@ async fn owner_schedule_cap_is_atomic_across_threads_and_scoped_list_is_complete
         let owner_count=owner.db.call(|db|Ok(db.query_row("SELECT count(*) FROM scheduled_command",[],|row|row.get::<_,i64>(0))?)).await.unwrap();
         assert_eq!(owner_count,16);
         let removed_id=ids_a.iter().next().unwrap().clone();
-        let removed=control.request(Request::new("remove-frees-owner-slot",Command::ScheduleRemove(crate::protocol::ScheduleRemoveArgs{schedule_id:removed_id}))).await;
+        let removed=control.request(current_request(&control, "remove-frees-owner-slot",Command::ScheduleRemove(crate::protocol::ScheduleRemoveArgs{schedule_id:removed_id}))).await;
         assert!(removed.ok,"{removed:?}");
-        let refilled=control.request(Request::new("refill-after-remove",Command::ScheduleAdd(ScheduleAddArgs{thread_id:Some(second.clone()),command:"true".into(),cwd:None,cron:None,at:Some(at)}))).await;
+        let refilled=control.request(current_request(&control, "refill-after-remove",Command::ScheduleAdd(ScheduleAddArgs{thread_id:Some(second.clone()),command:"true".into(),cwd:None,cron:None,at:Some(at)}))).await;
         assert!(refilled.ok,"{refilled:?}");
         let preview=control.request(Request::new("preview-cascade-cap",Command::ThreadDeletePreview(ThreadDeleteArgs{thread_id:first.clone(),descendants:false,preview_marker:None}))).await;
         assert!(preview.ok,"{preview:?}");
         let marker=serde_json::from_value(preview.result.unwrap()["preview_marker"].clone()).unwrap();
-        let deleted=control.request(Request::new("delete-frees-owner-slots",Command::ThreadDelete(ThreadDeleteArgs{thread_id:first,descendants:false,preview_marker:Some(marker)}))).await;
+        let deleted=control.request(current_request(&control, "delete-frees-owner-slots",Command::ThreadDelete(ThreadDeleteArgs{thread_id:first,descendants:false,preview_marker:Some(marker)}))).await;
         assert!(deleted.ok,"{deleted:?}");
         let count=owner.db.call(|db|Ok(db.query_row("SELECT count(*) FROM scheduled_command",[],|row|row.get::<_,i64>(0))?)).await.unwrap();
         assert!(count<16,"Thread delete cascade must release owner-wide registrations: {count}");
-        let after_cascade=control.request(Request::new("cascade-refills-owner-cap",Command::ScheduleAdd(ScheduleAddArgs{thread_id:Some(second),command:"true".into(),cwd:None,cron:None,at:Some(at)}))).await;
+        let after_cascade=control.request(current_request(&control, "cascade-refills-owner-cap",Command::ScheduleAdd(ScheduleAddArgs{thread_id:Some(second),command:"true".into(),cwd:None,cron:None,at:Some(at)}))).await;
         assert!(after_cascade.ok,"Thread cascade must free owner-wide registration capacity: {after_cascade:?}");
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
@@ -386,7 +396,8 @@ async fn normal_start_resumes_an_injected_persisted_due_cron_once() {
             let thread_id = create_test_thread(&first_control, root.path(), "restart-thread").await;
             let output = root.path().join("restart-count");
             let added = first_control
-                .request(Request::new(
+                .request(current_request(
+                    &first_control,
                     "register-before-restart",
                     Command::ScheduleAdd(ScheduleAddArgs {
                         thread_id: Some(thread_id.clone()),
@@ -496,7 +507,8 @@ async fn normal_owner_shutdown_settles_active_scheduled_shell() {
             // Result settlement is observable; this fixture does not claim an independent OS group-cleanup fact.
             let command = format!("touch '{}' ; sleep 1", started.display());
             let added = control
-                .request(Request::new(
+                .request(current_request(
+                    &control,
                     "shutdown-scheduled-add",
                     Command::ScheduleAdd(ScheduleAddArgs {
                         thread_id: Some(thread_id),
@@ -560,7 +572,7 @@ async fn fork_and_rewind_do_not_copy_or_change_thread_owned_schedule() {
         }}).await.unwrap();
         let command="printf scheduler-branch-proof".to_owned();
         let cwd=root.path().canonicalize().unwrap().to_string_lossy().into_owned();
-        let added=control.request(Request::new("register-parent-schedule",Command::ScheduleAdd(ScheduleAddArgs{
+        let added=control.request(current_request(&control, "register-parent-schedule",Command::ScheduleAdd(ScheduleAddArgs{
             thread_id:Some(parent.clone()),command:command.clone(),cwd:Some(cwd.clone()),cron:None,at:Some(chrono::Utc::now().timestamp()+86_400),
         }))).await;
         assert!(added.ok,"{added:?}");
@@ -571,7 +583,7 @@ async fn fork_and_rewind_do_not_copy_or_change_thread_owned_schedule() {
         assert_eq!(initial_rows.len(),1);
         let initial_next=initial_rows[0]["next_at"].clone();
 
-        let forked=control.request(Request::new("fork-parent-with-schedule",Command::ThreadFork(ThreadForkArgs{
+        let forked=control.request(current_request(&control, "fork-parent-with-schedule",Command::ThreadFork(ThreadForkArgs{
             agents:None,thread_id:parent.clone(),node_id:"sched-branch-n1".into(),cwd:None,
         }))).await;
         assert!(forked.ok,"{forked:?}");
@@ -581,7 +593,7 @@ async fn fork_and_rewind_do_not_copy_or_change_thread_owned_schedule() {
         assert!(empty_before.result.unwrap()["schedules"].as_array().unwrap().is_empty());
 
         let unrelated=create_test_thread(&control,root.path(),"unrelated-thread").await;
-        let unrelated_add=control.request(Request::new("register-unrelated-schedule",Command::ScheduleAdd(ScheduleAddArgs{
+        let unrelated_add=control.request(current_request(&control,"register-unrelated-schedule",Command::ScheduleAdd(ScheduleAddArgs{
             thread_id:Some(unrelated.clone()),command:"true".into(),cwd:None,cron:None,at:Some(chrono::Utc::now().timestamp()+86_400),
         }))).await;
         assert!(unrelated_add.ok,"{unrelated_add:?}");
@@ -589,7 +601,7 @@ async fn fork_and_rewind_do_not_copy_or_change_thread_owned_schedule() {
         assert!(empty_after.ok,"{empty_after:?}");
         assert!(empty_after.result.unwrap()["schedules"].as_array().unwrap().is_empty());
 
-        let rewound=control.request(Request::new("rewind-parent-with-schedule",Command::ThreadRewind(ThreadRewindArgs{
+        let rewound=control.request(current_request(&control,"rewind-parent-with-schedule",Command::ThreadRewind(ThreadRewindArgs{
             thread_id:Some(parent.clone()),node_id:"sched-branch-n1".into(),exclude_node:false,dry_run:false,recovery_run_id:None,
         }))).await;
         assert!(rewound.ok,"{rewound:?}");
