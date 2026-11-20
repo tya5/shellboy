@@ -15,6 +15,16 @@ pub struct DueSchedule {
     pub scheduled_at: i64,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ScheduledCommandResult {
+    pub scheduled_at: i64,
+    pub finished_at: i64,
+    pub status: String,
+    pub exit_code: Option<i32>,
+    pub output_tail: Option<String>,
+    pub output_truncated: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ScheduledRow {
     pub id: Uuid,
     pub thread_id: String,
@@ -23,7 +33,7 @@ pub struct ScheduledRow {
     pub cron_expression: Option<String>,
     pub at: Option<i64>,
     pub next_at: Option<i64>,
-    pub result: Option<(i64, i64, String, Option<i32>, Option<String>, bool)>,
+    pub result: Option<ScheduledCommandResult>,
 }
 
 pub async fn next_deadline(db: &DbWorker) -> Result<Option<i64>, StorageError> {
@@ -102,15 +112,15 @@ pub async fn advance_due(db: &DbWorker, now: i64) -> Result<Option<DueSchedule>,
 pub async fn finish(
     db: &DbWorker,
     id: Uuid,
-    scheduled_at: i64,
-    finished_at: i64,
-    status: &'static str,
-    exit_code: Option<i32>,
-    tail: Option<String>,
-    truncated: bool,
+    result: ScheduledCommandResult,
 ) -> Result<(), StorageError> {
-    if !matches!(status, "finished" | "overlap_skipped" | "launch_failed")
-        || tail.as_ref().is_some_and(|s| s.chars().count() > 4096)
+    if !matches!(
+        result.status.as_str(),
+        "finished" | "overlap_skipped" | "launch_failed"
+    ) || result
+        .output_tail
+        .as_ref()
+        .is_some_and(|s| s.chars().count() > 4096)
     {
         return Err(StorageError::InvalidInput(
             "invalid scheduler result".into(),
@@ -119,10 +129,19 @@ pub async fn finish(
     db.call(move |c| {
         c.execute(
             "INSERT INTO scheduled_command_result(schedule_id,scheduled_at,finished_at,status,exit_code,output_tail,output_truncated) SELECT ?1,?2,?3,?4,?5,?6,?7 WHERE EXISTS(SELECT 1 FROM scheduled_command WHERE id=?1) ON CONFLICT(schedule_id) DO UPDATE SET scheduled_at=excluded.scheduled_at,finished_at=excluded.finished_at,status=excluded.status,exit_code=excluded.exit_code,output_tail=excluded.output_tail,output_truncated=excluded.output_truncated WHERE excluded.scheduled_at>=scheduled_command_result.scheduled_at",
-            params![id.to_string(), scheduled_at, finished_at, status, exit_code, tail, if truncated { 1_i64 } else { 0_i64 }],
+            params![
+                id.to_string(),
+                result.scheduled_at,
+                result.finished_at,
+                result.status,
+                result.exit_code,
+                result.output_tail,
+                if result.output_truncated { 1_i64 } else { 0_i64 },
+            ],
         )?;
         Ok(())
-    }).await
+    })
+    .await
 }
 
 pub async fn list(db: &DbWorker, thread_id: String) -> Result<Vec<ScheduledRow>, StorageError> {
@@ -144,7 +163,16 @@ pub async fn list(db: &DbWorker, thread_id: String) -> Result<Vec<ScheduledRow>,
             let (id, thread_id, command, cwd, cron, at, next_at, scheduled, finished, status, code, tail, truncated) = row?;
             let result = match (scheduled, finished, status) {
                 (None, None, None) => None,
-                (Some(a), Some(b), Some(c)) => Some((a, b, c, code, tail, truncated.unwrap_or(0) != 0)),
+                (Some(scheduled_at), Some(finished_at), Some(status)) => {
+                    Some(ScheduledCommandResult {
+                        scheduled_at,
+                        finished_at,
+                        status,
+                        exit_code: code,
+                        output_tail: tail,
+                        output_truncated: truncated.unwrap_or(0) != 0,
+                    })
+                }
                 _ => return Err(StorageError::Schema("partial scheduled result".into())),
             };
             output.push(ScheduledRow {

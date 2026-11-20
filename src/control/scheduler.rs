@@ -2,7 +2,7 @@ use super::Control;
 use crate::{
     protocol::ShellToolArgs,
     shell::{ShellEvent, ShellSupervisor},
-    storage::schedule::{self, DueSchedule},
+    storage::schedule::{self, DueSchedule, ScheduledCommandResult},
 };
 use std::{
     collections::{HashSet, VecDeque},
@@ -132,12 +132,14 @@ pub(super) async fn run(control: Weak<Control>, stop: CancellationToken) {
                         let _ = schedule::finish(
                             &owner.store.database,
                             due.id,
-                            due.scheduled_at,
-                            now,
-                            "overlap_skipped",
-                            None,
-                            None,
-                            false,
+                            ScheduledCommandResult {
+                                scheduled_at: due.scheduled_at,
+                                finished_at: now,
+                                status: "overlap_skipped".into(),
+                                exit_code: None,
+                                output_tail: None,
+                                output_truncated: false,
+                            },
                         )
                         .await;
                     } else {
@@ -188,12 +190,16 @@ async fn execute(
             let _ = schedule::finish(
                 &owner.store.database,
                 id,
-                due.scheduled_at,
-                now,
-                "launch_failed",
-                None,
-                Some("Scheduler: Thread admission busy; command not started".into()),
-                false,
+                ScheduledCommandResult {
+                    scheduled_at: due.scheduled_at,
+                    finished_at: now,
+                    status: "launch_failed".into(),
+                    exit_code: None,
+                    output_tail: Some(
+                        "Scheduler: Thread admission busy; command not started".into(),
+                    ),
+                    output_truncated: false,
+                },
             )
             .await;
             return Ok(id);
@@ -270,7 +276,6 @@ async fn execute(
             let Some(completion) = execution.completion.borrow().clone() else {
                 return Err(());
             };
-            let completion = completion;
             let mut output =
                 String::from_utf8_lossy(&tail.into_iter().collect::<Vec<_>>()).into_owned();
             while output.len() > OUTPUT_TAIL_BYTES {
@@ -288,12 +293,14 @@ async fn execute(
     let _ = schedule::finish(
         &owner.store.database,
         id,
-        due.scheduled_at,
-        chrono::Utc::now().timestamp().max(started),
-        status,
-        code,
-        tail,
-        truncated,
+        ScheduledCommandResult {
+            scheduled_at: due.scheduled_at,
+            finished_at: chrono::Utc::now().timestamp().max(started),
+            status: status.into(),
+            exit_code: code,
+            output_tail: tail,
+            output_truncated: truncated,
+        },
     )
     .await;
     Ok(id)

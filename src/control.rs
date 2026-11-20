@@ -1171,10 +1171,13 @@ impl Control {
                         let thread=args.thread_id.clone().or_else(||origin.as_ref().map(|o|o.thread_id.clone())).ok_or_else(||ApiError::new(ErrorCode::InvalidArgument,"external schedule.list requires --thread"))?;
                         let rows=self.schedule_list(thread).await?;
                         let schedules:Vec<Value>=rows.into_iter().map(|row|{
-                            let latest=row.result.map(|(scheduled,finished,status,code,tail,truncated)|{
-                                let diagnostic=if status=="launch_failed" { tail.clone() } else { None };
-                                let child_tail=if status=="launch_failed" { None } else { tail };
-                                json!({"scheduled_at":scheduled,"finished_at":finished,"status":status,"exit_code":code,"output_tail":child_tail,"scheduler_diagnostic":diagnostic,"output_truncated":truncated})
+                            let latest=row.result.map(|result|{
+                                let (diagnostic, child_tail) = if result.status=="launch_failed" {
+                                    (result.output_tail.clone(), None)
+                                } else {
+                                    (None, result.output_tail)
+                                };
+                                json!({"scheduled_at":result.scheduled_at,"finished_at":result.finished_at,"status":result.status,"exit_code":result.exit_code,"output_tail":child_tail,"scheduler_diagnostic":diagnostic,"output_truncated":result.output_truncated})
                             });
                             json!({"schedule_id":row.id,"thread_id":row.thread_id,"cron":row.cron_expression,"at":row.at,"next_at":row.next_at,"latest":latest})
                         }).collect();

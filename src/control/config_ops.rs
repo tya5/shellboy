@@ -113,10 +113,11 @@ impl Control {
                 // until this one has really ended, so the closure owns the guard.
                 let _guard = guard;
                 let result=crate::config_edit::apply_live(&path, &args.expected_hash, &args.changes, &config, &clients);
-                if let Ok(applied)=&result {
-                    if applied.written {
-                        if let Some(bound)=schedule_bound { max_sleep.store(bound.unwrap_or(0),Ordering::SeqCst); schedule_changed.notify_waiters(); }
-                    }
+                if let (Ok(applied), Some(bound)) = (&result, schedule_bound)
+                    && applied.written
+                {
+                    max_sleep.store(bound.unwrap_or(0), Ordering::SeqCst);
+                    schedule_changed.notify_waiters();
                 }
                 result
             })
