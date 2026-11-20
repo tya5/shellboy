@@ -3,7 +3,7 @@ use crate::{
     app::DataOwner,
     protocol::{
         Command, Request, ScheduleAddArgs, ScheduleListArgs, ThreadArchiveArgs, ThreadCreateArgs,
-        ThreadDeleteArgs,
+        ThreadDeleteArgs, ThreadForkArgs, ThreadRewindArgs,
     },
 };
 use chrono::{Datelike, TimeZone};
@@ -478,4 +478,79 @@ async fn normal_owner_shutdown_settles_active_scheduled_shell() {
     )
     .await
     .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn fork_and_rewind_do_not_copy_or_change_thread_owned_schedule() {
+    crate::test_watchdog::watchdog("fork child remains empty and applied rewind preserves parent schedule", async {
+        let root=tempfile::tempdir().unwrap();
+        let config_path=root.path().join("config.toml");
+        std::fs::write(&config_path,"[schedule]\nmax_sleep_seconds=300\n").unwrap();
+        let owner=DataOwner::start(Some(config_path),Some(root.path().join("data")),root.path().into()).await.unwrap();
+        let control=Control::new(&owner,root.path().into());
+        let parent=create_test_thread(&control,root.path(),"scheduler-branch-parent").await;
+        owner.db.call({let parent=parent.clone();move|db|{
+            db.execute("INSERT INTO run(id,thread_id,state,created_at) VALUES('sched-branch-run',?1,'completed','2026-01-01T00:00:00')",[&parent])?;
+            db.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at) VALUES('sched-branch-turn',?1,'sched-branch-run','completed','2026-01-01T00:00:00')",[&parent])?;
+            db.execute("INSERT INTO node(id,turn_id,kind,created_at,payload_json,payload_bytes) VALUES('sched-branch-n1','sched-branch-turn','user','2026-01-01T00:00:01','{\"role\":\"user\",\"content\":[]}',20)",[])?;
+            db.execute("INSERT INTO node(id,turn_id,kind,created_at,payload_json,payload_bytes) VALUES('sched-branch-n2','sched-branch-turn','assistant','2026-01-01T00:00:02','{\"role\":\"assistant\",\"content\":[]}',20)",[])?;
+            db.execute("INSERT INTO thread_path(thread_id,ordinal,node_id) VALUES(?1,0,'sched-branch-n1'),(?1,1,'sched-branch-n2')",[&parent])?;
+            db.execute("UPDATE thread SET cursor_node_id='sched-branch-n2' WHERE id=?1",[&parent])?;
+            Ok(())
+        }}).await.unwrap();
+        let command="printf scheduler-branch-proof".to_owned();
+        let cwd=root.path().canonicalize().unwrap().to_string_lossy().into_owned();
+        let added=control.request(Request::new("register-parent-schedule",Command::ScheduleAdd(ScheduleAddArgs{
+            thread_id:Some(parent.clone()),command:command.clone(),cwd:Some(cwd.clone()),cron:None,at:Some(chrono::Utc::now().timestamp()+86_400),
+        }))).await;
+        assert!(added.ok,"{added:?}");
+        let schedule_id=added.result.unwrap()["schedule_id"].as_str().unwrap().to_owned();
+        let initial=control.request(Request::new("list-parent-before-branch",Command::ScheduleList(ScheduleListArgs{thread_id:Some(parent.clone())}))).await;
+        assert!(initial.ok,"{initial:?}");
+        let initial_rows=initial.result.unwrap()["schedules"].as_array().unwrap().clone();
+        assert_eq!(initial_rows.len(),1);
+        let initial_next=initial_rows[0]["next_at"].clone();
+
+        let forked=control.request(Request::new("fork-parent-with-schedule",Command::ThreadFork(ThreadForkArgs{
+            agents:None,thread_id:parent.clone(),node_id:"sched-branch-n1".into(),cwd:None,
+        }))).await;
+        assert!(forked.ok,"{forked:?}");
+        let fork_id=forked.result.unwrap()["thread_id"].as_str().unwrap().to_owned();
+        let empty_before=control.request(Request::new("list-fork-before-unrelated-change",Command::ScheduleList(ScheduleListArgs{thread_id:Some(fork_id.clone())}))).await;
+        assert!(empty_before.ok,"{empty_before:?}");
+        assert!(empty_before.result.unwrap()["schedules"].as_array().unwrap().is_empty());
+
+        let unrelated=create_test_thread(&control,root.path(),"unrelated-thread").await;
+        let unrelated_add=control.request(Request::new("register-unrelated-schedule",Command::ScheduleAdd(ScheduleAddArgs{
+            thread_id:Some(unrelated.clone()),command:"true".into(),cwd:None,cron:None,at:Some(chrono::Utc::now().timestamp()+86_400),
+        }))).await;
+        assert!(unrelated_add.ok,"{unrelated_add:?}");
+        let empty_after=control.request(Request::new("list-fork-after-unrelated-change",Command::ScheduleList(ScheduleListArgs{thread_id:Some(fork_id.clone())}))).await;
+        assert!(empty_after.ok,"{empty_after:?}");
+        assert!(empty_after.result.unwrap()["schedules"].as_array().unwrap().is_empty());
+
+        let rewound=control.request(Request::new("rewind-parent-with-schedule",Command::ThreadRewind(ThreadRewindArgs{
+            thread_id:Some(parent.clone()),node_id:"sched-branch-n1".into(),exclude_node:false,dry_run:false,recovery_run_id:None,
+        }))).await;
+        assert!(rewound.ok,"{rewound:?}");
+        let rewind_branch=rewound.result.unwrap()["branch_thread_id"].as_str().unwrap().to_owned();
+        let parent_after=control.request(Request::new("list-parent-after-rewind",Command::ScheduleList(ScheduleListArgs{thread_id:Some(parent.clone())}))).await;
+        assert!(parent_after.ok,"{parent_after:?}");
+        let rows=parent_after.result.unwrap()["schedules"].as_array().unwrap().clone();
+        assert_eq!(rows.len(),1);
+        assert_eq!(rows[0]["schedule_id"],schedule_id);
+        assert_eq!(rows[0]["next_at"],initial_next);
+        assert!(rows[0]["latest"].is_null());
+        let check_id=schedule_id.clone();
+        let stored=owner.db.call(move|db|db.query_row("SELECT thread_id,command,cwd,next_at FROM scheduled_command WHERE id=?1",[check_id],|row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,String>(2)?,row.get::<_,i64>(3)?))).map_err(crate::storage::StorageError::from)).await.unwrap();
+        assert_eq!(stored.0,parent);
+        assert_eq!(stored.1,command);
+        assert_eq!(stored.2,cwd);
+        assert_eq!(rows[0]["next_at"],stored.3);
+        let rewind_list=control.request(Request::new("list-rewind-branch",Command::ScheduleList(ScheduleListArgs{thread_id:Some(rewind_branch)}))).await;
+        assert!(rewind_list.ok,"{rewind_list:?}");
+        assert!(rewind_list.result.unwrap()["schedules"].as_array().unwrap().is_empty());
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+    }).await.unwrap();
 }
