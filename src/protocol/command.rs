@@ -393,6 +393,35 @@ mod tests {
     use super::*;
 
     #[test]
+    fn scheduler_writer_admission_and_list_observation_are_distinct() {
+        let add = Command::ScheduleAdd(crate::protocol::ScheduleAddArgs {
+            thread_id: Some("thread".into()),
+            command: "true".into(),
+            cwd: None,
+            cron: None,
+            at: Some(1),
+        });
+        let list = Command::ScheduleList(crate::protocol::ScheduleListArgs {
+            thread_id: Some("thread".into()),
+        });
+        let remove = Command::ScheduleRemove(crate::protocol::ScheduleRemoveArgs {
+            schedule_id: "00000000-0000-4000-8000-000000000001".into(),
+        });
+        for (command, name, read_only) in [
+            (&add, "schedule.add", false),
+            (&list, "schedule.list", true),
+            (&remove, "schedule.remove", false),
+        ] {
+            assert_eq!(command.name(), name);
+            assert_eq!(command.route(), CommandRoute::Database);
+            assert_eq!(command.is_read_only(), read_only);
+            assert_eq!(command.requires_receipt(), !read_only);
+            assert!(!command.changes_context());
+            command.validate().unwrap();
+        }
+    }
+
+    #[test]
     fn message_cancellation_is_atomic_database_work_with_receipts_and_shutdown_ordering() {
         let command = Command::MessageCancel(crate::protocol::MessageCancelArgs {
             message_ids: vec!["queued-message".into()],

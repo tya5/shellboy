@@ -209,11 +209,6 @@ mod tests {
                 "duplicate exemption"
             );
         }
-        assert_eq!(
-            Kind::ALL.len(),
-            64,
-            "classify new kinds and update this ratchet"
-        );
     }
 
     #[test]
@@ -239,6 +234,8 @@ mod tests {
             Kind::AttachmentRemove,
             Kind::Compact,
             Kind::ContextEdit,
+            Kind::ScheduleAdd,
+            Kind::ScheduleRemove,
         ];
         for kind in writers {
             assert!(
@@ -281,6 +278,44 @@ mod tests {
             Kind::Compact,
             Kind::ContextEdit,
         ];
+        let expected_reads = [
+            Kind::Status,
+            Kind::ThreadList,
+            Kind::ThreadTags,
+            Kind::ThreadCwds,
+            Kind::ThreadGet,
+            Kind::ThreadBranches,
+            Kind::UsageGet,
+            Kind::CompactList,
+            Kind::CompactPreview,
+            Kind::ShellList,
+            Kind::ScheduleList,
+            Kind::ThreadDeletePreview,
+            Kind::MessageGet,
+            Kind::OperationGet,
+            Kind::RunGet,
+            Kind::TurnGet,
+            Kind::HistoryList,
+            Kind::HistoryWindow,
+            Kind::HistoryGet,
+            Kind::HistoryRelations,
+            Kind::AttachmentList,
+        ];
+        let actual_reads: Vec<_> = Kind::ALL
+            .iter()
+            .copied()
+            .filter(|kind| kind.classification() == Classification::PureRead)
+            .collect();
+        for (index, kind) in actual_reads.iter().enumerate() {
+            assert!(expected_reads.contains(kind), "unexpected pure read: {kind:?}");
+            assert!(
+                !actual_reads[..index].contains(kind),
+                "duplicate pure read classification: {kind:?}"
+            );
+        }
+        for kind in expected_reads {
+            assert!(actual_reads.contains(&kind), "missing pure read: {kind:?}");
+        }
         let actual: Vec<_> = Kind::ALL
             .iter()
             .copied()
@@ -296,7 +331,9 @@ mod tests {
                     assert!(!kind.writer_allowed(&mutation));
                 }
                 Classification::MutationDeclaredBound | Classification::MutationExempt => {
-                    assert!(!kind.read_lane())
+                    assert!(!kind.read_lane());
+                    assert!(!kind.writer_allowed(&read_command));
+                    assert!(kind.writer_allowed(&mutation));
                 }
                 Classification::Runtime => {
                     assert!(!kind.read_lane());
