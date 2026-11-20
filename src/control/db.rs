@@ -6232,13 +6232,12 @@ mod thread_deletion_notification_tests {
         owner
             .db
             .call(|db| {
-                assert_eq!(
+                assert!(
                     db.query_row(
                         "SELECT deleted_at IS NULL FROM thread WHERE id='late-root'",
                         [],
                         |row| row.get::<_, bool>(0)
                     )?,
-                    true,
                     "a root appearing after an empty admission snapshot is not deleted",
                 );
                 Ok(())
