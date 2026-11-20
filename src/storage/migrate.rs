@@ -653,7 +653,7 @@ mod question_admission_migration_tests {
         assert_eq!(
             db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
                 .unwrap(),
-            49
+            crate::storage::SCHEMA_VERSION
         );
         assert_eq!(db.query_row("SELECT count(*) FROM schema_migration WHERE version=49 AND name='0049_generated_summary_user_role'", [], |r| r.get::<_, i64>(0)).unwrap(), 1);
         for id in [
@@ -707,7 +707,7 @@ mod question_admission_migration_tests {
             .unwrap()
             .collect::<rusqlite::Result<_>>()
             .unwrap();
-        run(&mut db, 49, &|_, _| {}, &|| {}).unwrap();
+        run(&mut db, crate::storage::SCHEMA_VERSION, &|_, _| {}, &|| {}).unwrap();
         let admitted_after_rerun: Vec<(String,String,Option<String>)> = db
             .prepare("SELECT id,path_admission,json_extract(result_json,'$.reply.state') FROM receipt ORDER BY id")
             .unwrap()
@@ -959,7 +959,7 @@ mod question_admission_migration_tests {
         assert_eq!(
             db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
                 .unwrap(),
-            49
+            crate::storage::SCHEMA_VERSION
         );
         assert_eq!(db.query_row("SELECT count(*) FROM schema_migration WHERE version=49 AND name='0049_generated_summary_user_role'", [], |r| r.get::<_, i64>(0)).unwrap(), 1);
         let path_before_rerun: Vec<String> = db
@@ -976,7 +976,7 @@ mod question_admission_migration_tests {
             .unwrap()
             .collect::<rusqlite::Result<_>>()
             .unwrap();
-        run(&mut db, 49, &|_, _| {}, &|| {}).unwrap();
+        run(&mut db, crate::storage::SCHEMA_VERSION, &|_, _| {}, &|| {}).unwrap();
         let path_after_rerun: Vec<String> = db
             .prepare("SELECT node_id FROM thread_path WHERE thread_id='t' ORDER BY ordinal")
             .unwrap()
@@ -2000,7 +2000,7 @@ mod generated_summary_role_migration_tests {
         assert_eq!(
             db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
                 .unwrap(),
-            49
+            crate::storage::SCHEMA_VERSION
         );
         let (payload,bytes,hash,revision):(String,i64,String,i64)=db.query_row("SELECT payload_json,payload_bytes,body_hash,payload_revision FROM node WHERE id='positive'",[],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).unwrap();
         let parsed: Value = serde_json::from_str(&payload).unwrap();
@@ -2047,7 +2047,7 @@ mod generated_summary_role_migration_tests {
             after_usage,
             before_usage + payload.len() as i64 - before_payload.len() as i64
         );
-        run(&mut db, 49, &|_, _| {}, &|| {}).unwrap();
+        run(&mut db, crate::storage::SCHEMA_VERSION, &|_, _| {}, &|| {}).unwrap();
         assert_eq!(
             db.query_row(
                 "SELECT payload_revision FROM node WHERE id='positive'",
@@ -2060,7 +2060,7 @@ mod generated_summary_role_migration_tests {
         drop(db);
         for _ in 0..2 {
             let mut reopened = Connection::open(&path).unwrap();
-            run(&mut reopened, 49, &|_, _| {}, &|| {}).unwrap();
+            run(&mut reopened, crate::storage::SCHEMA_VERSION, &|_, _| {}, &|| {}).unwrap();
             let saved: String = reopened
                 .query_row(
                     "SELECT payload_json FROM node WHERE id='positive'",
