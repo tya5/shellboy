@@ -45,11 +45,13 @@ class PublicUpgradeArguments(unittest.TestCase):
         self.assertIn('(45, "0045_thread_spill_override")', names)
         self.assertIn('(46, "0046_scope_identity_v2")', names)
         self.assertIn('(47, "0047_drop_selection_nonappend_generation")', names)
-        self.assertEqual(upgrade.CURRENT_SCHEMA_VERSION, 49)
+        self.assertEqual(upgrade.CURRENT_SCHEMA_VERSION, 50)
+        self.assertIn('(49, "0049_generated_summary_user_role")', names)
+        self.assertIn('(50, "0050_minimal_scheduler")', names)
+        self.assertTrue((ROOT / 'migrations/0050_minimal_scheduler.sql').is_file())
         self.assertTrue((ROOT / 'migrations/0046_scope_identity_v2.sql').is_file())
         self.assertTrue((ROOT / 'migrations/0047_drop_selection_nonappend_generation.sql').is_file())
         self.assertTrue((ROOT / 'migrations/0048_human_question_path_admission.sql').is_file())
-        self.assertIn('(49, "0049_generated_summary_user_role")', names)
         self.assertTrue((ROOT / 'migrations/0049_generated_summary_user_role.sql').is_file())
         self.assertTrue((ROOT / 'migrations/0045_thread_spill_override.sql').is_file())
         self.assertTrue((ROOT / 'migrations/0039_independent_runs.sql').is_file())
@@ -66,7 +68,8 @@ class PublicUpgradeArguments(unittest.TestCase):
         db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('old','/','','p','m','now')")
         upgrade.prepare_schema(db, upgrade.CURRENT_SCHEMA_VERSION)
         self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], upgrade.CURRENT_SCHEMA_VERSION)
-        self.assertEqual(db.execute("SELECT version,name FROM schema_migration ORDER BY version DESC LIMIT 1").fetchone(), (upgrade.CURRENT_SCHEMA_VERSION, '0049_generated_summary_user_role'))
+        self.assertEqual(db.execute("SELECT version,name FROM schema_migration ORDER BY version DESC LIMIT 1").fetchone(), (50, '0050_minimal_scheduler'))
+        self.assertIn((49, '0049_generated_summary_user_role'), upgrade.ledger(db))
         self.assertIsNone(db.execute("SELECT spill_override FROM thread WHERE id='old'").fetchone()[0])
         # The spill constraint remains pinned to 45 through the current schema.
         upgrade.check_migration(db, before_45, 44, upgrade.CURRENT_SCHEMA_VERSION)
@@ -89,9 +92,13 @@ class PublicUpgradeArguments(unittest.TestCase):
     def test_sql_only_schema49_staging_refuses_positive_summary_conversion_before_mutation(self):
         db = sqlite3.connect(':memory:')
         self.addCleanup(db.close)
-        db.executescript((ROOT / 'src/storage/current.sql').read_text())
-        db.execute("DELETE FROM schema_migration WHERE version=49")
-        db.execute('PRAGMA user_version=48')
+        db.executescript((ROOT / 'tests/fixtures/storage-current-schema43.sql').read_text())
+        upgrade.prepare_schema(db, 48)
+        self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 48)
+        self.assertEqual(
+            db.execute("SELECT version,name FROM schema_migration ORDER BY version DESC LIMIT 1").fetchone(),
+            (48, '0048_human_question_path_admission'),
+        )
         db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('t','/','','p','m','now')")
         for node_id in ('src-a', 'src-b'):
             db.execute("INSERT INTO node(id,kind,created_at,payload_json) VALUES(?,'message','now','{}')", (node_id,))

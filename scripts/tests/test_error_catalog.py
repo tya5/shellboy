@@ -1,6 +1,7 @@
 """External catalogue contracts using synthetic temporary conversation databases."""
 import contextlib
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -14,6 +15,10 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import error_catalog as catalog
 from error_catalog_fixture import ROOT, add, connect, time_at
+
+_upgrade_spec = importlib.util.spec_from_file_location('release_upgrade', ROOT / 'scripts/check-release-upgrade.py')
+release_upgrade = importlib.util.module_from_spec(_upgrade_spec)
+_upgrade_spec.loader.exec_module(release_upgrade)
 
 
 class CatalogueTests(unittest.TestCase):
@@ -197,19 +202,38 @@ class CatalogueTests(unittest.TestCase):
         self.assertEqual(self.rows()[0]['error'], 'error: safe complete')
         self.assertTrue(self.rows()[0]['stderr_limited'])
 
-    def test_supported_schema39_through49_and_unknown_versions_fail_closed(self):
+    def test_schema50_additive_migration_preserves_catalog_query_and_shape(self):
+        add(self.db, 'same-execution')
+        self.db.commit()
+        current = catalog.facts(self.root / 'shellboy.db')
+        self.assertEqual(self.db.execute('PRAGMA user_version').fetchone()[0], 50)
+
+        old_root = self.root / 'schema49'
+        old_root.mkdir()
+        old_path = old_root / 'shellboy.db'
+        with contextlib.closing(sqlite3.connect(old_path)) as old:
+            old.executescript((ROOT / 'tests/fixtures/storage-current-schema43.sql').read_text())
+            release_upgrade.prepare_schema(old, 49)
+            add(old, 'same-execution')
+            old.commit()
+            self.assertEqual(old.execute('PRAGMA user_version').fetchone()[0], 49)
+
+        # Schema 50 adds scheduler-owned tables only; catalog query rows and shape stay stable.
+        self.assertEqual(catalog.facts(old_path), current)
+
+    def test_supported_schema39_through50_and_unknown_versions_fail_closed(self):
         add(self.db, 'schema-compat')
-        for version in range(39, 50):
+        for version in range(39, 51):
             with self.subTest(version=version):
                 catalog.read_rows(self.db, f'PRAGMA user_version={version}')
                 self.db.commit()
                 self.build()
                 self.assertTrue(self.rows())
-        for version in (38, 50, 999):
+        for version in (38, 51, 999):
             with self.subTest(version=version):
                 catalog.read_rows(self.db, f'PRAGMA user_version={version}')
                 self.db.commit()
-                with self.assertRaisesRegex(ValueError, 'schema39 through schema49'):
+                with self.assertRaisesRegex(ValueError, 'schema39 through schema50'):
                     catalog.facts(self.root / 'shellboy.db')
 
     def test_source_version_fail_closed_and_rebuild_after_option_change(self):

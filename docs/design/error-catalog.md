@@ -75,9 +75,10 @@ Source path and SQLite sidecars must never alias output; no symlink output path
 or arbitrary output-file override is allowed. Failure leaves the previous derived
 snapshot intact and cleans the tool's own temporary file.
 
-The source-version gate explicitly supports conversation schemas 39 through 49
-(schema49 is the current generated-summary-role schema) and rejects older unsupported or future versions;
-extend this allowlist only after verifying that the bounded queries remain valid.
+The source-version gate explicitly supports conversation schemas 39 through 50
+(schema50 adds the minimal scheduler tables to schema49) and rejects older unsupported or future versions.
+The catalog query and output shape are checked against real schema49 and schema50 sources;
+extend this allowlist only after verifying the bounded queries remain valid.
 Schema48 is a receipt-data compatibility step: it marks `path_admission='admitted'`
 for applied receipts with strict JSON boolean `to_human=true`, preserving their
 reply facts. It adds no source columns used by this catalogue. Extend this

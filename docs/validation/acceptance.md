@@ -12173,14 +12173,53 @@ CI for the final candidate remain pending.
 
 Earlier fresh-main/default-off attempts and their guarded RED/PASS receipts are historical only. Their exact patches/logs remain externally preserved, and none transfers to the current landed-main source; the early `cargo check` PASS in particular applies only to pre-Thread bytes.
 
-## Core #281 landed-main continuation (2026-11-21; source only)
+## Core #281 schema50 coupling correction (2026-11-21; focused Python only)
 
-The task source is rebased onto exact `116e82e5965dbc2c736849659f9f48db21788873`; upstream #318/#320 documentation is retained alongside scheduler documentation. New source-only synthetic witnesses cover restart/latest missed, normal active-child shutdown, and wait-for-no-active deletion-preview before physical cascade observation. They are not run; no result is asserted. Config hot-reload, zero-row no-wake, suspend/forward-backward clock integration, fork/rewind, DST and power measurement remain unproven. The current protocol JSON Schema is still v6 against source v7; exporter/parity remains unqualified.
+Reviewed source base is `8f0c3f89c28de861f68372191cac60ecca5a8eb2` / tree
+`dfc564f2cd0d31168726bca82380e8373b59ad2b`, on landed main
+`116e82e5965dbc2c736849659f9f48db21788873`. Schema commit
+`55a635917f0ce6d598570bda4d849e1cf6813108` carries exact exporter bytes
+(269030 bytes, SHA-256
+`c38040af2651290c117fb4aef5f2ea7eb5bebc0fce85ab03ce860698fb9bd5ad`). No
+upstream #318/#320 documentation files were changed by this follow-up.
 
+The prior exact-source canonical native entry was guard execution
+`65a45857-8bae-4a9c-9a6d-935883f586c3`. Its exporter-schema parity selector had
+process rc 0 and a separate receipt of 1 passed, 0 failed, 1437 filtered. The
+same combined entry then failed in the Python stage of `sh scripts/check.sh`:
+230 tests, 4 failures and 13 errors. It stopped before Cargo formatting, strict
+Clippy or the Rust test suite. PRE/POST source bindings were clean and exact;
+guard cleanup was confirmed. Original evidence remains at
+`.local/private-reports/studio-current-20261113/core281-native-8f0c3f89-corrected-20261121-parity.log`
+and its matching `-result.json` / `-resources.tsv`.
 
-## Core #281 lifecycle witnesses added after landed-main rebase (not run)
+Focused follow-up changes allow the error catalogue's existing source query for
+schemas 39 through 50 only. `test_schema50_additive_migration_preserves_catalog_query_and_shape`
+constructs a real schema49 source from the existing schema43 fixture using the
+release migration helper, compares its catalogue result to the current schema50
+fixture, and checks exact shape/data equality; unknown versions 38, 51 and 999
+remain rejected. The schema49 generated-summary converter guard now starts from
+the actual schema43 fixture and calls the migration helper to build schema48;
+it no longer deletes a schema49 ledger row or spoofs `user_version` on current
+schema50. It retains the positive conversion candidate and the pre-mutation
+version/ledger/payload checks. Current-version assertions pin 50 and migration
+`0050_minimal_scheduler`, preserve migration49 ledger assertions, and retain
+published public schema mappings.
 
-Synthetic source now includes a temporary-owner restart test that closes the first owner, injects an elapsed annual-cron cursor into the SQLite file while no owner is open, opens a second owner, explicitly calls normal `Control::start` before list observation, checks the independently computed local Jan-1 occurrence/next timestamp, and verifies an append-count output is exactly one character. It is a synthetic cursor/restart witness, not an unmodified downtime fixture. The normal shutdown witness checks scheduled-result settlement only; it has no independently correlated shell-supervisor group-cleanup fact and does not prove native child cleanup. These source witnesses are unrun and are not acceptance results. Config hot reload, empty-schedule idle/no-wake, forward/backward clock and sleep-resume integration, independent child cleanup, fork/rewind, DST and actual sleep-power comparison remain open.
+The validation-document test no longer couples status content to a particular
+first heading. It still asserts that the acceptance document owns its validation
+record role and that the documents remain distinct. The Development status title
+is at the top for document clarity, not to preserve the removed test coupling.
 
+Affected non-real-DB Python verification passed on the corrected working tree:
+`PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=scripts/tests python3 -m unittest test_error_catalog test_public_release_upgrade_args test_validation_documents`
+(29 tests, 0 failures/errors; 2.929s). `git diff --check` passed. No full
+standard rerun, Rust build/test, CI, publication, live activation or product
+qualification has occurred on the corrected source.
 
-A Control-level branch lifecycle witness source now creates a real Thread and fixture path, adds one future schedule, forks at a known node and verifies the returned child list is empty before and after an unrelated schedule registration, then applies rewind and checks the original Thread retains the exact schedule ID, command, cwd, next_at and absent latest result while the returned rewind branch has no schedules. It has not been run; no lifecycle acceptance is claimed.
+The source-only config-set witness remains narrow: direct `Control::config_set`
+pre-arms and observes the successful-save `Control.changed` notification and
+exact sleep-bound value; it does not establish timer recomputation or a
+config-specific dropped-caller timeout. Other lifecycle witnesses remain
+unrun: natural downtime cursor resumption, empty-schedule idle/no-wake, clock
+and sleep changes, independent child OS-group cleanup, DST and power measurement.
