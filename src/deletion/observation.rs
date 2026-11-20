@@ -30,7 +30,8 @@ walk(id,parent,depth,path,cycle,deleted) AS (
  ORDER BY 3,1 LIMIT 257
 )
 SELECT w.id,w.deleted,w.cycle,t.updated_at,
- w.depth=8 AND NOT w.deleted AND NOT w.cycle AND EXISTS(SELECT 1 FROM thread child WHERE child.parent_thread_id=w.id)
+ w.depth=8 AND NOT w.deleted AND NOT w.cycle AND EXISTS(SELECT 1 FROM thread child WHERE child.parent_thread_id=w.id),
+ (SELECT count(*) FROM scheduled_command sc WHERE sc.thread_id=w.id)
 FROM walk w JOIN thread t ON t.id=w.id";
 
 // Ordinary finite successor walks over existing indexes. Every physical path,
@@ -96,6 +97,7 @@ struct Member {
     cycle: bool,
     updated: String,
     depth_limited: bool,
+    scheduled_command_count: i64,
 }
 struct Witness {
     kind: i64,
@@ -123,6 +125,7 @@ pub(crate) struct RawObservation {
     members: Vec<Member>,
     scope_truncated: bool,
     runs: Vec<Run>,
+    scheduled_command_count: Option<i64>,
     witnesses: Vec<Witness>,
     references_truncated: bool,
     replacement_threads: Vec<ReplacementThread>,
@@ -179,6 +182,7 @@ fn read_members(db: &Connection, thread: &str) -> Result<Vec<Member>, StorageErr
                 cycle: row.get(2)?,
                 updated: scalar(row, 3)?,
                 depth_limited: row.get(4)?,
+                scheduled_command_count: row.get(5)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()
@@ -219,15 +223,15 @@ pub(crate) fn read_tx(
     if args.thread_id.is_empty() || args.thread_id.len() > 256 {
         return Err(invalid("Invalid deletion observation Thread ID"));
     }
-    let updated: Option<String> = db
+    let root: Option<(String, i64)> = db
         .query_row(
-            "SELECT updated_at FROM thread WHERE id=?1 AND deleted_at IS NULL",
+            "SELECT t.updated_at,(SELECT count(*) FROM scheduled_command sc WHERE sc.thread_id=t.id) FROM thread t WHERE t.id=?1 AND t.deleted_at IS NULL",
             [&args.thread_id],
-            |row| scalar(row, 0),
+            |row| Ok((scalar(row, 0)?, row.get(1)?)),
         )
         .optional()
         .map_err(boundary_error)?;
-    let updated = updated.ok_or_else(|| {
+    let (updated, root_schedule_count) = root.ok_or_else(|| {
         StorageError::from(ApiError::new(ErrorCode::ThreadNotFound, "Thread not found"))
     })?;
     let revision: String = db
@@ -254,6 +258,23 @@ pub(crate) fn read_tx(
         );
     }
     let encoded = serde_json::to_string(&selected).expect("bounded Thread IDs serialize");
+    let selected_complete = !args.descendants || !scope_truncated;
+    let scheduled_command_count = if selected_complete {
+        Some(
+            root_schedule_count
+                + if args.descendants {
+                    members
+                        .iter()
+                        .filter(|row| !row.deleted && !row.cycle)
+                        .map(|row| row.scheduled_command_count)
+                        .sum::<i64>()
+                } else {
+                    0
+                },
+        )
+    } else {
+        None
+    };
     let runs=db.prepare("WITH selected AS (SELECT value AS id FROM json_each(?1)) SELECT r.id,r.thread_id,r.state FROM selected s CROSS JOIN run r INDEXED BY one_live_run ON r.thread_id=s.id WHERE r.state IN ('live','stopping') ORDER BY r.id")?.query_map([&encoded],|row|Ok(Run{id:scalar(row,0)?,thread:scalar(row,1)?,state:scalar(row,2)?}))?.collect::<rusqlite::Result<Vec<_>>>().map_err(boundary_error)?;
     let mut witnesses = db
         .prepare(REFERENCES)?
@@ -299,7 +320,6 @@ pub(crate) fn read_tx(
             surviving.extend(nodes.iter().copied());
         }
     }
-    let selected_complete = !args.descendants || !scope_truncated;
     let needs_global = selected_complete && !references_truncated && !sources.is_subset(&surviving);
     let mut replacement_threads = Vec::new();
     let mut replacement_threads_complete = !needs_global;
@@ -326,6 +346,7 @@ pub(crate) fn read_tx(
         members,
         scope_truncated,
         runs,
+        scheduled_command_count,
         witnesses,
         references_truncated,
         replacement_threads,
@@ -443,7 +464,7 @@ pub(crate) fn prepare(raw: RawObservation) -> Value {
     };
     let marker =
         selected_complete.then(|| super::target_marker(selected.iter().map(String::as_str)));
-    json!({"preview_marker":marker,"preview_marker_unavailable_reason":if selected_complete{None}else{Some("input_limit")},"thread_id":raw.args.thread_id,"descendants":raw.args.descendants,"updated_at":raw.updated,"root_revision":raw.root_revision,"snapshot_only":true,"deletable_now":deletable,
+    json!({"preview_marker":marker,"preview_marker_unavailable_reason":if selected_complete{None}else{Some("input_limit")},"thread_id":raw.args.thread_id,"descendants":raw.args.descendants,"updated_at":raw.updated,"root_revision":raw.root_revision,"snapshot_only":true,"deletable_now":deletable,"scheduled_command_count":raw.scheduled_command_count,
         "selection":{"thread_count":if selected_complete{Some(selected.len())}else{None},"descendant_thread_count":if raw.scope_truncated{None}else{Some(descendants.len())},"surviving_descendant_thread_count":if raw.args.descendants{Some(0)}else if raw.scope_truncated{None}else{Some(descendants.len())},"latest_updated_at":if selected_complete{Some(latest)}else{None}},
         "blockers":{"live_run_count":if selected_complete{Some(live)}else{None},"stopping_run_count":if selected_complete{Some(stopping)}else{None},"runs":runs,"truncated":raw.runs.len()>50||!selected_complete},
         "reference_scope":"direct_references_not_gc_reachability","references":references,
@@ -526,6 +547,18 @@ mod tests {
         path(&db, "outside", "output-ra", 1);
         db.execute("INSERT INTO thread_replacement VALUES('outside','rb')", [])
             .unwrap();
+        for (id, thread_id) in [
+            ("root-schedule", "root"),
+            ("child-schedule", "child"),
+            ("deleted-schedule", "deleted-bridge"),
+            ("outside-schedule", "outside"),
+        ] {
+            db.execute(
+                "INSERT INTO scheduled_command(id,thread_id,command,cwd,at,next_at) VALUES(?1,?2,'true','/',100,100)",
+                params![id, thread_id],
+            )
+            .unwrap();
+        }
         for (id, ownership) in [("external", "external"), ("managed", "managed_clipboard")] {
             db.execute("INSERT INTO attachment_ref(id,source_node_id,absolute_path,input_kind,ownership,created_at)VALUES(?1,'a','/synthetic','file',?2,'now')",params![id,ownership]).unwrap();
         }
@@ -537,6 +570,10 @@ mod tests {
             drop(trace);
             let mut value = prepare(raw);
             assert_eq!(value["observation"]["references_complete"], true);
+            assert_eq!(
+                value["scheduled_command_count"],
+                if descendants { 2 } else { 1 }
+            );
             value.as_object_mut().unwrap().remove("observation");
             assert_eq!(value, canonical);
             assert_eq!(
@@ -555,6 +592,7 @@ mod tests {
         let value = prepare(read_tx(&db, &args(true)).unwrap());
         assert_eq!(value["observation"]["descendant_physical_candidates"], 256);
         assert_eq!(value["observation"]["selected_scope_complete"], false);
+        assert!(value["scheduled_command_count"].is_null());
         assert!(value["selection"]["descendant_thread_count"].is_null());
         assert!(value["deletable_now"].is_null());
         assert!(value["blockers"]["live_run_count"].is_null());
@@ -702,6 +740,7 @@ mod tests {
         }
         let value = prepare(read_tx(&db, &args(true)).unwrap());
         assert_eq!(value["observation"]["selected_scope_complete"], false);
+        assert!(value["scheduled_command_count"].is_null());
         assert_eq!(
             value["observation"]["observed_lower_bounds"]["descendant_thread_count"],
             8
@@ -715,6 +754,7 @@ mod tests {
         .unwrap();
         let value = prepare(read_tx(&db, &args(true)).unwrap());
         assert_eq!(value["observation"]["selected_scope_complete"], false);
+        assert!(value["scheduled_command_count"].is_null());
         assert!(value["deletable_now"].is_null());
         let db = fixture();
         let raw = read_tx(&db, &args(true)).unwrap();
