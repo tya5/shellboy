@@ -338,42 +338,99 @@ async fn one_provider_invocation(
     .unwrap();
     let control = Control::new(&owner, root.path().into());
     let thread = thread(&control).await;
-    let mut trace =
-        proactive_third_turn_after_run(&control, &mut receive, &thread, 150, summary_reply(), None)
-            .await;
-    let events = proactive_events(&control, &thread).await;
-    assert_eq!(
-        events.len(),
-        1,
-        "the predeclared first threshold boundary has one automatic attempt: {events:#?}"
-    );
-    let event = events[0].clone();
-    let trigger_turn = event["turn_id"]
-        .as_str()
-        .expect("attempt is bound to a Turn")
-        .to_owned();
-    let trigger_turns = [trigger_turn];
-    let mut finish = Box::pin(automatic_attempts_finished_for_turns(
-        &control,
-        &trigger_turns,
-        1,
-    ));
-    let terminal = loop {
+    let mut report = None;
+    for (task, tokens) in [("task 0", 50), ("task 1", 150)] {
+        let accepted = send_accepted(&control, &thread, task).await;
+        let turn = accepted.turn_id.expect("warmup has its own accepted Turn");
+        let next = incoming(&control, &mut receive).await;
+        assert_eq!(next.kind(), ProviderRequestKind::Ordinary);
+        assert_current_context_once(
+            &next.body,
+            &current_context(&control, &thread).await,
+            "warmup ordinary request",
+        );
+        if task == "task 1" {
+            report = Some(
+                prepared_report_from_incoming(&control, &turn, &next, tokens)
+                    .await
+                    .owner,
+            );
+        }
+        next.reply
+            .send((200, answer_with_usage("saved answer", tokens)))
+            .unwrap();
+        settled(&control, &thread).await;
+    }
+    let report = report.expect("task 1 supplies the exact threshold report");
+    let accepted = send_accepted(&control, &thread, "current task").await;
+    let trigger = TriggerOwner {
+        run_id: accepted.run_id.expect("current task has an accepted Run"),
+        turn_id: accepted.turn_id.expect("current task has an accepted Turn"),
+    };
+    let report_turns = [report.row_turn_id.clone()];
+    let finish = automatic_attempts_finished_for_turns(&control, &report_turns, 1);
+    let settle = settled(&control, &thread);
+    tokio::pin!(finish, settle);
+    let mut terminal = None;
+    let mut foreground_replied = false;
+    let mut foreground_settled = false;
+    let mut invocation: Option<ReportBoundary> = None;
+    let mut bodies = Vec::new();
+    while terminal.is_none() || !foreground_settled {
         tokio::select! {
-            attempts = &mut finish => break attempts,
-            incoming = receive.recv() => {
-                let incoming = incoming.expect("provider receiver stays open through the exact FINISH cut");
-                assert_eq!(incoming.kind(), ProviderRequestKind::Summary,
-                    "after the named Turn settles only an actual summary retry remains");
-                assert_eq!(incoming.body, trace.summary_bodies[0], "late retry preserves the exact original request body");
-                trace.summary_requests += 1;
-                trace.summary_bodies.push(incoming.body.clone());
-                incoming.reply.send(summary_reply()).unwrap();
+            attempts = &mut finish, if terminal.is_none() => terminal = Some(attempts),
+            _ = &mut settle, if foreground_replied && !foreground_settled => {
+                foreground_settled = true;
+            }
+            next = incoming(&control, &mut receive) => match next.kind() {
+                ProviderRequestKind::Ordinary => {
+                    assert!(!foreground_replied, "one ordinary request for the accepted current task");
+                    assert_current_context_once(
+                        &next.body,
+                        &current_context(&control, &thread).await,
+                        "current task ordinary request",
+                    );
+                    next.reply.send((200, answer_with_usage("last answer", 10))).unwrap();
+                    foreground_replied = true;
+                }
+                ProviderRequestKind::Summary => {
+                    // The request is still held: the provisional report and active
+                    // duty must identify its owner even after the ordinary Turn settles.
+                    let admitted = admitted_summary_boundary(
+                        &control,
+                        std::slice::from_ref(&report),
+                        trigger.clone(),
+                    ).await;
+                    let key = format!("compact.automatic_active.{thread}");
+                    let duty: Value = control.store.database.call(move |db| {
+                        let saved: String = db.query_row(
+                            "SELECT value FROM app_meta WHERE key=?1", [key], |row| row.get(0),
+                        )?;
+                        Ok(serde_json::from_str(&saved).expect("active duty is JSON"))
+                    }).await.unwrap();
+                    assert_eq!(duty["run_id"], trigger.run_id);
+                    assert_eq!(duty["turn_id"], trigger.turn_id);
+                    assert_eq!(duty["input_tokens"], report.input_tokens);
+                    if let Some(first) = &invocation {
+                        assert_eq!(admitted.report.attempt_id, first.report.attempt_id);
+                        assert_eq!(admitted.gc_token, first.gc_token);
+                    } else {
+                        invocation = Some(admitted);
+                    }
+                    if let Some(first_body) = bodies.first() {
+                        assert_eq!(&next.body, first_body, "retry preserves the exact original request body");
+                    }
+                    bodies.push(next.body);
+                    assert!(bodies.len() <= retries as usize + 1, "unexpected extra Summary POST");
+                    next.reply.send(summary_reply()).unwrap();
+                }
             }
         }
-    };
+    }
+    let terminal = terminal.expect("exact durable FINISH was observed");
     assert_eq!(terminal.len(), 1);
-    assert_eq!(terminal[0].id, event["attempt_id"].as_str().unwrap());
+    assert_eq!(terminal[0].id, report.attempt_id);
+    let invocation = invocation.expect("the exact Summary invocation reached the provider");
     let finished_events = proactive_events(&control, &thread).await;
     assert_eq!(
         finished_events.len(),
@@ -381,55 +438,27 @@ async fn one_provider_invocation(
         "one predeclared eligible report still owns exactly one attempt"
     );
     assert_eq!(finished_events[0]["attempt_id"], terminal[0].id);
-    let attempt_id = terminal[0].id.clone();
-    let record_raw:String=control.store.database.call(move|db|{
-        db.query_row("SELECT json_extract(error_json,'$.automatic_trim_attempt') FROM model_attempt WHERE id=?1",[attempt_id],|row|row.get(0)).map_err(Into::into)
-    }).await.unwrap();
-    let record: Value = serde_json::from_str(&record_raw).unwrap();
-    let trigger_run = record["trigger"]["run_id"]
-        .as_str()
-        .expect("captured trigger Run");
+    let record = automatic_attempt_record(&control, report.attempt_id.clone()).await;
+    assert_eq!(record["trigger"]["run_id"], trigger.run_id);
+    let finished = invocation.finish(&terminal[0], &record);
+    let scope = finished.boundary.trigger;
+    let summary_posts = bodies.len();
     assert_eq!(
-        trace
-            .summary_scopes
-            .iter()
-            .collect::<std::collections::HashSet<_>>()
-            .len(),
-        1,
-        "all actual retry POSTs use one real Run/Turn scope"
-    );
-    assert!(
-        trace
-            .summary_scopes
-            .iter()
-            .all(|scope| scope.0 == trigger_run),
-        "summary POSTs and saved trigger identify the same foreground Run"
-    );
-    assert_eq!(
-        trace.summary_requests,
+        summary_posts,
         retries as usize + 1,
         "the exact provider POST retry vector is preserved for the one captured scope"
     );
-    assert_eq!(
-        trace.summary_scopes.len(),
-        1,
-        "retry POSTs retain the one provider invocation scope"
-    );
-    assert_eq!(trace.summary_bodies.len(), trace.summary_requests);
-    assert!(
-        trace
-            .summary_bodies
-            .iter()
-            .all(|body| body == &trace.summary_bodies[0]),
-        "all captured retries retain the same body"
-    );
+    assert!(matches!(
+        receive.try_recv(),
+        Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+    ));
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
     server.abort();
     ProviderInvocation {
-        summary_posts: trace.summary_requests,
-        scopes: trace.summary_scopes,
-        bodies: trace.summary_bodies,
+        summary_posts,
+        scopes: vec![(scope.run_id, scope.turn_id)],
+        bodies,
         record,
     }
 }
