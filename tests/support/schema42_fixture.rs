@@ -18,26 +18,31 @@ pub(crate) fn open_schema42_fixture(path: &Path) -> Connection {
 }
 
 /// Remove the schema-50-only objects from a freshly bootstrapped database.
-/// The caller can then construct a real predecessor fixture without leaving
-/// current scheduler tables behind under an older ledger/user_version.
-pub(crate) const REWIND_CURRENT_TO_49: &str = "DROP TABLE scheduled_command_result;
- DROP TABLE scheduled_command;
- DELETE FROM schema_migration WHERE version=50;
- PRAGMA user_version=49;";
+/// Callers use this before constructing a predecessor fixture so scheduler
+/// tables never survive under an older ledger or user_version.
+pub(crate) fn rewind_current_to_49(db: &Connection) -> rusqlite::Result<()> {
+    db.execute_batch(
+        "DROP TABLE scheduled_command_result;
+         DROP TABLE scheduled_command;
+         DELETE FROM schema_migration WHERE version=50;
+         PRAGMA user_version=49;",
+    )
+}
 
-/// Rewind current schema 50 to the schema-42 shape, so hand-built historical
-/// fixtures can exercise upgrades without retaining later scheduler objects.
-pub(crate) const REWIND_CURRENT_TO_42: &str = "DROP TABLE scheduled_command_result;
- DROP TABLE scheduled_command;
- DELETE FROM schema_migration WHERE version=50;
- PRAGMA user_version=49;
- ALTER TABLE thread DROP COLUMN spill_override;
- DELETE FROM schema_migration WHERE version=45;
- ALTER TABLE thread DROP COLUMN max_tokens;
- DELETE FROM schema_migration WHERE version=44;
- ALTER TABLE thread DROP COLUMN summary_max_chars;
- ALTER TABLE thread DROP COLUMN auto_compact_target_percent;
- ALTER TABLE thread ADD COLUMN segment_chars INTEGER CHECK(segment_chars IS NULL OR segment_chars BETWEEN 2000 AND 1000000);
- ALTER TABLE thread ADD COLUMN reduce_rounds INTEGER CHECK(reduce_rounds IS NULL OR reduce_rounds BETWEEN 1 AND 16);
- DELETE FROM schema_migration WHERE version=43;
- PRAGMA user_version=42;";
+/// Rewind current schema 50 to schema 42 by composing the shared schema-49
+/// boundary with the existing migration-specific fixture changes.
+pub(crate) fn rewind_current_to_42(db: &Connection) -> rusqlite::Result<()> {
+    rewind_current_to_49(db)?;
+    db.execute_batch(
+        "ALTER TABLE thread DROP COLUMN spill_override;
+         DELETE FROM schema_migration WHERE version=45;
+         ALTER TABLE thread DROP COLUMN max_tokens;
+         DELETE FROM schema_migration WHERE version=44;
+         ALTER TABLE thread DROP COLUMN summary_max_chars;
+         ALTER TABLE thread DROP COLUMN auto_compact_target_percent;
+         ALTER TABLE thread ADD COLUMN segment_chars INTEGER CHECK(segment_chars IS NULL OR segment_chars BETWEEN 2000 AND 1000000);
+         ALTER TABLE thread ADD COLUMN reduce_rounds INTEGER CHECK(reduce_rounds IS NULL OR reduce_rounds BETWEEN 1 AND 16);
+         DELETE FROM schema_migration WHERE version=43;
+         PRAGMA user_version=42;",
+    )
+}

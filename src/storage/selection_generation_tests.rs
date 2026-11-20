@@ -18,6 +18,7 @@ fn column_exists(db: &Connection) -> bool {
 
 fn v46_database() -> Connection {
     let db = fresh();
+    crate::storage::rewind_current_to_49(&db).unwrap();
     db.execute_batch(
         "DELETE FROM schema_migration WHERE version>46;
          DELETE FROM schema_migration WHERE version=40;
