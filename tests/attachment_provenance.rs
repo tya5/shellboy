@@ -1404,6 +1404,7 @@ async fn schema49_migrated_legacy_summary_reopens_as_user_before_newer_user_in_o
     {
         let path = root.path().join("data/shellboy.db");
         let db = rusqlite::Connection::open(path).unwrap();
+        crate::schema42_fixture::rewind_current_to_49(&db).unwrap();
         db.execute_batch("DELETE FROM schema_migration WHERE version=49; PRAGMA user_version=48;")
             .unwrap();
     }
