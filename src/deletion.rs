@@ -119,7 +119,8 @@ fn inspect(db: &Connection, args: &ThreadDeleteArgs) -> Result<Value, ApiError> 
     let surviving_sources = count(
         "SELECT count(*) FROM path_nodes n WHERE EXISTS(SELECT 1 FROM replacement_source rs INDEXED BY replacement_source_reverse JOIN replacement r ON r.id=rs.replacement_id WHERE rs.source_node_id=n.id AND r.state='completed' AND (EXISTS(SELECT 1 FROM thread_path p JOIN thread t ON t.id=p.thread_id WHERE p.node_id=r.output_node_id AND t.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM selected s WHERE s.id=t.id)) OR EXISTS(SELECT 1 FROM thread_replacement tr JOIN thread t ON t.id=tr.thread_id WHERE tr.replacement_id=r.id AND t.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM selected s WHERE s.id=t.id))))",
     )?;
-    let scheduled_command_count = count("SELECT count(*) FROM scheduled_command sc JOIN selected s ON s.id=sc.thread_id")?;
+    let scheduled_command_count =
+        count("SELECT count(*) FROM scheduled_command sc JOIN selected s ON s.id=sc.thread_id")?;
     let attachments =
         count("SELECT count(*) FROM attachment_ref a JOIN path_nodes n ON n.id=a.source_node_id")?;
     let external = count(

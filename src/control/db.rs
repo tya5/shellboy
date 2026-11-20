@@ -1232,33 +1232,118 @@ impl Store {
             }
 
             Command::ScheduleAdd(args) => {
-                let thread_id=args.thread_id.as_deref().ok_or_else(||error(ErrorCode::InvalidArgument,"schedule.add requires a Thread"))?;
-                let thread_cwd:Option<String>=tx.query_row("SELECT cwd FROM thread WHERE id=?1 AND deleted_at IS NULL",[thread_id],|row|row.get(0)).optional().map_err(sql_error)?;
-                let thread_cwd=thread_cwd.ok_or_else(||error(ErrorCode::ThreadNotFound,"Schedule Thread not found"))?;
-                let cwd=normalize(Path::new(args.cwd.as_deref().unwrap_or(".")),Path::new(&thread_cwd))?.to_string_lossy().into_owned();
-                if cwd.len()>4096 || cwd.contains('\0') {return Err(error(ErrorCode::InvalidArgument,"resolved schedule cwd exceeds its bound"));}
-                let count:i64=tx.query_row("SELECT count(*) FROM scheduled_command",[],|row|row.get(0)).map_err(sql_error)?;
-                if count>=crate::storage::schedule::MAX_SCHEDULES as i64 {return Err(error(ErrorCode::InputLimit,"Owner schedule limit of 16 reached"));}
-                let id=uuid::Uuid::new_v4();
-                let (cron,next,at)=if let Some(expression)=args.cron.as_ref(){
-                    let parsed=expression.parse::<croner::Cron>().map_err(|e|error(ErrorCode::InvalidArgument,format!("invalid cron expression: {e}")))?;
-                    let local=chrono::Local::now();
-                    let next=parsed.find_next_occurrence(&local,false).map_err(|e|error(ErrorCode::InvalidArgument,format!("cron has no next occurrence: {e}")))?.timestamp();
-                    (Some(expression.as_str()),next,None)
-                }else{let at=args.at.ok_or_else(||error(ErrorCode::InvalidArgument,"schedule.add requires cron or at"))?;(None,at,Some(at))};
+                let thread_id = args.thread_id.as_deref().ok_or_else(|| {
+                    error(ErrorCode::InvalidArgument, "schedule.add requires a Thread")
+                })?;
+                let thread_cwd: Option<String> = tx
+                    .query_row(
+                        "SELECT cwd FROM thread WHERE id=?1 AND deleted_at IS NULL",
+                        [thread_id],
+                        |row| row.get(0),
+                    )
+                    .optional()
+                    .map_err(sql_error)?;
+                let thread_cwd = thread_cwd
+                    .ok_or_else(|| error(ErrorCode::ThreadNotFound, "Schedule Thread not found"))?;
+                let cwd = normalize(
+                    Path::new(args.cwd.as_deref().unwrap_or(".")),
+                    Path::new(&thread_cwd),
+                )?
+                .to_string_lossy()
+                .into_owned();
+                if cwd.len() > 4096 || cwd.contains('\0') {
+                    return Err(error(
+                        ErrorCode::InvalidArgument,
+                        "resolved schedule cwd exceeds its bound",
+                    ));
+                }
+                let count: i64 = tx
+                    .query_row("SELECT count(*) FROM scheduled_command", [], |row| {
+                        row.get(0)
+                    })
+                    .map_err(sql_error)?;
+                if count >= crate::storage::schedule::MAX_SCHEDULES as i64 {
+                    return Err(error(
+                        ErrorCode::InputLimit,
+                        "Owner schedule limit of 16 reached",
+                    ));
+                }
+                let id = uuid::Uuid::new_v4();
+                let (cron, next, at) = if let Some(expression) = args.cron.as_ref() {
+                    let parsed = expression.parse::<croner::Cron>().map_err(|e| {
+                        error(
+                            ErrorCode::InvalidArgument,
+                            format!("invalid cron expression: {e}"),
+                        )
+                    })?;
+                    let local = chrono::Local::now();
+                    let next = parsed
+                        .find_next_occurrence(&local, false)
+                        .map_err(|e| {
+                            error(
+                                ErrorCode::InvalidArgument,
+                                format!("cron has no next occurrence: {e}"),
+                            )
+                        })?
+                        .timestamp();
+                    (Some(expression.as_str()), next, None)
+                } else {
+                    let at = args.at.ok_or_else(|| {
+                        error(
+                            ErrorCode::InvalidArgument,
+                            "schedule.add requires cron or at",
+                        )
+                    })?;
+                    (None, at, Some(at))
+                };
                 tx.execute("INSERT INTO scheduled_command(id,thread_id,command,cwd,cron_expression,at,next_at) VALUES(?1,?2,?3,?4,?5,?6,?7)",rusqlite::params![id.to_string(),thread_id,args.command,cwd,cron,at,next]).map_err(sql_error)?;
-                tx.execute("UPDATE thread SET updated_at=?1 WHERE id=?2",rusqlite::params![now,thread_id]).map_err(sql_error)?;
-                Ok(MutationResult::value(json!({"schedule_id":id,"thread_id":thread_id,"next_at":next}))?)
+                tx.execute(
+                    "UPDATE thread SET updated_at=?1 WHERE id=?2",
+                    rusqlite::params![now, thread_id],
+                )
+                .map_err(sql_error)?;
+                Ok(MutationResult::value(
+                    json!({"schedule_id":id,"thread_id":thread_id,"next_at":next}),
+                )?)
             }
             Command::ScheduleRemove(args) => {
                 let id = uuid::Uuid::parse_str(&args.schedule_id).map_err(|_| {
-                    error(ErrorCode::InvalidArgument,"schedule_id must be a canonical lowercase UUID")
+                    error(
+                        ErrorCode::InvalidArgument,
+                        "schedule_id must be a canonical lowercase UUID",
+                    )
                 })?;
-                if id.to_string()!=args.schedule_id { return Err(error(ErrorCode::InvalidArgument,"schedule_id must be a canonical lowercase UUID")); }
-                let thread_id:Option<String>=tx.query_row("SELECT thread_id FROM scheduled_command WHERE id=?1",[id.to_string()],|row|row.get(0)).optional().map_err(sql_error)?;
-                let removed=tx.execute("DELETE FROM scheduled_command WHERE id=?1",[id.to_string()]).map_err(sql_error)?!=0;
-                if let Some(thread_id)=thread_id {tx.execute("UPDATE thread SET updated_at=?1 WHERE id=?2",rusqlite::params![now,thread_id]).map_err(sql_error)?;}
-                Ok(MutationResult::value(json!({"schedule_id":id,"removed":removed}))?)
+                if id.to_string() != args.schedule_id {
+                    return Err(error(
+                        ErrorCode::InvalidArgument,
+                        "schedule_id must be a canonical lowercase UUID",
+                    ));
+                }
+                let thread_id: Option<String> = tx
+                    .query_row(
+                        "SELECT thread_id FROM scheduled_command WHERE id=?1",
+                        [id.to_string()],
+                        |row| row.get(0),
+                    )
+                    .optional()
+                    .map_err(sql_error)?;
+                let removed = tx
+                    .execute(
+                        "DELETE FROM scheduled_command WHERE id=?1",
+                        [id.to_string()],
+                    )
+                    .map_err(sql_error)?
+                    != 0;
+                if let Some(thread_id) = thread_id {
+                    tx.execute(
+                        "UPDATE thread SET updated_at=?1 WHERE id=?2",
+                        rusqlite::params![now, thread_id],
+                    )
+                    .map_err(sql_error)?;
+                }
+                Ok(MutationResult::value(
+                    json!({"schedule_id":id,"removed":removed}),
+                )?)
             }
             Command::ScheduleList(_) => Err(error(
                 ErrorCode::InvalidState,
@@ -3248,7 +3333,8 @@ fn delete_thread(
     }
     for id in &targets {
         // Thread deletion is soft-delete in this schema, so enforce the same cascade explicitly.
-        tx.execute("DELETE FROM scheduled_command WHERE thread_id=?1",[id]).map_err(sql_error)?;
+        tx.execute("DELETE FROM scheduled_command WHERE thread_id=?1", [id])
+            .map_err(sql_error)?;
         tx.execute("UPDATE thread SET deleted_at=?2,revision=revision+1,selection_revision=selection_revision+1,cursor_node_id=NULL,updated_at=?2 WHERE id=?1",params![id,now]).map_err(sql_error)?;
         crate::compaction::a_state::cleanup_tx(tx, id).map_err(storage_error)?;
         // Retain the last path/replacement as ownership evidence until payload

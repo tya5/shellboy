@@ -57,20 +57,25 @@ pub async fn advance_due(db: &DbWorker, now: i64) -> Result<Option<DueSchedule>,
     let uuid = Uuid::parse_str(&id)
         .map_err(|e| StorageError::Schema(format!("invalid schedule id: {e}")))?;
     let (next, occurrence_at, calculation_error) = if let Some(expression) = cron.as_deref() {
-        let facts=expression.parse::<croner::Cron>().ok().and_then(|parsed| {
-            let local=chrono::DateTime::<chrono::Utc>::from_timestamp(now,0)?.with_timezone(&chrono::Local);
-            let latest=parsed.find_previous_occurrence(&local,true).ok()?;
-            let future=parsed.find_next_occurrence(&local,false).ok()?;
-            Some((future.timestamp(),latest.timestamp().max(scheduled_at)))
+        let facts = expression.parse::<croner::Cron>().ok().and_then(|parsed| {
+            let local = chrono::DateTime::<chrono::Utc>::from_timestamp(now, 0)?
+                .with_timezone(&chrono::Local);
+            let latest = parsed.find_previous_occurrence(&local, true).ok()?;
+            let future = parsed.find_next_occurrence(&local, false).ok()?;
+            Some((future.timestamp(), latest.timestamp().max(scheduled_at)))
         });
         match facts {
-            Some((future,latest))=>(Some(future),Some(latest),None),
-            None=>(None,None,Some("Scheduler: cannot calculate next cron occurrence".to_string())),
+            Some((future, latest)) => (Some(future), Some(latest), None),
+            None => (
+                None,
+                None,
+                Some("Scheduler: cannot calculate next cron occurrence".to_string()),
+            ),
         }
     } else {
-        (None,Some(scheduled_at),None)
+        (None, Some(scheduled_at), None)
     };
-    let result_at=occurrence_at.unwrap_or(scheduled_at);
+    let result_at = occurrence_at.unwrap_or(scheduled_at);
     db.call(move |c| {
         let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let changed = tx.execute(
@@ -95,13 +100,21 @@ pub async fn advance_due(db: &DbWorker, now: i64) -> Result<Option<DueSchedule>,
 }
 
 pub async fn finish(
-    db: &DbWorker, id: Uuid, scheduled_at: i64, finished_at: i64,
-    status: &'static str, exit_code: Option<i32>, tail: Option<String>, truncated: bool,
+    db: &DbWorker,
+    id: Uuid,
+    scheduled_at: i64,
+    finished_at: i64,
+    status: &'static str,
+    exit_code: Option<i32>,
+    tail: Option<String>,
+    truncated: bool,
 ) -> Result<(), StorageError> {
     if !matches!(status, "finished" | "overlap_skipped" | "launch_failed")
         || tail.as_ref().is_some_and(|s| s.chars().count() > 4096)
     {
-        return Err(StorageError::InvalidInput("invalid scheduler result".into()));
+        return Err(StorageError::InvalidInput(
+            "invalid scheduler result".into(),
+        ));
     }
     db.call(move |c| {
         c.execute(

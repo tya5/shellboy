@@ -17,18 +17,19 @@ use tokio_util::sync::CancellationToken;
 
 const OUTPUT_TAIL_BYTES: usize = 4096;
 
-fn next_sleep_seconds(next_at:i64, now:i64, max_sleep_seconds:u64)->Option<u64> {
-    let remaining=next_at.saturating_sub(now);
-    (remaining>0 && max_sleep_seconds>0).then(||remaining.min(max_sleep_seconds.min(i64::MAX as u64) as i64) as u64)
+fn next_sleep_seconds(next_at: i64, now: i64, max_sleep_seconds: u64) -> Option<u64> {
+    let remaining = next_at.saturating_sub(now);
+    (remaining > 0 && max_sleep_seconds > 0)
+        .then(|| remaining.min(max_sleep_seconds.min(i64::MAX as u64) as i64) as u64)
 }
 
 #[cfg(test)]
 #[test]
 fn synthetic_wall_clock_recheck_recomputes_due_state_after_sleep_bound() {
-    assert_eq!(next_sleep_seconds(600,0,60),Some(60));
-    assert_eq!(next_sleep_seconds(600,500,60),Some(60));
-    assert_eq!(next_sleep_seconds(600,700,60),None);
-    assert_eq!(next_sleep_seconds(600,500,300),Some(100));
+    assert_eq!(next_sleep_seconds(600, 0, 60), Some(60));
+    assert_eq!(next_sleep_seconds(600, 500, 60), Some(60));
+    assert_eq!(next_sleep_seconds(600, 700, 60), None);
+    assert_eq!(next_sleep_seconds(600, 500, 300), Some(100));
 }
 
 pub(super) async fn run(control: Weak<Control>, stop: CancellationToken) {
@@ -38,7 +39,13 @@ pub(super) async fn run(control: Weak<Control>, stop: CancellationToken) {
         while let Some(result) = children.try_join_next() {
             if let Ok(id) = result {
                 active.remove(&id);
-                if let Some(owner)=control.upgrade(){owner.scheduled_active.lock().unwrap_or_else(|poison|poison.into_inner()).remove(&id);}
+                if let Some(owner) = control.upgrade() {
+                    owner
+                        .scheduled_active
+                        .lock()
+                        .unwrap_or_else(|poison| poison.into_inner())
+                        .remove(&id);
+                }
             }
         }
         let Some(owner) = control.upgrade() else {
@@ -53,8 +60,11 @@ pub(super) async fn run(control: Weak<Control>, stop: CancellationToken) {
         let deadline = match schedule::next_deadline(&owner.store.database).await {
             Ok(deadline) => deadline,
             Err(storage) => {
-                let error=storage.into_api_error();
-                if error.is_storage_failure() { owner.fail_storage().await; break 'dispatcher; }
+                let error = storage.into_api_error();
+                if error.is_storage_failure() {
+                    owner.fail_storage().await;
+                    break 'dispatcher;
+                }
                 tokio::select! { _=stop.cancelled()=>break 'dispatcher, _=&mut changed=>{} };
                 continue;
             }
@@ -65,17 +75,27 @@ pub(super) async fn run(control: Weak<Control>, stop: CancellationToken) {
             }
             Some(at) => {
                 let now = chrono::Utc::now().timestamp();
-                let sleep_seconds=next_sleep_seconds(at,now,owner.schedule_max_sleep_seconds.load(std::sync::atomic::Ordering::SeqCst));
-                if let Some(seconds)=sleep_seconds {
+                let sleep_seconds = next_sleep_seconds(
+                    at,
+                    now,
+                    owner
+                        .schedule_max_sleep_seconds
+                        .load(std::sync::atomic::Ordering::SeqCst),
+                );
+                if let Some(seconds) = sleep_seconds {
                     tokio::select! { _=stop.cancelled()=>break 'dispatcher, _=&mut changed=>{}, _=sleep(Duration::from_secs(seconds))=>{}, child=children.join_next(), if !children.is_empty()=>if let Some(Ok(id))=child { active.remove(&id); if let Some(owner)=control.upgrade(){owner.scheduled_active.lock().unwrap_or_else(|poison|poison.into_inner()).remove(&id);} } }
-                } else if at>now {
+                } else if at > now {
                     tokio::select! { _=stop.cancelled()=>break 'dispatcher, _=&mut changed=>{}, child=children.join_next(), if !children.is_empty()=>if let Some(Ok(id))=child { active.remove(&id); if let Some(owner)=control.upgrade(){owner.scheduled_active.lock().unwrap_or_else(|poison|poison.into_inner()).remove(&id);} } }
                 }
                 loop {
-                    while let Some(result)=children.try_join_next() {
-                        if let Ok(id)=result {
+                    while let Some(result) = children.try_join_next() {
+                        if let Ok(id) = result {
                             active.remove(&id);
-                            owner.scheduled_active.lock().unwrap_or_else(|poison|poison.into_inner()).remove(&id);
+                            owner
+                                .scheduled_active
+                                .lock()
+                                .unwrap_or_else(|poison| poison.into_inner())
+                                .remove(&id);
                         }
                     }
                     if stop.is_cancelled() {
@@ -88,17 +108,24 @@ pub(super) async fn run(control: Weak<Control>, stop: CancellationToken) {
                     let due = match schedule::advance_due(&owner.store.database, now).await {
                         Ok(v) => v,
                         Err(storage) => {
-                            let error=storage.into_api_error();
-                            if error.is_storage_failure() { owner.fail_storage().await; break 'dispatcher; }
+                            let error = storage.into_api_error();
+                            if error.is_storage_failure() {
+                                owner.fail_storage().await;
+                                break 'dispatcher;
+                            }
                             tokio::select! { _=stop.cancelled()=>break 'dispatcher, _=&mut changed=>{} }
                             break;
                         }
                     };
                     let Some(due) = due else { break };
-                    while let Some(result)=children.try_join_next() {
-                        if let Ok(id)=result {
+                    while let Some(result) = children.try_join_next() {
+                        if let Ok(id) = result {
                             active.remove(&id);
-                            owner.scheduled_active.lock().unwrap_or_else(|poison|poison.into_inner()).remove(&id);
+                            owner
+                                .scheduled_active
+                                .lock()
+                                .unwrap_or_else(|poison| poison.into_inner())
+                                .remove(&id);
                         }
                     }
                     if active.contains(&due.id) {
@@ -115,8 +142,10 @@ pub(super) async fn run(control: Weak<Control>, stop: CancellationToken) {
                         .await;
                     } else {
                         active.insert(due.id);
-                        let schedule_id=due.id;
-                        children.spawn(async move { execute(owner,due,stop).await.unwrap_or(schedule_id) });
+                        let schedule_id = due.id;
+                        children.spawn(async move {
+                            execute(owner, due, stop).await.unwrap_or(schedule_id)
+                        });
                     }
                 }
             }
@@ -125,7 +154,13 @@ pub(super) async fn run(control: Weak<Control>, stop: CancellationToken) {
     for child in children.join_all().await {
         if let Ok(id) = child {
             active.remove(&id);
-            if let Some(owner)=control.upgrade(){owner.scheduled_active.lock().unwrap_or_else(|poison|poison.into_inner()).remove(&id);}
+            if let Some(owner) = control.upgrade() {
+                owner
+                    .scheduled_active
+                    .lock()
+                    .unwrap_or_else(|poison| poison.into_inner())
+                    .remove(&id);
+            }
         }
     }
 }
@@ -136,24 +171,59 @@ async fn execute(
     stop: CancellationToken,
 ) -> Result<uuid::Uuid, ()> {
     let id = due.id;
-    let thread_id=due.thread_id.clone();
-    if stop.is_cancelled() { return Ok(id); }
-    let boundary=owner.boundary(&thread_id).await;
-    if stop.is_cancelled() { return Ok(id); }
-    let _admission=match boundary.try_lock_owned() {
-        Ok(guard)=>guard,
+    let thread_id = due.thread_id.clone();
+    if stop.is_cancelled() {
+        return Ok(id);
+    }
+    let boundary = owner.boundary(&thread_id).await;
+    if stop.is_cancelled() {
+        return Ok(id);
+    }
+    let _admission = match boundary.try_lock_owned() {
+        Ok(guard) => guard,
         Err(_) => {
-            if stop.is_cancelled() { return Ok(id); }
-            let now=chrono::Utc::now().timestamp();
-            let _=schedule::finish(&owner.store.database,id,due.scheduled_at,now,"launch_failed",None,Some("Scheduler: Thread admission busy; command not started".into()),false).await;
+            if stop.is_cancelled() {
+                return Ok(id);
+            }
+            let now = chrono::Utc::now().timestamp();
+            let _ = schedule::finish(
+                &owner.store.database,
+                id,
+                due.scheduled_at,
+                now,
+                "launch_failed",
+                None,
+                Some("Scheduler: Thread admission busy; command not started".into()),
+                false,
+            )
+            .await;
             return Ok(id);
         }
     };
-    if stop.is_cancelled() { return Ok(id); }
-    let target=thread_id.clone();
-    let thread_exists=owner.store.database.call(move|db|Ok(db.query_row("SELECT EXISTS(SELECT 1 FROM thread WHERE id=?1 AND deleted_at IS NULL)",[target],|row|row.get::<_,bool>(0))?)).await.map_err(|_|())?;
-    if !thread_exists { return Ok(id); }
-    owner.scheduled_active.lock().unwrap_or_else(|poison|poison.into_inner()).insert(id,thread_id.clone());
+    if stop.is_cancelled() {
+        return Ok(id);
+    }
+    let target = thread_id.clone();
+    let thread_exists = owner
+        .store
+        .database
+        .call(move |db| {
+            Ok(db.query_row(
+                "SELECT EXISTS(SELECT 1 FROM thread WHERE id=?1 AND deleted_at IS NULL)",
+                [target],
+                |row| row.get::<_, bool>(0),
+            )?)
+        })
+        .await
+        .map_err(|_| ())?;
+    if !thread_exists {
+        return Ok(id);
+    }
+    owner
+        .scheduled_active
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner())
+        .insert(id, thread_id.clone());
     drop(_admission);
     let started = chrono::Utc::now().timestamp();
     let args = ShellToolArgs {
@@ -171,7 +241,9 @@ async fn execute(
             id.to_string(),
             PathBuf::from(due.cwd),
             args,
-            [("SHELLBOY_THREAD_ID".to_string(),thread_id)].into_iter().collect(),
+            [("SHELLBOY_THREAD_ID".to_string(), thread_id)]
+                .into_iter()
+                .collect(),
         )
         .await;
     let (status, code, tail, truncated) = match execution {

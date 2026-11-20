@@ -72,13 +72,37 @@ impl Control {
                 )
                 .details(json!({"written":false}))
             })?;
-        if args.changes.iter().any(|change| change.field=="schedule.max_sleep_seconds" && change.value.is_none()) {
-            let count=self.store.database.call(|db| Ok(db.query_row("SELECT count(*) FROM scheduled_command",[],|row|row.get::<_,i64>(0))?)).await.map_err(storage_error)?;
-            if count>0 { return Err(ApiError::new(ErrorCode::InvalidState,"schedule.max_sleep_seconds cannot be unset while schedules exist")); }
+        if args
+            .changes
+            .iter()
+            .any(|change| change.field == "schedule.max_sleep_seconds" && change.value.is_none())
+        {
+            let count = self
+                .store
+                .database
+                .call(|db| {
+                    Ok(
+                        db.query_row("SELECT count(*) FROM scheduled_command", [], |row| {
+                            row.get::<_, i64>(0)
+                        })?,
+                    )
+                })
+                .await
+                .map_err(storage_error)?;
+            if count > 0 {
+                return Err(ApiError::new(
+                    ErrorCode::InvalidState,
+                    "schedule.max_sleep_seconds cannot be unset while schedules exist",
+                ));
+            }
         }
-        let schedule_bound=args.changes.iter().find(|change|change.field=="schedule.max_sleep_seconds").map(|change|change.value.as_ref().and_then(serde_json::Value::as_u64));
-        let max_sleep=self.schedule_max_sleep_seconds.clone();
-        let schedule_changed=self.changed.clone();
+        let schedule_bound = args
+            .changes
+            .iter()
+            .find(|change| change.field == "schedule.max_sleep_seconds")
+            .map(|change| change.value.as_ref().and_then(serde_json::Value::as_u64));
+        let max_sleep = self.schedule_max_sleep_seconds.clone();
+        let schedule_changed = self.changed.clone();
         let config = self.store.config.clone();
         let clients = self.store.clients.clone();
         let applied = self

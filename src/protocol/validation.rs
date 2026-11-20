@@ -930,20 +930,34 @@ impl Command {
             Self::ScheduleAdd(a) => {
                 optional_nonempty(a.thread_id.as_deref(), "thread_id")?;
                 nonempty(&a.command, "command")?;
-                if a.command.len() > 16_384 || a.command.contains('\0')
-                    || a.cwd.as_ref().is_some_and(|cwd| cwd.is_empty() || cwd.len()>4096 || cwd.contains('\0'))
-                    || a.cron.as_ref().is_some_and(|cron| cron.trim().is_empty() || cron.len()>256 || cron.split_whitespace().count()!=5)
+                if a.command.len() > 16_384
+                    || a.command.contains('\0')
+                    || a.cwd
+                        .as_ref()
+                        .is_some_and(|cwd| cwd.is_empty() || cwd.len() > 4096 || cwd.contains('\0'))
+                    || a.cron.as_ref().is_some_and(|cron| {
+                        cron.trim().is_empty()
+                            || cron.len() > 256
+                            || cron.split_whitespace().count() != 5
+                    })
                     || a.cron.is_some() == a.at.is_some()
-                    || a.at.is_some_and(|at| at<0)
-                { return Err(invalid("schedule.add needs one bounded cron/at value, command, and valid optional Thread/cwd")); }
+                    || a.at.is_some_and(|at| at < 0)
+                {
+                    return Err(invalid(
+                        "schedule.add needs one bounded cron/at value, command, and valid optional Thread/cwd",
+                    ));
+                }
                 Ok(())
             }
             Self::ScheduleRemove(a) => {
-                nonempty(&a.schedule_id,"schedule_id")?;
-                let id=uuid::Uuid::parse_str(&a.schedule_id).map_err(|_|invalid("schedule_id must be a canonical lowercase UUID"))?;
-                if id.to_string()!=a.schedule_id { return Err(invalid("schedule_id must be a canonical lowercase UUID")); }
+                nonempty(&a.schedule_id, "schedule_id")?;
+                let id = uuid::Uuid::parse_str(&a.schedule_id)
+                    .map_err(|_| invalid("schedule_id must be a canonical lowercase UUID"))?;
+                if id.to_string() != a.schedule_id {
+                    return Err(invalid("schedule_id must be a canonical lowercase UUID"));
+                }
                 Ok(())
-            },
+            }
             Self::ScheduleList(a) => optional_nonempty(a.thread_id.as_deref(), "thread_id"),
             Self::EventsWait(a) => a.validate(),
         }

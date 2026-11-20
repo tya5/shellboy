@@ -501,7 +501,8 @@ pub enum ScheduleCommand {
 }
 #[derive(Debug, Clone, Args)]
 pub struct ScheduleAddOptions {
-    #[arg(long)] pub thread: Option<String>,
+    #[arg(long)]
+    pub thread: Option<String>,
     #[arg(long, conflicts_with_all=["at","relative"])]
     pub cron: Option<String>,
     #[arg(long, conflicts_with_all=["cron","relative"])]
@@ -519,7 +520,10 @@ pub struct ScheduleRemoveOptions {
     pub schedule: String,
 }
 #[derive(Debug, Clone, Args)]
-pub struct ScheduleListOptions { #[arg(long)] pub thread: Option<String> }
+pub struct ScheduleListOptions {
+    #[arg(long)]
+    pub thread: Option<String>,
+}
 #[derive(Debug, Clone, Subcommand)]
 pub enum AttachmentCommand {
     Add(AttachmentAddOptions),
@@ -1580,12 +1584,30 @@ impl Cli {
                                 .timestamp(),
                         ),
                         (None, Some(value)) => {
-                            let (index, unit) = value.char_indices().last().ok_or_else(||invalid("--in must be a positive duration"))?;
-                            let amount: i64 = value[..index].parse().map_err(|_|invalid("--in must be a positive duration such as 10m"))?;
-                            let seconds = match unit { 's'=>1_i64, 'm'=>60, 'h'=>3600, 'd'=>86400, _=>return Err(invalid("--in unit must be s, m, h, or d")) };
-                            if amount<=0 { return Err(invalid("--in must be positive")); }
-                            let delta=amount.checked_mul(seconds).ok_or_else(||invalid("--in duration is out of range"))?;
-                            let at=chrono::Utc::now().timestamp().checked_add(delta).ok_or_else(||invalid("--in date is out of range"))?;
+                            let (index, unit) = value
+                                .char_indices()
+                                .last()
+                                .ok_or_else(|| invalid("--in must be a positive duration"))?;
+                            let amount: i64 = value[..index].parse().map_err(|_| {
+                                invalid("--in must be a positive duration such as 10m")
+                            })?;
+                            let seconds = match unit {
+                                's' => 1_i64,
+                                'm' => 60,
+                                'h' => 3600,
+                                'd' => 86400,
+                                _ => return Err(invalid("--in unit must be s, m, h, or d")),
+                            };
+                            if amount <= 0 {
+                                return Err(invalid("--in must be positive"));
+                            }
+                            let delta = amount
+                                .checked_mul(seconds)
+                                .ok_or_else(|| invalid("--in duration is out of range"))?;
+                            let at = chrono::Utc::now()
+                                .timestamp()
+                                .checked_add(delta)
+                                .ok_or_else(|| invalid("--in date is out of range"))?;
                             Some(at)
                         }
                         (None, None) => None,
@@ -1597,14 +1619,16 @@ impl Cli {
                         return Err(invalid("choose exactly one of --cron, --at, or --in"));
                     }
                     C::ScheduleAdd(wire::ScheduleAddArgs {
-                        thread_id:a.thread,
-                        command:a.command,
-                        cwd:a.cwd.map(path_string).transpose()?,
-                        cron:a.cron,
+                        thread_id: a.thread,
+                        command: a.command,
+                        cwd: a.cwd.map(path_string).transpose()?,
+                        cron: a.cron,
                         at,
                     })
                 }
-                ScheduleCommand::List(a) => C::ScheduleList(wire::ScheduleListArgs { thread_id:a.thread }),
+                ScheduleCommand::List(a) => C::ScheduleList(wire::ScheduleListArgs {
+                    thread_id: a.thread,
+                }),
                 ScheduleCommand::Remove(a) => C::ScheduleRemove(wire::ScheduleRemoveArgs {
                     schedule_id: a.schedule,
                 }),

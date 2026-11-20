@@ -165,7 +165,7 @@ pub struct Control {
     compactor: crate::compaction::Compactor,
     compact_tasks: Mutex<HashMap<String, CancellationToken>>,
     boundaries: Mutex<HashMap<String, std::sync::Weak<Mutex<()>>>>,
-    scheduled_active: std::sync::Mutex<HashMap<uuid::Uuid,String>>,
+    scheduled_active: std::sync::Mutex<HashMap<uuid::Uuid, String>>,
     shell: ShellSupervisor,
     instructions: InstructionLoader,
     replay: replay::ReplayCache,
@@ -405,7 +405,9 @@ impl Control {
             gc,
             maintenance: tokio::sync::OnceCell::new(),
             scheduler: tokio::sync::OnceCell::new(),
-            schedule_max_sleep_seconds: Arc::new(AtomicU64::new(config.schedule.max_sleep_seconds.unwrap_or(0))),
+            schedule_max_sleep_seconds: Arc::new(AtomicU64::new(
+                config.schedule.max_sleep_seconds.unwrap_or(0),
+            )),
             index,
             index_workers: tokio::sync::OnceCell::new(),
             shutdown_context: tokio::sync::OnceCell::new(),
@@ -517,8 +519,13 @@ impl Control {
         Ok(())
     }
 
-    async fn schedule_list(&self, thread_id:String) -> Result<Vec<crate::storage::schedule::ScheduledRow>, ApiError> {
-        crate::storage::schedule::list(&self.store.database,thread_id).await.map_err(storage_error)
+    async fn schedule_list(
+        &self,
+        thread_id: String,
+    ) -> Result<Vec<crate::storage::schedule::ScheduledRow>, ApiError> {
+        crate::storage::schedule::list(&self.store.database, thread_id)
+            .await
+            .map_err(storage_error)
     }
     /// Read-only accounting of retained conversion buffers and in-flight pins.
     pub fn replay_cache_stats(&self) -> replay::ReplayStats {
@@ -1590,7 +1597,11 @@ impl Control {
         }
         // An admitted startup may have published workers while shutdown first
         // inspected its OnceCell. Drain any such late publication as well.
-        if let Some(worker)=self.scheduler.get() && let Some(worker)=worker.lock().await.take() { let _=worker.await; }
+        if let Some(worker) = self.scheduler.get()
+            && let Some(worker) = worker.lock().await.take()
+        {
+            let _ = worker.await;
+        }
         if let Some(worker) = self.maintenance.get()
             && let Some(worker) = worker.lock().await.take()
         {
