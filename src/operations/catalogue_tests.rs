@@ -219,18 +219,40 @@ fn fresh_clap_executable_paths_and_every_option_match_the_catalogue_bindings() {
     );
     // Owner scheduler commands are executable CLI paths, but intentionally not TUI forms.
     for (name, expected) in [
-        ("schedule add", ["--thread", "--cron", "--at", "--in", "--cwd", "command"].as_slice()),
+        (
+            "schedule add",
+            ["--thread", "--cron", "--at", "--in", "--cwd", "command"].as_slice(),
+        ),
         ("schedule list", ["--thread"].as_slice()),
         ("schedule remove", ["--schedule"].as_slice()),
     ] {
-        let command = leaves.remove(name).unwrap_or_else(|| panic!("missing {name}"));
+        let command = leaves
+            .remove(name)
+            .unwrap_or_else(|| panic!("missing {name}"));
         let actual = command
             .get_arguments()
-            .filter(|arg| !matches!(arg.get_id().as_str(), "help" | "version" | "data_dir" | "config" | "operation_id"))
-            .map(|arg| arg.get_long().map(|long| format!("--{long}")).unwrap_or_else(|| arg.get_id().to_string()))
+            .filter(|arg| {
+                !matches!(
+                    arg.get_id().as_str(),
+                    "help" | "version" | "data_dir" | "config" | "operation_id"
+                )
+            })
+            .map(|arg| {
+                arg.get_long()
+                    .map(|long| format!("--{long}"))
+                    .unwrap_or_else(|| arg.get_id().to_string())
+            })
             .collect::<BTreeSet<_>>();
-        assert_eq!(actual, expected.iter().map(|value| (*value).to_owned()).collect());
-        assert!(!CLI_BINDINGS.iter().any(|binding| binding.path.join(" ") == name), "{name} is not a TUI form");
+        assert_eq!(
+            actual,
+            expected.iter().map(|value| (*value).to_owned()).collect()
+        );
+        assert!(
+            !CLI_BINDINGS
+                .iter()
+                .any(|binding| binding.path.join(" ") == name),
+            "{name} is not a TUI form"
+        );
     }
     let bindings = CLI_BINDINGS
         .iter()
@@ -522,18 +544,27 @@ fn runtime_cli_flags_and_mutual_exclusions_are_not_lost_in_form_metadata() {
 
 #[test]
 fn schedule_cli_parser_accepts_scoped_add_list_and_remove_syntax() {
-    assert!(Cli::try_parse_from([
-        "shellboy", "schedule", "add", "--thread", "thread", "--in", "10m", "--", "true"
-    ]).is_ok());
-    assert!(Cli::try_parse_from([
-        "shellboy", "schedule", "add", "--in", "10m", "--", "true"
-    ]).is_ok(), "clap accepts the syntax; Control enforces external --thread or model origin");
-    assert!(Cli::try_parse_from([
-        "shellboy", "schedule", "list", "--thread", "thread"
-    ]).is_ok());
-    assert!(Cli::try_parse_from([
-        "shellboy", "schedule", "remove", "--schedule", "00000000-0000-4000-8000-000000000001"
-    ]).is_ok());
+    assert!(
+        Cli::try_parse_from([
+            "shellboy", "schedule", "add", "--thread", "thread", "--in", "10m", "--", "true"
+        ])
+        .is_ok()
+    );
+    assert!(
+        Cli::try_parse_from(["shellboy", "schedule", "add", "--in", "10m", "--", "true"]).is_ok(),
+        "clap accepts the syntax; Control enforces external --thread or model origin"
+    );
+    assert!(Cli::try_parse_from(["shellboy", "schedule", "list", "--thread", "thread"]).is_ok());
+    assert!(
+        Cli::try_parse_from([
+            "shellboy",
+            "schedule",
+            "remove",
+            "--schedule",
+            "00000000-0000-4000-8000-000000000001"
+        ])
+        .is_ok()
+    );
 }
 
 #[test]

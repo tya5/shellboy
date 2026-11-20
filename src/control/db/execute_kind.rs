@@ -307,7 +307,10 @@ mod tests {
             .filter(|kind| kind.classification() == Classification::PureRead)
             .collect();
         for (index, kind) in actual_reads.iter().enumerate() {
-            assert!(expected_reads.contains(kind), "unexpected pure read: {kind:?}");
+            assert!(
+                expected_reads.contains(kind),
+                "unexpected pure read: {kind:?}"
+            );
             assert!(
                 !actual_reads[..index].contains(kind),
                 "duplicate pure read classification: {kind:?}"
