@@ -17,6 +17,10 @@ fn current_request(control: &Control, operation: impl AsRef<str>, command: Comma
     )
 }
 
+fn scheduler_thread_config() -> &'static str {
+    "default_connection='fixture'\ndefault_model='synthetic'\n[connections.fixture]\nbase_url='http://127.0.0.1:9/v1'\n[schedule]\nmax_sleep_seconds=300\n"
+}
+
 async fn create_test_thread(
     control: &Arc<Control>,
     cwd: &std::path::Path,
@@ -107,7 +111,7 @@ async fn scheduled_at_runs_shared_shell_and_list_reports_latest_result() {
     crate::test_watchdog::watchdog("schedule add -> timer -> shell -> latest result -> list", async {
         let root = tempfile::tempdir().unwrap();
         let config_path=root.path().join("config.toml");
-        std::fs::write(&config_path,"[schedule]\nmax_sleep_seconds=300\n").unwrap();
+        std::fs::write(&config_path, scheduler_thread_config()).unwrap();
         let owner = DataOwner::start(Some(config_path), Some(root.path().join("data")), root.path().into())
             .await.unwrap();
         let control = Control::new(&owner, root.path().into());
@@ -186,7 +190,7 @@ async fn busy_thread_admission_retires_one_due_row_and_dispatches_another() {
         async {
             let root = tempfile::tempdir().unwrap();
             let config_path = root.path().join("config.toml");
-            std::fs::write(&config_path, "[schedule]\nmax_sleep_seconds=300\n").unwrap();
+            std::fs::write(&config_path, scheduler_thread_config()).unwrap();
             let owner = DataOwner::start(
                 Some(config_path),
                 Some(root.path().join("data")),
@@ -320,7 +324,7 @@ async fn owner_schedule_cap_is_atomic_across_threads_and_scoped_list_is_complete
     crate::test_watchdog::watchdog("16 owner registrations, concurrent last slot, exact scoped lists and freed slots", async {
         let root=tempfile::tempdir().unwrap();
         let config_path=root.path().join("config.toml");
-        std::fs::write(&config_path,"[schedule]\nmax_sleep_seconds=300\n").unwrap();
+        std::fs::write(&config_path, scheduler_thread_config()).unwrap();
         let owner=DataOwner::start(Some(config_path),Some(root.path().join("data")),root.path().into()).await.unwrap();
         let control=Control::new(&owner,root.path().into());
         let first=create_test_thread(&control,root.path(),"cap-thread-a").await;
@@ -384,7 +388,7 @@ async fn normal_start_resumes_an_injected_persisted_due_cron_once() {
             let root = tempfile::tempdir().unwrap();
             let config_path = root.path().join("config.toml");
             let data_path = root.path().join("data");
-            std::fs::write(&config_path, "[schedule]\nmax_sleep_seconds=300\n").unwrap();
+            std::fs::write(&config_path, scheduler_thread_config()).unwrap();
             let first_owner = DataOwner::start(
                 Some(config_path.clone()),
                 Some(data_path.clone()),
@@ -493,7 +497,7 @@ async fn normal_owner_shutdown_settles_active_scheduled_shell() {
         async {
             let root = tempfile::tempdir().unwrap();
             let config_path = root.path().join("config.toml");
-            std::fs::write(&config_path, "[schedule]\nmax_sleep_seconds=300\n").unwrap();
+            std::fs::write(&config_path, scheduler_thread_config()).unwrap();
             let owner = DataOwner::start(
                 Some(config_path),
                 Some(root.path().join("data")),
@@ -557,7 +561,7 @@ async fn fork_and_rewind_do_not_copy_or_change_thread_owned_schedule() {
     crate::test_watchdog::watchdog("fork child remains empty and applied rewind preserves parent schedule", async {
         let root=tempfile::tempdir().unwrap();
         let config_path=root.path().join("config.toml");
-        std::fs::write(&config_path,"[schedule]\nmax_sleep_seconds=300\n").unwrap();
+        std::fs::write(&config_path, scheduler_thread_config()).unwrap();
         let owner=DataOwner::start(Some(config_path),Some(root.path().join("data")),root.path().into()).await.unwrap();
         let control=Control::new(&owner,root.path().into());
         let parent=create_test_thread(&control,root.path(),"scheduler-branch-parent").await;
