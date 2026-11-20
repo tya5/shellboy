@@ -2487,7 +2487,8 @@ async fn proactive_growing_active_range_permits_one_summary_per_new_report() {
             assert_eq!(outcome["reason"], "empty");
             assert_eq!(outcome["origin"], "output_validation");
             assert_eq!(record["error"]["details"]["summary_usage"]["requests"], 1);
-            assert!(record["committed_stages"].is_null());
+            assert_eq!(record["committed_stages"], json!({}));
+            assert_eq!(record["compaction_outcome"]["phase"], "active_summary");
             let thread = fixture.thread_id;
             let failure: String = control.store.database.call(move |db| {
                 let closed: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM app_meta WHERE key=?1)",
