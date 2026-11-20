@@ -151,16 +151,14 @@ pub(super) async fn run(control: Weak<Control>, stop: CancellationToken) {
             }
         }
     }
-    for child in children.join_all().await {
-        if let Ok(id) = child {
-            active.remove(&id);
-            if let Some(owner) = control.upgrade() {
-                owner
-                    .scheduled_active
-                    .lock()
-                    .unwrap_or_else(|poison| poison.into_inner())
-                    .remove(&id);
-            }
+    for id in children.join_all().await {
+        active.remove(&id);
+        if let Some(owner) = control.upgrade() {
+            owner
+                .scheduled_active
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner())
+                .remove(&id);
         }
     }
 }
