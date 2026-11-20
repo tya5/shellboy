@@ -1,6 +1,7 @@
 use super::*;
 use crate::{app::DataOwner, protocol::{Command, Request, ScheduleAddArgs, ScheduleListArgs, ThreadCreateArgs, ThreadDeleteArgs, ThreadArchiveArgs}};
 use std::time::Duration;
+use chrono::{Datelike, TimeZone};
 
 async fn create_test_thread(control:&Arc<Control>,cwd:&std::path::Path,operation:&'static str)->String {
     let response=control.request(Request::new(operation,Command::ThreadCreate(ThreadCreateArgs{
@@ -199,6 +200,85 @@ async fn owner_schedule_cap_is_atomic_across_threads_and_scoped_list_is_complete
         let after_cascade=control.request(Request::new("cascade-refills-owner-cap",Command::ScheduleAdd(ScheduleAddArgs{thread_id:Some(second),command:"true".into(),cwd:None,cron:None,at:Some(at)}))).await;
         assert!(after_cascade.ok,"Thread cascade must free owner-wide registration capacity: {after_cascade:?}");
         control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+    }).await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn normal_start_resumes_an_injected_persisted_due_cron_once() {
+    crate::test_watchdog::watchdog("normal Control::start resumes a synthetic persisted due cursor", async {
+        let root=tempfile::tempdir().unwrap();
+        let config_path=root.path().join("config.toml");
+        let data_path=root.path().join("data");
+        std::fs::write(&config_path,"[schedule]\nmax_sleep_seconds=300\n").unwrap();
+        let first_owner=DataOwner::start(Some(config_path.clone()),Some(data_path.clone()),root.path().into()).await.unwrap();
+        let first_control=Control::new(&first_owner,root.path().into());
+        let thread_id=create_test_thread(&first_control,root.path(),"restart-thread").await;
+        let output=root.path().join("restart-count");
+        let added=first_control.request(Request::new("register-before-restart",Command::ScheduleAdd(ScheduleAddArgs{
+            thread_id:Some(thread_id.clone()),command:format!("printf x >> '{}'",output.display()),cwd:None,cron:Some("0 0 1 1 *".into()),at:None,
+        }))).await;
+        assert!(added.ok,"{added:?}");
+        let schedule_id=added.result.unwrap()["schedule_id"].as_str().unwrap().to_owned();
+        first_control.shutdown().await.unwrap();
+        first_owner.shutdown().await.unwrap();
+
+        // Seed only the durable cursor while no owner is open, so ordinary restart startup sees it due.
+        let year=chrono::Local::now().year();
+        let jan1=|year|chrono::Local.with_ymd_and_hms(year,1,1,0,0,0).single().unwrap().timestamp();
+        let expected_latest=jan1(year);
+        let expected_next=jan1(year+1);
+        let connection=rusqlite::Connection::open(data_path.join("shellboy.db")).unwrap();
+        connection.execute("UPDATE scheduled_command SET next_at=?1 WHERE id=?2",rusqlite::params![expected_latest-86_400,schedule_id]).unwrap();
+        drop(connection);
+
+        let second_owner=DataOwner::start(Some(config_path),Some(data_path),root.path().into()).await.unwrap();
+        let second_control=Control::new(&second_owner,root.path().into());
+        second_control.start().await.unwrap();
+        let mut poll=0_u32;
+        loop {
+            let list=second_control.request(Request::new(format!("restart-list-{poll}"),Command::ScheduleList(ScheduleListArgs{thread_id:Some(thread_id.clone())}))).await;
+            poll+=1;
+            assert!(list.ok,"{list:?}");
+            let rows=list.result.unwrap()["schedules"].as_array().unwrap().clone();
+            if let Some(row)=rows.iter().find(|row|row["schedule_id"]==schedule_id && row["latest"]["status"]=="finished") {
+                assert_eq!(row["latest"]["scheduled_at"],expected_latest,"independent calendar oracle for latest missed annual occurrence");
+                assert_eq!(row["next_at"],expected_next,"next annual occurrence is future relative to restart dispatch");
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        second_control.shutdown().await.unwrap();
+        assert_eq!(tokio::fs::read_to_string(&output).await.unwrap(),"x","append witness records one execution, unlike idempotent touch");
+        second_owner.shutdown().await.unwrap();
+    }).await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn normal_owner_shutdown_settles_active_scheduled_shell() {
+    crate::test_watchdog::watchdog("normal owner shutdown settles an active scheduled child", async {
+        let root=tempfile::tempdir().unwrap();
+        let config_path=root.path().join("config.toml");
+        std::fs::write(&config_path,"[schedule]\nmax_sleep_seconds=300\n").unwrap();
+        let owner=DataOwner::start(Some(config_path),Some(root.path().join("data")),root.path().into()).await.unwrap();
+        let control=Control::new(&owner,root.path().into());
+        let thread_id=create_test_thread(&control,root.path(),"shutdown-thread").await;
+        let started=root.path().join("shutdown-child-started");
+        // Result settlement is observable; this fixture does not claim an independent OS group-cleanup fact.
+        let command=format!("touch '{}' ; sleep 1",started.display());
+        let added=control.request(Request::new("shutdown-scheduled-add",Command::ScheduleAdd(ScheduleAddArgs{
+            thread_id:Some(thread_id),command,cwd:None,cron:None,at:Some(chrono::Utc::now().timestamp()-1),
+        }))).await;
+        assert!(added.ok,"{added:?}");
+        let id=added.result.unwrap()["schedule_id"].as_str().unwrap().to_owned();
+        loop {
+            if tokio::fs::try_exists(&started).await.unwrap(){break;}
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        control.shutdown().await.unwrap();
+        let key=id.clone();
+        let status=owner.db.call(move|db|db.query_row("SELECT status FROM scheduled_command_result WHERE schedule_id=?1",[key],|row|row.get::<_,String>(0)).map_err(crate::storage::StorageError::from)).await.unwrap();
+        assert_eq!(status,"finished");
         owner.shutdown().await.unwrap();
     }).await.unwrap();
 }
