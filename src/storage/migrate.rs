@@ -2060,7 +2060,13 @@ mod generated_summary_role_migration_tests {
         drop(db);
         for _ in 0..2 {
             let mut reopened = Connection::open(&path).unwrap();
-            run(&mut reopened, crate::storage::SCHEMA_VERSION, &|_, _| {}, &|| {}).unwrap();
+            run(
+                &mut reopened,
+                crate::storage::SCHEMA_VERSION,
+                &|_, _| {},
+                &|| {},
+            )
+            .unwrap();
             let saved: String = reopened
                 .query_row(
                     "SELECT payload_json FROM node WHERE id='positive'",
