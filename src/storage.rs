@@ -72,6 +72,7 @@ pub(crate) const MIGRATION_NAMES: &[(i64, &str)] = &[
     (47, "0047_drop_selection_nonappend_generation"),
     (48, "0048_human_question_path_admission"),
     (49, "0049_generated_summary_user_role"),
+    (50, "0050_minimal_scheduler"),
 ];
 pub const SCHEMA_VERSION: i64 = MIGRATION_NAMES.len() as i64;
 pub const DEFAULT_QUEUE_CAPACITY: usize = 128;
@@ -3334,3 +3335,5 @@ mod integrity_policy_tests {
 #[cfg(test)]
 #[path = "storage/selection_generation_tests.rs"]
 mod selection_generation_migration_tests;
+
+pub(crate) mod schedule;

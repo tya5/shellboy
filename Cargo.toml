@@ -42,6 +42,7 @@ toml_edit = "=0.25.19"
 thiserror = "=2.0.21"
 fs2 = "=0.4.3"
 chrono = "=0.4.45"
+croner = { version = "=4.0.3", features = ["chrono"] }
 semver = "=1.0.28"
 base64 = "=0.23.1"
 uuid = { version = "=1.29.0", features = ["v4", "serde"] }

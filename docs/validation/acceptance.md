@@ -12167,3 +12167,10 @@ all replacement payloads and one current Thread epoch advance; the retained-anch
 control verifies rejection before any path mutation. A nonfatal macOS compact-unwind linker
 warning was emitted. Full standard, independent final-delta review, and exact-SHA required
 CI for the final candidate remain pending.
+
+
+## Core #281 source candidate (2026-11-20; not qualified)
+
+The fresh-main source path contains a registered synthetic owner request test for an overdue `schedule.add --at`, dispatch through the shared shell supervisor, durable `finished` latest result with captured output tail, and `schedule.list` projection. The test has not passed on the current source. Guarded runs are preserved separately: `core281-connected-check6-20261120` passed `cargo check --locked --tests` on earlier connected source before the synthetic test/default-off changes; `core281-connected-acceptance2-20261120` stopped at rustfmt after the watchdog edit; `core281-connected-acceptance3-20261120` stopped compiling on missing `Arc` import and watch-result inference. Those failures remain bound to their original source. The latest test-watchdog/default-off source has no successful build or synthetic test result; no rerun was started after TL's “no new run implied” disposition.
+
+No CI, three-OS evidence, production scheduler activation, live/user DB, provider, installed-binary, release, DST, or sleep-power evidence is recorded. Forced owner death may leave a child process; restart cannot prove overlap exclusion, as documented in both guides.

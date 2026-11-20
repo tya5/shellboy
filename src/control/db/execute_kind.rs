@@ -60,6 +60,7 @@ named_jobs! {
     OwnerShutdown => owner_shutdown, Status => status, ModelList => model_list,
     ThreadList => thread_list, ThreadGet => thread_get, ThreadBranches => thread_branches, UsageGet => usage_get,
     CompactList => compact_list, CompactPreview => compact_preview, ShellList => shell_list,
+    ScheduleAdd => schedule_add, ScheduleList => schedule_list, ScheduleRemove => schedule_remove,
     ThreadCreate => thread_create, ThreadFork => thread_fork, ThreadDelete => thread_delete,
     ThreadDeletePreview => thread_delete_preview, ThreadPrune => thread_prune, ThreadRewind => thread_rewind, ThreadArchive => thread_archive,
     ThreadUnarchive => thread_unarchive, ThreadTag => thread_tag, ThreadTags => thread_tags, ThreadCwds => thread_cwds, ThreadSet => thread_set,
@@ -117,6 +118,7 @@ impl Kind {
             | Kind::CompactList
             | Kind::CompactPreview
             | Kind::ShellList
+            | Kind::ScheduleList
             | Kind::ThreadDeletePreview
             | Kind::MessageGet
             | Kind::OperationGet
@@ -150,6 +152,7 @@ impl Kind {
             | Kind::AttachmentRemove
             | Kind::Compact
             | Kind::ContextEdit => MutationExempt,
+            Kind::ScheduleAdd | Kind::ScheduleRemove => MutationDeclaredBound,
             Kind::ModelList
             | Kind::Wait
             | Kind::EventsWait

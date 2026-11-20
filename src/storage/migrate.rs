@@ -251,6 +251,11 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         sql: include_str!("../../migrations/0049_generated_summary_user_role.sql"),
         foreign_keys: None,
     },
+    Migration {
+        version: 50,
+        sql: include_str!("../../migrations/0050_minimal_scheduler.sql"),
+        foreign_keys: None,
+    },
 ];
 
 pub(super) fn run(

@@ -1231,6 +1231,57 @@ impl Store {
                 })
             }
 
+            Command::ScheduleAdd(args) => {
+                let id = uuid::Uuid::new_v4();
+                let (cron, next, at) = if let Some(expression) = args.cron.as_ref() {
+                    let parsed = expression.parse::<croner::Cron>().map_err(|e| {
+                        error(
+                            ErrorCode::InvalidArgument,
+                            format!("invalid cron expression: {e}"),
+                        )
+                    })?;
+                    let local = chrono::Local::now();
+                    let next = parsed
+                        .find_next_occurrence(&local, false)
+                        .map_err(|e| {
+                            error(
+                                ErrorCode::InvalidArgument,
+                                format!("cron has no next occurrence: {e}"),
+                            )
+                        })?
+                        .timestamp();
+                    (Some(expression.as_str()), next, None)
+                } else {
+                    let at = args.at.unwrap();
+                    (None, at, Some(at))
+                };
+                tx.execute("INSERT INTO scheduled_command(id,command,cwd,cron_expression,at,next_at) VALUES(?1,?2,?3,?4,?5,?6)",rusqlite::params![id.to_string(),args.command,args.cwd,cron,at,next]).map_err(sql_error)?;
+                Ok(MutationResult::value(
+                    json!({"schedule_id":id,"next_at":next}),
+                )?)
+            }
+            Command::ScheduleRemove(args) => {
+                let id = uuid::Uuid::parse_str(&args.schedule_id).map_err(|_| {
+                    error(
+                        ErrorCode::InvalidArgument,
+                        "schedule_id must be a canonical UUID",
+                    )
+                })?;
+                let removed = tx
+                    .execute(
+                        "DELETE FROM scheduled_command WHERE id=?1",
+                        [id.to_string()],
+                    )
+                    .map_err(sql_error)?
+                    != 0;
+                Ok(MutationResult::value(
+                    json!({"schedule_id":id,"removed":removed}),
+                )?)
+            }
+            Command::ScheduleList(_) => Err(error(
+                ErrorCode::InvalidState,
+                "schedule.list uses the authenticated read projection",
+            )),
             Command::Status(_) => Err(error(
                 ErrorCode::InvalidState,
                 "Status uses the dedicated read-only projection",

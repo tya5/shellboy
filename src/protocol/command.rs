@@ -28,6 +28,9 @@ impl Command {
             Self::CompactList(_) => ("compact.list", CommandRoute::Database),
             Self::CompactPreview(_) => ("compact.preview", CommandRoute::Database),
             Self::ShellList(_) => ("shell.list", CommandRoute::Database),
+            Self::ScheduleAdd(_) => ("schedule.add", CommandRoute::Database),
+            Self::ScheduleList(_) => ("schedule.list", CommandRoute::Database),
+            Self::ScheduleRemove(_) => ("schedule.remove", CommandRoute::Database),
             Self::ThreadCreate(_) => ("thread.create", CommandRoute::Database),
             Self::ThreadFork(_) => ("thread.fork", CommandRoute::Database),
             Self::ThreadDelete(_) => ("thread.delete", CommandRoute::Database),
@@ -117,6 +120,9 @@ impl Command {
             | Self::ConnectionTest(_)
             | Self::ConfigGet(_) => true,
             Self::OwnerShutdown(_)
+            | Self::ScheduleAdd(_)
+            | Self::ScheduleList(_)
+            | Self::ScheduleRemove(_)
             | Self::ThreadList(_)
             | Self::ThreadGet(_)
             | Self::ThreadBranches(_)
@@ -170,6 +176,9 @@ impl Command {
         match self {
             Self::ShellEof(_) | Self::ShellStop(_) => true,
             Self::OwnerShutdown(_)
+            | Self::ScheduleAdd(_)
+            | Self::ScheduleList(_)
+            | Self::ScheduleRemove(_)
             | Self::Status(_)
             | Self::ModelList(_)
             | Self::ThreadList(_)
@@ -255,6 +264,9 @@ impl Command {
             | Self::ThreadTag(_)
             | Self::ThreadUnarchive(_) => true,
             Self::OwnerShutdown(_)
+            | Self::ScheduleAdd(_)
+            | Self::ScheduleList(_)
+            | Self::ScheduleRemove(_)
             | Self::Status(_)
             | Self::ModelList(_)
             | Self::ThreadList(_)
@@ -315,6 +327,7 @@ impl Command {
             | Self::CompactList(_)
             | Self::CompactPreview(_)
             | Self::ShellList(_)
+            | Self::ScheduleList(_)
             | Self::UsageGet(_)
             | Self::ThreadDeletePreview(_)
             | Self::MessageGet(_)
@@ -336,6 +349,8 @@ impl Command {
             | Self::ConnectionTest(_)
             | Self::ConfigGet(_) => true,
             Self::OwnerShutdown(_)
+            | Self::ScheduleAdd(_)
+            | Self::ScheduleRemove(_)
             | Self::ThreadCreate(_)
             | Self::ThreadFork(_)
             | Self::ThreadDelete(_)

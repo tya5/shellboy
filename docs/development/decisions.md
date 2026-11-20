@@ -4570,3 +4570,31 @@ A `RunStopped` fact from writer witness validation remains a typed rejection and
 ## CORE301 fb full-native failure disposition (2026-11-15)
 
 The first complete native run on exact candidate `fb056edbc41aecb13cc3b1f43d7d6fbdfe4d521a` exited 101: 2,632 passed, 9 failed, 25 ignored in 482.87 seconds; owned-group cleanup was confirmed. Keep it distinct from `039e495...`'s earlier full RED. `docs/validation/acceptance.md` preserves the nine original failures and exact follow-up control receipts. The stop-witness status timeout and pre-cancel/cross-stage phase oracle have scoped corrections with exact tests; atomic summary FINISH now has actual checkpoint-order rationale and the affected persistent/storage/retired/remeasurement matrix controls pass. The two uncalibrated watchdog fixtures were invalid: they held an in-flight driver response while directly entering internal summary with a different local boundary, blocking the real per-Thread boundary. Rebuilt real-source fixture reaches HTTP but currently returns `InvalidState` at strict adoption before its injector; retain this as unresolved, and do not loosen CAS or claim fixture-only without causal evidence. No whole-current native, normal completion, or three-OS qualification is claimed.
+
+## Minimal owner-local scheduler (#281, 2026-11-20)
+
+The controlling Issue replaces the previous unmerged branch design. Start from main
+and keep only three operations (`schedule add`, `schedule list`, `schedule remove`),
+one owner-local timer, `chrono::Local` plus `croner`, one indexed `next_at`, and
+two durable tables: registration and one latest result. The latest statuses are
+`finished`, `overlap_skipped`, `capacity_skipped`, and `launch_failed`. A cron
+occurrence that was valid at registration but cannot be calculated later is stopped
+by setting `next_at` NULL and recording a clearly labeled scheduler diagnostic in the
+bounded result tail in the same transaction; it is not child output and has no exit
+code. The dispatcher continues to other rows. Advancing
+`next_at` transactionally is the at-most-once boundary; active IDs exist only in
+the owner process. No persisted claim/reaper/retry/fault quarantine, timezone column,
+job queue, `schedule.once`, parallel scheduler, argv reconstruction, or host/service
+action is part of the contract. Shell capacity exhaustion records a skip and advances.
+
+Bounds for the first source slice: command 16 KiB UTF-8, cwd 4 KiB, cron text 256
+bytes, retained output tail 4 KiB; latest-only result storage. The shared shell runner
+remains the execution authority. The owner timer must wait on the existing Notify
+when the schedule is empty and shutdown must settle/stop owned children. `croner` is
+selected only for expression parsing/next occurrence; it introduces no job engine.
+The requested sleep-limit energy comparison (one minute, five minutes, no periodic
+timer) remains a later measured acceptance gate and no default is selected here.
+The owner's ordinary `Control::start` attaches the same single dispatcher; no enable
+setting or separate scheduler implementation is added. This is source behavior only,
+not evidence from an installed or live owner. Forced-owner-death overlap, DST
+behavior, and requested power measurements remain unverified.

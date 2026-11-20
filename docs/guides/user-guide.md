@@ -596,3 +596,17 @@ redraw with either value. `shellboy config check` validates the boolean setting.
 Synthetic terminal tests verify emitted clear/erase sequences and modeled cells,
 not font pixels. Windows hardware is unverified; please check your own terminal
 and font and report whether this option helps.
+
+## Scheduled shell commands (#281)
+
+A running owner can keep a small persistent schedule of shell-text commands:
+
+```sh
+shellboy schedule add --cron '*/15 * * * *' -- 'shellboy message send --thread THREAD_ID --text "check the queue"'
+shellboy schedule add --in 10m -- 'printf %s done'
+shellboy schedule add --at 2026-11-20T14:00:00Z --cwd /path/to/project -- 'git status --short'
+shellboy schedule list
+shellboy schedule remove --schedule SCHEDULE_UUID
+```
+
+The command runs through the shared shell supervisor without conversation context. The list shows schedule metadata and the latest result, not command text or cwd. Removing a schedule prevents future runs but does not stop one already running. Normal owner shutdown stops owned children; if the owner is forcibly killed, a child may survive, and a restarted owner cannot determine whether it is still running or guarantee no overlap.

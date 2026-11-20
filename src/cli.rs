@@ -115,6 +115,11 @@ pub enum CliCommand {
         #[command(subcommand)]
         command: HistoryCommand,
     },
+    /// Add, list, or remove owner-local scheduled shell commands.
+    Schedule {
+        #[command(subcommand)]
+        command: ScheduleCommand,
+    },
     /// Inspect and control existing shell executions; shell start is a model tool.
     Shell {
         #[command(subcommand)]
@@ -487,6 +492,30 @@ pub enum ShellCommand {
     Write(ShellWriteOptions),
     Eof(ExecutionOptions),
     Stop(ExecutionOptions),
+}
+#[derive(Debug, Clone, Subcommand)]
+pub enum ScheduleCommand {
+    Add(ScheduleAddOptions),
+    List,
+    Remove(ScheduleRemoveOptions),
+}
+#[derive(Debug, Clone, Args)]
+pub struct ScheduleAddOptions {
+    #[arg(long, conflicts_with_all=["at","in"])]
+    pub cron: Option<String>,
+    #[arg(long, conflicts_with_all=["cron","in"])]
+    pub at: Option<String>,
+    #[arg(long="in", conflicts_with_all=["cron","at"])]
+    pub relative: Option<String>,
+    #[arg(long)]
+    pub cwd: Option<PathBuf>,
+    #[arg(last = true, required = true)]
+    pub command: String,
+}
+#[derive(Debug, Clone, Args)]
+pub struct ScheduleRemoveOptions {
+    #[arg(long)]
+    pub schedule: String,
 }
 #[derive(Debug, Clone, Subcommand)]
 pub enum AttachmentCommand {
@@ -1537,6 +1566,59 @@ impl Cli {
                     relation: a.relation,
                     limit: a.limit,
                     cursor: a.cursor,
+                }),
+            },
+            CliCommand::Schedule { command } => match command {
+                ScheduleCommand::Add(a) => {
+                    let at = match (a.at, a.relative) {
+                        (Some(value), None) => Some(
+                            chrono::DateTime::parse_from_rfc3339(&value)
+                                .map_err(|_| invalid("--at must be RFC3339"))?
+                                .timestamp(),
+                        ),
+                        (None, Some(value)) => {
+                            let (n, u) = value.split_at(value.len().saturating_sub(1));
+                            let n: i64 = n.parse().map_err(|_| {
+                                invalid("--in must be a positive duration such as 10m")
+                            })?;
+                            let seconds = match u {
+                                "s" => 1,
+                                "m" => 60,
+                                "h" => 3600,
+                                "d" => 86400,
+                                _ => return Err(invalid("--in unit must be s, m, h, or d")),
+                            };
+                            if n <= 0 {
+                                return Err(invalid("--in must be positive"));
+                            }
+                            Some(
+                                chrono::Utc::now()
+                                    .timestamp()
+                                    .saturating_add(n.saturating_mul(seconds)),
+                            )
+                        }
+                        (None, None) => None,
+                        (Some(_), Some(_)) => {
+                            return Err(invalid("choose one of --cron, --at, or --in"));
+                        }
+                    };
+                    if a.cron.is_some() == at.is_some() {
+                        return Err(invalid("choose exactly one of --cron, --at, or --in"));
+                    }
+                    C::ScheduleAdd(wire::ScheduleAddArgs {
+                        command: a.command,
+                        cwd: a
+                            .cwd
+                            .map(|p| absolute_attachment(p, startup_cwd))
+                            .transpose()?
+                            .unwrap_or_else(|| startup_cwd.to_string_lossy().into_owned()),
+                        cron: a.cron,
+                        at,
+                    })
+                }
+                ScheduleCommand::List => C::ScheduleList(wire::ScheduleListArgs {}),
+                ScheduleCommand::Remove(a) => C::ScheduleRemove(wire::ScheduleRemoveArgs {
+                    schedule_id: a.schedule,
                 }),
             },
             CliCommand::Shell { command } => match command {

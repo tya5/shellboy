@@ -721,6 +721,20 @@ Without a TUI there is no interactive draft/restore, Turn interrupt or slash-onl
 UI operation, and no late UI attach/reconnect. Existing CLI compact is available.
 Owner binary replacement does not inherit live tools or automatically resume work.
 
+### Scheduled shell commands (#281)
+
+A running owner can register one shell-text command, inspect metadata/latest outcome, or remove a future registration:
+
+```sh
+shellboy schedule add --cron '*/15 * * * *' -- 'shellboy message send --thread THREAD_ID --text "check the queue"'
+shellboy schedule add --in 10m -- 'printf %s done'
+shellboy schedule add --at 2026-11-20T14:00:00Z --cwd /path/to/project -- 'git status --short'
+shellboy schedule list
+shellboy schedule remove --schedule SCHEDULE_UUID
+```
+
+The owner runs the command through its shared shell supervisor without a Thread conversation context; `schedule list` omits command text and cwd, but may show the bounded latest output tail. A scheduler calculation diagnostic is shown separately from child output. Removal affects future runs only and does not stop a shell already owned by the supervisor. A normal owner shutdown stops and joins its live children. After forced owner death, a child may remain; restart cannot reliably discover it and does not prevent a later overlapping run. Do not treat schedule registration as a hard real-time or exactly-once external-side-effect guarantee.
+
 ### Shell tool parameters
 
 Accepted parameters are `command`, `description`, `background`, `stdin_open`,

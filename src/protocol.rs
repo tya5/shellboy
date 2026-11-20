@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
-pub const PROTOCOL_VERSION: u32 = 6;
+pub const PROTOCOL_VERSION: u32 = 7;
 pub const PROTOCOL_CAPABILITIES: &[&str] = &["events.reasoning_activity"];
 pub const MAX_FRAME_BYTES: usize = 8 * 1024 * 1024;
 pub const MAX_PENDING_REPLY_DUTIES: u64 = 16;
@@ -1279,6 +1279,12 @@ pub enum Command {
     CompactList(CompactListArgs),
     #[serde(rename = "shell.list")]
     ShellList(ShellListArgs),
+    #[serde(rename = "schedule.add")]
+    ScheduleAdd(ScheduleAddArgs),
+    #[serde(rename = "schedule.list")]
+    ScheduleList(ScheduleListArgs),
+    #[serde(rename = "schedule.remove")]
+    ScheduleRemove(ScheduleRemoveArgs),
     #[serde(rename = "thread.create")]
     ThreadCreate(ThreadCreateArgs),
     #[serde(rename = "thread.fork")]
@@ -1396,6 +1402,13 @@ pub(crate) use command::CommandRoute;
 pub(crate) mod validation;
 pub(crate) use validation::rfc3339;
 
+args!(ScheduleAddArgs { command: String, cwd: String, #[serde(default)] cron: Option<String>, #[serde(default)] at: Option<i64> });
+args!(ScheduleRemoveArgs {
+    schedule_id: String
+});
+args!(ScheduleListArgs {});
+record!(ScheduleItem { schedule_id: String, #[serde(default)] cron: Option<String>, #[serde(default)] at: Option<i64>, next_at: Option<i64>, #[serde(default)] latest: Option<serde_json::Value> });
+record!(ScheduleListResult { schedules: Vec<ScheduleItem> });
 args!(ShellToolArgs { command: String, #[serde(default, deserialize_with = "crate::tool_description::deserialize", skip_serializing_if = "Option::is_none")] #[schemars(with = "Option<crate::tool_description::DescriptionSchema>")] description: Option<String>, #[serde(default)] background: bool, #[serde(default)] stdin_open: bool, #[serde(default)] initial_stdin: Option<String>, #[serde(default = "utf8")] input_encoding: String, #[serde(default = "utf8")] output_encoding: String });
 impl ShellToolArgs {
     pub fn validate(&self) -> Result<(), ApiError> {

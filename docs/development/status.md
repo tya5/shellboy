@@ -1,3 +1,13 @@
+## Core #281 minimal scheduler (source WIP; default-off)
+
+Fresh worktree `task/core281-minimal-d8076a6` is based directly on `d8076a661ca9fd763bcb4bc3504acba1fa64d892`; prior `core281-sqlite-store` history remains separate and untouched. The current source builds the single migration-50, two-table store, owner IPC add/list/remove, one dispatcher loop using the existing Control Notify, one nearest-deadline sleep, in-memory overlap/capacity decisions, shared ShellSupervisor execution, latest outcome projection, and a synthetic owner-request acceptance test. Cron runtime calculation failure atomically NULLs `next_at` and stores the TL-approved labeled diagnostic as `launch_failed`.
+
+The leader-reported owner decision resolves the shipped startup default: ordinary `Control::start` attaches the single dispatcher, with no enable setting. No installed/live owner was activated or restarted and no user/product availability is claimed.
+
+`Cargo.lock` retains all base versions/checksums and adds only croner 4.0.3 plus its nine required transitives. Changed-source guarded compile attempts remain distinct: the first stopped at the lock delta; subsequent checks exposed compile-classification issues; the latest connected test attempt stopped at layout because raw deadlines were forbidden. The current source was then changed to reuse the approved test watchdog and adopt TL's default-off decision. No successful build or synthetic acceptance result is currently bound to this final source. CI, release qualification, normal owner activation, DST, and power measurement remain unverified.
+
+Production additions are below the user review threshold of 1,500 lines; the source-only base patch and untracked source/migration files are preserved. Next: exact-source ff review of the committed WIP, then seek explicit activation scope ruling; no ordinary startup attachment before that decision.
+
 # Development status
 
 ## #315 Retry after partial output (owner-policy successor)

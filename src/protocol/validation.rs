@@ -927,6 +927,22 @@ impl Command {
                 crate::credential_store::check_connection_name(&a.connection)
             }
             Self::ConnectionTest(a) => a.validate(),
+            Self::ScheduleAdd(a) => {
+                nonempty(&a.command, "command")?;
+                if a.command.len() > 16_384
+                    || a.command.contains('\0')
+                    || a.cwd.len() > 4096
+                    || a.cwd.contains('\0')
+                    || a.cron.is_some() == a.at.is_some()
+                {
+                    return Err(invalid(
+                        "schedule.add requires exactly one of cron or at and bounded command/cwd",
+                    ));
+                }
+                Ok(())
+            }
+            Self::ScheduleRemove(a) => nonempty(&a.schedule_id, "schedule_id"),
+            Self::ScheduleList(_) => Ok(()),
             Self::EventsWait(a) => a.validate(),
         }
     }

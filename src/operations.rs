@@ -2132,7 +2132,10 @@ impl OperationId {
             | Command::ConfigSet(_)
             | Command::CredentialsSet(_)
             | Command::CredentialsClear(_)
-            | Command::ConnectionTest(_) => return None,
+            | Command::ConnectionTest(_)
+            | Command::ScheduleAdd(_)
+            | Command::ScheduleList(_)
+            | Command::ScheduleRemove(_) => return None,
             Command::Status(_) => Self::Status,
             Command::ModelList(_) => Self::ModelList,
             Command::ThreadList(_) => Self::ThreadList,

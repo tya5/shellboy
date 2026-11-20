@@ -13,6 +13,9 @@ mod notification;
 mod owner_shutdown;
 pub(crate) mod pending_messages;
 mod runtime;
+mod scheduler;
+#[cfg(all(test, unix))]
+mod scheduler_tests;
 pub(crate) mod submission_retention;
 mod turn_interrupt;
 mod ui_events;
@@ -154,6 +157,7 @@ pub struct Control {
     pub index: Arc<crate::index::IndexService>,
     pub gc: Arc<crate::gc::GcService>,
     maintenance: tokio::sync::OnceCell<Mutex<Option<tokio::task::JoinHandle<()>>>>,
+    scheduler: tokio::sync::OnceCell<Mutex<Option<tokio::task::JoinHandle<()>>>>,
     index_workers: tokio::sync::OnceCell<Mutex<Option<crate::index::IndexWorkers>>>,
     shutdown_context: tokio::sync::OnceCell<Result<(), ApiError>>,
     owner_shutdown: std::sync::OnceLock<CancellationToken>,
@@ -398,6 +402,7 @@ impl Control {
             attachments,
             gc,
             maintenance: tokio::sync::OnceCell::new(),
+            scheduler: tokio::sync::OnceCell::new(),
             index,
             index_workers: tokio::sync::OnceCell::new(),
             shutdown_context: tokio::sync::OnceCell::new(),
@@ -475,6 +480,13 @@ impl Control {
                 Ok::<_, ApiError>(Mutex::new(Some(self.index.start().await?)))
             })
             .await?;
+        self.scheduler
+            .get_or_init(|| async {
+                let weak = Arc::downgrade(self);
+                let stop = self.stop.clone();
+                Mutex::new(Some(tokio::spawn(scheduler::run(weak, stop))))
+            })
+            .await;
         self.maintenance
             .get_or_init(|| async {
                 let gc = self.gc.clone();
@@ -499,6 +511,12 @@ impl Control {
             })
             .await;
         Ok(())
+    }
+
+    async fn schedule_list(&self) -> Result<Vec<crate::storage::schedule::ScheduledRow>, ApiError> {
+        crate::storage::schedule::list(&self.store.database)
+            .await
+            .map_err(storage_error)
     }
     /// Read-only accounting of retained conversion buffers and in-flight pins.
     pub fn replay_cache_stats(&self) -> replay::ReplayStats {
@@ -1107,6 +1125,25 @@ impl Control {
                         })?;
                         self.recovery_rewind(request, origin, thread).await
                     }
+                    Command::ScheduleAdd(_) => {
+                        let effects=self.store.execute(request,origin).await?;
+                        self.changed.notify_waiters(); Ok(effects)
+                    }
+                    Command::ScheduleRemove(_) => {
+                        let effects=self.store.execute(request,origin).await?;
+                        self.changed.notify_waiters(); Ok(effects)
+                    }
+                    Command::ScheduleList(_) => {
+                        let rows=self.schedule_list().await?;
+                        let schedules:Vec<Value>=rows.into_iter().map(|row|{
+                            let latest=row.result.map(|(scheduled,finished,status,code,tail,truncated)|{
+                                let diagnostic=tail.as_deref().filter(|s|s.starts_with("Scheduler:")).map(str::to_owned);
+                                json!({"scheduled_at":scheduled,"finished_at":finished,"status":status,"exit_code":code,"output_tail":if diagnostic.is_none(){tail}else{None},"scheduler_diagnostic":diagnostic,"output_truncated":truncated})
+                            });
+                            json!({"schedule_id":row.id,"cron":row.cron_expression,"at":row.at,"next_at":row.next_at,"latest":latest})
+                        }).collect();
+                        Ok(crate::control::db::MutationResult{result:json!({"schedules":schedules}),..Default::default()})
+                    }
                     Command::ThreadGet(_) => {
                         let mut effects = self.store.execute(request, origin).await?;
                         if let Some(thread) = effects
@@ -1476,6 +1513,11 @@ impl Control {
 
     pub async fn shutdown(self: &Arc<Self>) -> Result<(), ApiError> {
         let context_result = self.prepare_shutdown().await;
+        if let Some(worker) = self.scheduler.get()
+            && let Some(worker) = worker.lock().await.take()
+        {
+            let _ = worker.await;
+        }
         if let Some(worker) = self.maintenance.get()
             && let Some(worker) = worker.lock().await.take()
         {
