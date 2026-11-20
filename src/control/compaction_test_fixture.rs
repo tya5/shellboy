@@ -147,7 +147,7 @@ pub(crate) async fn stage_fixture(
     fixture
 }
 
-fn append_completed_tool_group(
+pub(super) fn append_completed_tool_group(
     tx: &rusqlite::Transaction<'_>,
     thread: &str,
     attempt: &str,

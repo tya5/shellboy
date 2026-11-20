@@ -2371,6 +2371,144 @@ async fn direct_active_candidate_mutation(mutation: CandidateMutation) {
     server.abort();
 }
 
+/// #303 §6.3: growth changes the active range identity, not the live Turn.
+#[tokio::test]
+async fn proactive_growing_active_range_permits_one_summary_per_new_report() {
+    use crate::control::compaction_test_fixture::{
+        StagePlacement, append_completed_tool_group, stage_fixture,
+    };
+
+    crate::test_watchdog::watchdog("active range growth at the owned boundary", async {
+        let root = tempfile::tempdir().unwrap();
+        let (url, mut receive, _heads, server) = proxy().await;
+        let owner = proactive_owner(root.path(), &url, "[compaction]\nauto_at_tokens=200\n").await;
+        let control = Control::new(&owner, root.path().into());
+        let cwd = root.path().to_string_lossy().into_owned();
+        let agents = root.path().join("AGENTS.md").to_string_lossy().into_owned();
+        control.store.database.call(move |db| {
+            db.execute(
+                "INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,auto_compact_at,auto_compact_target_percent,spill_override,updated_at) VALUES('t',?1,?2,'fixture','fixture',200,20,0,'now')",
+                rusqlite::params![cwd, agents],
+            )?;
+            Ok(())
+        }).await.unwrap();
+        let mut fixture = stage_fixture(
+            &control.store.database,
+            StagePlacement::ActiveTurn,
+            20,
+            false,
+        ).await;
+        let slot = DriverSlot {
+            id: "direct-growth-slot".into(),
+            run_id: fixture.run_id.clone(),
+            ..DriverSlot::default()
+        };
+        slot.turn.lock().await.replace(crate::control::turn_interrupt::TurnBinding {
+            turn: fixture.turn_id.into(),
+            cancel: tokio_util::sync::CancellationToken::new(),
+            start_gate: Arc::new(tokio::sync::Mutex::new(false)),
+        });
+        let lock = control.boundary(fixture.thread_id).await;
+        let mut tokens_and_failures = Vec::new();
+        for (attempt, usage, selected, excluded) in [
+            ("trigger", 200, &["g1", "g2"][..], &["g3", "g4"][..]),
+            ("growth-trigger", 201, &["g1", "g2", "g3"][..], &["g4"][..]),
+        ] {
+            if attempt != fixture.attempt_id {
+                let thread = fixture.thread_id;
+                let turn = fixture.turn_id;
+                control.store.database.call(move |db| {
+                    let tx = db.transaction()?;
+                    let token = crate::compaction::a_state::begin_report_tx(
+                        &tx, thread, "fixture", "fixture",
+                    )?;
+                    let manifest = json!({"compaction_report_token":token}).to_string();
+                    let report_usage = json!({"input_tokens":usage}).to_string();
+                    tx.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at,ended_at) SELECT ?1,?2,0,revision,profile_id,model_id,reasoning_epoch,'completed',?3,?4,'growth','growth' FROM thread WHERE id=?5", rusqlite::params![attempt, turn, manifest, report_usage, thread])?;
+                    append_completed_tool_group(&tx, thread, attempt, turn, "g4", 4_000, "out-g4")?;
+                    tx.execute("INSERT INTO output_item(attempt_id,ordinal,item_type,status,payload_json,node_id) VALUES(?1,0,'function_call','completed',?2,'g4-call')", rusqlite::params![attempt, json!({"type":"function_call","call_id":"g4","name":"shell","arguments":"{}"}).to_string()])?;
+                    crate::compaction::a_state::complete_report_tx(
+                        &tx, thread, "fixture", "fixture", attempt, Some(token), Some(usage),
+                    )?;
+                    tx.commit()?;
+                    Ok(())
+                }).await.unwrap();
+                fixture.attempt_id = attempt;
+                fixture.input_tokens = usage;
+            }
+            let mut snapshot = direct_snapshot_for_fixture(&control, &fixture).await;
+            assert_eq!(snapshot.run, fixture.run_id);
+            assert_eq!(snapshot.turn, fixture.turn_id);
+            let plan = preflight(&control, &snapshot).await.unwrap().expect("eligible report");
+            assert_eq!(plan.attempt_id, attempt);
+            assert_eq!(plan.input_tokens, usage);
+            assert!(!plan.spill_effective);
+            let mut boundary = crate::compaction::boundary::Boundary::new(&lock, lock.lock().await);
+            let identity = {
+                let direct = maybe_compact_with_run_stop(
+                    &control, &mut snapshot, &slot, &mut boundary, slot.stop.clone(), plan,
+                );
+                tokio::pin!(direct);
+                let post = tokio::select! {
+                    result = &mut direct => panic!("finished before expected Summary: {result:?}"),
+                    post = receive.recv() => post.expect("expected exactly one Summary for this report"),
+                };
+                assert_eq!(post.body["tools"], json!([]));
+                let input = post.body["input"].to_string();
+                for group in selected {
+                    for node in ["call", "result"] {
+                        assert!(input.contains(&format!("{group}-{node}")), "missing {group}-{node}: {input}");
+                    }
+                }
+                for group in excluded {
+                    for node in ["call", "result"] {
+                        assert!(!input.contains(&format!("{group}-{node}")), "protected {group}-{node}: {input}");
+                    }
+                }
+                assert!(!input.contains("long task"), "current request stays outside R");
+                let identity = capture_terminal_identity(&control, fixture.thread_id, true).await;
+                assert_eq!(identity.attempt, attempt);
+                let record = automatic_attempt_record(&control, &fixture).await;
+                assert_eq!(record["token"], identity.token);
+                assert_eq!(record["active_stage"], "active_summary");
+                assert_eq!(record["trigger"]["run_id"], fixture.run_id);
+                assert_eq!(record["trigger"]["input_tokens"], usage);
+                post.reply.send((200, answer(" "))).unwrap();
+                assert_eq!(
+                    direct.await.unwrap(),
+                    ProactiveOutcome::Finished { path_changed: false },
+                );
+                identity
+            };
+            drop(boundary.into_guard());
+            assert!(terminal_record_written(&control, &identity, "failed", None).await);
+            let record = automatic_attempt_record(&control, &fixture).await;
+            let outcome = &record["compaction_outcome"]["outcome"];
+            assert_eq!(outcome["reason"], "empty");
+            assert_eq!(outcome["origin"], "output_validation");
+            assert_eq!(record["error"]["details"]["summary_usage"]["requests"], 1);
+            assert!(record["committed_stages"].is_null());
+            let thread = fixture.thread_id;
+            let failure: String = control.store.database.call(move |db| {
+                let closed: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM app_meta WHERE key=?1)",
+                    [format!("compact.deterministic_range_failure.closed.{thread}")], |r| r.get(0))?;
+                assert!(!closed);
+                Ok(db.query_row("SELECT value FROM app_meta WHERE key=?1",
+                    [format!("compact.deterministic_range_failure.active.{thread}")], |r| r.get(0))?)
+            }).await.unwrap();
+            tokens_and_failures.push((identity.token, failure));
+            let unchanged = direct_snapshot_for_fixture(&control, &fixture).await;
+            assert!(preflight(&control, &unchanged).await.unwrap().is_none());
+            assert!(matches!(receive.try_recv(), Err(tokio::sync::mpsc::error::TryRecvError::Empty)));
+        }
+        assert_ne!(tokens_and_failures[0].0, tokens_and_failures[1].0);
+        assert_ne!(tokens_and_failures[0].1, tokens_and_failures[1].1);
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+        server.abort();
+    }).await.unwrap();
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn proactive_postcommit_storage_boundaries() {
     boundaries(Fault::Storage).await;

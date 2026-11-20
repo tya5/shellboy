@@ -7590,56 +7590,6 @@ async fn proactive_deterministic_closed_failure_stays_suppressed_while_the_turn_
         "the active region is not spilled for a closed summary; attempts={attempts:#?}; slots={slots:?}"
     );
 }
-/// #303 §6.3: an active range's identity is its original first/last node, so
-/// each new tool group gives a new range; with no closed target, every
-/// eligible report retries the active summary exactly once.
-#[tokio::test]
-async fn proactive_growing_active_range_permits_one_summary_per_new_report() {
-    let (summaries, most, attempts, slots, _, _, _, report_ledger) = bx_growing_turn(
-        false,
-        false,
-        (200, answer(" ")),
-        [100, 100].into_iter().chain(202..=218).collect(),
-    )
-    .await;
-    let high_inputs: Vec<u64> = report_ledger
-        .iter()
-        .filter_map(|report| {
-            report["input_tokens"]
-                .as_u64()
-                .filter(|tokens| *tokens >= 200)
-        })
-        .collect();
-    assert_eq!(
-        high_inputs,
-        (202..=218).collect::<Vec<_>>(),
-        "all 17 independently named high reports remain present: {report_ledger:#?}"
-    );
-    let fresh = fresh_growth_attempts(&report_ledger);
-    assert_eq!(
-        summaries as usize,
-        fresh.len(),
-        "each source-current admitted active range requests Summary; stale/coalesced reports do not: {report_ledger:#?}"
-    );
-    assert_eq!(
-        most, 1,
-        "at most one Summary request per admitted active range"
-    );
-    assert!(
-        attempts
-            .iter()
-            .all(|attempt| attempt["outcome"] == "failed" || attempt["outcome"] == "no_target"),
-        "the report ledger preserves failed versus stale no-target negatives: {attempts:#?}"
-    );
-    assert!(!fresh.is_empty());
-    assert!(
-        fresh
-            .iter()
-            .all(|report| report["automatic_attempt"]["outcome"] == "failed"),
-        "fresh active ranges retain output-validation failure memory: {fresh:#?}"
-    );
-    assert!(slots.0.is_none() && slots.1.is_some(), "{slots:?}");
-}
 #[tokio::test]
 async fn proactive_provider_500_retries_for_a_new_active_range() {
     crate::test_watchdog::watchdog("provider500 across source-prescribed A epochs", async {
