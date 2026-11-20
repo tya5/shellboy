@@ -25,7 +25,7 @@ impl Store {
             if actual!=Some((expected.run_id.clone(),expected.turn_id.clone(),expected.turn_generation.map(|n|n as i64))) {
                 return Err(error(ErrorCode::InvalidState,"The displayed Run/Turn changed; refresh the Watch target before acting"));
             }
-            store.dispatch(tx,&command,None,&operation_id,now)
+            store.dispatch(tx,&command,None,&operation_id,now,None)
         }))).await
     }
 }
