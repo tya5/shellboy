@@ -1,7 +1,7 @@
 # Shellboy v0.13.1 (draft)
 
 Reliability and history-migration follow-ups to v0.13.0. The protocol remains 5;
-the conversation schema advances from 44 to 50.
+the conversation schema advances from 44 to 49.
 
 ## What changes for users
 
@@ -19,15 +19,14 @@ the conversation schema advances from 44 to 50.
   converts only canonical generated summaries with positively verified provenance,
   preserving their text and source/provenance records.
 
-## Conversation schema 50
+## Conversation schema 49
 
 Migrations 45-49 add the Thread spill-preference setting, update compaction scope
 identity records, remove obsolete selection-generation state, and mark as admitted
 historical applied human-question receipts that the supported published writer had
-already appended to the selected path (no path append occurs). Migration 49 also
-converts eligible canonical generated summaries to the user role; ambiguous summary
-rows fail closed. Migration 50 adds the minimal Thread-owned scheduler tables and
-lookup index with a cascade foreign key.
+already appended to the selected path (no path append occurs). They also convert
+eligible canonical generated summaries to the user role. Ambiguous summary rows fail
+closed.
 The upgrade is forward-only: an older binary cannot open a migrated database. Back
 up the data directory before first startup with this version.
 
@@ -40,4 +39,4 @@ archives, run packaged smoke and installer checks, and retain candidate provenan
 That candidate-ref workflow does not create a tag or publish a Release. Verify exact
 SHA, candidate assets/checksums, and all required gates before any separately
 approved publication. A real data-directory upgrade is also a separate, explicitly
-approved step (schema 44 to 50, backup first).
+approved step (schema 44 to 49, backup first).
