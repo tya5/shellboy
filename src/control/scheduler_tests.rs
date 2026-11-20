@@ -2,8 +2,9 @@ use super::*;
 use crate::{
     app::DataOwner,
     protocol::{
-        Command, Request, ScheduleAddArgs, ScheduleListArgs, ThreadArchiveArgs, ThreadCreateArgs,
-        ThreadDeleteArgs, ThreadForkArgs, ThreadRewindArgs,
+        Command, ConfigChange, ConfigGetArgs, ConfigSetArgs, Request, ScheduleAddArgs,
+        ScheduleListArgs, ThreadArchiveArgs, ThreadCreateArgs, ThreadDeleteArgs, ThreadForkArgs,
+        ThreadRewindArgs,
     },
 };
 use chrono::{Datelike, TimeZone};
@@ -32,6 +33,66 @@ async fn create_test_thread(
         .as_str()
         .unwrap()
         .to_owned()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn config_set_updates_scheduler_bound_and_notifies_registered_waiter() {
+    crate::test_watchdog::watchdog(
+        "config.set updates scheduler bound and notifies registered waiter",
+        async {
+            let root = tempfile::tempdir().unwrap();
+            let config_path = root.path().join("config.toml");
+            std::fs::write(&config_path, "[schedule]\nmax_sleep_seconds=300\n").unwrap();
+            let owner = DataOwner::start(
+                Some(config_path),
+                Some(root.path().join("data")),
+                root.path().into(),
+            )
+            .await
+            .unwrap();
+            let control = Control::new(&owner, root.path().into());
+            let got = control
+                .request(Request::new(
+                    "config-get-scheduler-bound",
+                    Command::ConfigGet(ConfigGetArgs {}),
+                ))
+                .await;
+            assert!(got.ok, "{got:?}");
+            let expected_hash = got.result.unwrap()["file"]["content_hash"]
+                .as_str()
+                .unwrap()
+                .to_owned();
+
+            // notify_waiters does not retain a permit for late subscribers.
+            let notified = control.changed.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            let changed = control
+                .request(Request::new(
+                    "config-set-scheduler-bound",
+                    Command::ConfigSet(ConfigSetArgs {
+                        expected_hash,
+                        changes: vec![ConfigChange {
+                            field: "schedule.max_sleep_seconds".into(),
+                            value: Some(serde_json::json!(37)),
+                        }],
+                    }),
+                ))
+                .await;
+            assert!(changed.ok, "{changed:?}");
+            notified.await;
+            assert_eq!(
+                control
+                    .schedule_max_sleep_seconds
+                    .load(Ordering::SeqCst),
+                37
+            );
+            control.shutdown().await.unwrap();
+            owner.shutdown().await.unwrap();
+        },
+    )
+    .await
+    .unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
