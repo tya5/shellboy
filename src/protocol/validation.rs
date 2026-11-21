@@ -849,6 +849,13 @@ impl Command {
                 optional_nonempty(a.thread_id.as_deref(), "thread_id")?;
                 nonempty(&a.text, "text")
             }
+            Self::IdResolve(a) => {
+                let chars = a.prefix.chars().count();
+                if !(8..36).contains(&chars) {
+                    return Err(invalid("id.resolve prefix must contain 8..=35 characters"));
+                }
+                Ok(())
+            }
             Self::MessageReply(a) => {
                 nonempty(&a.message_id, "message_id")?;
                 validate_sender_label(a.sender_label.as_deref())

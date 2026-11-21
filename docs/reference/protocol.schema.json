@@ -2,7 +2,8 @@
   "$id": "https://shellboy.dev/schema/protocol-v6.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "capabilities": [
-    "events.reasoning_activity"
+    "events.reasoning_activity",
+    "id.resolve"
   ],
   "definitions": {
     "Accepted": {
@@ -514,6 +515,22 @@
             },
             "command": {
               "const": "thread.set",
+              "type": "string"
+            }
+          },
+          "required": [
+            "command",
+            "args"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "args": {
+              "$ref": "#/definitions/IdResolveArgs"
+            },
+            "command": {
+              "const": "id.resolve",
               "type": "string"
             }
           },
@@ -1817,6 +1834,7 @@
         "protocol_mismatch",
         "thread_not_found",
         "target_unavailable",
+        "not_found",
         "operation_conflict",
         "operation_expired",
         "operation_not_found",
@@ -2871,6 +2889,31 @@
       },
       "required": [
         "thread_id"
+      ],
+      "type": "object"
+    },
+    "IdKind": {
+      "enum": [
+        "thread",
+        "message",
+        "run",
+        "shell_execution"
+      ],
+      "type": "string"
+    },
+    "IdResolveArgs": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "$ref": "#/definitions/IdKind"
+        },
+        "prefix": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "prefix"
       ],
       "type": "object"
     },
@@ -5332,6 +5375,35 @@
             },
             "command": {
               "const": "thread.set",
+              "type": "string"
+            },
+            "operation_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "origin": true,
+            "protocol_version": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "args",
+            "command",
+            "operation_id",
+            "protocol_version"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "args": {
+              "$ref": "#/definitions/IdResolveArgs"
+            },
+            "command": {
+              "const": "id.resolve",
               "type": "string"
             },
             "operation_id": {
@@ -10360,6 +10432,19 @@
         "items"
       ],
       "title": "HistoryWindow",
+      "type": "object"
+    },
+    "id.resolve": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "IdResolveResult",
       "type": "object"
     },
     "index.backfill": true,

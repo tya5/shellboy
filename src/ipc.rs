@@ -176,6 +176,21 @@ pub async fn call(
     connect(endpoint, command, operation_id, origin).await
 }
 
+/// Send a command only when the owner advertised the required capability in Welcome.
+pub async fn call_requiring_capability(
+    data_dir: &Path,
+    command: Command,
+    operation_id: Option<String>,
+    origin: Option<Origin>,
+    capability: &str,
+) -> Result<Response<Value>, ApiError> {
+    let endpoint = match environment_endpoint(data_dir)? {
+        Some(endpoint) => endpoint,
+        None => read_endpoint(data_dir).await?,
+    };
+    connect_with_capability(endpoint, command, operation_id, origin, Some(capability)).await
+}
+
 fn environment_endpoint(data_dir: &Path) -> Result<Option<Endpoint>, ApiError> {
     #[cfg(unix)]
     {
@@ -250,6 +265,16 @@ async fn connect(
     operation_id: Option<String>,
     origin: Option<Origin>,
 ) -> Result<Response<Value>, ApiError> {
+    connect_with_capability(endpoint, command, operation_id, origin, None).await
+}
+
+async fn connect_with_capability(
+    endpoint: Endpoint,
+    command: Command,
+    operation_id: Option<String>,
+    origin: Option<Origin>,
+    required_capability: Option<&str>,
+) -> Result<Response<Value>, ApiError> {
     if endpoint.protocol_version != PROTOCOL_VERSION {
         return Err(protocol_mismatch(
             PROTOCOL_VERSION,
@@ -275,7 +300,15 @@ async fn connect(
             )
             .hint("Start Shellboy and its CLI under the same OS user")
         })?;
-        call_stream(stream, endpoint, command, operation_id, origin).await
+        call_stream_requiring_capability(
+            stream,
+            endpoint,
+            command,
+            operation_id,
+            origin,
+            required_capability,
+        )
+        .await
     }
     #[cfg(windows)]
     {
@@ -295,7 +328,15 @@ async fn connect(
                 Err(error) => return Err(io_error(error)),
             }
         };
-        call_stream(stream, endpoint, command, operation_id, origin).await
+        call_stream_requiring_capability(
+            stream,
+            endpoint,
+            command,
+            operation_id,
+            origin,
+            required_capability,
+        )
+        .await
     }
 }
 fn uncertain_reply(mut error: ApiError, operation_id: &str, command: &Command) -> ApiError {
@@ -328,12 +369,24 @@ fn handshake_timeout() -> ApiError {
         .hint("Check that the owner is responsive and retry the connection; do not infer a protocol version change from this timeout")
         .details(serde_json::json!({"phase":"handshake","request_may_have_been_applied":false}))
 }
+#[cfg(test)]
 async fn call_stream<S: AsyncRead + AsyncWrite + Unpin>(
+    stream: S,
+    endpoint: Endpoint,
+    command: Command,
+    operation_id: Option<String>,
+    origin: Option<Origin>,
+) -> Result<Response<Value>, ApiError> {
+    call_stream_requiring_capability(stream, endpoint, command, operation_id, origin, None).await
+}
+
+async fn call_stream_requiring_capability<S: AsyncRead + AsyncWrite + Unpin>(
     mut stream: S,
     endpoint: Endpoint,
     command: Command,
     operation_id: Option<String>,
     origin: Option<Origin>,
+    required_capability: Option<&str>,
 ) -> Result<Response<Value>, ApiError> {
     write_frame(
         &mut stream,
@@ -355,6 +408,23 @@ async fn call_stream<S: AsyncRead + AsyncWrite + Unpin>(
     }
     if welcome.instance_id != endpoint.instance_id {
         return Err(endpoint_mismatch());
+    }
+    if let Some(capability) = required_capability
+        && !welcome
+            .capabilities
+            .iter()
+            .any(|advertised| advertised == capability)
+    {
+        return Err(ApiError::new(
+            ErrorCode::InvalidArgument,
+            "This owner cannot resolve short IDs",
+        )
+        .hint("Pass the full ID or update the owner to a release advertising this capability")
+        .details(serde_json::json!({
+            "reason":"missing_capability",
+            "required_capability":capability,
+            "request_may_have_been_applied":false,
+        })));
     }
     let mut request = Request::new(
         operation_id.unwrap_or_else(|| format!("{}:{}", welcome.instance_id, uuid::Uuid::new_v4())),
@@ -1038,6 +1108,56 @@ mod frame_delivery_tests {
         assert!(details.get("next_operation").is_none());
         owner.await.unwrap();
     }
+    #[tokio::test]
+    async fn missing_capability_rejects_prefix_query_before_sending_a_request() {
+        use crate::protocol::{IdKind, IdResolveArgs};
+
+        let (mut server, client) = tokio::io::duplex(4096);
+        let server_task = tokio::spawn(async move {
+            let hello: Hello = read_frame(&mut server).await.unwrap().unwrap();
+            assert_eq!(hello.protocol_version, PROTOCOL_VERSION);
+            write_frame(
+                &mut server,
+                &Welcome {
+                    protocol_version: PROTOCOL_VERSION,
+                    instance_id: "instance".into(),
+                    capabilities: Vec::new(),
+                },
+            )
+            .await
+            .unwrap();
+            let mut byte = [0u8; 1];
+            assert_eq!(
+                server.read(&mut byte).await.unwrap(),
+                0,
+                "no id.resolve request is sent without capability"
+            );
+        });
+        let error = call_stream_requiring_capability(
+            client,
+            endpoint(),
+            Command::IdResolve(IdResolveArgs {
+                kind: IdKind::Thread,
+                prefix: "12345678".into(),
+            }),
+            None,
+            None,
+            Some("id.resolve"),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.code, ErrorCode::InvalidArgument);
+        assert_eq!(
+            error.details.as_ref().unwrap()["required_capability"],
+            "id.resolve"
+        );
+        assert_eq!(
+            error.details.as_ref().unwrap()["request_may_have_been_applied"],
+            false
+        );
+        server_task.await.unwrap();
+    }
+
     #[tokio::test]
     async fn partial_request_prefix_and_payload_time_out_without_dispatch() {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};

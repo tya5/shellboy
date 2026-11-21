@@ -825,3 +825,99 @@ fn protocol_schema_is_standalone_and_matches_the_generated_contract() {
     let error: Value = serde_json::from_slice(&rejected.stdout).unwrap();
     assert_eq!(error["error"]["code"], "invalid_argument");
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cli_thread_ids_resolve_unique_prefixes_and_reject_ambiguous_or_missing_targets() {
+    let root = tempfile::tempdir().unwrap();
+    let config = root.path().join("config.toml");
+    std::fs::write(
+        &config,
+        "default_connection='fixture'\ndefault_model='fixture'\n[connections.fixture]\nbase_url='http://127.0.0.1:9/v1'\n",
+    )
+    .unwrap();
+    let owner = DataOwner::start(
+        Some(config),
+        Some(root.path().join("data")),
+        root.path().into(),
+    )
+    .await
+    .unwrap();
+    let control = Control::new(&owner, root.path().into());
+    let (send, receive) = tokio::sync::mpsc::channel(16);
+    let server = LocalServer::bind(&owner, send).await.unwrap();
+    let task = tokio::spawn(control.clone().serve(receive));
+    let cli = |args: Vec<String>| {
+        let directory = owner.loaded.data_dir.clone();
+        async move {
+            let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_shellboy"))
+                .arg("--data-dir")
+                .arg(directory)
+                .args(args)
+                .output()
+                .await
+                .unwrap();
+            let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+            (output.status.success(), value)
+        }
+    };
+
+    let (ok, created) = cli(vec!["thread".into(), "create".into()]).await;
+    assert!(ok, "{created}");
+    let full_id = created["result"]["thread_id"].as_str().unwrap().to_owned();
+    let prefix = full_id[..8].to_owned();
+    let (ok, by_prefix) = cli(vec![
+        "thread".into(),
+        "get".into(),
+        "--thread".into(),
+        prefix,
+    ])
+    .await;
+    assert!(ok, "{by_prefix}");
+    assert_eq!(by_prefix["result"]["thread_id"], full_id);
+    let (ok, by_full_id) = cli(vec![
+        "thread".into(),
+        "get".into(),
+        "--thread".into(),
+        full_id.clone(),
+    ])
+    .await;
+    assert!(ok, "{by_full_id}");
+    assert_eq!(by_full_id["result"]["thread_id"], full_id);
+
+    owner.db.call(|db| {
+        db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('aaaaaaaa-0000-4000-8000-000000000001','/','/a','fixture','fixture','0'),('aaaaaaaa-0000-4000-8000-000000000002','/','/a','fixture','fixture','0')", [])?;
+        Ok(())
+    }).await.unwrap();
+    let (ok, ambiguous) = cli(vec![
+        "thread".into(),
+        "get".into(),
+        "--thread".into(),
+        "aaaaaaaa".into(),
+    ])
+    .await;
+    assert!(!ok);
+    assert_eq!(ambiguous["error"]["code"], "invalid_argument");
+    assert_eq!(ambiguous["error"]["details"]["reason"], "ambiguous");
+    assert_eq!(
+        ambiguous["error"]["details"]["candidates"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+
+    let (ok, missing) = cli(vec![
+        "thread".into(),
+        "get".into(),
+        "--thread".into(),
+        "deadbeef".into(),
+    ])
+    .await;
+    assert!(!ok);
+    assert_eq!(missing["error"]["code"], "not_found");
+
+    server.shutdown().await.unwrap();
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+    task.await.unwrap();
+}

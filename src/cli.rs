@@ -1,7 +1,10 @@
 //! Human/model CLI syntax. Conversion produces the same typed operations as TUI.
 use crate::protocol::{self as wire, ApiError, ErrorCode};
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use std::path::{Component, Path, PathBuf};
+use std::{
+    future::Future,
+    path::{Component, Path, PathBuf},
+};
 use tokio::io::{AsyncRead, AsyncReadExt};
 
 pub const MAX_STDIN_TEXT_BYTES: usize = wire::MAX_FRAME_BYTES;
@@ -1194,6 +1197,141 @@ impl From<StorageOptions> for wire::StorageArgs {
             category: value.category,
         }
     }
+}
+
+#[derive(Clone)]
+enum IdPathSegment {
+    Key(String),
+    Index(usize),
+}
+struct IdSlot {
+    path: Vec<IdPathSegment>,
+    kind: wire::IdKind,
+    value: String,
+}
+
+fn id_kind_for_field(field: &str) -> Option<wire::IdKind> {
+    match field {
+        "thread_id" | "thread_ids" | "parent_id" => Some(wire::IdKind::Thread),
+        "message_id" | "message_ids" => Some(wire::IdKind::Message),
+        "run_id" | "recovery_run_id" => Some(wire::IdKind::Run),
+        "execution_id" => Some(wire::IdKind::ShellExecution),
+        _ => None,
+    }
+}
+
+fn collect_id_slots(
+    value: &serde_json::Value,
+    path: &mut Vec<IdPathSegment>,
+    slots: &mut Vec<IdSlot>,
+) {
+    match value {
+        serde_json::Value::Object(object) => {
+            for (field, child) in object {
+                if let Some(kind) = id_kind_for_field(field) {
+                    // Empty values are command-level sentinels, not IDs.
+                    match child {
+                        serde_json::Value::String(id) => {
+                            if id.is_empty() {
+                                continue;
+                            }
+                            path.push(IdPathSegment::Key(field.clone()));
+                            slots.push(IdSlot {
+                                path: path.clone(),
+                                kind,
+                                value: id.clone(),
+                            });
+                            path.pop();
+                        }
+                        serde_json::Value::Array(ids) => {
+                            for (index, id) in ids.iter().enumerate() {
+                                if let serde_json::Value::String(id) = id {
+                                    if id.is_empty() {
+                                        continue;
+                                    }
+                                    path.push(IdPathSegment::Key(field.clone()));
+                                    path.push(IdPathSegment::Index(index));
+                                    slots.push(IdSlot {
+                                        path: path.clone(),
+                                        kind,
+                                        value: id.clone(),
+                                    });
+                                    path.pop();
+                                    path.pop();
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                } else {
+                    path.push(IdPathSegment::Key(field.clone()));
+                    collect_id_slots(child, path, slots);
+                    path.pop();
+                }
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for (index, child) in items.iter().enumerate() {
+                path.push(IdPathSegment::Index(index));
+                collect_id_slots(child, path, slots);
+                path.pop();
+            }
+        }
+        _ => {}
+    }
+}
+
+fn id_at_path_mut<'a>(
+    value: &'a mut serde_json::Value,
+    path: &[IdPathSegment],
+) -> Option<&'a mut serde_json::Value> {
+    let mut current = value;
+    for segment in path {
+        current = match segment {
+            IdPathSegment::Key(key) => current.as_object_mut()?.get_mut(key)?,
+            IdPathSegment::Index(index) => current.as_array_mut()?.get_mut(*index)?,
+        };
+    }
+    Some(current)
+}
+
+/// Resolve every CLI target ID in one typed command before it is sent over the wire.
+pub async fn resolve_id_arguments<F, Fut>(
+    command: wire::Command,
+    mut resolve_prefix: F,
+) -> Result<wire::Command, ApiError>
+where
+    F: FnMut(wire::IdKind, String) -> Fut,
+    Fut: Future<Output = Result<String, ApiError>>,
+{
+    let mut value = serde_json::to_value(&command)
+        .map_err(|_| ApiError::new(ErrorCode::InvalidState, "Cannot inspect CLI command IDs"))?;
+    let mut slots = Vec::new();
+    collect_id_slots(&value, &mut Vec::new(), &mut slots);
+    let mut prefixes = Vec::new();
+    for slot in slots {
+        match slot.value.chars().count() {
+            36 => {}
+            8..=35 => prefixes.push(slot),
+            _ => {
+                return Err(invalid("ID arguments must be a full UUID or an 8-character-or-longer prefix")
+                    .hint("Pass the full ID or at least its first 8 characters")
+                    .details(serde_json::json!({"reason":"id_prefix_too_short_or_long","minimum_prefix_chars":8,"full_id_chars":36})));
+            }
+        }
+    }
+    for slot in prefixes {
+        let resolved = resolve_prefix(slot.kind, slot.value).await?;
+        let Some(value) = id_at_path_mut(&mut value, &slot.path) else {
+            return Err(ApiError::new(
+                ErrorCode::InvalidState,
+                "CLI ID argument path changed during resolution",
+            ));
+        };
+        *value = serde_json::Value::String(resolved);
+    }
+    serde_json::from_value(value)
+        .map_err(|_| ApiError::new(ErrorCode::InvalidState, "Resolved CLI command is invalid"))
 }
 
 impl Cli {

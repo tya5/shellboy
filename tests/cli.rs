@@ -1467,3 +1467,174 @@ fn message_get_help_uses_saved_context_and_body_read_without_resending() {
         assert!(text.contains(fact), "missing held guidance: {fact}");
     }
 }
+
+#[tokio::test]
+async fn shared_id_resolver_rewrites_every_supported_cli_target_kind() {
+    use shellboy::protocol::{IdKind, WaitArgs, WaitCondition};
+    use std::sync::{Arc, Mutex};
+
+    let observed = Arc::new(Mutex::new(Vec::new()));
+    let capture = observed.clone();
+    let command = Command::Wait(WaitArgs {
+        conditions: vec![
+            WaitCondition::ReplyReceived {
+                message_id: "0d404aa5".into(),
+            },
+            WaitCondition::ThreadSettled {
+                thread_ids: vec!["abcdef01".into(), "abcdef02".into()],
+                states: vec!["completed".into()],
+            },
+            WaitCondition::RunEnded {
+                run_id: "12345678".into(),
+            },
+            WaitCondition::ShellEnded {
+                execution_id: "deadbeef".into(),
+            },
+        ],
+        timeout_ms: 100,
+        after: None,
+    });
+    let resolved = shellboy::cli::resolve_id_arguments(command, move |kind, prefix| {
+        let observed = capture.clone();
+        async move {
+            observed.lock().unwrap().push((kind, prefix.clone()));
+            Ok(format!("resolved-{prefix}"))
+        }
+    })
+    .await
+    .unwrap();
+
+    let calls = observed.lock().unwrap();
+    assert_eq!(calls.len(), 5);
+    for kind in [
+        IdKind::Thread,
+        IdKind::Message,
+        IdKind::Run,
+        IdKind::ShellExecution,
+    ] {
+        assert!(
+            calls.iter().any(|(observed, _)| *observed == kind),
+            "missing resolver kind {kind:?}"
+        );
+    }
+    let Command::Wait(result) = resolved else {
+        panic!("command kind changed");
+    };
+    assert_eq!(
+        result.conditions,
+        vec![
+            WaitCondition::ReplyReceived {
+                message_id: "resolved-0d404aa5".into()
+            },
+            WaitCondition::ThreadSettled {
+                thread_ids: vec!["resolved-abcdef01".into(), "resolved-abcdef02".into()],
+                states: vec!["completed".into()],
+            },
+            WaitCondition::RunEnded {
+                run_id: "resolved-12345678".into()
+            },
+            WaitCondition::ShellEnded {
+                execution_id: "resolved-deadbeef".into()
+            },
+        ]
+    );
+}
+
+#[tokio::test]
+async fn shared_id_resolver_passes_full_ids_and_rejects_short_inputs_before_lookup() {
+    use shellboy::protocol::{RunTarget, ThreadTarget};
+
+    let full_id = "12345678-1234-4234-8234-123456789abc".to_owned();
+    let resolved = shellboy::cli::resolve_id_arguments(
+        Command::RunGet(RunTarget {
+            run_id: full_id.clone(),
+        }),
+        |_, _| async { panic!("full UUID must not query id.resolve") },
+    )
+    .await
+    .unwrap();
+    assert!(matches!(resolved, Command::RunGet(RunTarget { run_id }) if run_id == full_id));
+
+    let error = shellboy::cli::resolve_id_arguments(
+        Command::ThreadGet(ThreadTarget {
+            thread_id: Some("1234567".into()),
+        }),
+        |_, _| async { panic!("short input must be rejected before id.resolve") },
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error.code, ErrorCode::InvalidArgument);
+    assert_eq!(error.details.as_ref().unwrap()["minimum_prefix_chars"], 8);
+}
+
+#[tokio::test]
+async fn resolver_covers_cli_alias_fields_for_parent_threads_and_recovery_runs() {
+    let command = convert(&[
+        "thread",
+        "rewind",
+        "--thread",
+        "87654321",
+        "--node",
+        "node-exact",
+        "--run",
+        "23456789",
+    ])
+    .await;
+    let resolved = shellboy::cli::resolve_id_arguments(command, |kind, prefix| async move {
+        Ok(format!("{kind:?}-{prefix}"))
+    })
+    .await
+    .unwrap();
+    let Command::ThreadRewind(args) = resolved else {
+        panic!("command kind changed");
+    };
+    assert_eq!(args.thread_id.as_deref(), Some("Thread-87654321"));
+    assert_eq!(args.recovery_run_id.as_deref(), Some("Run-23456789"));
+    assert_eq!(args.node_id, "node-exact");
+
+    let command = convert(&["thread", "create", "--parent", "abcdef01"]).await;
+    let resolved = shellboy::cli::resolve_id_arguments(command, |kind, prefix| async move {
+        Ok(format!("{kind:?}-{prefix}"))
+    })
+    .await
+    .unwrap();
+    let Command::ThreadCreate(args) = resolved else {
+        panic!("command kind changed");
+    };
+    assert_eq!(args.parent_id.as_deref(), Some("Thread-abcdef01"));
+}
+
+#[tokio::test]
+async fn id_resolver_passes_empty_sentinels_to_command_validation() {
+    let detach = convert(&[
+        "thread",
+        "set",
+        "--thread",
+        "12345678-1234-4234-8234-123456789abc",
+        "--parent",
+        "",
+    ])
+    .await;
+    let resolved = shellboy::cli::resolve_id_arguments(detach, |_, _| async {
+        panic!("empty parent is a command sentinel, not an ID")
+    })
+    .await
+    .unwrap();
+    let Command::ThreadSet(args) = resolved else {
+        panic!("command kind changed");
+    };
+    assert_eq!(args.parent_id.as_deref(), Some(""));
+
+    let empty_message = shellboy::cli::resolve_id_arguments(
+        Command::MessageGet(shellboy::protocol::MessageTarget {
+            message_id: String::new(),
+        }),
+        |_, _| async { panic!("empty value is not a prefix query") },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        empty_message.validate().unwrap_err().code,
+        ErrorCode::InvalidArgument
+    );
+}

@@ -13,7 +13,7 @@ use serde_json::Value;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 pub const PROTOCOL_VERSION: u32 = 6;
-pub const PROTOCOL_CAPABILITIES: &[&str] = &["events.reasoning_activity"];
+pub const PROTOCOL_CAPABILITIES: &[&str] = &["events.reasoning_activity", "id.resolve"];
 pub const MAX_FRAME_BYTES: usize = 8 * 1024 * 1024;
 pub const MAX_PENDING_REPLY_DUTIES: u64 = 16;
 pub const MAX_SYNC_DELETION_REPLY_DUTIES: u64 = 16;
@@ -68,6 +68,7 @@ fn operation_result_schemas(
     opaque!("thread.tags");
     opaque!("thread.cwds");
     result!("thread.set", ThreadDetails);
+    result!("id.resolve", IdResolveResult);
     result!("message.reply", MessageAccepted);
     result!("message.send", MessageAccepted);
     result!("message.get", MessageDetails);
@@ -312,6 +313,7 @@ states!(ErrorCode {
     ProtocolMismatch,
     ThreadNotFound,
     TargetUnavailable,
+    NotFound,
     OperationConflict,
     OperationExpired,
     OperationNotFound,
@@ -427,7 +429,7 @@ impl ApiError {
             ErrorCode::ConfigInvalid => "Inspect the selected configuration and shellboy docs get --id shellboy/configuration; do not repeat an unconfirmed mutation",
             ErrorCode::AppNotRunning => "Check --data-dir and start its owner if needed; query any known operation receipt before repeating a mutation",
             ErrorCode::ProtocolMismatch => "Check the selected owner and client version; inspect any known operation receipt before repeating a mutation",
-            ErrorCode::ThreadNotFound | ErrorCode::TargetUnavailable => "Check the returned target ID and --data-dir with the corresponding get command; do not infer a replacement ID",
+            ErrorCode::ThreadNotFound | ErrorCode::TargetUnavailable | ErrorCode::NotFound => "Check the returned target ID and --data-dir with the corresponding get command; do not infer a replacement ID",
             ErrorCode::OperationConflict => "Query the existing receipt with shellboy operation get --operation OPERATION_ID; do not change the ID to repeat the same side effect",
             ErrorCode::OperationExpired | ErrorCode::OperationNotFound => "Inspect saved target state and history; an unavailable receipt does not prove the mutation was never applied",
             ErrorCode::InvalidState => "Inspect the target with its get command; read shellboy docs get --id shellboy/recovery-and-storage before choosing retry or stop",
@@ -935,6 +937,17 @@ record!(MessageCancelItem { message_id: String, outcome: MessageCancelOutcome,
     #[serde(default, skip_serializing_if = "Option::is_none")] archive_draft_id: Option<String>
 });
 record!(MessageCancelResult { items: Vec<MessageCancelItem> });
+states!(IdKind {
+    Thread,
+    Message,
+    Run,
+    ShellExecution
+});
+args!(IdResolveArgs {
+    kind: IdKind,
+    prefix: String
+});
+record!(IdResolveResult { id: String });
 args!(MessageTarget { message_id: String });
 args!(OperationTarget {
     operation_id: String
@@ -1303,6 +1316,8 @@ pub enum Command {
     ThreadCwds(ThreadCwdsArgs),
     #[serde(rename = "thread.set")]
     ThreadSet(Box<ThreadSetArgs>),
+    #[serde(rename = "id.resolve")]
+    IdResolve(IdResolveArgs),
     #[serde(rename = "message.reply")]
     MessageReply(MessageReplyArgs),
     #[serde(rename = "message.ask")]

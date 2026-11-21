@@ -802,3 +802,101 @@ async fn oversized_held_queue_progresses_through_send_and_retry_without_rejectio
     assert_eq!(held, 0);
     store.database.shutdown().await.unwrap();
 }
+
+#[tokio::test]
+async fn missing_reply_target_lists_only_calling_threads_pending_duties() {
+    let (_root, store) = fixture().await;
+    let recipient = store
+        .execute(request(send(true)), None)
+        .await
+        .unwrap()
+        .result;
+    let recipient_id = recipient["message_id"].as_str().unwrap().to_owned();
+    let unrelated = store
+        .execute(
+            request(Command::MessageSend(MessageSendArgs {
+                thread_id: Some("sender".into()),
+                ..match send(true) {
+                    Command::MessageSend(args) => args,
+                    _ => unreachable!(),
+                }
+            })),
+            None,
+        )
+        .await
+        .unwrap()
+        .result;
+    let unrelated_id = unrelated["message_id"].as_str().unwrap().to_owned();
+    let caller = Origin {
+        instance_id: "fixture".into(),
+        thread_id: "recipient".into(),
+        run_id: "caller-run".into(),
+        turn_id: "caller-turn".into(),
+        execution_id: "caller-shell".into(),
+        token: "synthetic-origin".into(),
+    };
+    let error = store
+        .execute(
+            request(Command::MessageReply(MessageReplyArgs {
+                message_id: "missing-message".into(),
+                text: "synthetic reply".into(),
+                sender_label: None,
+            })),
+            Some(caller),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::TargetUnavailable);
+    assert_eq!(
+        error.details.as_ref().unwrap()["pending_duty_ids"],
+        serde_json::json!([recipient_id])
+    );
+    assert_ne!(
+        error.details.as_ref().unwrap()["pending_duty_ids"][0],
+        unrelated_id
+    );
+    store.database.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn id_resolve_is_a_receipt_free_observation() {
+    let (_root, store) = fixture().await;
+    let resolve_request = Request::new(
+        "fixture:id-resolve-observation",
+        Command::IdResolve(IdResolveArgs {
+            kind: IdKind::Thread,
+            prefix: "recipien".into(),
+        }),
+    );
+    assert!(resolve_request.command.is_read_only());
+    let operation_id = resolve_request.operation_id.clone();
+    let direct_prefix = store
+        .execute(
+            request(Command::ThreadGet(ThreadTarget {
+                thread_id: Some("recipien".into()),
+            })),
+            None,
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(
+        direct_prefix.code,
+        ErrorCode::ThreadNotFound,
+        "wire target IDs remain exact"
+    );
+    let response = store.execute(resolve_request, None).await.unwrap();
+    assert_eq!(response.result["id"], "recipient");
+    let receipt_count = store
+        .database
+        .call(move |db| {
+            Ok(db.query_row(
+                "SELECT count(*) FROM operation_receipt WHERE operation_id=?1",
+                [&operation_id],
+                |row| row.get::<_, i64>(0),
+            )?)
+        })
+        .await
+        .unwrap();
+    assert_eq!(receipt_count, 0);
+    store.database.shutdown().await.unwrap();
+}

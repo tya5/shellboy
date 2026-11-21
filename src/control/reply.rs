@@ -247,7 +247,40 @@ impl super::db::Store {
     ) -> Result<super::db::MutationResult, crate::protocol::ApiError> {
         use crate::protocol::*;
         let sql = |e: rusqlite::Error| crate::app::storage_error(e.into());
-        let row = tx.query_row("SELECT target_thread_id,state,turn_id,result_json,sender_json FROM receipt WHERE message_node_id=?1",[&args.message_id],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,Option<String>>(2)?,r.get::<_,Option<String>>(3)?,r.get::<_,String>(4)?))).optional().map_err(sql)?.ok_or_else(||ApiError::new(ErrorCode::TargetUnavailable,"message not found"))?;
+        let row = tx
+            .query_row(
+                "SELECT target_thread_id,state,turn_id,result_json,sender_json FROM receipt WHERE message_node_id=?1",
+                [&args.message_id],
+                |r| Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, Option<String>>(2)?,
+                    r.get::<_, Option<String>>(3)?,
+                    r.get::<_, String>(4)?,
+                )),
+            )
+            .optional()
+            .map_err(sql)?;
+        let Some(row) = row else {
+            let pending_duty_ids = caller
+                .map(|origin| {
+                    awaiting_replies_tx(tx, &origin.thread_id, None)
+                        .map(|items| {
+                            items
+                                .into_iter()
+                                .take(crate::protocol::MAX_PENDING_REPLY_DUTIES as usize)
+                                .filter_map(|item| item["message_id"].as_str().map(str::to_owned))
+                                .collect::<Vec<_>>()
+                        })
+                        .map_err(sql)
+                })
+                .transpose()?
+                .unwrap_or_default();
+            return Err(
+                ApiError::new(ErrorCode::TargetUnavailable, "message not found")
+                    .details(json!({"pending_duty_ids":pending_duty_ids})),
+            );
+        };
         let saved: Value = row
             .3
             .as_deref()

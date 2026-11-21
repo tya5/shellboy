@@ -60,6 +60,12 @@ restores the original proxy assertion, and corrects this status. The full integr
 suite was not run locally.
 
 
+## Core #325 CLI unique-prefix IDs
+
+The shared CLI target-ID resolver, owner `id.resolve` observation and reply-not-found pending-duty details are implemented from landed base `7aa240f7386f9186ed0a0aeace9892b2cb9390d7`. The resolver covers Thread/message/Run/shell execution fields (including `parent_id` and recovery `run_id` wire aliases); full IDs stay exact, nonempty prefixes are 8–35 characters, and empty strings pass through as command sentinels rather than IDs. Wire target commands receive resolved full IDs only. Owner resolution uses bounded range reads on existing lookup indexes and adds no schema, index, dependency or persisted state. Protocol remains v6; `Welcome` advertises `id.resolve`, and the CLI checks it before sending a prefix query. Reply not-found details reuse the bounded pending-reply read scoped to the authenticated caller Thread.
+
+Pinned fmt, `cargo check --tests --locked`, Clippy with `-D warnings`, test-layout and focused resolver/CLI/IPC/reply/protocol-schema selectors passed locally. The complete integration suite was not run locally; hosted exact-SHA CI remains the qualification step.
+
 ## #315 Retry after partial output (owner-policy successor)
 
 The latest owner decision removes `response_retry_partial` and permits strict

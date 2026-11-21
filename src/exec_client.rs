@@ -108,6 +108,7 @@ impl Failure {
         let code = match error.code {
             ErrorCode::InvalidArgument
             | ErrorCode::ThreadNotFound
+            | ErrorCode::NotFound
             | ErrorCode::InputLimit
             | ErrorCode::ConfigInvalid
             | ErrorCode::SelfWait => 2,

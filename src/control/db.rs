@@ -1,6 +1,7 @@
 //! Durable Control operations. Runtime effects are returned only after commit.
 pub(super) mod archive;
 mod execute_kind;
+mod id_resolution;
 mod reparent;
 mod run_action;
 mod tags;
@@ -1235,6 +1236,7 @@ impl Store {
                 ErrorCode::InvalidState,
                 "Status uses the dedicated read-only projection",
             )),
+            Command::IdResolve(args) => MutationResult::value(id_resolution::resolve_id(tx, args)?),
             Command::ThreadCreate(args) => {
                 let mut defaults = args.clone();
                 defaults.agents = None;

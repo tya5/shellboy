@@ -1581,3 +1581,26 @@ fn shell_write_status_exported_enum_is_exact() {
         json!(["complete", "timeout", "closed", "stopped", "failed"])
     );
 }
+
+#[test]
+fn id_resolve_is_a_bounded_read_only_capability_command() {
+    for (prefix, valid) in [
+        ("1234567", false),
+        ("12345678", true),
+        ("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", true),
+        ("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", false),
+    ] {
+        let command = Command::IdResolve(IdResolveArgs {
+            kind: IdKind::Thread,
+            prefix: prefix.to_owned(),
+        });
+        assert_eq!(
+            command.validate().is_ok(),
+            valid,
+            "prefix chars={}",
+            prefix.chars().count()
+        );
+        assert!(command.is_read_only());
+        assert_eq!(command.name(), "id.resolve");
+    }
+}

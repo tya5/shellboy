@@ -464,22 +464,48 @@ async fn run_owner(cli: Cli, cwd: &Path) -> ExitCode {
         )
     );
     let result = async {
+        let data_dir =
+            resolve_cli_data_dir(cli.data_dir.as_deref(), &PathEnvironment::current(), cwd)
+                .map_err(|e| ApiError::new(ErrorCode::ConfigInvalid, e.to_string()))?;
+        let caller_origin = origin(&data_dir);
         let command = cli
             .clone()
             .into_command(cwd)
             .await?
             .ok_or_else(|| ApiError::new(ErrorCode::InvalidArgument, "Missing command"))?;
-
-        let data_dir =
-            resolve_cli_data_dir(cli.data_dir.as_deref(), &PathEnvironment::current(), cwd)
-                .map_err(|e| ApiError::new(ErrorCode::ConfigInvalid, e.to_string()))?;
-        ipc::call(
-            &data_dir,
-            command,
-            cli.operation_id.clone(),
-            origin(&data_dir),
-        )
-        .await
+        let resolved = shellboy::cli::resolve_id_arguments(command, |kind, prefix| {
+            let data_dir = data_dir.clone();
+            let caller_origin = caller_origin.clone();
+            async move {
+                let response = ipc::call_requiring_capability(
+                    &data_dir,
+                    shellboy::protocol::Command::IdResolve(shellboy::protocol::IdResolveArgs {
+                        kind,
+                        prefix,
+                    }),
+                    None,
+                    caller_origin,
+                    "id.resolve",
+                )
+                .await?;
+                if !response.ok {
+                    return Err(response.error.unwrap_or_else(|| {
+                        ApiError::new(
+                            ErrorCode::InvalidState,
+                            "Owner rejected ID resolution without an error",
+                        )
+                    }));
+                }
+                response
+                    .result
+                    .and_then(|result| result["id"].as_str().map(str::to_owned))
+                    .ok_or_else(|| {
+                        ApiError::new(ErrorCode::InvalidState, "Owner returned no resolved ID")
+                    })
+            }
+        })
+        .await?;
+        ipc::call(&data_dir, resolved, cli.operation_id.clone(), caller_origin).await
     }
     .await;
     match result {

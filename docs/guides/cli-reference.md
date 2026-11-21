@@ -42,6 +42,10 @@ Global flags may also follow subcommands. `--data-dir` selects owner storage, no
 
 The CLI automatically uses `SHELLBOY_*` context injected into the model shell. Do not display, copy, or manually generate origin tokens. Choosing another data directory does not inherit this context. Even when `--thread` is optional, external terminals have no current Thread: specify it. Omission resolves to the authenticated caller's Thread, never silently to the TUI's selected Thread.
 
+### ID arguments and unique prefixes (#325)
+
+Target arguments for Threads, messages, Runs, and shell executions accept the exact full ID or an exact prefix of 8–35 characters. A full 36-character ID is passed through unchanged. Prefixes resolve only when exactly one visible target matches; zero matches returns `not_found`, and ambiguity is rejected with at most eight candidate IDs. Seven-character (or shorter) prefixes and values longer than a full ID are rejected before lookup. Matching is case-sensitive and never fuzzy. An empty string is not an ID: the resolver passes it through unchanged so each command retains its existing empty-value meaning (for example, `thread set --parent ''` detaches); commands that reject empty IDs continue to reject them. Non-empty values shorter than eight characters are rejected. The CLI resolves each prefix through owner capability `id.resolve`; the target request still contains the resolved full ID. An owner without that advertised capability rejects short prefixes with a typed `invalid_argument` naming `id.resolve`, while full IDs continue to work.
+
 Replace example `THREAD` / `NODE` / `RUN` / `TURN` / `EXECUTION` / `MESSAGE` / `ATTACHMENT` with returned IDs. A Run is an execution lifetime; a Turn is an instruction/response unit; execution identifies a shell; node identifies immutable history; message tracks acceptance/assignment.
 
 ## JSON, exit codes, and replay
@@ -1078,7 +1082,9 @@ there can be at most 16 pending duties per recipient Thread. The 17th send/ask i
 `--text-stdin`. It must be applied and still pending. `message get` exposes
 `expect_reply`, `reply` (state and optional timestamp, node, sender), or
 `reply_to` for a delivered reply; it no longer borrows a Turn's end message.
-Use `history get --node REPLY_NODE_ID` for the body.
+Use `history get --node REPLY_NODE_ID` for the body. If `message reply` gets
+`target_unavailable` for an unknown ID, `error.details.pending_duty_ids` lists
+up to 16 duties in the caller Thread (when the CLI has Thread context).
 
 `wait reply_received` uses a JSON condition
 `{"type":"reply_received","message_id":"MESSAGE_ID"}`. Example:
