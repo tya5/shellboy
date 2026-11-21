@@ -2392,13 +2392,14 @@ mod message_acknowledgement_tests {
             "credentials.set",
             "credentials.clear",
             "connection.test",
+            "id.resolve",
         ] {
             assert!(
                 results.contains_key(name),
                 "missing result schema for {name}"
             );
         }
-        assert_eq!(results.len(), 63);
+        assert_eq!(results.len(), 64);
         for name in ["thread.create", "config.set", "connection.test"] {
             assert_eq!(
                 results[name],

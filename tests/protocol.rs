@@ -1225,19 +1225,22 @@ fn protocol_v6_handshake_and_typed_results_cover_existing_wire_modes() {
     let welcome = serde_json::json!({
         "protocol_version": PROTOCOL_VERSION,
         "instance_id": "i",
-        "capabilities": ["events.reasoning_activity"],
+        "capabilities": ["events.reasoning_activity", "id.resolve"],
         "future_metadata": true,
     });
     let decoded: shellboy::ipc::Welcome = serde_json::from_value(welcome).unwrap();
     assert_eq!(decoded.protocol_version, PROTOCOL_VERSION);
-    assert_eq!(decoded.capabilities, ["events.reasoning_activity"]);
+    assert_eq!(
+        decoded.capabilities,
+        ["events.reasoning_activity", "id.resolve"]
+    );
     let schema: Value = serde_json::from_str(&shellboy::protocol::schema_json()).unwrap();
     assert_eq!(schema["protocol_version"], PROTOCOL_VERSION);
     assert_eq!(
         schema["capabilities"],
-        serde_json::json!(["events.reasoning_activity"])
+        serde_json::json!(["events.reasoning_activity", "id.resolve"])
     );
-    assert_eq!(schema["operation_results"].as_object().unwrap().len(), 63);
+    assert_eq!(schema["operation_results"].as_object().unwrap().len(), 64);
     for operation in ["status", "shell.list", "usage.get", "config.get"] {
         assert_ne!(schema["operation_results"][operation], Value::Bool(true));
     }

@@ -50,25 +50,25 @@ async fn bad_cursor_does_not_block_owner_good_conversation_or_cli_deletion() {
     let cwd = root.path().to_string_lossy().into_owned();
     owner.db.call(move|db| {
         let tx=db.transaction()?;
-        for id in ["bad","good","incomplete"] {
+        for id in ["baa00000-0000-4000-8000-000000000001","600d0000-0000-4000-8000-000000000002","1c0a0000-0000-4000-8000-000000000003"] {
             tx.execute("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at) VALUES(?1,?1,?2,?3,'p','m','old')",rusqlite::params![id,cwd,format!("{cwd}/AGENTS.md")])?;
             tx.execute("INSERT INTO run(id,thread_id,state,created_at) VALUES(?1,?1,'live','old')",[id])?;
             tx.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at) VALUES(?1,?1,?1,'running','old')",[id])?;
             tx.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at) VALUES(?1,?1,0,0,'p','m',0,'completed','{}','old')",[id])?;
             tx.execute("INSERT INTO tool_group VALUES(?1,?1,?1,'running','old')",[id])?;
             let call=json!({"type":"function_call","call_id":format!("call-{id}"),"name":"shell","arguments":"{}"});
-            if id=="incomplete" {
+            if id=="1c0a0000-0000-4000-8000-000000000003" {
                 history::append_node(&tx,id,"before-incomplete",None,"user",&json!({"role":"user","content":[{"type":"input_text","text":"complete earlier request"}]}),"old")?;
             }
             let source=format!("source-{id}");
             history::append_node(&tx,id,&source,Some(id),"assistant_response",&json!({"output":[call],"group_id":id}),"old")?;
-            if id!="incomplete" {
+            if id!="1c0a0000-0000-4000-8000-000000000003" {
             tx.execute("INSERT INTO output_item(attempt_id,ordinal,item_type,status,payload_json,node_id) VALUES(?1,0,'function_call','completed',?2,?3)",rusqlite::params![id,call.to_string(),source])?;
             }
             tx.execute("INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state) VALUES(?1,?2,0,'shell','{}','pending')",rusqlite::params![id,format!("call-{id}")])?;
         }
-        history::append_node(&tx,"bad","bad-tail",None,"interruption_context",&json!({"text":"old audit"}),"old")?;
-        tx.execute("UPDATE thread SET cursor_node_id='source-bad' WHERE id='bad'",[])?;
+        history::append_node(&tx,"baa00000-0000-4000-8000-000000000001","bad-tail",None,"interruption_context",&json!({"text":"old audit"}),"old")?;
+        tx.execute("UPDATE thread SET cursor_node_id='source-baa00000-0000-4000-8000-000000000001' WHERE id='baa00000-0000-4000-8000-000000000001'",[])?;
         tx.commit()?;Ok(())
     }).await.unwrap();
     // Closing only the store preserves the deliberately interrupted durable fixture.
@@ -77,12 +77,12 @@ async fn bad_cursor_does_not_block_owner_good_conversation_or_cli_deletion() {
         .await
         .expect("one corrupt Thread must not block startup");
     owner.db.call(|db| {
-        assert_eq!(db.query_row("SELECT cursor_node_id FROM thread WHERE id='bad'",[],|r|r.get::<_,String>(0))?,"source-bad");
-        assert_eq!(db.query_row("SELECT count(*) FROM thread_path WHERE thread_id='bad'",[],|r|r.get::<_,i64>(0))?,2);
-        assert_eq!(db.query_row("SELECT count(*) FROM tool_result WHERE group_id='bad'",[],|r|r.get::<_,i64>(0))?,0);
-        assert_eq!(db.query_row("SELECT state FROM tool_group WHERE id='bad'",[],|r|r.get::<_,String>(0))?,"running");
-        assert_eq!(db.query_row("SELECT count(*) FROM tool_result WHERE group_id='good'",[],|r|r.get::<_,i64>(0))?,1);
-        assert!(db.query_row("SELECT EXISTS(SELECT 1 FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id='good' AND n.kind='interruption_context')",[],|r|r.get::<_,bool>(0))?);
+        assert_eq!(db.query_row("SELECT cursor_node_id FROM thread WHERE id='baa00000-0000-4000-8000-000000000001'",[],|r|r.get::<_,String>(0))?,"source-baa00000-0000-4000-8000-000000000001");
+        assert_eq!(db.query_row("SELECT count(*) FROM thread_path WHERE thread_id='baa00000-0000-4000-8000-000000000001'",[],|r|r.get::<_,i64>(0))?,2);
+        assert_eq!(db.query_row("SELECT count(*) FROM tool_result WHERE group_id='baa00000-0000-4000-8000-000000000001'",[],|r|r.get::<_,i64>(0))?,0);
+        assert_eq!(db.query_row("SELECT state FROM tool_group WHERE id='baa00000-0000-4000-8000-000000000001'",[],|r|r.get::<_,String>(0))?,"running");
+        assert_eq!(db.query_row("SELECT count(*) FROM tool_result WHERE group_id='600d0000-0000-4000-8000-000000000002'",[],|r|r.get::<_,i64>(0))?,1);
+        assert!(db.query_row("SELECT EXISTS(SELECT 1 FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id='600d0000-0000-4000-8000-000000000002' AND n.kind='interruption_context')",[],|r|r.get::<_,bool>(0))?);
         Ok(())
     }).await.unwrap();
     let control = Control::new(&owner, root.path().into());
@@ -95,7 +95,7 @@ async fn bad_cursor_does_not_block_owner_good_conversation_or_cli_deletion() {
             .as_array()
             .unwrap()
             .iter()
-            .any(|item| item["thread_id"] == "bad")
+            .any(|item| item["thread_id"] == "baa00000-0000-4000-8000-000000000001")
     );
     let broken = cli(
         &directory,
@@ -103,7 +103,7 @@ async fn bad_cursor_does_not_block_owner_good_conversation_or_cli_deletion() {
             "message",
             "send",
             "--thread",
-            "incomplete",
+            "1c0a0000-0000-4000-8000-000000000003",
             "--text",
             "show local failure",
         ],
@@ -137,13 +137,13 @@ async fn bad_cursor_does_not_block_owner_good_conversation_or_cli_deletion() {
             "thread",
             "fork",
             "--thread",
-            "incomplete",
+            "1c0a0000-0000-4000-8000-000000000003",
             "--node",
             "before-incomplete",
         ],
     )
     .await;
-    assert_ne!(forked["thread_id"], "incomplete");
+    assert_ne!(forked["thread_id"], "1c0a0000-0000-4000-8000-000000000003");
     let model = tokio::spawn(async move {
         let (mut socket, _) = listener.accept().await.unwrap();
         let mut bytes = Vec::new();
@@ -177,7 +177,7 @@ async fn bad_cursor_does_not_block_owner_good_conversation_or_cli_deletion() {
             "message",
             "send",
             "--thread",
-            "good",
+            "600d0000-0000-4000-8000-000000000002",
             "--text",
             "continue good conversation",
         ],
@@ -193,7 +193,10 @@ async fn bad_cursor_does_not_block_owner_good_conversation_or_cli_deletion() {
         .position(|item| item["type"] == "function_call")
         .unwrap();
     assert_eq!(input[call + 1]["type"], "function_call_output");
-    assert_eq!(input[call + 1]["call_id"], "call-good");
+    assert_eq!(
+        input[call + 1]["call_id"],
+        "call-600d0000-0000-4000-8000-000000000002"
+    );
     let run = accepted["run_id"].as_str().unwrap().to_owned();
     crate::test_watchdog::watchdog("tests/tool_repair_isolation.rs: bad_cursor_does_not_block_owner_good_conversation_or_cli_deletion", async {
         loop {
@@ -218,12 +221,21 @@ async fn bad_cursor_does_not_block_owner_good_conversation_or_cli_deletion() {
     })
     .await
     .unwrap();
-    cli(&directory, &["thread", "delete", "--thread", "bad"]).await;
+    cli(
+        &directory,
+        &[
+            "thread",
+            "delete",
+            "--thread",
+            "baa00000-0000-4000-8000-000000000001",
+        ],
+    )
+    .await;
     owner
         .db
         .call(|db| {
             assert!(db.query_row(
-                "SELECT deleted_at IS NOT NULL FROM thread WHERE id='bad'",
+                "SELECT deleted_at IS NOT NULL FROM thread WHERE id='baa00000-0000-4000-8000-000000000001'",
                 [],
                 |r| r.get::<_, bool>(0)
             )?);
@@ -242,7 +254,8 @@ async fn bad_cursor_does_not_block_owner_good_conversation_or_cli_deletion() {
     assert!(
         logs.lines()
             .filter_map(|line| serde_json::from_str::<Value>(line).ok())
-            .any(|entry| entry["tool_repair"]["thread_id"] == "bad"
+            .any(|entry| entry["tool_repair"]["thread_id"]
+                == "baa00000-0000-4000-8000-000000000001"
                 && entry["tool_repair"]["reason"] == "capture_cursor_mismatch")
     );
 }

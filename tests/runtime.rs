@@ -2312,7 +2312,7 @@ async fn missing_attachment_and_deleted_draft_targets_leave_other_work_alive() {
         .unwrap();
     assert!(!cli.status.success());
     let reply: Value = serde_json::from_slice(&cli.stdout).unwrap();
-    assert_eq!(reply["error"]["code"], "thread_not_found");
+    assert_eq!(reply["error"]["code"], "not_found");
     let args = ThreadCreateArgs {
         agents: None,
         connection: None,
