@@ -384,14 +384,6 @@ impl Fixture {
         }
     }
 
-    async fn assert_no_additional_attempts(&self, expected: usize) {
-        assert_eq!(
-            self.attempts().await.len(),
-            expected,
-            "no model request was admitted beyond the completed retry witness"
-        );
-    }
-
     async fn no_more_requests(&mut self) {
         assert!(self.requests.try_recv().is_err(), "unexpected HTTP replay");
     }
@@ -567,7 +559,7 @@ async fn transient_http_errors_retry_consumed_error_bodies_with_bounded_backoff(
             .await
             .unwrap();
         assert_eq!(recovery_artifacts, 0);
-        fixture.assert_no_additional_attempts(attempts.len()).await;
+        fixture.no_more_requests().await;
         fixture.close().await;
     }
 }
@@ -1711,7 +1703,6 @@ fn retry_attempt_diagnostics(attempts: &[(String, Option<Value>)]) -> String {
                 "classification": {
                     "kind": error.and_then(|value| value.get("kind")),
                     "status": error.and_then(|value| value.get("status")),
-                    "strict_untyped_stream_error_before_done": error.and_then(|value| value.get("strict_untyped_stream_error_before_done")),
                     "stream_provider_status": error.and_then(|value| value.get("stream_provider_status")),
                     "automatic_retry": saved.as_ref().and_then(|value| value.get("automatic_retry")),
                     "automatic_retry_exhausted": saved.as_ref().and_then(|value| value.get("automatic_retry_exhausted")),
@@ -1720,14 +1711,12 @@ fn retry_attempt_diagnostics(attempts: &[(String, Option<Value>)]) -> String {
             })
         })
         .collect();
-    let mut serialized = serde_json::to_string(&json!({
+    serde_json::to_string(&json!({
         "attempt_count": attempts.len(),
         "attempts": evidence,
-        "truncated": attempts.len() > evidence.len(),
+        "omitted_attempt_count": attempts.len().saturating_sub(evidence.len()),
     }))
-    .unwrap();
-    serialized.truncate(4096);
-    serialized
+    .unwrap()
 }
 
 fn fixture_request_log_lines(f: &Fixture) -> usize {

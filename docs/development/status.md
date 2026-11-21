@@ -3,8 +3,10 @@
 ## Core #324 deterministic Ubuntu integration witnesses (candidate; CI pending)
 
 The candidate branch `task/core324-nondeterministic-tests` is based directly on
-`origin/main` at `116e82e5965dbc2c736849659f9f48db21788873`; current candidate SHA is
-`23bd095a19c04d09abf107bb5146a0be0aa5d255` (CI RED; see exact-SHA run 44894914451). The refused-endpoint
+`origin/main` at `116e82e5965dbc2c736849659f9f48db21788873`. The corrected
+candidate `44a072334dcf3a44cc3d135c3d07bcc8eba693b7` passed normal Core CI run
+`44895968872`; the 23bd095a SHA is a historical RED (run `44894914451`), not current.
+The refused-endpoint
 test leaves its loopback port closed for the complete finite retry budget and
 checks the initial attempt plus all eight configured retries, all with zero body
 bytes sent. It makes no later-success claim. The proactive fixture documents
@@ -49,13 +51,14 @@ vary with Body chunking. The chunking fixture change is reverted; the retry test
 its original assertion/verdict. Its assertion message now includes bounded per-attempt
 `model_attempt` state, saved classification fields from `error_json`, and HTTP
 `rate_observation` facts for #329 investigation. The whole-file audit remains intact.
-The attempt diagnostics and restored fixture framing pass focused validation. The
-final-candidate CI RED (run `44894914451`, SHA `23bd095a19c04d09abf107bb5146a0be0aa5d255`)
-was caused by an over-broad shared Fixture helper assertion: it compared every fixture
-HTTP log row to model attempts for only one Turn, rejecting legitimate requests from a
-second Thread or Summary POST. The helper was restored to its prior queue check; both
-reported selectors pass locally again. Updated candidate pending push and exact-SHA CI.
-The full integration suite was not run.
+The attempt diagnostics and restored fixture framing passed focused validation. The
+historical 23bd095a RED (run `44894914451`) came from a shared Fixture helper comparing
+all HTTP request-log rows against attempts for only one Turn; the corrected 44a07233
+source restored the helper and passed CI run `44895968872`. Reviewer follow-up now
+removes nonpersisted evidence fields, bounds diagnostics by whole attempt records,
+restores the original proxy assertion, and corrects this status. Current Reviewer-round
+changes require exact-SHA CI; the 44a07233 green does not transfer. The full integration
+suite was not run.
 
 
 ## #315 Retry after partial output (owner-policy successor)
