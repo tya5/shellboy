@@ -71,6 +71,7 @@ fn protocol_mismatch(client: u32, owner: u32) -> ApiError {
 
 enum ConnectionOutcome {
     Reply(Response<Value>),
+    StopReply(Response<Value>),
     PeerGone,
 }
 
@@ -171,12 +172,15 @@ async fn serve_connection<S: AsyncRead + AsyncWrite + Unpin>(
         ))
     };
     let stopping = |stage, unapplied| {
-        failure(
-            ApiError::new(ErrorCode::AppNotRunning, "Owner IPC transport is stopping"),
-            stage,
-            "transport_stopping",
-            unapplied,
-        )
+        ConnectionOutcome::StopReply(Response::failure(
+            operation_id.clone(),
+            ipc_failure(
+                ApiError::new(ErrorCode::AppNotRunning, "Owner IPC transport is stopping"),
+                stage,
+                "transport_stopping",
+                unapplied,
+            ),
+        ))
     };
     let recovery = request
         .as_ref()
@@ -218,7 +222,9 @@ async fn serve_connection<S: AsyncRead + AsyncWrite + Unpin>(
         dispatched = true;
         let (command, requires_receipt) = recovery.expect("dispatched request has a command");
         let uncertain = |mut outcome: ConnectionOutcome| {
-            if let ConnectionOutcome::Reply(response) = &mut outcome {
+            if let ConnectionOutcome::Reply(response) | ConnectionOutcome::StopReply(response) =
+                &mut outcome
+            {
                 response.error = response
                     .error
                     .take()
@@ -239,8 +245,10 @@ async fn serve_connection<S: AsyncRead + AsyncWrite + Unpin>(
             },
         }
     };
-    let ConnectionOutcome::Reply(response) = outcome else {
-        return Ok(());
+    let (response, stop_reply) = match outcome {
+        ConnectionOutcome::Reply(response) => (response, false),
+        ConnectionOutcome::StopReply(response) => (response, true),
+        ConnectionOutcome::PeerGone => return Ok(()),
     };
     // End the observation, not an accepted mutation. The shutdown completion
     // guard still keeps Control from stopping transport before the final frame.
@@ -259,7 +267,16 @@ async fn serve_connection<S: AsyncRead + AsyncWrite + Unpin>(
             encode_frame(&Response::<Value>::failure(operation_id, error))?
         }
     };
-    write_encoded_frame(&mut stream, &bytes).await?;
+    let write = write_encoded_frame(&mut stream, &bytes);
+    if stop_reply {
+        // Stop was already selected. Attempt delivery once without waiting
+        // for a peer that cannot take the complete frame now.
+        return futures_util::FutureExt::now_or_never(write).unwrap_or(Ok(()));
+    }
+    tokio::select! {
+        result = write => result?,
+        _ = stop.cancelled() => return Ok(()),
+    }
     // A successful write/flush does not prove the peer consumed the reply,
     // especially on a Windows named pipe. The client closes after reading it.
     loop {
@@ -1426,6 +1443,43 @@ mod frame_delivery_tests {
                 task.await.unwrap().unwrap();
                 assert!(invocation.disconnected.is_cancelled());
             }
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn explicit_stop_releases_connection_with_blocked_final_write() {
+        crate::test_watchdog::watchdog("IPC stop during final write", async {
+            let (mut client, stream) = tokio::io::duplex(4096);
+            let (requests, mut incoming) = mpsc::channel(1);
+            let stop = CancellationToken::new();
+            let task = tokio::spawn(serve_connection(
+                stream,
+                "instance".into(),
+                requests,
+                stop.clone(),
+                server::WorkAdmission::new(),
+            ));
+            send_test_frame(&mut client, &status_frame()).await;
+            let invocation = incoming.recv().await.unwrap();
+            invocation
+                .reply
+                .send(Response::success(
+                    invocation.request.operation_id,
+                    Value::String("x".repeat(8192)),
+                ))
+                .unwrap();
+
+            // Observe that delivery started, but leave more bytes unread than
+            // the duplex buffer can hold so delivery cannot finish.
+            let frame_len = client.read_u32().await.unwrap() as usize;
+            assert!(frame_len > 4096);
+            stop.cancel();
+            task.await.unwrap().unwrap();
+            let mut tail = Vec::new();
+            client.read_to_end(&mut tail).await.unwrap();
+            assert!(tail.len() < frame_len);
         })
         .await
         .unwrap();
