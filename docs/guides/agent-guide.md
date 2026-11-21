@@ -728,7 +728,7 @@ A running owner can register one shell-text command, inspect metadata/latest out
 Before adding schedules, configure a positive measured `schedule.max_sleep_seconds` with `shellboy config get` followed by `shellboy config set --expected-hash HASH --set schedule.max_sleep_seconds=SECONDS`. It hot-reloads and caps wall-clock recheck delay. No shipped default is chosen until the required energy measurements are complete.
 
 ```sh
-shellboy schedule add --thread THREAD_ID --cron '*/15 * * * *' -- 'shellboy message send --thread THREAD_ID --text "check the queue"'
+shellboy schedule add --thread THREAD_ID --cron '*/15 * * * *' -- 'if [ -f alert.flag ]; then shellboy message send --thread "$SHELLBOY_THREAD_ID" --text "The scheduled check found an alert"; fi'
 shellboy schedule add --thread THREAD_ID --in 10m -- 'printf %s done'
 shellboy schedule add --thread THREAD_ID --at 2026-11-20T14:00:00Z --cwd /path/to/project -- 'git status --short'
 shellboy schedule list --thread THREAD_ID
