@@ -351,7 +351,7 @@ async fn one_provider_invocation(
         );
         if task == "task 1" {
             report = Some(
-                prepared_report_from_incoming(&control, &turn, &next, tokens)
+                prepared_report_from_incoming(&control, &turn, 1, &next, tokens)
                     .await
                     .owner,
             );

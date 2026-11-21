@@ -8,9 +8,13 @@ test leaves its loopback port closed for the complete finite retry budget and
 checks the initial attempt plus all eight configured retries, all with zero body
 bytes sent. It makes no later-success claim. The proactive fixture documents
 that proxy arrival orders only against the committed attempt admission, not later
-attempt state; report capture selects the latest admitted row by named Turn and
-attempt order. Its spill-only case checks the durable summary-usage ledger rather
-than a proxy queue snapshot. The U2 Stop test records the exact Run's model-attempt
+attempt state; report capture selects the k-th committed `model_attempt` row for
+an accepted Turn by the test-owned Ordinary-request ordinal. The Driver awaits
+one request attempt through response handling before admitting the next; the
+proxy body carries no attempt ID. Summary absence uses the persisted per-Thread
+Summary-usage `requests` ledger; `UsageLedger::begin` commits it before the Summary
+POST (`src/compaction/usage.rs:151-160`, `src/compaction/single_request.rs:599-602`),
+with a comment that these witnesses move to the unified #328 request pipeline. The U2 Stop test records the exact Run's model-attempt
 count at RunStop acknowledgement and compares it after that Run settles; `control/driver/request.rs:116-135` awaits durable attempt admission
 (the `model_attempt` insert at line 408) before `control/driver.rs:390-399`
 starts the HTTP request. The test therefore uses the existing DB admission record,
@@ -24,11 +28,13 @@ already-admitted inbox entries are dropped. Its report evidence is bound to the
 Turn returned by that exact `send_accepted`. On the current candidate, pinned
 formatting and `cargo check --tests --locked` passed. All three registered focused
 selectors passed individually: refused finite-budget exhaustion, typed/nontransient
-terminal retry refusal, and U2 stopped-spill adoption. The targeted validation-document role test passed. The
-full scripts test suite passed 230 tests with one skipped; all-target Clippy and
-`python3 scripts/check-test-layout.py` passed. Historical #281 Ubuntu REDs and
-attempt-2 U2 RED remain tied to their original SHA/attempt; full integration CI
-on this current revision remains pending.
+terminal retry refusal, U2 stopped-spill adoption, plus the later failing-Run identity
+case and the affected proactive ordinal fixtures. Pinned formatting, test compilation,
+all-target Clippy and `python3 scripts/check-test-layout.py` pass on current local
+source. Exact-SHA CI run `44884264205` is RED on parent `abc5756f7fb5a387c9c4a51082fd4e53666a0f0e`
+in `legal_new_run_reopens_provider_failure_memory`; its bad independent-Run equality
+was replaced locally with record/request-owned identity. The latest whole-file audit
+is not yet pushed or CI-qualified; no full integration suite was run.
 
 
 ## #315 Retry after partial output (owner-policy successor)

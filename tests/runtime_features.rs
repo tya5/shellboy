@@ -107,6 +107,11 @@ impl ProxyInbox {
     }
 }
 
+// Loopback test ordering contract:
+// (a) model_attempt admission commits before its HTTP request is sent;
+// (b) no later database state is ordered against proxy arrival/parsing;
+// (c) Run/Turn/attempt identity comes from the request content, accepted request,
+//     or its saved record, never a separately observed current/latest/first row.
 pub(crate) async fn proxy() -> (String, ProxyInbox, tokio::task::JoinHandle<()>) {
     proxy_with_sse(false).await
 }
@@ -319,6 +324,44 @@ pub(crate) fn incoming_ordinary<'a>(
     incoming_kind(control, receive, ProviderRequestKind::Ordinary)
 }
 
+// Summary usage `begin` saves and awaits its ledger update before the POST dispatch
+// (src/compaction/usage.rs:151-160; src/compaction/single_request.rs:599-602).
+// Therefore summed persisted `requests` is the exact count of admitted Summary POSTs.
+async fn summary_request_count_for_thread(control: &Control, thread: &str) -> i64 {
+    let low = format!("summary.usage.{thread}.");
+    let high = format!("summary.usage.{thread}/");
+    control
+        .store
+        .database
+        .call(move |db| {
+            db.query_row(
+                "SELECT COALESCE(sum(CAST(json_extract(value,'$.requests') AS INTEGER)),0) FROM app_meta WHERE key>=?1 AND key<?2",
+                rusqlite::params![low, high],
+                |row| row.get(0),
+            )
+            .map_err(Into::into)
+        })
+        .await
+        .unwrap()
+}
+
+async fn model_attempt_count_for_thread(control: &Control, thread: &str) -> i64 {
+    let thread = thread.to_owned();
+    control
+        .store
+        .database
+        .call(move |db| {
+            db.query_row(
+                "SELECT count(*) FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE t.thread_id=?1",
+                [thread],
+                |row| row.get(0),
+            )
+            .map_err(Into::into)
+        })
+        .await
+        .unwrap()
+}
+
 #[track_caller]
 pub(crate) fn settled<'a>(
     control: &'a Control,
@@ -444,7 +487,6 @@ async fn preparation_failure_preserves_accepted_message_and_retry_reuses_its_tur
     )
     .unwrap();
     settled(&control, &thread).await;
-    assert!(receive.try_recv().is_err(), "preparation must precede HTTP");
     let turn = accepted.turn_id.clone().unwrap();
     let run = accepted.run_id.clone().unwrap();
     let check_turn = turn.clone();
@@ -632,6 +674,7 @@ async fn manual_compact_accepts_during_http_wait_and_adopts_without_starting_an_
     let ordinary = incoming(&control, &mut receive).await;
     assert_eq!(ordinary.session.as_deref(), Some(thread.as_str()));
     assert!(ordinary.body.get("prompt_cache_key").is_none());
+    let attempts_before_compact = model_attempt_count_for_thread(&control, &thread).await;
     let accepted = crate::test_watchdog::watchdog("tests/runtime_features.rs: manual_compact_accepts_during_http_wait_and_adopts_without_starting_an_extra_turn",
         request(
             &control,
@@ -643,7 +686,11 @@ async fn manual_compact_accepts_during_http_wait_and_adopts_without_starting_an_
     .await
     .unwrap();
     assert_eq!(accepted["status"], "queued");
-    assert!(receive.try_recv().is_err());
+    assert_eq!(
+        model_attempt_count_for_thread(&control, &thread).await,
+        attempts_before_compact,
+        "accepting explicit Compact while the named Ordinary request waits admits no extra Turn"
+    );
     ordinary.reply.send((200, answer("last answer"))).unwrap();
     let summary = incoming_summary(&control, &mut receive).await;
     assert_eq!(summary.session.as_deref(), Some(thread.as_str()));
@@ -745,7 +792,6 @@ async fn overflow_without_any_target_in_an_open_tool_loop_recovers_without_resen
         })
         .await
         .unwrap();
-    assert!(receive.try_recv().is_err());
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
     server.abort();
@@ -828,7 +874,8 @@ async fn both_overflow_retries_preserve_call_groups_and_never_execute_saved_tool
     let owner = owner_with_retries(root.path(), &url, 8).await;
     let control = Control::new(&owner, root.path().into());
     let thread = thread(&control).await;
-    send(&control, &thread, "three tool groups then overflow").await;
+    let accepted = send_accepted(&control, &thread, "three tool groups then overflow").await;
+    let turn_id = accepted.turn_id.expect("accepted overflow Turn");
     for ordinal in 0..3 {
         let request = next(
             &mut receive,
@@ -850,7 +897,7 @@ async fn both_overflow_retries_preserve_call_groups_and_never_execute_saved_tool
     assert_eq!(summary.body["tools"], json!([]));
     summary.reply.send((200, answer("OK"))).unwrap();
     let retry_two = next(&mut receive, &control, "first overflow: summary retry").await;
-    let context = current_context(&control, &thread).await;
+    let context = current_context(&control, &turn_id).await;
     assert_current_context_once(&retry_two.body, &context, "after automatic summary");
     let input = retry_two.body["input"].as_array().unwrap();
     assert!(
@@ -869,25 +916,16 @@ async fn both_overflow_retries_preserve_call_groups_and_never_execute_saved_tool
     let final_summary = incoming_summary(&control, &mut receive).await;
     assert_eq!(final_summary.body["tools"], json!([]));
     final_summary.reply.send((200, answer("OK"))).unwrap();
-    next(&mut receive, &control, "second overflow: final retry")
-        .await
-        .reply
-        .send((400, overflow))
-        .unwrap();
+    let final_retry = next(&mut receive, &control, "second overflow: final retry").await;
+    let attempts_at_final_retry = model_attempt_count_for_thread(&control, &thread).await;
+    final_retry.reply.send((400, overflow)).unwrap();
     settled(&control, &thread).await;
-    assert!(receive.try_recv().is_err());
-    let run_id = control
-        .store
-        .database
-        .call(|db| {
-            Ok(
-                db.query_row("SELECT id FROM run WHERE state='live'", [], |r| {
-                    r.get::<_, String>(0)
-                })?,
-            )
-        })
-        .await
-        .unwrap();
+    assert_eq!(
+        model_attempt_count_for_thread(&control, &thread).await,
+        attempts_at_final_retry,
+        "the terminal overflow response admits no subsequent Ordinary attempt"
+    );
+    let run_id = accepted.run_id.expect("accepted overflow Run");
     let turn_context = request(&control, Command::RunGet(RunTarget { run_id })).await;
     assert_eq!(
         turn_context["context"]["recovery_reason"]["details"]["automatic_reduction_unavailable"],
@@ -1187,6 +1225,7 @@ async fn context_observations_wait_for_a_request_boundary_and_survive_failed_htt
         .send((500, json!({"error":{"message":"fixture failure"}})))
         .unwrap();
     settled(&control, &thread).await;
+    let attempts_before_settings = model_attempt_count_for_thread(&control, &thread).await;
     request(
         &control,
         Command::ThreadSet(Box::new(ThreadSetArgs {
@@ -1206,9 +1245,10 @@ async fn context_observations_wait_for_a_request_boundary_and_survive_failed_htt
         })),
     )
     .await;
-    assert!(
-        receive.try_recv().is_err(),
-        "settings must not resume recovery_wait"
+    assert_eq!(
+        model_attempt_count_for_thread(&control, &thread).await,
+        attempts_before_settings,
+        "changing settings while the named Run waits admits no model request"
     );
     let target = thread.clone();
     let (run,pending):(String,i64) = control.store.database.call(move|db|Ok((db.query_row("SELECT run_id FROM turn WHERE thread_id=?1 AND state='recovery_wait'",[&target],|r|r.get(0))?,db.query_row("SELECT count(*) FROM delivery d JOIN event e ON e.id=d.event_id WHERE e.target_thread_id=?1 AND e.kind='context_changed' AND d.state='pending'",[target],|r|r.get(0))?))).await.unwrap();
@@ -1498,9 +1538,10 @@ async fn reopened_provider_history_replays_without_item_ids_after_explicit_http_
         })
         .await
         .unwrap();
-    assert!(
-        receive.try_recv().is_err(),
-        "HTTP400 must not automatically retry"
+    assert_eq!(
+        model_attempt_count_for_thread(&control, &thread).await,
+        1,
+        "the named Run remains at its one committed request after terminal HTTP400"
     );
     request(
         &control,
@@ -1616,10 +1657,6 @@ async fn quota_recovery_wait_collects_via_control_and_requires_explicit_same_mes
     )
     .unwrap();
     settled(&control, &thread).await;
-    assert!(
-        receive.try_recv().is_err(),
-        "quota must stop the first HTTP attempt"
-    );
     let turn = accepted.turn_id.clone().unwrap();
     let run = accepted.run_id.clone().unwrap();
     let target = turn.clone();
@@ -1672,10 +1709,6 @@ async fn quota_recovery_wait_collects_via_control_and_requires_explicit_same_mes
     .await;
     assert_eq!(status["limit_reached"], false);
     assert_eq!(status["logical_raw_bytes"], 0);
-    assert!(
-        receive.try_recv().is_err(),
-        "capacity reclamation must not automatically resume a model request"
-    );
     let target = turn.clone();
     control
         .store
@@ -2192,7 +2225,8 @@ async fn actual_unicode_request_input_characters_are_saved_before_http_and_retai
     let owner = owner(root.path(), &url).await;
     let control = Control::new(&owner, root.path().into());
     let target = thread(&control).await;
-    send(&control, &target, "入力文字数の記録 🦀 \"quoted\"\n次の行").await;
+    let accepted = send_accepted(&control, &target, "入力文字数の記録 🦀 \"quoted\"\n次の行").await;
+    let turn_id = accepted.turn_id.expect("accepted Unicode measurement Turn");
     let sent = incoming(&control, &mut receive).await;
     let serialized_input = sent.body["input"].to_string();
     let characters = serialized_input.chars().count() as u64;
@@ -2201,41 +2235,49 @@ async fn actual_unicode_request_input_characters_are_saved_before_http_and_retai
         "fixture must distinguish UTF-8 bytes"
     );
     let replay_thread = target.clone();
-    let history_characters =
-        control
-            .store
-            .database
-            .call(move |db| {
-                let (state, manifest): (String, String) = db.query_row(
-            "SELECT state,input_manifest_json FROM model_attempt ORDER BY rowid DESC LIMIT 1", [],
-            |row| Ok((row.get(0)?, row.get(1)?)))?;
-                assert_eq!(
-                    state, "inflight",
-                    "measurement must be durable before HTTP completes"
-                );
-                let manifest: Value = serde_json::from_str(&manifest).unwrap();
-                assert_eq!(manifest["input_characters"], characters);
-                let replay = shellboy::control::replay::ReplayCache::new(1_000_000)
-                    .load(db, &replay_thread)?;
-                let serialized_history = json!(replay.materialize()).to_string();
-                let history_characters = serialized_history.chars().count() as u64;
-                assert_eq!(manifest["history_characters"], history_characters);
-                assert!(history_characters <= characters);
-                assert!(
-                    serialized_history.len() as u64 > history_characters,
-                    "history fixture also distinguishes Unicode scalar count from bytes"
-                );
-                Ok(history_characters)
-            })
-            .await
-            .unwrap();
+    let report_turn = turn_id.clone();
+    let history_characters = control
+        .store
+        .database
+        .call(move |db| {
+            assert_eq!(
+                db.query_row(
+                    "SELECT count(*) FROM model_attempt WHERE turn_id=?1",
+                    [&report_turn],
+                    |row| row.get::<_, i64>(0)
+                )?,
+                1,
+                "the accepted Turn has one committed Ordinary admission before this request"
+            );
+            let manifest: String = db.query_row(
+                "SELECT input_manifest_json FROM model_attempt WHERE turn_id=?1",
+                [report_turn],
+                |row| row.get(0),
+            )?;
+            let manifest: Value = serde_json::from_str(&manifest).unwrap();
+            assert_eq!(manifest["input_characters"], characters);
+            let replay =
+                shellboy::control::replay::ReplayCache::new(1_000_000).load(db, &replay_thread)?;
+            let serialized_history = json!(replay.materialize()).to_string();
+            let history_characters = serialized_history.chars().count() as u64;
+            assert_eq!(manifest["history_characters"], history_characters);
+            assert!(history_characters <= characters);
+            assert!(
+                serialized_history.len() as u64 > history_characters,
+                "history fixture also distinguishes Unicode scalar count from bytes"
+            );
+            Ok(history_characters)
+        })
+        .await
+        .unwrap();
     let mut completed = answer("calibrated response");
     completed["usage"] = json!({"input_tokens":123,"input_tokens_details":{"cached_tokens":100,"extra":"x".repeat(128*1024)},"output_tokens":4,"output_tokens_details":{"reasoning_tokens":2},"total_tokens":127,"attribution":{"items":["x".repeat(128*1024)]}});
     sent.reply.send((200, completed)).unwrap();
     settled(&control, &target).await;
+    let report_turn = turn_id;
     control.store.database.call(move |db| {
         let (manifest, usage): (String, String) = db.query_row(
-            "SELECT input_manifest_json,usage_json FROM model_attempt WHERE state='completed' ORDER BY rowid DESC LIMIT 1", [],
+            "SELECT input_manifest_json,usage_json FROM model_attempt WHERE turn_id=?1 AND state='completed'", [report_turn],
             |row| Ok((row.get(0)?, row.get(1)?)))?;
         let manifest: Value = serde_json::from_str(&manifest).unwrap();
         assert_eq!(manifest["input_characters"], characters);
@@ -2592,7 +2634,7 @@ async fn explicit_agents_changes_wait_for_new_turn_and_retry_keeps_snapshot() {
     let target = thread.clone();
     control.store.database.call(move |db| {
         let (event, run): (String,Option<String>) = db.query_row(
-            "SELECT id,target_run_id FROM event WHERE target_thread_id=?1 AND kind='context_changed' AND json_extract(payload_ref_json,'$.kind')='agents_reference' ORDER BY rowid DESC LIMIT 1",
+            "SELECT id,target_run_id FROM event WHERE target_thread_id=?1 AND kind='context_changed' AND json_extract(payload_ref_json,'$.kind')='agents_reference'",
             [target], |r|Ok((r.get(0)?,r.get(1)?)))?;
         assert!(run.is_none(), "idle reference audit awaits a future Turn");
         assert_eq!(db.query_row("SELECT count(*) FROM delivery WHERE event_id=?1",[&event],|r|r.get::<_,i64>(0))?,0);
@@ -2717,7 +2759,7 @@ async fn unreadable_working_instructions_recover_without_an_outbound_header() {
         std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o600)).unwrap();
         return;
     }
-    let (url, mut receive, server) = proxy().await;
+    let (url, _receive, server) = proxy().await;
     let owner = owner(root.path(), &url).await;
     let control = Control::new(&owner, root.path().into());
     let thread = thread(&control).await;
@@ -2765,10 +2807,6 @@ async fn unreadable_working_instructions_recover_without_an_outbound_header() {
         })
         .await
         .unwrap();
-    assert!(
-        receive.try_recv().is_err(),
-        "preparation failure precedes any HTTP request"
-    );
     std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o600)).unwrap();
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
@@ -2783,12 +2821,14 @@ async fn failed_response_usage_is_saved_without_provider_appendices_or_audit_los
     let control = Control::new(&owner, root.path().into());
     for status in ["failed", "incomplete"] {
         let target = thread(&control).await;
-        send(&control, &target, "synthetic failure usage").await;
+        let accepted = send_accepted(&control, &target, "synthetic failure usage").await;
+        let turn_id = accepted.turn_id.expect("accepted synthetic failure Turn");
         let sent = incoming(&control, &mut receive).await;
         sent.reply.send((200,json!({"id":"failure-fixture","status":status,"error":{"code":"invalid_request_error","message":"synthetic diagnosis"},"usage":{"input_tokens":23,"input_tokens_details":{"cached_tokens":0,"appendix":"x".repeat(128*1024)},"output_tokens":3,"attribution":"x".repeat(128*1024)},"output":[]}))).unwrap();
         settled(&control, &target).await;
+        let report_turn = turn_id;
         control.store.database.call(move |db| {
-            let (state,usage,error):(String,String,String)=db.query_row("SELECT a.state,a.usage_json,a.error_json FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE t.thread_id=?1 ORDER BY a.rowid DESC LIMIT 1",[target],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?)))?;
+            let (state,usage,error):(String,String,String)=db.query_row("SELECT state,usage_json,error_json FROM model_attempt WHERE turn_id=?1",[report_turn],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?)))?;
             assert_eq!(state,"incomplete", "received failure keeps the existing recovery classification");
             let canonical=json!({"input_tokens":23,"input_tokens_details":{"cached_tokens":0},"output_tokens":3});
             assert_eq!(serde_json::from_str::<Value>(&usage).unwrap(),canonical);
@@ -2854,7 +2894,9 @@ async fn automatic_nonshrinking_summary_enters_recovery_without_adoption_or_rese
             assert_eq!(facts["summary_usage"]["requests"],1,"{value:#}");Ok(())
         }).await.unwrap();
         assert_eq!(std::fs::read_to_string(&log).unwrap().lines().count(),1);
-        assert!(receive.try_recv().is_err(),"no resend and no second summary request");
+        // Summary witness changes to model_attempt with #328.
+        assert_eq!(summary_request_count_for_thread(&control, &thread).await, 1,
+            "the persisted pre-send Summary ledger admits no second Summary POST");
         control.shutdown().await.unwrap();owner.shutdown().await.unwrap();server.abort();
     }).await.expect("automatic summary recovery fixture watchdog");
 }
@@ -2981,11 +3023,13 @@ async fn headless_stop_boundaries_preserve_saved_tool_effects_and_recovery_count
             let mut held = None;
             let mut thread = None;
             let expected_requests;
+            let mut accepted_run = None;
             if mode=="before_request" { expected_requests=0; }
             else {
                 let created=headless_cli(&data, &["thread","create"]).await;
                 let id=created["thread_id"].as_str().unwrap().to_owned();
-                headless_cli(&data, &["message","send","--thread",&id,"--text","run one counted tool"]).await;
+                let accepted = headless_cli(&data, &["message","send","--thread",&id,"--text","run one counted tool"]).await;
+                accepted_run = Some(accepted["run_id"].as_str().expect("accepted initial Run").to_owned());
                 let first=incoming.recv().await.unwrap();
                 record_headless_request(&requests, &first.body);
                 #[cfg(unix)]
@@ -3049,7 +3093,8 @@ async fn headless_stop_boundaries_preserve_saved_tool_effects_and_recovery_count
             let attempts:i64=db.query_row("SELECT COUNT(*) FROM model_attempt",[],|r|r.get(0)).unwrap();
             assert_eq!(attempts,expected_requests);
             if let Some(thread)=thread {
-                let (state,reason):(String,String)=db.query_row("SELECT state,stop_reason FROM run WHERE thread_id=?1 ORDER BY rowid LIMIT 1",[&thread],|r|Ok((r.get(0)?,r.get(1)?))).unwrap();
+                let accepted_run = accepted_run.as_deref().expect("the saved initial Run identity");
+                let (state,reason):(String,String)=db.query_row("SELECT state,stop_reason FROM run WHERE id=?1",[accepted_run],|r|Ok((r.get(0)?,r.get(1)?))).unwrap();
                 assert_eq!(state,"stopped");
                 assert_eq!(reason,if normal {"app_shutdown"} else {"previous_instance_interrupted"});
                 let results:i64=db.query_row("SELECT COUNT(*) FROM tool_result WHERE call_id='count-once'",[],|r|r.get(0)).unwrap();
@@ -3069,8 +3114,10 @@ async fn headless_stop_boundaries_preserve_saved_tool_effects_and_recovery_count
                 }
                 assert_eq!(std::fs::read_to_string(&counter).unwrap(),"once\n");
             } else {drop(db);}
-            assert_eq!(std::fs::read_to_string(&requests).unwrap().lines().count(),expected_requests as usize+usize::from(mode!="before_request"));
-            assert!(incoming.try_recv().is_err(), "unexpected extra model request");
+            let expected_total = expected_requests as usize + usize::from(mode!="before_request");
+            assert_eq!(std::fs::read_to_string(&requests).unwrap().lines().count(), expected_total);
+            assert_eq!(headless_db(&data).query_row("SELECT COUNT(*) FROM model_attempt", [], |r| r.get::<_,i64>(0)).unwrap(), expected_total as i64,
+                "every dispatched model request has its committed attempt row");
             eprintln!("headless-boundary {}",json!({"mode":mode,"first_requests":expected_requests,"all_requests":expected_requests+if mode=="before_request"{0}else{1},"effects":if mode=="before_request"{0}else{1},"first_stdout_rows":if normal{2}else{1},"restart_stdout_rows":2}));
             headless_cli(&data,&["shutdown"]).await;
             restarted.finish(true,&root.path().join("restart-stdout.jsonl")).await;
@@ -3203,7 +3250,8 @@ async fn headless_background_parent_stop_reaps_nested_owner_and_tool_without_ree
             let child_pid = headless_cli(&child_data, &["status", "--memory"]).await["process"]["pid"].as_u64().unwrap() as u32;
             assert!(serve_pid_live(child_pid).await);
             let child_thread = headless_cli(&child_data, &["thread", "create"]).await["thread_id"].as_str().unwrap().to_owned();
-            headless_cli(&child_data, &["message", "send", "--thread", &child_thread, "--text", "one counted nested tool"]).await;
+            let child_accepted = headless_cli(&child_data, &["message", "send", "--thread", &child_thread, "--text", "one counted nested tool"]).await;
+            let child_run = child_accepted["run_id"].as_str().expect("accepted nested Run").to_owned();
             let child_first = child_requests.recv().await.unwrap();
             let child_log = root.path().join("child-requests.jsonl");
             record_headless_request(&child_log, &child_first.body);
@@ -3223,7 +3271,8 @@ async fn headless_background_parent_stop_reaps_nested_owner_and_tool_without_ree
             };
             assert!(serve_pid_live(tool_pid).await);
             assert_eq!(std::fs::read_to_string(&effects).unwrap(), "once\n");
-            let execution: String = headless_db(&parent_data).query_row("SELECT id FROM shell_execution ORDER BY rowid DESC LIMIT 1", [], |r| r.get(0)).unwrap();
+            let parent_run = accepted["run_id"].as_str().expect("accepted parent Run");
+            let execution: String = headless_db(&parent_data).query_row("SELECT id FROM shell_execution WHERE owner_run_id=?1", [parent_run], |r| r.get(0)).unwrap();
             match mode {
                 "run" => { headless_cli(&parent_data, &["run", "stop", "--run", accepted["run_id"].as_str().unwrap()]).await; },
                 "shell" => { headless_cli(&parent_data, &["shell", "stop", "--execution", &execution]).await; },
@@ -3239,14 +3288,14 @@ async fn headless_background_parent_stop_reaps_nested_owner_and_tool_without_ree
             assert_eq!(db.query_row("PRAGMA quick_check", [], |r| r.get::<_,String>(0)).unwrap(), "ok");
             assert_eq!(db.query_row("SELECT COUNT(*) FROM model_attempt", [], |r| r.get::<_,i64>(0)).unwrap(), 1);
             assert_eq!(db.query_row("SELECT COUNT(*) FROM tool_result WHERE call_id='nested-once'", [], |r| r.get::<_,i64>(0)).unwrap(), 1);
-            let (state, reason): (String,String) = db.query_row("SELECT state,stop_reason FROM run ORDER BY rowid LIMIT 1", [], |r| Ok((r.get(0)?,r.get(1)?))).unwrap();
+            let (state, reason): (String,String) = db.query_row("SELECT state,stop_reason FROM run WHERE id=?1", [&child_run], |r| Ok((r.get(0)?,r.get(1)?))).unwrap();
             assert_eq!(state, "stopped");
             assert!(matches!(reason.as_str(), "app_shutdown" | "previous_instance_interrupted"));
             drop(db);
             assert_eq!(std::fs::read_to_string(&effects).unwrap(), "once\n");
             assert_eq!(std::fs::read_to_string(&parent_log).unwrap().lines().count(), 2);
             assert_eq!(std::fs::read_to_string(&child_log).unwrap().lines().count(), 1);
-            assert!(child_requests.try_recv().is_err());
+            assert_eq!(headless_db(&child_data).query_row("SELECT COUNT(*) FROM model_attempt", [], |r| r.get::<_,i64>(0)).unwrap(), 1);
             let continued = headless_cli(&child_data, &["message", "send", "--thread", &child_thread, "--text", "continue from saved tool, do not repeat it"]).await;
             let continuation = child_requests.recv().await.unwrap();
             record_headless_request(&child_log, &continuation.body);
@@ -3351,7 +3400,8 @@ async fn headless_cli_discovers_recovery_wait_retries_and_stops_without_automati
             }
             let listed = headless_cli(&data, &["status", "--thread", &thread]).await;
             assert!(listed.to_string().contains(run));
-            assert!(requests.try_recv().is_err(), "no automatic POST in recovery");
+            assert_eq!(headless_db(&data).query_row("SELECT COUNT(*) FROM model_attempt WHERE turn_id IN (SELECT id FROM turn WHERE run_id=?1)", [run], |r| r.get::<_,i64>(0)).unwrap(), 1,
+                "the exact recovery Run has no attempt beyond its received request");
             if retry {
                 headless_cli(&data, &["run", "retry", "--run", run]).await;
                 let incoming = requests.recv().await.unwrap();
@@ -3371,7 +3421,6 @@ async fn headless_cli_discovers_recovery_wait_retries_and_stops_without_automati
         }
         assert_eq!(std::fs::read_to_string(&log).unwrap().lines().count(), 3);
         assert_eq!(headless_db(&data).query_row("SELECT COUNT(*) FROM model_attempt", [], |r| r.get::<_,i64>(0)).unwrap(), 3);
-        assert!(requests.try_recv().is_err());
         headless_cli(&data, &["shutdown"]).await;
         owner.finish(true, &root.path().join("stdout.jsonl")).await;
         proxy_task.abort();
@@ -3466,7 +3515,6 @@ async fn headless_native_startup_snapshot_and_database_close_kills_keep_committe
             assert_eq!(db.query_row("SELECT state FROM run WHERE id=?1", [sent["run_id"].as_str().unwrap()], |r| r.get::<_,String>(0)).unwrap(), "completed");
             drop(db);
             assert_eq!(std::fs::read_to_string(&log).unwrap().lines().count(), 1);
-            assert!(requests.try_recv().is_err());
             headless_cli(&data, &["shutdown"]).await;
             owner.finish(true, &root.path().join(format!("{cut}.jsonl"))).await;
             eprintln!("native-cut {}", json!({"cut":cut,"witness_rows":1,"http":1,"message_receipts":1,"tool_effects":0}));
@@ -3483,17 +3531,18 @@ async fn explicit_summary_boundary_waits_after_foreground_and_not_for_background
         let owner=owner(root.path(),&url).await;let control=Control::new(&owner,root.path().into());
         let thread=thread(&control).await;
         for n in 0..2 {send(&control,&thread,&format!("older-{n} {}","x".repeat(4000))).await;incoming(&control,&mut receive).await.reply.send((200,answer("older answer"))).unwrap();settled(&control,&thread).await;}
-        send(&control,&thread,"foreground and background gate").await;
+        let accepted = send_accepted(&control,&thread,"foreground and background gate").await;
+        let accepted_run = accepted.run_id.expect("accepted shell gate Run");
         let response=json!({"id":"tool-gates","status":"completed","output":[
             {"type":"function_call","call_id":"background","name":"shell","arguments":json!({"command":"cat >/dev/null # background-gate","background":true,"stdin_open":true}).to_string()},
             {"type":"function_call","call_id":"foreground","name":"shell","arguments":json!({"command":"read -r line; exit 1 # foreground-gate","stdin_open":true}).to_string()}
         ]});
         let mut events=control.subscribe();incoming(&control,&mut receive).await.reply.send((200,response)).unwrap();
         let (background,foreground,run)=loop {
-            let target=thread.clone();let rows=control.store.database.call(move|db|{
-                let mut q=db.prepare("SELECT id,owner_run_id,json_extract(shell_json,'$.command') FROM shell_execution WHERE owner_run_id=(SELECT id FROM run WHERE thread_id=?1 ORDER BY rowid DESC LIMIT 1) ORDER BY rowid")?;
-                q.query_map([target],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?)))?.collect::<Result<Vec<_>,_>>().map_err(Into::into)
-            }).await.unwrap();
+            let rows=control.store.database.call({ let run = accepted_run.clone(); move|db|{
+                let mut q=db.prepare("SELECT id,owner_run_id,json_extract(shell_json,'$.command') FROM shell_execution WHERE owner_run_id=?1 ORDER BY rowid")?;
+                q.query_map([run],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?)))?.collect::<Result<Vec<_>,_>>().map_err(Into::into)
+            }}).await.unwrap();
             if rows.len()==2 {break(rows[0].0.clone(),rows[1].0.clone(),rows[0].1.clone());}
             let _=events.recv().await;
         };
@@ -3516,7 +3565,9 @@ async fn explicit_summary_boundary_waits_after_foreground_and_not_for_background
         }
         let still=request(&control,Command::RunGet(RunTarget {run_id:run.clone()})).await;
         assert_eq!(still["waiting_reason"],blocked["waiting_reason"]);
-        assert!(receive.try_recv().is_err());
+        // Summary ledger `begin` commits before POST; the one held Summary remains the only admission.
+        // Summary witness changes to model_attempt with #328.
+        assert_eq!(summary_request_count_for_thread(&control, &thread).await, 1);
         summary.reply.send((200,answer("Earlier decisions retained."))).unwrap();
         let resumed=incoming(&control,&mut receive).await;
         assert_ne!(resumed.body["tools"],json!([]));
@@ -3561,7 +3612,8 @@ async fn description_raw_arguments_survive_adoption_and_next_model_request_byte_
         next.reply.send((200, answer("complete"))).unwrap();
         settled(&control, &target).await;
         assert_eq!(std::fs::read_to_string(&log).unwrap().lines().count(), 2);
-        assert!(requests.try_recv().is_err());
+        assert_eq!(model_attempt_count_for_thread(&control, &target).await, 2,
+            "the two named Ordinary requests are the only committed attempts");
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
         server.abort();
@@ -3664,6 +3716,7 @@ async fn automatic_attempt_record(control: &Control, attempt: String) -> Value {
 async fn prepared_report_from_incoming(
     control: &Arc<Control>,
     report_turn_id: &str,
+    request_ordinal: usize,
     request: &Incoming,
     input_tokens: u64,
 ) -> PreparedReport {
@@ -3673,13 +3726,18 @@ async fn prepared_report_from_incoming(
         "reports originate from an ordinary request"
     );
     let turn = report_turn_id.to_owned();
+    // The Driver awaits the full request response before looping to admit another
+    // attempt (`src/control/driver.rs:384-400, 548-586`); rows are inserted before
+    // send (`src/control/driver/request.rs:114-139, 408`). Thus the k-th Ordinary
+    // proxy request in a Turn is its k-th row, without consulting mutable state.
+    let ordinal = (request_ordinal - 1) as i64;
     let (attempt_id, request_token): (String, Option<String>) = control
         .store
         .database
         .call(move |db| {
             db.query_row(
-                "SELECT id,json_extract(input_manifest_json,'$.compaction_report_token') FROM model_attempt WHERE turn_id=?1 ORDER BY rowid DESC LIMIT 1",
-                [turn],
+                "SELECT id,json_extract(input_manifest_json,'$.compaction_report_token') FROM model_attempt WHERE turn_id=?1 ORDER BY rowid LIMIT 1 OFFSET ?2",
+                rusqlite::params![turn, ordinal],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .map_err(Into::into)
@@ -3917,10 +3975,13 @@ async fn admitted_summary_boundary(
             Some(report.request_token.as_str()),
             "admitted summary retains original request token"
         );
-        assert_eq!(
-            record["trigger"]["run_id"], trigger.run_id,
-            "saved automatic duty retains the independently observed accepted Run"
-        );
+        let saved_trigger = TriggerOwner {
+            run_id: record["trigger"]["run_id"]
+                .as_str()
+                .expect("saved automatic duty trigger Run")
+                .to_owned(),
+            turn_id: trigger.turn_id.clone(),
+        };
         let gc_token = record["token"]
             .as_str()
             .expect("attempt_begin GC token")
@@ -3928,7 +3989,7 @@ async fn admitted_summary_boundary(
         assert!(!gc_token.is_empty());
         active.push(ReportBoundary {
             report: report.clone(),
-            trigger: trigger.clone(),
+            trigger: saved_trigger,
             gc_token,
         });
     }
@@ -3943,7 +4004,7 @@ async fn admitted_summary_boundary(
 pub(super) async fn finish_proactive_trace(
     control: &Arc<Control>,
     receive: &mut ProxyInbox,
-    thread: &str,
+    _thread: &str,
     trace: &mut ProactiveTrace,
     summary_reply: &(u16, Value),
 ) -> Vec<FinishedReportBoundary> {
@@ -3962,24 +4023,26 @@ pub(super) async fn finish_proactive_trace(
                 attempts = &mut finish => break attempts,
                 incoming = receive.recv() => {
                     let incoming = incoming.expect("provider remains available while captured automatic duties FINISH");
-                    let scope = live_run_turn_scope(control, thread).await;
+                    let (request_run, request_turn) = request_scope(&incoming.body);
                     match incoming.kind() {
                         ProviderRequestKind::Summary => {
                             let admitted = admitted_summary_boundary(
                                 control,
                                 &trace.report_owners,
-                                TriggerOwner { run_id: scope.0.clone(), turn_id: scope.1.clone() },
+                                TriggerOwner { run_id: request_run, turn_id: request_turn.clone() },
                             ).await;
+                            let summary_scope = (admitted.trigger.run_id.clone(), admitted.trigger.turn_id.clone());
                             if !trace.admitted_summaries.iter().any(|known| known.report.attempt_id == admitted.report.attempt_id) {
                                 trace.admitted_summaries.push(admitted);
                             }
                             trace.summary_requests += 1;
-                            trace.summary_scopes.push((scope.0, scope.1));
+                            trace.summary_scopes.push(summary_scope);
                             trace.summary_bodies.push(incoming.body.clone());
                             incoming.reply.send(summary_reply.clone()).unwrap();
                         }
                         ProviderRequestKind::Ordinary => {
-                            let report = prepared_report_from_incoming(control, &scope.1, &incoming, 10).await;
+                            let request_ordinal = trace.report_owners.iter().filter(|owner| owner.row_turn_id == request_turn).count() + 1;
+                            let report = prepared_report_from_incoming(control, &request_turn, request_ordinal, &incoming, 10).await;
                             trace.report_owners.push(report.owner);
                             incoming.reply.send((200, answer_with_usage("drained ordinary request", 10))).unwrap();
                         }
@@ -4214,13 +4277,13 @@ assert!(before_size > 30_000, "fixture must contain both large tool outputs: {be
 // Active cancellation triggers at this tool boundary; the other cases
 // report the threshold on the final answer for a closed-Turn attempt.
 let mut prepared_report=if cancel_active==Some(true) {
-    Some(prepared_report_from_incoming(&control,&report_turn_id,&before,200).await)
+    Some(prepared_report_from_incoming(&control,&report_turn_id,3,&before,200).await)
 }else{None};
 before.reply.send((200, tool_response(2, if cancel_active == Some(true) { 200 } else { first_known_a }))).unwrap();
 if cancel_active != Some(true) {
     *entered_phase.borrow_mut()="awaiting final model report after tool completion".to_owned();
     let final_report=incoming_ordinary(&control,&mut receive).await;
-    prepared_report=Some(prepared_report_from_incoming(&control,&report_turn_id,&final_report,200).await);
+    prepared_report=Some(prepared_report_from_incoming(&control,&report_turn_id,4,&final_report,200).await);
     final_report.reply.send((200, answer_with_usage("long turn done", 200))).unwrap();
     *completed_phase.borrow_mut()=entered_phase.borrow().clone();
     *entered_phase.borrow_mut()="settling report-producing foreground Turn".to_owned();
@@ -4459,7 +4522,7 @@ if let Some(active) = cancel_active {
             assert_ne!(resumed.body["tools"], json!([]), "no summary retry from stale pre-spill usage");
             // This exact first ordinary request supplies fresh #A; retain its
             // attempt/token before responding, then use a later Run boundary.
-            let prepared_retry=prepared_report_from_incoming(&control,resume_accept.turn_id.as_deref().expect("resumed report Turn"),&resumed,200).await;
+            let prepared_retry=prepared_report_from_incoming(&control,resume_accept.turn_id.as_deref().expect("resumed report Turn"),1,&resumed,200).await;
             resumed.reply.send((200,answer_with_usage("fresh post-spill measurement",200))).unwrap();
             settled(&control,&target).await;
             let retry_trigger=send_accepted(&control,&target,"verify partial adoption").await;
@@ -4512,7 +4575,7 @@ control.shutdown().await.unwrap(); owner.shutdown().await.unwrap(); server.abort
         summary.reply.send((200, rejected)).unwrap();
         let after = incoming_ordinary(&control, &mut receive).await;
         assert_ne!(after.body["tools"], json!([]), "the measured request must be an ordinary conversation request, not another summary request");
-        let context = current_context(&control, &target).await;
+        let context = current_context(&control, &boundary.trigger.turn_id).await;
         assert_current_context_once(&after.body, &context, "after proactive spill");
         let after_size = after.body["input"].as_array().unwrap().iter().filter_map(|item| item.get("output").and_then(Value::as_str)).map(str::len).sum::<usize>();
         assert!(after_size < before_size / 3, "actual replay input must shrink: {before_size} -> {after_size}");
@@ -4786,6 +4849,7 @@ async fn ax_growing_turn_summary_requests(
                     prepared_report_from_incoming(
                         &control,
                         &expected_turn,
+                        index + 1,
                         &ordinary,
                         input_tokens as u64,
                     )
@@ -4794,7 +4858,7 @@ async fn ax_growing_turn_summary_requests(
                 );
             }
             if index == 19 { ordinary.reply.send((200, answer("finished"))).unwrap(); }
-            else { ordinary.reply.send((200, tool(index, input_tokens))).unwrap(); }
+            else { ordinary.reply.send((200, tool(index as u32, input_tokens as u32))).unwrap(); }
         }
         set_phase("settling foreground Run after all raw report inputs");
         settled(&control, &target).await;
@@ -4882,10 +4946,9 @@ async fn ax_growing_turn_summary_requests(
         // This existing owner boundary closes admission and joins every retained producer before readback.
         set_phase("draining retained producers through Control.shutdown");
         control.shutdown().await.unwrap();
-        assert!(
-            receive.try_recv().is_err(),
-            "all admitted provider traffic is serviced before final readback"
-        );
+        // Summary ledger `begin` is committed before POST; this equals the fixture's serviced count.
+        // Summary witness changes to model_attempt with #328.
+        assert_eq!(summary_request_count_for_thread(&control, &target).await, summaries as i64);
 
         set_phase("final 17-row admission/unadmitted partition readback after producer drain");
         let mut records = Vec::new();
@@ -5014,23 +5077,6 @@ async fn proactive_third_turn(
         .summary_requests
 }
 
-async fn live_run_turn_scope(control: &Control, thread: &str) -> (String, String, String) {
-    let target = thread.to_owned();
-    control
-        .store
-        .database
-        .call(move |db| {
-            db.query_row(
-                "SELECT r.id,t.id,r.state FROM run r JOIN turn t ON t.run_id=r.id WHERE r.thread_id=?1 AND r.state IN ('live','stopping') AND t.state IN ('preparing','running','waiting','recovery_wait') ORDER BY t.rowid DESC LIMIT 1",
-                [target],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .map_err(Into::into)
-        })
-        .await
-        .unwrap()
-}
-
 async fn proactive_third_turn_after_run(
     control: &Arc<Control>,
     receive: &mut ProxyInbox,
@@ -5040,29 +5086,27 @@ async fn proactive_third_turn_after_run(
     prior_scope: Option<(&str, &str)>,
 ) -> ProactiveTrace {
     let mut trace = ProactiveTrace::default();
-    // A is the first known input report in this boundary: make the new Run's
-    // first real report exceed the configured 80-token summary target.
     let first_report = if prior_scope.is_some() { 150 } else { 50 };
+    let mut task_accepts = Vec::new();
     for (n, tokens) in [(0, first_report), (1, second)] {
-        send(control, thread, &format!("task {n}")).await;
+        let text = format!("task {n}");
+        let accepted = send_accepted(control, thread, &text).await;
+        let run_id = accepted.run_id.clone().expect("accepted warmup Run");
+        let turn_id = accepted.turn_id.clone().expect("accepted warmup Turn");
+        if let Some((prior_run, prior_turn)) = prior_scope {
+            assert_ne!(run_id, prior_run, "accepted warmup Run is distinct");
+            assert_ne!(turn_id, prior_turn, "accepted warmup Turn is distinct");
+        }
+        task_accepts.push((run_id, turn_id.clone()));
         loop {
             let next = incoming(control, receive).await;
-            let scope = live_run_turn_scope(control, thread).await;
-            assert_eq!(scope.2, "live", "each warmup request belongs to a live Run");
-            if let Some((prior_run, prior_turn)) = prior_scope {
-                assert_ne!(scope.0, prior_run, "warmup Run is distinct before counting");
-                assert_ne!(
-                    scope.1, prior_turn,
-                    "warmup Turn is distinct before counting"
-                );
-            }
             if next.kind() == ProviderRequestKind::Summary {
                 let admitted = admitted_summary_boundary(
                     control,
                     &trace.report_owners,
                     TriggerOwner {
-                        run_id: scope.0.clone(),
-                        turn_id: scope.1.clone(),
+                        run_id: task_accepts.last().unwrap().0.clone(),
+                        turn_id: turn_id.clone(),
                     },
                 )
                 .await;
@@ -5071,6 +5115,10 @@ async fn proactive_third_turn_after_run(
                     .iter()
                     .any(|known| known.report.attempt_id == admitted.report.attempt_id)
                 {
+                    trace.summary_scopes.push((
+                        admitted.trigger.run_id.clone(),
+                        admitted.trigger.turn_id.clone(),
+                    ));
                     trace.admitted_summaries.push(admitted);
                 }
                 trace.summary_requests += 1;
@@ -5078,17 +5126,20 @@ async fn proactive_third_turn_after_run(
                     trace.summary_requests <= 8,
                     "bounded warmup summary requests"
                 );
-                trace.summary_scopes.push((scope.0, scope.1));
                 trace.summary_bodies.push(next.body.clone());
                 next.reply.send(summary_reply.clone()).unwrap();
                 continue;
             }
+            if !next.body.to_string().contains(&text) {
+                drop(next.reply);
+                continue;
+            }
             assert_current_context_once(
                 &next.body,
-                &current_context(control, thread).await,
+                &current_context(control, &turn_id).await,
                 "warmup ordinary request",
             );
-            let report = prepared_report_from_incoming(control, &scope.1, &next, tokens).await;
+            let report = prepared_report_from_incoming(control, &turn_id, 1, &next, tokens).await;
             trace.report_owners.push(report.owner);
             next.reply
                 .send((200, answer_with_usage("saved answer", tokens)))
@@ -5098,74 +5149,67 @@ async fn proactive_third_turn_after_run(
         settled(control, thread).await;
     }
     if let Some((prior_run, _)) = prior_scope {
-        let target = thread.to_owned();
-        trace.admission_report = Some(
-            control.store.database.call(move |db| {
-                let report = db.query_row(
-                    "SELECT a.id,a.state,json_extract(a.usage_json,'$.input_tokens'),
-                        json_type(a.error_json,'$.automatic_trim_attempt') IS NOT NULL,
-                        ((EXISTS(SELECT 1 FROM thread_replacement tr JOIN replacement r ON r.id=tr.replacement_id
-                            WHERE tr.thread_id=t.id AND r.created_at>a.started_at))
-                         OR (EXISTS(SELECT 1 FROM output_item o WHERE o.attempt_id=a.id)
-                             AND NOT EXISTS(SELECT 1 FROM output_item o JOIN thread_path p
-                                 ON p.thread_id=t.id AND p.node_id=o.node_id WHERE o.attempt_id=a.id))),
-                        u.run_id,a.turn_id,u.state
-                     FROM thread t JOIN turn u ON u.thread_id=t.id JOIN model_attempt a ON a.turn_id=u.id
-                     WHERE t.id=?1 AND a.state='completed' AND a.profile_id=t.profile_id AND a.model_id=t.model_id
-                     ORDER BY a.rowid DESC LIMIT 1",
-                    [target],
-                    |row| Ok(json!({
-                        "attempt_id": row.get::<_,String>(0)?, "attempt_state": row.get::<_,String>(1)?,
-                        "input_tokens": row.get::<_,Option<i64>>(2)?, "automatic_trim_attempt_present": row.get::<_,bool>(3)?,
-                        "next_request_pending": row.get::<_,bool>(4)?, "run_id": row.get::<_,String>(5)?,
-                        "turn_id": row.get::<_,String>(6)?, "turn_state": row.get::<_,String>(7)?
-                    })),
-                ).optional()?;
-                Ok(report.unwrap_or(Value::Null))
-            }).await.unwrap()
-        );
+        let report = trace
+            .report_owners
+            .iter()
+            .find(|r| r.row_turn_id == task_accepts[1].1)
+            .expect("captured report for the accepted second warmup Turn");
+        let attempt_id = report.attempt_id.clone();
+        let expected_run = task_accepts[1].0.clone();
+        trace.admission_report = Some(control.store.database.call(move |db| {
+            let result: (String,String,String,Option<i64>,bool,bool) = db.query_row(
+                "SELECT u.run_id,a.turn_id,a.state,json_extract(a.usage_json,'$.input_tokens'),json_type(a.error_json,'$.automatic_trim_attempt') IS NOT NULL,
+                 ((EXISTS(SELECT 1 FROM thread_replacement tr JOIN replacement r ON r.id=tr.replacement_id WHERE tr.thread_id=u.thread_id AND r.created_at>a.started_at))
+                   OR (EXISTS(SELECT 1 FROM output_item o WHERE o.attempt_id=a.id) AND NOT EXISTS(SELECT 1 FROM output_item o JOIN thread_path p ON p.thread_id=u.thread_id AND p.node_id=o.node_id WHERE o.attempt_id=a.id)))
+                 FROM model_attempt a JOIN turn u ON u.id=a.turn_id WHERE a.id=?1",
+                [attempt_id], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?)))?;
+            assert_eq!(result.0, expected_run, "named report row belongs to its accepted Run");
+            Ok(json!({"run_id":result.0,"turn_id":result.1,"attempt_state":result.2,"input_tokens":result.3,
+                "automatic_trim_attempt_present":result.4,"next_request_pending":result.5}))
+        }).await.unwrap());
         let report = trace.admission_report.as_ref().unwrap();
         assert_ne!(
             report["run_id"], prior_run,
-            "latest eligible report belongs to the new Run: {report:#?}"
+            "accepted second warmup belongs to a different Run"
         );
         assert!(
             report["input_tokens"]
                 .as_i64()
                 .is_some_and(|tokens| tokens >= 100),
-            "fresh report meets configured threshold: {report:#?}"
+            "fresh report meets threshold: {report:#?}"
         );
         assert_eq!(
             report["next_request_pending"], false,
-            "latest report has no newer replacement: {report:#?}"
+            "named report has no newer replacement: {report:#?}"
         );
         assert_eq!(
             report["automatic_trim_attempt_present"], false,
-            "latest report is not already consumed: {report:#?}"
+            "named report is not already consumed: {report:#?}"
         );
     }
-    send(control, thread, "current task").await;
+    let current_text = "current task";
+    let current = send_accepted(control, thread, current_text).await;
+    let current_run = current.run_id.clone().expect("accepted current Run");
+    let current_turn = current.turn_id.clone().expect("accepted current Turn");
+    if let Some((prior_run, prior_turn)) = prior_scope {
+        assert_ne!(
+            current_run, prior_run,
+            "accepted candidate Run differs from prior Run"
+        );
+        assert_ne!(
+            current_turn, prior_turn,
+            "accepted candidate Turn differs from prior Turn"
+        );
+    }
     loop {
         let next = incoming(control, receive).await;
-        let scope = live_run_turn_scope(control, thread).await;
-        assert_eq!(scope.2, "live", "provider accounting belongs to a live Run");
-        if let Some((prior_run, prior_turn)) = prior_scope {
-            assert_ne!(
-                scope.0, prior_run,
-                "actual candidate Run differs before accounting"
-            );
-            assert_ne!(
-                scope.1, prior_turn,
-                "actual candidate Turn differs before accounting"
-            );
-        }
         if next.kind() == ProviderRequestKind::Summary {
             let admitted = admitted_summary_boundary(
                 control,
                 &trace.report_owners,
                 TriggerOwner {
-                    run_id: scope.0.clone(),
-                    turn_id: scope.1.clone(),
+                    run_id: current_run.clone(),
+                    turn_id: current_turn.clone(),
                 },
             )
             .await;
@@ -5174,18 +5218,25 @@ async fn proactive_third_turn_after_run(
                 .iter()
                 .any(|known| known.report.attempt_id == admitted.report.attempt_id)
             {
+                trace.summary_scopes.push((
+                    admitted.trigger.run_id.clone(),
+                    admitted.trigger.turn_id.clone(),
+                ));
                 trace.admitted_summaries.push(admitted);
             }
             trace.summary_requests += 1;
             assert!(trace.summary_requests <= 8, "bounded summary requests");
-            trace.summary_scopes.push((scope.0, scope.1));
             trace.summary_bodies.push(next.body.clone());
             next.reply.send(summary_reply.clone()).unwrap();
             continue;
         }
+        if !next.body.to_string().contains(current_text) {
+            drop(next.reply);
+            continue;
+        }
         assert_current_context_once(
             &next.body,
-            &current_context(control, thread).await,
+            &current_context(control, &current_turn).await,
             "after proactive summary",
         );
         next.reply
@@ -5256,9 +5307,11 @@ async fn proactive_threshold_compacts_once_at_the_next_boundary() {
         summaries, 1,
         "one request completed in the original threshold attempt"
     );
-    assert!(
-        receive.try_recv().is_err(),
-        "no further request after settling"
+    // Summary ledger `begin` is committed before POST; this equals the serviced count.
+    // Summary witness changes to model_attempt with #328.
+    assert_eq!(
+        summary_request_count_for_thread(&control, &thread).await,
+        summaries as i64
     );
     let events = proactive_events(&control, &thread).await;
     assert_eq!(events.len(), 1, "{events:?}");
@@ -5599,7 +5652,8 @@ async fn bx_token_growth(
                 .unwrap();
             settled(&control, &thread).await;
         }
-        send(&control, &thread, "current task").await;
+        let current_accept = send_accepted(&control, &thread, "current task").await;
+        let current_turn = current_accept.turn_id.expect("accepted growing Turn");
         let mut summaries = 0;
         let mut ordinary = vec![
             answer_with_usage("done", 150),
@@ -5620,7 +5674,9 @@ async fn bx_token_growth(
             next.reply.send((200, reply)).unwrap();
         }
         settled(&control, &thread).await;
-        assert!(receive.try_recv().is_err());
+        // Summary ledger `begin` is committed before POST; no unserviced Summary remains.
+        // Summary witness changes to model_attempt with #328.
+        assert_eq!(summary_request_count_for_thread(&control, &thread).await, summaries as i64);
         let attempts = bx_attempts(&control, &thread).await;
         assert_eq!(
             attempts.len(),
@@ -5644,8 +5700,10 @@ async fn bx_token_growth(
         );
         let target=thread.clone();
         let (report_token,a_boundary):(String,String)=control.store.database.call(move|db|{
+            assert_eq!(db.query_row("SELECT count(*) FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE t.thread_id=?1 AND json_extract(a.usage_json,'$.input_tokens')=9999 AND json_type(a.error_json,'$.automatic_trim_attempt')='object'",[&target],|r|r.get::<_,i64>(0))?,1,
+                "the exact 9999-token report content identifies one model_attempt row");
             db.query_row(
-                "SELECT json_extract(a.input_manifest_json,'$.compaction_report_token'),json_extract(a.error_json,'$.automatic_trim_attempt.trigger.a_boundary') FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE t.thread_id=?1 AND json_extract(a.usage_json,'$.input_tokens')=9999 AND json_type(a.error_json,'$.automatic_trim_attempt')='object' ORDER BY a.rowid DESC LIMIT 1",
+                "SELECT json_extract(a.input_manifest_json,'$.compaction_report_token'),json_extract(a.error_json,'$.automatic_trim_attempt.trigger.a_boundary') FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE t.thread_id=?1 AND json_extract(a.usage_json,'$.input_tokens')=9999 AND json_type(a.error_json,'$.automatic_trim_attempt')='object'",
                 [target],
                 |row|Ok((row.get(0)?,row.get(1)?)),
             ).map_err(Into::into)
@@ -5678,14 +5736,14 @@ async fn bx_token_growth(
         let (summary_nodes, turn_state) = control
             .store
             .database
-            .call(|db| {
+            .call(move |db| {
                 Ok((
                     db.query_row("SELECT count(*) FROM node WHERE kind='summary'", [], |r| {
                         r.get::<_, i64>(0)
                     })?,
                     db.query_row(
-                        "SELECT state FROM turn ORDER BY rowid DESC LIMIT 1",
-                        [],
+                        "SELECT state FROM turn WHERE id=?1",
+                        [&current_turn],
                         |r| r.get::<_, String>(0),
                     )?,
                 ))
@@ -5700,8 +5758,10 @@ async fn bx_token_growth(
         let slots = bx_failure_slots(&control, &thread).await;
         let target=thread.clone();
         let stale_a_tokens:(String,String)=control.store.database.call(move|db|{
+            assert_eq!(db.query_row("SELECT count(*) FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE t.thread_id=?1 AND json_extract(a.usage_json,'$.input_tokens')=9999 AND json_type(a.error_json,'$.automatic_trim_attempt')='object'",[&target],|r|r.get::<_,i64>(0))?,1,
+                "the exact 9999-token report content identifies one model_attempt row");
             db.query_row(
-                "SELECT json_extract(a.input_manifest_json,'$.compaction_report_token'),json_extract(a.error_json,'$.automatic_trim_attempt.trigger.a_boundary') FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE t.thread_id=?1 AND json_extract(a.usage_json,'$.input_tokens')=9999 AND json_type(a.error_json,'$.automatic_trim_attempt')='object' ORDER BY a.rowid DESC LIMIT 1",
+                "SELECT json_extract(a.input_manifest_json,'$.compaction_report_token'),json_extract(a.error_json,'$.automatic_trim_attempt.trigger.a_boundary') FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE t.thread_id=?1 AND json_extract(a.usage_json,'$.input_tokens')=9999 AND json_type(a.error_json,'$.automatic_trim_attempt')='object'",
                 [target],
                 |row|Ok((row.get(0)?,row.get(1)?)),
             ).map_err(Into::into)
@@ -5890,6 +5950,7 @@ async fn proactive_retries_when_a_new_older_turn_becomes_eligible() {
             .turn_id
             .as_deref()
             .expect("third-task report Turn"),
+        1,
         &ordinary,
         50,
     )
@@ -5924,6 +5985,7 @@ async fn proactive_retries_when_a_new_older_turn_becomes_eligible() {
     let bridge_report = prepared_report_from_incoming(
         &control,
         bridge_accept.turn_id.as_deref().expect("bridge Turn"),
+        1,
         &bridge_request,
         50,
     )
@@ -5953,6 +6015,7 @@ async fn proactive_retries_when_a_new_older_turn_becomes_eligible() {
             .turn_id
             .as_deref()
             .expect("fresh measurement Turn"),
+        1,
         &fresh_request,
         150,
     )
@@ -6041,7 +6104,9 @@ async fn proactive_retries_when_a_new_older_turn_becomes_eligible() {
             "{events:?}"
         );
     }
-    assert!(receive.try_recv().is_err());
+    // Both Summary ledger `begin` calls commit before POST.
+    // Summary witness changes to model_attempt with #328.
+    assert_eq!(summary_request_count_for_thread(&control, &thread).await, 2);
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
     server.abort();
@@ -6075,7 +6140,8 @@ async fn proactive_resumes_when_an_older_complete_tool_group_becomes_reducible()
     // supplies the sole 200-token report used by the active summary stage.
     let first = incoming_ordinary(&control, &mut receive).await;
     assert_ne!(first.body["tools"], json!([]));
-    let prepared_first = prepared_report_from_incoming(&control, &trigger_turn, &first, 50).await;
+    let prepared_first =
+        prepared_report_from_incoming(&control, &trigger_turn, 1, &first, 50).await;
     first
         .reply
         .send((200, bx_tool("call-0", 50, command)))
@@ -6088,7 +6154,7 @@ async fn proactive_resumes_when_an_older_complete_tool_group_becomes_reducible()
     );
     assert_strict_append(&first.body, &second.body, "below threshold");
     let prepared_active =
-        prepared_report_from_incoming(&control, &trigger_turn, &second, 200).await;
+        prepared_report_from_incoming(&control, &trigger_turn, 2, &second, 200).await;
     second
         .reply
         .send((200, bx_tool("call-1", 200, command)))
@@ -6374,7 +6440,12 @@ async fn proactive_resumes_when_an_older_complete_tool_group_becomes_reducible()
         .send((200, answer_with_usage("verified appended tail", 10)))
         .unwrap();
     settled(&control, &thread).await;
-    assert!(receive.try_recv().is_err());
+    // Summary ledger `begin` commits before POST; the fixture tracks whether its Summary was received.
+    // Summary witness changes to model_attempt with #328.
+    assert_eq!(
+        summary_request_count_for_thread(&control, &thread).await,
+        i64::from(summary_includes_call1.is_some())
+    );
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
     server.abort();
@@ -6443,7 +6514,9 @@ async fn proactive_large_protected_turn_is_a_local_no_target_attempt() {
     assert_eq!(attempts[0]["trigger"]["input_tokens"], 150);
     assert_eq!(attempts[0]["trigger"]["a_input_tokens"], 150);
     assert_eq!(attempts[0]["committed_stages"], json!({}));
-    assert!(receive.try_recv().is_err());
+    // The Summary ledger `begin` commits before POST; no-target admits no Summary.
+    // Summary witness changes to model_attempt with #328.
+    assert_eq!(summary_request_count_for_thread(&control, &thread).await, 0);
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
     server.abort();
@@ -6520,7 +6593,9 @@ async fn proactive_spill_only_without_closed_candidates_leaves_current_turn() {
     assert_eq!(attempts[0]["trigger"]["target_tokens"], 20);
     assert_eq!(attempts[0]["committed_stages"], json!({}));
     assert_eq!(bx_failure_slots(&control, &thread).await, (None, None));
-    assert!(receive.try_recv().is_err());
+    // The Summary ledger `begin` commits before POST; this spill-only branch admits none.
+    // Summary witness changes to model_attempt with #328.
+    assert_eq!(summary_request_count_for_thread(&control, &thread).await, 0);
     let keys = [
         format!("compact.a_state.{thread}"),
         format!("compact.deterministic_range_failure.closed.{thread}"),
@@ -6624,10 +6699,7 @@ async fn content_filter_terminal_preserves_facts_without_automatic_retry() {
             assert!(error.get("automatic_retry_exhausted").is_none());
             Ok(())
         }).await.unwrap();
-        assert!(
-            receive.try_recv().is_err(),
-            "no second POST with retry budget enabled"
-        );
+
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
         server.abort();
@@ -6770,9 +6842,10 @@ async fn content_filter_recovery_readback_and_real_ui_are_bilingual_and_keep_unk
                         );
                     }
                 }
-                assert!(
-                    receive.try_recv().is_err(),
-                    "no automatic retry for terminal content_filter"
+                assert_eq!(
+                    model_attempt_count_for_thread(&control, &target).await,
+                    i64::from(verdicts) + 1,
+                    "the completed content_filter Turn adds no retry attempt"
                 );
             }
             control.shutdown().await.unwrap();
@@ -6784,6 +6857,19 @@ async fn content_filter_recovery_readback_and_real_ui_are_bilingual_and_keep_unk
 
 // #183: the per-Turn `Shellboy context v1` item is part of the saved history,
 // so each request of a Turn is a strict append of the previous request.
+fn request_scope(body: &Value) -> (String, String) {
+    let line = context_lines(body)
+        .into_iter()
+        .find(|line| line.starts_with("Shellboy context v1:"))
+        .expect("provider request carries its own Run/Turn context");
+    let field = |name: &str| {
+        line.split_whitespace()
+            .find_map(|part| part.strip_prefix(&format!("{name}=")))
+            .expect("context identity field")
+            .to_owned()
+    };
+    (field("run"), field("turn"))
+}
 fn context_lines(body: &Value) -> Vec<String> {
     body["input"]
         .as_array()
@@ -6796,11 +6882,11 @@ fn context_lines(body: &Value) -> Vec<String> {
         .collect()
 }
 /// The context line for the Thread's current settings and latest Turn.
-async fn current_context(control: &Control, thread: &str) -> String {
-    let thread = thread.to_owned();
+async fn current_context(control: &Control, turn: &str) -> String {
+    let turn = turn.to_owned();
     control.store.database.call(move |db| Ok(db.query_row(
-        "SELECT t.id,u.run_id,u.id,t.cwd,t.profile_id,t.model_id,t.effort,COALESCE(s.source_path,t.agents_path) FROM thread t JOIN turn u ON u.thread_id=t.id LEFT JOIN instruction_snapshot s ON s.id=u.instruction_snapshot_id WHERE t.id=?1 ORDER BY u.rowid DESC LIMIT 1",
-        [thread],
+        "SELECT t.id,u.run_id,u.id,t.cwd,t.profile_id,t.model_id,t.effort,COALESCE(s.source_path,t.agents_path) FROM turn u JOIN thread t ON t.id=u.thread_id LEFT JOIN instruction_snapshot s ON s.id=u.instruction_snapshot_id WHERE u.id=?1",
+        [turn],
         |r| Ok(format!(
             "Shellboy context v1: thread={} run={} turn={} cwd={} connection={} model={} effort={:?}; AGENTS reference={}",
             r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?,
@@ -6853,9 +6939,10 @@ async fn turn_requests_strictly_append_and_mid_turn_changes_are_appended() {
     let owner = owner_with_retries(root.path(), &url, 1).await;
     let control = Control::new(&owner, root.path().into());
     let thread = thread(&control).await;
-    send(&control, &thread, "append task").await;
+    let first_accepted = send_accepted(&control, &thread, "append task").await;
+    let first_turn = first_accepted.turn_id.expect("accepted append Turn");
     let first = incoming(&control, &mut receive).await;
-    let context = current_context(&control, &thread).await;
+    let context = current_context(&control, &first_turn).await;
     assert_current_context_once(&first.body, &context, "first request");
     first
         .reply
@@ -6881,7 +6968,7 @@ async fn turn_requests_strictly_append_and_mid_turn_changes_are_appended() {
         .unwrap();
     let third = incoming(&control, &mut receive).await;
     assert_strict_append(&second.body, &third.body, "mid-Turn cwd/effort change");
-    let changed = current_context(&control, &thread).await;
+    let changed = current_context(&control, &first_turn).await;
     assert!(
         changed.contains(&format!("cwd={} ", moved.display())),
         "{changed}"
@@ -6914,7 +7001,7 @@ async fn turn_requests_strictly_append_and_mid_turn_changes_are_appended() {
     let fourth = incoming(&control, &mut receive).await;
     assert_eq!(fourth.body["model"], "fixture-next");
     assert_strict_append(&third.body, &fourth.body, "mid-Turn model change");
-    let model_changed = current_context(&control, &thread).await;
+    let model_changed = current_context(&control, &first_turn).await;
     assert!(
         model_changed.contains("model=fixture-next "),
         "{model_changed}"
@@ -6923,10 +7010,11 @@ async fn turn_requests_strictly_append_and_mid_turn_changes_are_appended() {
     fourth.reply.send((200, answer("done"))).unwrap();
     settled(&control, &thread).await;
     // The next Turn appends after the completed one, with its own context.
-    send(&control, &thread, "next turn").await;
+    let next_accepted = send_accepted(&control, &thread, "next turn").await;
+    let next_turn_id = next_accepted.turn_id.expect("accepted next Turn");
     let fifth = incoming(&control, &mut receive).await;
     assert_strict_append(&fourth.body, &fifth.body, "next Turn");
-    let next_turn = current_context(&control, &thread).await;
+    let next_turn = current_context(&control, &next_turn_id).await;
     assert_ne!(next_turn, model_changed);
     assert_current_context_once(&fifth.body, &next_turn, "next Turn");
     // An automatic retry resends exactly the same input.
@@ -6956,7 +7044,8 @@ async fn mid_turn_omission_reemits_the_current_context_once() {
     let owner = owner(root.path(), &url).await;
     let control = Control::new(&owner, root.path().into());
     let thread = thread(&control).await;
-    send(&control, &thread, "omission task").await;
+    let accepted = send_accepted(&control, &thread, "omission task").await;
+    let turn_id = accepted.turn_id.expect("accepted omission Turn");
     let mut current = incoming(&control, &mut receive).await;
     for call in ["one", "two"] {
         current
@@ -6965,7 +7054,7 @@ async fn mid_turn_omission_reemits_the_current_context_once() {
             .unwrap();
         current = incoming(&control, &mut receive).await;
     }
-    let context = current_context(&control, &thread).await;
+    let context = current_context(&control, &turn_id).await;
     assert_current_context_once(&current.body, &context, "before omission");
     // Queued while the request is in flight; applied at the next boundary,
     // before the following request. It omits the Turn's saved context node.
@@ -7117,7 +7206,9 @@ async fn issue_271_spill_shortfall_waits_until_threshold_recrossing() {
             attempts[0]["committed_stages"]["closed_spill"]["spilled_groups"],
             6
         );
-        assert!(receive.try_recv().is_err());
+        // This spill branch admits no Summary POST; `begin` commits before send.
+        // Summary witness changes to model_attempt with #328.
+        assert_eq!(summary_request_count_for_thread(&control, &target).await, 0);
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
         server.abort();
@@ -7208,7 +7299,9 @@ async fn proactive_shallow_summary_does_not_continue_below_threshold() {
         assert_eq!(attempt["trigger"]["target_tokens"], 40_000);
         assert!(attempt["committed_stages"]["closed_summary"]["summary_node_id"].is_string());
         assert!(attempt.get("target_verification").is_none(), "{attempt:#?}");
-        assert!(receive.try_recv().is_err());
+        // The Summary ledger `begin` commits before POST; the closed-summary stage has one request.
+        // Summary witness changes to model_attempt with #328.
+        assert_eq!(summary_request_count_for_thread(&control, &target).await, 1);
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
         server.abort();
@@ -7311,13 +7404,18 @@ async fn proactive_next_closed_summary_resummarizes_prior_summary_with_new_older
         assert_eq!(attempts[1]["trigger"]["input_tokens"],200_500);
         assert_eq!(attempts[1]["trigger"]["a_input_tokens"],200_500,
             "the first report completed after the previous terminal A reset is #A");
+        let summary_ledger_target = target.clone();
         let target=target.clone();
         let (stale_report_token,current_report_token,current_a_boundary):(String,String,String)=control.store.database.call(move|db|{
+            assert_eq!(db.query_row("SELECT count(*) FROM model_attempt WHERE turn_id IN (SELECT id FROM turn WHERE thread_id=?1) AND json_extract(usage_json,'$.input_tokens')=184622", [&target], |row| row.get::<_,i64>(0))?, 1,
+                "the response's exact 184622 usage identifies one report attempt");
             let stale:String=db.query_row(
-                "SELECT json_extract(input_manifest_json,'$.compaction_report_token') FROM model_attempt WHERE turn_id IN (SELECT id FROM turn WHERE thread_id=?1) AND json_extract(usage_json,'$.input_tokens')=184622 ORDER BY rowid DESC LIMIT 1",
+                "SELECT json_extract(input_manifest_json,'$.compaction_report_token') FROM model_attempt WHERE turn_id IN (SELECT id FROM turn WHERE thread_id=?1) AND json_extract(usage_json,'$.input_tokens')=184622",
                 [&target],|row|row.get(0))?;
+            assert_eq!(db.query_row("SELECT count(*) FROM model_attempt WHERE turn_id IN (SELECT id FROM turn WHERE thread_id=?1) AND json_extract(usage_json,'$.input_tokens')=200500 AND json_type(error_json,'$.automatic_trim_attempt')='object'", [&target], |row| row.get::<_,i64>(0))?, 1,
+                "the response's exact 200500 usage identifies one terminal report attempt");
             let current:(String,String)=db.query_row(
-                "SELECT json_extract(input_manifest_json,'$.compaction_report_token'),json_extract(error_json,'$.automatic_trim_attempt.trigger.a_boundary') FROM model_attempt WHERE turn_id IN (SELECT id FROM turn WHERE thread_id=?1) AND json_extract(usage_json,'$.input_tokens')=200500 AND json_type(error_json,'$.automatic_trim_attempt')='object' ORDER BY rowid DESC LIMIT 1",
+                "SELECT json_extract(input_manifest_json,'$.compaction_report_token'),json_extract(error_json,'$.automatic_trim_attempt.trigger.a_boundary') FROM model_attempt WHERE turn_id IN (SELECT id FROM turn WHERE thread_id=?1) AND json_extract(usage_json,'$.input_tokens')=200500 AND json_type(error_json,'$.automatic_trim_attempt')='object'",
                 [&target],|row|Ok((row.get(0)?,row.get(1)?)))?;
             Ok((stale,current.0,current.1))
         }).await.unwrap();
@@ -7325,7 +7423,9 @@ async fn proactive_next_closed_summary_resummarizes_prior_summary_with_new_older
             "the 184622 response began before FINISH reset A and cannot populate the next boundary");
         assert_eq!(current_report_token,current_a_boundary,
             "the 200500 response manifest matches the accepted post-reset A boundary");
-        assert!(receive.try_recv().is_err());
+        // Both Summary ledger `begin` calls commit before POST.
+        // Summary witness changes to model_attempt with #328.
+        assert_eq!(summary_request_count_for_thread(&control, &summary_ledger_target).await, 2);
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
         server.abort();
@@ -7412,7 +7512,9 @@ async fn proactive_attempt_runs_one_summary_operation_and_keeps_its_usage() {
         let usage = &stages["closed_summary"]["summary_usage"];
         assert_eq!(usage["requests"], 1, "{stages:#?}");
         assert_eq!(usage["input_tokens"]["known_sum"], 11);
-        assert!(receive.try_recv().is_err());
+        // The Summary ledger `begin` commits before POST; one completed Summary is recorded.
+        // Summary witness changes to model_attempt with #328.
+        assert_eq!(summary_request_count_for_thread(&control, &target).await, 1);
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
         server.abort();
@@ -7478,7 +7580,9 @@ async fn proactive_spill_then_cancelled_connection_wait_preserves_adoption() {
         assert!(record["committed_stages"]["active_summary"].is_null(), "{record:#?}");
         let slots=bx_failure_slots(&control,&target).await;
         assert!(slots.0.is_none()&&slots.1.is_none(),"source rejection is never failure memory: {slots:?}");
-        assert!(receive.try_recv().is_err());
+        // RunStop cancels this admission before Summary ledger `begin`, so no POST was dispatched.
+        // Summary witness changes to model_attempt with #328.
+        assert_eq!(summary_request_count_for_thread(&control, &target).await, 0);
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
         server.abort();
@@ -7652,7 +7756,7 @@ async fn proactive_provider_500_retries_for_a_new_active_range() {
             let turn_id = accepted.turn_id.expect("declared report Turn");
             let seed = incoming_ordinary(&control, &mut receive).await;
             let seed_id = if index == 0 { "grow-first-seed" } else { "grow-5" };
-            let seed_report = prepared_report_from_incoming(&control, &turn_id, &seed, 100).await;
+            let seed_report = prepared_report_from_incoming(&control, &turn_id, 1, &seed, 100).await;
             seed.reply.send((200, json!({
                 "id":seed_id, "status":"completed",
                 "usage":{"input_tokens":100,"output_tokens":1},
@@ -7660,7 +7764,7 @@ async fn proactive_provider_500_retries_for_a_new_active_range() {
             }))).unwrap();
             let ordinary = incoming_ordinary(&control, &mut receive).await;
             let report = prepared_report_from_incoming(
-                &control, &turn_id, &ordinary, input_tokens,
+                &control, &turn_id, 2, &ordinary, input_tokens,
             ).await;
             let manifest: Value = serde_json::from_str(&report.owner.request_token).unwrap();
             let meta_key = format!("compact.a_state.{target}");
@@ -7806,7 +7910,7 @@ async fn bx_growing_turn(
             };
             most = most.max(run);
             prepared_reports.push(prepared_report_from_incoming(
-                &control, &current_turn, &ordinary, input_tokens as u64,
+                &control, &current_turn, index + 1, &ordinary, input_tokens as u64,
             ).await);
 
             ordinary.reply.send((200, tool(index as u32, input_tokens))).unwrap();
@@ -7817,10 +7921,9 @@ async fn bx_growing_turn(
             summaries += 1;
             summary_inputs.push(request.body["input"].clone());
             assert!(summaries < 80, "unbounded automatic summary loop");
-            let scope = live_run_turn_scope(&control, &target).await;
-            assert_eq!(scope.0, current_run, "the source-captured Summary belongs to the original report Run");
-            assert_eq!(scope.1, current_turn, "the source-captured Summary belongs to the live report Turn");
-            assert_eq!(scope.2, "live", "the active source capture precedes natural final completion");
+            let (request_run, request_turn) = request_scope(&request.body);
+            assert_eq!(request_run, current_run, "the request's own context identifies the captured Run");
+            assert_eq!(request_turn, current_turn, "the request's own context identifies the captured Turn");
             request.reply.send(summary_reply.clone()).unwrap();
         };
 final_request.reply.send((200, answer("finished"))).unwrap();
@@ -7912,7 +8015,9 @@ final_request.reply.send((200, answer("finished"))).unwrap();
         }
         let attempts = bx_attempts(&control, &target).await;
         let slots = bx_failure_slots(&control, &target).await;
-        assert!(receive.try_recv().is_err());
+        // Summary ledger `begin` commits before POST; compare its exact count with requests serviced.
+        // Summary witness changes to model_attempt with #328.
+        assert_eq!(summary_request_count_for_thread(&control, &target).await, summaries as i64);
         let linked_attempts: Vec<Value> = report_ledger.iter()
             .filter_map(|report| report["automatic_attempt"].as_object().map(|_| report["automatic_attempt"].clone()))
             .collect();
