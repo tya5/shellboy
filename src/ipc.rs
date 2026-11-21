@@ -19,6 +19,8 @@ use tokio_util::sync::CancellationToken;
 mod peer;
 mod server;
 pub use server::LocalServer;
+#[cfg(test)]
+pub(crate) use server::tests::Fixture as TestServer;
 
 const FRAME_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
@@ -248,21 +250,30 @@ async fn serve_connection<S: AsyncRead + AsyncWrite + Unpin>(
             result = &mut write => result?,
             _ = stop.cancelled() => {
                 // At the delivery cutoff, finish only what can complete now.
-                return futures_util::FutureExt::now_or_never(write).unwrap_or(Ok(()));
+                match futures_util::FutureExt::now_or_never(write) {
+                    Some(result) => result?,
+                    None => return Ok(()),
+                }
             }
         }
     }
     // A successful write/flush does not prove the peer consumed the reply,
     // especially on a Windows named pipe. The client closes after reading it.
     loop {
-        tokio::select! {
-            biased;
-            _ = stop.cancelled() => return Ok(()),
-            read = stream.read(&mut byte) => match read {
-                Ok(0) => return Ok(()),
-                Ok(_) => {},
-                Err(error) => return Err(ipc_failure(ApiError::new(ErrorCode::IoFailed, format!("IPC peer close read failed: {}", error.kind())), "peer_close", "peer_read_error", false)),
-            },
+        match stream.read(&mut byte).await {
+            Ok(0) => return Ok(()),
+            Ok(_) => {}
+            Err(error) => {
+                return Err(ipc_failure(
+                    ApiError::new(
+                        ErrorCode::IoFailed,
+                        format!("IPC peer close read failed: {}", error.kind()),
+                    ),
+                    "peer_close",
+                    "peer_read_error",
+                    false,
+                ));
+            }
         }
     }
 }
@@ -1528,53 +1539,34 @@ mod frame_delivery_tests {
     #[tokio::test]
     async fn final_frame_keeps_connection_until_peer_closes() {
         crate::test_watchdog::watchdog("IPC final frame lifetime", async {
-            for (reject, explicit_stop) in [(false, false), (true, false), (false, true)] {
+            for (reject, cutoff_before_delivery) in [(false, false), (true, false), (false, true)] {
                 let (mut client, stream) = tokio::io::duplex(4096);
                 let (requests, mut incoming) = mpsc::channel(1);
                 let stop = CancellationToken::new();
-                let mut task = tokio::spawn(serve_connection(
-                    stream,
-                    "instance".into(),
-                    requests,
-                    stop.clone(),
-                    server::WorkAdmission::new(),
-                ));
-                let mut frame = status_frame();
-                if reject {
-                    frame["command"] = Value::String("no.such.command".into());
-                }
-                send_test_frame(&mut client, &frame).await;
-                if !reject {
-                    let invocation = incoming.recv().await.unwrap();
-                    invocation
-                        .reply
-                        .send(Response::success(
-                            invocation.request.operation_id,
-                            Value::Bool(true),
-                        ))
-                        .unwrap();
-                }
-                let response = read_frame::<_, Response<Value>>(&mut client)
-                    .await
-                    .unwrap()
-                    .unwrap();
-                assert_eq!(response.ok, !reject);
-                assert!(
-                    futures_util::poll!(&mut task).is_pending(),
-                    "owner dropped stream before peer close"
-                );
-                if explicit_stop {
+                let connection = serve_connection(stream, "instance".into(), requests, stop.clone(), server::WorkAdmission::new());
+                tokio::pin!(connection);
+                let peer = async {
+                    let mut frame = status_frame();
+                    if reject { frame["command"] = Value::String("no.such.command".into()); }
+                    send_test_frame(&mut client, &frame).await;
+                    if !reject {
+                        let invocation = incoming.recv().await.unwrap();
+                        if cutoff_before_delivery { stop.cancel(); }
+                        invocation.reply.send(Response::success(invocation.request.operation_id, Value::Bool(true))).unwrap();
+                    }
+                    let response = read_frame::<_, Response<Value>>(&mut client).await.unwrap().unwrap();
+                    assert_eq!(response.ok, !reject);
                     stop.cancel();
-                    task.await.unwrap().unwrap();
-                    assert!(read_frame::<_, Value>(&mut client).await.unwrap().is_none());
-                } else {
-                    drop(client);
-                    task.await.unwrap().unwrap();
+                };
+                tokio::select! {
+                    () = peer => {},
+                    result = &mut connection => panic!("connection ended before peer close: {result:?}"),
                 }
+                assert!(futures_util::poll!(&mut connection).is_pending(), "completed delivery must wait for EOF even after cutoff");
+                drop(client);
+                connection.await.unwrap();
             }
-        })
-        .await
-        .unwrap();
+        }).await.unwrap();
     }
 
     #[tokio::test]

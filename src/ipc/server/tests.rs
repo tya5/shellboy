@@ -26,16 +26,19 @@ impl Acceptor for FakeAcceptor {
             .unwrap_or_else(|| Err(io::ErrorKind::BrokenPipe.into()))
     }
 }
-struct Fixture {
-    root: tempfile::TempDir,
-    server: LocalServer,
-    input: mpsc::Sender<io::Result<DuplexStream>>,
-    incoming: mpsc::Receiver<Invocation>,
+pub(crate) struct Fixture {
+    pub(crate) root: tempfile::TempDir,
+    pub(crate) server: LocalServer,
+    pub(crate) input: mpsc::Sender<io::Result<DuplexStream>>,
+    pub(crate) incoming: mpsc::Receiver<Invocation>,
     calls: Arc<AtomicUsize>,
     endpoint: Endpoint,
 }
 impl Fixture {
     fn new() -> Self {
+        Self::for_instance("fixture")
+    }
+    pub(crate) fn for_instance(instance: &str) -> Self {
         let root = tempfile::tempdir().unwrap();
         #[cfg(unix)]
         let (listener, socket) = {
@@ -57,7 +60,7 @@ impl Fixture {
         let address = String::new();
         let endpoint = Endpoint {
             protocol_version: PROTOCOL_VERSION,
-            instance_id: "fixture".into(),
+            instance_id: instance.into(),
             transport: "fixture".into(),
             address,
         };
@@ -73,11 +76,11 @@ impl Fixture {
                 #[cfg(unix)]
                 _listener: listener,
             },
-            "fixture".into(),
+            instance.into(),
             requests,
             EndpointFiles {
                 metadata,
-                instance: "fixture".into(),
+                instance: instance.into(),
                 #[cfg(unix)]
                 socket,
             },
@@ -107,19 +110,13 @@ impl Fixture {
         )
         .await
     }
-    async fn connect_command(&self, number: usize, command: Command) -> Client {
+    pub(crate) async fn connect_command(&self, number: usize, command: Command) -> Client {
         let (client, server) = tokio::io::duplex(4096);
         self.input.send(Ok(server)).await.unwrap();
         let endpoint = self.endpoint.clone();
         tokio::spawn(async move {
-            super::super::call_stream(
-                client,
-                endpoint,
-                command,
-                Some(format!("fixture:{number}")),
-                None,
-            )
-            .await
+            let operation = format!("{}:{number}", endpoint.instance_id);
+            super::super::call_stream(client, endpoint, command, Some(operation), None).await
         })
     }
     async fn pending_connection(&self) -> DuplexStream {

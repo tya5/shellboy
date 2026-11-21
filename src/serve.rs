@@ -70,6 +70,14 @@ pub async fn run(config: Option<PathBuf>, data: PathBuf) -> Result<bool, ApiErro
             "serve requires a UTF-8 data directory for its JSON readiness record",
         ));
     }
+    run_prepared(prepared, signal(&mut signals), emit).await
+}
+
+pub(crate) async fn run_prepared(
+    prepared: owner_session::Prepared,
+    stop_signal: impl std::future::Future<Output = ()>,
+    emit: impl Fn(&Value) -> bool,
+) -> Result<bool, ApiError> {
     let requested = prepared.control.owner_shutdown_signal();
     let mut failures = prepared.server.failures();
     let dispatcher = tokio::spawn(prepared.control.clone().serve(prepared.requests));
@@ -94,7 +102,7 @@ pub async fn run(config: Option<PathBuf>, data: PathBuf) -> Result<bool, ApiErro
     }
     let reason = tokio::select! { biased;
         _ = requested.cancelled() => Ok(()),
-        _ = signal(&mut signals) => Ok(()),
+        _ = stop_signal => Ok(()),
         _ = control.stopping() => Ok(()),
         error = listener_failure(&mut failures) => Err(error),
     };

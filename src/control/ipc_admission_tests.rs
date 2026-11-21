@@ -363,3 +363,110 @@ async fn disconnecting_a_send_observer_does_not_lose_commit_effects_or_race_shut
     assert_eq!(result, (1, 0, 0));
     owner.shutdown().await.unwrap();
 }
+
+#[tokio::test]
+async fn fatal_listener_failure_drains_real_headless_request() {
+    use crate::{ipc::TestServer, owner_session::Prepared, protocol::ThreadCreateArgs};
+    crate::test_watchdog::watchdog("headless listener failure drains admitted request", async {
+        let root = tempfile::tempdir().unwrap();
+        let config = root.path().join("config.toml");
+        std::fs::write(
+            &config,
+            r#"default_connection="fixture"
+default_model="fixture"
+[connections.fixture]
+base_url="http://127.0.0.1:1/v1"
+"#,
+        )
+        .unwrap();
+        let owner = DataOwner::start(
+            Some(config),
+            Some(root.path().join("data")),
+            root.path().into(),
+        )
+        .await
+        .unwrap();
+        let control = Control::new(&owner, root.path().into());
+        control.start().await.unwrap();
+        let fixture = TestServer::for_instance(&owner.instance_id);
+        let mut failure = fixture.server.failures();
+        let (blocked, blocked_rx) = oneshot::channel();
+        let (release, release_rx) = oneshot::channel::<()>();
+        let writer = owner
+            .db
+            .try_call(move |_| {
+                let _ = blocked.send(());
+                let _ = release_rx.blocking_recv();
+                Ok(())
+            })
+            .unwrap();
+        blocked_rx.await.unwrap();
+        let client = fixture
+            .connect_command(
+                1,
+                Command::ThreadCreate(ThreadCreateArgs {
+                    agents: None,
+                    connection: None,
+                    cwd: None,
+                    model: None,
+                    effort: None,
+                    parent_id: None,
+                }),
+            )
+            .await;
+        let TestServer {
+            server,
+            incoming,
+            input,
+            root: _transport_root,
+            ..
+        } = fixture;
+        let (records, mut output) = mpsc::unbounded_channel();
+        let headless = tokio::spawn(crate::serve::run_prepared(
+            Prepared {
+                owner,
+                control: control.clone(),
+                server,
+                requests: incoming,
+                cwd: root.path().into(),
+            },
+            std::future::pending(),
+            move |record| records.send(record.clone()).is_ok(),
+        ));
+        assert_eq!(output.recv().await.unwrap()["event"], "ready");
+        while control.context_requests.load(Ordering::Acquire) != 1 {
+            tokio::task::yield_now().await;
+        }
+        input
+            .send(Err(std::io::ErrorKind::PermissionDenied.into()))
+            .await
+            .unwrap();
+        let listener_error = failure
+            .wait_for(Option::is_some)
+            .await
+            .unwrap()
+            .clone()
+            .unwrap();
+        while !control.admission_closed.load(Ordering::Acquire) {
+            tokio::task::yield_now().await;
+        }
+        assert!(
+            !client.is_finished(),
+            "reply must still be outstanding during headless stop"
+        );
+        release.send(()).unwrap();
+        writer.receive().await.unwrap();
+        let reply = client.await.unwrap().unwrap();
+        assert!(reply.ok, "{reply:?}");
+        assert!(reply.result.unwrap()["thread_id"].is_string());
+        let stopped = output.recv().await.unwrap();
+        assert_eq!(stopped["event"], "stopped");
+        assert_eq!(
+            stopped["error"],
+            serde_json::to_value(listener_error).unwrap()
+        );
+        assert!(!headless.await.unwrap().unwrap());
+    })
+    .await
+    .unwrap();
+}
