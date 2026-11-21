@@ -262,18 +262,17 @@ async fn upload_facts(control: &Control, turn: &str) -> Value {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn refused_proxy_connections_keep_retrying_beyond_two_and_recover_when_it_listens() {
-    use tokio::io::AsyncWriteExt;
+async fn refused_proxy_connections_exhaust_the_finite_retry_budget() {
     let root = tempfile::tempdir().unwrap();
     let reserved = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = reserved.local_addr().unwrap();
-    drop(reserved); // A closed endpoint produces genuine connection-refused errors.
+    drop(reserved); // Every request gets a genuine native connection-refused error.
     const REQUIRED_FAILURES: u64 = 3;
+    const RETRY_LIMIT: u32 = 8;
     const HEADER_TIMEOUT_MS: u64 = 3_000;
     const RETRY_DELAY_MS: u64 = 100;
-    // Native refusal and subsequent admission are observed under the same fixture watchdog.
     let config = root.path().join("config.toml");
-    std::fs::write(&config, format!("default_connection='fixture'\ndefault_model='fixture'\n[connections.fixture]\nbase_url='http://{address}/v1'\nresponse_max_retries=8\nresponse_retry_max_delay_ms={RETRY_DELAY_MS}\nresponse_header_timeout_ms={HEADER_TIMEOUT_MS}\n")).unwrap();
+    std::fs::write(&config, format!("default_connection='fixture'\ndefault_model='fixture'\n[connections.fixture]\nbase_url='http://{address}/v1'\nresponse_max_retries={RETRY_LIMIT}\nresponse_retry_max_delay_ms={RETRY_DELAY_MS}\nresponse_header_timeout_ms={HEADER_TIMEOUT_MS}\n")).unwrap();
     let owner = DataOwner::start(
         Some(config),
         Some(root.path().join("data")),
@@ -297,7 +296,7 @@ async fn refused_proxy_connections_keep_retrying_beyond_two_and_recover_when_it_
         .as_str()
         .unwrap()
         .to_owned();
-    let retry_events = control.subscribe();
+    let mut events = control.subscribe();
     let accepted: MessageAccepted = serde_json::from_value(
         request(
             &control,
@@ -309,114 +308,39 @@ async fn refused_proxy_connections_keep_retrying_beyond_two_and_recover_when_it_
                 sender_label: None,
                 deliver: Deliver::Next,
                 thread_id: Some(thread.clone()),
-                text: "recover after actual proxy startup".into(),
+                text: "exhaust retry budget against a refused loopback endpoint".into(),
             }),
         )
         .await,
     )
     .unwrap();
     let turn = accepted.turn_id.unwrap();
-    let observer_thread = thread.clone();
-    let observer_turn = turn.clone();
-    let database = control.store.database.clone();
-    let runtime = tokio::runtime::Handle::current();
-    let watcher = tokio::task::spawn_blocking(move || -> Result<std::net::TcpListener, String> {
-        let mut events = retry_events;
-        loop {
-            match events.blocking_recv() {
-                Ok(EngineEvent::Changed { thread_id, .. }) if thread_id == observer_thread => {}
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                    return Err("retry observer event stream closed".into());
-                }
-                _ => continue,
-            }
-            let turn = observer_turn.clone();
-            let (failed, state): (i64, String) = runtime
-                .block_on(database.call(move |db| {
-                    let state =
-                        db.query_row("SELECT state FROM turn WHERE id=?1", [&turn], |row| {
-                            row.get(0)
-                        })?;
-                    let failed = db.query_row(
-                        "SELECT count(*) FROM model_attempt WHERE turn_id=?1 AND state='failed'",
-                        [turn],
-                        |row| row.get(0),
-                    )?;
-                    Ok((failed, state))
-                }))
-                .map_err(|error| format!("cannot inspect retry state: {error}"))?;
-            if state == "recovery_wait" {
-                return Err(format!(
-                    "turn entered recovery_wait after {failed} failed connection attempts"
-                ));
-            }
-            if failed >= REQUIRED_FAILURES as i64 {
-                let listener = std::net::TcpListener::bind(address)
-                    .map_err(|error| format!("cannot bind recovery listener: {error}"))?;
-                listener.set_nonblocking(true).map_err(|error| {
-                    format!("cannot make recovery listener nonblocking: {error}")
-                })?;
-                return Ok(listener);
-            }
-        }
-    });
-    let listener = crate::test_watchdog::watchdog(
-        "tests/response_upload_recovery.rs: listener ready after third refused attempt",
-        watcher,
-    )
-    .await
-    .expect("retry observer did not produce the listener")
-    .expect("retry observer task failed")
-    .unwrap_or_else(|error| panic!("connection retry stopped before listener startup: {error}"));
-    let listener = TcpListener::from_std(listener).unwrap();
-    let mut recovery_events = control.subscribe();
-    let server = tokio::spawn(async move {
-        let (mut stream, _) = crate::test_watchdog::watchdog("tests/response_upload_recovery.rs: refused_proxy_connections_keep_retrying_beyond_two_and_recover_when_it_listens", listener.accept()).await.unwrap().unwrap();
-        stream.set_nodelay(true).unwrap();
-        let mut bytes = Vec::new();
-        loop {
-            let mut buffer = [0; 8192];
-            let count = stream.read(&mut buffer).await.unwrap();
-            assert_ne!(count, 0);
-            bytes.extend_from_slice(&buffer[..count]);
-            if let Some(at) = bytes.windows(4).position(|w| w == b"\r\n\r\n") {
-                let length = String::from_utf8_lossy(&bytes[..at])
-                    .lines()
-                    .find_map(|line| {
-                        line.to_ascii_lowercase()
-                            .strip_prefix("content-length:")
-                            .map(|v| v.trim().parse::<usize>().unwrap())
+    crate::test_watchdog::watchdog(
+        "tests/response_upload_recovery.rs: all refused attempts settle",
+        async {
+            loop {
+                let target = turn.clone();
+                let state: String = control
+                    .store
+                    .database
+                    .call(move |db| {
+                        Ok(
+                            db.query_row("SELECT state FROM turn WHERE id=?1", [target], |r| {
+                                r.get(0)
+                            })?,
+                        )
                     })
+                    .await
                     .unwrap();
-                if bytes.len() >= at + 4 + length {
+                if state == "recovery_wait" {
                     break;
                 }
+                changed(&mut events, &thread).await;
             }
-        }
-        let body = json!({"id":"proxy-restored","status":"completed","output":[{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"connection restored"}]}]}).to_string();
-        stream.write_all(format!("HTTP/1.1 200 Fixture\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
-    });
-    crate::test_watchdog::watchdog("tests/response_upload_recovery.rs: refused_proxy_connections_keep_retrying_beyond_two_and_recover_when_it_listens", async {
-        loop {
-            let target = turn.clone();
-            let state: String = control
-                .store
-                .database
-                .call(move |db| {
-                    Ok(db.query_row("SELECT state FROM turn WHERE id=?1", [target], |r| r.get(0))?)
-                })
-                .await
-                .unwrap();
-            assert_ne!(state, "recovery_wait");
-            if state == "completed" {
-                break;
-            }
-            changed(&mut recovery_events, &thread).await;
-        }
-    })
+        },
+    )
     .await
-    .expect("Driver must automatically recover once the proxy listens");
+    .expect("the finite configured retry budget must reach recovery_wait");
     control
         .store
         .database
@@ -429,20 +353,28 @@ async fn refused_proxy_connections_keep_retrying_beyond_two_and_recover_when_it_
                     Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?, r.get::<_, Option<f64>>(2)?))
                 })?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
-            assert!(rows.len() >= 4);
-            assert_eq!(rows.last().unwrap().0, "completed");
+            assert_eq!(rows.len(), (RETRY_LIMIT + 1) as usize);
+            assert_eq!(rows.last().unwrap().0, "incomplete");
             let mut observations = Vec::new();
-            for (index, (state, body, wall_ms)) in rows[..rows.len() - 1].iter().enumerate() {
-                assert_eq!(state, "failed");
-                let saved: Value = serde_json::from_str(body.as_ref().unwrap()).unwrap();
+            for (index, (state, body, wall_ms)) in rows.iter().enumerate() {
                 assert_eq!(
-                    saved["error"]["http_observation"]["phase"],
-                    "before_body_source"
+                    state,
+                    if index < RETRY_LIMIT as usize { "failed" } else { "incomplete" }
                 );
-                assert_eq!(saved["automatic_retry"]["number"], index + 1);
+                let saved: Value = serde_json::from_str(body.as_ref().unwrap()).unwrap();
+                assert_eq!(saved["error"]["kind"], "transport");
+                assert_eq!(saved["error"]["http_observation"]["phase"], "before_body_source");
+                assert_eq!(saved["error"]["http_observation"]["body_source_bytes_consumed"], 0);
+                if index < RETRY_LIMIT as usize {
+                    assert_eq!(saved["automatic_retry"]["number"], index + 1);
+                } else {
+                    assert_eq!(saved["automatic_retry_exhausted"], json!({"retries":RETRY_LIMIT,"limit":RETRY_LIMIT}));
+                }
                 assert!(saved.get("automatic_trim").is_none());
                 observations.push(json!({"kind":saved["error"]["kind"],"phase":saved["error"]["http_observation"]["phase"],"source_bytes":saved["error"]["http_observation"]["body_source_bytes_consumed"],"attempt_wall_ms":wall_ms}));
             }
+            assert_eq!(observations.len(), (RETRY_LIMIT + 1) as usize);
+            assert!(observations.len() as u64 > REQUIRED_FAILURES);
             eprintln!("CLOSED_PROXY_OBSERVATIONS {}", json!(observations));
             assert_eq!(
                 db.query_row("SELECT count(*) FROM replacement", [], |r| r
@@ -453,12 +385,8 @@ async fn refused_proxy_connections_keep_retrying_beyond_two_and_recover_when_it_
         })
         .await
         .unwrap();
-    crate::test_watchdog::watchdog("tests/response_upload_recovery.rs: refused_proxy_connections_keep_retrying_beyond_two_and_recover_when_it_listens", server).await.unwrap().unwrap();
-    crate::test_watchdog::watchdog("tests/response_upload_recovery.rs: refused_proxy_connections_keep_retrying_beyond_two_and_recover_when_it_listens", control.shutdown())
-        .await
-        .unwrap()
-        .unwrap();
-    crate::test_watchdog::watchdog("tests/response_upload_recovery.rs: refused_proxy_connections_keep_retrying_beyond_two_and_recover_when_it_listens", owner.shutdown()).await.unwrap().unwrap();
+    control.shutdown().await.unwrap();
+    crate::test_watchdog::watchdog("tests/response_upload_recovery.rs: refused_proxy_connections_exhaust_the_finite_retry_budget", owner.shutdown()).await.unwrap().unwrap();
 }
 
 // Subscribe before the saved-state read; lag means re-read, not lost completion.

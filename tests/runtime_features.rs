@@ -7,13 +7,13 @@ use shellboy::{
     control::{Control, EngineEvent},
     protocol::*,
 };
-use std::{collections::VecDeque, net::SocketAddr, sync::Arc, time::Duration};
+use std::{collections::VecDeque, sync::Arc, time::Duration};
 #[path = "runtime_features/compaction_failure_memory.rs"]
 mod compaction_failure_memory;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    net::{TcpListener, TcpStream},
-    sync::{mpsc, oneshot, watch},
+    net::TcpListener,
+    sync::{mpsc, oneshot},
 };
 fn working_instructions(body: &Value) -> Option<(String, &str)> {
     let messages: Vec<_> = body["input"]
@@ -72,18 +72,9 @@ impl Incoming {
 
 /// Buffers the other request kind when a test waits for an ordinary or
 /// summary request; this preserves both legal Run/summary arrival orders.
-struct PendingProxyParse(watch::Sender<usize>);
-impl Drop for PendingProxyParse {
-    fn drop(&mut self) {
-        self.0
-            .send_modify(|pending| *pending = pending.saturating_sub(1));
-    }
-}
-
 pub(crate) struct ProxyInbox {
     pub(crate) receiver: mpsc::Receiver<Incoming>,
     deferred: VecDeque<Incoming>,
-    address: SocketAddr,
 }
 impl ProxyInbox {
     pub(crate) async fn recv(&mut self) -> Option<Incoming> {
@@ -114,55 +105,6 @@ impl ProxyInbox {
         }
         None
     }
-    /// Put a loopback request marker after every already-connected provider socket.
-    /// The proxy acknowledges it only after prior request bodies reach the inbox.
-    pub(crate) async fn synchronize(&mut self) {
-        let mut stream = TcpStream::connect(self.address).await.unwrap();
-        stream
-            .write_all(
-                b"GET /__shellboy_test_barrier HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
-            )
-            .await
-            .unwrap();
-        let mut response = Vec::new();
-        let mut chunk = [0; 256];
-        loop {
-            let read = tokio::select! {
-                read = stream.read(&mut chunk) => Some(read.unwrap()),
-                request = self.receiver.recv() => {
-                    self.deferred.push_back(request.expect("proxy request channel remains open during barrier"));
-                    None
-                }
-            };
-            if let Some(read) = read {
-                if read == 0 {
-                    break;
-                }
-                response.extend_from_slice(&chunk[..read]);
-            }
-        }
-        assert!(response.starts_with(b"HTTP/1.1 204 "), "{response:?}");
-    }
-    fn take_available_kind(&mut self, expected: ProviderRequestKind) -> Vec<Incoming> {
-        let mut matched = Vec::new();
-        let mut retained = VecDeque::new();
-        while let Some(request) = self.deferred.pop_front() {
-            if request.kind() == expected {
-                matched.push(request);
-            } else {
-                retained.push_back(request);
-            }
-        }
-        self.deferred = retained;
-        while let Ok(request) = self.receiver.try_recv() {
-            if request.kind() == expected {
-                matched.push(request);
-            } else {
-                self.deferred.push_back(request);
-            }
-        }
-        matched
-    }
 }
 
 pub(crate) async fn proxy() -> (String, ProxyInbox, tokio::task::JoinHandle<()>) {
@@ -172,17 +114,11 @@ async fn proxy_with_sse(sse: bool) -> (String, ProxyInbox, tokio::task::JoinHand
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let (send, receive) = mpsc::channel(8);
-    let (parsing, parsing_receiver) = watch::channel(0usize);
     let task = tokio::spawn(async move {
-        let _parsing_receiver = parsing_receiver;
         loop {
             let (mut stream, _) = listener.accept().await.unwrap();
-            parsing.send_modify(|pending| *pending += 1);
-            let parsing = parsing.clone();
             let send = send.clone();
             tokio::spawn(async move {
-                let _pending = PendingProxyParse(parsing.clone());
-                let mut parse_events = parsing.subscribe();
                 let mut bytes = Vec::new();
                 let mut chunk = [0; 8192];
                 let (body, session) = loop {
@@ -193,23 +129,6 @@ async fn proxy_with_sse(sse: bool) -> (String, ProxyInbox, tokio::task::JoinHand
                     bytes.extend_from_slice(&chunk[..n]);
                     if let Some(i) = bytes.windows(4).position(|v| v == b"\r\n\r\n") {
                         let head = String::from_utf8_lossy(&bytes[..i]);
-                        if head
-                            .lines()
-                            .next()
-                            .is_some_and(|line| line.starts_with("GET /__shellboy_test_barrier "))
-                        {
-                            loop {
-                                if *parse_events.borrow_and_update() <= 1 {
-                                    break;
-                                }
-                                parse_events.changed().await.unwrap();
-                            }
-                            stream
-                                .write_all(b"HTTP/1.1 204 Test Barrier\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
-                                .await
-                                .unwrap();
-                            return;
-                        }
                         let length = head
                             .lines()
                             .find_map(|s| {
@@ -243,7 +162,6 @@ async fn proxy_with_sse(sse: bool) -> (String, ProxyInbox, tokio::task::JoinHand
                 {
                     return;
                 }
-                drop(_pending);
                 let Ok((status, body)) = result.await else {
                     return;
                 };
@@ -276,7 +194,6 @@ async fn proxy_with_sse(sse: bool) -> (String, ProxyInbox, tokio::task::JoinHand
         ProxyInbox {
             receiver: receive,
             deferred: VecDeque::new(),
-            address,
         },
         task,
     )
@@ -4192,6 +4109,22 @@ async fn proactive_events(control: &Arc<Control>, thread: &str) -> Vec<Value> {
         .cloned()
         .collect()
 }
+async fn attempt_count_for_run(control: &Control, run_id: &str) -> i64 {
+    let run_id = run_id.to_owned();
+    control
+        .store
+        .database
+        .call(move |db| {
+            Ok(db.query_row(
+                "SELECT count(*) FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE t.run_id=?1",
+                [run_id],
+                |row| row.get(0),
+            )?)
+        })
+        .await
+        .unwrap()
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn proactive_closed_spill_then_cancelled_summary_preserves_adoption() {
     proactive_partial_spill_fixture(true, Some(false)).await;
@@ -4372,13 +4305,6 @@ if let Some(active) = cancel_active {
     }
     // incoming_summary may have deferred an Ordinary POST admitted before
     // Stop. Retain its typed custody separately from genuinely later arrivals.
-    crate::test_watchdog::watchdog(
-        "runtime proxy barrier before RunStop",
-        receive.synchronize(),
-    )
-    .await
-    .expect("all provider requests already connected before Stop must reach the inbox");
-    let pre_stop_ordinary=receive.take_available_kind(ProviderRequestKind::Ordinary);
     let pending_id=boundary.report.attempt_id.clone();
     let pending_record=automatic_attempt_record(&control,pending_id.clone()).await;
     assert_eq!(pending_record["outcome"],"unknown","RunStop targets an actually pending Thread-owned Summary");
@@ -4404,18 +4330,19 @@ if let Some(active) = cancel_active {
                 assert_eq!(shell_executions, 3,
                     "the two large calls and existing small-2 call execute once; retry backoff adds no tool execution");
             }
-            *entered_phase.borrow_mut()=format!("sending explicit RunStop for trigger Run {}, report attempt {}",boundary.trigger.run_id,boundary.report.attempt_id);
-            request(&control, Command::RunStop(RunTarget { run_id: boundary.trigger.run_id.clone() })).await;
+            let trigger_run_id = boundary.trigger.run_id.clone();
+            *entered_phase.borrow_mut()=format!("sending explicit RunStop for trigger Run {}, report attempt {}",trigger_run_id,boundary.report.attempt_id);
+            request(&control, Command::RunStop(RunTarget { run_id: trigger_run_id.clone() })).await;
+            // Admission is persisted before HTTP dispatch: src/control/driver/request.rs:116-135 awaits
+            // attempt admission (model_attempt INSERT at line 408), and src/control/driver.rs:390-399
+            // invokes stream_response only after prepare_attempt returns. The RunStop ACK
+            // therefore fences any later attempt row from any post-Stop provider dispatch.
+            let attempts_at_stop_ack = attempt_count_for_run(&control, &boundary.trigger.run_id).await;
             // Complete an already-admitted closed Summary after explicit Stop.
             // Its late success must not be adopted; this lets the producer and
             // the exact original FINISH unwind without a test-owned HTTP wait.
             let _late_summary_delivery = summary.reply.send((200, answer("late cancelled summary")));
             *completed_phase.borrow_mut()=entered_phase.borrow().clone();
-            assert!(pre_stop_ordinary.iter().all(|admitted|admitted.kind()==ProviderRequestKind::Ordinary));
-            // These bodies were admitted before Stop, not post-Stop dispatches.
-            // Close their loopback reply channels now instead of retaining HTTP
-            // senders across the exact report FINISH wait.
-            drop(pre_stop_ordinary);
             // One-shot diagnostic at the existing explicit-Stop cut: distinguish
             // a still-provisional exact report row from a completed CAS without
             // polling or extending the original outer watchdog.
@@ -4482,13 +4409,8 @@ if let Some(active) = cancel_active {
             settled(&control, &target).await;
             *completed_phase.borrow_mut()=entered_phase.borrow().clone();
             assert_eq!(request(&control, Command::RunGet(RunTarget { run_id: finished.boundary.trigger.run_id.clone() })).await["state"], "stopped");
-            crate::test_watchdog::watchdog(
-                "runtime proxy barrier after stopped Run",
-                receive.synchronize(),
-            )
-            .await
-            .expect("all proxy requests admitted through the stopped Run must be observable");
-            assert!(receive.try_recv().is_err(), "no provider request is dispatched after Stop");
+            let stopped_attempts = attempt_count_for_run(&control, &trigger_run_id).await;
+            assert_eq!(stopped_attempts, attempts_at_stop_ack);
             // §2.1/§2.3: the triggering report is consumed and pre-spill usage is
             // stale, so the resumed Turn starts with an ordinary request.
             let resume_accept=send_accepted(&control,&target,"resume after cancelled summary").await;

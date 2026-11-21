@@ -3,25 +3,28 @@
 ## Core #324 deterministic Ubuntu integration witnesses (candidate; CI pending)
 
 The candidate branch `task/core324-nondeterministic-tests` is based directly on
-`origin/main` at `116e82e5965dbc2c736849659f9f48db21788873`. The three CI-red
-witnesses now synchronize at their causal boundary: the refused-connection test
-uses an independent event observer to bind the loopback listener as soon as the
-third failed-attempt row commits; the RunStop test fences the mock proxy's already
-accepted request parsers before and after Stop; the response retry matrix removes
-the strict untyped 500 metadata envelope from its fail-closed cases, in accordance
-with #315, while retaining typed terminal, post-DONE, malformed and nontransient
-refusal cases. No product source, protocol, state, table or dependency changed.
+`origin/main` at `116e82e5965dbc2c736849659f9f48db21788873`. The refused-endpoint
+test leaves its loopback port closed for the complete finite retry budget and
+checks the initial attempt plus all eight configured retries, all with zero body
+bytes sent. It makes no later-success claim. The U2 Stop test records the exact
+Run's model-attempt count at RunStop acknowledgement and compares it after that
+Run settles; `control/driver/request.rs:116-135` awaits durable attempt admission
+(the `model_attempt` insert at line 408) before `control/driver.rs:390-399`
+starts the HTTP request. The test therefore uses the existing DB admission record,
+not mock-proxy parsing order, as the Stop witness. The retry matrix still retains
+the non-strict root-`response` metadata 500 as fail-closed; the #315 strict
+one-key terminal retry-positive test remains separate. No product source,
+protocol, state, table or dependency changed.
 
-On this candidate, pinned formatting and `cargo check --tests --locked` passed,
-and the three registered integration selectors passed individually. The retry
-classification selector and U2 Stop selector also passed on exact `origin/main`
-source; the response upload and retry selectors passed on both main and candidate.
-All-target Clippy and `python3 scripts/check-test-layout.py` passed on candidate
-source; the full integration suite and CI remain unrun. Historical #281 Ubuntu
-REDs and attempt-2 U2 RED remain tied to their original SHA/attempt; this
-candidate remains unqualified until normal CI completes.
+On the current candidate, pinned formatting and `cargo check --tests --locked`
+passed. All three registered focused selectors passed individually: refused
+finite-budget exhaustion, typed/nontransient terminal retry refusal, and U2
+stopped-spill adoption. The targeted validation-document role test passed. The
+full scripts test suite passed 230 tests with one skipped; all-target Clippy and
+`python3 scripts/check-test-layout.py` passed. Historical #281 Ubuntu REDs and
+attempt-2 U2 RED remain tied to their original SHA/attempt; full integration CI
+on this current revision remains pending.
 
-# Development status
 
 ## #315 Retry after partial output (owner-policy successor)
 
