@@ -945,7 +945,9 @@ states!(IdKind {
 });
 args!(IdResolveArgs {
     kind: IdKind,
-    prefix: String
+    prefix: String,
+    #[serde(default, skip_serializing_if = "is_false")]
+    include_pending_duties: bool
 });
 record!(IdResolveResult { id: String });
 args!(MessageTarget { message_id: String });

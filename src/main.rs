@@ -473,15 +473,20 @@ async fn run_owner(cli: Cli, cwd: &Path) -> ExitCode {
             .into_command(cwd)
             .await?
             .ok_or_else(|| ApiError::new(ErrorCode::InvalidArgument, "Missing command"))?;
-        let resolved = shellboy::cli::resolve_id_arguments(command, |kind, prefix| {
-            let data_dir = data_dir.clone();
-            let caller_origin = caller_origin.clone();
+        let include_pending_duties =
+            matches!(command, shellboy::protocol::Command::MessageReply(_));
+        let resolver_data_dir = data_dir.clone();
+        let resolver_origin = caller_origin.clone();
+        let resolved = shellboy::cli::resolve_id_arguments(command, move |kind, prefix| {
+            let data_dir = resolver_data_dir.clone();
+            let caller_origin = resolver_origin.clone();
             async move {
                 let response = ipc::call_requiring_capability(
                     &data_dir,
                     shellboy::protocol::Command::IdResolve(shellboy::protocol::IdResolveArgs {
                         kind,
                         prefix,
+                        include_pending_duties,
                     }),
                     None,
                     caller_origin,

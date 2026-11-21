@@ -2904,6 +2904,9 @@
     "IdResolveArgs": {
       "additionalProperties": false,
       "properties": {
+        "include_pending_duties": {
+          "type": "boolean"
+        },
         "kind": {
           "$ref": "#/definitions/IdKind"
         },

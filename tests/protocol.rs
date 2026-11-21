@@ -1596,6 +1596,7 @@ fn id_resolve_is_a_bounded_read_only_capability_command() {
         let command = Command::IdResolve(IdResolveArgs {
             kind: IdKind::Thread,
             prefix: prefix.to_owned(),
+            include_pending_duties: false,
         });
         assert_eq!(
             command.validate().is_ok(),

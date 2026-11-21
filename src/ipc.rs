@@ -1139,6 +1139,7 @@ mod frame_delivery_tests {
             Command::IdResolve(IdResolveArgs {
                 kind: IdKind::Thread,
                 prefix: "12345678".into(),
+                include_pending_duties: false,
             }),
             None,
             None,

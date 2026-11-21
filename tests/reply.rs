@@ -835,6 +835,48 @@ async fn missing_reply_target_lists_only_calling_threads_pending_duties() {
         execution_id: "caller-shell".into(),
         token: "synthetic-origin".into(),
     };
+    let resolve_error = store
+        .execute(
+            request(Command::IdResolve(IdResolveArgs {
+                kind: IdKind::Message,
+                prefix: "deadbeef".into(),
+                include_pending_duties: true,
+            })),
+            Some(caller.clone()),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(resolve_error.code, ErrorCode::NotFound);
+    assert_eq!(
+        resolve_error.details.as_ref().unwrap()["pending_duty_ids"],
+        serde_json::json!([recipient_id])
+    );
+    assert_ne!(
+        resolve_error.details.as_ref().unwrap()["pending_duty_ids"][0],
+        unrelated_id
+    );
+
+    let plain_resolve_error = store
+        .execute(
+            request(Command::IdResolve(IdResolveArgs {
+                kind: IdKind::Message,
+                prefix: "deadbeef".into(),
+                include_pending_duties: false,
+            })),
+            Some(caller.clone()),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(plain_resolve_error.code, ErrorCode::NotFound);
+    assert!(
+        plain_resolve_error
+            .details
+            .as_ref()
+            .unwrap()
+            .get("pending_duty_ids")
+            .is_none()
+    );
+
     let error = store
         .execute(
             request(Command::MessageReply(MessageReplyArgs {
@@ -866,6 +908,7 @@ async fn id_resolve_is_a_receipt_free_observation() {
         Command::IdResolve(IdResolveArgs {
             kind: IdKind::Thread,
             prefix: "recipien".into(),
+            include_pending_duties: false,
         }),
     );
     assert!(resolve_request.command.is_read_only());

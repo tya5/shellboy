@@ -1236,7 +1236,9 @@ impl Store {
                 ErrorCode::InvalidState,
                 "Status uses the dedicated read-only projection",
             )),
-            Command::IdResolve(args) => MutationResult::value(id_resolution::resolve_id(tx, args)?),
+            Command::IdResolve(args) => {
+                MutationResult::value(id_resolution::resolve_id(tx, args, caller)?)
+            }
             Command::ThreadCreate(args) => {
                 let mut defaults = args.clone();
                 defaults.agents = None;
