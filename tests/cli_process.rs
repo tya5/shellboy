@@ -921,3 +921,112 @@ async fn cli_thread_ids_resolve_unique_prefixes_and_reject_ambiguous_or_missing_
     owner.shutdown().await.unwrap();
     task.await.unwrap();
 }
+
+async fn cli_prefix_failure(directory: &std::path::Path, args: &[&str]) -> Value {
+    let output = crate::test_watchdog::watchdog(
+        "CLI prefix rejection",
+        tokio::process::Command::new(env!("CARGO_BIN_EXE_shellboy"))
+            .kill_on_drop(true)
+            .arg("--data-dir")
+            .arg(directory)
+            .args(args)
+            .output(),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    assert!(output.stderr.is_empty(), "{output:?}");
+    serde_json::from_slice(&output.stdout).unwrap()
+}
+
+#[tokio::test]
+async fn chat_ambiguity_uses_the_same_typed_cli_envelope_as_message_get() {
+    let root = tempfile::tempdir().unwrap();
+    let config = root.path().join("config.toml");
+    std::fs::write(&config, "").unwrap();
+    let owner = DataOwner::start(
+        Some(config),
+        Some(root.path().join("data")),
+        root.path().into(),
+    )
+    .await
+    .unwrap();
+    let (send, mut incoming) = tokio::sync::mpsc::channel::<shellboy::ipc::Invocation>(4);
+    let server = LocalServer::bind(&owner, send).await.unwrap();
+    // Different namespaces have different candidates; the same typed envelope
+    // from a synthetic dispatcher proves both boundaries preserve every field.
+    let task = tokio::spawn(async move {
+        use shellboy::protocol::{ApiError, Command, ErrorCode, IdKind, Response};
+        for expected in [IdKind::Thread, IdKind::Message] {
+            let invocation = incoming.recv().await.unwrap();
+            let Command::IdResolve(args) = invocation.request.command else {
+                panic!("target dispatched instead of prefix preflight");
+            };
+            assert_eq!(args.kind, expected);
+            assert_eq!(args.prefix, "aaaaaaaa");
+            invocation.reply.send(Response::failure(invocation.request.operation_id,
+                ApiError::new(ErrorCode::InvalidArgument, "ID prefix is ambiguous")
+                    .hint("Pass more characters")
+                    .details(serde_json::json!({"reason":"ambiguous","candidates":["aaaaaaaa-0000-4000-8000-000000000001","aaaaaaaa-0000-4000-8000-000000000002"]})),
+            )).unwrap();
+        }
+    });
+    let chat = cli_prefix_failure(&owner.loaded.data_dir, &["chat", "--thread", "aaaaaaaa"]).await;
+    let get = cli_prefix_failure(
+        &owner.loaded.data_dir,
+        &["message", "get", "--message", "aaaaaaaa"],
+    )
+    .await;
+    assert_eq!(chat, get);
+    assert_eq!(
+        chat["error"]["details"]["candidates"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    task.await.unwrap();
+    server.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn chat_missing_capability_uses_the_same_typed_cli_envelope_as_message_get() {
+    use shellboy::{
+        ipc::{Hello, Welcome},
+        protocol::{PROTOCOL_VERSION, read_frame, write_frame},
+    };
+    let root = tempfile::tempdir().unwrap();
+    let address = root.path().join("s");
+    let listener = tokio::net::UnixListener::bind(&address).unwrap();
+    std::fs::write(root.path().join("endpoint.json"), serde_json::to_vec(&serde_json::json!({
+        "transport":"unix", "address": address, "instance_id":"fixture", "protocol_version":PROTOCOL_VERSION,
+    })).unwrap()).unwrap();
+    let task = tokio::spawn(async move {
+        for _ in 0..2 {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            read_frame::<_, Hello>(&mut stream).await.unwrap().unwrap();
+            write_frame(
+                &mut stream,
+                &Welcome {
+                    protocol_version: PROTOCOL_VERSION,
+                    instance_id: "fixture".into(),
+                    capabilities: vec![],
+                },
+            )
+            .await
+            .unwrap();
+            assert!(read_frame::<_, Value>(&mut stream).await.unwrap().is_none());
+        }
+    });
+    let chat = cli_prefix_failure(root.path(), &["chat", "--thread", "aaaaaaaa"]).await;
+    let get = cli_prefix_failure(root.path(), &["message", "get", "--message", "aaaaaaaa"]).await;
+    assert_eq!(chat, get);
+    assert_eq!(
+        chat["error"]["details"]["required_capability"],
+        "id.resolve"
+    );
+    task.await.unwrap();
+}

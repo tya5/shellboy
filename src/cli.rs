@@ -1335,7 +1335,7 @@ struct ConversationIds {
     parent_id: Option<String>,
 }
 
-pub(crate) async fn resolve_conversation_ids(
+pub async fn resolve_conversation_ids(
     data: &Path,
     origin: Option<&wire::Origin>,
     thread_id: &mut Option<String>,

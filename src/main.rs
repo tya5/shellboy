@@ -272,7 +272,7 @@ fn main() -> ExitCode {
                 cli.operation_id,
             )))
         }
-        Some(CliCommand::Chat(options)) => {
+        Some(CliCommand::Chat(mut options)) => {
             if cli.operation_id.is_some() {
                 eprintln!("shellboy chat performs multiple RPCs; --operation-id is not accepted");
                 return ExitCode::from(2);
@@ -291,6 +291,14 @@ fn main() -> ExitCode {
             let (signal, interrupts) = tokio::sync::mpsc::channel(4);
             let stdin_is_tty = std::io::stdin().is_terminal();
             let origin = origin(&data);
+            if let Err(error) = runtime.block_on(shellboy::cli::resolve_conversation_ids(
+                &data,
+                origin.as_ref(),
+                &mut options.thread_id,
+                &mut options.create.parent_id,
+            )) {
+                return print_error(error, None);
+            }
             let result = runtime.block_on(async {
                 let relay = tokio::spawn(async move {
                     while tokio::signal::ctrl_c().await.is_ok() {
