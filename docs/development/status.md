@@ -4,7 +4,7 @@
 
 The candidate branch `task/core324-nondeterministic-tests` is based directly on
 `origin/main` at `116e82e5965dbc2c736849659f9f48db21788873`; current candidate SHA is
-`a8d97b5843746f6cd18708222776b3364e0458ca` (previous CI-green candidate). The refused-endpoint
+`80b50d6d0013a7b1045eb761667db2fc3d8f4914` (source candidate; CI pending). The refused-endpoint
 test leaves its loopback port closed for the complete finite retry budget and
 checks the initial attempt plus all eight configured retries, all with zero body
 bytes sent. It makes no later-success claim. The proactive fixture documents
@@ -48,7 +48,7 @@ The fixture now uses distinct HTTP transfer-encoding chunks for prefix and termi
 frames; the decoder buffers across Body frames, so this fixes fixture ambiguity without
 changing product semantics. Format/check and the fail-closed matrix, invalid-JSON,
 HTTP-200-JSON, retry-budget and #315 strict-positive selectors passed after this edit.
-The updated candidate is not yet pushed or CI-qualified. The full integration suite
+The source candidate is committed as `80b50d6d0013a7b1045eb761667db2fc3d8f4914`; its updated status record is the current branch tip. It is not yet pushed or CI-qualified. The full integration suite
 was not run.
 
 
