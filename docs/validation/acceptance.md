@@ -12187,3 +12187,7 @@ The first exact-SHA CI (`44905626185`, SHA `c67c646ac0f0e25533a6b6de75ad3b22dca4
 ## Core #326 IPC final frames
 
 Purpose checks cover typed replies for owner-side failures, clean EOF without a reply, typed failure on extra peer input or a peer read error, final-frame lifetime, and accepted replies surviving fatal listener failure. Core checks do not establish Windows named-pipe delivery to Studio; the three exact-pair Windows cases must be verified against the same Core SHA.
+
+## Core #327 attachment list pages (verification pending)
+
+Purpose coverage adds a multi-page attachment list assertion for first-page and cursor continuation order, plus a direct observation counter assertion equal to the returned page length. On this candidate, paging/CLI/index-plan integration selectors passed 3/3, observation count passed 1/1, schema snapshot passed 1/1, and clippy `--all-targets -- -D warnings` passed. The full suite was not run; same-SHA hosted CI remains pending.

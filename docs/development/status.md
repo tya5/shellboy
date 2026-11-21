@@ -596,3 +596,7 @@ transferred from 0ce or any intermediate closeout SHA.
 ## Core #326 IPC final frames
 
 A connection task owns one correlated final reply, distinguishes clean peer EOF from read errors or extra input, and holds the connection after writing until peer EOF or explicit shutdown. Listener failure does not itself cancel accepted connections. Windows Studio exact-pair qualification is separate from Core checks.
+
+## Core #327 attachment list pages
+
+`attachment.list` now uses a bounded keyset query in `(selected_order,id)` order, returns `Page<AttachmentDetails>`, and performs filesystem path observations only on the page items. The cursor is bound to Thread, selection revision, and a captured ordering watermark; CLI supports `--limit` and `--cursor`. Focused paging/CLI/index-plan tests (3/3), the path-observation count unit test (1/1), and protocol schema snapshot test (1/1) pass locally; hosted CI remains pending.

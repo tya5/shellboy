@@ -431,6 +431,8 @@ impl Store {
         }
         if let Command::AttachmentList(args) = &request.command {
             let thread = target(args.thread_id.as_deref(), caller.as_ref())?;
+            let mut list_args = args.clone();
+            list_args.thread_id = Some(thread);
             let path = self.database.path().to_path_buf();
             let observer = self.database.clone();
             let kind = format!("{:?}", execute_kind::Kind::of(&request.command));
@@ -440,21 +442,21 @@ impl Store {
             } else {
                 "external"
             });
-            let mut items = inspection_work(move || {
+            let mut page = inspection_work(move || {
                 let mut db = open_inspection(&path)?;
                 observer.observe_inspection(&mut db, &kind, queued_at, requester, |db| {
                     let tx = db.transaction().map_err(sql_error)?;
-                    let items = crate::attachments::list_tx(&tx, &thread)?;
+                    let page = crate::attachments::list_tx(&tx, &list_args)?;
                     tx.commit().map_err(sql_error)?;
-                    Ok::<_, ApiError>(items)
+                    Ok::<_, ApiError>(page)
                 })
             })
             .await??;
             return MutationResult::value(
                 self.instructions
                     .file_work(move || {
-                        crate::attachments::observe_paths(&mut items);
-                        Ok(items)
+                        crate::attachments::observe_paths(&mut page.items);
+                        Ok(page)
                     })
                     .await?,
             );
@@ -576,12 +578,19 @@ impl Store {
                         let body=payload.to_string();
                         tx.execute("INSERT INTO node(id,kind,created_at,payload_json,payload_bytes,body_hash)VALUES(?1,'event',?2,?3,?4,?5)",params![source,now,body,body.len() as i64,hash(body.as_bytes())]).map_err(sql_error)?;
                         tx.execute("INSERT INTO attachment_delivery(node_id,thread_id,status,operation_id,origin_json,created_at,target_run_id)VALUES(?1,?2,?3,?4,?5,?6,?7)",params![source,target_id,if held {"held"} else {"accepted"},request.operation_id,origin.to_string(),now,target_run]).map_err(sql_error)?;
-                        crate::attachments::add_tx(tx,&plan,Some(&source))?;
+                        let mut attached = crate::attachments::add_tx(tx,&plan,Some(&source))?;
                         bump_roots(tx)?;
                         store.index.authorize_new_tx(tx,std::slice::from_ref(&source))?;
                         let live:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM run WHERE thread_id=?1 AND state IN ('live','stopping'))",[&target_id],|r|r.get(0)).map_err(sql_error)?;
                         if !live && !held { super::attachment_delivery::apply_pending_tx(tx,&target_id,now)?; }
-                        let attached=crate::attachments::list_tx(tx,&target_id)?.into_iter().filter(|a|a.source_node_id==source).collect::<Vec<_>>();
+                        for attachment in &mut attached {
+                            attachment.delivery_status = crate::attachments::delivery_status(
+                                tx,
+                                &target_id,
+                                &attachment.source_node_id,
+                            )
+                            .map_err(sql_error)?;
+                        }
                         let mut result=MutationResult::value(attached)?;
                         if live && !held { result.quiet_wake_threads.push(target_id); } else { result.changed_threads.push(target_id); }
                         Ok(result)
@@ -1525,10 +1534,11 @@ impl Store {
                 operation_id,
                 Some(args),
             ),
-            Command::AttachmentList(args) => MutationResult::value(crate::attachments::list_tx(
-                tx,
-                &target(args.thread_id.as_deref(), caller)?,
-            )?),
+            Command::AttachmentList(args) => {
+                let mut args = args.clone();
+                args.thread_id = Some(target(args.thread_id.as_deref(), caller)?);
+                MutationResult::value(crate::attachments::list_tx(tx, &args)?)
+            }
             Command::AttachmentRemove(args) => {
                 let thread = target(args.thread_id.as_deref(), caller)?;
                 let changed = crate::attachments::remove_tx(tx, &thread, &args.attachment_id)?;

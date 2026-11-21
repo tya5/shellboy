@@ -166,6 +166,32 @@
       ],
       "type": "string"
     },
+    "AttachmentListArgs": {
+      "additionalProperties": false,
+      "properties": {
+        "cursor": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "limit": {
+          "default": 50,
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "thread_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "AttachmentRemoveArgs": {
       "additionalProperties": false,
       "properties": {
@@ -911,7 +937,7 @@
         {
           "properties": {
             "args": {
-              "$ref": "#/definitions/ThreadTarget"
+              "$ref": "#/definitions/AttachmentListArgs"
             },
             "command": {
               "const": "attachment.list",
@@ -6099,7 +6125,7 @@
           "additionalProperties": false,
           "properties": {
             "args": {
-              "$ref": "#/definitions/ThreadTarget"
+              "$ref": "#/definitions/AttachmentListArgs"
             },
             "command": {
               "const": "attachment.list",

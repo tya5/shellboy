@@ -2159,8 +2159,10 @@ async fn large_database_observations_do_not_grow_receipts_even_when_pending_rese
             limit: 50,
             cursor: None,
         }),
-        Command::AttachmentList(ThreadTarget {
+        Command::AttachmentList(AttachmentListArgs {
             thread_id: Some(thread.thread_id),
+            limit: shellboy::protocol::DEFAULT_LIST_LIMIT,
+            cursor: None,
         }),
     ];
     for _ in 0..20 {

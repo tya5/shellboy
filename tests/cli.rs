@@ -22,6 +22,27 @@ async fn convert(args: &[&str]) -> Command {
         .unwrap()
 }
 #[tokio::test]
+async fn attachment_list_cli_forwards_limit_and_cursor() {
+    let Command::AttachmentList(args) = convert(&[
+        "attachment",
+        "list",
+        "--thread",
+        "t",
+        "--limit",
+        "7",
+        "--cursor",
+        "next",
+    ])
+    .await
+    else {
+        panic!("expected attachment.list");
+    };
+    assert_eq!(args.thread_id.as_deref(), Some("t"));
+    assert_eq!(args.limit, 7);
+    assert_eq!(args.cursor.as_deref(), Some("next"));
+}
+
+#[tokio::test]
 async fn events_wait_text_and_reasoning_activity_are_independent_opt_ins() {
     for (args, text, activity) in [
         (&["events", "wait"][..], false, false),

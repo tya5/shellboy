@@ -6,7 +6,7 @@ use shellboy::{
     frontend,
     ipc::LocalServer,
     presentation::PresentationField,
-    protocol::{Command, OperationTarget, ThreadTarget},
+    protocol::{AttachmentListArgs, Command, OperationTarget},
     ui::{ManagementFollow, UiAction, UiUpdate},
 };
 
@@ -93,9 +93,13 @@ async fn attachment_reference_reads_exact_foreign_selection_outside_list_then_or
         server,
     ));
     actions
-        .send(UiAction::Manage(Command::AttachmentList(ThreadTarget {
-            thread_id: Some("actual".into()),
-        })))
+        .send(UiAction::Manage(Command::AttachmentList(
+            AttachmentListArgs {
+                thread_id: Some("actual".into()),
+                limit: shellboy::protocol::DEFAULT_LIST_LIMIT,
+                cursor: None,
+            },
+        )))
         .await
         .unwrap();
     let (_, list) = report(&mut incoming, |fields| {

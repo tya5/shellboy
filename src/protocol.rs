@@ -759,6 +759,7 @@ macro_rules! record {
     };
 }
 args!(ThreadTarget { #[serde(default)] thread_id: Option<String> });
+args!(AttachmentListArgs { #[serde(default)] thread_id: Option<String>, #[serde(default = "list_limit")] limit: u32, #[serde(default)] cursor: Option<String> });
 args!(#[derive(Default)] UsageGetArgs { #[serde(default)] attempt_id: Option<Box<str>>, #[serde(default)] since: Option<Box<str>>, #[serde(default)] since_node_id: Option<Box<str>>, #[serde(default)] until: Option<String>, #[serde(default)] thread_id: Option<Box<str>>, #[serde(default)] run_id: Option<String>, #[serde(default)] turn_id: Option<String>, #[serde(default)] include_children: bool, #[serde(default)] group_by: Option<Box<str>>, #[serde(default)] timezone: Option<Box<str>>, #[serde(default)] limit: Option<u32>, #[serde(default)] cursor: Option<Box<str>> });
 fn readback_default_limit() -> u32 {
     50
@@ -1367,7 +1368,7 @@ pub enum Command {
     #[serde(rename = "attachment.add")]
     AttachmentAdd(AttachmentAddArgs),
     #[serde(rename = "attachment.list")]
-    AttachmentList(ThreadTarget),
+    AttachmentList(AttachmentListArgs),
     #[serde(rename = "attachment.remove")]
     AttachmentRemove(AttachmentRemoveArgs),
     #[serde(rename = "compact.preview")]

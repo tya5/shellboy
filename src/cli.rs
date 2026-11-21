@@ -494,7 +494,7 @@ pub enum ShellCommand {
 #[derive(Debug, Clone, Subcommand)]
 pub enum AttachmentCommand {
     Add(AttachmentAddOptions),
-    List(ThreadOptions),
+    List(AttachmentListOptions),
     Remove(AttachmentRemoveOptions),
 }
 #[derive(Debug, Clone, Subcommand)]
@@ -650,6 +650,15 @@ pub struct ShellListOptions {
 pub struct ThreadOptions {
     #[arg(long = "thread")]
     pub thread_id: Option<String>,
+}
+#[derive(Debug, Clone, Args)]
+pub struct AttachmentListOptions {
+    #[arg(long = "thread")]
+    pub thread_id: Option<String>,
+    #[arg(long, default_value_t = wire::DEFAULT_LIST_LIMIT)]
+    pub limit: u32,
+    #[arg(long)]
+    pub cursor: Option<String>,
 }
 #[derive(Debug, Clone, Args)]
 #[command(group(clap::ArgGroup::new("edit_action").args(["spill", "summary", "trim", "omit", "restore", "maximal"]).multiple(false)))]
@@ -1772,8 +1781,10 @@ impl Cli {
                     path: absolute_attachment(a.path, startup_cwd)?,
                     kind: a.kind,
                 }),
-                AttachmentCommand::List(a) => C::AttachmentList(wire::ThreadTarget {
+                AttachmentCommand::List(a) => C::AttachmentList(wire::AttachmentListArgs {
                     thread_id: a.thread_id,
+                    limit: a.limit,
+                    cursor: a.cursor,
                 }),
                 AttachmentCommand::Remove(a) => C::AttachmentRemove(wire::AttachmentRemoveArgs {
                     thread_id: a.thread_id,

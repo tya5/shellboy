@@ -316,9 +316,20 @@ async fn oldest_past_attachments_excluded_only_at_admission_never_resurrect() {
     let prepared = f.prepare().await;
     assert_eq!(prepared.excluded_ids, vec![old.clone()]);
     let before =
-        f.db.call(|db| Ok(list_tx(db, "thread").unwrap()))
-            .await
-            .unwrap();
+        f.db.call(|db| {
+            Ok(list_tx(
+                db,
+                &shellboy::protocol::AttachmentListArgs {
+                    thread_id: Some("thread".into()),
+                    limit: shellboy::protocol::MAX_LIST_LIMIT,
+                    cursor: None,
+                },
+            )
+            .unwrap()
+            .items)
+        })
+        .await
+        .unwrap();
     assert!(before[0].selected);
     drop(f.adopt(prepared, true).await);
     std::fs::write(f.path.join("new"), b"x").unwrap();
@@ -1131,15 +1142,82 @@ async fn observed_list(f: &Fixture) -> Vec<shellboy::protocol::AttachmentDetails
         .execute(
             Request::new(
                 uuid::Uuid::new_v4().to_string(),
-                Command::AttachmentList(ThreadTarget {
+                Command::AttachmentList(AttachmentListArgs {
                     thread_id: Some("thread".into()),
+                    limit: shellboy::protocol::DEFAULT_LIST_LIMIT,
+                    cursor: None,
                 }),
             ),
             None,
         )
         .await
         .unwrap();
-    serde_json::from_value(result.result).unwrap()
+    serde_json::from_value::<shellboy::protocol::Page<shellboy::protocol::AttachmentDetails>>(
+        result.result,
+    )
+    .unwrap()
+    .items
+}
+
+#[tokio::test]
+async fn attachment_list_pages_in_selected_order_and_observes_only_page_items() {
+    use shellboy::{control::db::Store, protocol::*};
+
+    let f = Fixture::new(Config::default()).await;
+    let mut ids = Vec::new();
+    for index in 0..4 {
+        ids.push(f.add(&format!("page-{index}"), b"x").await);
+    }
+    let store = Store::new(
+        f.db.clone(),
+        std::sync::Arc::new(Config::default()),
+        f.path.clone(),
+        "instance-test".into(),
+    );
+    let request = |cursor| {
+        Request::new(
+            uuid::Uuid::new_v4().to_string(),
+            Command::AttachmentList(AttachmentListArgs {
+                thread_id: Some("thread".into()),
+                limit: 2,
+                cursor,
+            }),
+        )
+    };
+    let first: Page<AttachmentDetails> =
+        serde_json::from_value(store.execute(request(None), None).await.unwrap().result).unwrap();
+    assert_eq!(
+        first
+            .items
+            .iter()
+            .map(|item| item.attachment_id.as_str())
+            .collect::<Vec<_>>(),
+        ids[..2].iter().map(String::as_str).collect::<Vec<_>>()
+    );
+    assert!(
+        first
+            .items
+            .iter()
+            .all(|item| item.unavailable_reason.is_none())
+    );
+    let cursor = first.next_cursor.clone().unwrap();
+    let rest: Page<AttachmentDetails> = serde_json::from_value(
+        store
+            .execute(request(Some(cursor)), None)
+            .await
+            .unwrap()
+            .result,
+    )
+    .unwrap();
+    assert_eq!(
+        rest.items
+            .iter()
+            .map(|item| item.attachment_id.as_str())
+            .collect::<Vec<_>>(),
+        ids[2..].iter().map(String::as_str).collect::<Vec<_>>()
+    );
+    assert!(rest.next_cursor.is_none());
+    assert_eq!(first.items.len(), 2);
 }
 
 #[tokio::test]
@@ -1344,7 +1422,10 @@ async fn attachment_list_seeks_existing_indexes_and_does_not_wait_for_writer() {
         f.db.call(|db| {
             let mut plan = db.prepare(&format!("EXPLAIN QUERY PLAN {}", ATTACHMENT_LIST_SQL))?;
             let details = plan
-                .query_map(["thread"], |r| r.get::<_, String>(3))?
+                .query_map(
+                    params!["thread", None::<i64>, None::<i64>, None::<String>, 51],
+                    |r| r.get::<_, String>(3),
+                )?
                 .collect::<Result<Vec<_>, _>>()?;
             for alias in ["s", "a", "m"] {
                 assert!(

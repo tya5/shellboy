@@ -810,8 +810,15 @@ impl Command {
             }
             Self::ModelList(a) => a.validate(),
             Self::ThreadList(a) => a.validate(),
-            Self::ThreadGet(a) | Self::AttachmentList(a) | Self::Compact(a) => {
+            Self::ThreadGet(a) | Self::Compact(a) => {
                 optional_nonempty(a.thread_id.as_deref(), "thread_id")
+            }
+            Self::AttachmentList(a) => {
+                optional_nonempty(a.thread_id.as_deref(), "thread_id")?;
+                if a.limit == 0 || a.limit > crate::protocol::MAX_LIST_LIMIT {
+                    return Err(invalid("attachment limit must be in 1..=200"));
+                }
+                Ok(())
             }
             Self::ContextEdit(a) => a.validate(),
             Self::CompactPreview(a) => a.validate(),

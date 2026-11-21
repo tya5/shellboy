@@ -236,15 +236,20 @@ pub(super) async fn request(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::protocol::AttachmentListArgs;
     use rusqlite::StatementStatus;
     #[test]
     fn explicit_attachment_scope_does_not_fall_back_to_the_viewer() {
-        use crate::protocol::{Command, ThreadTarget};
-        assert!(!supports(&Command::AttachmentList(ThreadTarget {
-            thread_id: None
+        use crate::protocol::Command;
+        assert!(!supports(&Command::AttachmentList(AttachmentListArgs {
+            thread_id: None,
+            limit: crate::protocol::DEFAULT_LIST_LIMIT,
+            cursor: None,
         })));
-        assert!(supports(&Command::AttachmentList(ThreadTarget {
-            thread_id: Some("foreign".into())
+        assert!(supports(&Command::AttachmentList(AttachmentListArgs {
+            thread_id: Some("foreign".into()),
+            limit: crate::protocol::DEFAULT_LIST_LIMIT,
+            cursor: None,
         })));
     }
     fn fixture() -> Connection {
@@ -284,7 +289,19 @@ mod tests {
             assert!(!limited);
             assert_eq!(
                 canonical_rows(&value),
-                serde_json::to_value(crate::attachments::list_tx(&db, "target").unwrap()).unwrap()
+                serde_json::to_value(
+                    crate::attachments::list_tx(
+                        &db,
+                        &AttachmentListArgs {
+                            thread_id: Some("target".into()),
+                            limit: crate::protocol::MAX_LIST_LIMIT,
+                            cursor: None
+                        }
+                    )
+                    .unwrap()
+                    .items
+                )
+                .unwrap()
             );
             assert_eq!(
                 value["attachments"][0]["saved_observation"]["managed_state"],
@@ -301,17 +318,34 @@ mod tests {
         );
         assert_eq!(
             canonical_rows(&value),
-            serde_json::to_value(crate::attachments::list_tx(&db, "target").unwrap()).unwrap()
+            serde_json::to_value(
+                crate::attachments::list_tx(
+                    &db,
+                    &AttachmentListArgs {
+                        thread_id: Some("target".into()),
+                        limit: crate::protocol::MAX_LIST_LIMIT,
+                        cursor: None
+                    }
+                )
+                .unwrap()
+                .items
+            )
+            .unwrap()
         );
         assert!(
             matches!(read_tx(&db, "missing"), Err(StorageError::Operation(error)) if error.code == crate::protocol::ErrorCode::ThreadNotFound)
         );
-        assert!(
-            crate::attachments::list_tx(&db, "missing")
-                .unwrap()
-                .is_empty(),
-            "canonical explicit CLI behavior remains unchanged"
-        );
+        assert!(matches!(
+            crate::attachments::list_tx(
+                &db,
+                &AttachmentListArgs {
+                    thread_id: Some("missing".into()),
+                    limit: crate::protocol::MAX_LIST_LIMIT,
+                    cursor: None
+                }
+            ),
+            Err(error) if error.code == crate::protocol::ErrorCode::ThreadNotFound
+        ));
     }
     fn seed(db: &Connection, start: usize, end: usize) {
         for n in start..end {

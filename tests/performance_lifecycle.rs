@@ -534,8 +534,10 @@ async fn repeated_owned_runs_release_resources_after_many_turns() {
         let pin_release = releasing_pin.elapsed();
         let selections = command(
             &control,
-            Command::AttachmentList(ThreadTarget {
+            Command::AttachmentList(AttachmentListArgs {
                 thread_id: Some(parent.clone()),
+                limit: shellboy::protocol::DEFAULT_LIST_LIMIT,
+                cursor: None,
             }),
         )
         .await;

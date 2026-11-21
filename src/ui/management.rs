@@ -1372,9 +1372,13 @@ impl ManagementPopup {
             {
                 return match key.code {
                     KeyCode::Char('s') => {
-                        vec![UiAction::Manage(Command::AttachmentList(ThreadTarget {
-                            thread_id: Some(thread_id),
-                        }))]
+                        vec![UiAction::Manage(Command::AttachmentList(
+                            AttachmentListArgs {
+                                thread_id: Some(thread_id),
+                                limit: crate::protocol::DEFAULT_LIST_LIMIT,
+                                cursor: None,
+                            },
+                        ))]
                     }
                     KeyCode::Char('r') => vec![UiAction::ReloadAttachments { thread_id }],
                     _ => vec![],

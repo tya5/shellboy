@@ -680,17 +680,23 @@ fn exclusion_notice(selection: &Selected, thread: &str, reason: &str) -> Value {
     })
 }
 
-fn delivery_status(db: &Connection, thread: &str, source: &str) -> rusqlite::Result<String> {
+pub(crate) fn delivery_status(
+    db: &Connection,
+    thread: &str,
+    source: &str,
+) -> rusqlite::Result<String> {
     db.query_row("SELECT CASE WHEN EXISTS(SELECT 1 FROM thread_path WHERE thread_id=?1 AND node_id=?2) THEN 'applied' ELSE COALESCE((SELECT status FROM attachment_delivery WHERE thread_id=?1 AND node_id=?2),'accepted') END",params![thread,source],|r|r.get(0))
 }
-pub const ATTACHMENT_LIST_SQL: &str = "SELECT a.id,a.absolute_path,a.input_kind,a.ownership,s.state,s.reason,a.source_node_id,m.state,m.deleted_reason FROM attachment_selection s JOIN attachment_ref a ON a.id=s.attachment_id LEFT JOIN managed_file m ON m.absolute_path=a.absolute_path WHERE s.thread_id=?1 ORDER BY s.selected_order,a.id";
+pub const ATTACHMENT_LIST_SQL: &str = "SELECT a.id,a.absolute_path,a.input_kind,a.ownership,s.state,s.reason,a.source_node_id,m.state,m.deleted_reason,s.selected_order FROM attachment_selection s JOIN attachment_ref a ON a.id=s.attachment_id LEFT JOIN managed_file m ON m.absolute_path=a.absolute_path WHERE s.thread_id=?1 AND (?2 IS NULL OR s.selected_order<=?2) AND (?3 IS NULL OR s.selected_order>?3 OR (s.selected_order=?3 AND a.id>?4)) ORDER BY s.selected_order,a.id LIMIT ?5";
 
 /// Filesystem observations run only on a file/display worker, not the DB lane.
-pub(crate) fn observe_paths(items: &mut [AttachmentDetails]) {
+pub(crate) fn observe_paths(items: &mut [AttachmentDetails]) -> usize {
+    let mut observed = 0;
     for item in items {
         if item.unavailable_reason.is_some() {
             continue;
         }
+        observed += 1;
         item.unavailable_reason = match std::fs::metadata(&item.path) {
             Ok(meta) if meta.is_file() => {
                 std::fs::File::open(&item.path).err().map(|e| e.to_string())
@@ -699,6 +705,7 @@ pub(crate) fn observe_paths(items: &mut [AttachmentDetails]) {
             Err(error) => Some(error.to_string()),
         };
     }
+    observed
 }
 
 /// Pure precedence of saved facts, shared by exact CLI and bounded display.
@@ -717,52 +724,146 @@ pub(crate) fn saved_unavailable_reason(
     }
 }
 
-pub fn list_tx(db: &Connection, thread_id: &str) -> Result<Vec<AttachmentDetails>, ApiError> {
-    let mut statement = db.prepare(ATTACHMENT_LIST_SQL).map_err(sql_error)?;
-    statement
-        .query_map([thread_id], |r| {
-            let kind: String = r.get(2)?;
-            let source: String = r.get(6)?;
-            Ok(AttachmentDetails {
-                delivery_status: delivery_status(db, thread_id, &source)?,
-                source_node_id: source,
-                attachment_id: r.get(0)?,
-                thread_id: thread_id.into(),
-                path: r.get(1)?,
-                kind: if kind == "image" {
-                    AttachmentKind::Image
-                } else {
-                    AttachmentKind::File
-                },
-                managed: r.get::<_, String>(3)? == "managed_clipboard",
-                selected: r.get::<_, String>(4)? == "active",
-                unavailable_reason: {
-                    let state: Option<String> = r.get(7)?;
-                    let managed_unavailable =
-                        state.as_deref().is_some_and(|state| state != "ready");
-                    // Retain the canonical one-reason copy: an overridden
-                    // selection reason may itself be large.
-                    let reason: Option<String> = r.get(if managed_unavailable { 8 } else { 5 })?;
-                    saved_unavailable_reason(
-                        state.as_deref(),
-                        if managed_unavailable {
-                            reason.as_deref()
-                        } else {
-                            None
-                        },
-                        if managed_unavailable {
-                            None
-                        } else {
-                            reason.as_deref()
-                        },
-                    )
-                },
-            })
-        })
+pub fn list_tx(
+    db: &Connection,
+    args: &crate::protocol::AttachmentListArgs,
+) -> Result<crate::protocol::Page<AttachmentDetails>, ApiError> {
+    use crate::protocol::{MAX_LIST_LIMIT, Page, PageCursor};
+    if args.limit == 0 || args.limit > MAX_LIST_LIMIT {
+        return Err(ApiError::new(
+            ErrorCode::InvalidArgument,
+            "attachment limit must be in 1..=200",
+        ));
+    }
+    let thread_id = args.thread_id.as_deref().unwrap_or_default();
+    let (revision, max_order): (u64, u64) = db
+        .query_row(
+            "SELECT t.selection_revision,COALESCE((SELECT MAX(selected_order) FROM attachment_selection WHERE thread_id=t.id),0) FROM thread t WHERE t.id=?1",
+            [thread_id],
+            |row| Ok((row.get::<_, i64>(0)? as u64, row.get::<_, i64>(1)? as u64)),
+        )
+        .optional()
         .map_err(sql_error)?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(sql_error)
+        .ok_or_else(|| ApiError::new(ErrorCode::ThreadNotFound, "Thread not found"))?;
+    let (watermark, after_order, after_id) = if let Some(token) = &args.cursor {
+        let cursor = PageCursor::decode(token, "attachment.list", thread_id, revision, None)?;
+        let (order, id) = cursor.last_sort_key.split_once(':').ok_or_else(|| {
+            ApiError::new(ErrorCode::CursorExpired, "invalid attachment position")
+        })?;
+        let order = order
+            .parse::<u64>()
+            .map_err(|_| ApiError::new(ErrorCode::CursorExpired, "invalid attachment position"))?;
+        if cursor.watermark > max_order || order > cursor.watermark {
+            return Err(ApiError::new(
+                ErrorCode::CursorExpired,
+                "invalid attachment watermark",
+            ));
+        }
+        (cursor.watermark, Some(order as i64), Some(id.to_owned()))
+    } else {
+        (max_order, None, None)
+    };
+    let mut statement = db.prepare(ATTACHMENT_LIST_SQL).map_err(sql_error)?;
+    let mut rows = statement
+        .query(params![
+            thread_id,
+            Some(watermark as i64),
+            after_order,
+            after_id,
+            args.limit + 1,
+        ])
+        .map_err(sql_error)?;
+    let mut items = Vec::with_capacity(args.limit as usize);
+    let mut last = None;
+    let mut more = false;
+    while let Some(row) = rows.next().map_err(sql_error)? {
+        if items.len() == args.limit as usize {
+            more = true;
+            break;
+        }
+        let order: i64 = row.get(9).map_err(sql_error)?;
+        let id: String = row.get(0).map_err(sql_error)?;
+        let kind: String = row.get(2).map_err(sql_error)?;
+        let source: String = row.get(6).map_err(sql_error)?;
+        items.push(AttachmentDetails {
+            delivery_status: delivery_status(db, thread_id, &source).map_err(sql_error)?,
+            source_node_id: source,
+            attachment_id: id.clone(),
+            thread_id: thread_id.into(),
+            path: row.get(1).map_err(sql_error)?,
+            kind: if kind == "image" {
+                AttachmentKind::Image
+            } else {
+                AttachmentKind::File
+            },
+            managed: row.get::<_, String>(3).map_err(sql_error)? == "managed_clipboard",
+            selected: row.get::<_, String>(4).map_err(sql_error)? == "active",
+            unavailable_reason: {
+                let state: Option<String> = row.get(7).map_err(sql_error)?;
+                let managed_unavailable = state.as_deref().is_some_and(|state| state != "ready");
+                let reason: Option<String> = row
+                    .get(if managed_unavailable { 8 } else { 5 })
+                    .map_err(sql_error)?;
+                saved_unavailable_reason(
+                    state.as_deref(),
+                    managed_unavailable.then_some(reason.as_deref()).flatten(),
+                    (!managed_unavailable)
+                        .then_some(reason.as_deref())
+                        .flatten(),
+                )
+            },
+        });
+        last = Some(format!("{order}:{id}"));
+    }
+    let next_cursor = if more {
+        Some(
+            PageCursor {
+                version: 1,
+                scope: "attachment.list".into(),
+                filter: thread_id.into(),
+                last_sort_key: last.expect("a nonempty page has a last key"),
+                watermark,
+                revision,
+                encoding: None,
+            }
+            .encode()?,
+        )
+    } else {
+        None
+    };
+    Ok(Page { items, next_cursor })
 }
+
+#[cfg(test)]
+mod attachment_page_tests {
+    use super::*;
+    use crate::protocol::AttachmentDetails;
+
+    #[test]
+    fn filesystem_observation_count_matches_returned_page_size() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = [dir.path().join("one"), dir.path().join("two")];
+        for path in &paths {
+            std::fs::write(path, b"x").unwrap();
+        }
+        let mut page = paths
+            .iter()
+            .map(|path| AttachmentDetails {
+                source_node_id: "source".into(),
+                delivery_status: "applied".into(),
+                attachment_id: path.file_name().unwrap().to_string_lossy().into_owned(),
+                thread_id: "thread".into(),
+                path: path.to_string_lossy().into_owned(),
+                kind: AttachmentKind::File,
+                selected: true,
+                managed: false,
+                unavailable_reason: None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(observe_paths(&mut page), page.len());
+    }
+}
+
 pub fn remove_tx(
     tx: &Transaction<'_>,
     thread_id: &str,

@@ -126,3 +126,8 @@ excluded notice in place of the bytes. File unavailability is an alternative
 non-destructive workaround: the existing path is read on preparation and an
 unavailable notice is sent in place of content; restoring the path makes it
 eligible on later requests again. Never automatically move a user's file.
+
+
+## Bounded list pages (#327)
+
+`attachment.list` returns `Page<AttachmentDetails>` in stable `(selected_order,id)` order. `limit` defaults to 50 and is capped at 200; its opaque version-1 cursor binds Thread scope, selection revision, watermark, and last sort key. The query fetches at most `limit + 1` rows to decide whether a next cursor exists. Filesystem metadata/open observations run only for the returned `items`, on the bounded file worker; later pages are observed only when requested. There is no bare-array response path.

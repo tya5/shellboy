@@ -738,8 +738,10 @@ mod tests {
                     Command::OperationGet(crate::protocol::OperationTarget {
                         operation_id: "saved:operation".into(),
                     }),
-                    Command::AttachmentList(crate::protocol::ThreadTarget {
+                    Command::AttachmentList(crate::protocol::AttachmentListArgs {
                         thread_id: Some("target".into()),
+                        limit: crate::protocol::DEFAULT_LIST_LIMIT,
+                        cursor: None,
                     }),
                 ] {
                     values.push(

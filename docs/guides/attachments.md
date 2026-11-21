@@ -25,10 +25,11 @@ These are Bash/zsh examples. Replace `THREAD_ID` with the actual Thread ID. Huma
 ```sh
 shellboy attachment add --thread THREAD_ID --path /path/to/chart.png --kind image
 shellboy attach --thread THREAD_ID /path/to/report.pdf --kind file
-shellboy attachment list --thread THREAD_ID
+shellboy attachment list --thread THREAD_ID --limit 50
+shellboy attachment list --thread THREAD_ID --limit 50 --cursor NEXT_CURSOR
 ```
 
-Successful add and list both return an array of attachment records in `result`. Even adding one path does not return a single object; retrieve its ID from, for example, `result[0].attachment_id`. Each add/list item includes `attachment_id`, `source_node_id`, `delivery_status`, `path`, `kind`, `selected`, `managed`, and, when applicable, `unavailable_reason`. `delivery_status` is `accepted` (request accepted), `held` (pending application), `applied` (adopted into the path), or `cancelled`. Even applied does not mean the model has read the file.
+`attachment.add` returns its added attachment records in `result`; retrieve an ID from, for example, `result[0].attachment_id`. `attachment.list` returns a bounded page object in `result`: `items` holds this page and `next_cursor` is present when more rows remain. Pass that cursor to the next list request with the same Thread. The default page size is 50 and the maximum is 200. Each add/list item includes `attachment_id`, `source_node_id`, `delivery_status`, `path`, `kind`, `selected`, `managed`, and, when applicable, `unavailable_reason`. `delivery_status` is `accepted` (request accepted), `held` (pending application), `applied` (adopted into the path), or `cancelled`. Even applied does not mean the model has read the file.
 
 `attach PATH --kind KIND` aliases `attachment add --path PATH --kind KIND`. Kind is required: use `image` or `file`. CLI relative paths resolve against the CLI invocation's cwd; a separate human terminal may have a different cwd from the Thread.
 

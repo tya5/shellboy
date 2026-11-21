@@ -65,7 +65,7 @@ P3照合修正: ShellReadArgs.encodingをOptionへ変更し、省略時にexecut
 `model.list` の追加契約・接続解決・receipt規則は [models.md](models.md#cliと共有control操作2026-10-25採用) を参照。原文32操作に対する採用済み追加である。
 
 
-2026-10-25の添付契約是正により、AttachmentDetailsへ必須 `source_node_id` と `delivery_status` を追加した。add/listのresult配列という形は維持する。受付済みと反映済みを混同せず、CLI添付追加の出典IDを人間のmessage_idとして表現しない。所属と状態の扱いは [添付の所属](attachment-provenance.md)。
+2026-10-25の添付契約是正により、AttachmentDetailsへ必須 `source_node_id` と `delivery_status` を追加した。`attachment.add`はAttachmentDetails、`attachment.list`は`Page<AttachmentDetails>`を返す。添付listは既定50・最大200で、Thread selection revisionに束縛したopaque cursorで`selected_order,id`順に進む。filesystem path observationは返却ページのみで行う。受付済みと反映済みを混同せず、CLI添付追加の出典IDを人間のmessage_idとして表現しない。所属と状態の扱いは [添付の所属](attachment-provenance.md)。
 
 ## 検索filter・出典・直接関係の追加契約
 
