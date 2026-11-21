@@ -2134,3 +2134,169 @@ async fn issue_160_auto_compaction_detached_attachment_and_retry() {
         server.abort();
     }
 }
+
+// Schema 47 is pinned to 7fd739f2cf; no current owner opens the fixture until
+// the startup under test.
+fn pre48_question_fixture(root: &std::path::Path) {
+    let dir = root.join("data");
+    std::fs::create_dir(&dir).unwrap();
+    let mut db = rusqlite::Connection::open(dir.join("shellboy.db")).unwrap();
+    db.execute_batch(include_str!("fixtures/storage-current-schema47.sql"))
+        .unwrap();
+    assert_eq!(
+        db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
+            .unwrap(),
+        47
+    );
+    let tx = db.transaction().unwrap();
+    for (id, branch) in [
+        ("legacy", None),
+        ("preservation", Some("rewind")),
+        ("independent", None),
+    ] {
+        tx.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at,branch_kind) VALUES(?1,?2,'','fixture','fixture','2020-01-01T00:00:00Z',?3)", rusqlite::params![id,root.to_str().unwrap(),branch]).unwrap();
+    }
+    let append = |thread, id, kind, payload: Value| {
+        shellboy::history::append_node(
+            &tx,
+            thread,
+            id,
+            None,
+            kind,
+            &payload,
+            "2020-01-01T00:00:00Z",
+        )
+        .unwrap();
+    };
+    append(
+        "legacy",
+        "q-pending",
+        "assistant",
+        json!({"text":"Selected pending question?"}),
+    );
+    append(
+        "legacy",
+        "q-replied",
+        "assistant",
+        json!({"text":"Selected replied question?"}),
+    );
+    append(
+        "legacy",
+        "legacy-summary",
+        "summary",
+        json!({"item":{"role":"developer","content":[{"type":"input_text","text":"LEGACY_UPGRADE_SUMMARY"}]},"source_node_ids":["q-pending"],"summary_format":"shellboy-summary-v1"}),
+    );
+    append(
+        "legacy",
+        "legacy-tail",
+        "user",
+        json!({"role":"user","content":"Selected tail"}),
+    );
+    append(
+        "preservation",
+        "q-preserved",
+        "assistant",
+        json!({"text":"PRESERVATION_ONLY_QUESTION"}),
+    );
+    tx.execute_batch("INSERT INTO replacement(id,output_node_id,input_key,format_version,prompt_version,state,created_at) VALUES('legacy-replacement','legacy-summary','legacy-key','shellboy-summary-v1','shellboy-summary-prompt-v3','completed','2020-01-01T00:00:00Z');
+        INSERT INTO replacement_source(replacement_id,ordinal,source_node_id,source_revision,source_hash) SELECT 'legacy-replacement',0,id,payload_revision,body_hash FROM node WHERE id='q-pending';").unwrap();
+    for (id, reply) in [
+        ("q-pending", "pending"),
+        ("q-replied", "replied"),
+        ("q-preserved", "pending"),
+    ] {
+        tx.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,path_admission,created_at,result_json) VALUES(?1,?1,'{\"kind\":\"model\",\"thread_id\":\"independent\"}','legacy',?1,'applied','unadmitted','2020-01-01T00:00:00Z',?2)",rusqlite::params![id,json!({"to_human":true,"reply":{"state":reply}}).to_string()]).unwrap();
+    }
+    tx.commit().unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn schema47_owner_startup_processes_first_message_and_keeps_another_thread_working() {
+    let root = tempfile::tempdir().unwrap();
+    pre48_question_fixture(root.path());
+    let (url, mut receive, server) = proxy().await;
+    let owner = owner(root.path(), &url).await;
+    let control = Control::new(&owner, root.path().into());
+    control.start().await.unwrap();
+
+    for (thread, prompt, response) in [
+        (
+            "legacy",
+            "FIRST_MESSAGE_AFTER_UPGRADE",
+            "first saved answer",
+        ),
+        (
+            "independent",
+            "OTHER_THREAD_AFTER_UPGRADE",
+            "other saved answer",
+        ),
+    ] {
+        let accepted = request(
+            &control,
+            Command::MessageSend(MessageSendArgs {
+                resume_recovery: false,
+                human: false,
+                to_human: false,
+                expect_reply: false,
+                sender_label: None,
+                deliver: Deliver::Next,
+                thread_id: Some(thread.into()),
+                text: prompt.into(),
+            }),
+        )
+        .await;
+        let sent_node = accepted["message_id"].as_str().unwrap().to_owned();
+        let outgoing = incoming(&control, thread, &mut receive).await;
+        assert_eq!(outgoing.kind(), ProviderRequestKind::Ordinary);
+        assert!(outgoing.body["input"].to_string().contains(prompt));
+        if thread == "legacy" {
+            let input = outgoing.body["input"].as_array().unwrap();
+            assert!(input.iter().any(|item| item["role"] == "user"
+                && item.to_string().contains("LEGACY_UPGRADE_SUMMARY")));
+            assert!(
+                !outgoing.body["input"]
+                    .to_string()
+                    .contains("PRESERVATION_ONLY_QUESTION")
+            );
+        }
+        outgoing.reply.send((200, answer(response))).unwrap();
+        settled(&control, thread).await;
+        control.store.database.call(move |db| {
+            let path = db.prepare("SELECT n.id,n.kind,n.payload_json,n.turn_id FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 ORDER BY p.ordinal")?
+                .query_map([thread], |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,Option<String>>(3)?)))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            let prefix: &[&str] = if thread == "legacy" { &["q-pending","q-replied","legacy-summary","legacy-tail"] } else { &[] };
+            assert!(path.len() >= prefix.len()+2);
+            assert_eq!(&path[..prefix.len()].iter().map(|row| row.0.as_str()).collect::<Vec<_>>(),prefix);
+            let (message_id, turn) = db.query_row("SELECT message_node_id,turn_id FROM receipt WHERE message_node_id=?1 AND target_thread_id=?2 AND state='applied'", rusqlite::params![sent_node,thread], |r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?)))?;
+            let added = &path[prefix.len()..];
+            // Context/lifecycle events may be appended during the new Turn.
+            assert!(added.iter().all(|row| row.3.as_deref() == Some(turn.as_str())), "all appended nodes belong to the new Turn");
+            let content: Vec<_> = added.iter().filter(|row| !matches!(row.1.as_str(), "event" | "context")).collect();
+            assert_eq!(content.len(), 2, "only the accepted message and response add conversation content: {added:?}");
+            assert_eq!(content[0].0, message_id);
+            assert_eq!(content[0].3.as_deref(), Some(turn.as_str()));
+            assert!(content[0].2.contains(prompt));
+            let answer = content[1];
+            assert_eq!(answer.3.as_deref(), Some(turn.as_str()));
+            assert_eq!(answer.1,"assistant_response");
+            assert!(answer.2.contains(response));
+            assert_eq!(db.query_row("SELECT cursor_node_id FROM thread WHERE id=?1",[thread],|r|r.get::<_,String>(0))?,path.last().unwrap().0);
+            assert_eq!(db.query_row("SELECT count(*) FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE t.thread_id=?1 AND a.state='completed'",[thread],|r|r.get::<_,i64>(0))?,1);
+            Ok(())
+        }).await.unwrap();
+    }
+    control.store.database.call(|db| {
+        assert_eq!(db.query_row("SELECT count(*) FROM receipt WHERE id IN ('q-pending','q-replied','q-preserved') AND path_admission='admitted'", [],|r|r.get::<_,i64>(0))?,3);
+        assert_eq!(db.query_row("SELECT json_extract(payload_json,'$.item.role') FROM node WHERE id='legacy-summary'",[],|r|r.get::<_,String>(0))?,"user");
+        assert_eq!(db.query_row("SELECT node_id FROM thread_path WHERE thread_id='preservation'",[],|r|r.get::<_,String>(0))?,"q-preserved");
+        Ok(())
+    }).await.unwrap();
+    assert!(
+        receive.try_recv().is_err(),
+        "only one provider request per Thread"
+    );
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+    server.abort();
+}
