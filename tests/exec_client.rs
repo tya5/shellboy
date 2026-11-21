@@ -1760,7 +1760,7 @@ async fn chat_and_exec_resolve_thread_and_parent_prefixes_before_targeting() {
     let created = fixture
         .control
         .request(Request::new(
-            "prefix-seed",
+            format!("{}:prefix-seed", fixture.owner.instance_id),
             Command::ThreadCreate(ThreadCreateArgs {
                 agents: None,
                 connection: None,
@@ -1786,7 +1786,7 @@ async fn chat_and_exec_resolve_thread_and_parent_prefixes_before_targeting() {
             chat_command(&fixture, &["--json", flag, prefix])
         } else {
             let mut command = fixture.command(&fixture.schema());
-            command.args([flag, prefix, "--text", "prefix fixture"]);
+            command.args([flag, prefix, "prefix fixture"]);
             command
         };
         let mut child = command.spawn().unwrap();
@@ -1826,7 +1826,7 @@ async fn chat_and_exec_resolve_thread_and_parent_prefixes_before_targeting() {
             let detail = fixture
                 .control
                 .request(Request::new(
-                    "prefix-child-check",
+                    format!("{}:prefix-child-check", fixture.owner.instance_id),
                     Command::ThreadGet(ThreadTarget {
                         thread_id: Some(selected.as_str().unwrap().into()),
                     }),
