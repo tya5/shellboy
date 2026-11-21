@@ -1753,3 +1753,88 @@ async fn chat_state_change_without_a_hint_is_found_after_a_timeout() {
     assert!(out.contains("found without a hint"), "{out}");
     fixture.close().await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn chat_and_exec_resolve_thread_and_parent_prefixes_before_targeting() {
+    let mut fixture = Fixture::new().await;
+    let created = fixture
+        .control
+        .request(Request::new(
+            "prefix-seed",
+            Command::ThreadCreate(ThreadCreateArgs {
+                agents: None,
+                connection: None,
+                cwd: None,
+                model: None,
+                effort: None,
+                parent_id: None,
+            }),
+        ))
+        .await;
+    let id = created.result.unwrap()["thread_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let prefix = &id[..8];
+    for (chat, flag) in [
+        (true, "--thread"),
+        (true, "--parent"),
+        (false, "--thread"),
+        (false, "--parent"),
+    ] {
+        let mut command = if chat {
+            chat_command(&fixture, &["--json", flag, prefix])
+        } else {
+            let mut command = fixture.command(&fixture.schema());
+            command.args([flag, prefix, "--text", "prefix fixture"]);
+            command
+        };
+        let mut child = command.spawn().unwrap();
+        if chat {
+            child
+                .stdin
+                .take()
+                .unwrap()
+                .write_all(b"prefix fixture\n")
+                .await
+                .unwrap();
+        }
+        let mut child = tokio::spawn(async move { child.wait_with_output().await.unwrap() });
+        fixture
+            .next(&mut child)
+            .await
+            .reply
+            .send(answer(r#"{"value":"ok"}"#))
+            .unwrap();
+        let output = crate::test_watchdog::watchdog("chat and exec prefix result", child)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(output.status.success(), "{chat} {flag}: {output:?}");
+        let selected = if chat {
+            json_lines(&output)
+                .into_iter()
+                .find(|line| line["type"] == "message_accepted")
+                .unwrap()["thread_id"]
+                .clone()
+        } else {
+            diagnostic(&output)["thread_id"].clone()
+        };
+        if flag == "--thread" {
+            assert_eq!(selected, id);
+        } else {
+            let detail = fixture
+                .control
+                .request(Request::new(
+                    "prefix-child-check",
+                    Command::ThreadGet(ThreadTarget {
+                        thread_id: Some(selected.as_str().unwrap().into()),
+                    }),
+                ))
+                .await;
+            assert_eq!(detail.result.unwrap()["parent_id"], id);
+        }
+    }
+    assert_eq!(fixture.count("IdResolve"), 4);
+    fixture.close().await;
+}

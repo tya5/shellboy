@@ -475,39 +475,14 @@ async fn run_owner(cli: Cli, cwd: &Path) -> ExitCode {
             .ok_or_else(|| ApiError::new(ErrorCode::InvalidArgument, "Missing command"))?;
         let include_pending_duties =
             matches!(command, shellboy::protocol::Command::MessageReply(_));
-        let resolver_data_dir = data_dir.clone();
-        let resolver_origin = caller_origin.clone();
-        let resolved = shellboy::cli::resolve_id_arguments(command, move |kind, prefix| {
-            let data_dir = resolver_data_dir.clone();
-            let caller_origin = resolver_origin.clone();
-            async move {
-                let response = ipc::call_requiring_capability(
-                    &data_dir,
-                    shellboy::protocol::Command::IdResolve(shellboy::protocol::IdResolveArgs {
-                        kind,
-                        prefix,
-                        include_pending_duties,
-                    }),
-                    None,
-                    caller_origin,
-                    "id.resolve",
-                )
-                .await?;
-                if !response.ok {
-                    return Err(response.error.unwrap_or_else(|| {
-                        ApiError::new(
-                            ErrorCode::InvalidState,
-                            "Owner rejected ID resolution without an error",
-                        )
-                    }));
-                }
-                response
-                    .result
-                    .and_then(|result| result["id"].as_str().map(str::to_owned))
-                    .ok_or_else(|| {
-                        ApiError::new(ErrorCode::InvalidState, "Owner returned no resolved ID")
-                    })
-            }
+        let resolved = shellboy::cli::resolve_id_arguments(command, |kind, prefix| {
+            shellboy::cli::resolve_owner_prefix(
+                &data_dir,
+                caller_origin.as_ref(),
+                kind,
+                prefix,
+                include_pending_duties,
+            )
         })
         .await?;
         ipc::call(&data_dir, resolved, cli.operation_id.clone(), caller_origin).await

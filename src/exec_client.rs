@@ -689,6 +689,10 @@ pub async fn execute(
         },
     };
     let result: Result<Outcome,Failure>=async {
+        session.progress.stage = "resolve_ids";
+        timeout_at(session.deadline, crate::cli::resolve_conversation_ids(
+            &session.data, session.origin.as_ref(), &mut session.progress.thread_id, &mut create.parent_id,
+        )).await.map_err(|_| Failure::new(5, "timeout", "Client execution deadline expired; no target was stopped"))?.map_err(Failure::api)?;
         session.connect().await?;
         session.verify_end_message_support().await?;
         if session.progress.thread_id.is_none() {

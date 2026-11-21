@@ -1295,17 +1295,74 @@ fn id_at_path_mut<'a>(
     Some(current)
 }
 
-/// Resolve every CLI target ID in one typed command before it is sent over the wire.
-pub async fn resolve_id_arguments<F, Fut>(
-    command: wire::Command,
-    mut resolve_prefix: F,
-) -> Result<wire::Command, ApiError>
+/// Resolve a prefix using the same capability preflight for every online CLI client.
+pub async fn resolve_owner_prefix(
+    data: &Path,
+    origin: Option<&wire::Origin>,
+    kind: wire::IdKind,
+    prefix: String,
+    include_pending_duties: bool,
+) -> Result<String, ApiError> {
+    let response = crate::ipc::call_requiring_capability(
+        data,
+        wire::Command::IdResolve(wire::IdResolveArgs {
+            kind,
+            prefix,
+            include_pending_duties,
+        }),
+        None,
+        origin.cloned(),
+        "id.resolve",
+    )
+    .await?;
+    if !response.ok {
+        return Err(response.error.unwrap_or_else(|| {
+            ApiError::new(
+                ErrorCode::InvalidState,
+                "Owner rejected ID resolution without an error",
+            )
+        }));
+    }
+    response
+        .result
+        .and_then(|result| result["id"].as_str().map(str::to_owned))
+        .ok_or_else(|| ApiError::new(ErrorCode::InvalidState, "Owner returned no resolved ID"))
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct ConversationIds {
+    thread_id: Option<String>,
+    parent_id: Option<String>,
+}
+
+pub(crate) async fn resolve_conversation_ids(
+    data: &Path,
+    origin: Option<&wire::Origin>,
+    thread_id: &mut Option<String>,
+    parent_id: &mut Option<String>,
+) -> Result<(), ApiError> {
+    let resolved = resolve_id_arguments(
+        ConversationIds {
+            thread_id: thread_id.clone(),
+            parent_id: parent_id.clone(),
+        },
+        |kind, prefix| resolve_owner_prefix(data, origin, kind, prefix, false),
+    )
+    .await?;
+    *thread_id = resolved.thread_id;
+    *parent_id = resolved.parent_id;
+    Ok(())
+}
+
+/// Resolve every target ID in typed CLI input before sending it over the wire.
+pub async fn resolve_id_arguments<T, F, Fut>(input: T, mut resolve_prefix: F) -> Result<T, ApiError>
 where
+    T: serde::Serialize + serde::de::DeserializeOwned,
     F: FnMut(wire::IdKind, String) -> Fut,
     Fut: Future<Output = Result<String, ApiError>>,
 {
-    let mut value = serde_json::to_value(&command)
-        .map_err(|_| ApiError::new(ErrorCode::InvalidState, "Cannot inspect CLI command IDs"))?;
+    let mut value = serde_json::to_value(&input)
+        .map_err(|_| ApiError::new(ErrorCode::InvalidState, "Cannot inspect CLI target IDs"))?;
     let mut slots = Vec::new();
     collect_id_slots(&value, &mut Vec::new(), &mut slots);
     let mut prefixes = Vec::new();

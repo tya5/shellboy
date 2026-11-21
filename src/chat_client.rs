@@ -736,7 +736,7 @@ pub async fn run<R: AsyncBufRead + Unpin, W: Write>(
         })
         .transpose()
     }
-    let create = ThreadCreateArgs {
+    let mut create = ThreadCreateArgs {
         agents: path(options.create.agents.as_deref())?,
         cwd: match path(options.create.cwd.as_deref())? {
             Some(cwd) => Some(cwd),
@@ -767,6 +767,14 @@ pub async fn run<R: AsyncBufRead + Unpin, W: Write>(
         timed_out_run: None,
     };
     let result: Result<u8, ChatError> = async {
+        crate::cli::resolve_conversation_ids(
+            &chat.data,
+            chat.origin.as_ref(),
+            &mut chat.thread,
+            &mut create.parent_id,
+        )
+        .await
+        .map_err(ChatError::api)?;
         chat.connect().await?;
         if let Some(id) = chat.thread.clone() {
             chat.emit(
