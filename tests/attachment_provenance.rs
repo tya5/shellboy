@@ -2198,6 +2198,13 @@ fn pre48_question_fixture(root: &std::path::Path) {
         "assistant",
         json!({"text":"PRESERVATION_ONLY_QUESTION"}),
     );
+    // Compaction replaced the selected prefix, but kept the original edges.
+    // Re-appending either question from the cursor would now close a cycle.
+    tx.execute_batch(
+        "DELETE FROM thread_path WHERE thread_id='legacy' AND node_id IN ('q-pending','q-replied');
+        UPDATE thread_path SET ordinal=ordinal-2 WHERE thread_id='legacy';",
+    )
+    .unwrap();
     tx.execute_batch("INSERT INTO replacement(id,output_node_id,input_key,format_version,prompt_version,state,created_at) VALUES('legacy-replacement','legacy-summary','legacy-key','shellboy-summary-v1','shellboy-summary-prompt-v3','completed','2020-01-01T00:00:00Z');
         INSERT INTO replacement_source(replacement_id,ordinal,source_node_id,source_revision,source_hash) SELECT 'legacy-replacement',0,id,payload_revision,body_hash FROM node WHERE id='q-pending';").unwrap();
     for (id, reply) in [
@@ -2265,7 +2272,7 @@ async fn schema47_owner_startup_processes_first_message_and_keeps_another_thread
             let path = db.prepare("SELECT n.id,n.kind,n.payload_json,n.turn_id FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 ORDER BY p.ordinal")?
                 .query_map([thread], |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,Option<String>>(3)?)))?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
-            let prefix: &[&str] = if thread == "legacy" { &["q-pending","q-replied","legacy-summary","legacy-tail"] } else { &[] };
+            let prefix: &[&str] = if thread == "legacy" { &["legacy-summary","legacy-tail"] } else { &[] };
             assert!(path.len() >= prefix.len()+2);
             assert_eq!(&path[..prefix.len()].iter().map(|row| row.0.as_str()).collect::<Vec<_>>(),prefix);
             let (message_id, turn) = db.query_row("SELECT message_node_id,turn_id FROM receipt WHERE message_node_id=?1 AND target_thread_id=?2 AND state='applied'", rusqlite::params![sent_node,thread], |r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?)))?;
