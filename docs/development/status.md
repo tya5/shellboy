@@ -586,3 +586,7 @@ nonblocking or natural-Run reuse behavior is claimed as current. Full standard o
 current exact final source SHA, independent closure review, and same-SHA three-OS CI are
 still pending. Earlier failed attempts and their logs remain preserved; no result is
 transferred from 0ce or any intermediate closeout SHA.
+
+## Core #326 IPC final frames
+
+A connection task owns one correlated final reply, distinguishes clean peer EOF from read errors or extra input, and holds the connection after writing until peer EOF or explicit shutdown. Listener failure does not itself cancel accepted connections. Windows Studio exact-pair qualification is separate from Core checks.
