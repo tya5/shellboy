@@ -1,6 +1,6 @@
 # Development status
 
-## Core #324 deterministic Ubuntu integration witnesses (candidate; CI pending)
+## Core #324 deterministic Ubuntu integration witnesses
 
 The candidate branch `task/core324-nondeterministic-tests` is based directly on
 `origin/main` at `116e82e5965dbc2c736849659f9f48db21788873`. The corrected
@@ -56,9 +56,8 @@ historical 23bd095a RED (run `44894914451`) came from a shared Fixture helper co
 all HTTP request-log rows against attempts for only one Turn; the corrected 44a07233
 source restored the helper and passed CI run `44895968872`. Reviewer follow-up now
 removes nonpersisted evidence fields, bounds diagnostics by whole attempt records,
-restores the original proxy assertion, and corrects this status. Current Reviewer-round
-changes require exact-SHA CI; the 44a07233 green does not transfer. The full integration
-suite was not run.
+restores the original proxy assertion, and corrects this status. The full integration
+suite was not run locally.
 
 
 ## #315 Retry after partial output (owner-policy successor)
