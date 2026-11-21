@@ -183,6 +183,11 @@ async fn serve_connection<S: AsyncRead + AsyncWrite + Unpin>(
             unapplied,
         )
     };
+    let recovery = request
+        .as_ref()
+        .ok()
+        .map(|request| (request.command.name(), request.command.requires_receipt()));
+    let mut dispatched = false;
     let mut byte = [0];
     let outcome = 'request: {
         let request = match request {
@@ -214,16 +219,27 @@ async fn serve_connection<S: AsyncRead + AsyncWrite + Unpin>(
                 }
             }
         }
+        dispatched = true;
+        let (command, requires_receipt) = recovery.expect("dispatched request has a command");
+        let uncertain = |mut outcome: ConnectionOutcome| {
+            if let ConnectionOutcome::Reply(response) = &mut outcome {
+                response.error = response
+                    .error
+                    .take()
+                    .map(|error| uncertain_reply(error, &operation_id, command, requires_receipt));
+            }
+            outcome
+        };
         tokio::select! {
             biased;
-            read = stream.read(&mut byte) => peer_read_outcome(read, &operation_id, "await_reply", false),
-            _ = stop.cancelled() => stopping("await_reply", false),
+            read = stream.read(&mut byte) => uncertain(peer_read_outcome(read, &operation_id, "await_reply", false)),
+            _ = stop.cancelled() => uncertain(stopping("await_reply", false)),
             result = receiver => match result {
                 Ok(mut response) => {
                     response.error = response.error.take().map(|error| ipc_failure(error, "control", "control_failure", false));
                     ConnectionOutcome::Reply(response)
                 }
-                Err(_) => failure(ApiError::new(ErrorCode::IoFailed, "Operation reply unavailable"), "await_reply", "reply_sender_dropped", false),
+                Err(_) => uncertain(failure(ApiError::new(ErrorCode::IoFailed, "Operation reply unavailable"), "await_reply", "reply_sender_dropped", false)),
             },
         }
     };
@@ -235,10 +251,17 @@ async fn serve_connection<S: AsyncRead + AsyncWrite + Unpin>(
     disconnected.cancel();
     let bytes = match encode_frame(&response) {
         Ok(bytes) => bytes,
-        Err(error) => encode_frame(&Response::<Value>::failure(
-            operation_id,
-            ipc_failure(error, "encode_reply", "reply_encoding_failed", false),
-        ))?,
+        Err(error) => {
+            let error = ipc_failure(error, "encode_reply", "reply_encoding_failed", !dispatched);
+            let error = if dispatched {
+                let (command, requires_receipt) =
+                    recovery.expect("dispatched request has a command");
+                uncertain_reply(error, &operation_id, command, requires_receipt)
+            } else {
+                error
+            };
+            encode_frame(&Response::<Value>::failure(operation_id, error))?
+        }
     };
     write_encoded_frame(&mut stream, &bytes).await?;
     // A successful write/flush does not prove the peer consumed the reply,
@@ -391,28 +414,36 @@ async fn connect(
         call_stream(stream, endpoint, command, operation_id, origin).await
     }
 }
-fn uncertain_reply(mut error: ApiError, operation_id: &str, command: &Command) -> ApiError {
-    if !command.requires_receipt() {
-        let cost = if matches!(command, Command::HistorySearch(_)) {
+fn uncertain_reply(
+    mut error: ApiError,
+    operation_id: &str,
+    command: &str,
+    requires_receipt: bool,
+) -> ApiError {
+    let details = error.details.get_or_insert_with(|| serde_json::json!({}));
+    if !details.is_object() {
+        *details = serde_json::json!({"cause_details": details.take()});
+    }
+    details["operation_id"] = Value::String(operation_id.into());
+    details["request_may_have_been_applied"] = Value::Bool(requires_receipt);
+    if !requires_receipt {
+        let cost = if command == "history.search" {
             " Semantic search may incur another query embedding charge."
         } else {
             ""
         };
         error.hint = Some(format!(
             "Repeat shellboy {} with the same arguments to observe fresh state; this observation does not create an operation receipt. The same operation ID also runs a new observation.{cost}",
-            command.name().replace('.', " ")
+            command.replace('.', " ")
         ));
-        error.details = Some(
-            serde_json::json!({"operation_id":operation_id,"read_only":true,"request_may_have_been_applied":false}),
-        );
-        return error;
+        details["read_only"] = Value::Bool(true);
+    } else {
+        error.hint = Some("Use details.operation_id with shellboy operation get --operation OPERATION_ID, then inspect saved target state. A missing receipt does not prove the request was never applied; do not resubmit the mutation under a new ID".into());
+        details["next_operation"] =
+            serde_json::json!(Command::OperationGet(crate::protocol::OperationTarget {
+                operation_id: operation_id.into()
+            }));
     }
-    error.hint = Some("Use details.operation_id with shellboy operation get --operation OPERATION_ID, then inspect saved target state. A missing receipt does not prove the request was never applied; do not resubmit the mutation under a new ID".into());
-    error.details = Some(serde_json::json!({
-        "operation_id": operation_id,
-        "request_may_have_been_applied": true,
-        "next_operation": Command::OperationGet(crate::protocol::OperationTarget {operation_id:operation_id.into()})
-    }));
     error
 }
 
@@ -464,28 +495,30 @@ async fn call_stream<S: AsyncRead + AsyncWrite + Unpin>(
         }));
         error
     })?;
+    let uncertain = |error| {
+        uncertain_reply(
+            error,
+            &expected,
+            request.command.name(),
+            request.command.requires_receipt(),
+        )
+    };
     write_encoded_frame(&mut stream, &encoded)
         .await
-        .map_err(|error| uncertain_reply(error, &expected, &request.command))?;
+        .map_err(uncertain)?;
     let response: Response<Value> = read_frame(&mut stream)
         .await
-        .map_err(|error| uncertain_reply(error, &expected, &request.command))?
+        .map_err(uncertain)?
         .ok_or_else(|| {
             ApiError::new(
                 ErrorCode::IoFailed,
                 "Connection ended before reply; the operation result is unconfirmed",
             )
         })
-        .map_err(|error| uncertain_reply(error, &expected, &request.command))?;
-    response
-        .validate()
-        .map_err(|error| uncertain_reply(error, &expected, &request.command))?;
+        .map_err(uncertain)?;
+    response.validate().map_err(uncertain)?;
     if response.operation_id != expected {
-        return Err(uncertain_reply(
-            endpoint_mismatch(),
-            &expected,
-            &request.command,
-        ));
+        return Err(uncertain(endpoint_mismatch()));
     }
     Ok(response)
 }

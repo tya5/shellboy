@@ -158,7 +158,7 @@ async fn wait_registered(
 }
 
 #[tokio::test]
-async fn connection_loss_preserves_auto_operation_id_and_does_not_resend() {
+async fn dropped_mutation_reply_preserves_auto_operation_id_and_does_not_resend() {
     let root = tempfile::tempdir().unwrap();
     let owner = owner(root.path()).await;
     let (send, mut receive) = tokio::sync::mpsc::channel(4);
@@ -185,7 +185,14 @@ async fn connection_loss_preserves_auto_operation_id_and_does_not_resend() {
     let invocation = bounded(receive.recv()).await.unwrap();
     let id = invocation.request.operation_id.clone();
     drop(invocation);
-    let error = bounded(client).await.unwrap().unwrap_err();
+    let response = bounded(client).await.unwrap().unwrap();
+    let error = response.error.unwrap();
+    assert_eq!(
+        error.details.as_ref().unwrap()["reason"],
+        "reply_sender_dropped"
+    );
+    assert_eq!(error.details.as_ref().unwrap()["stage"], "await_reply");
+    assert_eq!(response.operation_id, id);
     assert_eq!(error.code, ErrorCode::IoFailed);
     assert_eq!(error.details.as_ref().unwrap()["operation_id"], id);
     assert_eq!(
@@ -206,7 +213,7 @@ async fn connection_loss_preserves_auto_operation_id_and_does_not_resend() {
 }
 
 #[tokio::test]
-async fn lost_status_reply_guides_a_fresh_read_without_a_nonexistent_receipt() {
+async fn dropped_status_reply_guides_a_fresh_read_without_a_nonexistent_receipt() {
     let root = tempfile::tempdir().unwrap();
     let owner = owner(root.path()).await;
     let (send, mut receive) = tokio::sync::mpsc::channel(4);
@@ -217,7 +224,13 @@ async fn lost_status_reply_guides_a_fresh_read_without_a_nonexistent_receipt() {
     });
     let invocation = bounded(receive.recv()).await.unwrap();
     drop(invocation);
-    let error = bounded(client).await.unwrap().unwrap_err();
+    let response = bounded(client).await.unwrap().unwrap();
+    let error = response.error.unwrap();
+    assert_eq!(
+        error.details.as_ref().unwrap()["reason"],
+        "reply_sender_dropped"
+    );
+    assert_eq!(error.details.as_ref().unwrap()["stage"], "await_reply");
     assert!(error.hint.unwrap().contains("Repeat shellboy status"));
     let details = error.details.unwrap();
     assert_eq!(details["read_only"], true);
@@ -284,7 +297,7 @@ async fn cli_json_exposes_generated_operation_after_unknown_result() {
                 "message",
                 "send",
                 "--thread",
-                "synthetic-thread",
+                "12345678-1234-4234-8234-123456789abc",
                 "--text",
                 "one instruction",
             ])
@@ -300,6 +313,8 @@ async fn cli_json_exposes_generated_operation_after_unknown_result() {
     let reply: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(reply["operation_id"], id);
     assert_eq!(reply["error"]["details"]["operation_id"], id);
+    assert_eq!(reply["error"]["details"]["reason"], "reply_sender_dropped");
+    assert_eq!(reply["error"]["details"]["stage"], "await_reply");
     assert!(receive.try_recv().is_err());
     server.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
