@@ -36,23 +36,6 @@ pub struct ScheduledRow {
     pub result: Option<ScheduledCommandResult>,
 }
 
-pub async fn owner_thread_id(
-    db: &DbWorker,
-    schedule_id: String,
-) -> Result<Option<String>, StorageError> {
-    db.call(move |connection| {
-        connection
-            .query_row(
-                "SELECT thread_id FROM scheduled_command WHERE id=?1",
-                [schedule_id],
-                |row| row.get(0),
-            )
-            .optional()
-            .map_err(StorageError::from)
-    })
-    .await
-}
-
 pub async fn next_deadline(db: &DbWorker) -> Result<Option<i64>, StorageError> {
     db.call(|c| {
         c.query_row(

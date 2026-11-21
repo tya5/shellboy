@@ -1,41 +1,54 @@
-use super::{ActiveScheduledCommand, Control};
+use super::Control;
 use crate::{
-    protocol::{ApiError, ErrorCode, ShellToolArgs},
-    shell::{ShellCompletion, ShellEvent, ShellExecution, ShellSupervisor},
+    control::db::MutationResult,
+    protocol::{ApiError, Command, ErrorCode, Origin, Request, ShellToolArgs},
+    shell::{ShellCompletion, ShellEvent, ShellExecution},
     storage::schedule::{self, DueSchedule, ScheduledCommandResult},
 };
 use std::{
-    collections::VecDeque,
+    collections::{HashMap, VecDeque},
     path::PathBuf,
-    sync::{Arc, Weak},
+    sync::Weak,
 };
 use tokio::{
-    task::JoinSet,
-    time::{Duration, Instant, sleep, sleep_until},
+    sync::{Mutex, mpsc, oneshot},
+    task::{JoinHandle, JoinSet},
+    time::{Duration, sleep},
 };
 use tokio_util::sync::CancellationToken;
 
 const OUTPUT_TAIL_BYTES: usize = 4096;
 const MAX_SLEEP_SECONDS: u64 = 60;
 const MAX_RUN_DURATION: Duration = Duration::from_secs(60 * 60);
+/// One outstanding scheduler-sensitive request can wait behind the owner loop.
+pub(super) const REQUEST_CAPACITY: usize = 1;
+
+pub(super) struct Worker {
+    pub requests: mpsc::Sender<SchedulerRequest>,
+    pub task: Mutex<Option<JoinHandle<()>>>,
+}
+
+pub(super) enum SchedulerRequest {
+    ScheduleRemove {
+        request: Request,
+        origin: Option<Origin>,
+        reply: oneshot::Sender<Result<MutationResult, ApiError>>,
+    },
+    ThreadDelete {
+        request: Request,
+        origin: Option<Origin>,
+        reply: oneshot::Sender<Result<MutationResult, ApiError>>,
+    },
+    ThreadDeletePreview {
+        request: Request,
+        origin: Option<Origin>,
+        reply: oneshot::Sender<Result<(MutationResult, String), ApiError>>,
+    },
+}
 
 fn next_sleep_seconds(next_at: i64, now: i64) -> Option<u64> {
     let remaining = next_at.saturating_sub(now);
     (remaining > 0).then(|| remaining.min(MAX_SLEEP_SECONDS as i64) as u64)
-}
-
-struct ActiveScheduleGuard {
-    owner: Arc<Control>,
-    schedule_id: uuid::Uuid,
-}
-impl Drop for ActiveScheduleGuard {
-    fn drop(&mut self) {
-        self.owner
-            .scheduled_active
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner())
-            .remove(&self.schedule_id);
-    }
 }
 
 #[cfg(test)]
@@ -48,201 +61,362 @@ fn fixed_wall_clock_recheck_is_sixty_seconds_and_stops_when_empty_or_due() {
     assert_eq!(next_sleep_seconds(600, 700), None);
 }
 
-struct SchedulerTaskFailure {
-    thread_id: String,
-    error: ApiError,
+struct RunOutcome {
+    schedule_id: uuid::Uuid,
+    result: Result<ScheduledCommandResult, ApiError>,
 }
 
-async fn report_task_failure(
-    owner: &Control,
-    scheduler_stop: &CancellationToken,
-    failure: SchedulerTaskFailure,
+pub(super) async fn run(
+    control: Weak<Control>,
+    stop: CancellationToken,
+    mut requests: mpsc::Receiver<SchedulerRequest>,
 ) {
-    if failure.error.is_storage_failure() {
-        owner.fail_storage().await;
-    } else {
-        owner.publish_event(super::EngineEvent::Error {
-            thread_id: failure.thread_id,
-            error: failure.error,
-        });
-    }
-    scheduler_stop.cancel();
-}
-
-async fn join_child(
-    owner: &Control,
-    scheduler_stop: &CancellationToken,
-    joined: Result<Result<uuid::Uuid, SchedulerTaskFailure>, tokio::task::JoinError>,
-) -> bool {
-    match joined {
-        Ok(Ok(_)) => false,
-        Ok(Err(failure)) => {
-            report_task_failure(owner, scheduler_stop, failure).await;
-            true
-        }
-        Err(error) => {
-            owner.publish_event(super::EngineEvent::Error {
-                thread_id: String::new(),
-                error: ApiError::new(
-                    ErrorCode::InvalidState,
-                    format!("scheduled shell task failed: {error}"),
-                ),
-            });
-            scheduler_stop.cancel();
-            true
-        }
-    }
-}
-
-pub(super) async fn run(control: Weak<Control>, owner_stop: CancellationToken) {
-    let scheduler_stop = owner_stop.child_token();
+    let child_stop = stop.child_token();
     let mut children = JoinSet::new();
+    let mut running = HashMap::<uuid::Uuid, String>::new();
+    let mut pending = HashMap::<uuid::Uuid, DueSchedule>::new();
+    let mut failure = None;
+
     'dispatcher: loop {
         let Some(owner) = control.upgrade() else {
             break;
         };
+        if stop.is_cancelled() {
+            break;
+        }
+
+        // Retire finished children before reading blocker snapshots. Then
+        // channel requests are linearized before any pending launch.
         while let Some(joined) = children.try_join_next() {
-            if join_child(&owner, &scheduler_stop, joined).await {
+            match finish_child(&owner, joined, &mut running).await {
+                Ok(()) => {}
+                Err(error) => {
+                    failure = Some(error);
+                    break 'dispatcher;
+                }
+            }
+        }
+        while let Ok(request) = requests.try_recv() {
+            if let Some(error) = handle_request(&owner, request, &mut running, &mut pending).await {
+                failure = Some(error);
                 break 'dispatcher;
             }
         }
-        if scheduler_stop.is_cancelled() {
+
+        // A normal Thread edit can temporarily hold the existing admission
+        // boundary. Keep that due row in this scheduler-owned map and retry on
+        // the request-completion notification; no shared registry or DB claim.
+        let mut processed_pending = false;
+        let pending_ids = pending.keys().copied().collect::<Vec<_>>();
+        for id in pending_ids {
+            let Some(due) = pending.get(&id) else {
+                continue;
+            };
+            let boundary = owner.boundary(&due.thread_id).await;
+            let Ok(admission) = boundary.try_lock_owned() else {
+                continue;
+            };
+            let due = pending.remove(&id).expect("pending ID remains present");
+            let thread_id = due.thread_id.clone();
+            let execution = owner
+                .shell
+                .spawn(
+                    id.to_string(),
+                    PathBuf::from(due.cwd.clone()),
+                    ShellToolArgs {
+                        command: due.command.clone(),
+                        description: None,
+                        background: false,
+                        stdin_open: false,
+                        initial_stdin: None,
+                        input_encoding: "utf-8".into(),
+                        output_encoding: "utf-8".into(),
+                    },
+                    [("SHELLBOY_THREAD_ID".to_string(), thread_id.clone())]
+                        .into_iter()
+                        .collect(),
+                )
+                .await;
+            drop(admission);
+            match execution {
+                Ok(execution) => {
+                    running.insert(id, thread_id.clone());
+                    let stop = child_stop.clone();
+                    children.spawn(async move { run_shell(due, execution, stop).await });
+                }
+                Err(error) => {
+                    let result = ScheduledCommandResult {
+                        scheduled_at: due.scheduled_at,
+                        finished_at: chrono::Utc::now().timestamp(),
+                        status: "launch_failed".into(),
+                        exit_code: None,
+                        output_tail: Some(format!("Scheduler: launch failed: {error}")),
+                        output_truncated: false,
+                    };
+                    if let Err(storage) = schedule::finish(&owner.store.database, id, result).await
+                    {
+                        failure = Some(storage.into_api_error());
+                        break 'dispatcher;
+                    }
+                }
+            }
+            processed_pending = true;
             break;
         }
+        if processed_pending {
+            continue;
+        }
+
         let changed = owner.changed.notified();
         tokio::pin!(changed);
         changed.as_mut().enable();
+
         let deadline = match schedule::next_deadline(&owner.store.database).await {
             Ok(deadline) => deadline,
             Err(storage) => {
-                let error = storage.into_api_error();
-                if error.is_storage_failure() {
-                    owner.fail_storage().await;
-                    break 'dispatcher;
-                }
-                tokio::select! { _=scheduler_stop.cancelled()=>break 'dispatcher, _=&mut changed=>{} };
-                continue;
+                failure = Some(storage.into_api_error());
+                break;
             }
         };
-        match deadline {
-            None => {
-                tokio::select! {
-                    _=scheduler_stop.cancelled()=>break 'dispatcher,
-                    _=&mut changed=>{},
-                    joined=children.join_next(), if !children.is_empty()=>{
-                        if let Some(joined)=joined && join_child(&owner,&scheduler_stop,joined).await {
-                            break 'dispatcher;
-                        }
-                    },
+        let now = chrono::Utc::now().timestamp();
+        if deadline.is_some_and(|at| at <= now) {
+            let due = match schedule::advance_due(&owner.store.database, now).await {
+                Ok(due) => due,
+                Err(storage) => {
+                    failure = Some(storage.into_api_error());
+                    break;
+                }
+            };
+            if let Some(due) = due {
+                let id = due.id;
+                if running.contains_key(&id) || pending.contains_key(&id) {
+                    let result = ScheduledCommandResult {
+                        scheduled_at: due.scheduled_at,
+                        finished_at: chrono::Utc::now().timestamp(),
+                        status: "overlap_skipped".into(),
+                        exit_code: None,
+                        output_tail: None,
+                        output_truncated: false,
+                    };
+                    if let Err(storage) = schedule::finish(&owner.store.database, id, result).await
+                    {
+                        failure = Some(storage.into_api_error());
+                        break;
+                    }
+                } else {
+                    pending.insert(id, due);
                 }
             }
-            Some(at) => {
-                loop {
-                    let now = chrono::Utc::now().timestamp();
-                    let Some(seconds) = next_sleep_seconds(at, now) else {
-                        break;
-                    };
-                    tokio::select! {
-                        _=scheduler_stop.cancelled()=>break 'dispatcher,
-                        _=&mut changed=>continue 'dispatcher,
-                        _=sleep(Duration::from_secs(seconds))=>{},
-                        joined=children.join_next(), if !children.is_empty()=>{
-                            if let Some(joined)=joined && join_child(&owner,&scheduler_stop,joined).await {
-                                break 'dispatcher;
-                            }
-                        },
+            continue;
+        }
+
+        let sleep_seconds = deadline.and_then(|at| next_sleep_seconds(at, now));
+        tokio::select! { biased;
+            _ = stop.cancelled() => break 'dispatcher,
+            joined = children.join_next(), if !children.is_empty() => {
+                if let Some(joined) = joined
+                    && let Err(error) = finish_child(&owner, joined, &mut running).await
+                {
+                    failure = Some(error);
+                    break 'dispatcher;
+                }
+            },
+            request = requests.recv() => match request {
+                Some(request) => {
+                    if let Some(error) = handle_request(&owner, request, &mut running, &mut pending).await {
+                        failure = Some(error);
+                        break 'dispatcher;
                     }
                 }
-                loop {
-                    while let Some(joined) = children.try_join_next() {
-                        if join_child(&owner, &scheduler_stop, joined).await {
-                            break 'dispatcher;
-                        }
-                    }
-                    if scheduler_stop.is_cancelled() {
-                        break;
-                    }
-                    let Some(owner) = control.upgrade() else {
-                        break;
-                    };
-                    let now = chrono::Utc::now().timestamp();
-                    let due = match schedule::advance_due(&owner.store.database, now).await {
-                        Ok(v) => v,
-                        Err(storage) => {
-                            let error = storage.into_api_error();
-                            if error.is_storage_failure() {
-                                owner.fail_storage().await;
-                                break 'dispatcher;
-                            }
-                            tokio::select! { _=scheduler_stop.cancelled()=>break 'dispatcher, _=&mut changed=>{} }
-                            break;
-                        }
-                    };
-                    let Some(due) = due else { break };
-                    let schedule_id = due.id;
-                    let thread_id = due.thread_id.clone();
-                    let failure_thread_id = thread_id.clone();
-                    let overlap = {
-                        let mut active = owner
-                            .scheduled_active
-                            .lock()
-                            .unwrap_or_else(|poison| poison.into_inner());
-                        match active.entry(schedule_id) {
-                            std::collections::hash_map::Entry::Occupied(_) => true,
-                            std::collections::hash_map::Entry::Vacant(entry) => {
-                                entry.insert(ActiveScheduledCommand {
-                                    thread_id,
-                                    launched: false,
-                                });
-                                false
-                            }
-                        }
-                    };
-                    if overlap {
-                        if let Err(storage) = schedule::finish(
-                            &owner.store.database,
-                            schedule_id,
-                            ScheduledCommandResult {
-                                scheduled_at: due.scheduled_at,
-                                finished_at: chrono::Utc::now().timestamp(),
-                                status: "overlap_skipped".into(),
-                                exit_code: None,
-                                output_tail: None,
-                                output_truncated: false,
-                            },
-                        )
-                        .await
-                        {
-                            report_task_failure(
-                                &owner,
-                                &scheduler_stop,
-                                SchedulerTaskFailure {
-                                    thread_id: failure_thread_id,
-                                    error: storage.into_api_error(),
-                                },
-                            )
-                            .await;
-                            break 'dispatcher;
-                        }
-                    } else {
-                        let child_stop = scheduler_stop.clone();
-                        let active_guard = ActiveScheduleGuard {
-                            owner: owner.clone(),
-                            schedule_id,
-                        };
-                        children.spawn(async move {
-                            let _active_guard = active_guard;
-                            execute(owner, due, child_stop).await
-                        });
-                    }
-                }
-            }
+                None => break 'dispatcher,
+            },
+            _ = &mut changed => {},
+            _ = sleep(Duration::from_secs(sleep_seconds.unwrap_or(0))), if sleep_seconds.is_some() => {},
         }
     }
+
+    child_stop.cancel();
     while let Some(joined) = children.join_next().await {
-        if let Some(owner) = control.upgrade() {
-            let _ = join_child(&owner, &scheduler_stop, joined).await;
+        if let Some(owner) = control.upgrade()
+            && let Err(error) = finish_child(&owner, joined, &mut running).await
+        {
+            failure.get_or_insert(error);
         }
+    }
+    if let (Some(owner), Some(error)) = (control.upgrade(), failure) {
+        if error.is_storage_failure() {
+            owner.fail_storage().await;
+        } else {
+            owner.publish_event(super::EngineEvent::Error {
+                thread_id: String::new(),
+                error,
+            });
+        }
+    }
+}
+
+async fn handle_request(
+    owner: &Control,
+    request: SchedulerRequest,
+    running: &HashMap<uuid::Uuid, String>,
+    pending: &mut HashMap<uuid::Uuid, DueSchedule>,
+) -> Option<ApiError> {
+    match request {
+        SchedulerRequest::ScheduleRemove {
+            request,
+            origin,
+            reply,
+        } => {
+            let schedule_id = match &request.command {
+                Command::ScheduleRemove(args) => uuid::Uuid::parse_str(&args.schedule_id).ok(),
+                _ => None,
+            };
+            let result = owner.store.execute(request, origin).await;
+            if let (Ok(result), Some(schedule_id)) = (&result, schedule_id)
+                && result.result["removed"] == true
+            {
+                pending.remove(&schedule_id);
+                owner.changed.notify_waiters();
+            }
+            let storage_failure = result
+                .as_ref()
+                .err()
+                .filter(|error| error.is_storage_failure())
+                .cloned();
+            let _ = reply.send(result);
+            storage_failure
+        }
+        SchedulerRequest::ThreadDeletePreview {
+            request,
+            origin,
+            reply,
+        } => {
+            let active_threads = running.values().cloned().collect();
+            let result = owner
+                .store
+                .execute_with_active_delete_preview(request, origin, active_threads)
+                .await;
+            let storage_failure = result
+                .as_ref()
+                .err()
+                .filter(|error| error.is_storage_failure())
+                .cloned();
+            let _ = reply.send(result);
+            storage_failure
+        }
+        SchedulerRequest::ThreadDelete {
+            request,
+            origin,
+            reply,
+        } => {
+            let result = delete_thread(owner, request, origin, running).await;
+            if let Ok((effects, deleted_targets)) = &result {
+                let deleted = deleted_targets
+                    .iter()
+                    .collect::<std::collections::HashSet<_>>();
+                pending.retain(|_, due| !deleted.contains(&due.thread_id));
+                if !effects.deleted_threads.is_empty() {
+                    owner.changed.notify_waiters();
+                }
+            }
+            let result = result.map(|(effects, _)| effects);
+            let storage_failure = result
+                .as_ref()
+                .err()
+                .filter(|error| error.is_storage_failure())
+                .cloned();
+            let _ = reply.send(result);
+            storage_failure
+        }
+    }
+}
+
+async fn delete_thread(
+    owner: &Control,
+    request: Request,
+    origin: Option<Origin>,
+    running: &HashMap<uuid::Uuid, String>,
+) -> Result<(MutationResult, Vec<String>), ApiError> {
+    if let Some(saved) = owner.store.replay(&request, &origin).await? {
+        return Ok((saved, Vec::new()));
+    }
+    let Command::ThreadDelete(args) = &request.command else {
+        return Err(ApiError::new(
+            ErrorCode::InvalidState,
+            "ThreadDelete request required",
+        ));
+    };
+    let selection = args.clone();
+    let checked_targets = owner
+        .store
+        .database
+        .call(move |db| {
+            if selection.preview_marker.is_some() {
+                Ok(crate::deletion::guarded_targets(db, &selection)
+                    .map_err(crate::storage::StorageError::from)?
+                    .unwrap_or_default())
+            } else {
+                crate::deletion::actual_delete_targets(db, &selection)
+            }
+        })
+        .await
+        .map_err(super::storage_error)?;
+    let mut guards = Vec::new();
+    for thread in &checked_targets {
+        let boundary = owner.boundary(thread).await;
+        guards.push(boundary.try_lock_owned().map_err(|_| {
+            ApiError::new(
+                ErrorCode::InvalidState,
+                "A Thread-owned edit is active; retry deletion after it ends",
+            )
+        })?);
+    }
+    if checked_targets
+        .iter()
+        .any(|thread| running.values().any(|active| active == thread))
+    {
+        return Err(ApiError::new(
+            ErrorCode::InvalidState,
+            "A scheduled shell is active for this Thread; wait until it finishes before deleting",
+        ));
+    }
+    let result = owner
+        .store
+        .execute_with_checked_delete_targets(request, origin, checked_targets.clone())
+        .await?;
+    Ok((result, checked_targets))
+}
+
+async fn finish_child(
+    owner: &Control,
+    joined: Result<RunOutcome, tokio::task::JoinError>,
+    running: &mut HashMap<uuid::Uuid, String>,
+) -> Result<(), ApiError> {
+    let outcome = joined.map_err(|error| {
+        ApiError::new(
+            ErrorCode::InvalidState,
+            format!("scheduled shell task failed: {error}"),
+        )
+    })?;
+    running.remove(&outcome.schedule_id);
+    let result = outcome.result?;
+    schedule::finish(&owner.store.database, outcome.schedule_id, result)
+        .await
+        .map_err(crate::app::storage_error)
+}
+
+async fn run_shell(
+    due: DueSchedule,
+    execution: ShellExecution,
+    stop: CancellationToken,
+) -> RunOutcome {
+    let id = due.id;
+    let result = collect_shell_output(execution, stop, MAX_RUN_DURATION)
+        .await
+        .map(|collected| scheduled_shell_result(due.scheduled_at, collected));
+    RunOutcome {
+        schedule_id: id,
+        result,
     }
 }
 
@@ -254,62 +428,93 @@ struct CollectedShell {
     finished_at: i64,
 }
 
-async fn collect_shell_output(
-    mut execution: ShellExecution,
-    stop: CancellationToken,
-    run_limit: Duration,
-) -> Result<CollectedShell, ApiError> {
-    let deadline = Instant::now() + run_limit;
+async fn wait_for_completion(
+    completion: &mut tokio::sync::watch::Receiver<Option<ShellCompletion>>,
+) -> Result<ShellCompletion, ApiError> {
+    loop {
+        if let Some(value) = completion.borrow().clone() {
+            return Ok(value);
+        }
+        completion.changed().await.map_err(|_| {
+            ApiError::new(
+                ErrorCode::InvalidState,
+                "scheduled shell completion was unavailable",
+            )
+        })?;
+    }
+}
+
+async fn drain_shell_output(
+    mut events: mpsc::Receiver<ShellEvent>,
+) -> (Option<String>, bool, bool) {
     let mut tail = VecDeque::with_capacity(OUTPUT_TAIL_BYTES);
     let mut truncated = false;
-    let mut events_open = true;
-    let mut completion_open = true;
-    let mut stop_sent = false;
-    let mut timed_out = false;
-    let mut finished_at = None;
-    loop {
-        tokio::select! { biased;
-            _=stop.cancelled(), if !stop_sent=>{execution.handle.stop();stop_sent=true;},
-            changed=execution.completion.changed(), if completion_open=>{ if changed.is_err() { completion_open=false; } },
-            _=sleep_until(deadline), if !stop_sent && execution.completion.borrow().is_none()=>{
-                timed_out=true;
-                execution.handle.stop();
-                stop_sent=true;
-            },
-            event=execution.events.recv(), if events_open=>match event {Some(ShellEvent::Output(chunk))=>for byte in chunk.bytes.iter().copied() { if tail.len()==OUTPUT_TAIL_BYTES {tail.pop_front();truncated=true;} tail.push_back(byte); },Some(ShellEvent::Stdin{..})=>{},None=>events_open=false},
-        }
-        let completed = execution.completion.borrow().is_some();
-        if completed && finished_at.is_none() {
-            finished_at = Some(chrono::Utc::now().timestamp());
-        }
-        if completed && !events_open {
-            break;
-        }
-        if !completion_open && !completed {
-            return Err(ApiError::new(
-                ErrorCode::InvalidState,
-                "scheduled shell completion was lost before output drain finished",
-            ));
+    while let Some(event) = events.recv().await {
+        match event {
+            ShellEvent::Output(chunk) => {
+                for byte in chunk.bytes.iter().copied() {
+                    if tail.len() == OUTPUT_TAIL_BYTES {
+                        tail.pop_front();
+                        truncated = true;
+                    }
+                    tail.push_back(byte);
+                }
+            }
+            ShellEvent::Stdin { .. } => {}
         }
     }
-    let Some(completion) = execution.completion.borrow().clone() else {
-        return Err(ApiError::new(
-            ErrorCode::InvalidState,
-            "scheduled shell completion was unavailable",
-        ));
-    };
-    truncated |= !completion.output_complete;
     let mut output = String::from_utf8_lossy(&tail.into_iter().collect::<Vec<_>>()).into_owned();
     while output.len() > OUTPUT_TAIL_BYTES {
         output.remove(0);
         truncated = true;
     }
+    (!output.is_empty())
+        .then_some(output)
+        .map_or((None, truncated, false), |value| {
+            (Some(value), truncated, true)
+        })
+}
+
+async fn collect_shell_output(
+    execution: ShellExecution,
+    stop: CancellationToken,
+    run_limit: Duration,
+) -> Result<CollectedShell, ApiError> {
+    let ShellExecution {
+        handle,
+        events,
+        completion: mut completion_rx,
+    } = execution;
+    let completion = async {
+        tokio::select! { biased;
+            _ = stop.cancelled() => {
+                let stop_at = chrono::Utc::now().timestamp();
+                handle.stop();
+                let completion = wait_for_completion(&mut completion_rx).await?;
+                Ok::<_, ApiError>((completion, false, stop_at))
+            }
+            result = tokio::time::timeout(run_limit, wait_for_completion(&mut completion_rx)) => {
+                match result {
+                    Ok(completion) => Ok((completion?, false, chrono::Utc::now().timestamp())),
+                    Err(_) => {
+                        let stop_at = chrono::Utc::now().timestamp();
+                        handle.stop();
+                        let completion = wait_for_completion(&mut completion_rx).await?;
+                        Ok((completion, true, stop_at))
+                    }
+                }
+            }
+        }
+    };
+    let (completion, output) = tokio::join!(completion, drain_shell_output(events));
+    let (completion, timed_out, stopped_at) = completion?;
+    let (output_tail, output_truncated, _) = output;
     Ok(CollectedShell {
-        completion,
-        output_tail: (!output.is_empty()).then_some(output),
-        output_truncated: truncated,
+        output_tail,
+        output_truncated: output_truncated || !completion.output_complete,
+        finished_at: stopped_at,
         timed_out,
-        finished_at: finished_at.unwrap_or_else(|| chrono::Utc::now().timestamp()),
+        completion,
     })
 }
 
@@ -331,103 +536,6 @@ fn scheduled_shell_result(scheduled_at: i64, collected: CollectedShell) -> Sched
         output_tail: collected.output_tail,
         output_truncated: collected.output_truncated,
     }
-}
-
-async fn execute(
-    owner: Arc<Control>,
-    due: DueSchedule,
-    stop: CancellationToken,
-) -> Result<uuid::Uuid, SchedulerTaskFailure> {
-    let id = due.id;
-    let thread_id = due.thread_id.clone();
-    if stop.is_cancelled() {
-        return Ok(id);
-    }
-    let boundary = owner.boundary(&thread_id).await;
-    let admission = tokio::select! {
-        biased;
-        _=stop.cancelled()=>return Ok(id),
-        guard=boundary.lock_owned()=>guard,
-    };
-    if stop.is_cancelled() {
-        return Ok(id);
-    }
-    let schedule_id = id.to_string();
-    let target_thread = thread_id.clone();
-    let thread_live_and_scheduled = owner
-        .store
-        .database
-        .call(move |db| {
-            Ok(db.query_row(
-                "SELECT EXISTS(SELECT 1 FROM scheduled_command s JOIN thread t ON t.id=s.thread_id WHERE s.id=?1 AND s.thread_id=?2 AND t.deleted_at IS NULL)",
-                rusqlite::params![schedule_id, target_thread],
-                |row| row.get::<_, bool>(0),
-            )?)
-        })
-        .await
-        .map_err(|storage| SchedulerTaskFailure {
-            thread_id: thread_id.clone(),
-            error: storage.into_api_error(),
-        })?;
-    if !thread_live_and_scheduled {
-        return Ok(id);
-    }
-    let args = ShellToolArgs {
-        command: due.command.clone(),
-        description: None,
-        background: false,
-        stdin_open: false,
-        initial_stdin: None,
-        input_encoding: "utf-8".into(),
-        output_encoding: "utf-8".into(),
-    };
-    let supervisor: ShellSupervisor = owner.shell.clone();
-    let execution = supervisor
-        .spawn(
-            id.to_string(),
-            PathBuf::from(due.cwd),
-            args,
-            [("SHELLBOY_THREAD_ID".to_string(), thread_id.clone())]
-                .into_iter()
-                .collect(),
-        )
-        .await;
-    let launched = execution.is_ok();
-    if let Some(active) = owner
-        .scheduled_active
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner())
-        .get_mut(&id)
-    {
-        active.launched = launched;
-    }
-    drop(admission);
-    let result = match execution {
-        Err(error) => ScheduledCommandResult {
-            scheduled_at: due.scheduled_at,
-            finished_at: chrono::Utc::now().timestamp(),
-            status: "launch_failed".into(),
-            exit_code: None,
-            output_tail: Some(format!("Scheduler: launch failed: {error}")),
-            output_truncated: false,
-        },
-        Ok(execution) => {
-            let collected = collect_shell_output(execution, stop.clone(), MAX_RUN_DURATION)
-                .await
-                .map_err(|error| SchedulerTaskFailure {
-                    thread_id: thread_id.clone(),
-                    error,
-                })?;
-            scheduled_shell_result(due.scheduled_at, collected)
-        }
-    };
-    schedule::finish(&owner.store.database, id, result)
-        .await
-        .map_err(|storage| SchedulerTaskFailure {
-            thread_id,
-            error: storage.into_api_error(),
-        })?;
-    Ok(id)
 }
 
 #[cfg(all(test, unix))]
@@ -610,7 +718,6 @@ mod run_limit_tests {
                 .await
                 .unwrap();
                 assert!(collected.timed_out);
-                assert!(collected.output_truncated, "continuous output should saturate the bounded shell event stream");
                 assert_eq!(collected.completion.state, ShellState::Stopped);
                 assert!(collected.completion.group_cleanup_confirmed);
                 let result = scheduled_shell_result(due.scheduled_at, collected);

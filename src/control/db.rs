@@ -387,7 +387,7 @@ impl Store {
         request: Request,
         caller: Option<Origin>,
         active_threads: Vec<String>,
-    ) -> Result<MutationResult> {
+    ) -> Result<(MutationResult, String)> {
         let Command::ThreadDeletePreview(args) = &request.command else {
             return Err(error(
                 ErrorCode::InvalidState,
@@ -415,13 +415,16 @@ impl Store {
                     &active_threads,
                 )
                 .map_err(crate::app::storage_error)?;
+                let observed_at = chrono::Utc::now().to_rfc3339();
                 tx.commit().map_err(sql_error)?;
-                Ok::<_, ApiError>(raw)
+                Ok::<_, ApiError>((raw, observed_at))
             })?;
             Ok(raw)
         })
         .await??;
+        let (raw, observed_at) = raw;
         MutationResult::value(crate::deletion::observation::prepare(raw))
+            .map(|result| (result, observed_at))
     }
 
     pub(crate) async fn execute_with_checked_delete_targets(

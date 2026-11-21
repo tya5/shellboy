@@ -601,7 +601,15 @@ and font and report whether this option helps.
 
 A running owner can keep a small persistent schedule of shell-text commands:
 
-The owner rechecks its wall clock at most 60 seconds after a timer wake. This uses no periodic I/O; with no schedules the timer is idle and waits for a schedule change. On macOS the monotonic timer does not advance during system sleep, so the cap bounds lateness after wake. Cron times use the owner’s local time. With the pinned croner implementation, a nonexistent spring-forward match moves to the first valid local time after the gap. For a daily fixed-time match in a fall-back fold, croner skips the repeated hour and advances to the next matching local day. Each command runs for at most one hour; an expired run is stopped through the shared shell handle and listed as `timed_out` with no exit code and its actual finish time. Expiry releases the schedule so later occurrences can run. A due command waits for an ordinary edit of its Thread and rechecks the Thread before starting; the edit does not discard the occurrence.
+The owner rechecks its wall clock at most 60 seconds after a timer wake. This uses no periodic I/O; with no schedules the timer is idle and waits for a schedule change. On macOS the monotonic timer does not advance during system sleep, so the cap bounds lateness after wake. Cron times use the owner’s local time. With the pinned croner implementation, a nonexistent spring-forward match moves to the first valid local time after the gap. For a daily fixed-time match in a fall-back fold, croner skips the repeated hour and advances to the next matching local day. Each command runs for at most one hour; an expired run is stopped through the shared shell handle and listed as `timed_out` with no exit code and its actual stop-request time. Expiry releases the schedule so later occurrences can run. The scheduler task owns pending due occurrences and running schedule IDs. A due
+launch waits for an ordinary edit of its Thread without dropping the occurrence.
+Schedule removal and Thread deletion are serialized with launch decisions through
+the scheduler request channel, so a removed pending occurrence cannot start later;
+a shell already launched may finish. Delete-preview blocker information comes from
+the same bounded observation, and is unknown if its selected descendant scope is
+incomplete. The one-hour limit wraps process completion separately from output
+drain, so continuous output cannot delay cancellation through the shared shell
+handle.
 
 ```sh
 shellboy schedule add --thread THREAD_ID --cron '*/15 * * * *' -- 'if [ -f alert.flag ]; then shellboy message send --thread "$SHELLBOY_THREAD_ID" --text "The scheduled check found an alert"; fi'

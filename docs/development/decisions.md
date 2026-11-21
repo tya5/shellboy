@@ -4605,3 +4605,31 @@ recorded above; no power measurement is claimed.
 Every schedule belongs to exactly one `thread_id` with `ON DELETE CASCADE` to both registration and latest-result rows. External `schedule.add`/`schedule.list` must name the Thread; an authenticated model shell may omit it and Control fills only the trusted origin Thread ID. `cwd` defaults to the Thread cwd captured during registration; only `SHELLBOY_THREAD_ID` is added to the command environment, never Origin/auth. Limit registrations to 16 total across the owner in the same transaction, counting archived and completed rows until remove or Thread deletion. Rationale: a row is conservatively under 32 KiB when its 4096-scalar tail is worst-case JSON escaped 6x plus cron, UUIDs, IDs and metadata; 16 rows remain under 512 KiB plus envelope, well below the actual 8 MiB `MAX_FRAME_BYTES`. The list remains one-Thread scoped and complete; all-Thread listing is explicitly out of scope.
 
 The existing per-Thread Control boundary is acquired only for launch admission, then released before the command runs. A due schedule waits for an ordinary Thread edit rather than retiring its occurrence; after admission it rechecks that the Thread is still live before spawning. One owner-memory map keyed by schedule ID records the Thread for overlap exclusion and deletion. Pending admission entries prevent same-ID overlap; deletion counts/blocks only entries whose shared shell was launched. Deletion resolves the same full target set as the canonical delete operation, including unmarked deletes; the bounded preview remains informational and partial when its existing observation limits are exceeded. FK cascade removes schedules and latest results. Archive does not change due scanning, fork has no schedule-copy path, and rewind is orthogonal.
+
+
+## Core #281 single-owner scheduler structure (2026-11-21)
+
+Claude's decision replaces the earlier shared-registry/recheck layout in the
+Thread-ownership addendum above. The scheduler task alone owns its local
+pending-due and running-ID state. `Control` retains no schedule-state mutex or
+launched flag. A bounded single-item request channel serializes schedule removal,
+Thread deletion and deletion-preview blocker observations with launches; these
+requests are handled in the scheduler's event loop. A removed pending occurrence
+is discarded before spawn, while a shell already launched may finish. The
+existing Thread boundary still defers a due launch during ordinary Thread edits;
+the due item stays in scheduler-local state, not a persisted claim or a second
+worker queue. No database registration recheck is performed immediately before
+spawn.
+
+A shell run is an owned child task. Its completion wait is wrapped in the fixed
+one-hour timeout; output drain runs independently so continuous output cannot
+starve expiry. Timeout cancels through the shared `ShellHandle`, records
+`timed_out`, no exit code, and the actual stop-request time. Child results return
+to the scheduler, which persists latest-result state. Dispatcher and child
+persistence errors remain typed and converge on the existing storage-failure
+path; there is no retry/quarantine path. Delete-preview obtains the active-shell
+projection in the same scheduler-loop request as the existing bounded
+observation; incomplete selected scope returns unknown, with no descendant
+re-walk. The canonical unmarked-delete target query is shared between admission
+and deletion. These choices add no table, durable state, dependency, or shell
+capacity policy; the control channel is bounded to one waiting request.

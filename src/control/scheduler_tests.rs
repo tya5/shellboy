@@ -47,6 +47,115 @@ async fn create_test_thread(
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn remove_request_cancels_a_due_launch_waiting_on_thread_edit() {
+    crate::test_watchdog::watchdog(
+        "scheduler request order removes a due pending launch before the Thread edit releases",
+        async {
+            let root = tempfile::tempdir().unwrap();
+            let config_path = root.path().join("config.toml");
+            std::fs::write(&config_path, scheduler_thread_config()).unwrap();
+            let owner = DataOwner::start(
+                Some(config_path),
+                Some(root.path().join("data")),
+                root.path().into(),
+            )
+            .await
+            .unwrap();
+            let control = Control::new(&owner, root.path().into());
+            let thread_id =
+                create_test_thread(&control, root.path(), "remove-pending-thread").await;
+            let marker = root.path().join("removed-schedule-launched");
+            let added = control
+                .request(current_request(
+                    &control,
+                    "remove-pending-add",
+                    Command::ScheduleAdd(ScheduleAddArgs {
+                        thread_id: Some(thread_id.clone()),
+                        command: format!("touch '{}'", marker.display()),
+                        cwd: None,
+                        cron: None,
+                        at: Some(chrono::Utc::now().timestamp() + 3600),
+                    }),
+                ))
+                .await;
+            assert!(added.ok, "{added:?}");
+            let schedule_id = added.result.unwrap()["schedule_id"]
+                .as_str()
+                .unwrap()
+                .to_owned();
+
+            let boundary = control.boundary(&thread_id).await;
+            let edit_guard = boundary.lock_owned().await;
+            let id_for_due = schedule_id.clone();
+            owner
+                .db
+                .call(move |db| {
+                    db.execute(
+                        "UPDATE scheduled_command SET next_at=?1 WHERE id=?2",
+                        rusqlite::params![chrono::Utc::now().timestamp() - 1, id_for_due],
+                    )?;
+                    Ok(())
+                })
+                .await
+                .unwrap();
+            control.changed.notify_waiters();
+
+            let id_for_wait = schedule_id.clone();
+            tokio::time::timeout(Duration::from_secs(3), async {
+                loop {
+                    let id = id_for_wait.clone();
+                    let due = owner
+                        .db
+                        .call(move |db| {
+                            Ok(db.query_row(
+                                "SELECT next_at IS NULL FROM scheduled_command WHERE id=?1",
+                                [id],
+                                |row| row.get::<_, bool>(0),
+                            )?)
+                        })
+                        .await
+                        .unwrap();
+                    if due {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                }
+            })
+            .await
+            .expect(
+                "scheduler should claim the due one-shot while Thread launch admission is held",
+            );
+
+            let removed = control
+                .request(current_request(
+                    &control,
+                    "remove-pending-remove",
+                    Command::ScheduleRemove(crate::protocol::ScheduleRemoveArgs {
+                        schedule_id: schedule_id.clone(),
+                    }),
+                ))
+                .await;
+            assert!(removed.ok, "{removed:?}");
+            assert_eq!(removed.result.unwrap()["removed"], true);
+            drop(edit_guard);
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            assert!(
+                !marker.exists(),
+                "a removed pending occurrence must not launch later"
+            );
+            let rows = crate::storage::schedule::list(&owner.db, thread_id)
+                .await
+                .unwrap();
+            assert!(rows.is_empty());
+            control.shutdown().await.unwrap();
+            owner.shutdown().await.unwrap();
+        },
+    )
+    .await
+    .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn scheduled_at_runs_shared_shell_and_list_reports_latest_result() {
     crate::test_watchdog::watchdog("schedule add -> timer -> shell -> latest result -> list", async {
         let root = tempfile::tempdir().unwrap();

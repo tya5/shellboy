@@ -70,6 +70,22 @@ index for the cross-Thread human inbox; recursive keyset seeks select a bounded
 candidate page before its exact count/oldest aggregation. `thread.get` remains
 the bounded per-Thread unified reply inbox. See [reply-expected messages](reply-expected-messages.md#thread-scoped-reply-inbox-262-unified-for-webtui).
 
+## Core #281 scheduler ownership (2026-11-21)
+
+One scheduler task owns all ephemeral schedule state: its local pending-due and
+running-ID collections. `Control` shares only a bounded request channel and the
+join handle. Schedule removal, Thread deletion, and bounded delete-preview
+blocker reads are answered in that same loop as launches; removing an unlaunched
+due item therefore removes it before it can start, while an already launched
+child may finish. There is no shared scheduled-ID mutex, `launched` marker, or
+pre-spawn registration recheck. Run children return typed outcomes; their
+one-hour completion timeout is independent of output drain and uses the shared
+`ShellHandle` cancellation. Storage failures from dispatcher and child-result
+persistence converge on the existing typed storage-failure shutdown path.
+Deletion preview takes active-shell facts from the scheduler while the loop is
+handling that bounded observation; incomplete selected scope reports the
+blocker as unknown. See [Core #281 in decisions](../development/decisions.md#core-281-single-owner-scheduler-structure-2026-11-21).
+
 Conversation schema34 (#222 stage 3) adds the `thread_tag` table, its `(tag, thread_id)` index and the partial
 `threads_cwd_updated` index: `thread tag`, `thread tags`, `thread list --tag/--cwd` and `tags` in `thread list`/`thread get`.
 Tags and the cwd filter are organization metadata only. See [thread organization](thread-organization.md).

@@ -1,7 +1,6 @@
 //! Saved review facts only; the dedicated confirmation still requests exact review.
 use crate::{
     control::Control,
-    deletion::observation,
     protocol::{ApiError, ThreadDeleteArgs},
 };
 use serde_json::{Value, json};
@@ -14,19 +13,15 @@ pub(super) async fn request(
     stop: CancellationToken,
 ) -> Result<Value, ApiError> {
     let thread = args.thread_id.clone();
-    let active_threads = control.active_scheduled_shell_thread_ids();
-    let (raw, at) = super::snapshot::read(
-        control.store.database.path().to_path_buf(),
-        stop,
-        move |db| {
-            let raw = observation::read_tx_with_active_shells(db, &args, &active_threads)?;
-            Ok((raw, chrono::Utc::now().to_rfc3339()))
-        },
-    )
-    .await?;
-    super::presentation_work(move|| {
-        let mut value=observation::prepare(raw);
-        value["view_observation"]=json!({"thread_id":thread,"observed_at":at,"scope":"saved deletion facts; not an execution authorization"});
+    let (value, at) = control.scheduler_delete_preview(args, stop).await?;
+    super::presentation_work(move || {
+        let mut value = value;
+        value["view_observation"] = json!({
+            "thread_id": thread,
+            "observed_at": at,
+            "scope": "saved deletion facts; not an execution authorization"
+        });
         Ok(value)
-    }).await?
+    })
+    .await?
 }

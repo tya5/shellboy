@@ -147,11 +147,6 @@ struct AutomaticFault {
     release_checkpoint: Arc<tokio::sync::Notify>,
 }
 
-pub(super) struct ActiveScheduledCommand {
-    pub thread_id: String,
-    pub launched: bool,
-}
-
 pub struct Control {
     #[cfg(test)]
     memory_samples: AtomicUsize,
@@ -162,14 +157,13 @@ pub struct Control {
     pub index: Arc<crate::index::IndexService>,
     pub gc: Arc<crate::gc::GcService>,
     maintenance: tokio::sync::OnceCell<Mutex<Option<tokio::task::JoinHandle<()>>>>,
-    scheduler: tokio::sync::OnceCell<Mutex<Option<tokio::task::JoinHandle<()>>>>,
+    scheduler: tokio::sync::OnceCell<scheduler::Worker>,
     index_workers: tokio::sync::OnceCell<Mutex<Option<crate::index::IndexWorkers>>>,
     shutdown_context: tokio::sync::OnceCell<Result<(), ApiError>>,
     owner_shutdown: std::sync::OnceLock<CancellationToken>,
     compactor: crate::compaction::Compactor,
     compact_tasks: Mutex<HashMap<String, CancellationToken>>,
     boundaries: Mutex<HashMap<String, std::sync::Weak<Mutex<()>>>>,
-    scheduled_active: std::sync::Mutex<HashMap<uuid::Uuid, ActiveScheduledCommand>>,
     shell: ShellSupervisor,
     instructions: InstructionLoader,
     replay: replay::ReplayCache,
@@ -415,7 +409,6 @@ impl Control {
             owner_shutdown: std::sync::OnceLock::new(),
             compactor,
             boundaries: Mutex::new(HashMap::new()),
-            scheduled_active: std::sync::Mutex::new(HashMap::new()),
             compact_tasks: Mutex::new(HashMap::new()),
             shell: ShellSupervisor::new(&config),
             instructions,
@@ -489,9 +482,13 @@ impl Control {
             .await?;
         self.scheduler
             .get_or_init(|| async {
+                let (requests, receiver) = mpsc::channel(scheduler::REQUEST_CAPACITY);
                 let weak = Arc::downgrade(self);
                 let stop = self.stop.clone();
-                Mutex::new(Some(tokio::spawn(scheduler::run(weak, stop))))
+                scheduler::Worker {
+                    requests,
+                    task: Mutex::new(Some(tokio::spawn(scheduler::run(weak, stop, receiver)))),
+                }
             })
             .await;
         self.maintenance
@@ -528,14 +525,97 @@ impl Control {
             .await
             .map_err(storage_error)
     }
-    pub(crate) fn active_scheduled_shell_thread_ids(&self) -> Vec<String> {
-        self.scheduled_active
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner())
-            .values()
-            .filter(|entry| entry.launched)
-            .map(|entry| entry.thread_id.clone())
-            .collect()
+    async fn scheduler_mutation(
+        &self,
+        make: impl FnOnce(
+            tokio::sync::oneshot::Sender<Result<MutationResult, ApiError>>,
+        ) -> scheduler::SchedulerRequest,
+    ) -> Result<MutationResult, ApiError> {
+        let worker = self
+            .scheduler
+            .get()
+            .ok_or_else(|| ApiError::new(ErrorCode::InvalidState, "Scheduler is not running"))?;
+        let (reply, response) = tokio::sync::oneshot::channel();
+        worker
+            .requests
+            .send(make(reply))
+            .await
+            .map_err(|_| ApiError::new(ErrorCode::InvalidState, "Scheduler is stopping"))?;
+        response.await.map_err(|_| {
+            ApiError::new(
+                ErrorCode::InvalidState,
+                "Scheduler stopped before answering",
+            )
+        })?
+    }
+
+    async fn scheduler_preview_request(
+        &self,
+        request: Request,
+        origin: Option<Origin>,
+    ) -> Result<(MutationResult, String), ApiError> {
+        let worker = self
+            .scheduler
+            .get()
+            .ok_or_else(|| ApiError::new(ErrorCode::InvalidState, "Scheduler is not running"))?;
+        let (reply, response) = tokio::sync::oneshot::channel();
+        worker
+            .requests
+            .send(scheduler::SchedulerRequest::ThreadDeletePreview {
+                request,
+                origin,
+                reply,
+            })
+            .await
+            .map_err(|_| ApiError::new(ErrorCode::InvalidState, "Scheduler is stopping"))?;
+        response.await.map_err(|_| {
+            ApiError::new(
+                ErrorCode::InvalidState,
+                "Scheduler stopped before answering",
+            )
+        })?
+    }
+
+    pub(crate) async fn scheduler_delete_preview(
+        self: &Arc<Self>,
+        args: ThreadDeleteArgs,
+        stop: CancellationToken,
+    ) -> Result<(Value, String), ApiError> {
+        self.start().await?;
+        let request = Request::new(
+            format!(
+                "{}:schedule-delete-preview:{}",
+                self.store.instance_id,
+                uuid::Uuid::new_v4()
+            ),
+            Command::ThreadDeletePreview(args),
+        );
+        let worker = self
+            .scheduler
+            .get()
+            .ok_or_else(|| ApiError::new(ErrorCode::InvalidState, "Scheduler is not running"))?;
+        let (reply, response) = tokio::sync::oneshot::channel();
+        tokio::select! {
+            _ = stop.cancelled() => return Err(ApiError::new(ErrorCode::InvalidState, "Deletion preview was cancelled")),
+            sent = worker.requests.send(scheduler::SchedulerRequest::ThreadDeletePreview {
+                request,
+                origin: None,
+                reply,
+            }) => sent.map_err(|_| ApiError::new(ErrorCode::InvalidState, "Scheduler is stopping"))?,
+        }
+        let result = tokio::select! {
+            _ = stop.cancelled() => return Err(ApiError::new(ErrorCode::InvalidState, "Deletion preview was cancelled")),
+            result = response => result.map_err(|_| ApiError::new(ErrorCode::InvalidState, "Scheduler stopped before answering"))?,
+        };
+        match result {
+            Ok((result, observed_at)) => Ok((result.result, observed_at)),
+            Err(error) => {
+                if error.is_storage_failure() {
+                    self.fail_storage().await;
+                }
+                Err(error)
+            }
+        }
     }
     /// Read-only accounting of retained conversion buffers and in-flight pins.
     pub fn replay_cache_stats(&self) -> replay::ReplayStats {
@@ -1144,12 +1224,10 @@ impl Control {
                         })?;
                         self.recovery_rewind(request, origin, thread).await
                     }
-                    Command::ThreadDeletePreview(_) => {
-                        let active_threads = self.active_scheduled_shell_thread_ids();
-                        self.store
-                            .execute_with_active_delete_preview(request, origin, active_threads)
-                            .await
-                    }
+                    Command::ThreadDeletePreview(_) => self
+                        .scheduler_preview_request(request, origin)
+                        .await
+                        .map(|(effects, _)| effects),
                     Command::ScheduleAdd(args) => {
                         let thread=args.thread_id.clone().or_else(||origin.as_ref().map(|o|o.thread_id.clone())).ok_or_else(||ApiError::new(ErrorCode::InvalidArgument,"external schedule.add requires --thread"))?;
                         let boundary=self.boundary(&thread).await;
@@ -1161,31 +1239,13 @@ impl Control {
                         self.changed.notify_waiters();
                         Ok(effects)
                     }
-                    Command::ScheduleRemove(args) => {
-                        let owner = crate::storage::schedule::owner_thread_id(
-                            &self.store.database,
-                            args.schedule_id.clone(),
-                        )
-                        .await;
-                        let owner = match owner {
-                            Ok(owner) => owner,
-                            Err(storage) => {
-                                let error = storage_error(storage);
-                                if error.is_storage_failure() {
-                                    self.fail_storage().await;
-                                }
-                                return Err(error);
-                            }
-                        };
-                        let effects = if let Some(thread_id) = owner {
-                            let boundary = self.boundary(&thread_id).await;
-                            let _boundary = boundary.lock().await;
-                            self.store.execute(request, origin).await?
-                        } else {
-                            self.store.execute(request, origin).await?
-                        };
-                        self.changed.notify_waiters();
-                        Ok(effects)
+                    Command::ScheduleRemove(_) => {
+                        self.scheduler_mutation(|reply| scheduler::SchedulerRequest::ScheduleRemove {
+                            request,
+                            origin,
+                            reply,
+                        })
+                        .await
                     }
                     Command::ScheduleList(args) => {
                         let thread=args.thread_id.clone().or_else(||origin.as_ref().map(|o|o.thread_id.clone())).ok_or_else(||ApiError::new(ErrorCode::InvalidArgument,"external schedule.list requires --thread"))?;
@@ -1203,47 +1263,13 @@ impl Control {
                         }).collect();
                         Ok(crate::control::db::MutationResult{result:json!({"schedules":schedules}),..Default::default()})
                     }
-                    Command::ThreadDelete(args) => {
-                        // Authenticated receipt replay must precede fresh target admission: a
-                        // committed delete has already removed its target from the live tree.
-                        if let Some(saved) = self.store.replay(&request, &origin).await? {
-                            return Ok(saved);
-                        }
-                        let selection = args.clone();
-                        let checked_targets = self
-                            .store
-                            .database
-                            .call(move |db| {
-                                if selection.preview_marker.is_some() {
-                                    Ok(crate::deletion::guarded_targets(db, &selection)
-                                        .map_err(crate::storage::StorageError::from)?
-                                        .unwrap_or_default())
-                                } else {
-                                    crate::deletion::actual_delete_targets(db, &selection)
-                                }
-                            })
-                            .await
-                            .map_err(storage_error)?;
-                        let mut guards = Vec::new();
-                        for thread in &checked_targets {
-                            let boundary = self.boundary(thread).await;
-                            guards.push(boundary.try_lock_owned().map_err(|_| ApiError::new(
-                                ErrorCode::InvalidState,
-                                "A Thread-owned edit is active; retry deletion after it ends",
-                            ))?);
-                        }
-                        {
-                            let active = self.scheduled_active.lock().unwrap_or_else(|poison| poison.into_inner());
-                            if checked_targets.iter().any(|thread| {
-                                active.values().any(|entry| entry.launched && &entry.thread_id == thread)
-                            }) {
-                                return Err(ApiError::new(
-                                    ErrorCode::InvalidState,
-                                    "A scheduled shell is active for this Thread; wait until it finishes before deleting",
-                                ));
-                            }
-                        }
-                        self.store.execute_with_checked_delete_targets(request, origin, checked_targets).await
+                    Command::ThreadDelete(_) => {
+                        self.scheduler_mutation(|reply| scheduler::SchedulerRequest::ThreadDelete {
+                            request,
+                            origin,
+                            reply,
+                        })
+                        .await
                     }
                     Command::ThreadGet(_) => {
                         let mut effects = self.store.execute(request, origin).await?;
@@ -1615,9 +1641,9 @@ impl Control {
     pub async fn shutdown(self: &Arc<Self>) -> Result<(), ApiError> {
         let context_result = self.prepare_shutdown().await;
         if let Some(worker) = self.scheduler.get()
-            && let Some(worker) = worker.lock().await.take()
+            && let Some(task) = worker.task.lock().await.take()
         {
-            let _ = worker.await;
+            let _ = task.await;
         }
         if let Some(worker) = self.maintenance.get()
             && let Some(worker) = worker.lock().await.take()
@@ -1644,9 +1670,9 @@ impl Control {
         // An admitted startup may have published workers while shutdown first
         // inspected its OnceCell. Drain any such late publication as well.
         if let Some(worker) = self.scheduler.get()
-            && let Some(worker) = worker.lock().await.take()
+            && let Some(task) = worker.task.lock().await.take()
         {
-            let _ = worker.await;
+            let _ = task.await;
         }
         if let Some(worker) = self.maintenance.get()
             && let Some(worker) = worker.lock().await.take()
