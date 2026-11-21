@@ -3,7 +3,8 @@
 ## Core #324 deterministic Ubuntu integration witnesses (candidate; CI pending)
 
 The candidate branch `task/core324-nondeterministic-tests` is based directly on
-`origin/main` at `116e82e5965dbc2c736849659f9f48db21788873`. The refused-endpoint
+`origin/main` at `116e82e5965dbc2c736849659f9f48db21788873`; current candidate SHA is
+`a8d97b5843746f6cd18708222776b3364e0458ca` (previous CI-green candidate). The refused-endpoint
 test leaves its loopback port closed for the complete finite retry budget and
 checks the initial attempt plus all eight configured retries, all with zero body
 bytes sent. It makes no later-success claim. The proactive fixture documents
@@ -40,7 +41,14 @@ Thread ledger total; the bilingual content-filter count used the wrong loop coun
 the idle agents-reference query selected a prior Run-targeted event; and one
 companion context helper still passed the Thread ID instead of the accepted Turn.
 These were corrected locally, and all eight reported selectors now pass focused
-re-runs. Final corrected SHA still needs push and CI. The full integration suite
+re-runs. Exact-SHA CI run `44892130126` passed on `a8d97b5843746f6cd18708222776b3364e0458ca`.
+Reviewer round 3 identified that `terminal_sse` used one Content-Length body write for
+prefix and terminal frames, leaving their HTTP body chunk boundary to TCP scheduling.
+The fixture now uses distinct HTTP transfer-encoding chunks for prefix and terminal
+frames; the decoder buffers across Body frames, so this fixes fixture ambiguity without
+changing product semantics. Format/check and the fail-closed matrix, invalid-JSON,
+HTTP-200-JSON, retry-budget and #315 strict-positive selectors passed after this edit.
+The updated candidate is not yet pushed or CI-qualified. The full integration suite
 was not run.
 
 

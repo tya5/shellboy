@@ -38,6 +38,23 @@ impl Reply {
         }
     }
 
+    fn chunked(status: u16, content_type: &str, chunks: &[&str], extra_headers: &str) -> Self {
+        let mut bytes = format!(
+            "HTTP/1.1 {status} Fixture\r\nContent-Type: {content_type}\r\nTransfer-Encoding: chunked\r\n{extra_headers}Connection: close\r\n\r\n"
+        )
+        .into_bytes();
+        for chunk in chunks {
+            bytes.extend_from_slice(format!("{:X}\r\n", chunk.len()).as_bytes());
+            bytes.extend_from_slice(chunk.as_bytes());
+            bytes.extend_from_slice(b"\r\n");
+        }
+        bytes.extend_from_slice(b"0\r\n\r\n");
+        Self {
+            bytes,
+            hold_open: false,
+        }
+    }
+
     fn error(status: u16, extra_headers: &str) -> Self {
         Self::http(
             status,
@@ -384,8 +401,22 @@ impl Fixture {
         }
     }
 
-    async fn no_more_requests(&mut self) {
-        assert!(self.requests.try_recv().is_err(), "unexpected HTTP replay");
+    async fn assert_no_additional_attempts(&self, expected: usize) {
+        assert_eq!(
+            self.attempts().await.len(),
+            expected,
+            "no model request was admitted beyond the completed retry witness"
+        );
+    }
+
+    async fn no_more_requests(&self) {
+        let attempts = self.attempts().await;
+        let request_count = fixture_request_log_lines(self);
+        assert_eq!(
+            request_count,
+            attempts.len(),
+            "each admitted model attempt has one dispatched request and no extra retry was sent"
+        );
     }
 
     #[track_caller]
@@ -559,7 +590,7 @@ async fn transient_http_errors_retry_consumed_error_bodies_with_bounded_backoff(
             .await
             .unwrap();
         assert_eq!(recovery_artifacts, 0);
-        fixture.no_more_requests().await;
+        fixture.assert_no_additional_attempts(attempts.len()).await;
         fixture.close().await;
     }
 }
@@ -2718,12 +2749,15 @@ async fn successful_connection_probe_releases_queued_threads_without_serializing
 const TERMINAL_SSE_500: &str = r#"{"error":{"code":"500","message":"fixture"}}"#;
 
 fn terminal_sse(prefix: &str, event: &str, headers: &str) -> Reply {
-    Reply::http(
-        200,
-        "text/event-stream",
-        &format!("{prefix}data: {event}\n\n"),
-        headers,
-    )
+    let terminal = format!("data: {event}\n\n");
+    let chunks = if prefix.is_empty() {
+        vec![terminal.as_str()]
+    } else {
+        vec![prefix, terminal.as_str()]
+    };
+    // Separate HTTP transfer chunks make the prefix/terminal Body-frame boundary
+    // deterministic even when the loopback socket coalesces their underlying reads.
+    Reply::chunked(200, "text/event-stream", &chunks, headers)
 }
 
 fn assert_terminal_stream_failure(failure: &Value, witness: Option<u16>) {
