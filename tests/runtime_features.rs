@@ -3673,13 +3673,19 @@ async fn prepared_report_from_incoming(
         "reports originate from an ordinary request"
     );
     let turn = report_turn_id.to_owned();
-    let (attempt_id,request_token):(String,Option<String>)=control.store.database.call(move|db|{
-            let rows=db.prepare("SELECT id,json_extract(input_manifest_json,'$.compaction_report_token') FROM model_attempt WHERE turn_id=?1 AND state='inflight' ORDER BY rowid")?
-                .query_map([turn],|row|Ok((row.get::<_,String>(0)?,row.get::<_,Option<String>>(1)?)))?
-                .collect::<rusqlite::Result<Vec<_>>>()?;
-            assert_eq!(rows.len(),1,"the explicitly named accepted Turn has one in-flight provider request: {rows:?}");
-            Ok(rows.into_iter().next().expect("one inflight request"))
-        }).await.unwrap();
+    let (attempt_id, request_token): (String, Option<String>) = control
+        .store
+        .database
+        .call(move |db| {
+            db.query_row(
+                "SELECT id,json_extract(input_manifest_json,'$.compaction_report_token') FROM model_attempt WHERE turn_id=?1 ORDER BY rowid DESC LIMIT 1",
+                [turn],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .map_err(Into::into)
+        })
+        .await
+        .unwrap();
     PreparedReport {
         owner: ReportOwner {
             attempt_id,
@@ -4142,6 +4148,11 @@ async fn proactive_active_spill_then_cancelled_summary_preserves_adoption() {
 /// 100 for the summary branch and, for the spill-only variant, exactly the
 /// target 40 (`#A <= target`, §2.6).
 async fn proactive_partial_spill_fixture(oversized: bool, cancel_active: Option<bool>) {
+    // Ordering contract: tests observe a provider POST only after its model_attempt
+    // admission transaction is committed (driver/request.rs:116-135, INSERT at :408;
+    // driver.rs:390-399 sends only after prepare_attempt returns). No later DB state
+    // transition is ordered against proxy parsing, so select admitted attempts by Turn
+    // and row order, and wait for request arrival with recv under the fixture watchdog.
     let entered_phase = std::cell::RefCell::new("fixture setup".to_owned());
     let completed_phase = std::cell::RefCell::new("fixture setup".to_owned());
     let result=crate::test_watchdog::watchdog("proactive partial spill adoption", async {
@@ -4253,7 +4264,18 @@ if !oversized && cancel_active.is_none() {
     assert!(replay_size<before_size,"the next request sees the adopted two-spill replay shrink: {before_size}->{replay_size}");
     resumed.reply.send((200,answer("finished"))).unwrap();
     settled(&control,&target).await;
-    assert!(receive.try_recv().is_err(),"spill-only path never posts an automatic summary");
+    // A summary ledger row is committed by single_request.rs:599-602 before
+    // the summary HTTP request is sent. Its absence proves no summary POST was
+    // admitted for this exact spill-only trigger Run; do not snapshot the proxy queue.
+    let spill_run = spill_trigger.run_id.clone().expect("accepted spill-only trigger Run");
+    let summary_requests: i64 = control.store.database.call(move |db| {
+        Ok(db.query_row(
+            "SELECT count(*) FROM app_meta WHERE key LIKE 'summary.usage.%' AND json_extract(value,'$.run_id')=?1 AND json_extract(value,'$.requests')>0",
+            [spill_run],
+            |row| row.get(0),
+        )?)
+    }).await.unwrap();
+    assert_eq!(summary_requests, 0, "spill-only trigger Run has no admitted summary request");
     *entered_phase.borrow_mut()="shutting down partial-spill control/owner".to_owned();
 control.shutdown().await.unwrap(); owner.shutdown().await.unwrap(); server.abort();
 *completed_phase.borrow_mut()=entered_phase.borrow().clone();

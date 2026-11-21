@@ -6,9 +6,12 @@ The candidate branch `task/core324-nondeterministic-tests` is based directly on
 `origin/main` at `116e82e5965dbc2c736849659f9f48db21788873`. The refused-endpoint
 test leaves its loopback port closed for the complete finite retry budget and
 checks the initial attempt plus all eight configured retries, all with zero body
-bytes sent. It makes no later-success claim. The U2 Stop test records the exact
-Run's model-attempt count at RunStop acknowledgement and compares it after that
-Run settles; `control/driver/request.rs:116-135` awaits durable attempt admission
+bytes sent. It makes no later-success claim. The proactive fixture documents
+that proxy arrival orders only against the committed attempt admission, not later
+attempt state; report capture selects the latest admitted row by named Turn and
+attempt order. Its spill-only case checks the durable summary-usage ledger rather
+than a proxy queue snapshot. The U2 Stop test records the exact Run's model-attempt
+count at RunStop acknowledgement and compares it after that Run settles; `control/driver/request.rs:116-135` awaits durable attempt admission
 (the `model_attempt` insert at line 408) before `control/driver.rs:390-399`
 starts the HTTP request. The test therefore uses the existing DB admission record,
 not mock-proxy parsing order, as the Stop witness. The retry matrix still retains
