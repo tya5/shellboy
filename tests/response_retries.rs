@@ -38,23 +38,6 @@ impl Reply {
         }
     }
 
-    fn chunked(status: u16, content_type: &str, chunks: &[&str], extra_headers: &str) -> Self {
-        let mut bytes = format!(
-            "HTTP/1.1 {status} Fixture\r\nContent-Type: {content_type}\r\nTransfer-Encoding: chunked\r\n{extra_headers}Connection: close\r\n\r\n"
-        )
-        .into_bytes();
-        for chunk in chunks {
-            bytes.extend_from_slice(format!("{:X}\r\n", chunk.len()).as_bytes());
-            bytes.extend_from_slice(chunk.as_bytes());
-            bytes.extend_from_slice(b"\r\n");
-        }
-        bytes.extend_from_slice(b"0\r\n\r\n");
-        Self {
-            bytes,
-            hold_open: false,
-        }
-    }
-
     fn error(status: u16, extra_headers: &str) -> Self {
         Self::http(
             status,
@@ -1721,6 +1704,38 @@ async fn usage_limit_new_conversation(f: &mut Fixture) {
     )
     .unwrap();
 }
+fn retry_attempt_diagnostics(attempts: &[(String, Option<Value>)]) -> String {
+    use serde_json::json;
+
+    let evidence: Vec<_> = attempts
+        .iter()
+        .take(8)
+        .map(|(state, saved)| {
+            let error = saved.as_ref().and_then(|value| value.get("error"));
+            json!({
+                "state": state,
+                "classification": {
+                    "kind": error.and_then(|value| value.get("kind")),
+                    "status": error.and_then(|value| value.get("status")),
+                    "strict_untyped_stream_error_before_done": error.and_then(|value| value.get("strict_untyped_stream_error_before_done")),
+                    "stream_provider_status": error.and_then(|value| value.get("stream_provider_status")),
+                    "automatic_retry": saved.as_ref().and_then(|value| value.get("automatic_retry")),
+                    "automatic_retry_exhausted": saved.as_ref().and_then(|value| value.get("automatic_retry_exhausted")),
+                },
+                "http": saved.as_ref().and_then(|value| value.get("rate_observation")),
+            })
+        })
+        .collect();
+    let mut serialized = serde_json::to_string(&json!({
+        "attempt_count": attempts.len(),
+        "attempts": evidence,
+        "truncated": attempts.len() > evidence.len(),
+    }))
+    .unwrap();
+    serialized.truncate(4096);
+    serialized
+}
+
 fn fixture_request_log_lines(f: &Fixture) -> usize {
     std::fs::read_to_string(f._root.path().join("requests.jsonl"))
         .unwrap()
@@ -2749,15 +2764,12 @@ async fn successful_connection_probe_releases_queued_threads_without_serializing
 const TERMINAL_SSE_500: &str = r#"{"error":{"code":"500","message":"fixture"}}"#;
 
 fn terminal_sse(prefix: &str, event: &str, headers: &str) -> Reply {
-    let terminal = format!("data: {event}\n\n");
-    let chunks = if prefix.is_empty() {
-        vec![terminal.as_str()]
-    } else {
-        vec![prefix, terminal.as_str()]
-    };
-    // Separate HTTP transfer chunks make the prefix/terminal Body-frame boundary
-    // deterministic even when the loopback socket coalesces their underlying reads.
-    Reply::chunked(200, "text/event-stream", &chunks, headers)
+    Reply::http(
+        200,
+        "text/event-stream",
+        &format!("{prefix}data: {event}\n\n"),
+        headers,
+    )
 }
 
 fn assert_terminal_stream_failure(failure: &Value, witness: Option<u16>) {
@@ -2899,7 +2911,8 @@ async fn untyped_terminal_sse_retry_fails_closed_for_typed_or_nontransient_error
         assert_eq!(
             attempts.len(),
             1,
-            "terminal classification for prefix={prefix:?} event={event}"
+            "terminal classification for prefix={prefix:?} event={event}; bounded attempt diagnostics={}",
+            retry_attempt_diagnostics(&attempts)
         );
         let failure = attempts[0].1.as_ref().unwrap();
         assert_terminal_stream_failure(failure, witness);

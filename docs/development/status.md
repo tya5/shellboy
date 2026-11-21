@@ -42,13 +42,15 @@ the idle agents-reference query selected a prior Run-targeted event; and one
 companion context helper still passed the Thread ID instead of the accepted Turn.
 These were corrected locally, and all eight reported selectors now pass focused
 re-runs. Exact-SHA CI run `44892130126` passed on `a8d97b5843746f6cd18708222776b3364e0458ca`.
-Reviewer round 3 identified that `terminal_sse` used one Content-Length body write for
-prefix and terminal frames, leaving their HTTP body chunk boundary to TCP scheduling.
-The fixture now uses distinct HTTP transfer-encoding chunks for prefix and terminal
-frames; the decoder buffers across Body frames, so this fixes fixture ambiguity without
-changing product semantics. Format/check and the fail-closed matrix, invalid-JSON,
-HTTP-200-JSON, retry-budget and #315 strict-positive selectors passed after this edit.
-The source candidate is committed as `80b50d6d0013a7b1045eb761667db2fc3d8f4914`; its updated status record is the current branch tip. It is not yet pushed or CI-qualified. The full integration suite
+Reviewer round 3 traced the intermittent 3-attempt versus 1-attempt result but did
+not establish a concrete cause. The proposed HTTP chunk-boundary explanation was
+retracted: complete SSE frames are buffered and terminal classification should not
+vary with Body chunking. The chunking fixture change is reverted; the retry test keeps
+its original assertion/verdict. Its assertion message now includes bounded per-attempt
+`model_attempt` state, saved classification fields from `error_json`, and HTTP
+`rate_observation` facts for #329 investigation. The whole-file audit remains intact.
+The attempt diagnostics and restored fixture framing pass focused validation. This
+updated source is not yet pushed or CI-qualified. The full integration suite
 was not run.
 
 
