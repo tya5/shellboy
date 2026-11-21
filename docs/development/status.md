@@ -4,7 +4,7 @@
 
 The candidate branch `task/core324-nondeterministic-tests` is based directly on
 `origin/main` at `116e82e5965dbc2c736849659f9f48db21788873`; current candidate SHA is
-`80b50d6d0013a7b1045eb761667db2fc3d8f4914` (source candidate; CI pending). The refused-endpoint
+`bc8684bd8a7ef254afe3c49d7b1cb29fa22d5feb` (source candidate; CI pending). The refused-endpoint
 test leaves its loopback port closed for the complete finite retry budget and
 checks the initial attempt plus all eight configured retries, all with zero body
 bytes sent. It makes no later-success claim. The proactive fixture documents
@@ -50,7 +50,7 @@ its original assertion/verdict. Its assertion message now includes bounded per-a
 `model_attempt` state, saved classification fields from `error_json`, and HTTP
 `rate_observation` facts for #329 investigation. The whole-file audit remains intact.
 The attempt diagnostics and restored fixture framing pass focused validation. This
-updated source is not yet pushed or CI-qualified. The full integration suite
+source candidate is pushed; updated status record is being checked on this branch. Exact-SHA CI is pending. The full integration suite
 was not run.
 
 
