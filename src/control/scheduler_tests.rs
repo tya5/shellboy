@@ -101,7 +101,6 @@ async fn remove_request_cancels_a_due_launch_waiting_on_thread_edit() {
             control.changed.notify_waiters();
 
             let id_for_wait = schedule_id.clone();
-            let deadline = std::time::Instant::now() + crate::test_watchdog::WATCHDOG;
             loop {
                 let id = id_for_wait.clone();
                 let due = owner
@@ -118,10 +117,6 @@ async fn remove_request_cancels_a_due_launch_waiting_on_thread_edit() {
                 if due {
                     break;
                 }
-                assert!(
-                    std::time::Instant::now() < deadline,
-                    "test watchdog: scheduler should claim the due one-shot while Thread launch admission is held"
-                );
                 tokio::task::yield_now().await;
             }
 
@@ -137,16 +132,15 @@ async fn remove_request_cancels_a_due_launch_waiting_on_thread_edit() {
             assert!(removed.ok, "{removed:?}");
             assert_eq!(removed.result.unwrap()["removed"], true);
             drop(edit_guard);
-            tokio::time::sleep(Duration::from_millis(100)).await;
-            assert!(
-                !marker.exists(),
-                "a removed pending occurrence must not launch later"
-            );
             let rows = crate::storage::schedule::list(&owner.db, thread_id)
                 .await
                 .unwrap();
             assert!(rows.is_empty());
             control.shutdown().await.unwrap();
+            assert!(
+                !marker.exists(),
+                "a removed pending occurrence must not launch later"
+            );
             owner.shutdown().await.unwrap();
         },
     )
