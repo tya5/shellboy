@@ -19,10 +19,12 @@ the non-strict root-`response` metadata 500 as fail-closed; the #315 strict
 one-key terminal retry-positive test remains separate. No product source,
 protocol, state, table or dependency changed.
 
-On the current candidate, pinned formatting and `cargo check --tests --locked`
-passed. All three registered focused selectors passed individually: refused
-finite-budget exhaustion, typed/nontransient terminal retry refusal, and U2
-stopped-spill adoption. The targeted validation-document role test passed. The
+The resumed U2 request is selected by its unique input text after `recv`; unrelated
+already-admitted inbox entries are dropped. Its report evidence is bound to the
+Turn returned by that exact `send_accepted`. On the current candidate, pinned
+formatting and `cargo check --tests --locked` passed. All three registered focused
+selectors passed individually: refused finite-budget exhaustion, typed/nontransient
+terminal retry refusal, and U2 stopped-spill adoption. The targeted validation-document role test passed. The
 full scripts test suite passed 230 tests with one skipped; all-target Clippy and
 `python3 scripts/check-test-layout.py` passed. Historical #281 Ubuntu REDs and
 attempt-2 U2 RED remain tied to their original SHA/attempt; full integration CI

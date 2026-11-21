@@ -4435,8 +4435,27 @@ if let Some(active) = cancel_active {
             assert_eq!(stopped_attempts, attempts_at_stop_ack);
             // §2.1/§2.3: the triggering report is consumed and pre-spill usage is
             // stale, so the resumed Turn starts with an ordinary request.
-            let resume_accept=send_accepted(&control,&target,"resume after cancelled summary").await;
-            let resumed = incoming_ordinary(&control, &mut receive).await;
+            let resume_text = "resume after cancelled summary";
+            let resume_accept = send_accepted(&control, &target, resume_text).await;
+            let resumed = crate::test_watchdog::watchdog(
+                "runtime_features: receive the explicitly named resumed request",
+                async {
+                    loop {
+                        let incoming = receive
+                            .recv()
+                            .await
+                            .expect("provider inbox remains open for the resumed Turn");
+                        if incoming.body.to_string().contains(resume_text) {
+                            break incoming;
+                        }
+                        // These requests were already admitted before the resumed input.
+                        drop(incoming.reply);
+                    }
+                },
+            )
+            .await
+            .expect("the explicitly named resumed request did not reach the proxy");
+            assert_eq!(resumed.kind(), ProviderRequestKind::Ordinary);
             assert_ne!(resumed.body["tools"], json!([]), "no summary retry from stale pre-spill usage");
             // This exact first ordinary request supplies fresh #A; retain its
             // attempt/token before responding, then use a later Run boundary.
