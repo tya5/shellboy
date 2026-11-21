@@ -687,16 +687,14 @@ pub(crate) fn delivery_status(
 ) -> rusqlite::Result<String> {
     db.query_row("SELECT CASE WHEN EXISTS(SELECT 1 FROM thread_path WHERE thread_id=?1 AND node_id=?2) THEN 'applied' ELSE COALESCE((SELECT status FROM attachment_delivery WHERE thread_id=?1 AND node_id=?2),'accepted') END",params![thread,source],|r|r.get(0))
 }
-pub const ATTACHMENT_LIST_SQL: &str = "SELECT a.id,a.absolute_path,a.input_kind,a.ownership,s.state,s.reason,a.source_node_id,m.state,m.deleted_reason,s.selected_order FROM attachment_selection s JOIN attachment_ref a ON a.id=s.attachment_id LEFT JOIN managed_file m ON m.absolute_path=a.absolute_path WHERE s.thread_id=?1 AND (?2 IS NULL OR s.selected_order<=?2) AND (?3 IS NULL OR s.selected_order>?3 OR (s.selected_order=?3 AND a.id>?4)) ORDER BY s.selected_order,a.id LIMIT ?5";
+pub const ATTACHMENT_LIST_SQL: &str = "SELECT a.id,a.absolute_path,a.input_kind,a.ownership,s.state,s.reason,a.source_node_id,m.state,m.deleted_reason,s.selected_order FROM attachment_selection s INDEXED BY attachment_page_order JOIN attachment_ref a ON a.id=s.attachment_id LEFT JOIN managed_file m ON m.absolute_path=a.absolute_path WHERE s.thread_id=?1 AND s.selected_order<=?2 AND (s.selected_order,s.attachment_id)>(?3,?4) ORDER BY s.selected_order,s.attachment_id LIMIT ?5";
 
 /// Filesystem observations run only on a file/display worker, not the DB lane.
-pub(crate) fn observe_paths(items: &mut [AttachmentDetails]) -> usize {
-    let mut observed = 0;
-    for item in items {
+pub(crate) fn observe_page(mut items: Vec<AttachmentDetails>) -> Vec<AttachmentDetails> {
+    for item in &mut items {
         if item.unavailable_reason.is_some() {
             continue;
         }
-        observed += 1;
         item.unavailable_reason = match std::fs::metadata(&item.path) {
             Ok(meta) if meta.is_file() => {
                 std::fs::File::open(&item.path).err().map(|e| e.to_string())
@@ -705,7 +703,7 @@ pub(crate) fn observe_paths(items: &mut [AttachmentDetails]) -> usize {
             Err(error) => Some(error.to_string()),
         };
     }
-    observed
+    items
 }
 
 /// Pure precedence of saved facts, shared by exact CLI and bounded display.
@@ -738,7 +736,7 @@ pub fn list_tx(
     let thread_id = args.thread_id.as_deref().unwrap_or_default();
     let (revision, max_order): (u64, u64) = db
         .query_row(
-            "SELECT t.selection_revision,COALESCE((SELECT MAX(selected_order) FROM attachment_selection WHERE thread_id=t.id),0) FROM thread t WHERE t.id=?1",
+            "SELECT t.selection_revision,COALESCE((SELECT selected_order FROM attachment_selection INDEXED BY attachment_page_order WHERE thread_id=t.id ORDER BY selected_order DESC,attachment_id DESC LIMIT 1),0) FROM thread t WHERE t.id=?1",
             [thread_id],
             |row| Ok((row.get::<_, i64>(0)? as u64, row.get::<_, i64>(1)? as u64)),
         )
@@ -759,9 +757,9 @@ pub fn list_tx(
                 "invalid attachment watermark",
             ));
         }
-        (cursor.watermark, Some(order as i64), Some(id.to_owned()))
+        (cursor.watermark, order as i64, id.to_owned())
     } else {
-        (max_order, None, None)
+        (max_order, 0, String::new())
     };
     let mut statement = db.prepare(ATTACHMENT_LIST_SQL).map_err(sql_error)?;
     let mut rows = statement
@@ -832,36 +830,6 @@ pub fn list_tx(
         None
     };
     Ok(Page { items, next_cursor })
-}
-
-#[cfg(test)]
-mod attachment_page_tests {
-    use super::*;
-    use crate::protocol::AttachmentDetails;
-
-    #[test]
-    fn filesystem_observation_count_matches_returned_page_size() {
-        let dir = tempfile::tempdir().unwrap();
-        let paths = [dir.path().join("one"), dir.path().join("two")];
-        for path in &paths {
-            std::fs::write(path, b"x").unwrap();
-        }
-        let mut page = paths
-            .iter()
-            .map(|path| AttachmentDetails {
-                source_node_id: "source".into(),
-                delivery_status: "applied".into(),
-                attachment_id: path.file_name().unwrap().to_string_lossy().into_owned(),
-                thread_id: "thread".into(),
-                path: path.to_string_lossy().into_owned(),
-                kind: AttachmentKind::File,
-                selected: true,
-                managed: false,
-                unavailable_reason: None,
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(observe_paths(&mut page), page.len());
-    }
 }
 
 pub fn remove_tx(

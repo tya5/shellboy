@@ -321,7 +321,7 @@ async fn oldest_past_attachments_excluded_only_at_admission_never_resurrect() {
                 db,
                 &shellboy::protocol::AttachmentListArgs {
                     thread_id: Some("thread".into()),
-                    limit: shellboy::protocol::MAX_LIST_LIMIT,
+                    limit: shellboy::protocol::DEFAULT_LIST_LIMIT,
                     cursor: None,
                 },
             )
@@ -1144,7 +1144,7 @@ async fn observed_list(f: &Fixture) -> Vec<shellboy::protocol::AttachmentDetails
                 uuid::Uuid::new_v4().to_string(),
                 Command::AttachmentList(AttachmentListArgs {
                     thread_id: Some("thread".into()),
-                    limit: shellboy::protocol::DEFAULT_LIST_LIMIT,
+                    limit: shellboy::protocol::MAX_LIST_LIMIT,
                     cursor: None,
                 }),
             ),
@@ -1165,7 +1165,7 @@ async fn attachment_list_pages_in_selected_order_and_observes_only_page_items() 
 
     let f = Fixture::new(Config::default()).await;
     let mut ids = Vec::new();
-    for index in 0..4 {
+    for index in 0..5 {
         ids.push(f.add(&format!("page-{index}"), b"x").await);
     }
     let store = Store::new(
@@ -1214,9 +1214,9 @@ async fn attachment_list_pages_in_selected_order_and_observes_only_page_items() 
             .iter()
             .map(|item| item.attachment_id.as_str())
             .collect::<Vec<_>>(),
-        ids[2..].iter().map(String::as_str).collect::<Vec<_>>()
+        ids[2..4].iter().map(String::as_str).collect::<Vec<_>>()
     );
-    assert!(rest.next_cursor.is_none());
+    assert!(rest.next_cursor.is_some());
     assert_eq!(first.items.len(), 2);
 }
 
@@ -1420,24 +1420,33 @@ async fn attachment_list_seeks_existing_indexes_and_does_not_wait_for_writer() {
         let f = Fixture::new(Config::default()).await;
         f.add("regular.txt", b"ordinary").await;
         f.db.call(|db| {
-            let mut plan = db.prepare(&format!("EXPLAIN QUERY PLAN {}", ATTACHMENT_LIST_SQL))?;
-            let details = plan
-                .query_map(
-                    params!["thread", None::<i64>, None::<i64>, None::<String>, 51],
-                    |r| r.get::<_, String>(3),
-                )?
-                .collect::<Result<Vec<_>, _>>()?;
-            for alias in ["s", "a", "m"] {
+            for (watermark, after_order, after_id) in
+                [(i64::MAX, 0, ""), (i64::MAX, 10, "cursor-id")]
+            {
+                let mut plan =
+                    db.prepare(&format!("EXPLAIN QUERY PLAN {}", ATTACHMENT_LIST_SQL))?;
+                let details = plan
+                    .query_map(
+                        params!["thread", watermark, after_order, after_id, 51],
+                        |r| r.get::<_, String>(3),
+                    )?
+                    .collect::<Result<Vec<_>, _>>()?;
                 assert!(
                     details
                         .iter()
-                        .any(|s| s.starts_with(&format!("SEARCH {alias} "))),
+                        .any(|s| s.starts_with("SEARCH s USING INDEX attachment_page_order")),
                     "{details:?}"
                 );
                 assert!(
-                    !details
-                        .iter()
-                        .any(|s| s.starts_with(&format!("SCAN {alias} "))),
+                    details.iter().any(|s| s.starts_with("SEARCH a ")),
+                    "{details:?}"
+                );
+                assert!(
+                    details.iter().any(|s| s.starts_with("SEARCH m ")),
+                    "{details:?}"
+                );
+                assert!(
+                    !details.iter().any(|s| s.contains("USE TEMP B-TREE")),
                     "{details:?}"
                 );
             }

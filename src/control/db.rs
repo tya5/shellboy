@@ -442,7 +442,7 @@ impl Store {
             } else {
                 "external"
             });
-            let mut page = inspection_work(move || {
+            let page = inspection_work(move || {
                 let mut db = open_inspection(&path)?;
                 observer.observe_inspection(&mut db, &kind, queued_at, requester, |db| {
                     let tx = db.transaction().map_err(sql_error)?;
@@ -452,14 +452,12 @@ impl Store {
                 })
             })
             .await??;
-            return MutationResult::value(
-                self.instructions
-                    .file_work(move || {
-                        crate::attachments::observe_paths(&mut page.items);
-                        Ok(page)
-                    })
-                    .await?,
-            );
+            let next_cursor = page.next_cursor;
+            let items = self
+                .instructions
+                .file_work(move || Ok(crate::attachments::observe_page(page.items)))
+                .await?;
+            return MutationResult::value(crate::protocol::Page { items, next_cursor });
         }
         if execute_kind::Kind::of(&request.command).read_lane() {
             let mut store = self.clone();

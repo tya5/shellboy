@@ -191,6 +191,7 @@ CREATE TABLE attachment_selection(
  revision INTEGER NOT NULL DEFAULT 0 CHECK(revision>=0), protected INTEGER NOT NULL DEFAULT 1 CHECK(protected IN (0,1)), PRIMARY KEY(thread_id,attachment_id));
 
 CREATE INDEX active_attachments ON attachment_selection(thread_id,state,selected_order);
+CREATE INDEX attachment_page_order ON attachment_selection(thread_id,selected_order,attachment_id);
 
 CREATE TABLE attachment_send(
  attempt_id TEXT NOT NULL REFERENCES model_attempt(id), ordinal INTEGER NOT NULL CHECK(ordinal>=0),
@@ -766,4 +767,5 @@ PRAGMA user_version=47;
 
 INSERT INTO schema_migration(version,name) VALUES(48,'0048_human_question_path_admission');
 INSERT INTO schema_migration(version,name) VALUES(49,'0049_generated_summary_user_role');
-PRAGMA user_version=49;
+INSERT INTO schema_migration(version,name) VALUES(50,'0050_attachment_page_order');
+PRAGMA user_version=50;
