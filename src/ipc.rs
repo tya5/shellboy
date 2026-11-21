@@ -90,12 +90,7 @@ fn ipc_failure(mut error: ApiError, stage: &str, reason: &str, unapplied: bool) 
     error
 }
 
-fn peer_read_outcome(
-    read: std::io::Result<usize>,
-    operation_id: &str,
-    stage: &str,
-    unapplied: bool,
-) -> ConnectionOutcome {
+fn peer_read_outcome(read: std::io::Result<usize>, operation_id: &str) -> ConnectionOutcome {
     let (error, reason) = match read {
         Ok(0) => return ConnectionOutcome::PeerGone,
         Ok(_) => (
@@ -115,7 +110,7 @@ fn peer_read_outcome(
     };
     ConnectionOutcome::Reply(Response::failure(
         operation_id,
-        ipc_failure(error, stage, reason, unapplied),
+        ipc_failure(error, "await_reply", reason, false),
     ))
 }
 
@@ -209,9 +204,10 @@ async fn serve_connection<S: AsyncRead + AsyncWrite + Unpin>(
             disconnected: disconnected.clone(),
             admission,
         };
+        // Dispatch the complete request before watching for peer EOF. Disconnect
+        // cancels observation, not the delivery of an already-read request.
         tokio::select! {
             biased;
-            read = stream.read(&mut byte) => break 'request peer_read_outcome(read, &operation_id, "dispatch", true),
             _ = stop.cancelled() => break 'request stopping("dispatch", true),
             result = requests.send(invocation) => {
                 if result.is_err() {
@@ -232,7 +228,7 @@ async fn serve_connection<S: AsyncRead + AsyncWrite + Unpin>(
         };
         tokio::select! {
             biased;
-            read = stream.read(&mut byte) => uncertain(peer_read_outcome(read, &operation_id, "await_reply", false)),
+            read = stream.read(&mut byte) => uncertain(peer_read_outcome(read, &operation_id)),
             _ = stop.cancelled() => uncertain(stopping("await_reply", false)),
             result = receiver => match result {
                 Ok(mut response) => {
@@ -1334,6 +1330,66 @@ mod frame_delivery_tests {
             let invocation = incoming.recv().await.unwrap();
             client.shutdown().await.unwrap();
             invocation.disconnected.cancelled().await;
+            assert!(
+                read_frame::<_, Response<Value>>(&mut client)
+                    .await
+                    .unwrap()
+                    .is_none()
+            );
+            task.await.unwrap().unwrap();
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn complete_shutdown_request_is_dispatched_even_when_peer_eof_is_ready() {
+        use tokio::io::AsyncWriteExt;
+        crate::test_watchdog::watchdog("IPC shutdown dispatch with buffered EOF", async {
+            let (mut client, stream) = tokio::io::duplex(4096);
+            let (requests, mut incoming) = mpsc::channel(1);
+            write_frame(
+                &mut client,
+                &Hello {
+                    protocol_version: PROTOCOL_VERSION,
+                },
+            )
+            .await
+            .unwrap();
+            write_frame(
+                &mut client,
+                &Request::new(
+                    "instance:shutdown",
+                    Command::OwnerShutdown(crate::protocol::OwnerShutdownArgs {
+                        instance_id: "instance".into(),
+                    }),
+                ),
+            )
+            .await
+            .unwrap();
+            client.shutdown().await.unwrap();
+            // Both the request and EOF are ready before the owner polls the transport.
+            let task = tokio::spawn(serve_connection(
+                stream,
+                "instance".into(),
+                requests,
+                CancellationToken::new(),
+                server::WorkAdmission::new(),
+            ));
+            read_frame::<_, Welcome>(&mut client)
+                .await
+                .unwrap()
+                .unwrap();
+            let invocation = incoming
+                .recv()
+                .await
+                .expect("complete shutdown request must reach Control");
+            assert!(matches!(
+                invocation.request.command,
+                Command::OwnerShutdown(_)
+            ));
+            invocation.disconnected.cancelled().await;
+            invocation.reply_completed.unwrap().cancelled().await;
             assert!(
                 read_frame::<_, Response<Value>>(&mut client)
                     .await
