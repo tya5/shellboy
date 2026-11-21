@@ -20,7 +20,7 @@ pub(crate) fn downgrade_schema42_to_schema39(db: &Connection) {
          DROP INDEX node_notification_event;
          ALTER TABLE node DROP COLUMN notification_event_id;
          ALTER TABLE event DROP COLUMN semantic_json;
-         DELETE FROM schema_migration WHERE version>=40;
+         DROP INDEX IF EXISTS attachment_page_order; DELETE FROM schema_migration WHERE version>=40;
          PRAGMA user_version=39;",
     )
     .expect("rewind pinned schema42 integration fixture to schema39");

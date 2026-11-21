@@ -16,8 +16,11 @@ fn downgrade_copy(db: &Connection, version: i64) {
         db.execute_batch("DROP INDEX IF EXISTS history_tool_group_attempt;")
             .unwrap();
     }
-    db.execute("DELETE FROM schema_migration WHERE version>?1", [version])
-        .unwrap();
+    db.execute(
+        "DROP INDEX IF EXISTS attachment_page_order; DELETE FROM schema_migration WHERE version>?1",
+        [version],
+    )
+    .unwrap();
     db.pragma_update(None, "user_version", version).unwrap();
 }
 

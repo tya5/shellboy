@@ -19,8 +19,8 @@ fn column_exists(db: &Connection) -> bool {
 fn v46_database() -> Connection {
     let db = fresh();
     db.execute_batch(
-        "DELETE FROM schema_migration WHERE version>46;
-         DELETE FROM schema_migration WHERE version=40;
+        "DROP INDEX IF EXISTS attachment_page_order; DELETE FROM schema_migration WHERE version>46;
+         DROP INDEX IF EXISTS attachment_page_order; DELETE FROM schema_migration WHERE version=40;
          DROP TRIGGER selection_thread_conflict;
          PRAGMA user_version=39;",
     )
