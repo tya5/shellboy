@@ -97,7 +97,7 @@ pub(super) async fn run(
             }
         }
         while let Ok(request) = requests.try_recv() {
-            if let Some(error) = handle_request(&owner, request, &mut running, &mut pending).await {
+            if let Some(error) = handle_request(&owner, request, &running, &mut pending).await {
                 failure = Some(error);
                 break 'dispatcher;
             }
@@ -223,7 +223,7 @@ pub(super) async fn run(
             },
             request = requests.recv() => match request {
                 Some(request) => {
-                    if let Some(error) = handle_request(&owner, request, &mut running, &mut pending).await {
+                    if let Some(error) = handle_request(&owner, request, &running, &mut pending).await {
                         failure = Some(error);
                         break 'dispatcher;
                     }
