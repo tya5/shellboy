@@ -195,11 +195,11 @@ async fn full_work_admission_does_not_block_status_or_stop_and_remains_bounded()
             .unwrap();
         assert!(client.await.unwrap().unwrap().ok);
     }
-    fixture.server.shutdown().await.unwrap();
-    for client in clients {
-        let _ = client.await;
-    }
     drop(accepted);
+    for client in clients {
+        assert!(!client.await.unwrap().unwrap().ok);
+    }
+    fixture.server.shutdown().await.unwrap();
 }
 
 #[tokio::test]
@@ -283,10 +283,11 @@ async fn each_reserved_class_is_bounded_and_releases_only_its_own_capacity() {
         assert!(client.await.unwrap().unwrap().ok);
     }
     assert_eq!(ordinary.len(), MAX_IPC_WORK);
-    fixture.server.shutdown().await.unwrap();
+    drop((ordinary, controls, observations));
     for client in clients {
-        let _ = client.await;
+        assert!(!client.await.unwrap().unwrap().ok);
     }
+    fixture.server.shutdown().await.unwrap();
 }
 
 #[tokio::test]
@@ -367,6 +368,7 @@ async fn fatal_accept_failure_cleans_endpoint_notifies_once_and_preserves_accept
         assert!(!std::path::Path::new(&fixture.endpoint.address).exists());
         assert!(!fixture.root.path().join("private").exists());
     }
+    fixture.server.stop_accepting().await;
     assert!(!invocation.disconnected.is_cancelled());
     // The accepted operation is owned by the request consumer, not the IPC task.
     let db = crate::storage::DbWorker::open(fixture.root.path().join("fixture.db"))
@@ -390,7 +392,10 @@ async fn fatal_accept_failure_cleans_endpoint_notifies_once_and_preserves_accept
             serde_json::json!({"saved":true}),
         ))
         .unwrap();
-    assert!(client.await.unwrap().unwrap().ok);
+    assert_eq!(
+        client.await.unwrap().unwrap().result.unwrap(),
+        serde_json::json!({"saved":true})
+    );
     assert!(fixture.server.shutdown().await.is_err());
     assert!(
         failure.changed().await.is_err(),

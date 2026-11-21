@@ -34,7 +34,6 @@ pub struct Welcome {
     pub capabilities: Vec<String>,
 }
 pub struct Invocation {
-    pub(crate) reply_completed: Option<CancellationToken>,
     pub request: Request,
     pub reply: oneshot::Sender<Response<Value>>,
     /// Only wait/observation should consult this; accepted writes must continue.
@@ -71,7 +70,6 @@ fn protocol_mismatch(client: u32, owner: u32) -> ApiError {
 
 enum ConnectionOutcome {
     Reply(Response<Value>),
-    StopReply(Response<Value>),
     PeerGone,
 }
 
@@ -161,25 +159,10 @@ async fn serve_connection<S: AsyncRead + AsyncWrite + Unpin>(
     };
     let disconnected = CancellationToken::new();
     let _disconnected_guard = disconnected.clone().drop_guard();
-    let reply_completed =
-        matches!(&request, Ok(request) if matches!(request.command, Command::OwnerShutdown(_)))
-            .then(CancellationToken::new);
-    let _reply_completion_guard = reply_completed.clone().map(CancellationToken::drop_guard);
     let failure = |error, stage, reason, unapplied| {
         ConnectionOutcome::Reply(Response::failure(
             operation_id.clone(),
             ipc_failure(error, stage, reason, unapplied),
-        ))
-    };
-    let stopping = |stage, unapplied| {
-        ConnectionOutcome::StopReply(Response::failure(
-            operation_id.clone(),
-            ipc_failure(
-                ApiError::new(ErrorCode::AppNotRunning, "Owner IPC transport is stopping"),
-                stage,
-                "transport_stopping",
-                unapplied,
-            ),
         ))
     };
     let recovery = request
@@ -202,7 +185,6 @@ async fn serve_connection<S: AsyncRead + AsyncWrite + Unpin>(
         };
         let (reply, receiver) = oneshot::channel();
         let invocation = Invocation {
-            reply_completed,
             request,
             reply,
             disconnected: disconnected.clone(),
@@ -210,21 +192,18 @@ async fn serve_connection<S: AsyncRead + AsyncWrite + Unpin>(
         };
         // Dispatch the complete request before watching for peer EOF. Disconnect
         // cancels observation, not the delivery of an already-read request.
-        tokio::select! {
-            biased;
-            _ = stop.cancelled() => break 'request stopping("dispatch", true),
-            result = requests.send(invocation) => {
-                if result.is_err() {
-                    break 'request failure(ApiError::new(ErrorCode::AppNotRunning, "Owner request queue closed"), "dispatch", "request_queue_closed", true);
-                }
-            }
+        if requests.send(invocation).await.is_err() {
+            break 'request failure(
+                ApiError::new(ErrorCode::AppNotRunning, "Owner request queue closed"),
+                "dispatch",
+                "request_queue_closed",
+                true,
+            );
         }
         dispatched = true;
         let (command, requires_receipt) = recovery.expect("dispatched request has a command");
         let uncertain = |mut outcome: ConnectionOutcome| {
-            if let ConnectionOutcome::Reply(response) | ConnectionOutcome::StopReply(response) =
-                &mut outcome
-            {
+            if let ConnectionOutcome::Reply(response) = &mut outcome {
                 response.error = response
                     .error
                     .take()
@@ -235,7 +214,6 @@ async fn serve_connection<S: AsyncRead + AsyncWrite + Unpin>(
         tokio::select! {
             biased;
             read = stream.read(&mut byte) => uncertain(peer_read_outcome(read, &operation_id)),
-            _ = stop.cancelled() => uncertain(stopping("await_reply", false)),
             result = receiver => match result {
                 Ok(mut response) => {
                     response.error = response.error.take().map(|error| ipc_failure(error, "control", "control_failure", false));
@@ -245,13 +223,9 @@ async fn serve_connection<S: AsyncRead + AsyncWrite + Unpin>(
             },
         }
     };
-    let (response, stop_reply) = match outcome {
-        ConnectionOutcome::Reply(response) => (response, false),
-        ConnectionOutcome::StopReply(response) => (response, true),
-        ConnectionOutcome::PeerGone => return Ok(()),
+    let ConnectionOutcome::Reply(response) = outcome else {
+        return Ok(());
     };
-    // End the observation, not an accepted mutation. The shutdown completion
-    // guard still keeps Control from stopping transport before the final frame.
     disconnected.cancel();
     let bytes = match encode_frame(&response) {
         Ok(bytes) => bytes,
@@ -267,15 +241,16 @@ async fn serve_connection<S: AsyncRead + AsyncWrite + Unpin>(
             encode_frame(&Response::<Value>::failure(operation_id, error))?
         }
     };
-    let write = write_encoded_frame(&mut stream, &bytes);
-    if stop_reply {
-        // Stop was already selected. Attempt delivery once without waiting
-        // for a peer that cannot take the complete frame now.
-        return futures_util::FutureExt::now_or_never(write).unwrap_or(Ok(()));
-    }
-    tokio::select! {
-        result = write => result?,
-        _ = stop.cancelled() => return Ok(()),
+    {
+        let write = write_encoded_frame(&mut stream, &bytes);
+        tokio::pin!(write);
+        tokio::select! {
+            result = &mut write => result?,
+            _ = stop.cancelled() => {
+                // At the delivery cutoff, finish only what can complete now.
+                return futures_util::FutureExt::now_or_never(write).unwrap_or(Ok(()));
+            }
+        }
     }
     // A successful write/flush does not prove the peer consumed the reply,
     // especially on a Windows named pipe. The client closes after reading it.
@@ -1279,7 +1254,6 @@ mod frame_delivery_tests {
                 ("control", "control", "control_failure", ErrorCode::InvalidState),
                 ("closed", "dispatch", "request_queue_closed", ErrorCode::AppNotRunning),
                 ("dropped", "await_reply", "reply_sender_dropped", ErrorCode::IoFailed),
-                ("stop", "await_reply", "transport_stopping", ErrorCode::AppNotRunning),
                 ("oversize", "encode_reply", "reply_encoding_failed", ErrorCode::InputLimit),
             ] {
                 let (mut client, server_stream) = tokio::io::duplex(4096);
@@ -1292,14 +1266,13 @@ mod frame_delivery_tests {
                     let status = Command::Status(Default::default());
                     while let Ok(permit) = work.try_acquire(&status) { permits.push(permit); }
                 }
-                let task = tokio::spawn(serve_connection(server_stream, "instance".into(), requests, stop.clone(), work));
+                let task = tokio::spawn(serve_connection(server_stream, "instance".into(), requests, stop, work));
                 let frame = match case {
                     "decode" => serde_json::json!({"protocol_version":PROTOCOL_VERSION,"operation_id":"instance:test","command":"no.such.command","args":{}}),
                     "validation" => serde_json::to_value(Request::new("instance:test", Command::ThreadList(crate::protocol::ThreadListArgs { limit: 0, ..Default::default() }))).unwrap(),
                     _ => status_frame(),
                 };
                 send_test_frame(&mut client, &frame).await;
-                let mut held = None;
                 match case {
                     "control" | "oversize" => {
                         let invocation = incoming.recv().await.unwrap();
@@ -1312,7 +1285,6 @@ mod frame_delivery_tests {
                         invocation.reply.send(response).unwrap();
                     }
                     "dropped" => drop(incoming.recv().await.unwrap()),
-                    "stop" => { held = incoming.recv().await; assert!(held.is_some()); stop.cancel(); }
                     _ => {}
                 }
                 let response = read_frame::<_, Response<Value>>(&mut client).await.unwrap().expect(case);
@@ -1325,7 +1297,6 @@ mod frame_delivery_tests {
                 assert_eq!(details["reason"], reason, "{case}");
                 drop(client);
                 task.await.unwrap().unwrap();
-                drop(held);
             }
         }).await.unwrap();
     }
@@ -1406,7 +1377,6 @@ mod frame_delivery_tests {
                 Command::OwnerShutdown(_)
             ));
             invocation.disconnected.cancelled().await;
-            invocation.reply_completed.unwrap().cancelled().await;
             assert!(
                 read_frame::<_, Response<Value>>(&mut client)
                     .await

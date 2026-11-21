@@ -3876,7 +3876,7 @@ async fn run_with_delivery(
         // Durable work precedes presentation-only waits; the outer select still
         // flushes the bounded delivery and accepts explicit shutdown choices.
         trace(Stage::Listener, Edge::Begin);
-        let server_result = server.shutdown().await;
+        server.stop_accepting().await;
         trace(Stage::Listener, Edge::End);
         // Coalesced autosaves retain the newest snapshot per Thread; FIFO
         // database admission within each Thread is preserved on shutdown too.
@@ -3915,6 +3915,7 @@ async fn run_with_delivery(
             u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
             control_result.as_ref().err().map(|error| error.code),
         );
+        let server_result = server.shutdown().await;
         trace(Stage::Workers, Edge::Begin);
         while workers.join_next().await.is_some() {}
         trace(Stage::Workers, Edge::End);

@@ -210,30 +210,38 @@ async fn wait_backoff(stop: &CancellationToken, delay: Duration) -> bool {
     }
 }
 
+#[derive(Clone, Default)]
+struct TransportStop {
+    accepting: CancellationToken,
+    listener_closed: CancellationToken,
+    delivery: CancellationToken,
+}
+
 async fn accept_connections<A: Acceptor>(
     mut listener: A,
     instance: String,
     requests: mpsc::Sender<Invocation>,
-    stop: CancellationToken,
+    stop: TransportStop,
     files: EndpointFiles,
     failure: watch::Sender<Option<ApiError>>,
 ) -> Result<(), ApiError> {
+    let listener_closed = stop.listener_closed.clone().drop_guard();
     let mut clients = JoinSet::new();
     let work = WorkAdmission::new();
     let mut backoff = ACCEPT_BACKOFF;
     let result = loop {
         tokio::select! {
             biased;
-            _ = stop.cancelled() => break Ok(()),
+            _ = stop.accepting.cancelled() => break Ok(()),
             Some(_) = clients.join_next(), if !clients.is_empty() => {},
             accepted = listener.accept(), if clients.len() < MAX_CONNECTIONS => {
                 match accepted {
                     Ok(stream) => {
                         backoff = ACCEPT_BACKOFF;
-                        clients.spawn(serve_connection(stream, instance.clone(), requests.clone(), stop.clone(), work.clone()));
+                        clients.spawn(serve_connection(stream, instance.clone(), requests.clone(), stop.delivery.clone(), work.clone()));
                     }
                     Err(error) if retryable(&error) => {
-                        if !wait_backoff(&stop, backoff).await {
+                        if !wait_backoff(&stop.accepting, backoff).await {
                             break Ok(());
                         }
                         backoff = (backoff * 2).min(MAX_ACCEPT_BACKOFF);
@@ -249,12 +257,13 @@ async fn accept_connections<A: Acceptor>(
     if let Err(error) = &result {
         failure.send_replace(Some(error.clone()));
     }
+    drop(listener_closed);
     while clients.join_next().await.is_some() {}
     result
 }
 
 pub struct LocalServer {
-    stop: CancellationToken,
+    stop: TransportStop,
     task: JoinHandle<Result<(), ApiError>>,
     failure: watch::Receiver<Option<ApiError>>,
 }
@@ -312,7 +321,7 @@ impl LocalServer {
         requests: mpsc::Sender<Invocation>,
         files: EndpointFiles,
     ) -> Self {
-        let stop = CancellationToken::new();
+        let stop = TransportStop::default();
         let token = stop.clone();
         let (failure_send, failure) = watch::channel(None);
         let task = tokio::spawn(accept_connections(
@@ -335,8 +344,14 @@ impl LocalServer {
         self.failure.clone()
     }
 
+    pub(crate) async fn stop_accepting(&self) {
+        self.stop.accepting.cancel();
+        self.stop.listener_closed.cancelled().await;
+    }
+
     pub async fn shutdown(self) -> Result<(), ApiError> {
-        self.stop.cancel();
+        self.stop_accepting().await;
+        self.stop.delivery.cancel();
         self.task
             .await
             .map_err(|error| server_error("task failed", error))?

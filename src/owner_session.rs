@@ -21,6 +21,8 @@ pub struct Prepared {
 }
 impl Prepared {
     pub async fn shutdown(self) -> Result<(), ApiError> {
+        // This startup-abort path has no dispatcher.
+        drop(self.requests);
         close(self.owner, Some(self.control), Some(self.server)).await
     }
 }
@@ -29,13 +31,15 @@ pub(crate) async fn close(
     control: Option<Arc<Control>>,
     server: Option<LocalServer>,
 ) -> Result<(), ApiError> {
-    // Freeze external transport first; drain Core before closing its writer.
-    let transport = match server {
-        Some(server) => server.shutdown().await,
-        None => Ok(()),
-    };
+    if let Some(server) = &server {
+        server.stop_accepting().await;
+    }
     let core = match control {
         Some(control) => control.shutdown().await,
+        None => Ok(()),
+    };
+    let transport = match server {
+        Some(server) => server.shutdown().await,
         None => Ok(()),
     };
     let database = owner.shutdown().await;
@@ -193,6 +197,48 @@ mod tests {
             .unwrap();
         owner.shutdown().await.unwrap();
         (root, config, data)
+    }
+
+    #[tokio::test]
+    async fn ordered_stop_delivers_controls_result_to_an_in_flight_wait() {
+        use crate::protocol::{Command, WaitArgs, WaitCondition, WaitResult, WaitStatus};
+        crate::test_watchdog::watchdog("ordered owner stop delivers interrupted wait", async {
+            let root = tempfile::tempdir().unwrap();
+            let config = root.path().join("config.toml");
+            std::fs::write(&config, "").unwrap();
+            let data = root.path().join("data");
+            let owner = DataOwner::start(Some(config), Some(data.clone()), root.path().into()).await.unwrap();
+            let control = Control::new(&owner, root.path().into());
+            control.start().await.unwrap();
+            owner.db.call(|db| {
+                db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('thread','/','/AGENTS.md','','','now'); INSERT INTO run(id,thread_id,state,created_at) VALUES('run','thread','live','now');")?;
+                Ok(())
+            }).await.unwrap();
+            let (send, receive) = tokio::sync::mpsc::channel(4);
+            let server = LocalServer::bind(&owner, send).await.unwrap();
+            let dispatch = tokio::spawn(control.clone().serve(receive));
+            let operation = format!("{}:ordered-wait", owner.instance_id);
+            let key = format!("wait.pending.{operation}");
+            let mut client = tokio::spawn(async move {
+                crate::ipc::call(&data, Command::Wait(WaitArgs {
+                    after: None,
+                    conditions: vec![WaitCondition::RunEnded { run_id: "run".into() }],
+                    timeout_ms: 120000,
+                }), Some(operation), None).await
+            });
+            loop {
+                let key = key.clone();
+                if owner.db.call(move |db| Ok(db.query_row("SELECT EXISTS(SELECT 1 FROM app_meta WHERE key=?1)", [key], |row| row.get::<_, bool>(0))?)).await.unwrap() { break; }
+                assert!(futures_util::poll!(&mut client).is_pending(), "wait finished before registration");
+                tokio::task::yield_now().await;
+            }
+            close(owner, Some(control), Some(server)).await.unwrap();
+            let response = client.await.unwrap().unwrap();
+            assert!(response.ok, "{:?}", response.error);
+            let wait: WaitResult = serde_json::from_value(response.result.unwrap()).unwrap();
+            assert_eq!(wait.status, WaitStatus::Interrupted);
+            dispatch.await.unwrap();
+        }).await.unwrap();
     }
 
     #[tokio::test]

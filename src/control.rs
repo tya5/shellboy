@@ -574,9 +574,6 @@ impl Control {
                 }
                 let _ = invocation.reply.send(reply);
                 if shutdown {
-                    if let Some(completed) = invocation.reply_completed {
-                        completed.cancelled().await;
-                    }
                     drop(_guard);
                     drop(_admission);
                 }
