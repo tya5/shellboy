@@ -346,7 +346,7 @@ async fn one_provider_invocation(
         assert_eq!(next.kind(), ProviderRequestKind::Ordinary);
         assert_current_context_once(
             &next.body,
-            &current_context(&control, &thread).await,
+            &current_context(&control, &turn).await,
             "warmup ordinary request",
         );
         if task == "task 1" {
@@ -387,7 +387,7 @@ async fn one_provider_invocation(
                     assert!(!foreground_replied, "one ordinary request for the accepted current task");
                     assert_current_context_once(
                         &next.body,
-                        &current_context(&control, &thread).await,
+                        &current_context(&control, &trigger.turn_id).await,
                         "current task ordinary request",
                     );
                     next.reply.send((200, answer_with_usage("last answer", 10))).unwrap();

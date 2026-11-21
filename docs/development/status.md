@@ -33,8 +33,15 @@ case and the affected proactive ordinal fixtures. Pinned formatting, test compil
 all-target Clippy and `python3 scripts/check-test-layout.py` pass on current local
 source. Exact-SHA CI run `44884264205` is RED on parent `abc5756f7fb5a387c9c4a51082fd4e53666a0f0e`
 in `legal_new_run_reopens_provider_failure_memory`; its bad independent-Run equality
-was replaced locally with record/request-owned identity. The latest whole-file audit
-is not yet pushed or CI-qualified; no full integration suite was run.
+was replaced locally with record/request-owned identity. The whole-file audit was pushed as `b448df143a439882465e417d660fa05f070a3c87`.
+Exact-SHA CI run `44890427963` was RED (Ubuntu: 1411 passed, 8 failed, 18 ignored):
+four scope-summary assertions omitted one later explicit Compact Summary from the
+Thread ledger total; the bilingual content-filter count used the wrong loop count;
+the idle agents-reference query selected a prior Run-targeted event; and one
+companion context helper still passed the Thread ID instead of the accepted Turn.
+These were corrected locally, and all eight reported selectors now pass focused
+re-runs. Final corrected SHA still needs push and CI. The full integration suite
+was not run.
 
 
 ## #315 Retry after partial output (owner-policy successor)

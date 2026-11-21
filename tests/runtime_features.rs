@@ -2633,9 +2633,12 @@ async fn explicit_agents_changes_wait_for_new_turn_and_retry_keeps_snapshot() {
     );
     let target = thread.clone();
     control.store.database.call(move |db| {
+        assert_eq!(db.query_row(
+                "SELECT count(*) FROM event WHERE target_thread_id=?1 AND kind='context_changed' AND json_extract(payload_ref_json,'$.kind')='agents_reference' AND target_run_id IS NULL",
+                [&target], |r| r.get::<_,i64>(0))?, 1, "one idle reference event has no target Run");
         let (event, run): (String,Option<String>) = db.query_row(
-            "SELECT id,target_run_id FROM event WHERE target_thread_id=?1 AND kind='context_changed' AND json_extract(payload_ref_json,'$.kind')='agents_reference'",
-            [target], |r|Ok((r.get(0)?,r.get(1)?)))?;
+                "SELECT id,target_run_id FROM event WHERE target_thread_id=?1 AND kind='context_changed' AND json_extract(payload_ref_json,'$.kind')='agents_reference' AND target_run_id IS NULL",
+                [target], |r|Ok((r.get(0)?,r.get(1)?)))?;
         assert!(run.is_none(), "idle reference audit awaits a future Turn");
         assert_eq!(db.query_row("SELECT count(*) FROM delivery WHERE event_id=?1",[&event],|r|r.get::<_,i64>(0))?,0);
         assert_eq!(db.query_row("SELECT count(*) FROM node WHERE id=?1",[format!("event-{event}")],|r|r.get::<_,i64>(0))?,0);
@@ -4948,7 +4951,9 @@ async fn ax_growing_turn_summary_requests(
         control.shutdown().await.unwrap();
         // Summary ledger `begin` is committed before POST; this equals the fixture's serviced count.
         // Summary witness changes to model_attempt with #328.
-        assert_eq!(summary_request_count_for_thread(&control, &target).await, summaries as i64);
+        // Include the explicit Compact Summary admitted after the proactive workload.
+        // Summary witness changes to model_attempt with #328.
+        assert_eq!(summary_request_count_for_thread(&control, &target).await, summaries as i64 + 1);
 
         set_phase("final 17-row admission/unadmitted partition readback after producer drain");
         let mut records = Vec::new();
@@ -6844,7 +6849,7 @@ async fn content_filter_recovery_readback_and_real_ui_are_bilingual_and_keep_unk
                 }
                 assert_eq!(
                     model_attempt_count_for_thread(&control, &target).await,
-                    i64::from(verdicts) + 1,
+                    1,
                     "the completed content_filter Turn adds no retry attempt"
                 );
             }
@@ -6881,7 +6886,7 @@ fn context_lines(body: &Value) -> Vec<String> {
         .map(str::to_owned)
         .collect()
 }
-/// The context line for the Thread's current settings and latest Turn.
+/// The context line for the named Turn's current Thread settings.
 async fn current_context(control: &Control, turn: &str) -> String {
     let turn = turn.to_owned();
     control.store.database.call(move |db| Ok(db.query_row(
