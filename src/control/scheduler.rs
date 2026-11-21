@@ -123,17 +123,15 @@ pub(super) async fn run(control: Weak<Control>, stop: CancellationToken) {
                             .scheduled_active
                             .lock()
                             .unwrap_or_else(|poison| poison.into_inner());
-                        if active.contains_key(&schedule_id) {
-                            true
-                        } else {
-                            active.insert(
-                                schedule_id,
-                                ActiveScheduledCommand {
+                        match active.entry(schedule_id) {
+                            std::collections::hash_map::Entry::Occupied(_) => true,
+                            std::collections::hash_map::Entry::Vacant(entry) => {
+                                entry.insert(ActiveScheduledCommand {
                                     thread_id,
                                     launched: false,
-                                },
-                            );
-                            false
+                                });
+                                false
+                            }
                         }
                     };
                     if overlap {
