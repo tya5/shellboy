@@ -126,6 +126,7 @@ pub(crate) struct RawObservation {
     scope_truncated: bool,
     runs: Vec<Run>,
     scheduled_command_count: Option<i64>,
+    scheduled_shell_count: Option<i64>,
     witnesses: Vec<Witness>,
     references_truncated: bool,
     replacement_threads: Vec<ReplacementThread>,
@@ -220,6 +221,14 @@ pub(crate) fn read_tx(
     db: &Connection,
     args: &ThreadDeleteArgs,
 ) -> Result<RawObservation, StorageError> {
+    read_tx_with_active_shells(db, args, &[])
+}
+
+pub(crate) fn read_tx_with_active_shells(
+    db: &Connection,
+    args: &ThreadDeleteArgs,
+    active_threads: &[String],
+) -> Result<RawObservation, StorageError> {
     if args.thread_id.is_empty() || args.thread_id.len() > 256 {
         return Err(invalid("Invalid deletion observation Thread ID"));
     }
@@ -271,6 +280,18 @@ pub(crate) fn read_tx(
                 } else {
                     0
                 },
+        )
+    } else {
+        None
+    };
+    let scheduled_shell_count = if active_threads.is_empty() {
+        Some(0)
+    } else if selected_complete {
+        Some(
+            active_threads
+                .iter()
+                .filter(|thread| selected.contains(*thread))
+                .count() as i64,
         )
     } else {
         None
@@ -347,6 +368,7 @@ pub(crate) fn read_tx(
         scope_truncated,
         runs,
         scheduled_command_count,
+        scheduled_shell_count,
         witnesses,
         references_truncated,
         replacement_threads,
@@ -431,13 +453,14 @@ pub(crate) fn prepare(raw: RawObservation) -> Value {
     let observed = json!({"selected_path_nodes":nodes.len(),"shared_path_nodes":shared.len(),"surviving_path_thread_count":surviving_threads.len(),"completed_replacement_source_nodes":completed_sources.len(),"surviving_replacement_source_nodes":surviving_sources.len(),"attachment_reference_count":attachments.len(),"external_attachment_reference_count":external,"managed_attachment_reference_count":attachments.len()-external});
     let references_complete =
         selected_complete && !raw.references_truncated && raw.replacement_threads_complete;
-    let deletable = if live + stopping > 0 {
-        Some(false)
-    } else if selected_complete && references_complete {
-        Some(true)
-    } else {
-        None
-    };
+    let deletable =
+        if live + stopping > 0 || raw.scheduled_shell_count.is_some_and(|count| count > 0) {
+            Some(false)
+        } else if selected_complete && references_complete && raw.scheduled_shell_count == Some(0) {
+            Some(true)
+        } else {
+            None
+        };
     let references = if references_complete {
         observed.clone()
     } else {
@@ -466,7 +489,7 @@ pub(crate) fn prepare(raw: RawObservation) -> Value {
         selected_complete.then(|| super::target_marker(selected.iter().map(String::as_str)));
     json!({"preview_marker":marker,"preview_marker_unavailable_reason":if selected_complete{None}else{Some("input_limit")},"thread_id":raw.args.thread_id,"descendants":raw.args.descendants,"updated_at":raw.updated,"root_revision":raw.root_revision,"snapshot_only":true,"deletable_now":deletable,"scheduled_command_count":raw.scheduled_command_count,
         "selection":{"thread_count":if selected_complete{Some(selected.len())}else{None},"descendant_thread_count":if raw.scope_truncated{None}else{Some(descendants.len())},"surviving_descendant_thread_count":if raw.args.descendants{Some(0)}else if raw.scope_truncated{None}else{Some(descendants.len())},"latest_updated_at":if selected_complete{Some(latest)}else{None}},
-        "blockers":{"live_run_count":if selected_complete{Some(live)}else{None},"stopping_run_count":if selected_complete{Some(stopping)}else{None},"runs":runs,"truncated":raw.runs.len()>50||!selected_complete},
+        "blockers":{"live_run_count":if selected_complete{Some(live)}else{None},"stopping_run_count":if selected_complete{Some(stopping)}else{None},"scheduled_shell_count":raw.scheduled_shell_count,"runs":runs,"truncated":raw.runs.len()>50||!selected_complete},
         "reference_scope":"direct_references_not_gc_reachability","references":references,
         "reclaimable_bytes":Value::Null,"reclaimable_reason":"requires_gc_reachability_and_storage_accounting",
         "observation":{"bounded":true,"selected_scope_complete":selected_complete,"descendant_scope_complete":!raw.scope_truncated,"references_complete":references_complete,"descendant_physical_candidates":raw.members.len(),"reference_witnesses":raw.witnesses.len()+raw.replacement_threads.len(),"depth_limit":8,"descendant_limit":THREAD_LIMIT,"witness_limit":WITNESS_LIMIT,"observed_lower_bounds":{"selected_thread_count":selected.len(),"descendant_thread_count":descendants.len(),"live_run_count":live,"stopping_run_count":stopping,"references":observed},"exact_review":"shellboy thread delete-preview --thread THREAD_ID"}
@@ -575,6 +598,10 @@ mod tests {
                 if descendants { 2 } else { 1 }
             );
             value.as_object_mut().unwrap().remove("observation");
+            value["blockers"]
+                .as_object_mut()
+                .unwrap()
+                .remove("scheduled_shell_count");
             assert_eq!(value, canonical);
             assert_eq!(
                 value["selection"]["descendant_thread_count"], 1,
@@ -738,9 +765,14 @@ mod tests {
             thread(&db, &id, Some(&parent), false);
             parent = id;
         }
-        let value = prepare(read_tx(&db, &args(true)).unwrap());
+        let active = vec!["root".to_owned(), "depth-9".to_owned()];
+        let value = prepare(read_tx_with_active_shells(&db, &args(true), &active).unwrap());
         assert_eq!(value["observation"]["selected_scope_complete"], false);
         assert!(value["scheduled_command_count"].is_null());
+        assert_eq!(
+            value["blockers"]["scheduled_shell_count"],
+            serde_json::Value::Null
+        );
         assert_eq!(
             value["observation"]["observed_lower_bounds"]["descendant_thread_count"],
             8
@@ -767,7 +799,11 @@ mod tests {
     #[test]
     fn oversized_saved_scalar_fails_before_owned_copy_and_never_authorizes_partial_scope() {
         let db = fixture();
-        let original = crate::deletion::preview(&db, &args(false)).unwrap();
+        let mut original = crate::deletion::preview(&db, &args(false)).unwrap();
+        original["blockers"]
+            .as_object_mut()
+            .unwrap()
+            .remove("scheduled_shell_count");
         db.execute(
             "UPDATE thread SET updated_at=?1 WHERE id='root'",
             ["x".repeat(1024 * 1024)],
@@ -780,6 +816,10 @@ mod tests {
             .unwrap();
         let mut after = prepare(read_tx(&db, &args(false)).unwrap());
         after.as_object_mut().unwrap().remove("observation");
+        after["blockers"]
+            .as_object_mut()
+            .unwrap()
+            .remove("scheduled_shell_count");
         assert_eq!(after, original);
     }
     #[test]

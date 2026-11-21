@@ -528,6 +528,15 @@ impl Control {
             .await
             .map_err(storage_error)
     }
+    pub(crate) fn active_scheduled_shell_thread_ids(&self) -> Vec<String> {
+        self.scheduled_active
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .values()
+            .filter(|entry| entry.launched)
+            .map(|entry| entry.thread_id.clone())
+            .collect()
+    }
     /// Read-only accounting of retained conversion buffers and in-flight pins.
     pub fn replay_cache_stats(&self) -> replay::ReplayStats {
         self.replay.stats()
@@ -1135,42 +1144,11 @@ impl Control {
                         })?;
                         self.recovery_rewind(request, origin, thread).await
                     }
-                    Command::ThreadDeletePreview(args) => {
-                        let selection = args.clone();
-                        let mut effects = self.store.execute(request, origin).await?;
-                        let active_threads = self
-                            .scheduled_active
-                            .lock()
-                            .unwrap_or_else(|poison| poison.into_inner())
-                            .values()
-                            .filter(|entry| entry.launched)
-                            .map(|entry| entry.thread_id.clone())
-                            .collect::<Vec<_>>();
-                        let active_thread_candidates = active_threads.clone();
-                        let matching_threads = self
-                            .store
-                            .database
-                            .call(move |db| {
-                                crate::deletion::active_delete_targets(
-                                    db,
-                                    &selection,
-                                    &active_thread_candidates,
-                                )
-                            })
+                    Command::ThreadDeletePreview(_) => {
+                        let active_threads = self.active_scheduled_shell_thread_ids();
+                        self.store
+                            .execute_with_active_delete_preview(request, origin, active_threads)
                             .await
-                            .map_err(storage_error)?;
-                        let active_count = active_threads
-                            .iter()
-                            .filter(|thread| matching_threads.contains(thread))
-                            .count();
-                        if let Some(result) = effects.result.as_object_mut() {
-                            let blockers = result.entry("blockers").or_insert_with(|| json!({}));
-                            blockers["scheduled_shell_count"] = json!(active_count);
-                            if active_count > 0 {
-                                result["deletable_now"] = json!(false);
-                            }
-                        }
-                        Ok(effects)
                     }
                     Command::ScheduleAdd(args) => {
                         let thread=args.thread_id.clone().or_else(||origin.as_ref().map(|o|o.thread_id.clone())).ok_or_else(||ApiError::new(ErrorCode::InvalidArgument,"external schedule.add requires --thread"))?;
@@ -1183,9 +1161,31 @@ impl Control {
                         self.changed.notify_waiters();
                         Ok(effects)
                     }
-                    Command::ScheduleRemove(_) => {
-                        let effects=self.store.execute(request,origin).await?;
-                        self.changed.notify_waiters(); Ok(effects)
+                    Command::ScheduleRemove(args) => {
+                        let owner = crate::storage::schedule::owner_thread_id(
+                            &self.store.database,
+                            args.schedule_id.clone(),
+                        )
+                        .await;
+                        let owner = match owner {
+                            Ok(owner) => owner,
+                            Err(storage) => {
+                                let error = storage_error(storage);
+                                if error.is_storage_failure() {
+                                    self.fail_storage().await;
+                                }
+                                return Err(error);
+                            }
+                        };
+                        let effects = if let Some(thread_id) = owner {
+                            let boundary = self.boundary(&thread_id).await;
+                            let _boundary = boundary.lock().await;
+                            self.store.execute(request, origin).await?
+                        } else {
+                            self.store.execute(request, origin).await?
+                        };
+                        self.changed.notify_waiters();
+                        Ok(effects)
                     }
                     Command::ScheduleList(args) => {
                         let thread=args.thread_id.clone().or_else(||origin.as_ref().map(|o|o.thread_id.clone())).ok_or_else(||ApiError::new(ErrorCode::InvalidArgument,"external schedule.list requires --thread"))?;

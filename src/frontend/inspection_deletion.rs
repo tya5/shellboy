@@ -14,11 +14,12 @@ pub(super) async fn request(
     stop: CancellationToken,
 ) -> Result<Value, ApiError> {
     let thread = args.thread_id.clone();
+    let active_threads = control.active_scheduled_shell_thread_ids();
     let (raw, at) = super::snapshot::read(
         control.store.database.path().to_path_buf(),
         stop,
         move |db| {
-            let raw = observation::read_tx(db, &args)?;
+            let raw = observation::read_tx_with_active_shells(db, &args, &active_threads)?;
             Ok((raw, chrono::Utc::now().to_rfc3339()))
         },
     )

@@ -1,6 +1,6 @@
 use super::{ActiveScheduledCommand, Control};
 use crate::{
-    protocol::ShellToolArgs,
+    protocol::{ApiError, ErrorCode, ShellToolArgs},
     shell::{ShellCompletion, ShellEvent, ShellExecution, ShellSupervisor},
     storage::schedule::{self, DueSchedule, ScheduledCommandResult},
 };
@@ -48,14 +48,65 @@ fn fixed_wall_clock_recheck_is_sixty_seconds_and_stops_when_empty_or_due() {
     assert_eq!(next_sleep_seconds(600, 700), None);
 }
 
-pub(super) async fn run(control: Weak<Control>, stop: CancellationToken) {
+struct SchedulerTaskFailure {
+    thread_id: String,
+    error: ApiError,
+}
+
+async fn report_task_failure(
+    owner: &Control,
+    scheduler_stop: &CancellationToken,
+    failure: SchedulerTaskFailure,
+) {
+    if failure.error.is_storage_failure() {
+        owner.fail_storage().await;
+    } else {
+        owner.publish_event(super::EngineEvent::Error {
+            thread_id: failure.thread_id,
+            error: failure.error,
+        });
+    }
+    scheduler_stop.cancel();
+}
+
+async fn join_child(
+    owner: &Control,
+    scheduler_stop: &CancellationToken,
+    joined: Result<Result<uuid::Uuid, SchedulerTaskFailure>, tokio::task::JoinError>,
+) -> bool {
+    match joined {
+        Ok(Ok(_)) => false,
+        Ok(Err(failure)) => {
+            report_task_failure(owner, scheduler_stop, failure).await;
+            true
+        }
+        Err(error) => {
+            owner.publish_event(super::EngineEvent::Error {
+                thread_id: String::new(),
+                error: ApiError::new(
+                    ErrorCode::InvalidState,
+                    format!("scheduled shell task failed: {error}"),
+                ),
+            });
+            scheduler_stop.cancel();
+            true
+        }
+    }
+}
+
+pub(super) async fn run(control: Weak<Control>, owner_stop: CancellationToken) {
+    let scheduler_stop = owner_stop.child_token();
     let mut children = JoinSet::new();
     'dispatcher: loop {
-        while children.try_join_next().is_some() {}
         let Some(owner) = control.upgrade() else {
             break;
         };
-        if stop.is_cancelled() {
+        while let Some(joined) = children.try_join_next() {
+            if join_child(&owner, &scheduler_stop, joined).await {
+                break 'dispatcher;
+            }
+        }
+        if scheduler_stop.is_cancelled() {
             break;
         }
         let changed = owner.changed.notified();
@@ -69,16 +120,20 @@ pub(super) async fn run(control: Weak<Control>, stop: CancellationToken) {
                     owner.fail_storage().await;
                     break 'dispatcher;
                 }
-                tokio::select! { _=stop.cancelled()=>break 'dispatcher, _=&mut changed=>{} };
+                tokio::select! { _=scheduler_stop.cancelled()=>break 'dispatcher, _=&mut changed=>{} };
                 continue;
             }
         };
         match deadline {
             None => {
                 tokio::select! {
-                    _=stop.cancelled()=>break 'dispatcher,
+                    _=scheduler_stop.cancelled()=>break 'dispatcher,
                     _=&mut changed=>{},
-                    _=children.join_next(), if !children.is_empty()=>{},
+                    joined=children.join_next(), if !children.is_empty()=>{
+                        if let Some(joined)=joined && join_child(&owner,&scheduler_stop,joined).await {
+                            break 'dispatcher;
+                        }
+                    },
                 }
             }
             Some(at) => {
@@ -88,15 +143,23 @@ pub(super) async fn run(control: Weak<Control>, stop: CancellationToken) {
                         break;
                     };
                     tokio::select! {
-                        _=stop.cancelled()=>break 'dispatcher,
+                        _=scheduler_stop.cancelled()=>break 'dispatcher,
                         _=&mut changed=>continue 'dispatcher,
                         _=sleep(Duration::from_secs(seconds))=>{},
-                        _=children.join_next(), if !children.is_empty()=>{},
+                        joined=children.join_next(), if !children.is_empty()=>{
+                            if let Some(joined)=joined && join_child(&owner,&scheduler_stop,joined).await {
+                                break 'dispatcher;
+                            }
+                        },
                     }
                 }
                 loop {
-                    while children.try_join_next().is_some() {}
-                    if stop.is_cancelled() {
+                    while let Some(joined) = children.try_join_next() {
+                        if join_child(&owner, &scheduler_stop, joined).await {
+                            break 'dispatcher;
+                        }
+                    }
+                    if scheduler_stop.is_cancelled() {
                         break;
                     }
                     let Some(owner) = control.upgrade() else {
@@ -111,13 +174,14 @@ pub(super) async fn run(control: Weak<Control>, stop: CancellationToken) {
                                 owner.fail_storage().await;
                                 break 'dispatcher;
                             }
-                            tokio::select! { _=stop.cancelled()=>break 'dispatcher, _=&mut changed=>{} }
+                            tokio::select! { _=scheduler_stop.cancelled()=>break 'dispatcher, _=&mut changed=>{} }
                             break;
                         }
                     };
                     let Some(due) = due else { break };
                     let schedule_id = due.id;
                     let thread_id = due.thread_id.clone();
+                    let failure_thread_id = thread_id.clone();
                     let overlap = {
                         let mut active = owner
                             .scheduled_active
@@ -135,7 +199,7 @@ pub(super) async fn run(control: Weak<Control>, stop: CancellationToken) {
                         }
                     };
                     if overlap {
-                        let _ = schedule::finish(
+                        if let Err(storage) = schedule::finish(
                             &owner.store.database,
                             schedule_id,
                             ScheduledCommandResult {
@@ -147,23 +211,39 @@ pub(super) async fn run(control: Weak<Control>, stop: CancellationToken) {
                                 output_truncated: false,
                             },
                         )
-                        .await;
+                        .await
+                        {
+                            report_task_failure(
+                                &owner,
+                                &scheduler_stop,
+                                SchedulerTaskFailure {
+                                    thread_id: failure_thread_id,
+                                    error: storage.into_api_error(),
+                                },
+                            )
+                            .await;
+                            break 'dispatcher;
+                        }
                     } else {
-                        let child_stop = stop.clone();
+                        let child_stop = scheduler_stop.clone();
                         let active_guard = ActiveScheduleGuard {
                             owner: owner.clone(),
                             schedule_id,
                         };
                         children.spawn(async move {
                             let _active_guard = active_guard;
-                            execute(owner, due, child_stop).await.unwrap_or(schedule_id)
+                            execute(owner, due, child_stop).await
                         });
                     }
                 }
             }
         }
     }
-    let _ = children.join_all().await;
+    while let Some(joined) = children.join_next().await {
+        if let Some(owner) = control.upgrade() {
+            let _ = join_child(&owner, &scheduler_stop, joined).await;
+        }
+    }
 }
 
 struct CollectedShell {
@@ -178,7 +258,7 @@ async fn collect_shell_output(
     mut execution: ShellExecution,
     stop: CancellationToken,
     run_limit: Duration,
-) -> Result<CollectedShell, ()> {
+) -> Result<CollectedShell, ApiError> {
     let deadline = Instant::now() + run_limit;
     let mut tail = VecDeque::with_capacity(OUTPUT_TAIL_BYTES);
     let mut truncated = false;
@@ -190,13 +270,13 @@ async fn collect_shell_output(
     loop {
         tokio::select! { biased;
             _=stop.cancelled(), if !stop_sent=>{execution.handle.stop();stop_sent=true;},
-            event=execution.events.recv(), if events_open=>match event {Some(ShellEvent::Output(chunk))=>for byte in chunk.bytes.iter().copied() { if tail.len()==OUTPUT_TAIL_BYTES {tail.pop_front();truncated=true;} tail.push_back(byte); },Some(ShellEvent::Stdin{..})=>{},None=>events_open=false},
             changed=execution.completion.changed(), if completion_open=>{ if changed.is_err() { completion_open=false; } },
             _=sleep_until(deadline), if !stop_sent && execution.completion.borrow().is_none()=>{
                 timed_out=true;
                 execution.handle.stop();
                 stop_sent=true;
             },
+            event=execution.events.recv(), if events_open=>match event {Some(ShellEvent::Output(chunk))=>for byte in chunk.bytes.iter().copied() { if tail.len()==OUTPUT_TAIL_BYTES {tail.pop_front();truncated=true;} tail.push_back(byte); },Some(ShellEvent::Stdin{..})=>{},None=>events_open=false},
         }
         let completed = execution.completion.borrow().is_some();
         if completed && finished_at.is_none() {
@@ -206,11 +286,17 @@ async fn collect_shell_output(
             break;
         }
         if !completion_open && !completed {
-            return Err(());
+            return Err(ApiError::new(
+                ErrorCode::InvalidState,
+                "scheduled shell completion was lost before output drain finished",
+            ));
         }
     }
     let Some(completion) = execution.completion.borrow().clone() else {
-        return Err(());
+        return Err(ApiError::new(
+            ErrorCode::InvalidState,
+            "scheduled shell completion was unavailable",
+        ));
     };
     truncated |= !completion.output_complete;
     let mut output = String::from_utf8_lossy(&tail.into_iter().collect::<Vec<_>>()).into_owned();
@@ -251,7 +337,7 @@ async fn execute(
     owner: Arc<Control>,
     due: DueSchedule,
     stop: CancellationToken,
-) -> Result<uuid::Uuid, ()> {
+) -> Result<uuid::Uuid, SchedulerTaskFailure> {
     let id = due.id;
     let thread_id = due.thread_id.clone();
     if stop.is_cancelled() {
@@ -266,20 +352,24 @@ async fn execute(
     if stop.is_cancelled() {
         return Ok(id);
     }
-    let target = thread_id.clone();
-    let thread_exists = owner
+    let schedule_id = id.to_string();
+    let target_thread = thread_id.clone();
+    let thread_live_and_scheduled = owner
         .store
         .database
         .call(move |db| {
             Ok(db.query_row(
-                "SELECT EXISTS(SELECT 1 FROM thread WHERE id=?1 AND deleted_at IS NULL)",
-                [target],
+                "SELECT EXISTS(SELECT 1 FROM scheduled_command s JOIN thread t ON t.id=s.thread_id WHERE s.id=?1 AND s.thread_id=?2 AND t.deleted_at IS NULL)",
+                rusqlite::params![schedule_id, target_thread],
                 |row| row.get::<_, bool>(0),
             )?)
         })
         .await
-        .map_err(|_| ())?;
-    if !thread_exists {
+        .map_err(|storage| SchedulerTaskFailure {
+            thread_id: thread_id.clone(),
+            error: storage.into_api_error(),
+        })?;
+    if !thread_live_and_scheduled {
         return Ok(id);
     }
     let args = ShellToolArgs {
@@ -297,7 +387,7 @@ async fn execute(
             id.to_string(),
             PathBuf::from(due.cwd),
             args,
-            [("SHELLBOY_THREAD_ID".to_string(), thread_id)]
+            [("SHELLBOY_THREAD_ID".to_string(), thread_id.clone())]
                 .into_iter()
                 .collect(),
         )
@@ -322,11 +412,21 @@ async fn execute(
             output_truncated: false,
         },
         Ok(execution) => {
-            let collected = collect_shell_output(execution, stop.clone(), MAX_RUN_DURATION).await?;
+            let collected = collect_shell_output(execution, stop.clone(), MAX_RUN_DURATION)
+                .await
+                .map_err(|error| SchedulerTaskFailure {
+                    thread_id: thread_id.clone(),
+                    error,
+                })?;
             scheduled_shell_result(due.scheduled_at, collected)
         }
     };
-    let _ = schedule::finish(&owner.store.database, id, result).await;
+    schedule::finish(&owner.store.database, id, result)
+        .await
+        .map_err(|storage| SchedulerTaskFailure {
+            thread_id,
+            error: storage.into_api_error(),
+        })?;
     Ok(id)
 }
 
@@ -450,7 +550,7 @@ mod run_limit_tests {
                             format!("{}:run-limit-schedule", control.store.instance_id),
                             crate::protocol::Command::ScheduleAdd(ScheduleAddArgs {
                                 thread_id: Some(thread_id.clone()),
-                                command: "while true; do sleep 1; done".into(),
+                                command: "while true; do printf x; done".into(),
                                 cwd: None,
                                 cron: None,
                                 at: Some(future_at),
@@ -505,11 +605,12 @@ mod run_limit_tests {
                 let collected = collect_shell_output(
                     execution,
                     CancellationToken::new(),
-                    Duration::from_millis(25),
+                    Duration::from_millis(250),
                 )
                 .await
                 .unwrap();
                 assert!(collected.timed_out);
+                assert!(collected.output_truncated, "continuous output should saturate the bounded shell event stream");
                 assert_eq!(collected.completion.state, ShellState::Stopped);
                 assert!(collected.completion.group_cleanup_confirmed);
                 let result = scheduled_shell_result(due.scheduled_at, collected);

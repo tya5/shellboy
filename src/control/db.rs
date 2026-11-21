@@ -382,6 +382,48 @@ impl Store {
             .await
     }
 
+    pub(crate) async fn execute_with_active_delete_preview(
+        &self,
+        request: Request,
+        caller: Option<Origin>,
+        active_threads: Vec<String>,
+    ) -> Result<MutationResult> {
+        let Command::ThreadDeletePreview(args) = &request.command else {
+            return Err(error(
+                ErrorCode::InvalidState,
+                "Active schedule projection requires ThreadDeletePreview",
+            ));
+        };
+        request.validate()?;
+        let args = args.clone();
+        let path = self.database.path().to_path_buf();
+        let observer = self.database.clone();
+        let kind = format!("{:?}", execute_kind::Kind::of(&request.command));
+        let queued_at = std::time::Instant::now();
+        let requester = Some(if caller.is_some() {
+            "shell"
+        } else {
+            "external"
+        });
+        let raw = inspection_work(move || -> Result<_> {
+            let mut db = open_inspection(&path)?;
+            let raw = observer.observe_inspection(&mut db, &kind, queued_at, requester, |db| {
+                let tx = db.transaction().map_err(sql_error)?;
+                let raw = crate::deletion::observation::read_tx_with_active_shells(
+                    &tx,
+                    &args,
+                    &active_threads,
+                )
+                .map_err(crate::app::storage_error)?;
+                tx.commit().map_err(sql_error)?;
+                Ok::<_, ApiError>(raw)
+            })?;
+            Ok(raw)
+        })
+        .await??;
+        MutationResult::value(crate::deletion::observation::prepare(raw))
+    }
+
     pub(crate) async fn execute_with_checked_delete_targets(
         &self,
         request: Request,
@@ -1098,9 +1140,23 @@ impl Store {
                         let revision: Option<i64> = tx.query_row("SELECT revision FROM thread WHERE id=?1 AND deleted_at IS NULL", [thread], |r|r.get(0)).optional().map_err(sql_error)?;
                         if revision != Some(*expected) { return Err(error(ErrorCode::OperationConflict, "Thread settings changed during AGENTS validation; retry with a new operation ID")); }
                     }
-                    self.dispatch(tx, &plan.command, caller, &request.operation_id, now, checked_delete_targets)
+                    self.dispatch(
+                        tx,
+                        &plan.command,
+                        caller,
+                        &request.operation_id,
+                        now,
+                        checked_delete_targets,
+                    )
                 } else {
-                    self.dispatch(tx, &request.command, caller, &request.operation_id, now, checked_delete_targets)
+                    self.dispatch(
+                        tx,
+                        &request.command,
+                        caller,
+                        &request.operation_id,
+                        now,
+                        checked_delete_targets,
+                    )
                 }
             },
         )
@@ -3346,15 +3402,8 @@ fn delete_thread(
             ));
         }
         targets
-    } else if args.descendants {
-        let mut statement=tx.prepare("WITH RECURSIVE children(id) AS(SELECT ?1 UNION SELECT t.id FROM thread t JOIN children c ON t.parent_thread_id=c.id WHERE t.deleted_at IS NULL) SELECT id FROM children").map_err(sql_error)?;
-        statement
-            .query_map([&args.thread_id], |row| row.get::<_, String>(0))
-            .map_err(sql_error)?
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .map_err(sql_error)?
     } else {
-        vec![args.thread_id.clone()]
+        crate::deletion::actual_delete_targets(tx, args).map_err(storage_error)?
     };
     if args.preview_marker.is_some() {
         thread_details(tx, &args.thread_id)?;

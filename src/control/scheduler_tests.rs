@@ -73,6 +73,33 @@ async fn scheduled_at_runs_shared_shell_and_list_reports_latest_result() {
         let active_preview=control.request(Request::new("preview-active",Command::ThreadDeletePreview(ThreadDeleteArgs{thread_id:thread_id.clone(),descendants:false,preview_marker:None}))).await;
         assert!(active_preview.ok,"{active_preview:?}");
         assert_eq!(active_preview.result.unwrap()["blockers"]["scheduled_shell_count"],1);
+        // The row-action blocker is derived from the canonical bounded observation;
+        // when its descendant scope is incomplete, it must stay unknown.
+        owner.db.call({
+            let thread_id = thread_id.clone();
+            move |db| {
+                for index in 0..257 {
+                    db.execute(
+                        "INSERT INTO thread(id,parent_thread_id,cwd,agents_path,profile_id,model_id,updated_at) VALUES(?1,?2,'/','agents','profile','model','now')",
+                        rusqlite::params![format!("active-preview-child-{index:03}"), thread_id],
+                    )?;
+                }
+                Ok(())
+            }
+        }).await.unwrap();
+        let bounded_preview = control.request(Request::new(
+            "preview-active-bounded-scope",
+            Command::ThreadDeletePreview(ThreadDeleteArgs {
+                thread_id: thread_id.clone(),
+                descendants: true,
+                preview_marker: None,
+            }),
+        )).await;
+        assert!(bounded_preview.ok, "bounded preview must remain a response: {bounded_preview:?}");
+        let bounded_preview = bounded_preview.result.unwrap();
+        assert_eq!(bounded_preview["preview_marker_unavailable_reason"], "input_limit");
+        assert_eq!(bounded_preview["blockers"]["scheduled_shell_count"], serde_json::Value::Null);
+        assert_eq!(bounded_preview["deletable_now"], serde_json::Value::Null);
         let active_delete=control.request(current_request(&control, "delete-active",Command::ThreadDelete(ThreadDeleteArgs{thread_id:thread_id.clone(),descendants:false,preview_marker:None}))).await;
         assert!(!active_delete.ok,"active scheduled shell must block Thread deletion");
         assert!(active_delete.error.as_ref().is_some_and(|error|error.message.contains("scheduled shell")),"unexpected deletion blocker: {active_delete:?}");
@@ -616,7 +643,7 @@ async fn bounded_delete_preview_stays_partial_and_unmarked_delete_keeps_full_sco
         let preview = preview.result.unwrap();
         assert_eq!(preview["preview_marker"], serde_json::Value::Null);
         assert_eq!(preview["preview_marker_unavailable_reason"], "input_limit");
-        assert_eq!(preview["scheduled_command_count"], 1);
+        assert_eq!(preview["scheduled_command_count"], serde_json::Value::Null);
         let deleted = control.request(current_request(
             &control,
             "unmarked-delete-keeps-canonical-full-target-scope",
