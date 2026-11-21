@@ -74,17 +74,20 @@ the bounded per-Thread unified reply inbox. See [reply-expected messages](reply-
 
 One scheduler task owns all ephemeral schedule state: its local pending-due and
 running-ID collections. `Control` shares only a bounded request channel and the
-join handle. Schedule removal, Thread deletion, and bounded delete-preview
-blocker reads are answered in that same loop as launches; removing an unlaunched
-due item therefore removes it before it can start, while an already launched
-child may finish. There is no shared scheduled-ID mutex, `launched` marker, or
-pre-spawn registration recheck. Run children return typed outcomes; their
-one-hour completion timeout is independent of output drain and uses the shared
-`ShellHandle` cancellation. Storage failures from dispatcher and child-result
-persistence converge on the existing typed storage-failure shutdown path.
-Deletion preview takes active-shell facts from the scheduler while the loop is
-handling that bounded observation; incomplete selected scope reports the
-blocker as unknown. See [Core #281 in decisions](../development/decisions.md#core-281-single-owner-scheduler-structure-2026-11-21).
+join handle. The loop never awaits storage: next-deadline, advance-due, latest
+result persistence, removal, and deletion run as owned tasks whose results return
+as scheduler messages. The loop therefore keeps selecting on requests while the
+writer is busy. Schedule removal marks an in-memory launch barrier before its
+storage task starts; Thread deletion holds a temporary launch barrier until its
+target result returns. An unlaunched due item is removed before it can start,
+while an already launched child may finish. There is no shared scheduled-ID
+mutex, `launched` marker, or pre-spawn registration recheck. Run children return
+typed outcomes; their one-hour completion timeout is independent of output drain
+and uses the shared `ShellHandle` cancellation. Storage failures converge on the
+existing typed storage-failure shutdown path. For deletion preview, Control asks
+the scheduler for the in-memory active-shell Thread snapshot immediately, then
+runs the existing bounded read-only inspection independently; incomplete selected
+scope reports the blocker as unknown. See [Core #281 in decisions](../development/decisions.md#core-281-single-owner-scheduler-structure-2026-11-21).
 
 Conversation schema34 (#222 stage 3) adds the `thread_tag` table, its `(tag, thread_id)` index and the partial
 `threads_cwd_updated` index: `thread tag`, `thread tags`, `thread list --tag/--cwd` and `tags` in `thread list`/`thread get`.

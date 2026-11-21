@@ -12246,3 +12246,8 @@ warning. No full local suite or heavy native qualification was run. Historical C
 RED `44860038102` belongs to parent SHA `9f0d85d06cc90df8478921e666f4eb2736d0cb9d`
 and remains source-bound; it is not carried forward. CI on `0cf2781eea9e548f85db1ea02be39d77bbe36953`, independent
 review, and all lifecycle/product cases remain pending.
+
+
+## Core #281 asynchronous owner-loop correction (candidate; CI pending)
+
+On parent `4baf1dc19d4c101ad1a7d1e1451d5e36bc540828`, the unchanged blocked-writer unit test failed because deletion preview queued behind owner-loop storage. The correction keeps storage operations in owned tasks with results returned to the owner loop; preview receives only the in-memory running-shell Thread snapshot and performs the bounded inspection on its existing independent path. The unchanged blocked-writer test passed locally (1/1), scheduler tests passed (14/14), and formatter, test compilation, all-target Clippy, and integration-layout checks passed on candidate source. No CI or full-suite result is claimed here.

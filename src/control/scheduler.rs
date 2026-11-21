@@ -40,9 +40,7 @@ pub(super) enum SchedulerRequest {
         reply: oneshot::Sender<Result<MutationResult, ApiError>>,
     },
     ThreadDeletePreview {
-        request: Request,
-        origin: Option<Origin>,
-        reply: oneshot::Sender<Result<(MutationResult, String), ApiError>>,
+        reply: oneshot::Sender<Vec<String>>,
     },
 }
 
@@ -66,15 +64,38 @@ struct RunOutcome {
     result: Result<ScheduledCommandResult, ApiError>,
 }
 
+enum SchedulerEvent {
+    Deadline(Result<Option<i64>, crate::storage::StorageError>),
+    Due(Result<Option<DueSchedule>, crate::storage::StorageError>),
+    Finished(Result<(), ApiError>),
+    RemoveCompleted {
+        id: uuid::Uuid,
+        removed: bool,
+        error: Option<ApiError>,
+    },
+    DeleteCompleted {
+        deleted_targets: Vec<String>,
+        error: Option<ApiError>,
+    },
+}
+
 pub(super) async fn run(
     control: Weak<Control>,
     stop: CancellationToken,
     mut requests: mpsc::Receiver<SchedulerRequest>,
 ) {
     let child_stop = stop.child_token();
-    let mut children = JoinSet::new();
+    let (events_tx, mut events) = mpsc::unbounded_channel();
+    let mut children = JoinSet::<RunOutcome>::new();
+    let mut storage_tasks = JoinSet::new();
     let mut running = HashMap::<uuid::Uuid, String>::new();
     let mut pending = HashMap::<uuid::Uuid, DueSchedule>::new();
+    let mut removing = std::collections::HashSet::<uuid::Uuid>::new();
+    let mut deleting = 0usize;
+    let mut deadline = None;
+    let mut deadline_dirty = true;
+    let mut deadline_pending = false;
+    let mut due_pending = false;
     let mut failure = None;
 
     'dispatcher: loop {
@@ -85,162 +106,260 @@ pub(super) async fn run(
             break;
         }
 
-        // Retire finished children before reading blocker snapshots. Then
-        // channel requests are linearized before any pending launch.
         while let Some(joined) = children.try_join_next() {
-            match finish_child(&owner, joined, &mut running).await {
-                Ok(()) => {}
+            match joined {
+                Ok(outcome) => {
+                    running.remove(&outcome.schedule_id);
+                    let database = owner.store.database.clone();
+                    let sender = events_tx.clone();
+                    storage_tasks.spawn(async move {
+                        let result = match outcome.result {
+                            Ok(result) => schedule::finish(&database, outcome.schedule_id, result)
+                                .await
+                                .map_err(crate::app::storage_error),
+                            Err(error) => Err(error),
+                        };
+                        let _ = sender.send(SchedulerEvent::Finished(result));
+                    });
+                }
                 Err(error) => {
-                    failure = Some(error);
+                    failure = Some(ApiError::new(
+                        ErrorCode::InvalidState,
+                        format!("scheduled shell task failed: {error}"),
+                    ));
                     break 'dispatcher;
                 }
             }
         }
+
         while let Ok(request) = requests.try_recv() {
-            if let Some(error) = handle_request(&owner, request, &running, &mut pending).await {
-                failure = Some(error);
-                break 'dispatcher;
-            }
+            dispatch_request(
+                &owner,
+                request,
+                &running,
+                &mut removing,
+                &mut deleting,
+                &events_tx,
+                &mut storage_tasks,
+            );
         }
 
-        // A normal Thread edit can temporarily hold the existing admission
-        // boundary. Keep that due row in this scheduler-owned map and retry on
-        // the request-completion notification; no shared registry or DB claim.
-        let mut processed_pending = false;
-        let pending_ids = pending.keys().copied().collect::<Vec<_>>();
-        for id in pending_ids {
-            let Some(due) = pending.get(&id) else {
-                continue;
-            };
-            let boundary = owner.boundary(&due.thread_id).await;
-            let Ok(admission) = boundary.try_lock_owned() else {
-                continue;
-            };
-            let due = pending.remove(&id).expect("pending ID remains present");
-            let thread_id = due.thread_id.clone();
-            let execution = owner
-                .shell
-                .spawn(
-                    id.to_string(),
-                    PathBuf::from(due.cwd.clone()),
-                    ShellToolArgs {
-                        command: due.command.clone(),
-                        description: None,
-                        background: false,
-                        stdin_open: false,
-                        initial_stdin: None,
-                        input_encoding: "utf-8".into(),
-                        output_encoding: "utf-8".into(),
-                    },
-                    [("SHELLBOY_THREAD_ID".to_string(), thread_id.clone())]
-                        .into_iter()
-                        .collect(),
-                )
-                .await;
-            drop(admission);
-            match execution {
-                Ok(execution) => {
-                    running.insert(id, thread_id.clone());
-                    let stop = child_stop.clone();
-                    children.spawn(async move { run_shell(due, execution, stop).await });
+        if deleting == 0 {
+            let pending_ids = pending.keys().copied().collect::<Vec<_>>();
+            for id in pending_ids {
+                if removing.contains(&id) {
+                    continue;
                 }
-                Err(error) => {
-                    let result = ScheduledCommandResult {
-                        scheduled_at: due.scheduled_at,
-                        finished_at: chrono::Utc::now().timestamp(),
-                        status: "launch_failed".into(),
-                        exit_code: None,
-                        output_tail: Some(format!("Scheduler: launch failed: {error}")),
-                        output_truncated: false,
-                    };
-                    if let Err(storage) = schedule::finish(&owner.store.database, id, result).await
-                    {
-                        failure = Some(storage.into_api_error());
-                        break 'dispatcher;
+                let Some(due) = pending.get(&id) else {
+                    continue;
+                };
+                let boundary = owner.boundary(&due.thread_id).await;
+                let Ok(admission) = boundary.try_lock_owned() else {
+                    continue;
+                };
+                let due = pending.remove(&id).expect("pending ID remains present");
+                let thread_id = due.thread_id.clone();
+                let execution = owner
+                    .shell
+                    .spawn(
+                        id.to_string(),
+                        PathBuf::from(due.cwd.clone()),
+                        ShellToolArgs {
+                            command: due.command.clone(),
+                            description: None,
+                            background: false,
+                            stdin_open: false,
+                            initial_stdin: None,
+                            input_encoding: "utf-8".into(),
+                            output_encoding: "utf-8".into(),
+                        },
+                        [("SHELLBOY_THREAD_ID".to_string(), thread_id.clone())]
+                            .into_iter()
+                            .collect(),
+                    )
+                    .await;
+                drop(admission);
+                match execution {
+                    Ok(execution) => {
+                        running.insert(id, thread_id);
+                        let stop = child_stop.clone();
+                        children.spawn(async move { run_shell(due, execution, stop).await });
+                    }
+                    Err(error) => {
+                        let result = ScheduledCommandResult {
+                            scheduled_at: due.scheduled_at,
+                            finished_at: chrono::Utc::now().timestamp(),
+                            status: "launch_failed".into(),
+                            exit_code: None,
+                            output_tail: Some(format!("Scheduler: launch failed: {error}")),
+                            output_truncated: false,
+                        };
+                        let database = owner.store.database.clone();
+                        let sender = events_tx.clone();
+                        storage_tasks.spawn(async move {
+                            let result = schedule::finish(&database, id, result)
+                                .await
+                                .map_err(crate::app::storage_error);
+                            let _ = sender.send(SchedulerEvent::Finished(result));
+                        });
                     }
                 }
+                break;
             }
-            processed_pending = true;
-            break;
-        }
-        if processed_pending {
-            continue;
         }
 
+        // Subscribe before querying storage so a concurrent add/remove cannot be lost.
         let changed = owner.changed.notified();
         tokio::pin!(changed);
         changed.as_mut().enable();
 
-        let deadline = match schedule::next_deadline(&owner.store.database).await {
-            Ok(deadline) => deadline,
-            Err(storage) => {
-                failure = Some(storage.into_api_error());
-                break;
-            }
-        };
-        let now = chrono::Utc::now().timestamp();
-        if deadline.is_some_and(|at| at <= now) {
-            let due = match schedule::advance_due(&owner.store.database, now).await {
-                Ok(due) => due,
-                Err(storage) => {
-                    failure = Some(storage.into_api_error());
-                    break;
-                }
-            };
-            if let Some(due) = due {
-                let id = due.id;
-                if running.contains_key(&id) || pending.contains_key(&id) {
-                    let result = ScheduledCommandResult {
-                        scheduled_at: due.scheduled_at,
-                        finished_at: chrono::Utc::now().timestamp(),
-                        status: "overlap_skipped".into(),
-                        exit_code: None,
-                        output_tail: None,
-                        output_truncated: false,
-                    };
-                    if let Err(storage) = schedule::finish(&owner.store.database, id, result).await
-                    {
-                        failure = Some(storage.into_api_error());
-                        break;
-                    }
-                } else {
-                    pending.insert(id, due);
-                }
-            }
-            continue;
+        if deadline_dirty && !deadline_pending && !due_pending {
+            let database = owner.store.database.clone();
+            let sender = events_tx.clone();
+            deadline_pending = true;
+            deadline_dirty = false;
+            storage_tasks.spawn(async move {
+                let _ = sender.send(SchedulerEvent::Deadline(
+                    schedule::next_deadline(&database).await,
+                ));
+            });
         }
 
-        let sleep_seconds = deadline.and_then(|at| next_sleep_seconds(at, now));
+        if !due_pending && let Some(at) = deadline {
+            let now = chrono::Utc::now().timestamp();
+            if at <= now {
+                deadline = None;
+                due_pending = true;
+                let database = owner.store.database.clone();
+                let sender = events_tx.clone();
+                storage_tasks.spawn(async move {
+                    let _ = sender.send(SchedulerEvent::Due(
+                        schedule::advance_due(&database, now).await,
+                    ));
+                });
+            }
+        }
+
+        let sleep_seconds =
+            deadline.and_then(|at| next_sleep_seconds(at, chrono::Utc::now().timestamp()));
         tokio::select! { biased;
             _ = stop.cancelled() => break 'dispatcher,
-            joined = children.join_next(), if !children.is_empty() => {
-                if let Some(joined) = joined
-                    && let Err(error) = finish_child(&owner, joined, &mut running).await
-                {
-                    failure = Some(error);
-                    break 'dispatcher;
-                }
-            },
-            request = requests.recv() => match request {
-                Some(request) => {
-                    if let Some(error) = handle_request(&owner, request, &running, &mut pending).await {
-                        failure = Some(error);
-                        break 'dispatcher;
+            Some(event) = events.recv() => match event {
+                SchedulerEvent::Deadline(result) => {
+                    deadline_pending = false;
+                    match result {
+                        Ok(value) => deadline = value,
+                        Err(storage) => { failure = Some(storage.into_api_error()); break 'dispatcher; }
                     }
                 }
-                None => break 'dispatcher,
+                SchedulerEvent::Due(result) => {
+                    due_pending = false;
+                    deadline = None;
+                    match result {
+                        Ok(Some(due)) => {
+                            let id = due.id;
+                            if running.contains_key(&id) || pending.contains_key(&id) {
+                                let result = ScheduledCommandResult {
+                                    scheduled_at: due.scheduled_at,
+                                    finished_at: chrono::Utc::now().timestamp(),
+                                    status: "overlap_skipped".into(),
+                                    exit_code: None,
+                                    output_tail: None,
+                                    output_truncated: false,
+                                };
+                                let database = owner.store.database.clone();
+                                let sender = events_tx.clone();
+                                storage_tasks.spawn(async move {
+                                    let result = schedule::finish(&database, id, result)
+                                        .await
+                                        .map_err(crate::app::storage_error);
+                                    let _ = sender.send(SchedulerEvent::Finished(result));
+                                });
+                            } else {
+                                pending.insert(id, due);
+                            }
+                        }
+                        Ok(None) => {}
+                        Err(storage) => { failure = Some(storage.into_api_error()); break 'dispatcher; }
+                    }
+                    deadline_dirty = true;
+                }
+                SchedulerEvent::Finished(result) => {
+                    if let Err(error) = result { failure = Some(error); break 'dispatcher; }
+                    deadline_dirty = true;
+                }
+                SchedulerEvent::RemoveCompleted { id, removed, error } => {
+                    removing.remove(&id);
+                    if removed { pending.remove(&id); }
+                    if let Some(error) = error { failure = Some(error); break 'dispatcher; }
+                    deadline_dirty = true;
+                }
+                SchedulerEvent::DeleteCompleted { deleted_targets, error } => {
+                    deleting = deleting.saturating_sub(1);
+                    if !deleted_targets.is_empty() {
+                        let deleted = deleted_targets.iter().collect::<std::collections::HashSet<_>>();
+                        pending.retain(|_, due| !deleted.contains(&due.thread_id));
+                        deadline_dirty = true;
+                    }
+                    if let Some(error) = error { failure = Some(error); break 'dispatcher; }
+                }
             },
-            _ = &mut changed => {},
-            _ = sleep(Duration::from_secs(sleep_seconds.unwrap_or(0))), if sleep_seconds.is_some() => {},
+            Some(request) = requests.recv() => {
+                dispatch_request(
+                    &owner,
+                    request,
+                    &running,
+                    &mut removing,
+                    &mut deleting,
+                    &events_tx,
+                    &mut storage_tasks,
+                );
+            },
+            joined = children.join_next(), if !children.is_empty() => {
+                if let Some(Ok(outcome)) = joined {
+                    running.remove(&outcome.schedule_id);
+                    let database = owner.store.database.clone();
+                    let sender = events_tx.clone();
+                    storage_tasks.spawn(async move {
+                        let result = match outcome.result {
+                            Ok(result) => schedule::finish(&database, outcome.schedule_id, result)
+                                .await
+                                .map_err(crate::app::storage_error),
+                            Err(error) => Err(error),
+                        };
+                        let _ = sender.send(SchedulerEvent::Finished(result));
+                    });
+                }
+            },
+            _ = &mut changed => deadline_dirty = true,
+            _ = sleep(Duration::from_secs(sleep_seconds.unwrap_or(0))), if sleep_seconds.is_some() => deadline_dirty = true,
         }
     }
 
     child_stop.cancel();
     while let Some(joined) = children.join_next().await {
-        if let Some(owner) = control.upgrade()
-            && let Err(error) = finish_child(&owner, joined, &mut running).await
+        if let Ok(outcome) = joined
+            && let Some(owner) = control.upgrade()
         {
-            failure.get_or_insert(error);
+            let result = match outcome.result {
+                Ok(result) => schedule::finish(&owner.store.database, outcome.schedule_id, result)
+                    .await
+                    .map_err(crate::app::storage_error),
+                Err(error) => Err(error),
+            };
+            if let Err(error) = result {
+                failure.get_or_insert(error);
+            }
+        }
+    }
+    while let Some(joined) = storage_tasks.join_next().await {
+        if let Err(error) = joined {
+            failure.get_or_insert_with(|| {
+                ApiError::new(
+                    ErrorCode::InvalidState,
+                    format!("scheduler storage task failed: {error}"),
+                )
+            });
         }
     }
     if let (Some(owner), Some(error)) = (control.upgrade(), failure) {
@@ -255,78 +374,78 @@ pub(super) async fn run(
     }
 }
 
-async fn handle_request(
-    owner: &Control,
+fn dispatch_request(
+    owner: &std::sync::Arc<Control>,
     request: SchedulerRequest,
     running: &HashMap<uuid::Uuid, String>,
-    pending: &mut HashMap<uuid::Uuid, DueSchedule>,
-) -> Option<ApiError> {
+    removing: &mut std::collections::HashSet<uuid::Uuid>,
+    deleting: &mut usize,
+    events: &mpsc::UnboundedSender<SchedulerEvent>,
+    storage_tasks: &mut JoinSet<()>,
+) {
     match request {
+        SchedulerRequest::ThreadDeletePreview { reply } => {
+            let _ = reply.send(running.values().cloned().collect());
+        }
         SchedulerRequest::ScheduleRemove {
             request,
             origin,
             reply,
         } => {
-            let schedule_id = match &request.command {
+            let id = match &request.command {
                 Command::ScheduleRemove(args) => uuid::Uuid::parse_str(&args.schedule_id).ok(),
                 _ => None,
             };
-            let result = owner.store.execute(request, origin).await;
-            if let (Ok(result), Some(schedule_id)) = (&result, schedule_id)
-                && result.result["removed"] == true
-            {
-                pending.remove(&schedule_id);
-                owner.changed.notify_waiters();
+            if let Some(id) = id {
+                removing.insert(id);
             }
-            let storage_failure = result
-                .as_ref()
-                .err()
-                .filter(|error| error.is_storage_failure())
-                .cloned();
-            let _ = reply.send(result);
-            storage_failure
-        }
-        SchedulerRequest::ThreadDeletePreview {
-            request,
-            origin,
-            reply,
-        } => {
-            let active_threads = running.values().cloned().collect();
-            let result = owner
-                .store
-                .execute_with_active_delete_preview(request, origin, active_threads)
-                .await;
-            let storage_failure = result
-                .as_ref()
-                .err()
-                .filter(|error| error.is_storage_failure())
-                .cloned();
-            let _ = reply.send(result);
-            storage_failure
+            let owner = owner.clone();
+            let events = events.clone();
+            storage_tasks.spawn(async move {
+                let result = owner.store.execute(request, origin).await;
+                let removed = result
+                    .as_ref()
+                    .is_ok_and(|result| result.result["removed"] == true);
+                let error = result
+                    .as_ref()
+                    .err()
+                    .filter(|error| error.is_storage_failure())
+                    .cloned();
+                if removed {
+                    owner.changed.notify_waiters();
+                }
+                let _ = reply.send(result);
+                if let Some(id) = id {
+                    let _ = events.send(SchedulerEvent::RemoveCompleted { id, removed, error });
+                }
+            });
         }
         SchedulerRequest::ThreadDelete {
             request,
             origin,
             reply,
         } => {
-            let result = delete_thread(owner, request, origin, running).await;
-            if let Ok((effects, deleted_targets)) = &result {
-                let deleted = deleted_targets
-                    .iter()
-                    .collect::<std::collections::HashSet<_>>();
-                pending.retain(|_, due| !deleted.contains(&due.thread_id));
-                if !effects.deleted_threads.is_empty() {
-                    owner.changed.notify_waiters();
-                }
-            }
-            let result = result.map(|(effects, _)| effects);
-            let storage_failure = result
-                .as_ref()
-                .err()
-                .filter(|error| error.is_storage_failure())
-                .cloned();
-            let _ = reply.send(result);
-            storage_failure
+            *deleting += 1;
+            let owner = owner.clone();
+            let running = running.clone();
+            let events = events.clone();
+            storage_tasks.spawn(async move {
+                let result = delete_thread(&owner, request, origin, &running).await;
+                let (effects, deleted_targets) = match result {
+                    Ok((effects, targets)) => (Ok(effects), targets),
+                    Err(error) => (Err(error), Vec::new()),
+                };
+                let failure = effects
+                    .as_ref()
+                    .err()
+                    .filter(|error| error.is_storage_failure())
+                    .cloned();
+                let _ = reply.send(effects);
+                let _ = events.send(SchedulerEvent::DeleteCompleted {
+                    deleted_targets,
+                    error: failure,
+                });
+            });
         }
     }
 }
@@ -385,24 +504,6 @@ async fn delete_thread(
         .execute_with_checked_delete_targets(request, origin, checked_targets.clone())
         .await?;
     Ok((result, checked_targets))
-}
-
-async fn finish_child(
-    owner: &Control,
-    joined: Result<RunOutcome, tokio::task::JoinError>,
-    running: &mut HashMap<uuid::Uuid, String>,
-) -> Result<(), ApiError> {
-    let outcome = joined.map_err(|error| {
-        ApiError::new(
-            ErrorCode::InvalidState,
-            format!("scheduled shell task failed: {error}"),
-        )
-    })?;
-    running.remove(&outcome.schedule_id);
-    let result = outcome.result?;
-    schedule::finish(&owner.store.database, outcome.schedule_id, result)
-        .await
-        .map_err(crate::app::storage_error)
 }
 
 async fn run_shell(

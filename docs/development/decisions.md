@@ -4633,3 +4633,8 @@ observation; incomplete selected scope returns unknown, with no descendant
 re-walk. The canonical unmarked-delete target query is shared between admission
 and deletion. These choices add no table, durable state, dependency, or shell
 capacity policy; the control channel is bounded to one waiting request.
+
+
+### Core #281 owner-loop nonblocking storage and preview correction (2026-11-21)
+
+This addendum supersedes only the preceding synchronous-storage and preview wording. The scheduler loop never awaits storage: deadline lookup, due advancement, latest-result persistence, remove and Thread delete execute in owned tasks and report results as scheduler messages. The loop continues selecting bounded requests while the DB writer is occupied. Remove registers an in-memory schedule-ID launch barrier before its storage task; Thread delete holds a temporary launch barrier through target resolution and completion. Delete preview requests only the in-memory active scheduled-shell Thread snapshot from the scheduler, then runs the existing bounded read-only inspection independently. No new durable state, table, dependency, generic request queue, or shell capacity policy is introduced.

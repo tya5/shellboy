@@ -468,6 +468,26 @@ impl Control {
         }
         Ok(guard)
     }
+    async fn ensure_scheduler_started(self: &Arc<Self>) -> Result<(), ApiError> {
+        if self.stop.is_cancelled() {
+            return Err(ApiError::new(
+                ErrorCode::InvalidState,
+                "Owner is shutting down",
+            ));
+        }
+        self.scheduler
+            .get_or_init(|| async {
+                let (requests, receiver) = mpsc::channel(scheduler::REQUEST_CAPACITY);
+                let weak = Arc::downgrade(self);
+                let stop = self.stop.clone();
+                scheduler::Worker {
+                    requests,
+                    task: Mutex::new(Some(tokio::spawn(scheduler::run(weak, stop, receiver)))),
+                }
+            })
+            .await;
+        Ok(())
+    }
     pub async fn start(self: &Arc<Self>) -> Result<(), ApiError> {
         if self.stop.is_cancelled() {
             return Err(ApiError::new(
@@ -480,17 +500,7 @@ impl Control {
                 Ok::<_, ApiError>(Mutex::new(Some(self.index.start().await?)))
             })
             .await?;
-        self.scheduler
-            .get_or_init(|| async {
-                let (requests, receiver) = mpsc::channel(scheduler::REQUEST_CAPACITY);
-                let weak = Arc::downgrade(self);
-                let stop = self.stop.clone();
-                scheduler::Worker {
-                    requests,
-                    task: Mutex::new(Some(tokio::spawn(scheduler::run(weak, stop, receiver)))),
-                }
-            })
-            .await;
+        self.ensure_scheduler_started().await?;
         self.maintenance
             .get_or_init(|| async {
                 let gc = self.gc.clone();
@@ -550,7 +560,7 @@ impl Control {
     }
 
     async fn scheduler_preview_request(
-        &self,
+        self: &Arc<Self>,
         request: Request,
         origin: Option<Origin>,
     ) -> Result<(MutationResult, String), ApiError> {
@@ -561,19 +571,26 @@ impl Control {
         let (reply, response) = tokio::sync::oneshot::channel();
         worker
             .requests
-            .send(scheduler::SchedulerRequest::ThreadDeletePreview {
-                request,
-                origin,
-                reply,
-            })
+            .send(scheduler::SchedulerRequest::ThreadDeletePreview { reply })
             .await
             .map_err(|_| ApiError::new(ErrorCode::InvalidState, "Scheduler is stopping"))?;
-        response.await.map_err(|_| {
+        let active_threads = response.await.map_err(|_| {
             ApiError::new(
                 ErrorCode::InvalidState,
                 "Scheduler stopped before answering",
             )
-        })?
+        })?;
+        let result = self
+            .store
+            .execute_with_active_delete_preview(request, origin, active_threads)
+            .await;
+        if result
+            .as_ref()
+            .is_err_and(|error| error.is_storage_failure())
+        {
+            self.fail_storage().await;
+        }
+        result
     }
 
     pub(crate) async fn scheduler_delete_preview(
@@ -581,7 +598,7 @@ impl Control {
         args: ThreadDeleteArgs,
         stop: CancellationToken,
     ) -> Result<(Value, String), ApiError> {
-        self.start().await?;
+        self.ensure_scheduler_started().await?;
         let request = Request::new(
             format!(
                 "{}:schedule-delete-preview:{}",
@@ -597,25 +614,24 @@ impl Control {
         let (reply, response) = tokio::sync::oneshot::channel();
         tokio::select! {
             _ = stop.cancelled() => return Err(ApiError::new(ErrorCode::InvalidState, "Deletion preview was cancelled")),
-            sent = worker.requests.send(scheduler::SchedulerRequest::ThreadDeletePreview {
-                request,
-                origin: None,
-                reply,
-            }) => sent.map_err(|_| ApiError::new(ErrorCode::InvalidState, "Scheduler is stopping"))?,
+            sent = worker.requests.send(scheduler::SchedulerRequest::ThreadDeletePreview { reply }) => sent.map_err(|_| ApiError::new(ErrorCode::InvalidState, "Scheduler is stopping"))?,
         }
-        let result = tokio::select! {
+        let active_threads = tokio::select! {
             _ = stop.cancelled() => return Err(ApiError::new(ErrorCode::InvalidState, "Deletion preview was cancelled")),
             result = response => result.map_err(|_| ApiError::new(ErrorCode::InvalidState, "Scheduler stopped before answering"))?,
         };
-        match result {
-            Ok((result, observed_at)) => Ok((result.result, observed_at)),
-            Err(error) => {
-                if error.is_storage_failure() {
-                    self.fail_storage().await;
-                }
-                Err(error)
-            }
+        let result = self
+            .store
+            .execute_with_active_delete_preview(request, None, active_threads)
+            .await;
+        if result
+            .as_ref()
+            .is_err_and(|error| error.is_storage_failure())
+        {
+            self.fail_storage().await;
         }
+        let (result, observed_at) = result?;
+        Ok((result.result, observed_at))
     }
     /// Read-only accounting of retained conversion buffers and in-flight pins.
     pub fn replay_cache_stats(&self) -> replay::ReplayStats {

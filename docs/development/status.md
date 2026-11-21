@@ -1,33 +1,24 @@
 # Development status
 
-## Core #281 single-owner scheduler (current source; CI pending)
+## Core #281 single-owner scheduler (current candidate; CI pending)
 
-Source commit `0cf2781eea9e548f85db1ea02be39d77bbe36953` on `task/core281-minimal-d8076a6` is based on
-`9f0d85d06cc90df8478921e666f4eb2736d0cb9d`. The current implementation keeps
-all pending due and running schedule state inside the scheduler task. A bounded
-request channel serializes schedule removal, Thread deletion and the bounded
-delete-preview blocker snapshot with launch decisions. Runs are child tasks;
-the one-hour completion timeout and output drain proceed independently, and
-storage errors converge on the existing typed failure path. The shared registry,
-`launched` flag and pre-spawn registration query are absent. Scope otherwise
-remains the accepted minimal #281 path; no new durable state or worker queue is
-introduced.
+Candidate source on `task/core281-minimal-d8076a6` extends the single-owner design:
+the scheduler loop never awaits storage. Deadline lookup, due advancement, run
+result persistence, removal and Thread deletion execute as owned tasks reporting
+back to the loop. The bounded request channel remains responsive while the writer
+is blocked. Delete preview obtains an immediate in-memory active-shell Thread
+snapshot, then uses the existing independent read-only observation. Removal and
+delete launch barriers preserve admission ordering. No shared registry,
+`launched` flag, persisted claim, or new shell capacity policy is introduced.
 
-On the exact source commit, pinned `cargo fmt --all` and `cargo check --tests
---locked` passed. Focused `control::scheduler` tests passed 14/14, including a
-pending-due/remove request ordering witness and continuous-output timeout
-control; `deletion::observation` passed 10/10, including incomplete-scope
-blocker unknown. The nonfatal macOS linker compact-unwind warning appeared in
-test builds. No full local suite was run.
-
-Historical CI RED `44860038102` is on parent `9f0d85d06cc90df8478921e666f4eb2736d0cb9d`,
-not this source: Windows failed the test's output-queue-saturation assertion,
-Ubuntu failed the active-preview test's scheduler-state race, and macOS passed.
-The structural refactor removes those coupled paths; no result transfers to the
-current SHA. New-source CI/review, full standard/native suite, natural downtime,
-zero-registration no-wake observation, clock/suspend integration and production
-qualification remain pending. No install, release, live activation or qualification
-is claimed.
+On candidate source, pinned `cargo fmt --all`, `cargo check --tests --locked`,
+`cargo test --locked --lib control::scheduler` (14 passed), the unchanged blocked-
+writer saved-inspection test (1 passed), `cargo clippy --locked --all-targets -- -D
+warnings`, and `python3 scripts/check-test-layout.py` passed. No full local suite was
+run. CI/review on this new SHA are pending; no result transfers from prior SHAs.
+Natural downtime, zero-registration no-wake observation, clock/suspend integration
+and production qualification remain unverified. No install, release, live
+activation or qualification is claimed.
 
 ## #315 Retry after partial output (owner-policy successor)
 
