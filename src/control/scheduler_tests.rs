@@ -101,30 +101,29 @@ async fn remove_request_cancels_a_due_launch_waiting_on_thread_edit() {
             control.changed.notify_waiters();
 
             let id_for_wait = schedule_id.clone();
-            tokio::time::timeout(Duration::from_secs(3), async {
-                loop {
-                    let id = id_for_wait.clone();
-                    let due = owner
-                        .db
-                        .call(move |db| {
-                            Ok(db.query_row(
-                                "SELECT next_at IS NULL FROM scheduled_command WHERE id=?1",
-                                [id],
-                                |row| row.get::<_, bool>(0),
-                            )?)
-                        })
-                        .await
-                        .unwrap();
-                    if due {
-                        break;
-                    }
-                    tokio::time::sleep(Duration::from_millis(5)).await;
+            let deadline = std::time::Instant::now() + crate::test_watchdog::WATCHDOG;
+            loop {
+                let id = id_for_wait.clone();
+                let due = owner
+                    .db
+                    .call(move |db| {
+                        Ok(db.query_row(
+                            "SELECT next_at IS NULL FROM scheduled_command WHERE id=?1",
+                            [id],
+                            |row| row.get::<_, bool>(0),
+                        )?)
+                    })
+                    .await
+                    .unwrap();
+                if due {
+                    break;
                 }
-            })
-            .await
-            .expect(
-                "scheduler should claim the due one-shot while Thread launch admission is held",
-            );
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "test watchdog: scheduler should claim the due one-shot while Thread launch admission is held"
+                );
+                tokio::task::yield_now().await;
+            }
 
             let removed = control
                 .request(current_request(
