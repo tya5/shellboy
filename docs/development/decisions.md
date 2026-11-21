@@ -4577,7 +4577,7 @@ The controlling Issue replaces the previous unmerged branch design. Start from m
 and keep only three operations (`schedule add`, `schedule list`, `schedule remove`),
 one owner-local timer, `chrono::Local` plus `croner`, one indexed `next_at`, and
 two durable tables: registration and one latest result. The latest statuses are
-`finished`, `overlap_skipped`, and `launch_failed`. A cron
+`finished`, `overlap_skipped`, `launch_failed`, and `timed_out`. A cron
 occurrence that was valid at registration but cannot be calculated later is stopped
 by setting `next_at` NULL and recording a clearly labeled scheduler diagnostic in the
 bounded result tail in the same transaction; it is not child output and has no exit
@@ -4592,15 +4592,16 @@ bytes, retained output tail 4 KiB; latest-only result storage. The shared shell 
 remains the execution authority. The owner timer must wait on the existing Notify
 when the schedule is empty and shutdown must settle/stop owned children. `croner` is
 selected only for expression parsing/next occurrence; it introduces no job engine.
-The optional `schedule.max_sleep_seconds` accepts only positive signed-clock-range values and reloads through existing `config.set`; schedules cannot be added unless one is supplied, and it cannot be unset while schedule rows remain. No shipped value is selected. The one timer uses this bound for wall-clock rechecks; empty schedules still wait only on Control Notify. The required one-minute/five-minute/no-periodic-timer energy comparison remains pending.
+The timer rechecks wall-clock time at most every 60 seconds. This is a fixed behavior, not a setting or an operator prerequisite. On macOS the monotonic timer does not advance during system sleep; the one-minute cap therefore bounds post-wake lateness. Timer-only wakes compare the cached deadline to the wall clock without database I/O; with zero schedules the timer is not armed and waits only on Control Notify. Per-run execution is capped at one hour; expiry calls the shared `ShellHandle::stop`, records `timed_out` with no exit code and the actual finish timestamp, then releases the schedule ID so later runs may proceed. Normal owner shutdown still stops and joins children. Cron/DST behavior follows the pinned `croner` + `chrono::Local`: a nonexistent gap match advances to the first valid local instant after the gap. For a fixed daily match in a fold, the `find_next_occurrence` path skips the repeated hour and advances to the next matching local day.
 The owner's ordinary `Control::start` attaches the same single dispatcher; no enable
 setting or separate scheduler implementation is added. This is source behavior only,
-not evidence from an installed or live owner. Forced-owner-death overlap, DST
-behavior, and requested power measurements remain unverified.
+not evidence from an installed or live owner. Forced-owner-death overlap remains
+unverified. The sleep cap and default are fixed at 60 seconds by the Claude decision
+recorded above; no power measurement is claimed.
 
 
 ## Core #281 Thread ownership addendum (2026-11-20)
 
 Every schedule belongs to exactly one `thread_id` with `ON DELETE CASCADE` to both registration and latest-result rows. External `schedule.add`/`schedule.list` must name the Thread; an authenticated model shell may omit it and Control fills only the trusted origin Thread ID. `cwd` defaults to the Thread cwd captured during registration; only `SHELLBOY_THREAD_ID` is added to the command environment, never Origin/auth. Limit registrations to 16 total across the owner in the same transaction, counting archived and completed rows until remove or Thread deletion. Rationale: a row is conservatively under 32 KiB when its 4096-scalar tail is worst-case JSON escaped 6x plus cron, UUIDs, IDs and metadata; 16 rows remain under 512 KiB plus envelope, well below the actual 8 MiB `MAX_FRAME_BYTES`. The list remains one-Thread scoped and complete; all-Thread listing is explicitly out of scope.
 
-The existing per-Thread Control boundary is acquired only for launch admission, then released before the command runs. A busy boundary retires the due occurrence as `launch_failed` with the owner-approved bounded `Thread admission busy; command not started` diagnostic and no child. The active Thread-to-schedule map blocks deletion until shell settlement; deletion never holds a boundary while waiting for a child. Preview includes the registration count; FK cascade removes schedules and latest results. Archive does not change due scanning, fork has no schedule-copy path, and rewind is orthogonal. These are source design statements; final synthetic acceptance is pending.
+The existing per-Thread Control boundary is acquired only for launch admission, then released before the command runs. A due schedule waits for an ordinary Thread edit rather than retiring its occurrence; after admission it rechecks that the Thread is still live before spawning. One owner-memory map keyed by schedule ID records the Thread for overlap exclusion and deletion. Pending admission entries prevent same-ID overlap; deletion counts/blocks only entries whose shared shell was launched. Deletion resolves the same full target set as the canonical delete operation, including unmarked deletes; the bounded preview remains informational and partial when its existing observation limits are exceeded. FK cascade removes schedules and latest results. Archive does not change due scanning, fork has no schedule-copy path, and rewind is orthogonal.

@@ -60,7 +60,7 @@ use std::{
     path::PathBuf,
     sync::{
         Arc,
-        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
 };
 use tokio::sync::{Mutex, Notify, broadcast, mpsc};
@@ -147,6 +147,11 @@ struct AutomaticFault {
     release_checkpoint: Arc<tokio::sync::Notify>,
 }
 
+pub(super) struct ActiveScheduledCommand {
+    pub thread_id: String,
+    pub launched: bool,
+}
+
 pub struct Control {
     #[cfg(test)]
     memory_samples: AtomicUsize,
@@ -158,14 +163,13 @@ pub struct Control {
     pub gc: Arc<crate::gc::GcService>,
     maintenance: tokio::sync::OnceCell<Mutex<Option<tokio::task::JoinHandle<()>>>>,
     scheduler: tokio::sync::OnceCell<Mutex<Option<tokio::task::JoinHandle<()>>>>,
-    schedule_max_sleep_seconds: Arc<AtomicU64>,
     index_workers: tokio::sync::OnceCell<Mutex<Option<crate::index::IndexWorkers>>>,
     shutdown_context: tokio::sync::OnceCell<Result<(), ApiError>>,
     owner_shutdown: std::sync::OnceLock<CancellationToken>,
     compactor: crate::compaction::Compactor,
     compact_tasks: Mutex<HashMap<String, CancellationToken>>,
     boundaries: Mutex<HashMap<String, std::sync::Weak<Mutex<()>>>>,
-    scheduled_active: std::sync::Mutex<HashMap<uuid::Uuid, String>>,
+    scheduled_active: std::sync::Mutex<HashMap<uuid::Uuid, ActiveScheduledCommand>>,
     shell: ShellSupervisor,
     instructions: InstructionLoader,
     replay: replay::ReplayCache,
@@ -405,9 +409,6 @@ impl Control {
             gc,
             maintenance: tokio::sync::OnceCell::new(),
             scheduler: tokio::sync::OnceCell::new(),
-            schedule_max_sleep_seconds: Arc::new(AtomicU64::new(
-                config.schedule.max_sleep_seconds.unwrap_or(0),
-            )),
             index,
             index_workers: tokio::sync::OnceCell::new(),
             shutdown_context: tokio::sync::OnceCell::new(),
@@ -1135,24 +1136,43 @@ impl Control {
                         self.recovery_rewind(request, origin, thread).await
                     }
                     Command::ThreadDeletePreview(args) => {
-                        let selection=args.clone();
-                        let mut effects=self.store.execute(request,origin).await?;
-                        let targets=self.store.database.call(move|db|{
-                            let targets=crate::deletion::guarded_targets(db,&selection).map_err(crate::storage::StorageError::from)?;
-                            targets.ok_or_else(||crate::storage::StorageError::InvalidInput("Thread deletion selection exceeds its guarded target bound".into()))
-                        }).await.map_err(storage_error)?;
-                        let active=self.scheduled_active.lock().unwrap_or_else(|poison|poison.into_inner());
-                        let active_count=active.values().filter(|thread|targets.contains(thread)).count();
-                        if let Some(result)=effects.result.as_object_mut(){
-                            let blocker=result.entry("blockers").or_insert_with(||json!({}));
-                            blocker["scheduled_shell_count"]=json!(active_count);
-                            if active_count>0 { result["deletable_now"]=json!(false); }
+                        let selection = args.clone();
+                        let mut effects = self.store.execute(request, origin).await?;
+                        let active_threads = self
+                            .scheduled_active
+                            .lock()
+                            .unwrap_or_else(|poison| poison.into_inner())
+                            .values()
+                            .filter(|entry| entry.launched)
+                            .map(|entry| entry.thread_id.clone())
+                            .collect::<Vec<_>>();
+                        let active_thread_candidates = active_threads.clone();
+                        let matching_threads = self
+                            .store
+                            .database
+                            .call(move |db| {
+                                crate::deletion::active_delete_targets(
+                                    db,
+                                    &selection,
+                                    &active_thread_candidates,
+                                )
+                            })
+                            .await
+                            .map_err(storage_error)?;
+                        let active_count = active_threads
+                            .iter()
+                            .filter(|thread| matching_threads.contains(thread))
+                            .count();
+                        if let Some(result) = effects.result.as_object_mut() {
+                            let blockers = result.entry("blockers").or_insert_with(|| json!({}));
+                            blockers["scheduled_shell_count"] = json!(active_count);
+                            if active_count > 0 {
+                                result["deletable_now"] = json!(false);
+                            }
                         }
                         Ok(effects)
                     }
                     Command::ScheduleAdd(args) => {
-                        let _config_guard=self.config_write.lock().await;
-                        if self.schedule_max_sleep_seconds.load(Ordering::SeqCst)==0 { return Err(ApiError::new(ErrorCode::InvalidState,"Set schedule.max_sleep_seconds to a positive measured bound before registering schedules")); }
                         let thread=args.thread_id.clone().or_else(||origin.as_ref().map(|o|o.thread_id.clone())).ok_or_else(||ApiError::new(ErrorCode::InvalidArgument,"external schedule.add requires --thread"))?;
                         let boundary=self.boundary(&thread).await;
                         let _boundary=boundary.lock().await;
@@ -1190,26 +1210,20 @@ impl Control {
                             return Ok(saved);
                         }
                         let selection = args.clone();
-                        let (targets, root_exists) = self.store.database.call(move |db| {
-                            let tx = db.unchecked_transaction()?;
-                            let targets = crate::deletion::guarded_targets(&tx, &selection)
-                                .map_err(crate::storage::StorageError::from)?;
-                            let root_exists = tx.query_row(
-                                "SELECT EXISTS(SELECT 1 FROM thread WHERE id=?1 AND deleted_at IS NULL)",
-                                [&selection.thread_id],
-                                |row| row.get::<_, bool>(0),
-                            )?;
-                            tx.commit()?;
-                            Ok((targets, root_exists))
-                        }).await.map_err(storage_error)?;
-                        let checked_targets = match targets {
-                            Some(targets) => targets,
-                            None if args.preview_marker.is_some() || !root_exists => Vec::new(),
-                            None => return Err(ApiError::new(
-                                ErrorCode::InvalidArgument,
-                                "Thread deletion selection exceeds its guarded target bound",
-                            )),
-                        };
+                        let checked_targets = self
+                            .store
+                            .database
+                            .call(move |db| {
+                                if selection.preview_marker.is_some() {
+                                    Ok(crate::deletion::guarded_targets(db, &selection)
+                                        .map_err(crate::storage::StorageError::from)?
+                                        .unwrap_or_default())
+                                } else {
+                                    crate::deletion::actual_delete_targets(db, &selection)
+                                }
+                            })
+                            .await
+                            .map_err(storage_error)?;
                         let mut guards = Vec::new();
                         for thread in &checked_targets {
                             let boundary = self.boundary(thread).await;
@@ -1220,7 +1234,9 @@ impl Control {
                         }
                         {
                             let active = self.scheduled_active.lock().unwrap_or_else(|poison| poison.into_inner());
-                            if checked_targets.iter().any(|thread| active.values().any(|owner| owner == thread)) {
+                            if checked_targets.iter().any(|thread| {
+                                active.values().any(|entry| entry.launched && &entry.thread_id == thread)
+                            }) {
                                 return Err(ApiError::new(
                                     ErrorCode::InvalidState,
                                     "A scheduled shell is active for this Thread; wait until it finishes before deleting",

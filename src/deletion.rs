@@ -3,7 +3,10 @@ pub(crate) mod observation;
 use rusqlite::{Connection, OptionalExtension};
 use serde_json::{Value, json};
 
-use crate::protocol::{ApiError, ErrorCode, ThreadDeleteArgs};
+use crate::{
+    protocol::{ApiError, ErrorCode, ThreadDeleteArgs},
+    storage::StorageError,
+};
 
 pub(crate) const MAX_PREVIEW_THREADS: u32 = observation::THREAD_LIMIT as u32 + 1;
 
@@ -42,6 +45,44 @@ pub(crate) fn guarded_targets(
             }
         }
     }
+}
+
+pub(crate) fn actual_delete_targets(
+    db: &Connection,
+    args: &ThreadDeleteArgs,
+) -> Result<Vec<String>, StorageError> {
+    let sql = if args.descendants {
+        "WITH RECURSIVE targets(id) AS (SELECT id FROM thread WHERE id=?1 AND deleted_at IS NULL UNION SELECT child.id FROM thread child JOIN targets parent ON child.parent_thread_id=parent.id WHERE child.deleted_at IS NULL) SELECT id FROM targets ORDER BY id"
+    } else {
+        "SELECT id FROM thread WHERE id=?1 AND deleted_at IS NULL"
+    };
+    Ok(db
+        .prepare(sql)?
+        .query_map([&args.thread_id], |row| row.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+pub(crate) fn active_delete_targets(
+    db: &Connection,
+    args: &ThreadDeleteArgs,
+    active_threads: &[String],
+) -> Result<Vec<String>, StorageError> {
+    if active_threads.is_empty() {
+        return Ok(Vec::new());
+    }
+    let encoded =
+        serde_json::to_string(active_threads).expect("bounded owner schedule IDs serialize");
+    let sql = if args.descendants {
+        "WITH RECURSIVE targets(id) AS (SELECT id FROM thread WHERE id=?1 AND deleted_at IS NULL UNION SELECT child.id FROM thread child JOIN targets parent ON child.parent_thread_id=parent.id WHERE child.deleted_at IS NULL) SELECT DISTINCT targets.id FROM targets JOIN json_each(?2) active ON active.value=targets.id ORDER BY targets.id"
+    } else {
+        "SELECT thread.id FROM thread JOIN json_each(?2) active ON active.value=thread.id WHERE thread.id=?1 AND thread.deleted_at IS NULL"
+    };
+    Ok(db
+        .prepare(sql)?
+        .query_map(rusqlite::params![args.thread_id, encoded], |row| {
+            row.get::<_, String>(0)
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
 // Match delete_thread's subtree: deleted Threads do not bridge traversal.

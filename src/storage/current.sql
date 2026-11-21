@@ -784,7 +784,7 @@ CREATE TABLE scheduled_command_result(
  schedule_id TEXT PRIMARY KEY NOT NULL REFERENCES scheduled_command(id) ON DELETE CASCADE,
  scheduled_at INTEGER NOT NULL CHECK(scheduled_at>=0),
  finished_at INTEGER NOT NULL CHECK(finished_at>=0),
- status TEXT NOT NULL CHECK(status IN ('finished','overlap_skipped','launch_failed')),
+ status TEXT NOT NULL CHECK(status IN ('finished','overlap_skipped','launch_failed','timed_out')),
  exit_code INTEGER,
  output_tail TEXT CHECK(output_tail IS NULL OR length(output_tail)<=4096),
  output_truncated INTEGER NOT NULL DEFAULT 0 CHECK(output_truncated IN (0,1))

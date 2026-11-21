@@ -601,7 +601,7 @@ and font and report whether this option helps.
 
 A running owner can keep a small persistent schedule of shell-text commands:
 
-Before adding schedules, configure a positive measured `schedule.max_sleep_seconds` with `shellboy config get` followed by `shellboy config set --expected-hash HASH --set schedule.max_sleep_seconds=SECONDS`. It hot-reloads and caps wall-clock recheck delay. No shipped default is chosen until the required energy measurements are complete.
+The owner rechecks its wall clock at most 60 seconds after a timer wake. This uses no periodic I/O; with no schedules the timer is idle and waits for a schedule change. On macOS the monotonic timer does not advance during system sleep, so the cap bounds lateness after wake. Cron times use the owner’s local time. With the pinned croner implementation, a nonexistent spring-forward match moves to the first valid local time after the gap. For a daily fixed-time match in a fall-back fold, croner skips the repeated hour and advances to the next matching local day. Each command runs for at most one hour; an expired run is stopped through the shared shell handle and listed as `timed_out` with no exit code and its actual finish time. Expiry releases the schedule so later occurrences can run. A due command waits for an ordinary edit of its Thread and rechecks the Thread before starting; the edit does not discard the occurrence.
 
 ```sh
 shellboy schedule add --thread THREAD_ID --cron '*/15 * * * *' -- 'if [ -f alert.flag ]; then shellboy message send --thread "$SHELLBOY_THREAD_ID" --text "The scheduled check found an alert"; fi'

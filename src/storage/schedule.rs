@@ -48,54 +48,54 @@ pub async fn next_deadline(db: &DbWorker) -> Result<Option<i64>, StorageError> {
     }).await
 }
 
-/// Query one candidate, calculate recurrence outside SQLite, then CAS-advance before launch.
+/// Select the next due row and advance it in one owner-local transaction.
 pub async fn advance_due(db: &DbWorker, now: i64) -> Result<Option<DueSchedule>, StorageError> {
-    let candidate = db.call(move |c| {
-        c.query_row(
-            "SELECT id,thread_id,command,cwd,cron_expression,next_at FROM scheduled_command WHERE next_at IS NOT NULL AND next_at<=?1 ORDER BY next_at,id LIMIT 1",
-            [now],
-            |r| Ok((
-                r.get::<_, String>(0)?, r.get::<_, String>(1)?,
-                r.get::<_, String>(2)?, r.get::<_, String>(3)?,
-                r.get::<_, Option<String>>(4)?, r.get::<_, i64>(5)?,
-            )),
-        ).optional().map_err(StorageError::from)
-    }).await?;
-    let Some((id, thread_id, command, cwd, cron, scheduled_at)) = candidate else {
-        return Ok(None);
-    };
-    let uuid = Uuid::parse_str(&id)
-        .map_err(|e| StorageError::Schema(format!("invalid schedule id: {e}")))?;
-    let (next, occurrence_at, calculation_error) = if let Some(expression) = cron.as_deref() {
-        let facts = expression.parse::<croner::Cron>().ok().and_then(|parsed| {
-            let local = chrono::DateTime::<chrono::Utc>::from_timestamp(now, 0)?
-                .with_timezone(&chrono::Local);
-            let latest = parsed.find_previous_occurrence(&local, true).ok()?;
-            let future = parsed.find_next_occurrence(&local, false).ok()?;
-            Some((future.timestamp(), latest.timestamp().max(scheduled_at)))
-        });
-        match facts {
-            Some((future, latest)) => (Some(future), Some(latest), None),
-            None => (
-                None,
-                None,
-                Some("Scheduler: cannot calculate next cron occurrence".to_string()),
-            ),
-        }
-    } else {
-        (None, Some(scheduled_at), None)
-    };
-    let result_at = occurrence_at.unwrap_or(scheduled_at);
     db.call(move |c| {
         let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let changed = tx.execute(
-            "UPDATE scheduled_command SET next_at=?1 WHERE id=?2 AND next_at=?3",
-            params![next, id, scheduled_at],
-        )?;
-        if changed == 0 {
-            tx.rollback()?;
+        let candidate = tx
+            .query_row(
+                "SELECT id,thread_id,command,cwd,cron_expression,next_at FROM scheduled_command WHERE next_at IS NOT NULL AND next_at<=?1 ORDER BY next_at,id LIMIT 1",
+                [now],
+                |r| Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, String>(3)?,
+                    r.get::<_, Option<String>>(4)?,
+                    r.get::<_, i64>(5)?,
+                )),
+            )
+            .optional()?;
+        let Some((id, thread_id, command, cwd, cron, scheduled_at)) = candidate else {
+            tx.commit()?;
             return Ok(None);
-        }
+        };
+        let uuid = Uuid::parse_str(&id)
+            .map_err(|error| StorageError::Schema(format!("invalid schedule id: {error}")))?;
+        let (next, occurrence_at, calculation_error) = if let Some(expression) = cron.as_deref() {
+            let facts = expression.parse::<croner::Cron>().ok().and_then(|parsed| {
+                let local = chrono::DateTime::<chrono::Utc>::from_timestamp(now, 0)?
+                    .with_timezone(&chrono::Local);
+                let latest = parsed.find_previous_occurrence(&local, true).ok()?;
+                let future = parsed.find_next_occurrence(&local, false).ok()?;
+                Some((future.timestamp(), latest.timestamp().max(scheduled_at)))
+            });
+            match facts {
+                Some((future, latest)) => (Some(future), Some(latest), None),
+                None => (
+                    None,
+                    None,
+                    Some("Scheduler: cannot calculate next cron occurrence".to_string()),
+                ),
+            }
+        } else {
+            (None, Some(scheduled_at), None)
+        };
+        let result_at = occurrence_at.unwrap_or(scheduled_at);
+        tx.execute(
+            "UPDATE scheduled_command SET next_at=?1 WHERE id=?2",
+            params![next, id],
+        )?;
         if let Some(diagnostic) = calculation_error {
             tx.execute(
                 "INSERT INTO scheduled_command_result(schedule_id,scheduled_at,finished_at,status,output_tail) VALUES(?1,?2,?3,'launch_failed',?4) ON CONFLICT(schedule_id) DO UPDATE SET scheduled_at=excluded.scheduled_at,finished_at=excluded.finished_at,status='launch_failed',exit_code=NULL,output_tail=excluded.output_tail,output_truncated=0",
@@ -105,8 +105,16 @@ pub async fn advance_due(db: &DbWorker, now: i64) -> Result<Option<DueSchedule>,
             return Ok(None);
         }
         tx.commit()?;
-        Ok(Some(DueSchedule { id: uuid, thread_id, command, cwd, cron_expression: cron, scheduled_at: result_at }))
-    }).await
+        Ok(Some(DueSchedule {
+            id: uuid,
+            thread_id,
+            command,
+            cwd,
+            cron_expression: cron,
+            scheduled_at: result_at,
+        }))
+    })
+    .await
 }
 
 pub async fn finish(
@@ -116,7 +124,7 @@ pub async fn finish(
 ) -> Result<(), StorageError> {
     if !matches!(
         result.status.as_str(),
-        "finished" | "overlap_skipped" | "launch_failed"
+        "finished" | "overlap_skipped" | "launch_failed" | "timed_out"
     ) || result
         .output_tail
         .as_ref()

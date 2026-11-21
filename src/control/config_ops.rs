@@ -72,37 +72,6 @@ impl Control {
                 )
                 .details(json!({"written":false}))
             })?;
-        if args
-            .changes
-            .iter()
-            .any(|change| change.field == "schedule.max_sleep_seconds" && change.value.is_none())
-        {
-            let count = self
-                .store
-                .database
-                .call(|db| {
-                    Ok(
-                        db.query_row("SELECT count(*) FROM scheduled_command", [], |row| {
-                            row.get::<_, i64>(0)
-                        })?,
-                    )
-                })
-                .await
-                .map_err(storage_error)?;
-            if count > 0 {
-                return Err(ApiError::new(
-                    ErrorCode::InvalidState,
-                    "schedule.max_sleep_seconds cannot be unset while schedules exist",
-                ));
-            }
-        }
-        let schedule_bound = args
-            .changes
-            .iter()
-            .find(|change| change.field == "schedule.max_sleep_seconds")
-            .map(|change| change.value.as_ref().and_then(serde_json::Value::as_u64));
-        let max_sleep = self.schedule_max_sleep_seconds.clone();
-        let schedule_changed = self.changed.clone();
         let config = self.store.config.clone();
         let clients = self.store.clients.clone();
         let applied = self
@@ -112,14 +81,13 @@ impl Control {
                 // A timed-out caller stops waiting, but the next change must not start
                 // until this one has really ended, so the closure owns the guard.
                 let _guard = guard;
-                let result=crate::config_edit::apply_live(&path, &args.expected_hash, &args.changes, &config, &clients);
-                if let (Ok(applied), Some(bound)) = (&result, schedule_bound)
-                    && applied.written
-                {
-                    max_sleep.store(bound.unwrap_or(0), Ordering::SeqCst);
-                    schedule_changed.notify_waiters();
-                }
-                result
+                crate::config_edit::apply_live(
+                    &path,
+                    &args.expected_hash,
+                    &args.changes,
+                    &config,
+                    &clients,
+                )
             })
             .await
             .map_err(|error| {

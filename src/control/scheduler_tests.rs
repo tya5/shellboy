@@ -2,9 +2,8 @@ use super::*;
 use crate::{
     app::DataOwner,
     protocol::{
-        Command, ConfigChange, ConfigGetArgs, ConfigSetArgs, Request, ScheduleAddArgs,
-        ScheduleListArgs, ThreadArchiveArgs, ThreadCreateArgs, ThreadDeleteArgs, ThreadForkArgs,
-        ThreadRewindArgs,
+        Command, Request, ScheduleAddArgs, ScheduleListArgs, ThreadArchiveArgs, ThreadCreateArgs,
+        ThreadDeleteArgs, ThreadForkArgs, ThreadRewindArgs,
     },
 };
 use chrono::{Datelike, TimeZone};
@@ -18,7 +17,7 @@ fn current_request(control: &Control, operation: impl AsRef<str>, command: Comma
 }
 
 fn scheduler_thread_config() -> &'static str {
-    "default_connection='fixture'\ndefault_model='synthetic'\n[connections.fixture]\nbase_url='http://127.0.0.1:9/v1'\n[schedule]\nmax_sleep_seconds=300\n"
+    "default_connection='fixture'\ndefault_model='synthetic'\n[connections.fixture]\nbase_url='http://127.0.0.1:9/v1'\n"
 }
 
 async fn create_test_thread(
@@ -45,65 +44,6 @@ async fn create_test_thread(
         .as_str()
         .unwrap()
         .to_owned()
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn config_set_updates_bound_and_notifies_prearmed_waiter() {
-    crate::test_watchdog::watchdog(
-        "config.set saves scheduler bound and notifies prearmed waiter",
-        async {
-            let root = tempfile::tempdir().unwrap();
-            let config_path = root.path().join("config.toml");
-            std::fs::write(&config_path, "[schedule]\nmax_sleep_seconds=300\n").unwrap();
-            let owner = DataOwner::start(
-                Some(config_path),
-                Some(root.path().join("data")),
-                root.path().into(),
-            )
-            .await
-            .unwrap();
-            let control = Control::new(&owner, root.path().into());
-            let got = control
-                .request(Request::new(
-                    "config-get-scheduler-bound",
-                    Command::ConfigGet(ConfigGetArgs {}),
-                ))
-                .await;
-            assert!(got.ok, "{got:?}");
-            let expected_hash = got.result.unwrap()["file"]["content_hash"]
-                .as_str()
-                .unwrap()
-                .to_owned();
-
-            // Call the production config worker directly to exclude RequestGuard's generic wake.
-            let notified = control.changed.notified();
-            tokio::pin!(notified);
-            notified.as_mut().enable();
-            let applied = control
-                .config_set(
-                    ConfigSetArgs {
-                        expected_hash,
-                        changes: vec![ConfigChange {
-                            field: "schedule.max_sleep_seconds".into(),
-                            value: Some(serde_json::json!(37)),
-                        }],
-                    },
-                    None,
-                )
-                .await
-                .unwrap();
-            assert_eq!(applied["written"], true);
-            notified.await;
-            assert_eq!(
-                control.schedule_max_sleep_seconds.load(Ordering::SeqCst),
-                37
-            );
-            control.shutdown().await.unwrap();
-            owner.shutdown().await.unwrap();
-        },
-    )
-    .await
-    .unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -264,9 +204,9 @@ async fn scheduler_marks_shell_producer_incompleteness_as_truncated() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn busy_thread_admission_retires_one_due_row_and_dispatches_another() {
+async fn busy_thread_admission_waits_then_runs_due_row_and_dispatches_another() {
     crate::test_watchdog::watchdog(
-        "busy Thread admission retires without a child and dispatcher continues",
+        "ordinary Thread edit delays, but does not drop, a due scheduled command",
         async {
             let root = tempfile::tempdir().unwrap();
             let config_path = root.path().join("config.toml");
@@ -279,60 +219,78 @@ async fn busy_thread_admission_retires_one_due_row_and_dispatches_another() {
             .await
             .unwrap();
             let control = Control::new(&owner, root.path().into());
-            let busy_thread = create_test_thread(&control, root.path(), "create-busy-thread").await;
-            let free_thread = create_test_thread(&control, root.path(), "create-free-thread").await;
-            let no_child = root.path().join("must-not-run");
-            let future_at = chrono::Utc::now().timestamp() + 86_400;
-            let blocked = control
+            let delayed_root =
+                create_test_thread(&control, root.path(), "create-delayed-root").await;
+            let delayed_response = control
                 .request(current_request(
                     &control,
-                    "blocked-schedule-add",
+                    "create-delayed-child",
+                    Command::ThreadCreate(ThreadCreateArgs {
+                        agents: None,
+                        connection: None,
+                        cwd: Some(root.path().to_string_lossy().into_owned()),
+                        model: None,
+                        effort: None,
+                        parent_id: Some(delayed_root.clone()),
+                    }),
+                ))
+                .await;
+            assert!(delayed_response.ok, "{delayed_response:?}");
+            let delayed_thread = delayed_response.result.unwrap()["thread_id"]
+                .as_str()
+                .unwrap()
+                .to_owned();
+            let free_thread = create_test_thread(&control, root.path(), "create-free-thread").await;
+            let delayed_child = root.path().join("delayed-child-ran");
+            let free_child = root.path().join("free-child-ran");
+            let future_at = chrono::Utc::now().timestamp() + 86_400;
+            let delayed = control
+                .request(current_request(
+                    &control,
+                    "delayed-schedule-add",
                     Command::ScheduleAdd(ScheduleAddArgs {
-                        thread_id: Some(busy_thread.clone()),
-                        command: format!("touch '{}'", no_child.display()),
+                        thread_id: Some(delayed_thread.clone()),
+                        command: format!("touch '{}'", delayed_child.display()),
                         cwd: None,
                         cron: None,
                         at: Some(future_at),
                     }),
                 ))
                 .await;
-            assert!(blocked.ok, "{blocked:?}");
-            let blocked_id = blocked.result.unwrap()["schedule_id"]
+            assert!(delayed.ok, "{delayed:?}");
+            let delayed_id = delayed.result.unwrap()["schedule_id"]
                 .as_str()
                 .unwrap()
                 .to_owned();
-            let did_run = root.path().join("other-ran");
-            let other = control
+            let free = control
                 .request(current_request(
                     &control,
                     "free-schedule-add",
                     Command::ScheduleAdd(ScheduleAddArgs {
                         thread_id: Some(free_thread.clone()),
-                        command: format!("touch '{}'", did_run.display()),
+                        command: format!("touch '{}'", free_child.display()),
                         cwd: None,
                         cron: None,
                         at: Some(future_at),
                     }),
                 ))
                 .await;
-            assert!(other.ok, "{other:?}");
-            let other_id = other.result.unwrap()["schedule_id"]
+            assert!(free.ok, "{free:?}");
+            let free_id = free.result.unwrap()["schedule_id"]
                 .as_str()
                 .unwrap()
                 .to_owned();
-            let boundary = control.boundary(&busy_thread).await;
+            let boundary = control.boundary(&delayed_thread).await;
             let held = boundary.lock().await;
             let due_at = chrono::Utc::now().timestamp() - 1;
-            let busy_id = blocked_id.clone();
-            let free_id = other_id.clone();
-            // Synthetic cursor injection deterministically makes future registrations due;
-            // this exercises dispatcher settlement, not the original one-shot timestamp.
+            let delayed_id_for_db = delayed_id.clone();
+            let free_id_for_db = free_id.clone();
             owner
                 .db
                 .call(move |db| {
                     db.execute(
                         "UPDATE scheduled_command SET next_at=?1 WHERE id IN (?2,?3)",
-                        rusqlite::params![due_at, busy_id, free_id],
+                        rusqlite::params![due_at, delayed_id_for_db, free_id_for_db],
                     )?;
                     Ok(())
                 })
@@ -340,57 +298,204 @@ async fn busy_thread_admission_retires_one_due_row_and_dispatches_another() {
                 .unwrap();
             control.changed.notify_waiters();
             loop {
-                let busy_list = control
+                let response = control
                     .request(Request::new(
-                        "busy-thread-list",
-                        Command::ScheduleList(ScheduleListArgs {
-                            thread_id: Some(busy_thread.clone()),
-                        }),
-                    ))
-                    .await;
-                let free_list = control
-                    .request(Request::new(
-                        "free-thread-list",
+                        "list-free-delayed-schedules",
                         Command::ScheduleList(ScheduleListArgs {
                             thread_id: Some(free_thread.clone()),
                         }),
                     ))
                     .await;
-                assert!(busy_list.ok && free_list.ok, "{busy_list:?} {free_list:?}");
-                let busy_rows = busy_list.result.unwrap()["schedules"]
+                assert!(response.ok, "{response:?}");
+                let rows = response.result.unwrap()["schedules"]
                     .as_array()
                     .unwrap()
                     .clone();
-                let free_rows = free_list.result.unwrap()["schedules"]
-                    .as_array()
-                    .unwrap()
-                    .clone();
-                let busy_settled = busy_rows.iter().any(|row| {
-                    row["schedule_id"] == blocked_id
-                        && row["next_at"].is_null()
-                        && row["latest"]["status"] == "launch_failed"
-                        && row["latest"]["scheduler_diagnostic"]
-                            == "Scheduler: Thread admission busy; command not started"
-                        && row["latest"]["output_tail"].is_null()
-                        && row["latest"]["exit_code"].is_null()
-                        && row["latest"]["scheduled_at"] == due_at
-                });
-                let free_settled = free_rows.iter().any(|row| {
-                    row["schedule_id"] == other_id
-                        && row["next_at"].is_null()
+                if rows.iter().any(|row| {
+                    row["schedule_id"] == free_id
                         && row["latest"]["status"] == "finished"
                         && row["latest"]["scheduled_at"] == due_at
-                });
-                if busy_settled && free_settled {
+                }) {
                     break;
                 }
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
+            assert!(tokio::fs::try_exists(&free_child).await.unwrap());
             assert!(
-                !tokio::fs::try_exists(&no_child).await.unwrap(),
-                "busy-boundary occurrence must not launch a child"
+                !tokio::fs::try_exists(&delayed_child).await.unwrap(),
+                "ordinary Thread edit should delay the scheduled shell, not launch it concurrently"
+            );
+            let preview = control
+                .request(Request::new(
+                    "preview-delayed-schedule",
+                    Command::ThreadDeletePreview(ThreadDeleteArgs {
+                        thread_id: delayed_root.clone(),
+                        descendants: true,
+                        preview_marker: None,
+                    }),
+                ))
+                .await;
+            assert!(preview.ok, "{preview:?}");
+            assert_eq!(
+                preview.result.unwrap()["blockers"]["scheduled_shell_count"],
+                0,
+                "queued admission is not an active shell and must not block deletion",
             );
             drop(held);
+            loop {
+                let response = control
+                    .request(Request::new(
+                        "list-delayed-schedule-result",
+                        Command::ScheduleList(ScheduleListArgs {
+                            thread_id: Some(delayed_thread.clone()),
+                        }),
+                    ))
+                    .await;
+                assert!(response.ok, "{response:?}");
+                let rows = response.result.unwrap()["schedules"]
+                    .as_array()
+                    .unwrap()
+                    .clone();
+                if rows.iter().any(|row| {
+                    row["schedule_id"] == delayed_id
+                        && row["latest"]["status"] == "finished"
+                        && row["latest"]["scheduled_at"] == due_at
+                        && row["latest"]["exit_code"] == 0
+                }) {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            assert!(tokio::fs::try_exists(&delayed_child).await.unwrap());
+            control.shutdown().await.unwrap();
+            owner.shutdown().await.unwrap();
+        },
+    )
+    .await
+    .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn same_schedule_overlap_is_skipped_while_shell_is_active() {
+    crate::test_watchdog::watchdog(
+        "same-ID overlap uses the single owner active registry",
+        async {
+            let root = tempfile::tempdir().unwrap();
+            let config_path = root.path().join("config.toml");
+            std::fs::write(&config_path, scheduler_thread_config()).unwrap();
+            let owner = DataOwner::start(
+                Some(config_path),
+                Some(root.path().join("data")),
+                root.path().into(),
+            )
+            .await
+            .unwrap();
+            let control = Control::new(&owner, root.path().into());
+            let thread_id = create_test_thread(&control, root.path(), "overlap-thread").await;
+            let started = root.path().join("overlap-started");
+            let release = root.path().join("overlap-release");
+            let executions = root.path().join("overlap-executions");
+            let added = control.request(current_request(
+            &control,
+            "overlap-schedule-add",
+            Command::ScheduleAdd(ScheduleAddArgs {
+                thread_id: Some(thread_id.clone()),
+                command: format!(
+                    "printf x >> '{}'; touch '{}'; while [ ! -e '{}' ]; do sleep 0.01; done",
+                    executions.display(), started.display(), release.display()
+                ),
+                cwd: None,
+                cron: Some("* * * * *".into()),
+                at: None,
+            }),
+        )).await;
+            assert!(added.ok, "{added:?}");
+            let schedule_id = added.result.unwrap()["schedule_id"]
+                .as_str()
+                .unwrap()
+                .to_owned();
+            let first_due = chrono::Utc::now().timestamp() - 1;
+            let id_for_db = schedule_id.clone();
+            owner
+                .db
+                .call(move |db| {
+                    db.execute(
+                        "UPDATE scheduled_command SET next_at=?1 WHERE id=?2",
+                        rusqlite::params![first_due, id_for_db],
+                    )?;
+                    Ok(())
+                })
+                .await
+                .unwrap();
+            control.changed.notify_waiters();
+            loop {
+                if tokio::fs::try_exists(&started).await.unwrap() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            let overlap_due = chrono::Utc::now().timestamp() + 1;
+            let id_for_db = schedule_id.clone();
+            owner
+                .db
+                .call(move |db| {
+                    db.execute(
+                        "UPDATE scheduled_command SET next_at=?1 WHERE id=?2",
+                        rusqlite::params![overlap_due, id_for_db],
+                    )?;
+                    Ok(())
+                })
+                .await
+                .unwrap();
+            control.changed.notify_waiters();
+            loop {
+                let listed = control
+                    .request(Request::new(
+                        "overlap-schedule-list",
+                        Command::ScheduleList(ScheduleListArgs {
+                            thread_id: Some(thread_id.clone()),
+                        }),
+                    ))
+                    .await;
+                assert!(listed.ok, "{listed:?}");
+                let rows = listed.result.unwrap()["schedules"]
+                    .as_array()
+                    .unwrap()
+                    .clone();
+                if rows.iter().any(|row| {
+                    row["schedule_id"] == schedule_id
+                        && row["latest"]["status"] == "overlap_skipped"
+                        && row["latest"]["scheduled_at"] == overlap_due
+                        && row["latest"]["exit_code"].is_null()
+                }) {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            assert_eq!(tokio::fs::read_to_string(&executions).await.unwrap(), "x");
+            std::fs::write(&release, "").unwrap();
+            loop {
+                let listed = control
+                    .request(Request::new(
+                        "overlap-final-list",
+                        Command::ScheduleList(ScheduleListArgs {
+                            thread_id: Some(thread_id.clone()),
+                        }),
+                    ))
+                    .await;
+                let rows = listed.result.unwrap()["schedules"]
+                    .as_array()
+                    .unwrap()
+                    .clone();
+                if rows.iter().any(|row| {
+                    row["schedule_id"] == schedule_id
+                        && row["latest"]["status"] == "overlap_skipped"
+                }) {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            assert_eq!(tokio::fs::read_to_string(&executions).await.unwrap(), "x");
             control.shutdown().await.unwrap();
             owner.shutdown().await.unwrap();
         },
@@ -448,13 +553,92 @@ async fn owner_schedule_cap_is_atomic_across_threads_and_scoped_list_is_complete
         assert!(refilled.ok,"{refilled:?}");
         let preview=control.request(Request::new("preview-cascade-cap",Command::ThreadDeletePreview(ThreadDeleteArgs{thread_id:first.clone(),descendants:false,preview_marker:None}))).await;
         assert!(preview.ok,"{preview:?}");
-        let marker=serde_json::from_value(preview.result.unwrap()["preview_marker"].clone()).unwrap();
+        let preview_result = preview.result.unwrap();
+        assert_eq!(preview_result["scheduled_command_count"], first_ids.len() - 1);
+        let marker=serde_json::from_value(preview_result["preview_marker"].clone()).unwrap();
         let deleted=control.request(current_request(&control, "delete-frees-owner-slots",Command::ThreadDelete(ThreadDeleteArgs{thread_id:first,descendants:false,preview_marker:Some(marker)}))).await;
         assert!(deleted.ok,"{deleted:?}");
         let count=owner.db.call(|db|Ok(db.query_row("SELECT count(*) FROM scheduled_command",[],|row|row.get::<_,i64>(0))?)).await.unwrap();
         assert!(count<16,"Thread delete cascade must release owner-wide registrations: {count}");
         let after_cascade=control.request(current_request(&control, "cascade-refills-owner-cap",Command::ScheduleAdd(ScheduleAddArgs{thread_id:Some(second),command:"true".into(),cwd:None,cron:None,at:Some(at)}))).await;
         assert!(after_cascade.ok,"Thread cascade must free owner-wide registration capacity: {after_cascade:?}");
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+    }).await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn bounded_delete_preview_stays_partial_and_unmarked_delete_keeps_full_scope() {
+    crate::test_watchdog::watchdog("delete preview retains partial scope while unmarked delete uses canonical targets", async {
+        let root = tempfile::tempdir().unwrap();
+        let config_path = root.path().join("config.toml");
+        std::fs::write(&config_path, scheduler_thread_config()).unwrap();
+        let owner = DataOwner::start(
+            Some(config_path),
+            Some(root.path().join("data")),
+            root.path().into(),
+        ).await.unwrap();
+        let control = Control::new(&owner, root.path().into());
+        let thread_id = create_test_thread(&control, root.path(), "large-delete-root").await;
+        let schedule = control.request(current_request(
+            &control,
+            "schedule-on-large-delete-root",
+            Command::ScheduleAdd(ScheduleAddArgs {
+                thread_id: Some(thread_id.clone()),
+                command: "true".into(),
+                cwd: None,
+                cron: None,
+                at: Some(chrono::Utc::now().timestamp() + 86_400),
+            }),
+        )).await;
+        assert!(schedule.ok, "{schedule:?}");
+        owner.db.call({
+            let thread_id = thread_id.clone();
+            move |db| {
+                for index in 0..257 {
+                    db.execute(
+                        "INSERT INTO thread(id,parent_thread_id,cwd,agents_path,profile_id,model_id,updated_at) VALUES(?1,?2,'/','agents','profile','model','now')",
+                        rusqlite::params![format!("delete-child-{index:03}"), thread_id],
+                    )?;
+                }
+                Ok(())
+            }
+        }).await.unwrap();
+        let preview = control.request(Request::new(
+            "preview-large-delete-scope",
+            Command::ThreadDeletePreview(ThreadDeleteArgs {
+                thread_id: thread_id.clone(),
+                descendants: true,
+                preview_marker: None,
+            }),
+        )).await;
+        assert!(preview.ok, "bounded preview must remain a response: {preview:?}");
+        let preview = preview.result.unwrap();
+        assert_eq!(preview["preview_marker"], serde_json::Value::Null);
+        assert_eq!(preview["preview_marker_unavailable_reason"], "input_limit");
+        assert_eq!(preview["scheduled_command_count"], 1);
+        let deleted = control.request(current_request(
+            &control,
+            "unmarked-delete-keeps-canonical-full-target-scope",
+            Command::ThreadDelete(ThreadDeleteArgs {
+                thread_id: thread_id.clone(),
+                descendants: true,
+                preview_marker: None,
+            }),
+        )).await;
+        assert!(deleted.ok, "unmarked deletion must retain canonical unbounded scope: {deleted:?}");
+        let remaining = owner.db.call(move |db| Ok(db.query_row(
+            "SELECT count(*) FROM thread WHERE deleted_at IS NULL AND (id=?1 OR parent_thread_id=?1)",
+            [&thread_id],
+            |row| row.get::<_, i64>(0),
+        )?)).await.unwrap();
+        assert_eq!(remaining, 0);
+        let schedules_remaining = owner.db.call(|db| Ok(db.query_row(
+            "SELECT count(*) FROM scheduled_command",
+            [],
+            |row| row.get::<_, i64>(0),
+        )?)).await.unwrap();
+        assert_eq!(schedules_remaining, 0);
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
     }).await.unwrap();
