@@ -430,7 +430,11 @@ const MEANINGS: &[Meaning] = &[
     (
         OperationId::AttachmentList,
         &["attachment", "list"],
-        &[("thread_id", FieldId::Thread)],
+        &[
+            ("thread_id", FieldId::Thread),
+            ("limit", FieldId::Limit),
+            ("cursor", FieldId::Cursor),
+        ],
         None,
     ),
     (
