@@ -392,14 +392,8 @@ impl Fixture {
         );
     }
 
-    async fn no_more_requests(&self) {
-        let attempts = self.attempts().await;
-        let request_count = fixture_request_log_lines(self);
-        assert_eq!(
-            request_count,
-            attempts.len(),
-            "each admitted model attempt has one dispatched request and no extra retry was sent"
-        );
+    async fn no_more_requests(&mut self) {
+        assert!(self.requests.try_recv().is_err(), "unexpected HTTP replay");
     }
 
     #[track_caller]
