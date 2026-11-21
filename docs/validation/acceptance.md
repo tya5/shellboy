@@ -12223,3 +12223,26 @@ exact sleep-bound value; it does not establish timer recomputation or a
 config-specific dropped-caller timeout. Other lifecycle witnesses remain
 unrun: natural downtime cursor resumption, empty-schedule idle/no-wake, clock
 and sleep changes, independent child OS-group cleanup, DST and power measurement.
+
+
+## Core #281 single-owner scheduler refactor (0cf2781eea9e548f85db1ea02be39d77bbe36953; validation partial)
+
+The second review's four findings and the user's follow-up structure decision were
+addressed on source commit `0cf2781eea9e548f85db1ea02be39d77bbe36953` (parent `9f0d85d06cc90df8478921e666f4eb2736d0cb9d`).
+The scheduler task now owns pending due occurrences and active schedule IDs locally;
+Control shares only a one-request bounded channel and worker handle. Schedule removal,
+Thread deletion and deletion-preview blockers are handled in the same event loop as
+launches. A run is a child task whose one-hour completion timeout is separate from
+output draining. Child/dispatcher storage failures return through a typed path; the
+bounded observation reports the scheduled-shell blocker as unknown on incomplete scope.
+The canonical unmarked-delete target query is shared. No new table, persisted state,
+dependency or shell-admission control was introduced.
+
+On this exact source, `cargo fmt --all`, `cargo check --tests --locked`,
+`cargo test --locked --lib control::scheduler` (14 passed) and
+`cargo test --locked --lib deletion::observation` (10 passed) succeeded using pinned
+Rust 1.99.1 through `rust-slot`. Focused test linking emitted a nonfatal compact-unwind
+warning. No full local suite or heavy native qualification was run. Historical CI
+RED `44860038102` belongs to parent SHA `9f0d85d06cc90df8478921e666f4eb2736d0cb9d`
+and remains source-bound; it is not carried forward. CI on `0cf2781eea9e548f85db1ea02be39d77bbe36953`, independent
+review, and all lifecycle/product cases remain pending.

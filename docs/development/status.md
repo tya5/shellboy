@@ -1,14 +1,33 @@
 # Development status
 
-## Core #281 minimal scheduler (current source; partial validation)
+## Core #281 single-owner scheduler (current source; CI pending)
 
-Reviewed source base: `8f0c3f89c28de861f68372191cac60ecca5a8eb2` (tree `dfc564f2cd0d31168726bca82380e8373b59ad2b`), based on landed main `116e82e5965dbc2c736849659f9f48db21788873`. The schema-only commit `55a635917f0ce6d598570bda4d849e1cf6813108` copied the exact version-7 exporter artifact into the tracked schema; it remains byte-identical at 269030 bytes with SHA-256 `c38040af2651290c117fb4aef5f2ea7eb5bebc0fce85ab03ce860698fb9bd5ad`.
+Source commit `0cf2781eea9e548f85db1ea02be39d77bbe36953` on `task/core281-minimal-d8076a6` is based on
+`9f0d85d06cc90df8478921e666f4eb2736d0cb9d`. The current implementation keeps
+all pending due and running schedule state inside the scheduler task. A bounded
+request channel serializes schedule removal, Thread deletion and the bounded
+delete-preview blocker snapshot with launch decisions. Runs are child tasks;
+the one-hour completion timeout and output drain proceed independently, and
+storage errors converge on the existing typed failure path. The shared registry,
+`launched` flag and pre-spawn registration query are absent. Scope otherwise
+remains the accepted minimal #281 path; no new durable state or worker queue is
+introduced.
 
-The accepted implementation scope remains Thread-owned schedule registration/list/removal, one owner-local scheduler timer, shared shell execution, durable latest result, three persisted result states, owner-wide cap 16, and one migration/two tables. The source has synthetic connected-flow, ownership, cap, restart-cursor, shutdown-settlement, fork/rewind-pending-registration and direct config-set bound-update witnesses. The config-set test calls `Control::config_set` directly, arms `Control.changed`, and checks successful write, notification and exact bound 37. It excludes the public RequestGuard wake; it does not prove a config-specific dropped-caller timeout or timer recomputation. These scheduler unit witnesses have not been run.
+On the exact source commit, pinned `cargo fmt --all` and `cargo check --tests
+--locked` passed. Focused `control::scheduler` tests passed 14/14, including a
+pending-due/remove request ordering witness and continuous-output timeout
+control; `deletion::observation` passed 10/10, including incomplete-scope
+blocker unknown. The nonfatal macOS linker compact-unwind warning appeared in
+test builds. No full local suite was run.
 
-On the exact 8f0c3f89 source, guarded parity invocation `65a45857-8bae-4a9c-9a6d-935883f586c3` passed the registered selector with process stage rc 0 and receipt `1 passed, 0 failed, 1437 filtered`. PRE/POST physical path, SHA/tree and cleanliness matched; inherited target was `target-shared`. The same invocation then ran `sh scripts/check.sh`; its Python stage reported 230 tests, 4 failures and 13 errors, so the script stopped before Cargo formatting, Clippy and Rust test stages. The retained guard log is `.local/private-reports/studio-current-20261113/core281-native-8f0c3f89-corrected-20261121-parity.log`; guard terminal exit was 1, unforced, cleanup confirmed. The failures included stale schema49 Python expectations/catalog allowance and an obsolete status-title assertion. The working follow-up explicitly supports schema50, retains schema49 historically, constructs a real schema48 source for the schema49 guard, and removes only the obsolete status-title assertion while preserving document-role checks. The affected non-real-DB Python modules now pass 29/29 on the corrected working tree (see acceptance). This does not rerun or qualify the full standard check; Cargo format, Clippy and Rust test stages remain unverified after the correction.
-
-The config reload assertion is limited to publication from the successful config-save closure; the prior generic `BlockingFiles` retention test is separate composition, not proof of a config-specific timeout. Empty-schedule no-wake, timer recomputation, actual downtime without cursor injection, independent OS child-group cleanup, sleep/clock-change integration, DST and power measurements remain unverified. No CI, release, live activation or product qualification is claimed.
+Historical CI RED `44860038102` is on parent `9f0d85d06cc90df8478921e666f4eb2736d0cb9d`,
+not this source: Windows failed the test's output-queue-saturation assertion,
+Ubuntu failed the active-preview test's scheduler-state race, and macOS passed.
+The structural refactor removes those coupled paths; no result transfers to the
+current SHA. New-source CI/review, full standard/native suite, natural downtime,
+zero-registration no-wake observation, clock/suspend integration and production
+qualification remain pending. No install, release, live activation or qualification
+is claimed.
 
 ## #315 Retry after partial output (owner-policy successor)
 
