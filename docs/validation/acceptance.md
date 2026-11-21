@@ -12184,3 +12184,6 @@ Local verification on the #325 worktree: pinned `cargo fmt`, `cargo check --test
 
 
 The first exact-SHA CI (`44905626185`, SHA `c67c646ac0f0e25533a6b6de75ad3b22dca47141`) exposed test-ratchet updates required for the additional read-only operation and capability, the new `not_found` CLI lookup result, and a legacy tool-repair test using short IDs at CLI boundaries. These tests were updated and pass focused local reruns. The compact-list count selector failed in that full CI run but passed four focused local repetitions; its cause remains unestablished. Do not treat the c67 RED as evidence for a later SHA.
+## Core #326 IPC final frames
+
+Purpose checks cover typed replies for owner-side failures, clean EOF without a reply, typed failure on extra peer input or a peer read error, final-frame lifetime, and accepted replies surviving fatal listener failure. Core checks do not establish Windows named-pipe delivery to Studio; the three exact-pair Windows cases must be verified against the same Core SHA.

@@ -367,12 +367,7 @@ async fn fatal_accept_failure_cleans_endpoint_notifies_once_and_preserves_accept
         assert!(!std::path::Path::new(&fixture.endpoint.address).exists());
         assert!(!fixture.root.path().join("private").exists());
     }
-    assert!(invocation.disconnected.is_cancelled());
-    let error = client.await.unwrap().unwrap_err();
-    assert_eq!(
-        error.details.unwrap()["request_may_have_been_applied"],
-        true
-    );
+    assert!(!invocation.disconnected.is_cancelled());
     // The accepted operation is owned by the request consumer, not the IPC task.
     let db = crate::storage::DbWorker::open(fixture.root.path().join("fixture.db"))
         .await
@@ -388,15 +383,14 @@ async fn fatal_accept_failure_cleans_endpoint_notifies_once_and_preserves_accept
     .await
     .unwrap();
     db.shutdown().await.unwrap();
-    assert!(
-        invocation
-            .reply
-            .send(Response::success(
-                invocation.request.operation_id,
-                serde_json::json!({"saved":true})
-            ))
-            .is_err()
-    );
+    invocation
+        .reply
+        .send(Response::success(
+            invocation.request.operation_id,
+            serde_json::json!({"saved":true}),
+        ))
+        .unwrap();
+    assert!(client.await.unwrap().unwrap().ok);
     assert!(fixture.server.shutdown().await.is_err());
     assert!(
         failure.changed().await.is_err(),

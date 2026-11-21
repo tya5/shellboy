@@ -69,6 +69,56 @@ fn protocol_mismatch(client: u32, owner: u32) -> ApiError {
     }))
 }
 
+enum ConnectionOutcome {
+    Reply(Response<Value>),
+    PeerGone,
+}
+
+fn ipc_failure(mut error: ApiError, stage: &str, reason: &str, unapplied: bool) -> ApiError {
+    let details = error.details.get_or_insert_with(|| serde_json::json!({}));
+    if !details.is_object() {
+        *details = serde_json::json!({"cause_details": details.take()});
+    }
+    let details = details.as_object_mut().expect("IPC failure details object");
+    details.insert("stage".into(), Value::String(stage.into()));
+    details
+        .entry("reason")
+        .or_insert_with(|| Value::String(reason.into()));
+    if unapplied {
+        details.insert("request_may_have_been_applied".into(), Value::Bool(false));
+    }
+    error
+}
+
+fn peer_read_outcome(
+    read: std::io::Result<usize>,
+    operation_id: &str,
+    stage: &str,
+    unapplied: bool,
+) -> ConnectionOutcome {
+    let (error, reason) = match read {
+        Ok(0) => return ConnectionOutcome::PeerGone,
+        Ok(_) => (
+            ApiError::new(
+                ErrorCode::InvalidArgument,
+                "Unexpected bytes after IPC request",
+            ),
+            "unexpected_peer_byte",
+        ),
+        Err(error) => (
+            ApiError::new(
+                ErrorCode::IoFailed,
+                format!("IPC peer read failed: {}", error.kind()),
+            ),
+            "peer_read_error",
+        ),
+    };
+    ConnectionOutcome::Reply(Response::failure(
+        operation_id,
+        ipc_failure(error, stage, reason, unapplied),
+    ))
+}
+
 async fn serve_connection<S: AsyncRead + AsyncWrite + Unpin>(
     mut stream: S,
     instance: String,
@@ -76,8 +126,7 @@ async fn serve_connection<S: AsyncRead + AsyncWrite + Unpin>(
     stop: CancellationToken,
     work: server::WorkAdmission,
 ) -> Result<(), ApiError> {
-    let disconnected = CancellationToken::new();
-    let operation = async {
+    let read_request = async {
         let hello: Hello = tokio::time::timeout(FRAME_READ_TIMEOUT, read_frame(&mut stream))
             .await
             .map_err(|_| endpoint_mismatch())??
@@ -101,66 +150,110 @@ async fn serve_connection<S: AsyncRead + AsyncWrite + Unpin>(
             .await
             .map_err(|_| ApiError::new(ErrorCode::IoFailed, "Request frame read timed out"))??
             .ok_or_else(endpoint_mismatch)?;
-        // Parsing happens before any effect. A decodable frame with an unknown
-        // command/field is answered with its own ID instead of being closed.
-        let request = match Request::decode_frame(frame) {
+        Ok::<_, ApiError>(frame)
+    };
+    let frame = tokio::select! {
+        biased;
+        result = read_request => result?,
+        _ = stop.cancelled() => return Ok(()),
+    };
+    let request = Request::decode_frame(frame);
+    let operation_id = match &request {
+        Ok(request) if !request.operation_id.trim().is_empty() => request.operation_id.clone(),
+        Err((Some(id), _)) => id.clone(),
+        _ => return Err(endpoint_mismatch()),
+    };
+    let disconnected = CancellationToken::new();
+    let _disconnected_guard = disconnected.clone().drop_guard();
+    let reply_completed =
+        matches!(&request, Ok(request) if matches!(request.command, Command::OwnerShutdown(_)))
+            .then(CancellationToken::new);
+    let _reply_completion_guard = reply_completed.clone().map(CancellationToken::drop_guard);
+    let failure = |error, stage, reason, unapplied| {
+        ConnectionOutcome::Reply(Response::failure(
+            operation_id.clone(),
+            ipc_failure(error, stage, reason, unapplied),
+        ))
+    };
+    let stopping = |stage, unapplied| {
+        failure(
+            ApiError::new(ErrorCode::AppNotRunning, "Owner IPC transport is stopping"),
+            stage,
+            "transport_stopping",
+            unapplied,
+        )
+    };
+    let mut byte = [0];
+    let outcome = 'request: {
+        let request = match request {
             Ok(request) => request,
-            Err((Some(operation_id), error)) => {
-                write_frame(
-                    &mut stream,
-                    &Response::<Value>::failure(operation_id, error),
-                )
-                .await?;
-                return Ok(());
-            }
-            Err((None, _)) => return Err(endpoint_mismatch()),
+            Err((_, error)) => break 'request failure(error, "decode", "invalid_request", true),
         };
         if let Err(error) = request.validate() {
-            write_frame(
-                &mut stream,
-                &Response::<Value>::failure(request.operation_id, error),
-            )
-            .await?;
-            return Ok(());
+            break 'request failure(error, "validate", "invalid_request", true);
         }
         let admission = match work.try_acquire(&request.command) {
             Ok(permit) => permit,
-            Err(error) => {
-                write_frame(
-                    &mut stream,
-                    &Response::<Value>::failure(request.operation_id, error),
-                )
-                .await?;
-                return Ok(());
-            }
+            Err(error) => break 'request failure(error, "work_admission", "work_rejected", true),
         };
-        let reply_completed =
-            matches!(request.command, Command::OwnerShutdown(_)).then(CancellationToken::new);
-        let _reply_completion_guard = reply_completed.clone().map(CancellationToken::drop_guard);
         let (reply, receiver) = oneshot::channel();
-        requests
-            .send(Invocation {
-                reply_completed,
-                request,
-                reply,
-                disconnected: disconnected.clone(),
-                admission,
-            })
-            .await
-            .map_err(|_| ApiError::new(ErrorCode::AppNotRunning, "Owner is shutting down"))?;
-        let mut byte = [0u8; 1];
+        let invocation = Invocation {
+            reply_completed,
+            request,
+            reply,
+            disconnected: disconnected.clone(),
+            admission,
+        };
         tokio::select! {
-            result=receiver=>{
-                let response=result.map_err(|_|ApiError::new(ErrorCode::IoFailed,"Operation reply unavailable"))?;
-                write_frame(&mut stream,&response).await?;
-                Ok(())
+            biased;
+            read = stream.read(&mut byte) => break 'request peer_read_outcome(read, &operation_id, "dispatch", true),
+            _ = stop.cancelled() => break 'request stopping("dispatch", true),
+            result = requests.send(invocation) => {
+                if result.is_err() {
+                    break 'request failure(ApiError::new(ErrorCode::AppNotRunning, "Owner request queue closed"), "dispatch", "request_queue_closed", true);
+                }
+            }
+        }
+        tokio::select! {
+            biased;
+            read = stream.read(&mut byte) => peer_read_outcome(read, &operation_id, "await_reply", false),
+            _ = stop.cancelled() => stopping("await_reply", false),
+            result = receiver => match result {
+                Ok(mut response) => {
+                    response.error = response.error.take().map(|error| ipc_failure(error, "control", "control_failure", false));
+                    ConnectionOutcome::Reply(response)
+                }
+                Err(_) => failure(ApiError::new(ErrorCode::IoFailed, "Operation reply unavailable"), "await_reply", "reply_sender_dropped", false),
             },
-            _=stream.read(&mut byte)=>Ok(()),
         }
     };
-    let result = tokio::select! {result=operation=>result,_=stop.cancelled()=>Ok(())};
+    let ConnectionOutcome::Reply(response) = outcome else {
+        return Ok(());
+    };
+    // End the observation, not an accepted mutation. The shutdown completion
+    // guard still keeps Control from stopping transport before the final frame.
     disconnected.cancel();
-    result
+    let bytes = match encode_frame(&response) {
+        Ok(bytes) => bytes,
+        Err(error) => encode_frame(&Response::<Value>::failure(
+            operation_id,
+            ipc_failure(error, "encode_reply", "reply_encoding_failed", false),
+        ))?,
+    };
+    write_encoded_frame(&mut stream, &bytes).await?;
+    // A successful write/flush does not prove the peer consumed the reply,
+    // especially on a Windows named pipe. The client closes after reading it.
+    loop {
+        tokio::select! {
+            biased;
+            _ = stop.cancelled() => return Ok(()),
+            read = stream.read(&mut byte) => match read {
+                Ok(0) => return Ok(()),
+                Ok(_) => {},
+                Err(error) => return Err(ipc_failure(ApiError::new(ErrorCode::IoFailed, format!("IPC peer close read failed: {}", error.kind())), "peer_close", "peer_read_error", false)),
+            },
+        }
+    }
 }
 
 pub async fn call(
@@ -978,9 +1071,9 @@ mod frame_delivery_tests {
         response.validate().unwrap();
         assert_eq!(response.operation_id, "instance:invalid");
         assert_eq!(response.error.unwrap().code, ErrorCode::InvalidArgument);
+        drop(client);
         task.await.unwrap().unwrap();
         assert!(incoming.recv().await.is_none());
-        assert!(read_frame::<_, Value>(&mut client).await.unwrap().is_none());
     }
     async fn rejected_reply(frame: Value) -> (Response<Value>, bool) {
         let (mut client, server) = tokio::io::duplex(4096);
@@ -1007,6 +1100,7 @@ mod frame_delivery_tests {
         write_frame(&mut client, &frame).await.unwrap();
         let response: Response<Value> = read_frame(&mut client).await.unwrap().unwrap();
         response.validate().unwrap();
+        drop(client);
         task.await.unwrap().unwrap();
         let dispatched = incoming.recv().await.is_some();
         (response, dispatched)
@@ -1108,6 +1202,268 @@ mod frame_delivery_tests {
         assert!(details.get("next_operation").is_none());
         owner.await.unwrap();
     }
+    async fn send_test_frame(client: &mut tokio::io::DuplexStream, frame: &Value) {
+        write_frame(
+            client,
+            &Hello {
+                protocol_version: PROTOCOL_VERSION,
+            },
+        )
+        .await
+        .unwrap();
+        read_frame::<_, Welcome>(client).await.unwrap().unwrap();
+        write_frame(client, frame).await.unwrap();
+    }
+
+    fn status_frame() -> Value {
+        serde_json::to_value(Request::new(
+            "instance:test",
+            Command::Status(Default::default()),
+        ))
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn owner_close_after_request_returns_typed_failure() {
+        crate::test_watchdog::watchdog("IPC final failure frame", async {
+            for (case, stage, reason, code) in [
+                ("decode", "decode", "unknown_command", ErrorCode::InvalidArgument),
+                ("validation", "validate", "invalid_request", ErrorCode::InvalidArgument),
+                ("admission", "work_admission", "work_rejected", ErrorCode::InvalidState),
+                ("control", "control", "control_failure", ErrorCode::InvalidState),
+                ("closed", "dispatch", "request_queue_closed", ErrorCode::AppNotRunning),
+                ("dropped", "await_reply", "reply_sender_dropped", ErrorCode::IoFailed),
+                ("stop", "await_reply", "transport_stopping", ErrorCode::AppNotRunning),
+                ("oversize", "encode_reply", "reply_encoding_failed", ErrorCode::InputLimit),
+            ] {
+                let (mut client, server_stream) = tokio::io::duplex(4096);
+                let (requests, mut incoming) = mpsc::channel(1);
+                if case == "closed" { incoming.close(); }
+                let stop = CancellationToken::new();
+                let work = server::WorkAdmission::new();
+                let mut permits = Vec::new();
+                if case == "admission" {
+                    let status = Command::Status(Default::default());
+                    while let Ok(permit) = work.try_acquire(&status) { permits.push(permit); }
+                }
+                let task = tokio::spawn(serve_connection(server_stream, "instance".into(), requests, stop.clone(), work));
+                let frame = match case {
+                    "decode" => serde_json::json!({"protocol_version":PROTOCOL_VERSION,"operation_id":"instance:test","command":"no.such.command","args":{}}),
+                    "validation" => serde_json::to_value(Request::new("instance:test", Command::ThreadList(crate::protocol::ThreadListArgs { limit: 0, ..Default::default() }))).unwrap(),
+                    _ => status_frame(),
+                };
+                send_test_frame(&mut client, &frame).await;
+                let mut held = None;
+                match case {
+                    "control" | "oversize" => {
+                        let invocation = incoming.recv().await.unwrap();
+                        let id = invocation.request.operation_id;
+                        let response = if case == "control" {
+                            Response::failure(id, ApiError::new(ErrorCode::InvalidState, "admission refused"))
+                        } else {
+                            Response::success(id, Value::String("x".repeat(MAX_FRAME_BYTES)))
+                        };
+                        invocation.reply.send(response).unwrap();
+                    }
+                    "dropped" => drop(incoming.recv().await.unwrap()),
+                    "stop" => { held = incoming.recv().await; assert!(held.is_some()); stop.cancel(); }
+                    _ => {}
+                }
+                let response = read_frame::<_, Response<Value>>(&mut client).await.unwrap().expect(case);
+                response.validate().unwrap();
+                assert_eq!(response.operation_id, "instance:test", "{case}");
+                let error = response.error.unwrap();
+                assert_eq!(error.code, code, "{case}");
+                let details = error.details.unwrap();
+                assert_eq!(details["stage"], stage, "{case}");
+                assert_eq!(details["reason"], reason, "{case}");
+                drop(client);
+                task.await.unwrap().unwrap();
+                drop(held);
+            }
+        }).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn clean_peer_eof_cancels_without_reply() {
+        use tokio::io::AsyncWriteExt;
+        crate::test_watchdog::watchdog("IPC clean EOF", async {
+            let (mut client, stream) = tokio::io::duplex(4096);
+            let (requests, mut incoming) = mpsc::channel(1);
+            let task = tokio::spawn(serve_connection(
+                stream,
+                "instance".into(),
+                requests,
+                CancellationToken::new(),
+                server::WorkAdmission::new(),
+            ));
+            send_test_frame(&mut client, &status_frame()).await;
+            let invocation = incoming.recv().await.unwrap();
+            client.shutdown().await.unwrap();
+            invocation.disconnected.cancelled().await;
+            assert!(
+                read_frame::<_, Response<Value>>(&mut client)
+                    .await
+                    .unwrap()
+                    .is_none()
+            );
+            task.await.unwrap().unwrap();
+        })
+        .await
+        .unwrap();
+    }
+
+    struct FailPeerRead {
+        stream: tokio::io::DuplexStream,
+        fail: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    }
+    impl AsyncRead for FailPeerRead {
+        fn poll_read(
+            mut self: std::pin::Pin<&mut Self>,
+            cx: &mut std::task::Context<'_>,
+            buf: &mut tokio::io::ReadBuf<'_>,
+        ) -> std::task::Poll<std::io::Result<()>> {
+            let mut probe = [0];
+            if self.fail.load(std::sync::atomic::Ordering::SeqCst) {
+                // The trigger byte wakes an already-pending read; replace only
+                // that read's result, leaving the connection writable.
+                let mut read = tokio::io::ReadBuf::new(&mut probe);
+                return match std::pin::Pin::new(&mut self.stream).poll_read(cx, &mut read) {
+                    std::task::Poll::Ready(Ok(())) if !read.filled().is_empty() => {
+                        self.fail.store(false, std::sync::atomic::Ordering::SeqCst);
+                        std::task::Poll::Ready(Err(std::io::ErrorKind::Other.into()))
+                    }
+                    result => result,
+                };
+            }
+            std::pin::Pin::new(&mut self.stream).poll_read(cx, buf)
+        }
+    }
+    impl AsyncWrite for FailPeerRead {
+        fn poll_write(
+            mut self: std::pin::Pin<&mut Self>,
+            cx: &mut std::task::Context<'_>,
+            bytes: &[u8],
+        ) -> std::task::Poll<std::io::Result<usize>> {
+            std::pin::Pin::new(&mut self.stream).poll_write(cx, bytes)
+        }
+        fn poll_flush(
+            mut self: std::pin::Pin<&mut Self>,
+            cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<std::io::Result<()>> {
+            std::pin::Pin::new(&mut self.stream).poll_flush(cx)
+        }
+        fn poll_shutdown(
+            mut self: std::pin::Pin<&mut Self>,
+            cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<std::io::Result<()>> {
+            std::pin::Pin::new(&mut self.stream).poll_shutdown(cx)
+        }
+    }
+
+    #[tokio::test]
+    async fn extra_byte_or_peer_read_error_gets_typed_reply() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        };
+        use tokio::io::AsyncWriteExt;
+        crate::test_watchdog::watchdog("IPC non-EOF peer input", async {
+            for inject_error in [false, true] {
+                let (mut client, stream) = tokio::io::duplex(4096);
+                let fail = Arc::new(AtomicBool::new(false));
+                let (requests, mut incoming) = mpsc::channel(1);
+                let task = tokio::spawn(serve_connection(
+                    FailPeerRead {
+                        stream,
+                        fail: fail.clone(),
+                    },
+                    "instance".into(),
+                    requests,
+                    CancellationToken::new(),
+                    server::WorkAdmission::new(),
+                ));
+                send_test_frame(&mut client, &status_frame()).await;
+                let invocation = incoming.recv().await.unwrap();
+                fail.store(inject_error, Ordering::SeqCst);
+                client.write_all(b"x").await.unwrap();
+                let response = read_frame::<_, Response<Value>>(&mut client)
+                    .await
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(response.operation_id, "instance:test");
+                let error = response.error.unwrap();
+                let details = error.details.unwrap();
+                assert_eq!(details["stage"], "await_reply");
+                assert_eq!(
+                    details["reason"],
+                    if inject_error {
+                        "peer_read_error"
+                    } else {
+                        "unexpected_peer_byte"
+                    }
+                );
+                drop(client);
+                task.await.unwrap().unwrap();
+                assert!(invocation.disconnected.is_cancelled());
+            }
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn final_frame_keeps_connection_until_peer_closes() {
+        crate::test_watchdog::watchdog("IPC final frame lifetime", async {
+            for (reject, explicit_stop) in [(false, false), (true, false), (false, true)] {
+                let (mut client, stream) = tokio::io::duplex(4096);
+                let (requests, mut incoming) = mpsc::channel(1);
+                let stop = CancellationToken::new();
+                let mut task = tokio::spawn(serve_connection(
+                    stream,
+                    "instance".into(),
+                    requests,
+                    stop.clone(),
+                    server::WorkAdmission::new(),
+                ));
+                let mut frame = status_frame();
+                if reject {
+                    frame["command"] = Value::String("no.such.command".into());
+                }
+                send_test_frame(&mut client, &frame).await;
+                if !reject {
+                    let invocation = incoming.recv().await.unwrap();
+                    invocation
+                        .reply
+                        .send(Response::success(
+                            invocation.request.operation_id,
+                            Value::Bool(true),
+                        ))
+                        .unwrap();
+                }
+                let response = read_frame::<_, Response<Value>>(&mut client)
+                    .await
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(response.ok, !reject);
+                assert!(
+                    futures_util::poll!(&mut task).is_pending(),
+                    "owner dropped stream before peer close"
+                );
+                if explicit_stop {
+                    stop.cancel();
+                    task.await.unwrap().unwrap();
+                    assert!(read_frame::<_, Value>(&mut client).await.unwrap().is_none());
+                } else {
+                    drop(client);
+                    task.await.unwrap().unwrap();
+                }
+            }
+        })
+        .await
+        .unwrap();
+    }
+
     #[tokio::test]
     async fn missing_capability_rejects_prefix_query_before_sending_a_request() {
         use crate::protocol::{IdKind, IdResolveArgs};

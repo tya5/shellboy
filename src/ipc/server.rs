@@ -215,6 +215,8 @@ async fn accept_connections<A: Acceptor>(
     instance: String,
     requests: mpsc::Sender<Invocation>,
     stop: CancellationToken,
+    files: EndpointFiles,
+    failure: watch::Sender<Option<ApiError>>,
 ) -> Result<(), ApiError> {
     let mut clients = JoinSet::new();
     let work = WorkAdmission::new();
@@ -241,10 +243,12 @@ async fn accept_connections<A: Acceptor>(
             },
         }
     };
-    // Release the listener before disconnecting observers. Invocation processing
-    // belongs to Control and continues independently once it has been accepted.
     drop(listener);
-    stop.cancel();
+    let result = result.and(files.cleanup().await);
+    // Report a fatal listener failure without stopping accepted connections.
+    if let Err(error) = &result {
+        failure.send_replace(Some(error.clone()));
+    }
     while clients.join_next().await.is_some() {}
     result
 }
@@ -311,14 +315,14 @@ impl LocalServer {
         let stop = CancellationToken::new();
         let token = stop.clone();
         let (failure_send, failure) = watch::channel(None);
-        let task = tokio::spawn(async move {
-            let result = accept_connections(listener, instance, requests, token).await;
-            let result = result.and(files.cleanup().await);
-            if let Err(error) = &result {
-                failure_send.send_replace(Some(error.clone()));
-            }
-            result
-        });
+        let task = tokio::spawn(accept_connections(
+            listener,
+            instance,
+            requests,
+            token,
+            files,
+            failure_send,
+        ));
         Self {
             stop,
             task,
