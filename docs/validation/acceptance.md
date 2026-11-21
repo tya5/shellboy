@@ -12167,3 +12167,8 @@ all replacement payloads and one current Thread epoch advance; the retained-anch
 control verifies rejection before any path mutation. A nonfatal macOS compact-unwind linker
 warning was emitted. Full standard, independent final-delta review, and exact-SHA required
 CI for the final candidate remain pending.
+
+
+## Core #324 deterministic Ubuntu test witnesses (candidate validation)
+
+All three registered integration selectors passed individually on candidate source: `response_upload_recovery::refused_proxy_connections_keep_retrying_beyond_two_and_recover_when_it_listens`, `response_retries::untyped_terminal_sse_retry_fails_closed_for_typed_or_nontransient_errors`, and `runtime_features::proactive_closed_spill_then_cancelled_summary_preserves_adoption`. The retry and U2 selectors also passed on an archive of `origin/main` `116e82e5965dbc2c736849659f9f48db21788873`; the other two were previously compared on that same base and passed. The strict untyped 500 after response metadata now follows #315's retry decision; the non-strict extra-root-response fixture remains fail-closed. No full integration suite or CI qualification is claimed yet.

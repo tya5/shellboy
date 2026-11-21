@@ -11,7 +11,6 @@ use tokio::{io::AsyncReadExt, net::TcpListener, sync::mpsc};
 use tokio_util::sync::CancellationToken;
 
 // Fixture bounds cover scheduling, persisted transitions and cleanup, not HTTP deadlines.
-use crate::test_watchdog::WATCHDOG;
 
 async fn request(control: &Arc<Control>, command: Command) -> Value {
     let response = crate::test_watchdog::watchdog(
@@ -298,6 +297,7 @@ async fn refused_proxy_connections_keep_retrying_beyond_two_and_recover_when_it_
         .as_str()
         .unwrap()
         .to_owned();
+    let retry_events = control.subscribe();
     let accepted: MessageAccepted = serde_json::from_value(
         request(
             &control,
@@ -316,50 +316,61 @@ async fn refused_proxy_connections_keep_retrying_beyond_two_and_recover_when_it_
     )
     .unwrap();
     let turn = accepted.turn_id.unwrap();
-    let mut events = control.subscribe();
-    let observed = crate::test_watchdog::watchdog("tests/response_upload_recovery.rs: refused_proxy_connections_keep_retrying_beyond_two_and_recover_when_it_listens", async {
+    let observer_thread = thread.clone();
+    let observer_turn = turn.clone();
+    let database = control.store.database.clone();
+    let runtime = tokio::runtime::Handle::current();
+    let watcher = tokio::task::spawn_blocking(move || -> Result<std::net::TcpListener, String> {
+        let mut events = retry_events;
         loop {
-            let turn = turn.clone();
-            let (failed, state): (i64, String) = control
-                .store
-                .database
-                .call(move |db| {
+            match events.blocking_recv() {
+                Ok(EngineEvent::Changed { thread_id, .. }) if thread_id == observer_thread => {}
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                    return Err("retry observer event stream closed".into());
+                }
+                _ => continue,
+            }
+            let turn = observer_turn.clone();
+            let (failed, state): (i64, String) = runtime
+                .block_on(database.call(move |db| {
                     let state =
-                        db.query_row("SELECT state FROM turn WHERE id=?1", [&turn], |r| r.get(0))?;
+                        db.query_row("SELECT state FROM turn WHERE id=?1", [&turn], |row| {
+                            row.get(0)
+                        })?;
                     let failed = db.query_row(
                         "SELECT count(*) FROM model_attempt WHERE turn_id=?1 AND state='failed'",
                         [turn],
-                        |r| r.get(0),
+                        |row| row.get(0),
                     )?;
                     Ok((failed, state))
-                })
-                .await
-                .unwrap();
-            assert_ne!(
-                state, "recovery_wait",
-                "connect failures must not hit the partial-upload two-strike rule"
-            );
-            if failed >= REQUIRED_FAILURES as i64 {
-                break;
+                }))
+                .map_err(|error| format!("cannot inspect retry state: {error}"))?;
+            if state == "recovery_wait" {
+                return Err(format!(
+                    "turn entered recovery_wait after {failed} failed connection attempts"
+                ));
             }
-            changed(&mut events, &thread).await;
+            if failed >= REQUIRED_FAILURES as i64 {
+                let listener = std::net::TcpListener::bind(address)
+                    .map_err(|error| format!("cannot bind recovery listener: {error}"))?;
+                listener.set_nonblocking(true).map_err(|error| {
+                    format!("cannot make recovery listener nonblocking: {error}")
+                })?;
+                return Ok(listener);
+            }
         }
-    })
-    .await;
-    if observed.is_err() {
-        let target = turn.clone();
-        let progress = crate::test_watchdog::watchdog("tests/response_upload_recovery.rs: refused_proxy_connections_keep_retrying_beyond_two_and_recover_when_it_listens", control.store.database.call(move |db| {
-        let state: String = db.query_row("SELECT state FROM turn WHERE id=?1", [&target], |r| r.get(0))?;
-        let attempts = db.prepare("SELECT json_object('state',state,'kind',json_extract(error_json,'$.error.kind'),'phase',json_extract(error_json,'$.error.http_observation.phase'),'source_bytes',json_extract(error_json,'$.error.http_observation.body_source_bytes_consumed'),'duration_ms',round((julianday(ended_at)-julianday(started_at))*86400000)) FROM model_attempt WHERE turn_id=?1 ORDER BY rowid LIMIT 9")?
-            .query_map([target], |r| r.get::<_, String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
-        Ok(json!({"turn_state":state,"attempts":attempts}))
-    })).await;
-        panic!(
-            "three failed connections exceeded {}ms fixture watchdog; saved progress: {progress:?}",
-            WATCHDOG.as_millis()
-        );
-    }
-    let listener = TcpListener::bind(address).await.unwrap();
+    });
+    let listener = crate::test_watchdog::watchdog(
+        "tests/response_upload_recovery.rs: listener ready after third refused attempt",
+        watcher,
+    )
+    .await
+    .expect("retry observer did not produce the listener")
+    .expect("retry observer task failed")
+    .unwrap_or_else(|error| panic!("connection retry stopped before listener startup: {error}"));
+    let listener = TcpListener::from_std(listener).unwrap();
+    let mut recovery_events = control.subscribe();
     let server = tokio::spawn(async move {
         let (mut stream, _) = crate::test_watchdog::watchdog("tests/response_upload_recovery.rs: refused_proxy_connections_keep_retrying_beyond_two_and_recover_when_it_listens", listener.accept()).await.unwrap().unwrap();
         stream.set_nodelay(true).unwrap();
@@ -401,7 +412,7 @@ async fn refused_proxy_connections_keep_retrying_beyond_two_and_recover_when_it_
             if state == "completed" {
                 break;
             }
-            changed(&mut events, &thread).await;
+            changed(&mut recovery_events, &thread).await;
         }
     })
     .await

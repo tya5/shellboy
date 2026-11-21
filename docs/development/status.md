@@ -1,3 +1,24 @@
+## Core #324 deterministic Ubuntu integration witnesses (candidate; CI pending)
+
+The candidate branch `task/core324-nondeterministic-tests` is based directly on
+`origin/main` at `116e82e5965dbc2c736849659f9f48db21788873`. The three CI-red
+witnesses now synchronize at their causal boundary: the refused-connection test
+uses an independent event observer to bind the loopback listener as soon as the
+third failed-attempt row commits; the RunStop test fences the mock proxy's already
+accepted request parsers before and after Stop; the response retry matrix removes
+the strict untyped 500 metadata envelope from its fail-closed cases, in accordance
+with #315, while retaining typed terminal, post-DONE, malformed and nontransient
+refusal cases. No product source, protocol, state, table or dependency changed.
+
+On this candidate, pinned formatting and `cargo check --tests --locked` passed,
+and the three registered integration selectors passed individually. The retry
+classification selector and U2 Stop selector also passed on exact `origin/main`
+source; the response upload and retry selectors passed on both main and candidate.
+All-target Clippy and `python3 scripts/check-test-layout.py` passed on candidate
+source; the full integration suite and CI remain unrun. Historical #281 Ubuntu
+REDs and attempt-2 U2 RED remain tied to their original SHA/attempt; this
+candidate remains unqualified until normal CI completes.
+
 # Development status
 
 ## #315 Retry after partial output (owner-policy successor)

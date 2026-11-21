@@ -2809,7 +2809,7 @@ async fn strict_untyped_terminal_after_full_response_and_reasoning_item_retries(
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn untyped_terminal_sse_retry_fails_closed_for_ambiguous_or_nontransient_errors() {
+async fn untyped_terminal_sse_retry_fails_closed_for_typed_or_nontransient_errors() {
     let collision = r#"{"type":"response.failed","response":{"output":[{"type":"reasoning"}]},"response":{"error":{"code":"500","message":"fixture"}}}"#;
     let done_prefix = "data: [DONE]\n\n";
     for (prefix, event, witness) in [
@@ -2821,6 +2821,8 @@ async fn untyped_terminal_sse_retry_fails_closed_for_ambiguous_or_nontransient_e
         ),
         (done_prefix, TERMINAL_SSE_500, Some(500)),
         ("", r#"{"type":"error","error":{"code":"500"}}"#, Some(500)),
+        // The extra root `response` field makes this unlike #315's strict
+        // one-key `{error: {code, ...}}` retry envelope.
         (
             "",
             r#"{"response":{"status":"in_progress"},"error":{"code":"500"}}"#,
@@ -2860,7 +2862,11 @@ async fn untyped_terminal_sse_retry_fails_closed_for_ambiguous_or_nontransient_e
             .unwrap();
         assert_eq!(fixture.settled().await, "recovery_wait", "{prefix}{event}");
         let attempts = fixture.attempts().await;
-        assert_eq!(attempts.len(), 1);
+        assert_eq!(
+            attempts.len(),
+            1,
+            "terminal classification for prefix={prefix:?} event={event}"
+        );
         let failure = attempts[0].1.as_ref().unwrap();
         assert_terminal_stream_failure(failure, witness);
         if event == collision {
