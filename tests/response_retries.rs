@@ -3295,11 +3295,14 @@ async fn conversation_and_summary_commit_each_transient_retry_before_dispatch() 
 
 impl Fixture {
     async fn park_at_usage_limit(&mut self) -> chrono::DateTime<chrono::Utc> {
+        self.park_at_usage_limit_after(6).await
+    }
+
+    async fn park_at_usage_limit_after(&mut self, seconds: i64) -> chrono::DateTime<chrono::Utc> {
         let first = self.incoming().await;
         let reset =
-            chrono::DateTime::from_timestamp(chrono::Utc::now().timestamp() + 6, 0).unwrap();
-        let body = json!({"error":{"type":"usage_limit_reached","resets_at":reset.timestamp()}})
-            .to_string();
+            chrono::DateTime::from_timestamp(chrono::Utc::now().timestamp() + seconds, 0).unwrap();
+        let body = usage_limit_body(reset);
         first
             .reply
             .send(Reply::http(429, "application/json", &body, ""))
@@ -3413,4 +3416,86 @@ async fn owner_with_usage_limit_retry_disabled_stays_parked_past_reset() {
     assert_eq!(fixture_request_log_lines(&f), 1);
     f.assert_usage_limit_admissions(0).await;
     f.close().await;
+}
+
+fn usage_limit_body(reset: chrono::DateTime<chrono::Utc>) -> String {
+    json!({"error":{"type":"usage_limit_reached","resets_at":reset.timestamp()}}).to_string()
+}
+
+async fn human_usage_limit_resume(held: usize) {
+    let mut f = Fixture::new(0, 100, 120_000).await;
+    f.control.start().await.unwrap();
+    let reset = f.park_at_usage_limit_after(12).await;
+    let thread = f.accepted.thread_id.clone();
+    let send = |human, text| {
+        Command::MessageSend(MessageSendArgs {
+            human,
+            text,
+            thread_id: Some(thread.clone()),
+            resume_recovery: false,
+            to_human: false,
+            expect_reply: false,
+            sender_label: None,
+            deliver: Deliver::Next,
+        })
+    };
+    for index in 0..held {
+        let queued: MessageAccepted = serde_json::from_value(
+            request(&f.control, send(false, format!("Held input {index}"))).await,
+        )
+        .unwrap();
+        assert_eq!(
+            queued.delivery_status,
+            shellboy::protocol::DeliveryStatus::Held
+        );
+    }
+    request(&f.control, send(true, "Resume before reset".into())).await;
+    assert!(
+        chrono::Utc::now() < reset,
+        "human must resume before the reset"
+    );
+    let expected_requests = if held > 128 {
+        assert_eq!(f.settled().await, "recovery_wait");
+        let turn = f.accepted.turn_id.clone().unwrap();
+        f.owner.db.call(move |db| {
+            let remaining: i64 = db.query_row("SELECT count(*) FROM receipt WHERE turn_id=?1 AND state='held' AND hold_reason='recovery_wait'", [turn], |row| row.get(0))?;
+            assert_eq!(remaining, 1);
+            Ok(())
+        }).await.unwrap();
+        1
+    } else {
+        let resumed = f.incoming().await;
+        assert!(
+            chrono::Utc::now() < reset,
+            "explicit resume must reach the provider before reset"
+        );
+        resumed
+            .reply
+            .send(Reply::http(
+                429,
+                "application/json",
+                &usage_limit_body(reset),
+                "",
+            ))
+            .ok()
+            .unwrap();
+        assert_eq!(f.settled().await, "recovery_wait");
+        2
+    };
+    wait_for_reset(reset + chrono::Duration::seconds(1)).await;
+    assert_eq!(f.settled().await, "recovery_wait");
+    f.no_more_requests().await;
+    assert_eq!(fixture_request_log_lines(&f), expected_requests);
+    f.assert_usage_limit_admissions(0).await;
+    f.close().await;
+}
+
+#[tokio::test]
+async fn human_usage_limit_resume_consumes_reset_even_with_held_receipts_remaining() {
+    human_usage_limit_resume(129).await;
+}
+
+#[tokio::test]
+async fn human_usage_limit_resume_does_not_rearm_after_same_provider_reset() {
+    human_usage_limit_resume(0).await;
 }

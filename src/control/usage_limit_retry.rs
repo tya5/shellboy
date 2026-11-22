@@ -145,7 +145,6 @@ pub(super) fn step(
             &candidate.turn,
             candidate.generation,
         ),
-        true,
         serde_json::json!({"kind":"owner"}),
         &now.to_rfc3339(),
     )?;

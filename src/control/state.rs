@@ -40,7 +40,6 @@ pub(super) fn resume_recovery_turn_tx(
     turn: &str,
     generation: i64,
     at: &str,
-    consume_reset: bool,
 ) -> Result<bool, StorageError> {
     use super::usage_limit_retry as usage;
     let reason: Option<Option<String>> = tx
@@ -58,17 +57,13 @@ pub(super) fn resume_recovery_turn_tx(
     let mut parsed: Option<Value> = reason
         .as_deref()
         .and_then(|text| serde_json::from_str(text).ok());
-    let consumed_now = if consume_reset {
-        parsed.as_mut().is_some_and(|reason| {
-            let Some(reset) = usage::reset(reason) else {
-                return false;
-            };
-            usage::mark_consumed(reason, reset.timestamp());
-            true
-        })
-    } else {
-        false
-    };
+    let consumed_now = parsed.as_mut().is_some_and(|reason| {
+        let Some(reset) = usage::reset(reason) else {
+            return false;
+        };
+        usage::mark_consumed(reason, reset.timestamp());
+        true
+    });
     super::message_delivery::recover_on_resume_tx(
         tx,
         thread,

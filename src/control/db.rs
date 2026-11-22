@@ -1561,13 +1561,7 @@ impl Store {
                 MutationResult::value(details)
             }
             Command::RunStop(args) => stop_run(tx, &args.run_id, now),
-            Command::RunRetry(args) => retry_run(
-                tx,
-                &args.run_id,
-                caller,
-                now,
-                self.config.recovery.auto_retry_usage_limit,
-            ),
+            Command::RunRetry(args) => retry_run(tx, &args.run_id, caller, now),
             Command::CompactPreview(_) => Err(error(
                 ErrorCode::InvalidState,
                 "Compact preview uses its dedicated read-only projection",
@@ -2287,7 +2281,7 @@ fn assign_message(
                 } else {
                     if state == "recovery_wait" {
                         if !super::state::resume_recovery_turn_tx(
-                            tx, id, &run_id, &turn_id, generation, now, false,
+                            tx, id, &run_id, &turn_id, generation, now,
                         )
                         .map_err(storage_error)?
                         {
@@ -3199,7 +3193,6 @@ fn retry_run(
     id: &str,
     caller: Option<&Origin>,
     now: &str,
-    consume_reset: bool,
 ) -> Result<MutationResult> {
     let details = run_details(tx, id)?;
     if details.state != RunState::Live {
@@ -3225,7 +3218,6 @@ fn retry_run(
     resume_run_tx(
         tx,
         (&details.thread_id, id, &turn, generation),
-        consume_reset,
         actor(caller),
         now,
     )
@@ -3247,19 +3239,10 @@ fn retry_run(
 pub(super) fn resume_run_tx(
     tx: &Transaction<'_>,
     (thread, run, turn, generation): (&str, &str, &str, i64),
-    consume_reset: bool,
     actor: Value,
     now: &str,
 ) -> std::result::Result<(), StorageError> {
-    if !super::state::resume_recovery_turn_tx(
-        tx,
-        thread,
-        run,
-        turn,
-        generation,
-        now,
-        consume_reset,
-    )? {
+    if !super::state::resume_recovery_turn_tx(tx, thread, run, turn, generation, now)? {
         return Err(error(ErrorCode::InvalidState, "Run has no recoverable Turn").into());
     }
     super::context::record_fact(
@@ -7219,9 +7202,7 @@ mod retry_tracking_diagnosis_287 {
                 .unwrap();
             assert_eq!(baseline.changes.len(), 1);
             let tx = db.transaction().unwrap();
-            let accepted = retry_run(&tx, "run", None, "accepted", true)
-                .unwrap()
-                .result;
+            let accepted = retry_run(&tx, "run", None, "accepted").unwrap().result;
             tx.commit().unwrap();
             assert_eq!(accepted["run_id"], "run");
             assert_eq!(accepted["turn_id"], "turn");
