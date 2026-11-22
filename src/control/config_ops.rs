@@ -74,6 +74,8 @@ impl Control {
             })?;
         let config = self.store.config.clone();
         let clients = self.store.clients.clone();
+        let change_clock = self.change_clock.clone();
+        let changed = self.changed.clone();
         let applied = self
             .attachments
             .control_files()
@@ -81,7 +83,13 @@ impl Control {
                 // A timed-out caller stops waiting, but the next change must not start
                 // until this one has really ended, so the closure owns the guard.
                 let _guard = guard;
-                crate::config_edit::apply_live(&path, &args.expected_hash, &args.changes, &config, &clients)
+                let applied = crate::config_edit::apply_live(&path, &args.expected_hash, &args.changes, &config, &clients)?;
+                // Publish under the write guard even if the caller has stopped waiting.
+                if applied.written {
+                    change_clock.record_config_changed();
+                    changed.notify_waiters();
+                }
+                Ok(applied)
             })
             .await
             .map_err(|error| {
@@ -95,8 +103,6 @@ impl Control {
             })?;
         let mut result = applied.result;
         if applied.written {
-            self.change_clock.record_config_changed();
-            self.changed.notify_waiters();
             let ids = caller.map_or_else(crate::diagnostics::DiagnosticIds::default, |origin| {
                 crate::diagnostics::DiagnosticIds {
                     attempt_id: None,

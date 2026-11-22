@@ -170,7 +170,7 @@ pub struct Control {
     origins: Mutex<HashMap<String, Origin>>,
     events: broadcast::Sender<EngineEvent>,
     ui_events: ui_events::UiEvents,
-    changed: Notify,
+    changed: Arc<Notify>,
     change_clock: Arc<change_clock::ChangeClock>,
     /// Wakes only `events.wait` calls that asked for text; everything else sleeps through deltas.
     text_changed: Notify,
@@ -460,7 +460,7 @@ impl Control {
             origins: Mutex::new(HashMap::new()),
             events,
             ui_events: ui_events::UiEvents::new(),
-            changed: Notify::new(),
+            changed: Arc::new(Notify::new()),
             change_clock: Arc::new(change_clock::ChangeClock::new()),
             text_changed: Notify::new(),
             shell_output_changed: Notify::new(),

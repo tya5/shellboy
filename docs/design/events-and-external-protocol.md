@@ -178,11 +178,13 @@ is newer than its `after` cursor and no later than the returned cursor. It is
 not consumed: independent tabs/devices/CLI processes with older cursors all see
 the mark. A `changed` response can therefore have an empty `changes` array.
 Baseline and resync return false; timeout returns false only after the caller's
-cursor has passed the retained mark. `config.set` records the mark after every
-successful file write (`applied.written`), including restart-required changes;
-refused and no-op writes do not mark. Clients reread with `config.get`, which
-reports the file and loaded values; the hint carries neither a diff nor config
-values. This is memory-only and adds no event path, table, cache, or polling.
+cursor has passed the retained mark. The `config.set` write worker marks and
+wakes waiters after every successful file write (`applied.written`), including
+restart-required changes, before releasing the write guard. This does not depend
+on the caller receiving a reply. Refused and no-op writes do not mark. Clients
+reread with `config.get`, which reports the file and loaded values; the hint
+carries neither a diff nor config values. This is memory-only and adds no event
+path, table, cache, or polling.
 
 Algorithm (same lost-wakeup discipline as `wait`): enable
 `control.changed.notified()` → lock clock, compute → if non-empty or
