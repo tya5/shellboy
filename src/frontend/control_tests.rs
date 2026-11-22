@@ -1849,16 +1849,16 @@ async fn slow_usage_trigger_and_scope_follow_existing_owner_request_workers_with
         .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
         .filter(|row| row["event"] == "usage_totals_slow")
         .collect::<Vec<_>>();
-    assert_eq!(entries.len(), 9);
+    assert_eq!(entries.len(), 8, "ThreadGet does not aggregate exact usage");
     assert_eq!(
         entries
             .iter()
             .filter(|row| row["usage_slow"]["trigger"] == "cli")
             .count(),
-        7
+        6
     );
-    assert_eq!(entries[7]["usage_slow"]["trigger"], "open");
-    assert_eq!(entries[8]["usage_slow"]["trigger"], "changed");
+    assert_eq!(entries[6]["usage_slow"]["trigger"], "open");
+    assert_eq!(entries[7]["usage_slow"]["trigger"], "changed");
     for scope in ["turn", "run", "thread", "thread_children"] {
         assert!(
             entries
