@@ -1031,3 +1031,162 @@ async fn chat_missing_capability_uses_the_same_typed_cli_envelope_as_message_get
     );
     task.await.unwrap();
 }
+
+#[tokio::test]
+async fn artifact_cli_round_trip_through_owner_changes_and_restart() {
+    async fn start(
+        root: &std::path::Path,
+    ) -> (
+        DataOwner,
+        std::sync::Arc<Control>,
+        LocalServer,
+        tokio::task::JoinHandle<()>,
+    ) {
+        let owner = DataOwner::start(
+            Some(root.join("config.toml")),
+            Some(root.join("data")),
+            root.into(),
+        )
+        .await
+        .unwrap();
+        let control = Control::new(&owner, root.into());
+        let (send, receive) = tokio::sync::mpsc::channel(8);
+        let local = LocalServer::bind(&owner, send).await.unwrap();
+        let serving = tokio::spawn(control.clone().serve(receive));
+        (owner, control, local, serving)
+    }
+    async fn cli(owner: &DataOwner, args: &[&str]) -> Value {
+        let out = tokio::process::Command::new(env!("CARGO_BIN_EXE_shellboy"))
+            .arg("--data-dir")
+            .arg(&owner.loaded.data_dir)
+            .env_remove("SHELLBOY_SOCKET")
+            .env_remove("SHELLBOY_INSTANCE_ID")
+            .current_dir(owner.loaded.data_dir.parent().unwrap())
+            .args(args)
+            .output()
+            .await
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stdout)
+        );
+        serde_json::from_slice::<Value>(&out.stdout).unwrap()["result"].clone()
+    }
+    async fn hint(owner: &DataOwner, thread: &str, after: Option<&str>) -> String {
+        let mut args = vec!["events", "wait", "--thread", thread, "--timeout-ms", "0"];
+        if let Some(after) = after {
+            args.extend(["--after", after]);
+        }
+        let result = cli(owner, &args).await;
+        if after.is_some() {
+            assert_eq!(result["changes"][0]["thread_id"], thread);
+        }
+        result["cursor"].as_str().unwrap().into()
+    }
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(root.path().join("config.toml"), "default_connection='fixture'\ndefault_model='fixture'\n[connections.fixture]\nbase_url='http://127.0.0.1:1/v1'\n").unwrap();
+    let (owner, control, local, serving) = start(root.path()).await;
+    let created = cli(&owner, &["thread", "create"]).await;
+    let thread = created["thread_id"].as_str().unwrap();
+    let at = hint(&owner, thread, None).await;
+    let uri = "new+client:opaque value/%2F";
+    let added = cli(
+        &owner,
+        &[
+            "artifact",
+            "add",
+            "--thread",
+            thread,
+            "--uri",
+            uri,
+            "--title",
+            "Draft",
+            "--mime",
+            "text/plain",
+        ],
+    )
+    .await;
+    let id = added["artifact_id"].as_str().unwrap();
+    let at = hint(&owner, thread, Some(&at)).await;
+    let list = cli(&owner, &["artifact", "list", "--thread", thread]).await;
+    assert_eq!(list["items"][0]["latest"]["uri"], uri);
+    let v1 = cli(
+        &owner,
+        &["artifact", "get", "--artifact", id, "--version", "1"],
+    )
+    .await;
+    assert_eq!(v1["version"]["mime"], "text/plain");
+    let next = "other:missing";
+    cli(
+        &owner,
+        &["artifact", "update", "--artifact", id, "--uri", next],
+    )
+    .await;
+    hint(&owner, thread, Some(&at)).await;
+    local.shutdown().await.unwrap();
+    serving.abort();
+    let _ = serving.await;
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+    let (owner, control, local, serving) = start(root.path()).await;
+    let latest = cli(
+        &owner,
+        &["artifact", "get", "--artifact", id, "--limit", "1"],
+    )
+    .await;
+    assert_eq!(latest["latest"]["uri"], next);
+    assert_eq!(latest["latest"]["title"], "Draft");
+    assert!(latest["latest"]["mime"].is_null());
+    let cursor = latest["versions"]["next_cursor"].as_str().unwrap();
+    let older = cli(
+        &owner,
+        &["artifact", "get", "--artifact", id, "--cursor", cursor],
+    )
+    .await;
+    assert_eq!(older["versions"]["items"][0]["version"], 1);
+    let saved = cli(
+        &owner,
+        &["artifact", "get", "--artifact", id, "--version", "1"],
+    )
+    .await;
+    assert_eq!(saved["version"], v1["version"]);
+    let relative = "missing/../output.txt";
+    // On Unix getcwd can spell a symlinked temp directory differently from tempfile.
+    // Resolve only the existing fixture cwd, never the missing artifact path.
+    #[cfg(unix)]
+    let cli_cwd = root.path().canonicalize().unwrap();
+    #[cfg(not(unix))]
+    let cli_cwd = root.path().to_path_buf();
+    for (input, expected) in [
+        (
+            relative,
+            cli_cwd.join(relative).to_str().unwrap().to_owned(),
+        ),
+        (
+            "https://example.test/a%2Fb",
+            "https://example.test/a%2Fb".to_owned(),
+        ),
+        (r"C:\missing\draft.txt", r"C:\missing\draft.txt".to_owned()),
+    ] {
+        cli(
+            &owner,
+            &["artifact", "update", "--artifact", id, "--uri", input],
+        )
+        .await;
+        let latest = cli(&owner, &["artifact", "get", "--artifact", id]).await;
+        assert_eq!(latest["latest"]["uri"], expected);
+    }
+    let at = hint(&owner, thread, None).await;
+    cli(&owner, &["artifact", "remove", "--artifact", id]).await;
+    hint(&owner, thread, Some(&at)).await;
+    assert_eq!(
+        cli(&owner, &["artifact", "list", "--thread", thread]).await["items"],
+        serde_json::json!([])
+    );
+    local.shutdown().await.unwrap();
+    serving.abort();
+    let _ = serving.await;
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+}

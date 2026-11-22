@@ -972,3 +972,7 @@ and cursor-ordered `attempt_ends`. Only a matching `not_adopted` proves that
 attempt was not saved. Keep adopted previews until saved history arrives;
 a resync is not evidence of discard. Order live previews by the saved input
 boundary, not by when the preview or a sent message arrived.
+
+## Thread artifacts
+
+Register an output explicitly with `shellboy artifact add --thread "$SHELLBOY_THREAD_ID" --uri URI --title TITLE [--mime MIME]`. Use the URI format your client or system prompt specifies. For `artifact add` and `artifact update`, the CLI joins a relative file path to its own current working directory without checking the file. Absolute paths, URLs, and other schemes are sent unchanged; the owner stores the resulting string verbatim. `shellboy artifact update --artifact A --uri URI` appends a version and retains the title unless replaced. Omitted MIME is not inherited. Use `artifact list --thread T`, `artifact get --artifact A [--version N]`, and `artifact remove --artifact A`. Pass `next_cursor` back as `--cursor` to continue list or version history.

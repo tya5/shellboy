@@ -37,6 +37,11 @@ impl Command {
             Self::ThreadArchive(_) => ("thread.archive", CommandRoute::Database),
             Self::ThreadUnarchive(_) => ("thread.unarchive", CommandRoute::Database),
             Self::ThreadTag(_) => ("thread.tag", CommandRoute::Database),
+            Self::ArtifactAdd(_) => ("artifact.add", CommandRoute::Database),
+            Self::ArtifactUpdate(_) => ("artifact.update", CommandRoute::Database),
+            Self::ArtifactList(_) => ("artifact.list", CommandRoute::Database),
+            Self::ArtifactGet(_) => ("artifact.get", CommandRoute::Database),
+            Self::ArtifactRemove(_) => ("artifact.remove", CommandRoute::Database),
             Self::ScheduleAdd(_) => ("schedule.add", CommandRoute::Database),
             Self::ScheduleSet(_) => ("schedule.set", CommandRoute::Database),
             Self::ScheduleEnable(_) => ("schedule.enable", CommandRoute::Database),
@@ -107,7 +112,10 @@ impl Command {
     /// May owner shutdown drop the runtime action before receipt finalization?
     pub(crate) fn runtime_cancellable(&self) -> bool {
         match self {
-            Self::ScheduleAdd(_)
+            Self::ArtifactAdd(_)
+            | Self::ArtifactUpdate(_)
+            | Self::ArtifactRemove(_)
+            | Self::ScheduleAdd(_)
             | Self::ScheduleSet(_)
             | Self::ScheduleEnable(_)
             | Self::ScheduleDisable(_)
@@ -133,6 +141,8 @@ impl Command {
             | Self::ThreadList(_)
             | Self::ThreadGet(_)
             | Self::ThreadBranches(_)
+            | Self::ArtifactList(_)
+            | Self::ArtifactGet(_)
             | Self::ScheduleList(_)
             | Self::ThreadTags(_)
             | Self::ThreadCwds(_)
@@ -184,7 +194,10 @@ impl Command {
     /// Late runtime cleanup allowed after cancellation; not the IPC reserved lane.
     pub(crate) fn runtime_allowed_while_stopping(&self) -> bool {
         match self {
-            Self::ScheduleAdd(_)
+            Self::ArtifactAdd(_)
+            | Self::ArtifactUpdate(_)
+            | Self::ArtifactRemove(_)
+            | Self::ScheduleAdd(_)
             | Self::ScheduleSet(_)
             | Self::ScheduleEnable(_)
             | Self::ScheduleDisable(_)
@@ -196,6 +209,8 @@ impl Command {
             | Self::ThreadList(_)
             | Self::ThreadGet(_)
             | Self::ThreadBranches(_)
+            | Self::ArtifactList(_)
+            | Self::ArtifactGet(_)
             | Self::ScheduleList(_)
             | Self::ThreadTags(_)
             | Self::ThreadCwds(_)
@@ -260,7 +275,10 @@ impl Command {
     /// Must finish admission before the graceful-shutdown context capture?
     pub(crate) fn changes_context(&self) -> bool {
         match self {
-            Self::ScheduleAdd(_)
+            Self::ArtifactAdd(_)
+            | Self::ArtifactUpdate(_)
+            | Self::ArtifactRemove(_)
+            | Self::ScheduleAdd(_)
             | Self::ScheduleSet(_)
             | Self::ScheduleEnable(_)
             | Self::ScheduleDisable(_)
@@ -289,6 +307,8 @@ impl Command {
             | Self::ThreadList(_)
             | Self::ThreadGet(_)
             | Self::ThreadBranches(_)
+            | Self::ArtifactList(_)
+            | Self::ArtifactGet(_)
             | Self::ScheduleList(_)
             | Self::ThreadTags(_)
             | Self::ThreadCwds(_)
@@ -337,7 +357,10 @@ impl Command {
     /// Observes targets without changing their state; receipt metadata and API cost are separate.
     pub fn is_read_only(&self) -> bool {
         match self {
-            Self::ScheduleAdd(_)
+            Self::ArtifactAdd(_)
+            | Self::ArtifactUpdate(_)
+            | Self::ArtifactRemove(_)
+            | Self::ScheduleAdd(_)
             | Self::ScheduleSet(_)
             | Self::ScheduleEnable(_)
             | Self::ScheduleDisable(_)
@@ -347,6 +370,8 @@ impl Command {
             | Self::ThreadList(_)
             | Self::ThreadGet(_)
             | Self::ThreadBranches(_)
+            | Self::ArtifactList(_)
+            | Self::ArtifactGet(_)
             | Self::ScheduleList(_)
             | Self::ThreadTags(_)
             | Self::ThreadCwds(_)

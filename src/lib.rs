@@ -2,6 +2,7 @@
 
 pub mod activity;
 pub mod app;
+mod artifacts;
 pub mod attachments;
 pub mod chat_client;
 pub mod cli;

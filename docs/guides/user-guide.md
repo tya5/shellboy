@@ -669,3 +669,7 @@ To send a message to the owning Thread only when a flag file exists (POSIX shell
 shellboy schedule add --thread THREAD --cron '0 * * * *' -- \
   'if test -f needs-review; then shellboy message send --thread "$SHELLBOY_THREAD_ID" --text "Review is needed"; fi'
 ```
+
+## Thread artifacts
+
+Artifacts keep named, versioned references with a Thread. Use `shellboy artifact list --thread T` to find them and `shellboy artifact get --artifact A --version N` to retrieve an older reference. Clients determine URI formats and previews. Archive retains the references; deleting the Thread or removing the artifact deletes only metadata, not the files or other targets.
