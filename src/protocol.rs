@@ -2517,7 +2517,13 @@ mod message_acknowledgement_tests {
                 "{name} remains opaque"
             );
         }
-        for name in ["status", "shell.list", "usage.get", "config.get", "config.set"] {
+        for name in [
+            "status",
+            "shell.list",
+            "usage.get",
+            "config.get",
+            "config.set",
+        ] {
             assert_ne!(
                 results[name],
                 serde_json::Value::Bool(true),
