@@ -593,6 +593,10 @@ mod lifecycle_event_tests {
             }),
         };
 
+        assert!(!coordinator.process_lifecycle_event(WriterJobId(76)));
+        assert!(coordinator.active.as_ref().unwrap().completion_signal.is_some());
+        assert!(!coordinator.process_lifecycle_event(id));
+        assert!(coordinator.active.as_ref().unwrap().completion_signal.is_none());
         assert!(!coordinator.process_lifecycle_event(id));
         let job = coordinator
             .active
