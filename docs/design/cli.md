@@ -396,12 +396,13 @@ the sent body by source, or null), and ungrouped scoped `usage get` returns
 
 ## Explicit Reply Commands (#194)
 
-Use `message send --thread T --expect-reply --text TEXT` to request a deliberate
-reply and retain its message ID. The recipient uses `message reply --message M
+Use `message ask --thread T --text TEXT` (or `--to NAME` for a named recipient,
+human by default) to request a deliberate reply and retain its message ID. The recipient uses `message reply --message M
 --text TEXT` (or `--text-stdin`). `message get --message M` exposes reply state;
 `wait --conditions-json '[{"type":"reply_received","message_id":"M"}]'` waits
-for a terminal reply state, not a Turn's end message. `thread get` lists pending
-`awaiting_reply` duties. See the adopted reply design for Run-end and exec
+for a terminal reply state, not a Turn's end message. `message list --awaiting`
+with one of `--owed-by T`, `--asked-by T` or `--to NAME` pages pending duties,
+and `thread get` returns `pending_replies.owed_by` / `.asked_by` counts. See the adopted reply design for Run-end and exec
 behavior implemented by subsequent steps.
 
 ### Selected request-history diagnostics (#284)

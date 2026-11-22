@@ -11,8 +11,8 @@ user did not decide explicitly are marked **Judgement** and are also in the
 
 ## Summary
 
-A sender can mark a message `--expect-reply`. The recipient Thread's model (or a
-human) answers it once with `shellboy message reply --message ID`. The reply is
+A sender can ask with `shellboy message ask` (`--thread ID` or `--to NAME`). The
+recipient Thread's model (or a human) answers it once with `shellboy message reply --message ID`. The reply is
 attached to the original message for every sender kind and, when the sender is
 a model, is also delivered to the sender's Thread as an ordinary message.
 `wait` gains one condition, `reply_received`. A Run that tries to complete with
@@ -28,7 +28,7 @@ what it returns with `--result reply|turn-end|run-end` (default `reply`).
 | # | User decision (2026-11-03) | Where |
 |---|---|---|
 | D1 | Wake once at Run end; on the second detection record "ignored" as a stored notice, release waits, notify the sender | [Run-end rule](#run-end-rule) |
-| D2 | `message send --expect-reply`, combinable with `--deliver now\|complete` | [CLI](#cli) |
+| D2 | `message ask --thread ID`, combinable with `--deliver now\|complete` (originally the `message send --expect-reply` flag, replaced by #317) | [CLI](#cli) |
 | D3 | One reply per message; replying clears the pending state; progress uses ordinary messages | [Reply operation](#message-reply) |
 | D4 | The recipient Thread's model replies; a human may also reply from the TUI if that is simpler | [Who may reply](#authority), [Human reply](#human-reply) |
 | D5 | Recipient Thread deleted: release waits and notify the sender | [Outcomes](#outcomes) |
@@ -167,7 +167,7 @@ states never change again.
 
 ### Fail-safe cap
 
-A send with `--expect-reply` is rejected with typed `reply_limit` when the target Thread already has 16 pending duties. The count is read with an indexed `LIMIT 17` inside the same write transaction as receipt insertion. The error includes `details.limit` and `details.current_count` and directs the caller to reply to or cancel an outstanding request before retry. This per-recipient cap covers both human asks and Thread replies. Legacy over-limit rows are preserved; reads remain bounded.
+A `message ask` is rejected with typed `reply_limit` when the receiving Thread already has 16 pending duties (for a named ask, the asking Thread's own receipt). The count is read with an indexed `LIMIT 17` inside the same write transaction as receipt insertion. The error includes `details.limit` and `details.current_count` and directs the caller to reply to or cancel an outstanding request before retry. This per-Thread cap covers both named asks and Thread-directed asks. Legacy over-limit rows are preserved; reads remain bounded.
 
 ### Migration 26
 
@@ -193,20 +193,23 @@ names change.
 
 ## CLI
 
-### `message send --expect-reply`
+### `message ask`
 
 ```
-message send [--thread THREAD] [--deliver now|complete] [--expect-reply]
-             [--sender-label TEXT] (--text TEXT | --text-stdin)
+message ask (--thread THREAD [--deliver now|complete] | --to NAME)
+            (--text TEXT | --text-stdin)
 ```
 
-- Combines freely with every `--deliver` timing; admission timing and the
-  reply state are independent.
-- Rejected (`invalid_argument`) when a model targets its own Thread: it would
-  wait on itself.
-- Rejected (`input_limit`) at the cap above.
-- The result adds `"expect_reply": true`; everything else is unchanged.
-- Without the flag, behaviour is exactly today's.
+- `--thread` asks another Thread: an ordinary message plus a reply duty on the
+  receiving Thread. It combines freely with every `--deliver` timing; admission
+  timing and the reply state are independent.
+- `--to NAME` (conflicts with `--thread`; `--deliver` requires `--thread`) asks
+  a named recipient, `human` when neither is given, and needs a calling model
+  Thread. The duty is recorded on the asking Thread's own receipt.
+- Model self-targets are not rejected (#259).
+- Rejected (`reply_limit`) at the cap above.
+- The result carries `"expect_reply": true`; `message send` has no
+  `--expect-reply` flag, so an ordinary send never creates a reply duty.
 
 ### `message reply`
 
@@ -243,9 +246,13 @@ duplicated.
 
 ### How a model lists pending reply-expected messages
 
-No new list operation. `thread get` adds `awaiting_replies`: up to 128 unified items
-`{message_id, sender, created_at, delivery_status, reminded}` for the Thread,
-oldest first (the cap guarantees completeness). Bodies are read with
+`message list --awaiting` pages pending duties with exactly one direction
+filter: `--owed-by THREAD` (Thread-directed asks it must answer), `--asked-by
+THREAD` (asks it sent, named or Thread-directed) or `--to NAME` (asks to that
+name). Items are `{message_id, created_at, asked_by, sender, recipient, excerpt}`,
+oldest first, with `--limit` / `--cursor`. `thread get` returns
+`pending_replies.owed_by` / `.asked_by` as `{count, exact}`, exact through 16.
+Bodies are read with
 `message get` / `history get --node`. Besides that, every reply-expected message
 is announced with its ID when admitted, and the Run-end reminder lists the
 remaining ones, so a model that lost the ID to compaction can recover it.
@@ -257,7 +264,7 @@ immediately (`shellboy message reply --message ID --text …` from another
 terminal). The TUI adds a small reply mode in this issue (decision Q7, **Judgement**: landed last, after the CLI path):
 
 - `/replies` opens a shared-framework popup listing the current Thread's
-  `awaiting_replies` items (recipient kind/Thread, sender, excerpt, elapsed time).
+  pending reply items (recipient kind/Thread, sender, excerpt, elapsed time).
 - Enter on an item puts the composer into reply mode, shown as one line above
   the composer (`Replying to <sender>: <excerpt>`); Esc leaves the mode.
 - The next submit sends `message.reply` instead of `message.send`, text only.
@@ -439,7 +446,7 @@ sender-label rules; repairs are sent in the same mode.
 
 | Mode | Send | Wait | Result text |
 |---|---|---|---|
-| `reply` (default) | `message send --expect-reply` | `reply_received` on the message **and** `run_ended` on the Run the message was assigned to | the reply node (`message get` → `reply.node_id` → `history get --node`) |
+| `reply` (default) | `message ask --thread` | `reply_received` on the message **and** `run_ended` on the Run the message was assigned to | the reply node (`message get` → `reply.node_id` → `history get --node`) |
 | `turn-end` | ordinary `message send`, no reply duty | `turn_completed` on the Turn the message was assigned to | that Turn's end message (`turn get` → `end_message_node_id` → `history get --end-message-only`) |
 | `run-end` | ordinary `message send`, no reply duty | `run_ended` on the Run the message was assigned to | that Run's end message (`run get` → `end_message_node_id` → `history get --end-message-only`) |
 
@@ -562,7 +569,7 @@ for callers that want it.
 
 | Action | Model caller | Human / external CLI (no Origin) |
 |---|---|---|
-| `--expect-reply` send | ordinary send authority; not to its own Thread | ordinary send authority |
+| `message ask` | ordinary send authority; own Thread allowed (#259) | ordinary send authority |
 | `message reply` | only when its Thread is the original's target Thread (any Run of it). A parent cannot reply for its child; a fork cannot reply for its source | any message |
 | cancel the pending reply | only messages its own Thread sent (existing rule) | any message |
 | `wait reply_received` | any message, cycle-checked | any message |
@@ -574,7 +581,7 @@ Every flow in `docs/guides/delegation.md` and the Agent Guide.
 | Current flow | Today | New | Lost? |
 |---|---|---|---|
 | Create child | `thread create --parent` | unchanged | no |
-| Assign work | `message send --thread CHILD --text …` | `message send --thread CHILD --expect-reply --text …` | no |
+| Assign work | `message send --thread CHILD --text …` | `message ask --thread CHILD --text …` | no |
 | Check assignment / pending | `message get` (`assignment`, `held` reason) | unchanged; also shows `reply.state` | no |
 | Wait for one child | `wait turn_completed CHILD_TURN` | `wait reply_received CHILD_MESSAGE` (+ `thread_settled` for recovery/stop if wanted) | no; waits on the specific request rather than whichever Turn answered |
 | Wait for any of several | several `turn_completed` (any) or `thread_settled` with cursor | several `reply_received` (any); `thread_settled` + cursor unchanged | no |
@@ -584,16 +591,16 @@ Every flow in `docs/guides/delegation.md` and the Agent Guide.
 | Wait for all owned work to drain | `wait run_ended` | unchanged | no |
 | Recovery decision | `run get` / `turn get` / `run retry` / `run stop` | unchanged; the pending reply survives retry and is answered after it | no |
 | Stop a child | `run stop --run CHILD_RUN` | unchanged; pending reply stays pending (decision Q2); parent may `message cancel` it | no |
-| After restart | interruption context + stored answers + unprocessed messages | same, with `awaiting_replies` and reply states instead of answers | no |
+| After restart | interruption context + stored answers + unprocessed messages | same, with `message list --awaiting` and reply states instead of answers | no |
 | Delete child | `thread delete-preview` / `thread delete` | unchanged; up to 16 pending replies become `recipient_deleted` synchronously; legacy excess is completed by bounded history GC and the parent is notified after each committed batch | no |
-| Overview | `thread get` `last_answer` / `last_input` | `last_end_message` / `last_input`, plus `awaiting_replies` | no |
+| Overview | `thread get` `last_answer` / `last_input` | `last_end_message` / `last_input`, plus `pending_replies` counts | no |
 | "Make sure you report before finishing" via `--deliver complete` | leader's workaround | unnecessary: the Run-end rule is that check | removed |
 
 ### Leader's operational flow
 
 | Step | Today | New |
 |---|---|---|
-| Send instruction | `message send --thread T --text …` (external CLI) | `message send --thread T --expect-reply --text …` |
+| Send instruction | `message send --thread T --text …` (external CLI) | `message ask --thread T --text …` |
 | Check completion | `wait thread_settled` / `status`, then `thread get` `last_answer` and history | `wait reply_received` (re-issue after timeout), then `message get` → reply node; `thread_settled` / `status` unchanged for stalls |
 | Model ended without reporting | leader inspects the last answer and guesses | explicit `ignored`; `last_end_message` and history remain for diagnosis |
 | Withdraw an instruction | `message cancel` while still queued | same, and also after admission (`reply_cancelled`, the model is told) |
@@ -612,7 +619,7 @@ decided here without an explicit user answer (see [Decisions](#decisions)).
 
 | # | Existing behaviour | Status | Treatment |
 |---|---|---|---|
-| G1 | Operation-ID idempotency of `message send` | Design | `expect_reply` joins the request fingerprint; same ID + different flag = `operation_conflict` |
+| G1 | Operation-ID idempotency of `message send` | Design | `expect_reply` joins the request fingerprint; same ID with `message send` versus `message ask` = `operation_conflict` |
 | G2 | Idempotency of `message reply` | Design | ordinary mutation receipt; replay returns saved result; expiry is safe because `reply.state` blocks a second reply |
 | G3 | Idempotency of `wait` | Design | unchanged; `reply_received` is stored in `wait.pending` metadata like other conditions and survives restart as an `interrupted_wait` node |
 | G4 | `held` with `stopping` | Design | reply state is independent of delivery; the message is replyable only once `applied`; sender may cancel meanwhile |
@@ -621,7 +628,7 @@ decided here without an explicit user answer (see [Decisions](#decisions)).
 | G7 | `--deliver now` | Decided | combinable (D2); no reply-specific effect |
 | G8 | `--deliver complete` and Run-end ordering | Design | waiting `complete` messages are delivered first; the reminder is checked only when none wait, so a `complete` message can still be answered before any reminder |
 | G9 | Forks (`thread fork`) | Decided | receipts stay with the original target Thread; the fork shares the node but cannot reply and has no reminder (Q13) |
-| G10 | Compaction replacing original or reply nodes | Design | node rows stay (receipt and Turn roots), so `message get` and `history get` still work; the model regains IDs from `awaiting_replies` and the reminder |
+| G10 | Compaction replacing original or reply nodes | Design | node rows stay (receipt and Turn roots), so `message get` and `history get` still work; the model regains IDs from `message list --awaiting` and the reminder |
 | G11 | Attachments in replies | Decided | text only, like `message send`; a human can send attachments as an ordinary message (Q8) |
 | G12 | Who may reply | Decided | recipient model (D4) and humans; parent-for-child not allowed (Q5) |
 | G13 | Who may cancel | Decided | sender may cancel (decided); authority reuses the existing cancel rule |
@@ -640,10 +647,10 @@ decided here without an explicit user answer (see [Decisions](#decisions)).
 | G26 | Search and history indexing | Design | reply node indexed like any message node; scoped to the sender Thread (model senders) or the recipient Thread (others). `history list` provenance of a reply without a delivery receipt shows sender `unknown`; `message get` of the original gives `reply.by` |
 | G27 | `exec` exit codes and timeouts | Decided | `--result` modes and exit table in [exec](#exec) (Q14, D9, D10, D11) |
 | G28 | Multiple waiters on one message | Design | all released by one transition |
-| G29 | Messages sent without `--expect-reply` | Design | unchanged except `message get` drops `answer_node_id` |
+| G29 | Messages sent with `message send` | Design | unchanged except `message get` drops `answer_node_id` |
 | G30 | Wait `interrupted` from an arriving receipt | Design | `satisfied` wins when the arriving receipt is the awaited reply |
 | G31 | Wait cycles | Design | Thread → live Run edge, as in `thread_settled` |
-| G32 | Model sending `--expect-reply` to its own Thread | Decided | rejected (Q16) |
+| G32 | Model asking its own Thread | Decided | allowed, superseded Q16 (#259) |
 | G33 | `child_turn_completed` wake plus reply message | Design | both still arrive; they usually land in one parent Turn. Not changed here |
 | G34 | Thread title derived from first user body | Design | a reply node on a sender Thread is a user node like any message; no special case |
 | G35 | `thread request` debug command | Decided | unchanged; it shows the new notice nodes in rebuilt requests (Q1) |
@@ -705,14 +712,14 @@ text. `message get` `answer_node_id` stays until step 2.
 
 ### Step 2 — Schema 26 and the reply core
 
-`message send --expect-reply` (flag in `MessageSendArgs`, `MessageAccepted`,
+`message ask` (originally a `message send --expect-reply` flag in `MessageSendArgs`, `MessageAccepted`,
 the operation fingerprint), `message reply` (`Command::MessageReply`,
 `"message.reply"`), the reply node and its two deliveries, `message get`
 `expect_reply` / `reply` / `reply_to` (removes `answer_node_id`), `status`
 message items `answer_node_id` → `reply_node_id`,
 `wait reply_received` (condition, snapshot, cycle edge, precedence over
 `interrupted`), `message cancel` outcome `reply_cancelled` and its
-`context_changed` notice, `thread get` `awaiting_reply` for human decisions and `awaiting_thread_replies` for Thread recipients, with additive `awaiting_replies`; admission notices (`reply_expected`, `reply`) and the 16-duty `reply_limit` admission cap. Model self-targets and cross-thread reply/cancel actors remain allowed per #259.
+`context_changed` notice, `thread get` pending reply counts (now `pending_replies.owed_by` / `.asked_by`, #317); admission notices (`reply_expected`, `reply`) and the 16-duty `reply_limit` admission cap. Model self-targets and cross-thread reply/cancel actors remain allowed per #259.
 Pending replies have no Run-end effect yet; nothing uses them until step 4/5.
 
 - Schema: `migrations/0026_reply_expected.sql`, `src/storage/current.sql`,
@@ -779,7 +786,7 @@ table, per-mode diagnostics and the `reply_received` owner probe.
 ### Step 5 — Delegation and leader flow on replies
 
 No code. Rewrite the delegation recipe as in
-[Delegation mapping](#delegation-mapping): `--expect-reply` assignment,
+[Delegation mapping](#delegation-mapping): `message ask --thread` assignment,
 `wait reply_received` (+ `thread_settled` for stalls), the reply as the result,
 `ignored` as explicit failure; remove the "did you report?" `--deliver complete`
 workaround.
@@ -817,7 +824,7 @@ replaced by one wait per mode. The final-answer projection stays (renamed),
 because `--result turn-end|run-end` uses it. The "answer" vocabulary becomes
 "end message" (rename, no new concept).
 
-Added (7): the expect-reply flag, the per-message reply state (five values), the
+Added (7): the `message ask` reply duty, the per-message reply state (five values), the
 `message reply` operation, the `reply_received` wait condition, the Run-end
 reminder rule, two event kinds (`reply_reminder`, `reply_outcome`) with three
 notice payload kinds on existing paths, and the client-only `exec --result`
@@ -866,7 +873,7 @@ the memo gave no single recommendation, the choice made here is marked
 | Q13 | Forks | A fork does not inherit the duty to reply; only the original Thread can reply |
 | Q14 | exec strictness | User: replaced by `exec --result reply\|turn-end\|run-end`, default `reply`. `reply` reminds once and then exits 4 `ignored`; `turn-end` and `run-end` send an ordinary message with no reply duty and never produce the reply outcomes. See [exec](#exec) |
 | Q15 | Cap (superseded by #262 user decision, 2026-11-08) | 16 pending duties per recipient Thread; the 17th new send/ask is refused with `reply_limit` and details containing limit/current_count |
-| Q16 | Asking yourself | A model cannot send a reply-expected message to its own Thread |
+| Q16 | Asking yourself | Superseded by #259: a model may ask its own Thread |
 | Q17 | TUI glyph | Option B: no new mark; a label after the existing glyph. See [TUI rendering](#tui-rendering) |
 | D10 | Empty end message (user, after Q14; refined) | A successful empty result: exit 0 in every mode, also with `--schema`; Schema validation and repairs apply only to non-empty text. Exit 0 means valid JSON or an empty end message |
 | D11 | Turn ended by Esc, no end message (user, correcting an earlier judgement) | Not the same as empty: no result, treated like a stopped Turn, exit 4 |
@@ -965,17 +972,18 @@ a reason to pause or abandon that reply duty.
 
 ## Thread-scoped reply inbox (#262, unified for web/TUI)
 
-`thread.get` remains the public, bounded per-Thread inbox: `ThreadDetails.awaiting_replies` is the unified
-page of pending duties for that one Thread, ordered by saved creation time and
-bounded to 128. Each item has `message_id`, `recipient_kind` (`human` for
-`message ask`, otherwise `thread`), `recipient_thread_id` (the target Thread),
-`excerpt` (bounded first-line question), `created_at`, `elapsed_ms` (derived
-from saved creation time and observation time), `delivery_status`, and
-`reminded`. `thread.get` is already refreshed by `events.wait --thread THREAD_ID`;
-clients reload only that Thread after a change hint. Answering uses existing
-`message.reply` with `message_id` and text. No new queue or read operation is
-needed for per-Thread details. The caller must observe `recipient_kind`, not
-infer it from sender or Thread identity. A thread-targeted duty is not a human notification.
+`thread.get` returns `ThreadDetails.pending_replies`: directional counts
+`owed_by` (Thread-directed asks the Thread must answer) and `asked_by` (asks it
+sent), each `{count, exact}` and exact through 16. The items come from
+`message.list` (`message list --awaiting`) with one of `owed_by`, `asked_by` or
+`to`, paged by saved creation time with `limit` / `cursor`. Each item has
+`message_id`, `created_at`, `asked_by` (the asking model Thread or null),
+`sender`, `recipient` (`{kind:"name",name}` or `{kind:"thread",thread_id}`) and
+a bounded first-line `excerpt`. `thread.get` is already refreshed by
+`events.wait --thread THREAD_ID`; clients reload only that Thread after a change
+hint. Answering uses existing `message.reply` with `message_id` and text. The
+caller must read `recipient.kind`, not infer it from sender or Thread identity.
+A thread-targeted duty is not a human notification.
 
 For cross-Thread web inboxes, `thread.list awaiting=human` pages only Threads
 with human-directed pending receipts. Schema 38 adds
@@ -998,7 +1006,7 @@ state churn.
 
 
 The TUI `Pending replies` region is the same unified per-Thread list. It uses the
-existing human mark for `recipient_kind=human`; Thread-targeted duties retain the
+existing human mark for a human recipient; Thread-targeted duties retain the
 existing model mark. `thread list` exposes the count of all pending duties in its ordinary listing;
 `thread list awaiting=human` is a separate cross-Thread human inbox view.
 Overflow remains reachable through `/replies`. Human questions alone are
@@ -1008,14 +1016,14 @@ existing rules.
 ## Adopted G21 replacement (#276)
 
 Reply-expected messages are the single delegation contract. Create/select a child Thread, send an accepted request
-with `expect_reply`, retain its message ID and finish the current Turn if only that result remains. The recipient
+from `message ask`, retain its message ID and finish the current Turn if only that result remains. The recipient
 replies to the exact applied message once; ordinary reply delivery resumes the sender Thread through the existing
 message path. Progress is an ordinary message. No Run owns another Run, no parent background state is retained by a
 child, and child answer/end/progress/recovery notifications are not automatically forwarded. Run-end unanswered
 request reminders remain. Human decision questions and sender provenance are unchanged.
 
-Thread-get exposes one `awaiting_replies` list. Each item's `recipient_kind` and `recipient_thread_id` distinguish
-human/thread duties; the duplicate `awaiting_human`, `awaiting_reply` and `awaiting_thread_replies` lists are removed.
+Thread-get exposes the directional `pending_replies` counts; `message list --awaiting` lists the items, whose `recipient` distinguishes
+named/thread duties. The duplicate `awaiting_human`, `awaiting_reply` and `awaiting_thread_replies` lists are removed.
 
 ## W8 correction: bounded terminal settlement and restart
 

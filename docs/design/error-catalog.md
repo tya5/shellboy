@@ -98,8 +98,8 @@ the same lifetime rule before temporary-directory cleanup.
 
 ## Reply-Duty Admission Error (#262)
 
-`reply_limit` rejects a new human ask or `expect-reply` send when its recipient
-Thread already has 16 pending duties. The error includes `details.limit` and
+`reply_limit` rejects a new `message ask` (named or Thread-directed) when the
+receiving Thread already has 16 pending duties. The error includes `details.limit` and
 `details.current_count` (17 only for pre-existing legacy over-limit data); it
 explains that replying to or cancelling an outstanding request permits retry.
 The check and admission share one write transaction and counts at most 17 rows.
