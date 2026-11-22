@@ -98,11 +98,13 @@ pub(super) fn resume_recovery_turn_tx(
                     .map(usage::consumed_only),
             )
         };
-    tx.execute(
-        "UPDATE turn SET state=?2,generation=generation+1,recovery_reason_json=?3 WHERE id=?1",
-        params![turn, state, reason],
+    let changed = tx.execute(
+        "UPDATE turn SET state=?2,generation=generation+1,recovery_reason_json=?3
+         WHERE id=?1 AND generation=?4 AND state='recovery_wait'",
+        params![turn, state, reason, generation],
     )?;
-    Ok(true)
+    // The caller rolls back the receipt batch if the transition writes no row.
+    Ok(changed == 1)
 }
 
 /// A DB transition result, not a second in-memory attempt state machine.
