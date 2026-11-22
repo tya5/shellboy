@@ -11,7 +11,7 @@ WITH activity(thread_id, at) AS (
 )
 UPDATE thread SET created_at=earliest.at FROM earliest WHERE thread.id=earliest.thread_id AND thread.created_at IS NULL;
 
-CREATE INDEX IF NOT EXISTS threads_created ON thread((archived_at IS NOT NULL),created_at DESC,id DESC) WHERE deleted_at IS NULL;
+CREATE INDEX threads_created ON thread((archived_at IS NOT NULL),created_at DESC,id DESC) WHERE deleted_at IS NULL;
 
 INSERT INTO schema_migration(version,name) VALUES(54,'0054_thread_created_at');
 PRAGMA user_version=54;

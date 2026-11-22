@@ -1024,6 +1024,9 @@ coalesced global config-file write mark through the existing change clock. See
 
 ## Thread creation order (#338)
 
+Protocol 10 introduces the creation-order argument. Clients must match the
+owner protocol before sending it; older owners reject the unknown argument.
+
 `thread.list.order` accepts `updated` (default) and `created`. The created order
 uses `(created_at DESC, id DESC)` within the selected archive scope. Its opaque
 cursor does not cross order or archive scope. Creation pages are live, without
@@ -1039,4 +1042,3 @@ awaiting filters keep their existing list order and cannot be combined with
 Every summary carries `created_at`; for Threads created before schema 54,
 created_at is the earliest recorded activity. If none was recorded, it is null.
 Creation order puts null last and breaks ties by descending Thread ID.
-
