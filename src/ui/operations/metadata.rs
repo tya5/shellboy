@@ -1131,22 +1131,22 @@ fn field_label_for(id: FieldId, language: crate::config::UiLanguage) -> &'static
         ),
         FieldId::PendingReplies => local!(
             language,
-            "返信待ちの依頼だけを一覧します。",
+            "返信待ち",
             "Pending replies"
         ),
         FieldId::OwedBy => local!(
             language,
-            "指定したThreadが答える依頼に絞ります。",
+            "答えるThread",
             "Owed by"
         ),
         FieldId::AskedBy => local!(
             language,
-            "指定したThreadが出した依頼に絞ります。",
+            "依頼したThread",
             "Asked by"
         ),
         FieldId::RecipientName => local!(
             language,
-            "指定した名前宛ての依頼に絞ります。",
+            "宛先名",
             "Recipient name"
         ),
         FieldId::Awaiting => local!(language, "人への返信待ち", "Awaiting a human reply"),

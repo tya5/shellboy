@@ -323,7 +323,9 @@ async fn delivered_cross_thread_ask_can_be_withdrawn_only_by_its_sender_or_owner
             .await
             .unwrap();
         assert_eq!(cancelled.result["items"][0]["outcome"], "reply_cancelled");
-        assert!(cancelled.wake_threads.is_empty() && cancelled.quiet_wake_threads.is_empty());
+        assert!(cancelled.wake_threads.is_empty());
+        // The recipient gets a saved notice; only the sender gets the existing outcome wake.
+        assert_eq!(cancelled.quiet_wake_threads, ["sender"]);
         for thread in ["sender", "recipient"] {
             assert!(cancelled.changed_threads.iter().any(|id| id == thread));
         }
@@ -360,6 +362,14 @@ async fn delivered_cross_thread_ask_can_be_withdrawn_only_by_its_sender_or_owner
                         |row| row.get::<_, String>(0)
                     )?,
                     id
+                );
+                assert_eq!(
+                    db.query_row(
+                        "SELECT target_thread_id FROM event WHERE id=?1 AND target_run_id IS NULL",
+                        [format!("reply-cancelled-{id}")],
+                        |row| row.get::<_, String>(0)
+                    )?,
+                    "recipient"
                 );
                 assert_eq!(
                     db.query_row("SELECT count(*) FROM receipt", [], |row| row
