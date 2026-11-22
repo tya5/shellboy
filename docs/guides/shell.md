@@ -32,7 +32,7 @@ The `command` examples use Bash. The shell type and executable follow startup co
 
 ## Foreground and background
 
-For foreground work, the model waits for the tool to complete. This does not stop the entire UI/Control: humans can switch Threads or perform other operations. Background work has the same ownership (cleanup and notice) rules; inspect the returned `execution_id` later. Even after the model's Turn returns its final answer, the Run remains live while it owns shells or child Runs. Normal Run completion requires that no owned work remains. Explicitly stopping the Run or exiting the application stops and reclaims owned work.
+For foreground work, the model waits for the tool to complete. This does not stop the entire UI/Control: humans can switch Threads or perform other operations. Background work has the same ownership (cleanup and notice) rules; inspect the returned `execution_id` later. Even after the model's Turn returns its final answer, the Run remains live while it owns its Thread's foreground or background shells. Normal Run completion requires that no owned work remains. Explicitly stopping the Run or exiting the application stops and reclaims owned work.
 
 ```json
 {"command":"sleep 2; printf '%s\\n' 'ready'","background":true}
@@ -95,7 +95,7 @@ other persistent commands when finished. A sequence whose later commands depend
 on success can be one shell command (`test-command && next-command`) rather than
 separate tool calls; releasing the foreground wait still leaves that shell alive.
 
-Unlike backgrounding, interrupting a Run with Ctrl+C requests stopping it and its owned descendants. Acceptance of a stop request does not mean every PID has been reclaimed; query the terminal Run/shell state. An interrupted model is not automatically resumed merely to deliver a notification.
+Unlike backgrounding, interrupting a Run with Ctrl+C requests stopping it and its owned shells. Acceptance of a stop request does not mean every PID has been reclaimed; query the terminal Run/shell state. An interrupted model is not automatically resumed merely to deliver a notification.
 
 ### Finding and stopping a stalled shell
 

@@ -124,7 +124,7 @@ IDs have distinct roles even within the same task. `operation_id` identifies an 
 
 Give children their purpose, scope, permitted files, completion criteria and expected return information in the
 request. They do not inherit the entire parent conversation. Use `message send --thread CHILD_THREAD_ID
---expect-reply --text ...`, retain `message_id`, and end the Turn instead of synchronously supervising a child Run.
+--expect-reply --text ...`, retain `message_id`, and end the Turn when only the reply remains.
 The child uses `message reply --message MESSAGE_ID --text ...` once the request is applied. A normal delivered reply
 continues the sender's conversation. Inspect `message get` and its `reply.node_id` when evidence is needed; do not
 mistake the child's final Turn text for the requested reply. Progress is an ordinary message. Parent Run completion
@@ -839,7 +839,7 @@ have no dependency graph. Child requests use expected replies and normal deliver
 
 ## Wait for any child Thread
 
-Use expected replies rather than supervising child Runs: retain each accepted request ID and finish your Turn.
+Delegate with reply-expected messages to other Threads: retain each accepted request ID and finish your Turn.
 External inspection may use `thread_settled` with `--after`. Inspect `result.snapshot.changes`, `result.cursor` and
 `last_end_message` and `last_input` without treating recovery_wait as terminal or automatically replaying an interrupted wait.
 

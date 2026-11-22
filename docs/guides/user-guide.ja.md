@@ -111,7 +111,7 @@ shellboy
 設定が自動反映されないため、設定やkeyの環境変数を直したらownerを起動し直します。
 
 
-作業中の処理をまとめて見るにはTUIで`/status`、別の端末で`shellboy status`を使います。background shell、子Run、依頼の保留、モデル要求を保存済みIDから追跡できます。終了済みも見る場合は`/status all`又は`shellboy status --all`です。詳しくは[画面操作](tui.md#slash-commands)と[CLIの作業状態](cli-reference.md#common-syntax-and-connection)を参照してください。
+作業中の処理をまとめて見るにはTUIで`/status`、別の端末で`shellboy status`を使います。background shell、依頼の保留、モデル要求を保存済みIDから追跡できます。終了済みも見る場合は`/status all`又は`shellboy status --all`です。詳しくは[画面操作](tui.md#slash-commands)と[CLIの作業状態](cli-reference.md#common-syntax-and-connection)を参照してください。
 
 まず[環境別の起動方法](configuration.md#starting-on-each-platform)で、端末・OS版binary・モデル用shellの組合せを選びます。[設定・導入](configuration.md) に従ってビルド・インストールと接続設定を行った後、ターミナルで次を実行します。例はBash/zsh用です。
 
@@ -183,7 +183,7 @@ base_url = "https://proxy.example/v1"
 
 一覧を開いている間も、保存済みタイトル・状態・追加・削除が自動で反映され、選択と親子の開閉状態を保ちます。新しい行が現在の閲覧位置より上に入る場合は、上キーで移動できます。「再確認中」は、再取得後に以前の選択先を確認している印です。Ctrl+Rで明示的に再取得でき、変更通知を取りこぼした場合は理由を表示して再同期します。
 
-Threadごとに下書きと閲覧位置を持ちます。切替は実行停止を意味しません。前のThreadでshellや子Runが動いていれば処理を続けます。回答後も背景処理が残ると、Turnは完了していてもRunは継続する場合があります。Thread・Run・Turnの違いは[委譲](delegation.md)を参照してください。
+Threadごとに下書きと閲覧位置を持ちます。切替は実行停止を意味しません。前のThreadのshellは処理を続けます。回答後も背景処理が残ると、Turnは完了していてもRunは継続する場合があります。Thread・Run・Turnの違いは[委譲](delegation.md)を参照してください。
 
 ### 会話を読む
 
@@ -483,7 +483,7 @@ ownerの権限も考慮が必要です。モデルのshellだけを包んでも�
 
 ## 入力欄の上の「抱えている作業」
 
-選択中のRunが所有するshell・子Run・待機を、古いものから既定で最大3件表示します。
+選択中のRunが所有するshellと保存済みの待機を、古いものから既定で最大3件表示します。
 `ui.live_work_rows`で1〜10件に変更できます。
 回答したTurnが完了しても、作業が続いていれば残ります。残りは件数で示し、
 保存時刻や待機の根拠が不明な場合に0件と表示することはありません。

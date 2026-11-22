@@ -74,7 +74,7 @@ shellboy run get --run RUN_ID
 | Message `applied` | Included in model input | Answer may not be complete |
 | Message `cancelled` | Instruction treated as cancelled | Investigate the cause before deciding the next instruction |
 | `assignment: pending` | Run/Turn not assigned yet | Check `message get` rather than guessing IDs |
-| Turn `completed` | Normal answer finalized | Background shells or child Runs may still be active |
+| Turn `completed` | Normal answer finalized | The Run's background shells may still be active |
 | Run `live` | Execution lifetime continues | Includes waiting for owned background work after answering |
 | Turn `recovery_wait` | Failure reason saved, awaiting an explicit decision | Time or configuration changes alone do not resume it |
 
@@ -307,12 +307,12 @@ Explicit context-capacity overflow triggers automatic compaction and up to two r
 |---|---|
 | TUI Esc, with no popup/completion/selection | Interrupt only the observed Turn; foreground shell moves to background; owned background work continues |
 | TUI Ctrl+C | Request stopping the current Run, including owned background work |
-| `shellboy run stop --run RUN_ID` | Accept stopping the specified Run and its owned descendants |
+| `shellboy run stop --run RUN_ID` | Accept stopping the specified Run and its owned shells |
 | `shellboy shell stop --execution EXECUTION_ID` | Request stopping that shell |
 | Ctrl+C during external CLI wait | Disconnect observation; target Run/shell continues |
 | TUI Ctrl+Q | Stop work, save, close DB, and shut down normally |
 
-Successful stop acceptance does not prove all PIDs were reaped. Wait for Run termination and inspect state when needed. Any caller may stop any Run; stopping a Run also stops its currently owned descendants and their shells. Check the Run ID first, because stopping another conversation's Run interrupts it. The operation receipt records the calling Origin.
+Successful stop acceptance does not prove all PIDs were reaped. Wait for Run termination and inspect state when needed. Any caller may stop any Run; stopping a Run also stops only its own foreground and background shells. Check the Run ID first, because stopping another conversation's Run interrupts it. The operation receipt records the calling Origin.
 
 After normal-shutdown grace expires, the TUI offers continued waiting or force quit. W/Enter waits for the same shutdown. F then Y explicitly forces exit; N/Esc cancels force confirmation. Force quit can leave unsaved data/unreaped descendants and differs from normal shutdown.
 

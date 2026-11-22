@@ -117,7 +117,7 @@ for OS paths, credentials and a keyless local-endpoint example. If an owner was
 already running, restart it after editing the file or its credential environment.
 
 
-Use `/status` in the TUI or `shellboy status` in another terminal for an overview of current work. Saved IDs let you track background shells, child Runs, held requests, and model requests. Include terminal work with `/status all` or `shellboy status --all`. See [TUI slash commands](tui.md#slash-commands) and [CLI connection and common syntax](cli-reference.md#common-syntax-and-connection).
+Use `/status` in the TUI or `shellboy status` in another terminal for an overview of current work. Saved IDs let you track background shells, held requests, and model requests. Include terminal work with `/status all` or `shellboy status --all`. See [TUI slash commands](tui.md#slash-commands) and [CLI connection and common syntax](cli-reference.md#common-syntax-and-connection).
 
 First choose your terminal, OS binary, and model shell combination in [Starting on each platform](configuration.md#starting-on-each-platform). Follow [Configuration and installation](configuration.md) to build or install Shellboy and configure the connection, then run the following in a terminal. These examples use Bash/zsh.
 
@@ -194,7 +194,7 @@ Until acceptance completes, the submitted text and attachments remain visible. E
 
 Saved title, state, additions and deletions update the open list automatically while keeping selection and collapsed branches. A new row may be above your retained reading position; use Up to reach it. `再確認中` means a previously selected row is being checked after refresh. Ctrl+R explicitly reloads the list; lost notifications trigger an explained resynchronization.
 
-Each Thread retains its own draft and reading position. Switching does not stop execution. Shells or child Runs in the previous Thread continue. Background work may keep a Run live after its Turn's answer completes. See [Delegation](delegation.md) for the Thread/Run/Turn distinction.
+Each Thread retains its own draft and reading position. Switching does not stop execution. Shells in the previous Thread continue. Background work may keep a Run live after its Turn's answer completes. See [Delegation](delegation.md) for the Thread/Run/Turn distinction.
 
 ### Read the conversation
 
@@ -516,8 +516,7 @@ See [Agent Guide](agent-guide.md#safety-boundary) and
 
 ## Live work above the composer
 
-The `◉ 抱えている作業` section shows the oldest shells, owned child Runs and pending waits
-while the selected Run owns work, including after its answer completes. Its default
+The `◉ 抱えている作業` section shows the oldest shells owned by the selected Run and pending waits, including after its answer completes. Its default
 limit is three; `ui.live_work_rows` accepts 1 through 10. Overflow
 shows a count; missing saved timing or wait evidence is not reported as zero.
 Elapsed time comes from saved start facts. Last-output age uses saved or newly

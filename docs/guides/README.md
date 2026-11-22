@@ -29,8 +29,9 @@ For people: User Guide → TUI operations → task-specific guides. For models: 
 | --- | --- |
 | Thread | A saved conversation with a cwd, model configuration, and selected history path. |
 | Turn | An interval ending in one normal response; it can contain multiple model requests and tool executions. |
-| Run | The lifetime that owns shells and child Runs. It can remain alive after a Turn answers if background work remains. |
-| Child agent / subagent | A Run on a child Thread to which a parent delegates work. |
+| Run | An execution lifetime that owns only its Thread's foreground and background shells. It can remain live after a Turn answers while those shells are active. |
+| Child agent / subagent | Another Thread carrying out a request sent as a reply-expected message. |
+| Schedule | A command scheduled by a Thread, independent of its Runs. |
 | cwd | The Thread's shell working directory, separate from its storage data directory. |
 | data-dir / owner | The storage location for the database and execution state / the running Shellboy instance managing that location. |
 | node / execution | A saved history item / an identified shell execution. |

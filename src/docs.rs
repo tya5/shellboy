@@ -670,6 +670,18 @@ mod tests {
     }
 
     #[test]
+    fn bundled_catalogue_has_no_obsolete_run_ownership_term() {
+        let page = execute(DocsCommand::Search {
+            query: ["child", "Run"].join(" "),
+            parent: None,
+            limit: 20,
+            cursor: None,
+        })
+        .unwrap();
+        assert_eq!(page["items"], serde_json::json!([]), "{page}");
+    }
+
+    #[test]
     fn heading_parser_ignores_code_and_disambiguates() {
         let s = sections("# Same\n\n```\n# Hidden\n```\n## Same\n\n## 子\n");
         assert_eq!(

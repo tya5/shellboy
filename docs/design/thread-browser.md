@@ -145,7 +145,7 @@ startup terminalization: explicit_stop is retained.
 Thread list retains its native `state` field and adds a separate snake_case
 `activity` projection. One pure classifier is shared with the conversation
 footer: terminal/stopping Runs take precedence, completed Turns on live Runs
-with active owned shells/child Runs are background, and live Runs without
+with active owned shells are background, and live Runs without
 remaining owned work are continuing. Running refinements use the latest saved
 attempt, retry diagnostic and tool-group facts. Latest Run and Turn ordering
 is created_at then ID, descending, on both surfaces. No Run means idle.

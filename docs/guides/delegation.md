@@ -44,8 +44,8 @@ Creating with a parent inherits cwd, AGENTS reference, connection, model, and ef
 
 ## Waiting for replies
 
-After accepting the child request, end your Turn when only the result remains. Do not block the parent Run on a
-child Run/Turn. The explicit reply is delivered as ordinary conversation input and can start the next Turn/Run.
+After the request is accepted, end your Turn when only the result remains. Delegation uses the saved reply-expected
+message, not Run ownership. The explicit reply is delivered as ordinary conversation input and can start the next Turn/Run.
 A reply is tied to the request message, not to the child's most recent final message. `message get` exposes the saved
 reply state and `reply.node_id`, including while assignment remains pending; do not resend a duplicate request.
 For an external observer, explicit `wait` with `reply_received` remains an inspection option, not the delegation
@@ -101,11 +101,11 @@ shellboy message send --thread PARENT_THREAD_ID --text 'Progress: read-only audi
 This is an ordinary message notification. A child need not wait for a reply to every report; the parent adopts it at a safe boundary. A progress report does not replace the requested reply. Completion of the child's answer and termination of its Run also differ. Background shells can keep a Run live after its Turn answers. If all owned work must finish, wait for `run_ended`.
 
 ```bash
-shellboy wait --conditions-json '[{"type":"run_ended","run_id":"CHILD_RUN_ID"}]' --timeout-ms 30000
+shellboy wait --conditions-json '[{"type":"run_ended","run_id":"TARGET_RUN_ID"}]' --timeout-ms 30000
 ```
 
-A parent Run can complete while the child independently continues. Stopping the parent stops only its own shells,
-not child or grandchild Runs. Application exit stops every live Run independently. Never rely on a Thread's tree
+The sender's Run can complete while the recipient Thread continues independently. Stopping the sender's Run
+stops only its own shells and does not stop the recipient's Run. Application exit stops every live Run independently. Never rely on a Thread's tree
 position as a cleanup policy; select the exact Run or shell when a stop is needed.
 
 After reading the results and waiting for the child's Runs to end, the parent or user decides whether to retain the child.

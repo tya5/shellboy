@@ -666,7 +666,7 @@ pub struct StatusOptions {
     /// Exact Thread; model callers default to their own Thread.
     #[arg(long = "thread")]
     pub thread_id: Option<String>,
-    /// Exact owning Run; does not implicitly include owned child Runs.
+    /// Filter work to this exact Run.
     #[arg(long = "run")]
     pub run_id: Option<String>,
     /// Recorded activity at or after RFC3339 time; not all state transitions are timestamped.

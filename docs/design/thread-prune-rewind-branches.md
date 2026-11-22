@@ -203,7 +203,7 @@ store the tail it cuts exactly. There are two candidates:
 ```text
 shellboy thread rewind --thread T --node NODE
 ```
-1. **Refusal.** If T has a live or stopping Run, the command refuses. It uses the same live/stopping check as `/edit`, with no automatic stop. Held shells or child Runs keep the Run live, so the refusal covers them (`control/driver.rs` ~559, *unverified for every held-work kind*).
+1. **Refusal.** If T has a live or stopping Run, the command refuses. It uses the same live/stopping check as `/edit`, with no automatic stop. Active owned shells can keep the Run live, so the refusal covers that case.
 2. **`NODE` on T's path.** `validate_group_boundary` runs on the prefix. The tail after `NODE` is saved as a branch anchored at `NODE`. Then `select_path(T, path[..=NODE])` runs; truncation causes no reasoning restart. All of this happens in one transaction with a CAS on `selection_revision`.
 3. **`NODE` in a live branch B's tail (forward or switch).**
    - The command resolves B's full path: the anchor's position on the current path, or recursively in its parent branch (bounded depth 64).

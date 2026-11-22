@@ -177,7 +177,7 @@ retry/recovery. An already adopted response must finish every tool-call result:
 unstarted calls save executed:false/human_turn_interrupted; a running foreground
 shell returns running, its execution ID and the interruption reason; it continues
 in the background. Later calls save the structured prerequisite cancellation
-reason from #56. The interrupt never stops background shells or owned child Runs.
+reason from #56. The interrupt never stops background shells or another Thread's Run.
 
 Acknowledgement terminalizes only that Turn, settles its already-admitted event
 deliveries (not genuinely later completions), repairs admitted receipts, and

@@ -596,5 +596,5 @@ stop propagation and child-based Run retention described earlier. A new Run is i
 request sender or Thread parentage. `parent_thread_id` remains organizational. Stopping a Run stops that Run's
 shells only; application shutdown independently visits every live Run. A completed Turn keeps a Run alive only
 for its own shell work or ordinary current-Run completion conditions, never for another Run or pending child reply.
-Recovery/replay does not adopt, stop or replay child Runs. Exact shell ownership, operation receipts, generation
+Recovery and replay do not adopt, stop, or replay other Runs. Exact shell ownership, operation receipts, generation
 fences and explicit recovery decisions remain. There is no compatibility ownership graph or replacement queue.

@@ -1979,8 +1979,8 @@ fn term_for(id: Term, language: crate::config::UiLanguage) -> &'static str {
     match id {
         Term::Run => local!(
             language,
-            "作業（Run）は依頼を進める実行単位です。Turnの回答後も、所有するshellや子Runの終了まで続くことがあります。",
-            "A Run is a unit of work progressing a request. It may continue after a Turn's response until owned shells and child Runs finish."
+            "作業（Run）は依頼を進める実行単位です。Turnの回答後も、そのThreadで所有するshellの終了まで続くことがあります。",
+            "A Run is a unit of work progressing a request. It may continue after a Turn's response until its foreground and background shells finish."
         ),
 
         Term::Turn => local!(

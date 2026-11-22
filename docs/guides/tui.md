@@ -91,18 +91,18 @@ not rewrite the title or alter the CLI's title lookup.
 
 The header orders state, conversation name, model, and working directory. Long names use at most half the width; when space runs out, trailing items are omitted first. Working directories favor their final components; inspect/copy the full value in F8 `会話 | 詳細`.
 
-Display follows stored state and received events. Receiving response means actual text has arrived from the current model attempt. Unobservable details, such as the model's internal thought, are not guessed. The `抱えている作業` section shows saved wait targets when available and labels the timeout estimate as approximate. A Turn that has answered while owned shells or child Runs remain active shows answered/background-active. Use `/status thread` or F8 for details.
+Display follows stored state and received events. Receiving response means actual text has arrived from the current model attempt. Unobservable details, such as the model's internal thought, are not guessed. The `抱えている作業` section shows saved wait targets when available and labels the timeout estimate as approximate. A Turn that has answered while the Run's shells remain active shows answered/background-active. Use `/status thread` or F8 for details.
 
 At most one thing moves in each region: the status line keeps its shimmer/pulse, the newest running foreground shell row (or, without one, the streaming answer row) shows a one-column spinner in place of its mark, and the `◉ 抱えている作業` heading mark changes brightness at most once per second. Animation never changes history text, wrapping, selection or scroll position; `[ui] motion = "off"` keeps every region on its static mark, and `NO_COLOR` does not blink. Animation redraws stop during selection/copy mode or overlays. Selection mode shows `表示固定` (display frozen), its UTC freeze-entry time when space permits, and exit keys at the top; F2/Esc resumes updates. The open conversation list updates saved row facts reactively; it has no running-state animation.
 
 `観測経過` (observed elapsed time) uses a monotonic clock for the period during which this screen observed Turn activity. It excludes time before selection, before restart, and while state was unavailable; it stops at recovery wait or Turn termination. It differs from a tool header's saved execution duration.
 
-The `◉ 抱えている作業` section above the composer shows the current Run's
-owned shells, child Runs and saved pending waits, including after an answer.
+The `◉ 抱えている作業` section above the composer shows shells owned by the current Run and
+saved pending waits, including after an answer.
 `ui.live_work_rows` sets the oldest visible rows from 1 to 10 (default 3);
 smaller terminals show a hidden count. Matching row numbers connect a wait to
 its visible target. Shift+Tab focuses a row, Space opens a shell preview, F6
-inspects it, and `o` opens a selected child. Unknown evidence remains unknown.
+inspects it, and `o` opens the relevant Thread when a row provides one. Unknown evidence remains unknown.
 
 The heading is always shown, as `◉ 抱えている作業` plus `なし` (none) when there is no work
 (no blink then). Alt+W or a click on the heading folds and unfolds the body; the
@@ -119,7 +119,7 @@ the branches use `+-` and `\-`, and metadata uses a spaced vertical bar (`|`).
 Truncated work and tool rows use
 `…` only when the measurement is one column; otherwise they use `.`. No
 terminal width is guessed.
-The one-column kind glyph is `$` for a shell, `↳` for a child Run, and `⋯`
+The one-column kind glyph is `$` for a shell and `⋯`
 for a saved wait. Selection uses reverse video and bold, without a caret.
 These fixed-width glyphs do not depend
 on color. An overflow line uses the last branch; blank padding has no connector.
@@ -254,7 +254,7 @@ Restore failed/cancelled send snapshots with `/restore REVISION`. Unaccepted or 
 
 `/status` lists stored work across all Threads. `/status thread` limits it to the current Thread; `/status all` includes terminal work. Runs, Turns, background shells, unapplied requests, and model attempts each occupy one row. Up/Down select, Enter opens ownership/model/timestamp details, O queries the target, S reads shell source output, R refreshes, and N fetches the next list page. Within a detail page, N continues that detail. Esc returns to the conversation, retaining the draft and reading position.
 
-This observes saved state, not OS process liveness, in-flight searches, or standalone RAG stores. A completed Turn can still own background shells or child Runs; inspect Turn and Run states separately. Use F8 `作業 | 状態一覧` for filters such as failures, `/index status` for indexing, and CLI `shellboy rag status` for RAG.
+This observes saved state, not OS process liveness, in-flight searches, or standalone RAG stores. The Run's background shells can remain active after a Turn completes; inspect Turn and Run states separately. Use F8 `作業 | 状態一覧` for filters such as failures, `/index status` for indexing, and CLI `shellboy rag status` for RAG.
 
 Replace `ID` and connection names below with real values. `/attach` and `/cwd`, which use their argument as a path, allow quoted paths with spaces.
 

@@ -2087,7 +2087,7 @@ change Rust production paths/rendering, native test inventories, ignored tests,
 parallelism, deadlines, retries or dependencies. The fixture tests each pass
 once on macOS arm64 / Rust 1.99.1, using the existing four-thread configuration.
 
-The new Python regression launches a real child runner with
+The new Python regression launches a real worker subprocess with
 `PYTHONIOENCODING=ascii:strict`, `PYTHONUTF8=0` and an uncoerced C locale. A real
 Python fixture process emits UTF-8 Japanese/emoji output exceeding the console
 tail size and exits 101; subcases use ASCII and non-ASCII test names. Before the
@@ -2662,7 +2662,7 @@ ignored (invoked by its parent).
 Specific evidence:
 
 - Revisit ordinary completion survives a closed start gate when no reservation
-  is pending, including child Run completion. Malformed current-format Revisit
+  is pending, including formerly subordinate Run completion. Malformed current-format Revisit
   values do not block stop/list/startup; explicit reads still report errors.
 - Real DataOwner/CLI tests cover malformed typed Revisit capture, bad cursor,
   healthy HTTP conversation, blocked bad history before HTTP, fork before an
@@ -8098,7 +8098,7 @@ Synthetic loopback PTYs at 80 and 140 columns, dark/light, NO_COLOR, and vt100
 show the owned background shell section; all eight existing row-vocabulary
 scenarios pass. A separate synthetic loopback PTY and replay show a shell-ended
 wait, its visible target row and estimated 30-second deadline. A separate
-process-limited PTY shows a live synthetic child Run. Row-limit variants and
+process-limited PTY shows a live synthetic formerly subordinate Run. Row-limit variants and
 motion-off remain unverified. The
 128-node/50-tool redraw-only fixture reports p50 2796 us, p95 2845 us and max
 2981 us (500 samples); it does not populate ten owned-work rows or supply a
@@ -10555,7 +10555,7 @@ attach, move and detach (only `parent_thread_id` and `revision` change, `updated
 the same-parent no-op (nothing published, no second `thread_parent` entry), replay of the same operation ID
 after another move, refusal of self, child, grandchild and unknown or deleted parents with nothing changed,
 a subtree moving as a unit, the ancestor bound exactly (a parent with 1,024 ancestors is accepted, 1,025 is
-`input_limit`) and a stored cycle above the parent ending in `input_limit`, a live child Run keeping its
+`input_limit`) and a stored cycle above the parent ending in `input_limit`, a live formerly subordinate Run keeping its
 owner after the move (the new parent's send is refused until the Run ends; stopping the old owner's Run
 reaches the moved child's Run; afterwards the new parent's send owns the next Run), a pending reply
 delivered to its recorded sender (and nothing to the new parent) after the recipient moved, usage with

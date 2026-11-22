@@ -469,7 +469,7 @@ has none (see below).
   by `--deliver complete` messages released at completion (#187), the Run-end
   reminder Turn for any pending reply-expected message in that Thread (from
   any sender), Turns for later messages or wake events, and the Run also waits
-  for owned shells and child Runs. `run-end` therefore returns what the Thread
+  for owned shells and formerly subordinate Runs. `run-end` therefore returns what the Thread
   said last before going idle; `turn-end` returns what it said when it
   finished this message. Neither mode creates a reply duty, so neither mode
   causes a reminder for its own message.
@@ -631,7 +631,7 @@ decided here without an explicit user answer (see [Decisions](#decisions)).
 | G18 | Two replies racing | Design | single DB lane; first commit wins; the second gets `invalid_state` `reply_state=replied` |
 | G19 | Reply vs cancel vs Run-end races | Design | same serialisation; whichever commits first decides the outcome |
 | G20 | Reply to a cancelled / ignored / deleted message | Decided | rejected with `details.reply_state`; the model can send an ordinary message instead (Q3) |
-| G21 | Child Run ownership | Design | reply delivery uses ordinary send rules; replying to a parent never creates ownership; an owning parent stays live while its child works, so the reply reaches the live parent Run |
+| G21 | Independent Runs (#276) | Design | replies use ordinary send rules and do not create Run ownership; a reply does not require the sender’s Run to remain live |
 | G22 | `run stop` cascade | Decided | descendants stop; pending replies on them stay pending; the parent's waits end with the stop as today (Q2) |
 | G23 | Esc Turn interruption | Decided | reminder still applies once, as #187 delivery does; shown in the TUI (Q11) |
 | G24 | App shutdown | Design | reminder skipped once the start gate closes; nothing becomes `ignored` at shutdown |

@@ -19,7 +19,7 @@ shellboy rag search --scope docs --scope history --query 'recovery' --mode keywo
 
 ## Common syntax and connection
 
-`shellboy status` lists saved work. From a model it defaults to the caller's Thread; from an ordinary external terminal it covers all Threads. Explicit `--run RUN` filters membership in that Run without implicitly including owned descendants. Combined `--thread THREAD` applies both conditions. `--all` includes terminal work without widening Thread scope. `--state failed` and similar exact native-state matches can retrieve terminal states.
+`shellboy status` lists saved work. From a model it defaults to the caller's Thread; from an ordinary external terminal it covers all Threads. Explicit `--run RUN` filters membership in that Run without including work from other Runs. Combined `--thread THREAD` applies both conditions. `--all` includes terminal work without widening Thread scope. `--state failed` and similar exact native-state matches can retrieve terminal states.
 
 ```sh
 shellboy status --limit 50
@@ -191,7 +191,7 @@ Connection precedence: explicit `--connection` > explicit Thread > authenticated
 |---|---|
 | `thread list [--limit N] [--cursor C] [--query TEXT] [--awaiting human] [--archived exclude\|include\|only] [--tag TAG]... [--cwd PATH]` | `items` (thread_id/title/cwd/parent_id/state/latest_run_stop_reason/optional revisit/updated_at/optional `archived_at`/optional `tags`/excerpt/`last_end_message`/`last_input`/`awaiting_human_count`/`awaiting_human_count_exact`/optional `awaiting_human_oldest_at`/`awaiting_thread_count`), optional `next_cursor`; default 50, range 1–200. `--awaiting human` pages only Threads with pending human-directed replies; each item reports counts through 16 exactly; count 17 with `awaiting_human_count_exact=false` means 17 or more. Legacy receipts are retained and read with a 17-row bound. `awaiting_human_oldest_at` is the minimum saved timestamp only for exact counts; it is absent for 17-or-more. Its live Thread-ID keyset cursor is scoped to filter and archived mode, is not a snapshot, may include late-arriving Threads after the current key, and rejects older snapshot cursors (restart without a cursor). It cannot be combined with `--query`, `--tag` or `--cwd`. Archived Threads are hidden by default (`--archived exclude`); `include` lists both and `only` lists just the archived ones. A cursor is bound to its archived mode: using it with another `--archived` value fails with `cursor_expired`. Order is unchanged (`updated_at` then ID), and archiving does not change `updated_at`. `--tag TAG` keeps only Threads that carry the tag; repeat it to require every tag (AND, at most 64). `--cwd PATH` keeps only Threads whose saved working directory is PATH after the same lexical cleanup as saved cwds (`.`, `..`, trailing `/`; no symlink resolution). The CLI resolves a relative PATH against the current directory; a wire client must send an absolute path (a relative one is `invalid_argument`). A parent directory does not match. Both combine with `--query` and `--archived`, and a cursor is bound to the whole filter (`cursor_expired` if it changes). A tag filter reads the members of the first tag, so a very large first tag costs more than a small one: put the narrowest tag first. With `--query` every member of the first tag is read, because the text match runs after the SQL page |
 | `thread get [--thread THREAD]` | thread_id/title/cwd/connection/model/effort/parent_id, optional `archived_at`, optional `tags` (sorted), `auto_compact_at` (this Thread's own compaction threshold, null if none) and `effective_auto_compact_at` (the value in use), current run_id/turn_id, `summarizing` (boolean; automatic compaction witnessed for the current live Run and Turn), children_count (includes archived children)/shells_count, recovery_reason, `last_end_message`, `last_input`, and `awaiting_replies` (up to 16 pending items, oldest first, legacy excess retained but not listed, each with `recipient_kind`, `recipient_thread_id`, `excerpt`, `created_at`, `elapsed_ms`, `delivery_status`, `reminded`) |
-| `thread create [--cwd PATH] [--connection NAME] [--model ID] [--effort VALUE] [--parent THREAD]` | New Thread details, without starting instructions or a Run. Parent establishes ancestry; execution ownership is assigned when the parent Run sends. Normally inherits parent settings |
+| `thread create [--cwd PATH] [--connection NAME] [--model ID] [--effort VALUE] [--parent THREAD]` | New Thread details, without starting instructions or a Run. Parent establishes Thread ancestry only, not execution ownership. Normally inherits parent settings |
 | `thread fork --thread THREAD --node NODE [--cwd PATH]` | New Thread sharing the selected path through NODE inclusive, without changing the original; invalid boundaries such as incomplete tool groups rejected |
 | `thread delete-preview --thread THREAD [--descendants]` | Read-only impact: deletable_now, blocking Run count/details (max 50), target/descendant counts, direct sharing/replacement-source/attachment-reference counts, update time; reclaimable_bytes null with reason. Rechecked on deletion |
 | `thread delete --thread THREAD [--descendants]` | Deletion acceptance; targets must have no live/stopping Run. Descendants require explicit selection. At most 16 pending reply duties are cancelled synchronously across the cascade; legacy excess is resolved and delivered by existing bounded history GC after commit. Success does not mean every outcome has already been delivered. Subsequent reachability GC preserves required shared sources |
@@ -305,7 +305,7 @@ PowerShell can use `--text '...'` or pipeline `--text-stdin`. Native stdin encod
 |---|---|
 | `run get --run RUN` | run_id/thread_id/state/turn_id/end_message_node_id, owned_execution_ids, recovery_hint; optional waiting_reason identifies a saved in-flight context edit at the safe request boundary. Owned execution IDs reference current live shells, not other Runs |
 | `run retry --run RUN` | Recovery Run/Turn references; release the oldest at most 128 recoverable held receipts per operation, retaining recovery_wait while more remain. Existing recovery_hint includes remaining_held; repeat with a new operation ID for the next unit. Once drained, reprepare the same Turn without blindly rerunning executed shells. Any caller may retry (no authority check); the owner Run still receives the recovery notice. Concurrent retries are safe: one resumes the Turn, the others fail with `invalid_state` |
-| `run stop --run RUN` | Confirmed stopping/Run state; stops the target Run and its owned descendants without affecting independent Runs. Any caller may target any Run (no authority check; check the ID first). Check get/wait for completed resource cleanup |
+| `run stop --run RUN` | Confirmed stopping/Run state; stops the target Run and its owned shells without affecting independent Runs. Any caller may target any Run (no authority check; check the ID first). Check get/wait for completed resource cleanup |
 | `turn get --turn TURN` | turn_id/run_id/thread_id/state/end_message_node_id/recovery_hint. Background owned work may keep the Run live after answering |
 
 `run retry` returning `ok: true` is acceptance, not execution success. Follow the
@@ -468,7 +468,7 @@ Specify repeated source exclusions with `rag source add PATH --name NAME --exclu
 returns snake_case `activity`, using the same saved-fact classifier as the
 conversation footer. In particular, `state: "completed"` can coexist with
 `activity: "background"` or `"continuing"` while the latest Run remains live.
-`background` requires an active owned shell or child Run; `continuing` does
+`background` requires an active shell owned by that Run; `continuing` does
 not assert such work. Exit markers and Revisit are independent of activity.
 
 ### Observing long-running shells (Issue #45)
@@ -695,7 +695,7 @@ Inspect the reported message/operation IDs rather than resending. Prefer the new
 saved Thread default or a separate conversation. A timeout is not cancellation.
 
 In `turn-end` mode, a saved Turn end message does not prove that all
-background shells or child Runs have drained. `run-end` waits for the assigned
+background shells owned by the assigned Run have drained. `run-end` waits for the assigned
 Run; `reply` normally waits for both the reply and that Run, although a committed
 reply remains the result if the Run stops later. Inspect run get/status for
 continuing work. Schema validation guarantees supported shape only, not factual

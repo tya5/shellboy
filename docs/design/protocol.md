@@ -301,7 +301,7 @@ get/list/search/preview/statusはreceiptを作らず、同IDでも再観測す�
 returns snake_case `activity`, using the same saved-fact classifier as the
 conversation footer. In particular, `state: "completed"` can coexist with
 `activity: "background"` or `"continuing"` while the latest Run remains live.
-`background` requires an active owned shell or child Run; `continuing` does
+`background` requires an active shell owned by the Run; `continuing` does
 not assert such work. Exit markers and Revisit are independent of activity.
 
 ### Cross-Thread human waiting list

@@ -98,7 +98,7 @@ Use encoding_rs and the existing encoding resolver. Keep separate stream decoder
 ## D: owned live work and accurate output activity
 
 Follow-up #172 bounds the physical candidate work before sorting: at most 128
-owned shells and 128 owned child Runs enter the merge, and activity counts use
+owned shells and 128 owned formerly subordinate Runs enter the merge, and activity counts use
 capped indexed reads. At the cap, counts and overflow are lower bounds, displayed
 as "at least N" or "N件以上". Rows remain sorted within the sampled candidates,
 but are not promised to be globally oldest and the footer omits its oldest-time
@@ -1627,7 +1627,7 @@ Extend #83's minimum without changing Core events, protocol, schema or canonical
 history. The existing admitted frontend reader resolves at most 128 event-node
 IDs in one indexed metadata statement. It follows node.event_id to the saved
 event, execution to the unique tool_call.operation_id and matching shell/group
-Turn, and child Run to its saved Thread. Duplicate call IDs or similar commands
+Turn, and formerly subordinate Run to its saved Thread. Duplicate call IDs or similar commands
 are never identity evidence. Select bounded command/title/identity fields only;
 never return provider bodies or shell output for display. Missing, deleted and
 expired sources remain explicit. Current Thread titles say "current name";

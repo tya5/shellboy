@@ -100,8 +100,8 @@ impl CommandHint {
             ),
             "/status" => local!(
                 language,
-                "作業状態・背景コマンド・子の作業を確認",
-                "Inspect work, background shells, and child Runs"
+                "作業状態・背景コマンドを確認",
+                "Inspect work and background shells"
             ),
             "/help" => local!(language, "操作ガイド", "Usage guide"),
             "/new" => local!(language, "新しい会話", "New conversation"),
