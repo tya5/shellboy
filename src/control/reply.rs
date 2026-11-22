@@ -866,6 +866,91 @@ pub(crate) fn deleted_sender_receipt_tx(
 mod tests {
     use super::*;
     #[test]
+    fn admitted_messages_replay_receipt_facts_without_notice_nodes() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('t','/','','p','m','0'); INSERT INTO run(id,thread_id,state,created_at) VALUES('r','t','live','0'); INSERT INTO turn(id,thread_id,run_id,state,created_at) VALUES('u','t','r','running','0');").unwrap();
+        for (id, facts) in [
+            ("request", json!({"expect_reply":true})),
+            ("other", json!({})),
+            ("answer", json!({"reply_to":"request"})),
+        ] {
+            let body =
+                json!({"role":"user","content":[{"type":"input_text","text":id}]}).to_string();
+            let sender = json!({"kind":"external_cli","label":format!("fixture-{id}")}).to_string();
+            db.execute("INSERT INTO node(id,kind,turn_id,created_at,payload_json,payload_bytes) VALUES(?1,'user','u','0',?2,length(?2))",params![id,body]).unwrap();
+            db.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,result_json) VALUES(?1,?1,?2,'t',?1,'accepted','0',?3)",params![id,sender,facts.to_string()]).unwrap();
+        }
+        let tx = db.transaction().unwrap();
+        let ids = ["request".into(), "other".into(), "answer".into()];
+        super::super::message_delivery::append_admitted_tx(&tx, "t", 0, &ids, "now").unwrap();
+        let count: u32 = tx
+            .query_row("SELECT count(*) FROM thread_path", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            count, 3,
+            "admission must append only the three received bodies"
+        );
+        for (id, kind) in [
+            ("event-reply-admission-request", "event"),
+            ("event-reply-admission-other", "message"),
+        ] {
+            let body = json!({"role":"developer","content":[{"type":"input_text","text":"old duplicate"}]}).to_string();
+            tx.execute("INSERT INTO node(id,kind,turn_id,created_at,payload_json,payload_bytes) VALUES(?1,?2,'u','0',?3,length(?3))",params![id,kind,body]).unwrap();
+            tx.execute("INSERT INTO thread_path(thread_id,ordinal,node_id) SELECT 't',max(ordinal)+1,?1 FROM thread_path",[id]).unwrap();
+        }
+        let cache = super::super::replay::ReplayCache::new(1024 * 1024);
+        let wire = cache.load(&tx, "t").unwrap().materialize();
+        assert_eq!(wire, cache.load(&tx, "t").unwrap().materialize());
+        assert_eq!(
+            wire,
+            super::super::replay::load_uncached(&tx, "t", None, 0)
+                .unwrap()
+                .materialize()
+        );
+        let text: Vec<_> = wire
+            .iter()
+            .map(|item| item["content"][0]["text"].as_str().unwrap())
+            .collect();
+        assert_eq!(text.len(), 6);
+        assert!(text[0].contains("shellboy message reply --message request"));
+        assert_eq!(text[1], "request");
+        assert!(text[2].contains("fixture-other"));
+        assert_eq!(text[3], "other");
+        assert!(text[4].contains("request"));
+        assert_eq!(text[5], "answer");
+        let args = |items| crate::protocol::HistoryWindowArgs {
+            thread_id: "t".into(),
+            items,
+            ordinal: Some(0),
+            node_id: None,
+            expect_node_id: None,
+            before: 0,
+            after: 4,
+            excerpt_chars: 32,
+        };
+        assert_eq!(
+            crate::history::window(&tx, &args(false))
+                .unwrap()
+                .items
+                .len(),
+            5
+        );
+        let out = serde_json::to_value(crate::history::window(&tx, &args(true)).unwrap()).unwrap();
+        assert_eq!(
+            out["items"][0]["provenance"]["message"]["expect_reply"],
+            true
+        );
+        assert_eq!(
+            out["items"][2]["provenance"]["message"]["reply_to"],
+            "request"
+        );
+        for i in [3, 4] {
+            assert_eq!(out["items"][i]["items"], json!([]));
+        }
+    }
+
+    #[test]
     fn malformed_saved_sender_never_creates_model_identity_or_authority() {
         for raw in [
             None,
