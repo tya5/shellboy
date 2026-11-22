@@ -2510,14 +2510,14 @@ mod message_acknowledgement_tests {
             );
         }
         assert_eq!(results.len(), 70);
-        for name in ["thread.create", "config.set", "connection.test"] {
+        for name in ["thread.create", "connection.test"] {
             assert_eq!(
                 results[name],
                 serde_json::Value::Bool(true),
                 "{name} remains opaque"
             );
         }
-        for name in ["status", "shell.list", "usage.get", "config.get"] {
+        for name in ["status", "shell.list", "usage.get", "config.get", "config.set"] {
             assert_ne!(
                 results[name],
                 serde_json::Value::Bool(true),
