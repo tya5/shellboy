@@ -38,7 +38,7 @@ async fn recovery_resume_and_new_run_between_waits_survive_an_owner_restart() {
             tx.execute("INSERT INTO run(id,thread_id,state,created_at)VALUES('active','t','live','2002')",[])?;
             tx.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','t','active','running','2002')",[])?;
             assert!(crate::control::state::recover_turn_tx(&tx,"t","active","u",0,&ApiError::new(ErrorCode::IoFailed,"fixture"))?);
-            assert!(crate::control::state::resume_recovery_turn_tx(&tx,"t","active","u",0,"2003",false)?);
+            assert!(crate::control::state::resume_recovery_turn_tx(&tx,"t","active","u",0,"2003")?);
             tx.commit()?;Ok(())
         }).await.unwrap();
         let result=observe(control.clone(),"next".into(),args("t",Some(cursor)),None,CancellationToken::new()).await.unwrap();

@@ -702,7 +702,7 @@ async fn usage_limit_retry_admission_uses_one_saved_reset() {
                 assert!(matches!(step(&tx, at)?, Step::Waiting(None)));
                 // Carry consumption through another explicit admission, then
                 // receive a genuinely newer limit on the same Turn.
-                super::super::db::resume_run_tx(&tx, (&thread, &run, &turn, generation), true, json!({"kind":"human"}), &at.to_rfc3339())?;
+                super::super::db::resume_run_tx(&tx, (&thread, &run, &turn, generation), json!({"kind":"human"}), &at.to_rfc3339())?;
                 assert!(recover_turn_tx(&tx, &thread, &run, &turn, generation + 1, &newer)?);
                 assert!(matches!(step(&tx, at)?, Step::Waiting(Some(saved)) if saved == newer_at));
                 assert!(matches!(step(&tx, newer_at)?, Step::Admitted(id) if id == thread));
