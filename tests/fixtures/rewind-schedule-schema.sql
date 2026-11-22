@@ -39,5 +39,5 @@ END;
 CREATE TRIGGER logical_raw_output_chunk_update AFTER UPDATE OF bytes ON output_chunk BEGIN
  UPDATE quota_counter SET logical_bytes=logical_bytes+(COALESCE(length(NEW.bytes),0))-(COALESCE(length(OLD.bytes),0)),revision=revision+1 WHERE category='logical.raw';
 END;
-DELETE FROM schema_migration WHERE version=51;
+DELETE FROM schema_migration WHERE version>=51;
 PRAGMA user_version=50;
