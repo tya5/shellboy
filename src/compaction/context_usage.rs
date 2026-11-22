@@ -14,6 +14,7 @@ pub(crate) type Scope = (String, String, String);
 struct Coverage {
     latest_complete: bool,
     pending_complete: bool,
+    output_complete: bool,
 }
 pub(crate) struct RawContextUsage {
     scope: Scope,
@@ -184,12 +185,13 @@ pub(crate) fn prepare_context_usage(raw: RawContextUsage) -> (Value, Scope) {
         })
     });
     if let Some(coverage) = raw.coverage
-        && (!coverage.latest_complete || !coverage.pending_complete)
+        && (!coverage.latest_complete || !coverage.pending_complete || !coverage.output_complete)
     {
         let mut candidate = latest;
         if let Some(value) = candidate.as_mut()
             && (!coverage.latest_complete
-                || (!coverage.pending_complete && value["next_request_pending"] != true))
+                || ((!coverage.pending_complete || !coverage.output_complete)
+                    && value["next_request_pending"] != true))
         {
             value["next_request_pending"] = Value::Null;
         }
@@ -200,6 +202,7 @@ pub(crate) fn prepare_context_usage(raw: RawContextUsage) -> (Value, Scope) {
                     "candidate": if coverage.latest_complete {None} else {candidate},
                     "latest_complete":coverage.latest_complete,
                     "replacement_coverage_complete":coverage.pending_complete,
+                    "output_coverage_complete":coverage.output_complete,
                     "notice":"Finite retained prefixes; unknown is not no saved usage or no pending edit"
                 }
             }),
@@ -915,6 +918,55 @@ mod bounded_cost_tests {
             "bounded context actual VM/fullscan before/after10x: {a:?}->{b:?}; elapsed is not a gate"
         );
     }
+    #[test]
+    fn output_prefix_bounds_visits_without_claiming_absence_after_saturation() {
+        let db = fixture();
+        grow(&db, 0, 64);
+        let attempt = "a000063-63";
+        let insert = |i: i64| {
+            db.execute("INSERT INTO output_item(attempt_id,ordinal,item_type,status,payload_json,node_id) VALUES(?1,?2,'message','completed','{}','marker')", params![attempt, i]).unwrap();
+        };
+        insert(0);
+        let read = || prepare_context_usage(read_context_usage_tx(&db, "t", Some(512)).unwrap()).0;
+        assert_eq!(
+            read()["last_successful_attempt"]["next_request_pending"],
+            true
+        );
+        for i in 1..201 {
+            insert(i);
+        }
+        let small = measure(&db);
+        for i in 201..2500 {
+            insert(i);
+        }
+        let large = measure(&db);
+        assert!(
+            large.0 <= small.0 && large.1 <= small.1,
+            "{small:?} -> {large:?}"
+        );
+        let unknown = read();
+        assert_eq!(unknown["last_successful_attempt"]["input_tokens"], 11);
+        assert!(unknown["last_successful_attempt"]["next_request_pending"].is_null());
+        assert_eq!(
+            unknown["bounded_observation"]["output_coverage_complete"],
+            false
+        );
+        db.execute(
+            "INSERT INTO thread_path(thread_id,ordinal,node_id) VALUES('t',0,'marker')",
+            [],
+        )
+        .unwrap();
+        let retained = read();
+        assert_eq!(
+            retained["bounded_observation"]["output_coverage_complete"],
+            true
+        );
+        assert!(
+            retained["last_successful_attempt"]["next_request_pending"].is_null(),
+            "replacement evidence is still incomplete"
+        );
+    }
+
     #[test]
     fn rowid_winner_with_older_timestamp_is_the_exact_latest_in_display_too() {
         let db = fixture();

@@ -1194,7 +1194,7 @@ impl Control {
                             .map(str::to_owned)
                         {
                             effects.result["context_usage"] =
-                                match self.compactor.context_metrics(&thread).await {
+                                match self.compactor.context_metrics_display(&thread).await {
                                     Ok(metrics) => metrics,
                                     Err(error) if error.is_storage_failure() => return Err(error),
                                     Err(error) => json!({"available":false,"error":error}),

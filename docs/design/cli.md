@@ -285,7 +285,8 @@ compaction operations, automatic-failure observations and retained replacements,
 newest first. Unknown legacy metrics remain null and retention gaps are explicit.
 Adopted summaries add `post_compaction_input_tokens` / `post_compaction_attempt_id`
 (#230), derived at read time ([compaction](compaction.md#limits-and-readback)).
-`thread get` includes its latest retained compaction observation.
+`thread get` includes its latest retained compaction observation and bounded context usage.
+Use `usage get` for exact whole-Thread usage totals.
 
 `usage get` accepts a half-open RFC3339 interval [since,until), selecting model
 attempts by started_at, shells by started_at and Runs by created_at. Selected

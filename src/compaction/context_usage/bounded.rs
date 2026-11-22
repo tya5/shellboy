@@ -28,18 +28,26 @@ pub(super) fn query() -> String {
  ORDER BY replacement_id DESC LIMIT 201
 ), edits AS MATERIALIZED (
  SELECT r.created_at FROM audit tr CROSS JOIN replacement r ON r.id=tr.replacement_id
+), outputs AS MATERIALIZED (
+ SELECT o.node_id FROM output_item o
+ WHERE o.attempt_id=(SELECT a.id FROM selected s CROSS JOIN model_attempt a ON a.rowid=s.native_rowid)
+ ORDER BY o.ordinal LIMIT 201
+), output_evidence AS MATERIALIZED (
+ SELECT (SELECT count(*) FROM outputs) AS n,
+ EXISTS(SELECT 1 FROM outputs o CROSS JOIN thread_path p ON p.node_id=o.node_id AND p.thread_id=?1) AS on_path
 )
  SELECT CASE WHEN octet_length(a.id)<=?2 THEN a.id END, {},
  CASE WHEN octet_length(a.started_at)<=?2 THEN a.started_at END,
  CASE WHEN octet_length(a.ended_at)<=?2 THEN a.ended_at END,
  (EXISTS(SELECT 1 FROM edits WHERE octet_length(created_at)<=?2 AND created_at>a.started_at)
- OR (EXISTS(SELECT 1 FROM output_item o WHERE o.attempt_id=a.id) AND NOT EXISTS(SELECT 1 FROM output_item o JOIN thread_path p ON p.thread_id=?1 AND p.node_id=o.node_id WHERE o.attempt_id=a.id))),
+ OR (outputs.n > 0 AND outputs.n < 201 AND NOT outputs.on_path)),
  COALESCE(octet_length(a.id)>?2 OR octet_length(a.started_at)>?2
  OR COALESCE(octet_length(a.ended_at)>?2,0),0),
  selected.native_rowid IS NULL AND (SELECT count(*) FROM recent_turns)=33,
  (SELECT count(*) FROM audit)=201 OR EXISTS(SELECT 1 FROM edits WHERE octet_length(created_at)>?2),
- selected.native_rowid IS NOT NULL
- FROM (SELECT 1) root LEFT JOIN selected ON 1
+ selected.native_rowid IS NOT NULL,
+ outputs.n < 201 OR outputs.on_path
+ FROM output_evidence outputs LEFT JOIN selected ON 1
  LEFT JOIN model_attempt a ON a.rowid=selected.native_rowid",
         latest_completed_cte(),
         usage::sql_projection("a.usage_json")
@@ -63,11 +71,23 @@ pub(super) fn read(
             row.get::<_, bool>(10)?,
             row.get::<_, bool>(11)?,
             row.get::<_, bool>(12)?,
+            row.get::<_, bool>(13)?,
         ))
     })
     .map_err(StorageError::from)
     .and_then(
-        |(id, usage, started, ended, pending, invalid, partial, audit_partial, present)| {
+        |(
+            id,
+            usage,
+            started,
+            ended,
+            pending,
+            invalid,
+            partial,
+            audit_partial,
+            present,
+            output_complete,
+        )| {
             if invalid {
                 return Err(scalar_limit());
             }
@@ -88,6 +108,7 @@ pub(super) fn read(
                 coverage: Some(Coverage {
                     latest_complete: !partial,
                     pending_complete: !audit_partial,
+                    output_complete,
                 }),
             })
         },

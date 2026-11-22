@@ -2243,7 +2243,7 @@ async fn fresh_observations_can_reuse_a_mutation_id_without_replacing_its_saved_
 }
 
 #[tokio::test]
-async fn saved_usage_queries_and_gets_share_totals_without_receipts_or_schema_changes() {
+async fn thread_get_omits_totals_and_usage_get_remains_exact_without_writes() {
     let (_root, store) = store().await;
     let parent = create(&store, None).await;
     let child = create(&store, Some(parent.thread_id.clone())).await;
@@ -2277,8 +2277,18 @@ async fn saved_usage_queries_and_gets_share_totals_without_receipts_or_schema_ch
     )
     .await
     .result;
+    assert!(own.get("usage_totals").is_none());
+    let exact = execute(
+        &store,
+        Command::UsageGet(UsageGetArgs {
+            thread_id: Some(parent.thread_id.clone().into_boxed_str()),
+            ..Default::default()
+        }),
+    )
+    .await
+    .result;
     assert_eq!(
-        own["usage_totals"]["model_attempts"]["completed"]["input_tokens"]["known_sum"],
+        exact["model_attempts"]["completed"]["input_tokens"]["known_sum"],
         10
     );
     let run = execute(

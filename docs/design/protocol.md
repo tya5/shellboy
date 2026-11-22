@@ -399,8 +399,12 @@ model notification follow the adopted design; existing lifecycle enums remain.
 `/compact-max` is its TUI counterpart. It calls no summary API and does not
 resume a Run. Edit results replace token estimates with before_characters,
 after_characters and changed_suffix_characters (replay JSON Unicode scalars).
-No target_tokens field remains. thread get context_usage reports only the last
-successful measured usage, start/end time and next_request_pending after an edit.
+No target_tokens field remains. `thread.get.context_usage` uses bounded display
+readback: up to 33 recent Turns, 201 replacement candidates and 201 output
+candidates for the selected attempt. Incomplete evidence is explicit; an unknown
+`next_request_pending` is not false. `thread.get` does not include whole-Thread
+`usage_totals`; use `usage.get` for the exact aggregate. The #346 wire change is
+qualified with the Protocol 9 Studio pairing, after Protocols 7 and 8.
 
 ## Message sender inspection (#59)
 
