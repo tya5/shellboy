@@ -768,7 +768,7 @@ async fn thread_list_awaiting_human_pages_only_human_waits_with_oldest_timestamp
     let first: Page<ThreadSummary> = serde_json::from_value(first.result).unwrap();
     assert_eq!(first.items.len(), 1);
     assert_eq!(first.items[0].thread_id, human.thread_id);
-    assert_eq!(first.items[0].awaiting_human_count, 2);
+    assert_eq!(first.items[0].awaiting_named_count, 2);
     let oldest: String = store
         .database
         .call(move |db| {
@@ -781,7 +781,7 @@ async fn thread_list_awaiting_human_pages_only_human_waits_with_oldest_timestamp
         .await
         .unwrap();
     assert_eq!(
-        first.items[0].awaiting_human_oldest_at.as_deref(),
+        first.items[0].awaiting_named_oldest_at.as_deref(),
         Some(oldest.as_str())
     );
     assert!(first.next_cursor.is_none());

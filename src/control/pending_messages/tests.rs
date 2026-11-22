@@ -584,6 +584,8 @@ async fn bounded_admission_prefix_keeps_the_129th_question_before_its_reply() {
                 Request::new(
                     format!("fixture:question-{index}"),
                     Command::MessageAsk(MessageAskArgs {
+                        human: false,
+                        sender_label: None,
                         thread_id: None,
                         to: None,
                         deliver: Deliver::Next,

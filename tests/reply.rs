@@ -271,6 +271,110 @@ async fn human_reply_resumes_recovery_but_model_reply_does_not() {
 }
 
 #[tokio::test]
+async fn delivered_cross_thread_ask_can_be_withdrawn_only_by_its_sender_or_owner() {
+    for owner_override in [false, true] {
+        let (_root, store) = fixture().await;
+        let sender = Origin {
+            instance_id: "fixture".into(),
+            thread_id: "sender".into(),
+            run_id: "sender-run".into(),
+            turn_id: "sender-turn".into(),
+            execution_id: "sender-shell".into(),
+            token: "synthetic".into(),
+        };
+        let recipient = Origin {
+            thread_id: "recipient".into(),
+            ..sender.clone()
+        };
+        let accepted = store
+            .execute(request(send(true)), Some(sender.clone()))
+            .await
+            .unwrap();
+        let id = accepted.result["message_id"].as_str().unwrap().to_owned();
+        let node = id.clone();
+        store.database.call(move |db| {
+            let tx = db.transaction()?;
+            tx.execute("UPDATE receipt SET state='applied',path_admission='admitted' WHERE message_node_id=?1", [&node])?;
+            tx.execute("INSERT INTO thread_path(thread_id,ordinal,node_id) VALUES('recipient',0,?1)", [&node])?;
+            tx.commit()?;
+            Ok(())
+        }).await.unwrap();
+        let cancel = || {
+            request(Command::MessageCancel(MessageCancelArgs {
+                message_ids: vec![id.clone()],
+            }))
+        };
+        let rejected = store
+            .execute(cancel(), Some(recipient.clone()))
+            .await
+            .unwrap();
+        assert_eq!(rejected.result["items"][0]["outcome"], "forbidden");
+        let get = || {
+            request(Command::MessageGet(MessageTarget {
+                message_id: id.clone(),
+            }))
+        };
+        assert_eq!(
+            store.execute(get(), None).await.unwrap().result["reply"]["state"],
+            "pending"
+        );
+        let cancelled = store
+            .execute(cancel(), (!owner_override).then_some(sender))
+            .await
+            .unwrap();
+        assert_eq!(cancelled.result["items"][0]["outcome"], "reply_cancelled");
+        assert!(cancelled.wake_threads.is_empty() && cancelled.quiet_wake_threads.is_empty());
+        for thread in ["sender", "recipient"] {
+            assert!(cancelled.changed_threads.iter().any(|id| id == thread));
+        }
+        let saved = store.execute(get(), None).await.unwrap().result;
+        assert_eq!(saved["delivery_status"], "applied");
+        assert_eq!(saved["reply"]["state"], "cancelled");
+        assert_eq!(
+            saved["reply"]["cancelled_by"]["kind"],
+            if owner_override { "human" } else { "model" }
+        );
+        let late = store
+            .execute(
+                request(Command::MessageReply(MessageReplyArgs {
+                    message_id: id.clone(),
+                    text: "late answer".into(),
+                    sender_label: None,
+                })),
+                Some(recipient),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(late.code, ErrorCode::InvalidState);
+        assert_eq!(
+            late.details.unwrap(),
+            serde_json::json!({"reply_state":"cancelled","reason":"withdrawn"})
+        );
+        store
+            .database
+            .call(move |db| {
+                assert_eq!(
+                    db.query_row(
+                        "SELECT node_id FROM thread_path WHERE thread_id='recipient' AND ordinal=0",
+                        [],
+                        |row| row.get::<_, String>(0)
+                    )?,
+                    id
+                );
+                assert_eq!(
+                    db.query_row("SELECT count(*) FROM receipt", [], |row| row
+                        .get::<_, i64>(0))?,
+                    1
+                );
+                Ok(())
+            })
+            .await
+            .unwrap();
+        store.database.shutdown().await.unwrap();
+    }
+}
+
+#[tokio::test]
 async fn cancellation_releases_duty_and_lists_no_longer_awaiting() {
     for admitted in [false, true] {
         let (_root, store) = fixture().await;

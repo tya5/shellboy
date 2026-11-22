@@ -362,7 +362,7 @@ reviewが必要で、S6aの保存/readbackだけではoffが実行時に有効�
 まず shellboy docs get --id shellboy/agent-guide と
 shellboy docs get --id shellboy/delegation をshellで読んでください。
 その手順で所有する子Threadを作り、調査だけを委譲してください。
-子への依頼は `message send --expect-reply` を使い、`reply_received` で待ち、返信状態と原文を確認して結果をまとめてください。
+子への依頼は `message ask --thread` を使い、`reply_received` で待ち、返信状態と原文を確認して結果をまとめてください。
 ```
 
 親子の停止範囲、途中報告、recovery待ちの判断は[委譲ガイド](delegation.md)にあります。

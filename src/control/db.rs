@@ -2944,12 +2944,12 @@ fn thread_list_awaiting_human(
     }
     for item in &mut items {
         if let Some((_, counts)) = candidates.iter().find(|(id, _)| id == &item.thread_id) {
-            item.awaiting_human_count = counts.count;
-            item.awaiting_human_count_exact = counts.exact;
-            item.awaiting_human_oldest_at = counts.oldest.clone();
+            item.awaiting_named_count = counts.count;
+            item.awaiting_named_count_exact = counts.exact;
+            item.awaiting_named_oldest_at = counts.oldest.clone();
         }
     }
-    items.retain(|item| item.awaiting_human_count > 0);
+    items.retain(|item| item.awaiting_named_count > 0);
     let mut tagged = tags::for_threads(connection, &visible_ids)?;
     for item in &mut items {
         item.tags = tagged.remove(&item.thread_id).unwrap_or_default();
@@ -3766,13 +3766,13 @@ mod thread_list_plan_tests {
             },
         )
         .unwrap();
-        assert_eq!(page.items[0].awaiting_human_count, 17);
+        assert_eq!(page.items[0].awaiting_named_count, 17);
         assert!(
-            !page.items[0].awaiting_human_count_exact,
+            !page.items[0].awaiting_named_count_exact,
             "17 is a lower bound, not an exact count"
         );
         assert!(
-            page.items[0].awaiting_human_oldest_at.is_none(),
+            page.items[0].awaiting_named_oldest_at.is_none(),
             "oldest is unknown when the bounded sample is inexact"
         );
         let sql = awaiting_human_candidates_sql();
@@ -3866,15 +3866,15 @@ mod thread_list_plan_tests {
             .unwrap()
         };
         let saturated = page(&db);
-        assert_eq!(saturated.items[0].awaiting_human_count, 17);
-        assert!(!saturated.items[0].awaiting_human_count_exact);
-        assert_eq!(saturated.items[0].awaiting_human_oldest_at, None);
+        assert_eq!(saturated.items[0].awaiting_named_count, 17);
+        assert!(!saturated.items[0].awaiting_named_count_exact);
+        assert_eq!(saturated.items[0].awaiting_named_oldest_at, None);
         db.execute("UPDATE receipt SET result_json='{\"reply\":{\"state\":\"replied\"},\"ask_name\":\"human\",\"to_human\":true}' WHERE id='receipt-16'", []).unwrap();
         let exact = page(&db);
-        assert_eq!(exact.items[0].awaiting_human_count, 16);
-        assert!(exact.items[0].awaiting_human_count_exact);
+        assert_eq!(exact.items[0].awaiting_named_count, 16);
+        assert!(exact.items[0].awaiting_named_count_exact);
         assert_eq!(
-            exact.items[0].awaiting_human_oldest_at.as_deref(),
+            exact.items[0].awaiting_named_oldest_at.as_deref(),
             Some("1999-01-01")
         );
     }

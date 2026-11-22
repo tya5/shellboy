@@ -310,9 +310,9 @@ not assert such work. Exit markers and Revisit are independent of activity.
 `tags`, and `cwd`; it composes with `archived`, `limit`, and `cursor`). The CLI
 spelling is `shellboy thread list --awaiting human`. This returns a keyset
 page of only Threads with pending human-directed reply receipts. Items carry
-`awaiting_human_count` and `awaiting_human_count_exact`: through 16 the count is
+`awaiting_named_count` and `awaiting_named_count_exact`: through 16 the count is
 exact and the bool is omitted/default true; 17 with false means 17 or more.
-`awaiting_human_oldest_at` is the minimum `created_at` only when all pending
+`awaiting_named_oldest_at` is the minimum `created_at` only when all pending
 receipts were observed (at most 16); it is null/absent when the bounded 17-row
 sample proves an overflow. Legacy receipts are preserved. Thread-directed
 reply duties do not qualify. Cursor v2 is scoped to this live Thread-ID keyset
@@ -972,8 +972,8 @@ Visibility lifetime: intermediate `assistant_response` rows are appended to the 
 
 ## Protocol 5 (Issue #262; historical)
 
-`ThreadSummary.awaiting_human_count` is exact through 16. Value 17 with
-`awaiting_human_count_exact=false` means 17 or more. The bool defaults to true
+`ThreadSummary.awaiting_named_count` is exact through 16. Value 17 with
+`awaiting_named_count_exact=false` means 17 or more. The bool defaults to true
 when absent and is omitted when true. Protocol 5 is required because strict
 typed response records cannot assume older clients tolerate an added field.
 The human inbox uses live Thread-ID cursor v2; old snapshot cursors expire.

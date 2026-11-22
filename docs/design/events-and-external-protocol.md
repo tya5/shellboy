@@ -557,14 +557,14 @@ Studio follows separately in #280; the final wire inventory and version are reco
 Main already uses protocol 4 for #275 reasoning activity; #276 therefore advances to 5 and retains the
 `events.reasoning_activity` capability. The initial branch-only version-4 proposal is superseded.
 
-Protocol 5 adds `awaiting_human_count_exact` to `ThreadSummary`. It defaults to
+Protocol 5 adds `awaiting_named_count_exact` to `ThreadSummary`. It defaults to
 true when absent and is omitted when true; false means the accompanying count
 17 is a lower bound (17 or more), never an exact 17. Output records tolerate additive fields; the version boundary is instead due
 to the changed count/oldest semantics and incompatible live cursor behavior.
 
 
-Protocol 5 adds `ThreadSummary.awaiting_human_count_exact`. It defaults to true
-when absent and is omitted when true; false means `awaiting_human_count` 17 is
+Protocol 5 adds `ThreadSummary.awaiting_named_count_exact`. It defaults to true
+when absent and is omitted when true; false means `awaiting_named_count` 17 is
 a lower bound of 17 or more. The version boundary accounts for changed existing-field semantics and
 incompatible live cursor behavior, not unknown-field strictness.
 

@@ -106,7 +106,7 @@ pub(crate) struct RawSummary {
     pub(crate) awaiting_reply: u64,
     pub(crate) awaiting_reply_exact: bool,
     pub(crate) awaiting_thread_replies: u64,
-    pub(crate) awaiting_human_oldest_at: Option<String>,
+    pub(crate) awaiting_named_oldest_at: Option<String>,
     pub(crate) awaiting_replies: u64,
 }
 
@@ -264,7 +264,7 @@ pub(crate) fn decode(row: &Row<'_>) -> rusqlite::Result<RawSummary> {
         awaiting_reply_exact: row.get::<_, i64>(24)?.max(0)
             < (crate::protocol::MAX_HUMAN_REPLY_SUMMARY_DUTIES + 1) as i64,
         awaiting_thread_replies: row.get::<_, i64>(23)?.max(0) as u64,
-        awaiting_human_oldest_at: row.get(25)?,
+        awaiting_named_oldest_at: row.get(25)?,
     })
 }
 pub(crate) fn prepare(raw: RawSummary, title: String, excerpt: String) -> ThreadSummary {
@@ -276,13 +276,13 @@ pub(crate) fn prepare(raw: RawSummary, title: String, excerpt: String) -> Thread
         },
         awaiting_thread_replies: raw.awaiting_thread_replies,
         awaiting_replies: raw.awaiting_replies,
-        awaiting_human_count: if raw.awaiting_reply_exact {
+        awaiting_named_count: if raw.awaiting_reply_exact {
             raw.awaiting_reply
         } else {
             MAX_HUMAN_REPLY_SUMMARY_DUTIES + 1
         },
-        awaiting_human_count_exact: raw.awaiting_reply_exact,
-        awaiting_human_oldest_at: raw.awaiting_human_oldest_at,
+        awaiting_named_count_exact: raw.awaiting_reply_exact,
+        awaiting_named_oldest_at: raw.awaiting_named_oldest_at,
         awaiting_thread_count: raw.awaiting_thread_replies,
         last_end_message: None,
         last_input: None,
@@ -413,9 +413,9 @@ mod tests {
         assert_eq!(summary.awaiting_replies, 2);
         assert_eq!(summary.awaiting_reply, 1);
         assert_eq!(summary.awaiting_thread_replies, 1);
-        assert_eq!(summary.awaiting_human_count, 1);
+        assert_eq!(summary.awaiting_named_count, 1);
         assert_eq!(summary.awaiting_thread_count, 1);
-        assert!(summary.awaiting_human_count_exact);
+        assert!(summary.awaiting_named_count_exact);
     }
 
     #[test]
@@ -433,17 +433,17 @@ mod tests {
         }
         let raw = read_ids_tx(&db, &["t".into()]).unwrap().pop().unwrap();
         let summary = prepare(raw, "t".into(), String::new());
-        assert_eq!(summary.awaiting_human_count, 17);
-        assert!(!summary.awaiting_human_count_exact);
+        assert_eq!(summary.awaiting_named_count, 17);
+        assert!(!summary.awaiting_named_count_exact);
         assert!(
-            summary.awaiting_human_oldest_at.is_none(),
+            summary.awaiting_named_oldest_at.is_none(),
             "17+ must not publish a non-exact minimum"
         );
         db.execute("UPDATE receipt SET result_json=json_set(result_json,'$.reply.state','completed') WHERE id='r0'",[]).unwrap();
         let raw = read_ids_tx(&db, &["t".into()]).unwrap().pop().unwrap();
         let summary = prepare(raw, "t".into(), String::new());
-        assert_eq!(summary.awaiting_human_count, 17);
-        assert!(!summary.awaiting_human_count_exact);
+        assert_eq!(summary.awaiting_named_count, 17);
+        assert!(!summary.awaiting_named_count_exact);
     }
 
     #[test]
@@ -460,9 +460,9 @@ mod tests {
         }
         let raw = read_ids_tx(&db, &["t".into()]).unwrap().pop().unwrap();
         let summary = prepare(raw, "t".into(), String::new());
-        assert!(summary.awaiting_human_count_exact);
+        assert!(summary.awaiting_named_count_exact);
         assert_eq!(
-            summary.awaiting_human_oldest_at.as_deref(),
+            summary.awaiting_named_oldest_at.as_deref(),
             Some("2020-01-01")
         );
     }

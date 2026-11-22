@@ -631,7 +631,9 @@ fn operation_label_for(id: OperationId, language: crate::config::UiLanguage) -> 
         OperationId::ThreadSet => local!(language, "会話 · 設定", "Conversation · Settings"),
         OperationId::MessageReply => local!(language, "依頼 · 返信", "Message · Reply"),
         OperationId::MessageSend => local!(language, "依頼 · 送信", "Message · Send"),
-        OperationId::MessageList => OperationId::MessageList.spec().label,
+        OperationId::MessageList => {
+            local!(language, "依頼 · 返信待ち", "Message · Pending replies")
+        }
         OperationId::MessageGet => local!(
             language,
             "依頼 · 割当と回答",
@@ -881,7 +883,11 @@ fn operation_meaning_for(id: OperationId, language: crate::config::UiLanguage) -
             "指定Threadへ入力を保存します。受付、Run・Turnへの採用、回答完了は個別に追跡します。",
             "Save input to the specified Thread. Receipt, Run and Turn assignment, and response completion are tracked separately."
         ),
-        OperationId::MessageList => OperationId::MessageList.spec().meaning,
+        OperationId::MessageList => local!(
+            language,
+            "保存された返信待ちを向きごとにページで一覧します。",
+            "Page through saved pending replies by direction."
+        ),
         OperationId::MessageGet => local!(
             language,
             "保存された入力の受付状態と不変のRun・Turn割当、回答への参照を表示します。",
@@ -1123,14 +1129,26 @@ fn field_label_for(id: FieldId, language: crate::config::UiLanguage) -> &'static
             "実行中の変換をやめる",
             "Stop the running conversion"
         ),
-        FieldId::PendingReplies | FieldId::OwedBy | FieldId::AskedBy | FieldId::RecipientName => {
-            OperationId::MessageList
-                .spec()
-                .field(id)
-                .expect("pending reply field")
-                .field
-                .label
-        }
+        FieldId::PendingReplies => local!(
+            language,
+            "返信待ちの依頼だけを一覧します。",
+            "Pending replies"
+        ),
+        FieldId::OwedBy => local!(
+            language,
+            "指定したThreadが答える依頼に絞ります。",
+            "Owed by"
+        ),
+        FieldId::AskedBy => local!(
+            language,
+            "指定したThreadが出した依頼に絞ります。",
+            "Asked by"
+        ),
+        FieldId::RecipientName => local!(
+            language,
+            "指定した名前宛ての依頼に絞ります。",
+            "Recipient name"
+        ),
         FieldId::Awaiting => local!(language, "人への返信待ち", "Awaiting a human reply"),
         FieldId::SettlementStates => local!(
             language,
@@ -1312,14 +1330,26 @@ fn field_help_for(id: FieldId, language: crate::config::UiLanguage) -> &'static 
             "途中の結果を捨て、古い索引をそのまま使い続けます。",
             "Discard the partial result and keep using the old index."
         ),
-        FieldId::PendingReplies | FieldId::OwedBy | FieldId::AskedBy | FieldId::RecipientName => {
-            OperationId::MessageList
-                .spec()
-                .field(id)
-                .expect("pending reply field")
-                .field
-                .help
-        }
+        FieldId::PendingReplies => local!(
+            language,
+            "返信待ちの依頼だけを一覧します。",
+            "List pending replies."
+        ),
+        FieldId::OwedBy => local!(
+            language,
+            "指定したThreadが答える依頼に絞ります。",
+            "Filter to replies owed by this Thread."
+        ),
+        FieldId::AskedBy => local!(
+            language,
+            "指定したThreadが出した依頼に絞ります。",
+            "Filter to requests made by this Thread."
+        ),
+        FieldId::RecipientName => local!(
+            language,
+            "指定した名前宛ての依頼に絞ります。",
+            "Filter to requests addressed to this name."
+        ),
         FieldId::Awaiting => local!(
             language,
             "humanを選ぶと、人への返信待ちがあるThreadだけを一覧します。",

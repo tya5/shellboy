@@ -232,7 +232,7 @@ fn fresh_clap_executable_paths_and_every_option_match_the_catalogue_bindings() {
     );
     assert_eq!(
         leaves.len(),
-        77,
+        78,
         "update executable-path inventory deliberately; UI launch/help/version are not operations"
     );
     let bindings = CLI_BINDINGS
@@ -356,8 +356,8 @@ fn fresh_clap_executable_paths_and_every_option_match_the_catalogue_bindings() {
 
 #[test]
 fn identities_are_complete_and_attach_is_the_only_explicit_alias() {
-    assert_eq!(OperationId::ALL.len(), 76);
-    assert_eq!(SPECS.len(), 76);
+    assert_eq!(OperationId::ALL.len(), 77);
+    assert_eq!(SPECS.len(), 77);
     let ids = OperationId::ALL.iter().copied().collect::<BTreeSet<_>>();
     assert_eq!(ids.len(), OperationId::ALL.len());
     assert_eq!(

@@ -394,9 +394,11 @@ Simply saying "use subagents" does not guarantee that the model understands Shel
 First read shellboy docs get --id shellboy/agent-guide and
 shellboy docs get --id shellboy/delegation using shell.
 Follow those procedures to create an owned child Thread and delegate research only.
-Send each request with `message send --expect-reply`, wait for `reply_received`,
+Send each request with `message ask --thread`, wait for `reply_received`,
 check the reply state, retrieve the original reply, and summarize the results.
 ```
+
+Use `message ask --thread` instead of `message send --expect-reply`. `message send` does not request a reply. `message cancel --message MESSAGE_ID` withdraws a pending reply request without removing delivered history. A model can withdraw only its own requests; the owner can withdraw any pending request.
 
 [Delegation](delegation.md) covers parent/child stopping scope, progress reports, and recovery-wait decisions.
 

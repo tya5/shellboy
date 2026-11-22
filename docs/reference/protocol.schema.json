@@ -729,6 +729,22 @@
         {
           "properties": {
             "args": {
+              "$ref": "#/definitions/MessageListArgs"
+            },
+            "command": {
+              "const": "message.list",
+              "type": "string"
+            }
+          },
+          "required": [
+            "command",
+            "args"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "args": {
               "$ref": "#/definitions/MessageCancelArgs"
             },
             "command": {
@@ -3540,10 +3556,28 @@
     "MessageAskArgs": {
       "additionalProperties": false,
       "properties": {
+        "deliver": {
+          "$ref": "#/definitions/Deliver"
+        },
+        "human": {
+          "type": "boolean"
+        },
+        "sender_label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "text": {
           "type": "string"
         },
         "thread_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "to": {
           "type": [
             "string",
             "null"
@@ -3683,6 +3717,46 @@
       "title": "MessageDetails",
       "type": "object"
     },
+    "MessageListArgs": {
+      "additionalProperties": false,
+      "properties": {
+        "asked_by": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cursor": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "limit": {
+          "default": 50,
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "owed_by": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "to": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "MessageProvenance": {
       "properties": {
         "expect_reply": {
@@ -3753,9 +3827,6 @@
         "deliver": {
           "$ref": "#/definitions/Deliver"
         },
-        "expect_reply": {
-          "type": "boolean"
-        },
         "human": {
           "type": "boolean"
         },
@@ -3777,9 +3848,6 @@
             "string",
             "null"
           ]
-        },
-        "to_human": {
-          "type": "boolean"
         }
       },
       "required": [
@@ -4838,6 +4906,38 @@
           ]
         }
       },
+      "type": "object"
+    },
+    "PendingReplyCount": {
+      "properties": {
+        "count": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "exact": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "count",
+        "exact"
+      ],
+      "type": "object"
+    },
+    "PendingReplyCounts": {
+      "properties": {
+        "asked_by": {
+          "$ref": "#/definitions/PendingReplyCount"
+        },
+        "owed_by": {
+          "$ref": "#/definitions/PendingReplyCount"
+        }
+      },
+      "required": [
+        "owed_by",
+        "asked_by"
+      ],
       "type": "object"
     },
     "PromptCacheDiagnostics": {
@@ -5914,6 +6014,35 @@
             },
             "command": {
               "const": "message.get",
+              "type": "string"
+            },
+            "operation_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "origin": true,
+            "protocol_version": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "args",
+            "command",
+            "operation_id",
+            "protocol_version"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "args": {
+              "$ref": "#/definitions/MessageListArgs"
+            },
+            "command": {
+              "const": "message.list",
               "type": "string"
             },
             "operation_id": {
@@ -8573,11 +8702,6 @@
             "null"
           ]
         },
-        "awaiting_replies": {
-          "default": [],
-          "items": true,
-          "type": "array"
-        },
         "connection": {
           "type": "string"
         },
@@ -8672,6 +8796,19 @@
             "string",
             "null"
           ]
+        },
+        "pending_replies": {
+          "$ref": "#/definitions/PendingReplyCounts",
+          "default": {
+            "asked_by": {
+              "count": 0,
+              "exact": true
+            },
+            "owed_by": {
+              "count": 0,
+              "exact": true
+            }
+          }
         },
         "recovery_reason": {
           "type": [
@@ -8982,17 +9119,17 @@
             "null"
           ]
         },
-        "awaiting_human_count": {
+        "awaiting_named_count": {
           "default": 0,
-          "description": "Pending human-directed replies: exact through 16; 17 with exact=false means 17 or more.",
+          "description": "Pending replies for the selected name (human by default): exact through 16; 17 with exact=false means 17 or more.",
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
         },
-        "awaiting_human_count_exact": {
+        "awaiting_named_count_exact": {
           "type": "boolean"
         },
-        "awaiting_human_oldest_at": {
+        "awaiting_named_oldest_at": {
           "type": [
             "string",
             "null"
@@ -11332,6 +11469,7 @@
       "title": "MessageDetails",
       "type": "object"
     },
+    "message.list": true,
     "message.reply": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
@@ -11966,11 +12104,6 @@
             "null"
           ]
         },
-        "awaiting_replies": {
-          "default": [],
-          "items": true,
-          "type": "array"
-        },
         "connection": {
           "type": "string"
         },
@@ -12065,6 +12198,19 @@
             "string",
             "null"
           ]
+        },
+        "pending_replies": {
+          "$ref": "#/definitions/PendingReplyCounts",
+          "default": {
+            "asked_by": {
+              "count": 0,
+              "exact": true
+            },
+            "owed_by": {
+              "count": 0,
+              "exact": true
+            }
+          }
         },
         "recovery_reason": {
           "type": [
@@ -12188,11 +12334,6 @@
             "null"
           ]
         },
-        "awaiting_replies": {
-          "default": [],
-          "items": true,
-          "type": "array"
-        },
         "connection": {
           "type": "string"
         },
@@ -12287,6 +12428,19 @@
             "string",
             "null"
           ]
+        },
+        "pending_replies": {
+          "$ref": "#/definitions/PendingReplyCounts",
+          "default": {
+            "asked_by": {
+              "count": 0,
+              "exact": true
+            },
+            "owed_by": {
+              "count": 0,
+              "exact": true
+            }
+          }
         },
         "recovery_reason": {
           "type": [

@@ -984,7 +984,7 @@ on pending human replies, so the listing starts from qualifying receipts and
 never scans the Thread table. Recursive indexed keyset seeks select at most
 `limit+1` candidate Thread IDs. Each candidate's aggregate reads at most 17
 pending rows. Counts through 16 are exact; a 17-row result is the lower bound
-17+ with `awaiting_human_count_exact=false`, never an assertion of exactly 17.
+17+ with `awaiting_named_count_exact=false`, never an assertion of exactly 17.
 The minimum `created_at` is reported only when the full pending set was observed
 (up to 16); with 17+ rows oldest is unknown/null, not an arrival-order guess.
 Archived/deleted candidates are filtered from the bounded candidate page, and

@@ -194,8 +194,6 @@ async fn accepted_send_operation_id_is_projected_after_driver_admission() {
                 deliver: Deliver::Next,
                 human: false,
                 resume_recovery: false,
-                to_human: false,
-                expect_reply: false,
                 sender_label: None,
             }),
         )

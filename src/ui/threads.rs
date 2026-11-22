@@ -590,8 +590,8 @@ impl BrowserMessage<'_> {
                     .unwrap_or_else(|| "none".into()),
                 one_line(activity_label(thread, language)),
                 format_reply_waits(
-                    thread.awaiting_human_count,
-                    thread.awaiting_human_count_exact,
+                    thread.awaiting_named_count,
+                    thread.awaiting_named_count_exact,
                     thread.awaiting_thread_count,
                     language
                 ),
@@ -630,8 +630,8 @@ impl BrowserMessage<'_> {
                     .unwrap_or_else(|| "なし".into()),
                 one_line(activity_label(thread, language)),
                 format_reply_waits(
-                    thread.awaiting_human_count,
-                    thread.awaiting_human_count_exact,
+                    thread.awaiting_named_count,
+                    thread.awaiting_named_count_exact,
                     thread.awaiting_thread_count,
                     language
                 ),
@@ -2621,8 +2621,8 @@ impl ThreadBrowser {
             title
         };
         let waits = format_reply_waits(
-            thread.awaiting_human_count,
-            thread.awaiting_human_count_exact,
+            thread.awaiting_named_count,
+            thread.awaiting_named_count_exact,
             thread.awaiting_thread_count,
             self.language,
         );
@@ -3466,10 +3466,10 @@ mod tests {
         ThreadSummary {
             awaiting_reply: 0,
             awaiting_thread_replies: 0,
-            awaiting_human_count_exact: true,
-            awaiting_human_count: 0,
+            awaiting_named_count_exact: true,
+            awaiting_named_count: 0,
             awaiting_thread_count: 0,
-            awaiting_human_oldest_at: None,
+            awaiting_named_oldest_at: None,
             awaiting_replies: 0,
             archived_at: None,
             tags: Vec::new(),
@@ -4311,10 +4311,10 @@ mod tests {
         let mut thread = ThreadSummary {
             awaiting_reply: 0,
             awaiting_thread_replies: 0,
-            awaiting_human_count_exact: true,
-            awaiting_human_count: 0,
+            awaiting_named_count_exact: true,
+            awaiting_named_count: 0,
             awaiting_thread_count: 0,
-            awaiting_human_oldest_at: None,
+            awaiting_named_oldest_at: None,
             awaiting_replies: 0,
             archived_at: None,
             tags: Vec::new(),
@@ -4564,10 +4564,10 @@ mod patch_tests {
         ThreadSummary {
             awaiting_reply: 0,
             awaiting_thread_replies: 0,
-            awaiting_human_count_exact: true,
-            awaiting_human_count: 0,
+            awaiting_named_count_exact: true,
+            awaiting_named_count: 0,
             awaiting_thread_count: 0,
-            awaiting_human_oldest_at: None,
+            awaiting_named_oldest_at: None,
             awaiting_replies: 0,
             archived_at: None,
             tags: Vec::new(),
@@ -5302,10 +5302,10 @@ mod archive_tests {
         ThreadSummary {
             awaiting_reply: 0,
             awaiting_thread_replies: 0,
-            awaiting_human_count_exact: true,
-            awaiting_human_count: 0,
+            awaiting_named_count_exact: true,
+            awaiting_named_count: 0,
             awaiting_thread_count: 0,
-            awaiting_human_oldest_at: None,
+            awaiting_named_oldest_at: None,
             awaiting_replies: 0,
             last_end_message: None,
             last_input: None,
@@ -5616,10 +5616,10 @@ mod watch_integration_tests {
         ThreadSummary {
             awaiting_reply: 0,
             awaiting_thread_replies: 0,
-            awaiting_human_count_exact: true,
-            awaiting_human_count: 0,
+            awaiting_named_count_exact: true,
+            awaiting_named_count: 0,
             awaiting_thread_count: 0,
-            awaiting_human_oldest_at: None,
+            awaiting_named_oldest_at: None,
             awaiting_replies: 0,
             archived_at: None,
             tags: Vec::new(),
@@ -6345,10 +6345,10 @@ mod language_tests {
         ThreadSummary {
             awaiting_reply: 0,
             awaiting_thread_replies: 0,
-            awaiting_human_count_exact: true,
-            awaiting_human_count: 0,
+            awaiting_named_count_exact: true,
+            awaiting_named_count: 0,
             awaiting_thread_count: 0,
-            awaiting_human_oldest_at: None,
+            awaiting_named_oldest_at: None,
             awaiting_replies: 0,
             archived_at: None,
             tags: Vec::new(),
@@ -6685,11 +6685,11 @@ mod language_tests {
         row.awaiting_replies = 2;
         row.awaiting_reply = 1;
         row.awaiting_thread_replies = 1;
-        row.awaiting_human_count = 1;
+        row.awaiting_named_count = 1;
         row.awaiting_thread_count = 1;
         let labels = format_reply_waits(
             row.awaiting_reply,
-            row.awaiting_human_count_exact,
+            row.awaiting_named_count_exact,
             row.awaiting_thread_replies,
             UiLanguage::Ja,
         );

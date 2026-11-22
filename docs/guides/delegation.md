@@ -20,7 +20,7 @@ This example runs in the parent model's Bash shell. Replace `CHILD_THREAD_ID` an
 ```bash
 shellboy thread create --parent "$SHELLBOY_THREAD_ID"
 # Retain result.thread_id
-shellboy message send --thread CHILD_THREAD_ID --expect-reply --text 'Task: read-only audit of the parser. Make no changes. Return definite defects, supporting evidence, and the scope verified.'
+shellboy message ask --thread CHILD_THREAD_ID --text 'Task: read-only audit of the parser. Make no changes. Return definite defects, supporting evidence, and the scope verified.'
 # Retain result.message_id / assignment / run_id / turn_id
 shellboy message get --message MESSAGE_ID
 ```
@@ -169,7 +169,7 @@ Labels remain self-asserted; inspect originals by node ID when needed.
 
 ## Leader's operating flow
 
-Send an instruction with `message send --thread T --expect-reply` and retain its
+Send an instruction with `message ask --thread T` and retain its
 message ID. End the current Turn when only the result remains; the explicit reply is delivered to the sender
 Thread normally. An external observer can wait for `reply_received`; after a timeout, reissue that observation rather
 than the instruction. Inspect `message get` and retrieve `reply.node_id` for a
@@ -182,6 +182,6 @@ the Run-end reply reminder provides that check.
 
 ## Waiting for several Threads
 
-For subagent requests, send each request with `--expect-reply`, retain its accepted message ID and end your Turn.
+For subagent requests, send each request with `message ask --thread`, retain its accepted message ID and end your Turn.
 Normal explicit replies or terminal outcomes deliver the results to your Thread. External observers may use the
 explicit conditions described in Waiting for replies; do not keep a parent Run alive for child lifecycle events.

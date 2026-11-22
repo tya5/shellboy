@@ -2988,10 +2988,10 @@ fn dense_thread_rows_and_selected_preview_stay_compact() {
             .map(|i| shellboy::protocol::ThreadSummary {
                 awaiting_reply: 0,
                 awaiting_thread_replies: 0,
-                awaiting_human_count_exact: true,
-                awaiting_human_count: 0,
+                awaiting_named_count_exact: true,
+                awaiting_named_count: 0,
                 awaiting_thread_count: 0,
-                awaiting_human_oldest_at: None,
+                awaiting_named_oldest_at: None,
                 awaiting_replies: 0,
                 archived_at: None,
                 tags: Vec::new(),
