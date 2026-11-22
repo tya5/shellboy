@@ -2857,6 +2857,7 @@ mod tests {
                 } else if matches!(
                     name,
                     "model.list"
+                        | "thread.delete"
                         | "shell.write"
                         | "shell.eof"
                         | "shell.stop"

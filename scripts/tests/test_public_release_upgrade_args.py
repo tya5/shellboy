@@ -45,7 +45,7 @@ class PublicUpgradeArguments(unittest.TestCase):
         self.assertIn('(45, "0045_thread_spill_override")', names)
         self.assertIn('(46, "0046_scope_identity_v2")', names)
         self.assertIn('(47, "0047_drop_selection_nonappend_generation")', names)
-        self.assertEqual(upgrade.CURRENT_SCHEMA_VERSION, 50)
+        self.assertEqual(upgrade.CURRENT_SCHEMA_VERSION, 51)
         self.assertTrue((ROOT / 'migrations/0046_scope_identity_v2.sql').is_file())
         self.assertTrue((ROOT / 'migrations/0047_drop_selection_nonappend_generation.sql').is_file())
         self.assertTrue((ROOT / 'migrations/0048_human_question_path_admission.sql').is_file())

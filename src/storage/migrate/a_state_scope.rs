@@ -277,6 +277,10 @@ mod tests {
     fn schema45_with_generation_column() -> Connection {
         let db = Connection::open_in_memory().unwrap();
         db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        db.execute_batch(include_str!(
+            "../../../tests/fixtures/rewind-schedule-schema.sql"
+        ))
+        .unwrap();
         db.execute_batch("DROP INDEX IF EXISTS attachment_page_order; DELETE FROM schema_migration WHERE version=40;")
             .unwrap();
         db.execute_batch(include_str!(

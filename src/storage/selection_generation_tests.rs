@@ -4,6 +4,10 @@ use rusqlite::OptionalExtension;
 fn fresh() -> Connection {
     let db = Connection::open_in_memory().unwrap();
     db.execute_batch(CURRENT_SCHEMA).unwrap();
+    db.execute_batch(include_str!(
+        "../../tests/fixtures/rewind-schedule-schema.sql"
+    ))
+    .unwrap();
     db
 }
 

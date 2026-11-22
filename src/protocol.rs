@@ -2425,13 +2425,19 @@ mod message_acknowledgement_tests {
             "credentials.clear",
             "connection.test",
             "id.resolve",
+            "schedule.add",
+            "schedule.list",
+            "schedule.set",
+            "schedule.enable",
+            "schedule.disable",
+            "schedule.remove",
         ] {
             assert!(
                 results.contains_key(name),
                 "missing result schema for {name}"
             );
         }
-        assert_eq!(results.len(), 64);
+        assert_eq!(results.len(), 70);
         for name in ["thread.create", "config.set", "connection.test"] {
             assert_eq!(
                 results[name],

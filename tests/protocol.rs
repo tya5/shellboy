@@ -1240,7 +1240,7 @@ fn protocol_v6_handshake_and_typed_results_cover_existing_wire_modes() {
         schema["capabilities"],
         serde_json::json!(["events.reasoning_activity", "id.resolve"])
     );
-    assert_eq!(schema["operation_results"].as_object().unwrap().len(), 64);
+    assert_eq!(schema["operation_results"].as_object().unwrap().len(), 70);
     for operation in ["status", "shell.list", "usage.get", "config.get"] {
         assert_ne!(schema["operation_results"][operation], Value::Bool(true));
     }

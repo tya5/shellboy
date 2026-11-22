@@ -123,6 +123,7 @@ pub(crate) struct RawObservation {
     members: Vec<Member>,
     scope_truncated: bool,
     runs: Vec<Run>,
+    schedule_count: i64,
     witnesses: Vec<Witness>,
     references_truncated: bool,
     replacement_threads: Vec<ReplacementThread>,
@@ -254,6 +255,7 @@ pub(crate) fn read_tx(
         );
     }
     let encoded = serde_json::to_string(&selected).expect("bounded Thread IDs serialize");
+    let schedule_count = db.query_row("SELECT count(*) FROM json_each(?1) j CROSS JOIN schedule s INDEXED BY schedule_thread ON s.thread_id=j.value",[&encoded],|row|row.get(0))?;
     let runs=db.prepare("WITH selected AS (SELECT value AS id FROM json_each(?1)) SELECT r.id,r.thread_id,r.state FROM selected s CROSS JOIN run r INDEXED BY one_live_run ON r.thread_id=s.id WHERE r.state IN ('live','stopping') ORDER BY r.id")?.query_map([&encoded],|row|Ok(Run{id:scalar(row,0)?,thread:scalar(row,1)?,state:scalar(row,2)?}))?.collect::<rusqlite::Result<Vec<_>>>().map_err(boundary_error)?;
     let mut witnesses = db
         .prepare(REFERENCES)?
@@ -326,6 +328,7 @@ pub(crate) fn read_tx(
         members,
         scope_truncated,
         runs,
+        schedule_count,
         witnesses,
         references_truncated,
         replacement_threads,
@@ -407,7 +410,7 @@ pub(crate) fn prepare(raw: RawObservation) -> Value {
         .flat_map(|(_, nodes)| nodes.iter().cloned())
         .collect::<BTreeSet<_>>();
     let external = attachments.values().filter(|external| **external).count();
-    let observed = json!({"selected_path_nodes":nodes.len(),"shared_path_nodes":shared.len(),"surviving_path_thread_count":surviving_threads.len(),"completed_replacement_source_nodes":completed_sources.len(),"surviving_replacement_source_nodes":surviving_sources.len(),"attachment_reference_count":attachments.len(),"external_attachment_reference_count":external,"managed_attachment_reference_count":attachments.len()-external});
+    let observed = json!({"selected_path_nodes":nodes.len(),"shared_path_nodes":shared.len(),"surviving_path_thread_count":surviving_threads.len(),"completed_replacement_source_nodes":completed_sources.len(),"surviving_replacement_source_nodes":surviving_sources.len(),"attachment_reference_count":attachments.len(),"schedule_count":raw.schedule_count,"external_attachment_reference_count":external,"managed_attachment_reference_count":attachments.len()-external});
     let references_complete =
         selected_complete && !raw.references_truncated && raw.replacement_threads_complete;
     let deletable = if live + stopping > 0 {
