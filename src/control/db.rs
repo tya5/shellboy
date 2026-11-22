@@ -2287,7 +2287,7 @@ fn assign_message(
                 } else {
                     if state == "recovery_wait" {
                         if !super::state::resume_recovery_turn_tx(
-                            tx, id, &run_id, &turn_id, generation, now,
+                            tx, id, &run_id, &turn_id, generation, now, false,
                         )
                         .map_err(storage_error)?
                         {
@@ -3208,15 +3208,15 @@ fn retry_run(
             "only a live Run in recovery_wait can retry",
         ));
     }
-    let recovery: Option<(String, i64, Option<String>)> = tx
+    let recovery: Option<(String, i64)> = tx
         .query_row(
-            "SELECT id,generation,recovery_reason_json FROM turn WHERE run_id=?1 AND state='recovery_wait'",
+            "SELECT id,generation FROM turn WHERE run_id=?1 AND state='recovery_wait'",
             [id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()
         .map_err(sql_error)?;
-    let Some((turn, generation, reason)) = recovery else {
+    let Some((turn, generation)) = recovery else {
         return Err(error(
             ErrorCode::InvalidState,
             "Run has no recoverable Turn",
@@ -3225,7 +3225,7 @@ fn retry_run(
     resume_run_tx(
         tx,
         (&details.thread_id, id, &turn, generation),
-        reason.as_deref().filter(|_| consume_reset),
+        consume_reset,
         actor(caller),
         now,
     )
@@ -3247,26 +3247,19 @@ fn retry_run(
 pub(super) fn resume_run_tx(
     tx: &Transaction<'_>,
     (thread, run, turn, generation): (&str, &str, &str, i64),
-    reason: Option<&str>,
+    consume_reset: bool,
     actor: Value,
     now: &str,
 ) -> std::result::Result<(), StorageError> {
-    use super::usage_limit_retry as usage;
-    if let Some((original, mut reason, reset)) = reason.and_then(|original| {
-        let reason: Value = serde_json::from_str(original).ok()?;
-        let reset = usage::reset(&reason)?;
-        Some((original, reason, reset))
-    }) {
-        usage::mark_consumed(&mut reason, reset.timestamp());
-        let changed = tx.execute(
-            "UPDATE turn SET recovery_reason_json=?1 WHERE id=?2 AND generation=?3 AND state='recovery_wait' AND recovery_reason_json=?4",
-            params![reason.to_string(), turn, generation, original],
-        )?;
-        if changed != 1 {
-            return Err(error(ErrorCode::InvalidState, "Run has no recoverable Turn").into());
-        }
-    }
-    if !super::state::resume_recovery_turn_tx(tx, thread, run, turn, generation, now)? {
+    if !super::state::resume_recovery_turn_tx(
+        tx,
+        thread,
+        run,
+        turn,
+        generation,
+        now,
+        consume_reset,
+    )? {
         return Err(error(ErrorCode::InvalidState, "Run has no recoverable Turn").into());
     }
     super::context::record_fact(

@@ -18,6 +18,10 @@ pub(super) fn consumed(reason: &Value) -> Option<i64> {
     reason[CONSUMED].as_i64()
 }
 
+pub(super) fn consumed_only(at: i64) -> String {
+    serde_json::json!({CONSUMED: at}).to_string()
+}
+
 pub(super) fn mark_consumed(reason: &mut Value, at: i64) {
     reason[CONSUMED] = consumed(reason).map_or(at, |old| old.max(at)).into();
 }
@@ -40,7 +44,6 @@ pub(super) struct Candidate {
     pub run: String,
     pub turn: String,
     pub generation: i64,
-    pub reason: String,
     pub at: DateTime<Utc>,
 }
 
@@ -69,7 +72,6 @@ fn parked(
                 run: row.get(1)?,
                 turn: row.get(2)?,
                 generation: row.get(3)?,
-                reason,
                 at,
             });
         }
@@ -143,7 +145,7 @@ pub(super) fn step(
             &candidate.turn,
             candidate.generation,
         ),
-        Some(&candidate.reason),
+        true,
         serde_json::json!({"kind":"owner"}),
         &now.to_rfc3339(),
     )?;

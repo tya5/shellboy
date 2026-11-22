@@ -170,14 +170,38 @@ impl Fixture {
         seed_chars: Option<usize>,
         text: &str,
     ) -> Self {
+        Self::configured(
+            retries,
+            max_delay_ms,
+            idle_ms,
+            trim_enabled,
+            seed_chars,
+            text,
+            None,
+        )
+        .await
+    }
+
+    async fn configured(
+        retries: u32,
+        max_delay_ms: u64,
+        idle_ms: u64,
+        trim_enabled: bool,
+        seed_chars: Option<usize>,
+        text: &str,
+        auto_retry: Option<bool>,
+    ) -> Self {
         let root = tempfile::tempdir().unwrap();
         let (url, requests, server) = proxy(root.path().join("requests.jsonl")).await;
         let config = root.path().join("config.toml");
         let trim_settings = format!("auto_trim_on_disconnect={trim_enabled}\n");
+        let recovery_settings = auto_retry.map_or_else(String::new, |enabled| {
+            format!("[recovery]\nauto_retry_usage_limit={enabled}\n")
+        });
         std::fs::write(
             &config,
             format!(
-                "default_connection=\"fixture\"\ndefault_model=\"fixture\"\n[connections.fixture]\nbase_url={url:?}\nresponse_max_retries={retries}\nresponse_retry_max_delay_ms={max_delay_ms}\nstream_idle_timeout_ms={idle_ms}\nresponse_header_timeout_ms={idle_ms}\n{trim_settings}"
+                "default_connection=\"fixture\"\ndefault_model=\"fixture\"\n[connections.fixture]\nbase_url={url:?}\nresponse_max_retries={retries}\nresponse_retry_max_delay_ms={max_delay_ms}\nstream_idle_timeout_ms={idle_ms}\nresponse_header_timeout_ms={idle_ms}\n{trim_settings}{recovery_settings}"
             ),
         )
         .unwrap();
@@ -3269,21 +3293,75 @@ async fn conversation_and_summary_commit_each_transient_retry_before_dispatch() 
     fixture.close().await;
 }
 
+impl Fixture {
+    async fn park_at_usage_limit(&mut self) -> chrono::DateTime<chrono::Utc> {
+        let first = self.incoming().await;
+        let reset =
+            chrono::DateTime::from_timestamp(chrono::Utc::now().timestamp() + 6, 0).unwrap();
+        let body = json!({"error":{"type":"usage_limit_reached","resets_at":reset.timestamp()}})
+            .to_string();
+        first
+            .reply
+            .send(Reply::http(429, "application/json", &body, ""))
+            .ok()
+            .unwrap();
+        assert_eq!(self.settled().await, "recovery_wait");
+        assert_eq!(fixture_request_log_lines(self), 1);
+        reset
+    }
+
+    async fn restart_after(self, at: chrono::DateTime<chrono::Utc>) -> Self {
+        let Self {
+            _root,
+            owner,
+            control,
+            requests,
+            server,
+            accepted,
+        } = self;
+        control.shutdown().await.unwrap();
+        drop(control);
+        owner.shutdown().await.unwrap();
+        wait_for_reset(at).await;
+        let owner = DataOwner::start(
+            Some(_root.path().join("config.toml")),
+            Some(_root.path().join("data")),
+            _root.path().into(),
+        )
+        .await
+        .unwrap();
+        let control = Control::new(&owner, _root.path().into());
+        control.start().await.unwrap();
+        Self {
+            _root,
+            owner,
+            control,
+            requests,
+            server,
+            accepted,
+        }
+    }
+
+    async fn assert_usage_limit_admissions(&self, expected: i64) {
+        self.owner.db.call(move |db| {
+            let count: i64 = db.query_row("SELECT count(*) FROM event WHERE json_extract(payload_ref_json,'$.kind')='recovery_resumed' AND json_extract(source_json,'$.kind')='owner'", [], |row| row.get(0))?;
+            assert_eq!(count, expected);
+            Ok(())
+        }).await.unwrap();
+    }
+}
+
+async fn wait_for_reset(at: chrono::DateTime<chrono::Utc>) {
+    while let Ok(remaining) = (at - chrono::Utc::now()).to_std() {
+        tokio::time::sleep(remaining).await;
+    }
+}
+
 #[tokio::test]
 async fn owner_maintenance_resends_usage_limit_once_at_saved_reset() {
     let mut f = Fixture::new(0, 100, 120_000).await;
     f.control.start().await.unwrap();
-    let first = f.incoming().await;
-    let reset = chrono::DateTime::from_timestamp(chrono::Utc::now().timestamp() + 6, 0).unwrap();
-    let body =
-        json!({"error":{"type":"usage_limit_reached","resets_at":reset.timestamp()}}).to_string();
-    first
-        .reply
-        .send(Reply::http(429, "application/json", &body, ""))
-        .ok()
-        .unwrap();
-    assert_eq!(f.settled().await, "recovery_wait");
-    assert_eq!(fixture_request_log_lines(&f), 1);
+    let reset = f.park_at_usage_limit().await;
     let resumed = f.incoming().await;
     assert!(
         chrono::Utc::now() >= reset,
@@ -3292,10 +3370,47 @@ async fn owner_maintenance_resends_usage_limit_once_at_saved_reset() {
     resumed.reply.send(Reply::success()).ok().unwrap();
     assert_eq!(f.settled().await, "completed");
     assert_eq!(fixture_request_log_lines(&f), 2);
-    f.owner.db.call(|db| {
-        let count: i64 = db.query_row("SELECT count(*) FROM event WHERE json_extract(payload_ref_json,'$.kind')='recovery_resumed' AND json_extract(source_json,'$.kind')='owner'", [], |row| row.get(0))?;
-        assert_eq!(count, 1);
-        Ok(())
-    }).await.unwrap();
+    f.assert_usage_limit_admissions(1).await;
+    f.close().await;
+}
+
+#[tokio::test]
+async fn owner_start_rediscovers_overdue_usage_limit_once() {
+    let mut f = Fixture::new(0, 100, 120_000).await;
+    // Do not start maintenance on the first owner: the first admission must be
+    // driven by the replacement owner's scan, not an old in-memory signal.
+    let reset = f.park_at_usage_limit().await;
+    let mut f = f.restart_after(reset).await;
+    let resumed = f.incoming().await;
+    resumed.reply.send(Reply::success()).ok().unwrap();
+    assert_eq!(f.settled().await, "completed");
+    f.assert_usage_limit_admissions(1).await;
+    let mut f = f.restart_after(reset).await;
+    assert_eq!(f.settled().await, "completed");
+    f.no_more_requests().await;
+    assert_eq!(fixture_request_log_lines(&f), 2);
+    f.assert_usage_limit_admissions(1).await;
+    f.close().await;
+}
+
+#[tokio::test]
+async fn owner_with_usage_limit_retry_disabled_stays_parked_past_reset() {
+    let mut f = Fixture::configured(
+        0,
+        100,
+        120_000,
+        true,
+        None,
+        "synthetic opt-out",
+        Some(false),
+    )
+    .await;
+    f.control.start().await.unwrap();
+    let reset = f.park_at_usage_limit().await;
+    wait_for_reset(reset + chrono::Duration::seconds(1)).await;
+    assert_eq!(f.settled().await, "recovery_wait");
+    f.no_more_requests().await;
+    assert_eq!(fixture_request_log_lines(&f), 1);
+    f.assert_usage_limit_admissions(0).await;
     f.close().await;
 }

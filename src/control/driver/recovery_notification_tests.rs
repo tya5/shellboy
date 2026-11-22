@@ -644,7 +644,7 @@ async fn usage_limit_retry_admission_uses_one_saved_reset() {
     use crate::protocol::{Command, Request, RunTarget};
     let at = chrono::Utc::now() + chrono::Duration::hours(1);
     let at = chrono::DateTime::from_timestamp(at.timestamp(), 0).unwrap();
-    for case in ["owner", "manual", "stop", "overdue", "disabled"] {
+    for case in ["owner", "manual", "stop"] {
         let (_root, owner, control, accepted) =
             preparation_tests::fixture("http://127.0.0.1:9/v1").await;
         let snapshot = preparation_tests::ready(&control, &accepted).await;
@@ -691,17 +691,10 @@ async fn usage_limit_retry_admission_uses_one_saved_reset() {
         let newer = error(newer_at.timestamp());
         owner.db.call(move |db| {
             let tx = db.transaction()?;
-            if matches!(case, "overdue" | "disabled") {
-                let restart = (at + chrono::Duration::seconds(1)).to_rfc3339();
-                super::super::state::finish_drained_shutdown(&tx, case != "disabled")?;
-                super::super::state::interrupt_previous_work(&tx, &restart, case != "disabled")?;
-            }
-            let due = if case == "overdue" { at + chrono::Duration::seconds(1) } else { at };
-            let automatic = matches!(case, "owner" | "overdue");
-            if automatic {
-                assert!(matches!(step(&tx, due)?, Step::Admitted(id) if id == thread));
+            if case == "owner" {
+                assert!(matches!(step(&tx, at)?, Step::Admitted(id) if id == thread));
             } else {
-                assert!(matches!(step(&tx, due)?, Step::Waiting(None)));
+                assert!(matches!(step(&tx, at)?, Step::Waiting(None)));
             }
             if matches!(case, "owner" | "manual") {
                 let generation = tx.query_row("SELECT generation FROM turn WHERE id=?1", [&turn], |r| r.get(0))?;
@@ -709,24 +702,15 @@ async fn usage_limit_retry_admission_uses_one_saved_reset() {
                 assert!(matches!(step(&tx, at)?, Step::Waiting(None)));
                 // Carry consumption through another explicit admission, then
                 // receive a genuinely newer limit on the same Turn.
-                let saved: String = tx.query_row("SELECT recovery_reason_json FROM turn WHERE id=?1", [&turn], |r| r.get(0))?;
-                super::super::db::resume_run_tx(&tx, (&thread, &run, &turn, generation), Some(&saved), json!({"kind":"human"}), &at.to_rfc3339())?;
+                super::super::db::resume_run_tx(&tx, (&thread, &run, &turn, generation), true, json!({"kind":"human"}), &at.to_rfc3339())?;
                 assert!(recover_turn_tx(&tx, &thread, &run, &turn, generation + 1, &newer)?);
                 assert!(matches!(step(&tx, at)?, Step::Waiting(Some(saved)) if saved == newer_at));
                 assert!(matches!(step(&tx, newer_at)?, Step::Admitted(id) if id == thread));
             }
             assert!(matches!(step(&tx, newer_at)?, Step::Waiting(None)));
             let owner_events: i64 = tx.query_row("SELECT count(*) FROM event WHERE json_extract(payload_ref_json,'$.kind')='recovery_resumed' AND json_extract(source_json,'$.kind')='owner'", [], |r| r.get(0))?;
-            assert_eq!(owner_events, match case { "owner" => 2, "manual" | "overdue" => 1, _ => 0 });
+            assert_eq!(owner_events, match case { "owner" => 2, "manual" => 1, _ => 0 });
             tx.commit()?;
-            if case == "overdue" {
-                let tx = db.transaction()?;
-                super::super::state::interrupt_previous_work(&tx, &due.to_rfc3339(), true)?;
-                assert!(matches!(step(&tx, due)?, Step::Waiting(None)));
-                let stopped: String = tx.query_row("SELECT state FROM turn WHERE id=?1", [&turn], |r| r.get(0))?;
-                assert_eq!(stopped, "stopped");
-                tx.commit()?;
-            }
             Ok(())
         }).await.unwrap();
         preparation_tests::close(control, owner).await;

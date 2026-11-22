@@ -40,13 +40,35 @@ pub(super) fn resume_recovery_turn_tx(
     turn: &str,
     generation: i64,
     at: &str,
+    consume_reset: bool,
 ) -> Result<bool, StorageError> {
-    // No global <=128 queue invariant exists: ordinary sends can accumulate.
-    // Keep the Turn recoverable until ordered, committed units drain its queue.
-    let valid: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM turn WHERE id=?1 AND thread_id=?2 AND run_id=?3 AND generation=?4 AND state='recovery_wait' AND EXISTS(SELECT 1 FROM run r WHERE r.id=turn.run_id AND r.state='live'))", params![turn,thread,run,generation], |r| r.get(0))?;
-    if !valid {
+    use super::usage_limit_retry as usage;
+    let reason: Option<Option<String>> = tx
+        .query_row(
+            "SELECT recovery_reason_json FROM turn WHERE id=?1 AND thread_id=?2 AND run_id=?3
+         AND generation=?4 AND state='recovery_wait'
+         AND EXISTS(SELECT 1 FROM run r WHERE r.id=turn.run_id AND r.state='live')",
+            params![turn, thread, run, generation],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let Some(reason) = reason else {
         return Ok(false);
-    }
+    };
+    let mut parsed: Option<Value> = reason
+        .as_deref()
+        .and_then(|text| serde_json::from_str(text).ok());
+    let consumed_now = if consume_reset {
+        parsed.as_mut().is_some_and(|reason| {
+            let Some(reset) = usage::reset(reason) else {
+                return false;
+            };
+            usage::mark_consumed(reason, reset.timestamp());
+            true
+        })
+    } else {
+        false
+    };
     super::message_delivery::recover_on_resume_tx(
         tx,
         thread,
@@ -56,24 +78,30 @@ pub(super) fn resume_recovery_turn_tx(
         at,
     )?;
     let remaining: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM receipt INDEXED BY receipt_target WHERE target_thread_id=?1 AND state='held' AND turn_id=?2 AND run_id=?3 AND hold_reason='recovery_wait')", params![thread,turn,run], |r| r.get(0))?;
-    if remaining || super::message_delivery::interrupted_remaining(tx, thread)? {
-        tx.execute(
-            "UPDATE turn SET generation=generation+1 WHERE id=?1 AND generation=?2",
-            params![turn, generation],
-        )?;
-        return Ok(true);
-    }
-    let changed = tx.execute(
-        "UPDATE turn SET state='preparing',generation=generation+1,recovery_reason_json=
-             CASE WHEN json_type(recovery_reason_json,'$.consumed_usage_limit_reset')='integer'
-             THEN json_object('consumed_usage_limit_reset',json_extract(recovery_reason_json,'$.consumed_usage_limit_reset')) END
-         WHERE id=?1 AND thread_id=?2 AND run_id=?3 AND generation=?4 AND state='recovery_wait'
-         AND EXISTS(SELECT 1 FROM run r WHERE r.id=turn.run_id AND r.state='live')",
-        params![turn, thread, run, generation],
+    // One admission drains one bounded unit and commits its reset with the transition.
+    let (state, reason) =
+        if remaining || super::message_delivery::interrupted_remaining(tx, thread)? {
+            (
+                "recovery_wait",
+                if consumed_now {
+                    parsed.map(|value| value.to_string())
+                } else {
+                    reason
+                },
+            )
+        } else {
+            (
+                "preparing",
+                parsed
+                    .as_ref()
+                    .and_then(usage::consumed)
+                    .map(usage::consumed_only),
+            )
+        };
+    tx.execute(
+        "UPDATE turn SET state=?2,generation=generation+1,recovery_reason_json=?3 WHERE id=?1",
+        params![turn, state, reason],
     )?;
-    if changed != 1 {
-        return Ok(false);
-    }
     Ok(true)
 }
 

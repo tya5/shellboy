@@ -683,7 +683,7 @@ mod tests {
             let tx = db.transaction().unwrap();
             assert!(
                 super::super::state::resume_recovery_turn_tx(
-                    &tx, "t", "new", "next", generation, "resume"
+                    &tx, "t", "new", "next", generation, "resume", false
                 )
                 .unwrap()
             );
@@ -716,7 +716,7 @@ mod tests {
             let tx = db.transaction().unwrap();
             assert!(
                 super::super::state::resume_recovery_turn_tx(
-                    &tx, "t", "new", "next", generation, "resume"
+                    &tx, "t", "new", "next", generation, "resume", false
                 )
                 .unwrap()
             );
@@ -763,7 +763,7 @@ mod tests {
             let tx = db.transaction().unwrap();
             assert!(
                 super::super::state::resume_recovery_turn_tx(
-                    &tx, "t", "new", "next", generation, "resume"
+                    &tx, "t", "new", "next", generation, "resume", false
                 )
                 .unwrap()
             );
@@ -774,7 +774,8 @@ mod tests {
                     "new",
                     "next",
                     generation,
-                    "stale concurrent retry"
+                    "stale concurrent retry",
+                    false
                 )
                 .unwrap()
             );
