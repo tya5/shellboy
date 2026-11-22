@@ -2452,18 +2452,29 @@ mod thread_creation_migration_tests {
     fn schema54_backfills_earliest_owned_activity_without_inherited_path_or_updates() {
         let mut db = Connection::open_in_memory().unwrap();
         db.execute_batch(super::super::CURRENT_SCHEMA).unwrap();
+        // Restore the exact time-only schedule DDL before replaying the upgrade.
+        let (time_schedule, _) = include_str!("../../migrations/0051_thread_schedule.sql")
+            .split_once("CREATE TABLE scheduled_shell_execution(")
+            .unwrap();
         db.execute_batch("DROP INDEX receipt_named_reply_pending;
             DROP INDEX receipt_pending_by_time;
             DROP INDEX receipt_pending_owed;
             DROP INDEX receipt_pending_asked;
             DROP INDEX receipt_pending_to;
-            DELETE FROM schema_migration WHERE version=56;
+            DELETE FROM schema_migration WHERE version IN (56,57);
             DROP TABLE automatic_compaction; CREATE INDEX automatic_compaction_turn ON model_attempt(turn_id,started_at,id) WHERE CASE WHEN json_valid(error_json) THEN json_type(error_json,'$.automatic_trim')='object' OR json_type(error_json,'$.automatic_trim_attempt')='object' ELSE 0 END;
             DELETE FROM schema_migration WHERE version=55;
-            DROP INDEX threads_created; ALTER TABLE thread DROP COLUMN created_at;
-            DELETE FROM schema_migration WHERE version=54; PRAGMA user_version=53;
+            DROP TABLE schedule; DROP INDEX threads_created; ALTER TABLE thread DROP COLUMN created_at;
+            DELETE FROM schema_migration WHERE version>=54; PRAGMA user_version=53;").unwrap();
+        db.execute_batch(time_schedule).unwrap();
+        db.pragma_update(None, "foreign_keys", true).unwrap();
+        db.execute_batch("
             INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES
                 ('t','/','','p','m','99'),('fork','/','','p','m','00'),('held','/','','p','m','99');
+            INSERT INTO schedule(id,thread_id,once_at,enabled,cwd,command) VALUES('saved-schedule','t',1,1,'/','echo test');
+            INSERT INTO shell_execution(id,schedule_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at)
+                VALUES('saved-shell','saved-schedule','saved-op','exited','/','{}','utf-8','utf-8','closed','now');
+            INSERT INTO output_chunk VALUES('saved-shell',1,'stdout',0,X'4142','now');
             INSERT INTO run(id,thread_id,state,created_at) VALUES('r','t','completed','41');
             INSERT INTO turn(id,thread_id,run_id,state,created_at) VALUES('u','t','r','completed','40');
             INSERT INTO node(id,turn_id,kind,created_at) VALUES('known','u','message','20'),('held-node',NULL,'message','10');
@@ -2471,6 +2482,16 @@ mod thread_creation_migration_tests {
                 VALUES('receipt','op','{}','held','held-node','held','30','{}');
             INSERT INTO thread_path(thread_id,ordinal,node_id) VALUES('fork',0,'known');").unwrap();
         run(&mut db, 53, &|_, _| {}, &|| {}).unwrap();
+        let (kind, output): (String, Vec<u8>) = db.query_row(
+            "SELECT s.kind,o.bytes FROM schedule s JOIN shell_execution e ON e.schedule_id=s.id JOIN output_chunk o ON o.execution_id=e.id WHERE s.id='saved-schedule'",
+            [], |r| Ok((r.get(0)?, r.get(1)?)),
+        ).unwrap();
+        assert_eq!(kind, "time");
+        assert_eq!(output, b"AB");
+        assert!(
+            db.pragma_query_value(None, "foreign_keys", |r| r.get::<_, bool>(0))
+                .unwrap()
+        );
         for (id, expected) in [("t", Some("20")), ("held", Some("10")), ("fork", None)] {
             let actual: Option<String> = db
                 .query_row("SELECT created_at FROM thread WHERE id=?1", [id], |r| {
@@ -2496,7 +2517,7 @@ mod automatic_compaction_migration_tests {
             DROP INDEX receipt_pending_owed;
             DROP INDEX receipt_pending_asked;
             DROP INDEX receipt_pending_to;
-            DELETE FROM schema_migration WHERE version=56;
+            DELETE FROM schema_migration WHERE version IN (56,57);
             DROP TABLE automatic_compaction;
             CREATE INDEX automatic_compaction_turn ON model_attempt(turn_id,started_at,id) WHERE CASE WHEN json_valid(error_json) THEN json_type(error_json,'$.automatic_trim')='object' OR json_type(error_json,'$.automatic_trim_attempt')='object' ELSE 0 END;
             DELETE FROM schema_migration WHERE version=55;
