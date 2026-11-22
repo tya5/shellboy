@@ -114,7 +114,7 @@ fn operation_result_schemas(
     result!("storage.status", StorageStatus);
     opaque!("storage.collect");
     result!("config.get", ConfigGetResult);
-    opaque!("config.set");
+    result!("config.set", ConfigSetResult);
     result!("credentials.set", CredentialsSetResult);
     result!("credentials.clear", CredentialsClearResult);
     opaque!("connection.test");
@@ -490,22 +490,22 @@ pub struct Origin {
 /// Credential-free provenance for persistence and human/model projections.
 /// This is not an authentication credential: only `Origin` can cross the IPC
 /// authentication boundary, where its token is checked against issued origins.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub struct OriginIdentity<'a> {
-    pub instance_id: &'a str,
-    pub thread_id: &'a str,
-    pub run_id: &'a str,
-    pub turn_id: &'a str,
-    pub execution_id: &'a str,
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct OriginIdentity {
+    pub instance_id: String,
+    pub thread_id: String,
+    pub run_id: String,
+    pub turn_id: String,
+    pub execution_id: String,
 }
 impl Origin {
-    pub fn identity(&self) -> OriginIdentity<'_> {
+    pub fn identity(&self) -> OriginIdentity {
         OriginIdentity {
-            instance_id: &self.instance_id,
-            thread_id: &self.thread_id,
-            run_id: &self.run_id,
-            turn_id: &self.turn_id,
-            execution_id: &self.execution_id,
+            instance_id: self.instance_id.clone(),
+            thread_id: self.thread_id.clone(),
+            run_id: self.run_id.clone(),
+            turn_id: self.turn_id.clone(),
+            execution_id: self.execution_id.clone(),
         }
     }
 }
@@ -1724,12 +1724,10 @@ record!(AttachmentRemoveResult {
     attachment_id: String,
     removed: bool
 });
-record!(CredentialChangeOrigin {
-    instance_id: String,
-    thread_id: String,
-    run_id: String,
-    turn_id: String,
-    execution_id: String,
+// Config edit details are open; authenticated change provenance is not.
+record!(ConfigSetResult {
+    changed_by: Option<OriginIdentity>,
+    #[serde(flatten)] fields: std::collections::BTreeMap<String, Value>,
 });
 record!(CredentialsSetResult {
     connection: String,
@@ -1739,14 +1737,14 @@ record!(CredentialsSetResult {
     credentials_path: std::path::PathBuf,
     permissions_tightened: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")] warning: Option<String>,
-    changed_by: Option<CredentialChangeOrigin>,
+    changed_by: Option<OriginIdentity>,
 });
 record!(CredentialsClearResult {
     connection: String,
     cleared: bool,
     key_source: crate::config::KeySource,
     credentials_path: std::path::PathBuf,
-    changed_by: Option<CredentialChangeOrigin>,
+    changed_by: Option<OriginIdentity>,
 });
 record!(ShellOutput {
     execution_id: String,

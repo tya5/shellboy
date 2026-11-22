@@ -101,7 +101,12 @@ impl Control {
                     error
                 }
             })?;
-        let mut result = applied.result;
+        let Value::Object(fields) = applied.result else {
+            return Err(ApiError::new(
+                ErrorCode::InvalidState,
+                "Config edit result is not an object",
+            ));
+        };
         if applied.written {
             let ids = caller.map_or_else(crate::diagnostics::DiagnosticIds::default, |origin| {
                 crate::diagnostics::DiagnosticIds {
@@ -114,7 +119,13 @@ impl Control {
             });
             self.diagnostics.record_config_change(ids, applied.fields);
         }
-        result["changed_by"] = json!(caller.map(Origin::identity));
-        Ok(result)
+        super::runtime::encode_result(
+            crate::protocol::ConfigSetResult {
+                changed_by: caller.map(Origin::identity),
+                fields: fields.into_iter().collect(),
+            },
+            ErrorCode::InvalidState,
+            "Cannot encode config edit result",
+        )
     }
 }

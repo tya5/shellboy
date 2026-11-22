@@ -982,6 +982,7 @@ async fn through_the_owner_set_replays_and_get_shows_the_pending_difference() {
         let operation = format!("{}:config-1", control.store.instance_id);
         let first = set(&control, &operation, args.clone()).await.unwrap();
         assert_eq!(first["written"], true);
+        crate::operation_result_schema::assert_result("config.set", &first);
         assert!(first["changed_by"].is_null(), "no shell origin here");
         let text = std::fs::read_to_string(&path).unwrap();
         assert_eq!(

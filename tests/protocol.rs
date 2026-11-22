@@ -1214,6 +1214,36 @@ fn exported_schema_matches_committed_protocol_schema() {
 }
 
 #[test]
+fn exported_schema_shares_changed_by_identity() {
+    let schema: Value =
+        serde_json::from_str(include_str!("../docs/reference/protocol.schema.json")).unwrap();
+    let identity = &schema["definitions"]["OriginIdentity"];
+    let fields = identity["properties"].as_object().unwrap();
+    assert_eq!(fields.len(), 5);
+    for field in [
+        "instance_id",
+        "thread_id",
+        "run_id",
+        "turn_id",
+        "execution_id",
+    ] {
+        assert_eq!(fields[field]["type"], "string");
+    }
+    for operation in ["config.set", "credentials.set", "credentials.clear"] {
+        let changed_by = &schema["operation_results"][operation]["properties"]["changed_by"];
+        assert_eq!(
+            changed_by,
+            &schema["operation_results"]["credentials.set"]["properties"]["changed_by"]
+        );
+        assert!(
+            changed_by
+                .to_string()
+                .contains("#/definitions/OriginIdentity")
+        );
+    }
+}
+
+#[test]
 fn exported_schema_local_references_resolve() {
     fn visit(value: &Value, document: &Value, path: &str) {
         match value {

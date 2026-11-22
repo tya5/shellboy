@@ -111,7 +111,7 @@ impl Control {
             caller_ids(caller),
             vec![format!("credentials.{connection}")],
         );
-        result.changed_by = caller.map(credential_change_origin);
+        result.changed_by = caller.map(Origin::identity);
         serde_json::to_value(result)
             .map_err(|_| ApiError::new(ErrorCode::IoFailed, "Cannot encode credentials result"))
     }
@@ -149,7 +149,7 @@ impl Control {
                 vec![format!("credentials.{connection}")],
             );
         }
-        result.changed_by = caller.map(credential_change_origin);
+        result.changed_by = caller.map(Origin::identity);
         serde_json::to_value(result)
             .map_err(|_| ApiError::new(ErrorCode::IoFailed, "Cannot encode credentials result"))
     }
@@ -383,15 +383,5 @@ fn source_name(source: KeySource) -> &'static str {
         KeySource::Env => "env",
         KeySource::Stored => "stored",
         KeySource::None => "none",
-    }
-}
-
-fn credential_change_origin(origin: &Origin) -> crate::protocol::CredentialChangeOrigin {
-    crate::protocol::CredentialChangeOrigin {
-        instance_id: origin.instance_id.clone(),
-        thread_id: origin.thread_id.clone(),
-        run_id: origin.run_id.clone(),
-        turn_id: origin.turn_id.clone(),
-        execution_id: origin.execution_id.clone(),
     }
 }

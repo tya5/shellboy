@@ -1831,33 +1831,6 @@
       ],
       "type": "object"
     },
-    "CredentialChangeOrigin": {
-      "properties": {
-        "execution_id": {
-          "type": "string"
-        },
-        "instance_id": {
-          "type": "string"
-        },
-        "run_id": {
-          "type": "string"
-        },
-        "thread_id": {
-          "type": "string"
-        },
-        "turn_id": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "instance_id",
-        "thread_id",
-        "run_id",
-        "turn_id",
-        "execution_id"
-      ],
-      "type": "object"
-    },
     "CredentialsClearArgs": {
       "additionalProperties": false,
       "properties": {
@@ -4159,6 +4132,34 @@
         "token"
       ],
       "title": "Origin",
+      "type": "object"
+    },
+    "OriginIdentity": {
+      "description": "Credential-free provenance for persistence and human/model projections.\nThis is not an authentication credential: only `Origin` can cross the IPC\nauthentication boundary, where its token is checked against issued origins.",
+      "properties": {
+        "execution_id": {
+          "type": "string"
+        },
+        "instance_id": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "thread_id": {
+          "type": "string"
+        },
+        "turn_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "instance_id",
+        "thread_id",
+        "run_id",
+        "turn_id",
+        "execution_id"
+      ],
       "type": "object"
     },
     "Outcome": {
@@ -10711,7 +10712,24 @@
       "title": "ConfigGetResult",
       "type": "object"
     },
-    "config.set": true,
+    "config.set": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": true,
+      "properties": {
+        "changed_by": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/OriginIdentity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "title": "ConfigSetResult",
+      "type": "object"
+    },
     "connection.test": true,
     "context.edit": true,
     "credentials.clear": {
@@ -10720,7 +10738,7 @@
         "changed_by": {
           "anyOf": [
             {
-              "$ref": "#/definitions/CredentialChangeOrigin"
+              "$ref": "#/definitions/OriginIdentity"
             },
             {
               "type": "null"
@@ -10755,7 +10773,7 @@
         "changed_by": {
           "anyOf": [
             {
-              "$ref": "#/definitions/CredentialChangeOrigin"
+              "$ref": "#/definitions/OriginIdentity"
             },
             {
               "type": "null"
