@@ -14,7 +14,7 @@ fn db() -> Connection {
     c
 }
 fn shell_row(c: &Connection, id: &str, t: &str, at: &str, command: &str, exit: i32) {
-    c.execute("INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at,ended_at,exit_code)VALUES(?1,?2,?2,?1,'exited','/',?3,'UTF-8','UTF-8','closed',?4,'2026-10-31T00:01:00Z',?5)",params![id,t,json!({"command":command,"completion":{"elapsed_ms":1000}}).to_string(),at,exit]).unwrap();
+    c.prepare_cached("INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at,ended_at,exit_code)VALUES(?1,?2,?2,?1,'exited','/',?3,'UTF-8','UTF-8','closed',?4,'2026-10-31T00:01:00Z',?5)").unwrap().execute(params![id,t,json!({"command":command,"completion":{"elapsed_ms":1000}}).to_string(),at,exit]).unwrap();
 }
 fn args() -> ShellListArgs {
     ShellListArgs {
@@ -432,9 +432,9 @@ fn readback_plans_seek_shared_tables_and_indexes_have_measured_sizes() {
         let tx = c.unchecked_transaction().unwrap();
         for i in 0..5000 {
             let t = if i % 2 == 0 { "t" } else { "other" };
-            tx.execute("INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,result_ref_json,created_at)VALUES(?1,'test','{}','hash','completed',?2,'2026-10-31T00:00:00Z')",params![format!("op{i}"),json!({"result":{"thread_id":t,"status":"queued"}}).to_string()]).unwrap();
-            tx.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id=?2),?1,?2,0,0,'p','m',0,'failed','{}','2026-10-31T00:00:00Z')",params![format!("a{i}"),t]).unwrap();
-            tx.execute("INSERT INTO automatic_compaction(attempt_id,turn_id,attempt_started_at,result_json) VALUES(?1,?2,'2026-10-31T00:00:00Z','{\"metrics\":{}}')",params![format!("a{i}"),t]).unwrap();
+            tx.prepare_cached("INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,result_ref_json,created_at)VALUES(?1,'test','{}','hash','completed',?2,'2026-10-31T00:00:00Z')").unwrap().execute(params![format!("op{i}"),json!({"result":{"thread_id":t,"status":"queued"}}).to_string()]).unwrap();
+            tx.prepare_cached("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id=?2),?1,?2,0,0,'p','m',0,'failed','{}','2026-10-31T00:00:00Z')").unwrap().execute(params![format!("a{i}"),t]).unwrap();
+            tx.prepare_cached("INSERT INTO automatic_compaction(attempt_id,turn_id,attempt_started_at,result_json) VALUES(?1,?2,'2026-10-31T00:00:00Z','{\"metrics\":{}}')").unwrap().execute(params![format!("a{i}"),t]).unwrap();
         }
         tx.commit().unwrap();
         for thread in [false, true] {
