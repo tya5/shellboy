@@ -7286,5 +7286,15 @@
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection.",
     "source_tokens_sha256": "6237f19467094a509a67362a09fd25efdaf737251e52e53122eeb46f69d29989"
+  },
+  "src/operations.rs:c6c27a0c87dd8a20:1": {
+    "category": "a",
+    "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection.",
+    "source_tokens_sha256": "04d4c5c1dac76a67c00d22d10f380a9642bb7c87f97a78724c283c1b4f2267a7"
+  },
+  "src/operations.rs:ea7839e70a857e29:1": {
+    "category": "a",
+    "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection.",
+    "source_tokens_sha256": "04d4c5c1dac76a67c00d22d10f380a9642bb7c87f97a78724c283c1b4f2267a7"
   }
 }
