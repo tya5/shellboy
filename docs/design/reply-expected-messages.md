@@ -469,7 +469,7 @@ has none (see below).
   by `--deliver complete` messages released at completion (#187), the Run-end
   reminder Turn for any pending reply-expected message in that Thread (from
   any sender), Turns for later messages or wake events, and the Run also waits
-  for owned shells and formerly subordinate Runs. `run-end` therefore returns what the Thread
+  for owned shells and subordinate Runs. `run-end` therefore returns what the Thread
   said last before going idle; `turn-end` returns what it said when it
   finished this message. Neither mode creates a reply duty, so neither mode
   causes a reminder for its own message.

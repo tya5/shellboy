@@ -2499,7 +2499,7 @@ impl Term {
             key: TextKey::Term(self),
             fallback: match self {
                 Self::Run => {
-                    "作業（Run）は依頼を進める実行単位です。Turnの回答後も、所有するshellや子Runの終了まで続くことがあります。"
+                    "作業（Run）は依頼を進める実行単位です。Turnの回答後も、そのThreadで所有するshellの終了まで続くことがあります。"
                 }
                 Self::Turn => {
                     "応答処理（Turn）は一つの回答へ進む区間です。複数のモデル要求やtool実行を含み、Runと別に完了・停止・復旧待ちになります。"

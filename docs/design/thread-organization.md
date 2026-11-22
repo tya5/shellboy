@@ -52,7 +52,7 @@ Completed); no surveyed product offers arbitrary re-parenting.
 | Creation defaults: cwd, AGENTS reference, connection, model, effort, compaction overrides copied from the parent | `create_thread`, `src/control/db.rs:1609-1682` | once, at create | none; stays a creation-time copy |
 | Fork / `/edit` / rewind child: parent = source Thread, settings and path prefix copied | `fork_thread`, `src/history.rs:469`; [history](history.md) ("fork's parent_thread_id is lineage and creates no Run ownership edge") | once | none |
 | **Ownership grant**: model send starting a new Run on a Thread whose parent is the caller's Thread sets `owner_run_id` = caller Run | `assign_message`, `src/control/db.rs:1901-2021` | at each new Run start | the *next* Run follows the new parent; live Runs keep their stored owner |
-| Parent send to a live formerly subordinate Run owned by a different parent | `assign_message`, `src/control/db.rs` | at send | accepted into existing Run without transferring its saved owner |
+| Parent send to a live subordinate Run owned by a different parent | `assign_message`, `src/control/db.rs` | at send | accepted into existing Run without transferring its saved owner |
 | TUI Thread browser tree (▾/▸, ├─/└─, missing-parent marker, cycle marker) | `src/ui/threads.rs:2051-2120`; [thread browser](thread-browser.md) | each fetched page | already a projection of fetched rows; needs refetch of old and new parent |
 | Browser lineage counts (bounded descendant walk, depth 8, 256 rows, cycle flag) | `src/frontend/lineage.rs:12-37`, `affected_tx` `:196-210` | read time | invalidation walks *upward from the changed IDs*; the move must report the old parent as changed too |
 | Header / watch / status show parent id and title | `src/frontend/header.rs:97`, `src/frontend/watch_read.rs:22-35`, `src/status.rs:444` | read time | none |
@@ -78,7 +78,7 @@ Uses of **`owner_run_id`** (not `parent_id`), unchanged by re-parenting:
 - ownership cycles are rejected by triggers (`migrations/0001_initial.sql:57-70`).
 
 **Answer to issue point 2.** Re-parenting can and should leave live Run ownership
-untouched. Ownership decides notices and cascade, not permission: the Run that owns a live formerly subordinate Run keeps
+untouched. Ownership decides notices and cascade, not permission: the Run that owns a live subordinate Run keeps
 recovery and child-end notices (and its stop cascade) until that Run ends; the new parent gains
 ownership only of Runs it starts afterwards. "Moving a delegation mid-flight" is
 then: re-parent, let the current Run finish (or stop it as its owner/human), and
@@ -97,7 +97,7 @@ notices follow the *owning Run*, not `parent_id`.
 | Parent fixed at creation | nothing: every consumer reads the current value; ownership is snapshotted in `owner_run_id` | **remove** (stage 2) |
 | Ownership granted only when caller Thread = target's parent at Run start | delegation authority is explicit; a model cannot take over a Thread it merely messages | keep; with mutable parents the grant is still an explicit act (someone set the parent) |
 | One owner per live Run ("owned by another live parent Run") | single owner, single cleanup path | keep |
-| Owner Run stays live while it owns work; stopping it stops owned descendants | no orphaned formerly subordinate Runs or shells ("no persistent daemons") | keep |
+| Owner Run stays live while it owns work; stopping it stops owned descendants | no orphaned subordinate Runs or shells ("no persistent daemons") | keep |
 | ~~Retry only by the live direct owner or a human~~ | was: avoid two Runs deciding recovery for one child | **removed (#256)**: retry is a generation CAS (`resume_recovery_turn_tx` returns false when the Turn changed), so a race is safe. The user then also removed the stop check: any caller may stop or retry any Run (personal use; the check was not a security boundary) |
 | Model message to a child in `recovery_wait` is held | an ordinary message must not silently act as a retry | keep |
 | Delete refused while any selected Thread has a live/stopping Run | no deletion under running work | keep |
