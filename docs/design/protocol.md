@@ -869,6 +869,16 @@ persisted digest-kind namespace; no JSON field in a user file activates source d
 raw snapshots even when they contain an `extra` JSON field. Repair/remove broken common-file registrations through
 the model-independent config CLI, then explicitly retry; fail-closed semantics are unchanged.
 
+## Current automatic compaction (#341)
+
+`thread.get` returns required `summarizing: bool`. It is true only when the
+current live Run and its preparing or running Turn have the same bounded,
+validated automatic-compaction witness used by the TUI activity snapshot.
+Otherwise it is false. `last_compaction` is retained history, not current
+activity. Studio rereads `thread.get` after existing Thread change hints and
+uses only `summarizing` for the current indicator. This is not a progress estimate
+and adds no list field, event or polling path.
+
 ## #274 spill-to-tool provenance
 
 `history.list` and `history.window` retain all existing fields and add `spill_tools` only for spill nodes:

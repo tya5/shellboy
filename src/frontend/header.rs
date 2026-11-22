@@ -166,6 +166,7 @@ pub(super) fn read_tx(db: &Connection, thread: &str) -> Result<RawHeader, Storag
         last_end_message: None,
         last_input: None,
         last_compaction: None,
+        summarizing: false,
         thread_id: thread.into(),
         title: row.get(0)?,
         cwd: row.get(1)?,

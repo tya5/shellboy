@@ -8774,6 +8774,7 @@ mod tool_refresh_tests {
             last_end_message: None,
             last_input: None,
             last_compaction: None,
+            summarizing: false,
             thread_id: "t".into(),
             title: "paired header".into(),
             cwd: "/".into(),

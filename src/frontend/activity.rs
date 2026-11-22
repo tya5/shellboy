@@ -132,15 +132,6 @@ struct AutomaticCompactionSkipWitness {
     reason: crate::ui::activity::AutomaticCompactionSkip,
 }
 
-#[derive(serde::Deserialize)]
-struct AutomaticCompactionWitness {
-    run_id: String,
-    turn_id: String,
-    input_tokens: u64,
-    threshold: u64,
-    started_at: String,
-}
-
 // Both the group fanout and the number of result rows are bounded. A partial
 // count stays a lower bound even when the first groups contain no results.
 fn bounded_group_counts(
@@ -242,14 +233,20 @@ pub(super) fn read_tx_with_limit(
         },
     };
     if let Some(saved_turn) = turn {
+        raw.automatic_compaction = crate::compaction::read_automatic_activity(
+            db,
+            thread,
+            run_id,
+            run_state,
+            &saved_turn.id,
+            &saved_turn.state,
+        )?
+        .map(|w| crate::ui::activity::AutomaticCompactionSnapshot {
+            input_tokens: w.input_tokens,
+            threshold: w.threshold,
+            started_at: w.started_at,
+        });
         if run_state == "live" && matches!(saved_turn.state.as_str(), "preparing" | "running") {
-            let body: Option<String> = db
-                .query_row(
-                    "SELECT substr(value,1,4096) FROM app_meta WHERE key=?1",
-                    [crate::compaction::CompactionKeys::new(thread).automatic_active()],
-                    |row| row.get(0),
-                )
-                .optional()?;
             let status: Option<String> = db
                 .query_row(
                     "SELECT substr(value,1,4096) FROM app_meta WHERE key=?1",
@@ -261,19 +258,6 @@ pub(super) fn read_tx_with_limit(
                 .and_then(|body| serde_json::from_str::<AutomaticCompactionSkipWitness>(&body).ok())
                 .filter(|saved| saved.run_id == *run_id && saved.turn_id == saved_turn.id)
                 .map(|saved| saved.reason);
-            raw.automatic_compaction = body
-                .and_then(|body| serde_json::from_str::<AutomaticCompactionWitness>(&body).ok())
-                .filter(|w| {
-                    w.run_id == *run_id
-                        && w.turn_id == saved_turn.id
-                        && w.threshold > 0
-                        && w.input_tokens >= w.threshold
-                })
-                .map(|w| crate::ui::activity::AutomaticCompactionSnapshot {
-                    input_tokens: w.input_tokens,
-                    threshold: w.threshold,
-                    started_at: w.started_at,
-                });
         }
         let turn_id = &saved_turn.id;
         let generation = saved_turn.generation;

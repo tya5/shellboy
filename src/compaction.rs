@@ -16,6 +16,8 @@ use std::{
 };
 use tokio_util::sync::CancellationToken;
 
+mod activity;
+pub(crate) use activity::read_automatic_activity;
 mod attempt;
 pub(crate) mod boundary;
 pub(crate) mod context_usage;

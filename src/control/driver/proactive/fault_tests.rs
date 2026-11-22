@@ -230,6 +230,7 @@ fn assert_trigger_evidence(trigger: &Value, scenario: Scenario) {
 async fn context_limit_waits_for_the_same_proactive_job_without_a_second_summary_post() {
     crate::test_watchdog::watchdog("context-limit joins the active proactive job", async {
         let DriverLifecycleFixture {
+            root: _root,
             owner,
             control,
             target,
@@ -243,6 +244,7 @@ async fn context_limit_waits_for_the_same_proactive_job_without_a_second_summary
             .take()
             .expect("proactive summary reached its provider boundary");
         assert_ne!(normal.body, summary.body);
+        assert_eq!(thread_get_summarizing(&control, &target).await, true);
         normal
             .reply
             .send((
@@ -284,6 +286,8 @@ async fn context_limit_waits_for_the_same_proactive_job_without_a_second_summary
             receive.try_recv().is_err(),
             "context-limit recovery did not launch another summary or replay the POST"
         );
+        settled(&control, &target).await;
+        assert_eq!(thread_get_summarizing(&control, &target).await, false);
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
         server.abort();
@@ -2634,6 +2638,9 @@ async fn prepare_driver_lifecycle(
         incoming(&control, &mut receive).await.reply.send((200, json!({"id":format!("boundary-{index}"),"status":"completed","usage":{"input_tokens":100,"output_tokens":1},"output":[{"type":"function_call","call_id":format!("boundary-{index}"),"name":"shell","arguments":json!({"command":command}).to_string()}]}))).unwrap();
     }
     let request_boundary = incoming(&control, &mut receive).await;
+    if hold_summary {
+        assert_eq!(thread_get_summarizing(&control, &target).await, false);
+    }
     // Closed scenarios complete this trigger report as plain text, then open a
     // new Turn with an eligible closed prefix. Active scenarios keep this Turn
     // live with the ordinary tool continuation; the summary POST, if selected,
@@ -3371,6 +3378,16 @@ pub(super) async fn checkpoint(
     result
 }
 
+async fn thread_get_summarizing(control: &Arc<Control>, thread: &str) -> Value {
+    let details = request(
+        control,
+        Command::ThreadGet(ThreadTarget {
+            thread_id: Some(thread.into()),
+        }),
+    )
+    .await;
+    details["summarizing"].clone()
+}
 async fn request(control: &Arc<Control>, command: Command) -> Value {
     let response = control
         .request(Request::new(
