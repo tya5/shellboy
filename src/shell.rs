@@ -1027,6 +1027,54 @@ mod output_failure_tests {
         }
     }
 
+    #[cfg(unix)]
+    #[tokio::test(start_paused = true)]
+    async fn unix_guardian_reap_timeout_preserves_known_exit() {
+        use std::os::unix::process::ExitStatusExt;
+
+        let started = Instant::now();
+        let guardian_confirmed = confirm_unix_reap(async {
+            tokio::time::sleep(UNIX_REAP_TIMEOUT + Duration::from_millis(1)).await;
+            Ok(())
+        })
+        .await;
+        assert!(!guardian_confirmed);
+        let (io, _handle, _events) = IoSession::start(
+            Arc::new(Mutex::new(None)),
+            tokio::io::empty(),
+            tokio::io::empty(),
+            None,
+            false,
+            false,
+            8192,
+            &Config::default(),
+        );
+        let completion = finish_unix_shell(
+            io,
+            Ok(std::process::ExitStatus::from_raw(7 << 8)),
+            Duration::from_millis(100),
+            false,
+            UnixCleanup {
+                reap_confirmed: true,
+                group_confirmed: true,
+                guardian_confirmed,
+                forced: false,
+            },
+            "synthetic-guardian-reap".into(),
+            started,
+        )
+        .await;
+        assert_eq!(completion.state, ShellState::Exited);
+        assert_eq!(completion.exit_code, Some(7));
+        assert_eq!(completion.exit_signal, None);
+        assert!(completion.output_complete);
+        assert!(!completion.group_cleanup_confirmed);
+        assert_eq!(
+            completion.reason.as_deref(),
+            Some("Unix guardian reap was not confirmed")
+        );
+    }
+
     #[test]
     fn drain_only_failure_keeps_successful_process_exited_but_output_incomplete() {
         let failure = Arc::new(StdMutex::new(ShellFailures::default()));
