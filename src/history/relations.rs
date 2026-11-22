@@ -9,6 +9,9 @@ use crate::protocol::{
 
 use super::sql_error;
 
+// Bound operation IDs before UTF-8 conversion so malformed receipt data stays non-fatal.
+const MAX_CLIENT_OPERATION_ID_BYTES: usize = 256;
+
 const ATTEMPT_OWNER_SQL: &str = "SELECT COUNT(DISTINCT attempt_id),MIN(CASE WHEN length(CAST(attempt_id AS BLOB))<=36 THEN attempt_id END),MAX(length(CAST(attempt_id AS BLOB))) FROM output_item INDEXED BY output_item_node WHERE node_id=?1";
 
 fn saved_attempt_id(connection: &Connection, node_id: &str) -> Result<Option<String>, ApiError> {
@@ -49,13 +52,20 @@ pub fn provenance(connection: &Connection, node_id: &str) -> Result<NodeProvenan
     }
     if result.kind == "user" {
         let mut statement = connection.prepare(
-            "SELECT CASE WHEN length(CAST(sender_json AS BLOB))<=8192 THEN sender_json END, CASE WHEN typeof(client_operation_id)='text' AND length(CAST(client_operation_id AS BLOB))<=256 THEN client_operation_id END, target_thread_id FROM receipt INDEXED BY receipt_message_node WHERE message_node_id=?1 LIMIT 2",
+            "SELECT CASE WHEN length(CAST(sender_json AS BLOB))<=8192 THEN sender_json END, CASE WHEN typeof(client_operation_id)='text' THEN CAST(client_operation_id AS BLOB) END, target_thread_id FROM receipt INDEXED BY receipt_message_node WHERE message_node_id=?1 LIMIT 2",
         ).map_err(sql_error)?;
         let mut rows = statement.query([node_id]).map_err(sql_error)?;
         let mut sender_raw = None;
         if let Some(row) = rows.next().map_err(sql_error)? {
             sender_raw = row.get::<_, Option<String>>(0).map_err(sql_error)?;
-            let operation_id = row.get::<_, Option<String>>(1).map_err(sql_error)?;
+            let operation_id = match row.get_ref(1).map_err(sql_error)? {
+                rusqlite::types::ValueRef::Blob(bytes)
+                    if bytes.len() <= MAX_CLIENT_OPERATION_ID_BYTES =>
+                {
+                    std::str::from_utf8(bytes).ok().map(str::to_owned)
+                }
+                _ => None,
+            };
             let target_thread = row.get::<_, Option<String>>(2).map_err(sql_error)?;
             let duplicate = rows.next().map_err(sql_error)?.is_some();
             if !duplicate
@@ -205,8 +215,10 @@ pub fn relations(
             break;
         }
         let node_id: String = row.get(0).map_err(sql_error)?;
+        let mut item_provenance = provenance(connection, &node_id)?;
+        item_provenance.client_operation_id = None;
         items.push(RelationItem {
-            provenance: provenance(connection, &node_id)?,
+            provenance: item_provenance,
             node_id,
             replacement_id: row.get(1).map_err(sql_error)?,
             source_revision: row.get(2).map_err(sql_error)?,

@@ -169,6 +169,57 @@ async fn accepted_send_operation_id_is_projected_by_all_history_readers() {
 }
 
 #[tokio::test]
+async fn relation_items_never_project_client_operation_id() {
+    let (_root, store) = fixture().await;
+    let first = store
+        .execute(request(send(false)), None)
+        .await
+        .unwrap()
+        .result;
+    let second = store
+        .execute(request(send(false)), None)
+        .await
+        .unwrap()
+        .result;
+    let first_node = first["message_id"].as_str().unwrap().to_owned();
+    let second_node = second["message_id"].as_str().unwrap().to_owned();
+    let edge_from = first_node.clone();
+    let edge_to = second_node.clone();
+    store
+        .database
+        .call(move |db| {
+            db.execute(
+                "INSERT INTO edge(src,dst) VALUES(?1,?2)",
+                rusqlite::params![edge_from, edge_to],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let result = store
+        .execute(
+            request(Command::HistoryRelations(HistoryRelationsArgs {
+                node_id: second_node,
+                relation: HistoryRelation::Previous,
+                limit: 10,
+                cursor: None,
+            })),
+            None,
+        )
+        .await
+        .unwrap()
+        .result;
+    let item = result["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["node_id"] == first_node)
+        .unwrap();
+    assert!(item["provenance"].get("client_operation_id").is_none());
+    store.database.shutdown().await.unwrap();
+}
+
+#[tokio::test]
 async fn shared_node_has_no_client_operation_id_in_nonorigin_thread() {
     let (_root, store) = fixture().await;
     let accepted = store
@@ -274,6 +325,13 @@ async fn ambiguous_or_oversized_direct_receipts_do_not_project_operation_id() {
             .get("client_operation_id")
             .is_none()
     );
+    let identity = node.clone();
+    store.database.call(move |db| {
+        db.execute("UPDATE receipt SET client_operation_id=CAST(X'80' AS TEXT) WHERE message_node_id=?1", [identity])?;
+        Ok(())
+    }).await.unwrap();
+    let malformed = store.execute(get(), None).await.unwrap().result;
+    assert!(malformed["provenance"].get("client_operation_id").is_none());
     store.database.shutdown().await.unwrap();
 }
 
