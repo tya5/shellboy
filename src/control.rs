@@ -165,7 +165,6 @@ pub struct Control {
     instructions: InstructionLoader,
     replay: replay::ReplayCache,
     data_dir: PathBuf,
-    #[cfg(unix)]
     endpoint: Arc<std::sync::RwLock<Option<crate::app::Endpoint>>>,
     live: Arc<LiveRegistry>,
     origins: Mutex<HashMap<String, Origin>>,
@@ -221,7 +220,7 @@ async fn maintenance_loop(
 ) {
     use crate::maintenance::Work;
     let mut schedule_due = None;
-    let mut refresh_schedule_due = true;
+    let mut refresh_schedule_due = false;
     let mut deadlines: HashMap<u32, tokio::time::Instant> = HashMap::new();
     let mut reply_cursor = None;
     let mut reply_active = false;
@@ -236,7 +235,15 @@ async fn maintenance_loop(
             let Some(owner) = control.upgrade() else {
                 return;
             };
-            match schedule::next_deadline(&owner).await {
+            match if owner
+                .endpoint
+                .read()
+                .is_ok_and(|endpoint| endpoint.is_some())
+            {
+                schedule::next_deadline(&owner).await
+            } else {
+                Ok(None)
+            } {
                 Ok(next) => schedule_due = next,
                 Err(_) => {
                     owner.fail_storage().await;
@@ -448,7 +455,6 @@ impl Control {
             instructions,
             replay: replay::ReplayCache::new(config.cache.history_bytes),
             data_dir: owner.loaded.data_dir.clone(),
-            #[cfg(unix)]
             endpoint: owner.endpoint.clone(),
             live: Arc::new(LiveRegistry::default()),
             origins: Mutex::new(HashMap::new()),
@@ -587,6 +593,10 @@ impl Control {
     /// This task never waits for a model or owned shell to finish. Individual
     /// requests may await DB/network-independent observations without occupying it.
     pub async fn serve(self: Arc<Self>, mut requests: mpsc::Receiver<Invocation>) {
+        self.store
+            .database
+            .signals()
+            .mark(crate::maintenance::Work::Schedule);
         while let Some(invocation) = requests.recv().await {
             let control = self.clone();
             tokio::spawn(async move {

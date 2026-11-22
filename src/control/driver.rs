@@ -1126,7 +1126,7 @@ async fn run_shell(
         .lock()
         .await
         .insert(origin.token.clone(), origin.clone());
-    let mut env = shell_output::shell_environment(&control, &origin.thread_id);
+    let mut env = shell_output::cli_environment(&control, &origin.thread_id);
     for (name, value) in [
         ("SHELLBOY_INSTANCE_ID", origin.instance_id.clone()),
         ("SHELLBOY_RUN_ID", origin.run_id.clone()),

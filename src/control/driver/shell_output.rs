@@ -117,7 +117,7 @@ impl ShellOwner {
     }
 }
 
-pub(in crate::control) fn shell_environment(
+pub(in crate::control) fn cli_environment(
     control: &Control,
     thread: &str,
 ) -> std::collections::BTreeMap<String, String> {
@@ -127,6 +127,14 @@ pub(in crate::control) fn shell_environment(
             control.data_dir.to_string_lossy().into_owned(),
         ),
         ("SHELLBOY_THREAD_ID".into(), thread.to_owned()),
+        (
+            "SHELLBOY_INSTANCE_ID".into(),
+            control.store.instance_id.clone(),
+        ),
+        ("SHELLBOY_RUN_ID".into(), String::new()),
+        ("SHELLBOY_TURN_ID".into(), String::new()),
+        ("SHELLBOY_EXECUTION_ID".into(), String::new()),
+        ("SHELLBOY_ORIGIN_TOKEN".into(), String::new()),
     ]);
     #[cfg(unix)]
     {

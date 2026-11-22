@@ -719,6 +719,8 @@ fn origin(data_dir: &Path) -> Option<Origin> {
         run_id: std::env::var("SHELLBOY_RUN_ID").ok()?,
         turn_id: std::env::var("SHELLBOY_TURN_ID").ok()?,
         execution_id: std::env::var("SHELLBOY_EXECUTION_ID").ok()?,
-        token: std::env::var("SHELLBOY_ORIGIN_TOKEN").ok()?,
+        token: std::env::var("SHELLBOY_ORIGIN_TOKEN")
+            .ok()
+            .filter(|token| !token.is_empty())?,
     })
 }

@@ -36,13 +36,12 @@ enum Occurrence {
 }
 
 fn occurrence(
-    enabled: bool,
-    next_at: Option<i64>,
+    next_at: i64,
     cron: Option<&str>,
     now: DateTime<Utc>,
     zone: &impl TimeZone,
 ) -> Occurrence {
-    if !enabled || next_at.is_none_or(|at| at > now.timestamp()) {
+    if next_at > now.timestamp() {
         return Occurrence::NotDue;
     }
     let next = cron.and_then(|expression| next_cron(expression, now, zone));
@@ -58,14 +57,13 @@ fn advance_due(
     shell_kind: &str,
 ) -> Result<Option<DueShell>, StorageError> {
     let due = tx.query_row(
-        "SELECT id,thread_id,cwd,command,cron,next_at FROM schedule WHERE enabled=1 AND next_at IS NOT NULL AND next_at<=?1 ORDER BY next_at,id LIMIT 1", [now.timestamp()],
+        "SELECT id,thread_id,cwd,command,cron,next_at FROM schedule WHERE enabled=1 AND next_at IS NOT NULL ORDER BY next_at,id LIMIT 1", [],
         |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,String>(3)?,r.get::<_,Option<String>>(4)?,r.get::<_,i64>(5)?)),
     ).optional()?;
     let Some((schedule, thread, cwd, command, cron, scheduled_at)) = due else {
         return Ok(None);
     };
-    let Occurrence::Due { next, invalid } =
-        occurrence(true, Some(scheduled_at), cron.as_deref(), now, &Local)
+    let Occurrence::Due { next, invalid } = occurrence(scheduled_at, cron.as_deref(), now, &Local)
     else {
         return Ok(None);
     };
@@ -145,7 +143,7 @@ pub(super) async fn dispatch(control: &Arc<Control>) -> Result<Option<DateTime<U
             input_encoding: "utf-8".into(),
             output_encoding: "utf-8".into(),
         };
-        let env = shell_output::shell_environment(control, &shell.thread);
+        let env = shell_output::cli_environment(control, &shell.thread);
         match control
             .shell
             .spawn(shell.id.clone(), shell.cwd, args, env)
@@ -510,30 +508,24 @@ mod tests {
     #[test]
     fn wall_clock_jumps_coalesce_missed_occurrences_without_replaying() {
         let at = |hour, minute| Utc.with_ymd_and_hms(2025, 1, 2, hour, minute, 0).unwrap();
-        let stored = Some(at(8, 0).timestamp());
+        let stored = at(8, 0).timestamp();
         let cron = Some("0 * * * *");
         assert_eq!(
-            occurrence(true, stored, cron, at(7, 59), &Utc),
+            occurrence(stored, cron, at(7, 59), &Utc),
             Occurrence::NotDue
         );
-        let next = Some(at(13, 0).timestamp());
+        let next = at(13, 0).timestamp();
         assert_eq!(
-            occurrence(true, stored, cron, at(12, 20), &Utc),
+            occurrence(stored, cron, at(12, 20), &Utc),
             Occurrence::Due {
-                next,
+                next: Some(next),
                 invalid: false
             }
         );
+        assert_eq!(occurrence(next, cron, at(9, 0), &Utc), Occurrence::NotDue);
+        assert_eq!(occurrence(next, cron, at(12, 20), &Utc), Occurrence::NotDue);
         assert_eq!(
-            occurrence(true, next, cron, at(9, 0), &Utc),
-            Occurrence::NotDue
-        );
-        assert_eq!(
-            occurrence(true, next, cron, at(12, 20), &Utc),
-            Occurrence::NotDue
-        );
-        assert_eq!(
-            occurrence(true, next, cron, at(13, 0), &Utc),
+            occurrence(next, cron, at(13, 0), &Utc),
             Occurrence::Due {
                 next: Some(at(14, 0).timestamp()),
                 invalid: false
@@ -571,46 +563,6 @@ mod tests {
             next_cron("* * * * *", fold_edge, &Stockholm),
             Some(second_hour.timestamp())
         );
-    }
-
-    #[tokio::test]
-    async fn owner_restart_runs_one_overdue_occurrence_then_advances() {
-        use chrono::Datelike;
-        let root = tempfile::tempdir().unwrap();
-        let data = root.path().join("data");
-        let open = || crate::app::DataOwner::start(None, Some(data.clone()), root.path().into());
-        let owner = open().await.unwrap();
-        let now = Utc::now();
-        let due = (now - chrono::Duration::days(1000)).timestamp();
-        // Put the next future occurrence well outside this test's runtime.
-        let future = (now + chrono::Duration::days(90)).with_timezone(&Local);
-        let cron = format!("0 12 {} {} *", future.day(), future.month());
-        let expected = next_cron(&cron, now, &Local).unwrap();
-        let cwd = root.path().to_string_lossy().into_owned();
-        owner.db.call(move |db| {
-            db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('target',?1,'','fixture','fixture','now')",[&cwd])?;
-            db.execute("INSERT INTO schedule(id,thread_id,cron,next_at,enabled,cwd,command) VALUES('q','target',?1,?2,1,?3,'echo resumed')",params![cron,due,cwd])?;
-            Ok(())
-        }).await.unwrap();
-        owner.shutdown().await.unwrap();
-        let owner = open().await.unwrap();
-        let control = Control::new(&owner, root.path().into());
-        control.start().await.unwrap();
-        crate::test_watchdog::watchdog("overdue scheduler occurrence after owner restart", async {
-            loop {
-                let changed = control.changed.notified();
-                tokio::pin!(changed);
-                changed.as_mut().enable();
-                let (saved, terminal, next) = owner.db.call(|db| {
-                    Ok(db.query_row("SELECT count(x.id),count(CASE WHEN x.state='exited' AND x.exit_code=0 THEN 1 END),q.next_at FROM schedule q LEFT JOIN shell_execution x ON x.schedule_id=q.id WHERE q.id='q' GROUP BY q.id",[],|r|Ok((r.get::<_,i64>(0)?,r.get::<_,i64>(1)?,r.get::<_,i64>(2)?)))?)
-                }).await.unwrap();
-                assert!(saved <= 1);
-                if terminal == 1 { assert_eq!(saved,1); assert_eq!(next,expected); break; }
-                changed.await;
-            }
-        }).await.unwrap();
-        control.shutdown().await.unwrap();
-        owner.shutdown().await.unwrap();
     }
 
     #[tokio::test]
@@ -796,6 +748,9 @@ mod tests {
             )
         };
         control.start().await.unwrap();
+        let (sender, requests) = tokio::sync::mpsc::channel(4);
+        let server = crate::ipc::LocalServer::bind(&owner, sender).await.unwrap();
+        let dispatcher = tokio::spawn(control.clone().serve(requests));
         let add = control
             .request(request(Command::ScheduleAdd(
                 crate::protocol::ScheduleAddArgs {
@@ -845,6 +800,8 @@ mod tests {
             Ok(())
         }).await.unwrap();
         control.shutdown().await.unwrap();
+        server.shutdown().await.unwrap();
+        dispatcher.await.unwrap();
         owner.shutdown().await.unwrap();
         drop(root);
     }

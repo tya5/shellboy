@@ -615,3 +615,15 @@ runs at the first valid time after the gap; interval entries skip nonexistent
 times. During a repeated hour, a fixed-time entry uses the first occurrence,
 while interval entries may run in both halves. When several occurrences are
 already past, the owner runs at most one and schedules the next future occurrence.
+
+After a forced owner exit, a recovered terminal execution record does not prove
+that a surviving OS child stopped. If a schedule or Thread deletion was
+interrupted before its final commit, issue a new delete to finish it; the owner
+does not resume the interrupted deletion on startup.
+
+To send a message to the owning Thread only when a flag file exists (POSIX shell):
+
+```sh
+shellboy schedule add --thread THREAD --cron '0 * * * *' -- \
+  'if test -f needs-review; then shellboy message send --thread "$SHELLBOY_THREAD_ID" --text "Review is needed"; fi'
+```

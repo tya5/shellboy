@@ -8045,3 +8045,52 @@ final_request.reply.send((200, answer("finished"))).unwrap();
         (summaries,most,attempts,slots,spills,scopes,summary_inputs,report_ledger)
     }).await.unwrap()
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn owner_restart_runs_one_overdue_conditional_cli_message_then_advances() {
+    crate::test_watchdog::watchdog("overdue schedule delivers through the ready owner", async {
+        let root = tempfile::tempdir().unwrap();
+        let data = root.path().join("data");
+        let config = root.path().join("config.toml");
+        let (url, mut requests, proxy_task) = proxy().await;
+        std::fs::write(&config, format!("default_connection=\"fixture\"\ndefault_model=\"fixture\"\n[connections.fixture]\nbase_url={url:?}\nresponse_max_retries=0\n")).unwrap();
+        let seed = HeadlessOwner::start(&data, &config).await;
+        let thread = headless_cli(&data, &["thread", "create"]).await["thread_id"].as_str().unwrap().to_owned();
+        headless_cli(&data, &["shutdown"]).await;
+        seed.finish(true, &root.path().join("seed.jsonl")).await;
+
+        std::fs::write(root.path().join("needs-review"), "").unwrap();
+        let cli = serve_quote(std::path::Path::new(env!("CARGO_BIN_EXE_shellboy")));
+        let text = "Review is needed from the overdue schedule";
+        let command = if cfg!(windows) {
+            format!("if (Test-Path needs-review) {{ & {cli} message send --thread \"$env:SHELLBOY_THREAD_ID\" --text '{text}'; exit $LASTEXITCODE }}")
+        } else {
+            format!("if test -f needs-review; then {cli} message send --thread \"$SHELLBOY_THREAD_ID\" --text '{text}'; fi")
+        };
+        {
+            let db = rusqlite::Connection::open(data.join("shellboy.db")).unwrap();
+            db.execute("INSERT INTO schedule(id,thread_id,cron,next_at,enabled,cwd,command) VALUES('overdue',?1,'0 12 1 1 *',1,1,?2,?3)",rusqlite::params![thread,root.path().to_str().unwrap(),command]).unwrap();
+        }
+        let owner = HeadlessOwner::start(&data, &config).await;
+        let request = requests.recv().await.unwrap();
+        assert!(request.body["input"].to_string().contains(text));
+        request.reply.send((200, answer("Scheduled message received"))).unwrap();
+        loop {
+            let list = headless_cli(&data, &["schedule", "list", "--thread", &thread]).await;
+            let saved = &list["items"][0]["latest"];
+            if saved["state"] == "exited" {
+                assert_eq!(saved["exit_code"], 0, "{list}");
+                break;
+            }
+            assert!(!matches!(saved["state"].as_str(), Some("failed" | "stopped")), "{list}");
+            tokio::task::yield_now().await;
+        }
+        headless_cli(&data, &["shutdown"]).await;
+        owner.finish(true, &root.path().join("restart.jsonl")).await;
+        let db = headless_db(&data);
+        let (count, next) = db.query_row("SELECT count(x.id),q.next_at FROM schedule q LEFT JOIN shell_execution x ON x.schedule_id=q.id WHERE q.id='overdue' GROUP BY q.id",[],|r|Ok((r.get::<_,i64>(0)?,r.get::<_,i64>(1)?))).unwrap();
+        assert_eq!(count, 1);
+        assert!(next > chrono::Utc::now().timestamp());
+        proxy_task.abort();
+    }).await.unwrap();
+}
