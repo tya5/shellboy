@@ -1734,7 +1734,42 @@ async fn usage_limit_new_conversation(f: &mut Fixture) {
     )
     .unwrap();
 }
-fn retry_attempt_diagnostics(attempts: &[(String, Option<Value>)]) -> String {
+fn bounded_field(value: Option<&Value>) -> Value {
+    const LIMIT: usize = 160;
+    match value {
+        Some(Value::String(text)) if text.chars().count() > LIMIT => {
+            let head: String = text.chars().take(LIMIT).collect();
+            Value::String(format!(
+                "{head}...[truncated, {} chars]",
+                text.chars().count()
+            ))
+        }
+        Some(Value::Object(_) | Value::Array(_)) => {
+            let text = value.unwrap().to_string();
+            if text.chars().count() > LIMIT {
+                let head: String = text.chars().take(LIMIT).collect();
+                Value::String(format!(
+                    "{head}...[truncated, {} chars]",
+                    text.chars().count()
+                ))
+            } else {
+                value.unwrap().clone()
+            }
+        }
+        Some(other) => other.clone(),
+        None => Value::Null,
+    }
+}
+
+/// Bounded evidence for a one-attempt assertion: the case, the fixture's count
+/// of fully read POSTs (requests.jsonl rows are appended only after the whole
+/// body was read, so this is distinct from admitted model_attempt rows), and
+/// each row's saved classification, HTTP/rate facts and retry disposition.
+fn retry_attempt_diagnostics(
+    case: &str,
+    fixture_posts: usize,
+    attempts: &[(String, Option<Value>)],
+) -> String {
     use serde_json::json;
 
     let evidence: Vec<_> = attempts
@@ -1742,21 +1777,38 @@ fn retry_attempt_diagnostics(attempts: &[(String, Option<Value>)]) -> String {
         .take(8)
         .map(|(state, saved)| {
             let error = saved.as_ref().and_then(|value| value.get("error"));
+            let field = |name: &str| saved.as_ref().and_then(|value| value.get(name));
+            let disposition = if field("automatic_retry").is_some() {
+                "retry_scheduled"
+            } else if field("automatic_retry_exhausted").is_some() {
+                "retry_exhausted"
+            } else if field("automatic_retry_deferred").is_some() {
+                "retry_deferred"
+            } else if saved.is_some() {
+                "no_automatic_retry"
+            } else {
+                "no_saved_failure"
+            };
             json!({
                 "state": state,
+                "disposition": disposition,
                 "classification": {
-                    "kind": error.and_then(|value| value.get("kind")),
-                    "status": error.and_then(|value| value.get("status")),
-                    "stream_provider_status": error.and_then(|value| value.get("stream_provider_status")),
-                    "automatic_retry": saved.as_ref().and_then(|value| value.get("automatic_retry")),
-                    "automatic_retry_exhausted": saved.as_ref().and_then(|value| value.get("automatic_retry_exhausted")),
+                    "kind": bounded_field(error.and_then(|value| value.get("kind"))),
+                    "message": bounded_field(error.and_then(|value| value.get("message"))),
+                    "status": bounded_field(error.and_then(|value| value.get("status"))),
+                    "stream_provider_status": bounded_field(error.and_then(|value| value.get("stream_provider_status"))),
+                    "automatic_retry": bounded_field(field("automatic_retry")),
+                    "automatic_retry_exhausted": bounded_field(field("automatic_retry_exhausted")),
+                    "automatic_retry_deferred": bounded_field(field("automatic_retry_deferred")),
                 },
-                "http": saved.as_ref().and_then(|value| value.get("rate_observation")),
+                "http_rate": bounded_field(field("rate_observation")),
             })
         })
         .collect();
     serde_json::to_string(&json!({
-        "attempt_count": attempts.len(),
+        "case": bounded_field(Some(&Value::String(case.to_owned()))),
+        "fixture_posts_fully_read": fixture_posts,
+        "attempt_rows": attempts.len(),
         "attempts": evidence,
         "omitted_attempt_count": attempts.len().saturating_sub(evidence.len()),
     }))
@@ -2947,7 +2999,11 @@ async fn untyped_terminal_sse_retry_fails_closed_for_typed_or_nontransient_error
             attempts.len(),
             1,
             "terminal classification for prefix={prefix:?} event={event}; bounded attempt diagnostics={}",
-            retry_attempt_diagnostics(&attempts)
+            retry_attempt_diagnostics(
+                &format!("prefix={prefix:?} event={event}"),
+                fixture_request_log_lines(&fixture),
+                &attempts
+            )
         );
         let failure = attempts[0].1.as_ref().unwrap();
         assert_terminal_stream_failure(failure, witness);
