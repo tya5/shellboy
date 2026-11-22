@@ -144,16 +144,27 @@ CREATE TABLE tool_result(
  status TEXT NOT NULL, FOREIGN KEY(group_id,call_id) REFERENCES tool_call(group_id,call_id),
  PRIMARY KEY(group_id,call_id));
 
+CREATE TABLE schedule(
+ id TEXT PRIMARY KEY NOT NULL, thread_id TEXT NOT NULL REFERENCES thread(id) ON DELETE CASCADE,
+ cron TEXT, once_at INTEGER, next_at INTEGER, enabled INTEGER NOT NULL CHECK(enabled IN (0,1)),
+ cwd TEXT NOT NULL, command TEXT NOT NULL, description TEXT, last_skipped_at INTEGER,
+ CHECK((cron IS NULL) <> (once_at IS NULL)));
+CREATE INDEX schedule_thread ON schedule(thread_id,id);
+CREATE INDEX schedule_due ON schedule(next_at,id) WHERE enabled=1 AND next_at IS NOT NULL;
+
 CREATE TABLE shell_execution(
- id TEXT PRIMARY KEY NOT NULL, owner_run_id TEXT NOT NULL REFERENCES run(id),
- turn_id TEXT NOT NULL REFERENCES turn(id), operation_id TEXT NOT NULL UNIQUE,
+ id TEXT PRIMARY KEY NOT NULL, owner_run_id TEXT REFERENCES run(id),
+ turn_id TEXT REFERENCES turn(id), schedule_id TEXT REFERENCES schedule(id) ON DELETE CASCADE, operation_id TEXT NOT NULL UNIQUE,
  state TEXT NOT NULL CHECK(state IN ('starting','running','stopping','exited','failed','stopped')), cwd TEXT NOT NULL, shell_json TEXT NOT NULL CHECK(json_valid(shell_json)),
  input_encoding TEXT NOT NULL, output_encoding TEXT NOT NULL, stdin_state TEXT NOT NULL,
  saved_sequence INTEGER NOT NULL DEFAULT 0 CHECK(saved_sequence>=0), retention_generation INTEGER NOT NULL DEFAULT 0 CHECK(retention_generation>=0),
- exit_code INTEGER, end_reason TEXT, output_complete INTEGER CHECK(output_complete IS NULL OR output_complete IN (0,1)), started_at TEXT NOT NULL, ended_at TEXT);
+ exit_code INTEGER, end_reason TEXT, output_complete INTEGER CHECK(output_complete IS NULL OR output_complete IN (0,1)), started_at TEXT NOT NULL, ended_at TEXT,
+ CHECK((schedule_id IS NULL AND owner_run_id IS NOT NULL AND turn_id IS NOT NULL)
+    OR (schedule_id IS NOT NULL AND owner_run_id IS NULL AND turn_id IS NULL)));
+CREATE INDEX shell_schedule_latest ON shell_execution(schedule_id,started_at DESC,id DESC) WHERE schedule_id IS NOT NULL;
 
 CREATE TABLE output_chunk(
- execution_id TEXT NOT NULL REFERENCES shell_execution(id), sequence INTEGER NOT NULL CHECK(sequence>=0),
+ execution_id TEXT NOT NULL REFERENCES shell_execution(id) ON DELETE CASCADE, sequence INTEGER NOT NULL CHECK(sequence>=0),
  stream TEXT NOT NULL CHECK(stream IN ('stdout','stderr')),
  stream_offset INTEGER NOT NULL CHECK(stream_offset>=0), bytes BLOB NOT NULL,
  received_at TEXT NOT NULL, PRIMARY KEY(execution_id,sequence));
@@ -768,4 +779,5 @@ PRAGMA user_version=47;
 INSERT INTO schema_migration(version,name) VALUES(48,'0048_human_question_path_admission');
 INSERT INTO schema_migration(version,name) VALUES(49,'0049_generated_summary_user_role');
 INSERT INTO schema_migration(version,name) VALUES(50,'0050_attachment_page_order');
-PRAGMA user_version=50;
+INSERT INTO schema_migration(version,name) VALUES(51,'0051_thread_schedule');
+PRAGMA user_version=51;

@@ -760,8 +760,8 @@ impl Control {
         let execution = execution.to_owned();
         let (stop,eof,thread) = self.store.database.call(move |db| {
             let tx = db.transaction()?;
-            let (state,stdin,run,thread):(String,String,String,String) = tx.query_row("SELECT s.state,s.stdin_state,r.state,r.thread_id FROM shell_execution s JOIN run r ON r.id=s.owner_run_id WHERE s.id=?1",[&execution],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)))?;
-            let stop = !matches!(state.as_str(),"starting"|"running") || run!="live";
+            let (state,stdin,run,thread):(String,String,Option<String>,String) = tx.query_row("SELECT s.state,s.stdin_state,r.state,COALESCE(r.thread_id,q.thread_id) FROM shell_execution s LEFT JOIN run r ON r.id=s.owner_run_id LEFT JOIN schedule q ON q.id=s.schedule_id WHERE s.id=?1",[&execution],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)))?;
+            let stop = !matches!(state.as_str(),"starting"|"running") || run.as_deref().is_some_and(|state| state!="live");
             if spawned {
                 tx.execute("UPDATE shell_execution SET shell_json=json_set(shell_json,'$.spawned',json('true')),state=CASE WHEN state='starting' THEN 'running' ELSE state END WHERE id=?1",[execution])?;
             } else if stop {

@@ -13,6 +13,7 @@ mod notification;
 mod owner_shutdown;
 pub(crate) mod pending_messages;
 mod runtime;
+mod schedule;
 pub(crate) mod submission_retention;
 mod turn_interrupt;
 mod ui_events;
@@ -129,7 +130,7 @@ impl Default for DriverSlot {
 }
 #[derive(Clone)]
 struct LiveShell {
-    run_id: String,
+    run_id: Option<String>,
     handle: ShellHandle,
     // In-process observation of a successfully committed output batch only.
     last_committed_output: Option<std::time::Instant>,
@@ -219,6 +220,7 @@ async fn maintenance_loop(
     stop: CancellationToken,
 ) {
     use crate::maintenance::Work;
+    let mut schedule_due = Some(tokio::time::Instant::now());
     let mut deadlines: HashMap<u32, tokio::time::Instant> = HashMap::new();
     let mut reply_cursor = None;
     let mut reply_active = false;
@@ -226,6 +228,27 @@ async fn maintenance_loop(
     let mut reply_requester = None;
 
     loop {
+        if stop.is_cancelled() {
+            return;
+        }
+        if schedule_due.is_some_and(|at| at <= tokio::time::Instant::now()) {
+            let Some(owner) = control.upgrade() else {
+                return;
+            };
+            match schedule::dispatch(&owner).await {
+                Ok(next) => {
+                    schedule_due = next.map(|at| {
+                        tokio::time::Instant::now()
+                            + crate::maintenance::until(at).min(std::time::Duration::from_secs(60))
+                    })
+                }
+                Err(error) if error.is_storage_failure() => {
+                    owner.fail_storage().await;
+                    return;
+                }
+                Err(_) => schedule_due = None,
+            }
+        }
         let now = tokio::time::Instant::now();
         let due: Vec<u32> = deadlines
             .iter()
@@ -242,6 +265,9 @@ async fn maintenance_loop(
             return;
         }
         let set = signals.take();
+        if set.contains(Work::Schedule) {
+            schedule_due = Some(tokio::time::Instant::now());
+        }
         if set.contains(Work::ReplyOutcomes) {
             if reply_active {
                 reply_rescan = true;
@@ -307,10 +333,10 @@ async fn maintenance_loop(
                 }
             }
             drop(strong);
-            if Work::ALL
-                .iter()
-                .any(|w| !matches!(w, Work::Receipts | Work::ReplyOutcomes) && set.contains(*w))
-            {
+            if Work::ALL.iter().any(|w| {
+                !matches!(w, Work::Receipts | Work::ReplyOutcomes | Work::Schedule)
+                    && set.contains(*w)
+            }) {
                 tokio::select! {biased;_=stop.cancelled()=>return,result=gc.collect_kinds(set,chrono::Utc::now())=>{
                     match result {
                         Err(error) if error.is_storage_failure() => {if let Some(control)=control.upgrade(){control.fail_storage().await;}return;}
@@ -344,7 +370,7 @@ async fn maintenance_loop(
             }
             continue;
         }
-        let next = deadlines.values().min().copied();
+        let next = deadlines.values().copied().chain(schedule_due).min();
         tokio::select! {
             biased;
             _=stop.cancelled()=>return,
@@ -1947,7 +1973,7 @@ mod failure_tests {
         control.live.test_shells().lock().await.insert(
             "failure-observer-shell".into(),
             LiveShell {
-                run_id: "fixture-run-without-driver".into(),
+                run_id: Some("fixture-run-without-driver".into()),
                 handle: shell.handle.clone(),
                 last_committed_output: None,
             },

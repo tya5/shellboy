@@ -63,38 +63,21 @@ async fn marker_case(rollback: bool) {
             .register_shell(
                 execution.clone(),
                 LiveShell {
-                    run_id: format!("r{index}"),
+                    run_id: Some(format!("r{index}")),
                     handle: handle.clone(),
                     last_committed_output: (index == 2).then_some(hidden_marker),
                 },
             )
             .await;
         handles.push(handle);
-        let snapshot = Snapshot {
-            clients: control.store.clients.snapshot(),
+        let shell_owner = ShellOwner::Run {
             thread: format!("t{index}"),
             run: format!("r{index}"),
             turn: format!("u{index}"),
-            generation: 0,
-            selection: 0,
-            profile_revision: 0,
-            profile: "p".into(),
-            model: "m".into(),
-            cache_comparison_response_id: None,
-            cache_diagnostics_enabled: false,
-            input_bytes: None,
-            effort: None,
-            max_tokens: None,
-            epoch: 0,
-            cwd: root.path().into(),
-            agents: root.path().join("AGENTS.md"),
-            input: None,
-            receipts: vec![],
-            events: vec![],
         };
         let collecting = Arc::clone(&control);
         collectors.push(tokio::spawn(async move {
-            collect_shell(&collecting, &snapshot, &execution, shell).await
+            collect_shell(&collecting, &shell_owner, &execution, shell).await
         }));
     }
     assert!(

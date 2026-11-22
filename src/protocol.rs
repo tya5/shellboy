@@ -66,6 +66,8 @@ fn operation_result_schemas(
     result!("thread.unarchive", ThreadUnarchiveResult);
     opaque!("thread.tag");
     opaque!("thread.tags");
+    opaque!("schedule.add");
+    opaque!("schedule.list");
     opaque!("thread.cwds");
     result!("thread.set", ThreadDetails);
     result!("id.resolve", IdResolveResult);
@@ -855,6 +857,7 @@ args!(ThreadTagArgs {
     remove: Vec<String>
 });
 // Distinct tag names in byte order, paged; no member counts.
+args!(ScheduleAddArgs { thread_id: Option<String>, cron: Option<String>, at: Option<String>, in_seconds: Option<u64>, cwd: Option<String>, description: Option<String>, command: String });
 args!(ThreadTagsArgs {
     #[serde(default = "list_limit")]
     limit: u32,
@@ -1313,6 +1316,10 @@ pub enum Command {
     ThreadUnarchive(ThreadArchiveArgs),
     #[serde(rename = "thread.tag")]
     ThreadTag(ThreadTagArgs),
+    #[serde(rename = "schedule.add")]
+    ScheduleAdd(ScheduleAddArgs),
+    #[serde(rename = "schedule.list")]
+    ScheduleList(ThreadTarget),
     #[serde(rename = "thread.tags")]
     ThreadTags(ThreadTagsArgs),
     #[serde(rename = "thread.cwds")]

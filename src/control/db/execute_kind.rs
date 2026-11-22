@@ -59,6 +59,7 @@ macro_rules! named_jobs {
 named_jobs! {
     OwnerShutdown => owner_shutdown, Status => status, ModelList => model_list,
     ThreadList => thread_list, ThreadGet => thread_get, ThreadBranches => thread_branches, UsageGet => usage_get,
+    ScheduleAdd => schedule_add, ScheduleList => schedule_list,
     CompactList => compact_list, CompactPreview => compact_preview, ShellList => shell_list,
     ThreadCreate => thread_create, ThreadFork => thread_fork, ThreadDelete => thread_delete,
     ThreadDeletePreview => thread_delete_preview, ThreadPrune => thread_prune, ThreadRewind => thread_rewind, ThreadArchive => thread_archive,
@@ -109,6 +110,7 @@ impl Kind {
         match self {
             Kind::Status
             | Kind::ThreadList
+            | Kind::ScheduleList
             | Kind::ThreadTags
             | Kind::ThreadCwds
             | Kind::ThreadGet
@@ -131,7 +133,8 @@ impl Kind {
             // Bounded closure (65,536 sources) in one transaction; see history::prune.
             // Rewind refuses paths over history::rewind::PATH_LIMIT nodes.
             // Archive: at most 200 IDs, descendants walk capped at 256 (control::archive).
-            Kind::MessageReply
+            Kind::ScheduleAdd
+            | Kind::MessageReply
             | Kind::ThreadPrune
             | Kind::ThreadRewind
             | Kind::ThreadArchive

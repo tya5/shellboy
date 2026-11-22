@@ -133,6 +133,11 @@ async fn unknown_legacy_facts_stay_unknown_and_mock_unconfirmed_cleanup_stays_fa
     else {
         panic!("fixture has a real admitted Turn");
     };
+    let shell_owner = ShellOwner::Run {
+        thread: snapshot.thread.clone(),
+        run: snapshot.run.clone(),
+        turn: snapshot.turn.clone(),
+    };
     let run = snapshot.run.clone();
     let turn = snapshot.turn.clone();
     // This row is a DB/mock fixture, not a claim that an OS group was spawned.
@@ -169,7 +174,7 @@ async fn unknown_legacy_facts_stay_unknown_and_mock_unconfirmed_cleanup_stays_fa
         elapsed_ms: None,
     };
     control.store.database.signals().take_seen();
-    save_completion(&control, &snapshot, "mock-unconfirmed", &completion)
+    save_completion(&control, &shell_owner, "mock-unconfirmed", &completion)
         .await
         .unwrap();
     // Producer contract (#171): terminal output is offered to raw retention.
@@ -222,6 +227,11 @@ async fn repeated_or_late_completion_keeps_original_facts_and_one_event() {
     use super::super::preparation_tests::{close, fixture, ready};
     let (_root, owner, control, accepted) = fixture("http://127.0.0.1:1/v1").await;
     let snapshot = ready(&control, &accepted).await;
+    let shell_owner = ShellOwner::Run {
+        thread: snapshot.thread.clone(),
+        run: snapshot.run.clone(),
+        turn: snapshot.turn.clone(),
+    };
     let run = snapshot.run.clone();
     let turn = snapshot.turn.clone();
     control.store.database.call(move|db| {
@@ -239,7 +249,7 @@ async fn repeated_or_late_completion_keeps_original_facts_and_one_event() {
         group_cleanup_confirmed: true,
         elapsed_ms: Some(42),
     };
-    save_completion(&control, &snapshot, "execution", &result)
+    save_completion(&control, &shell_owner, "execution", &result)
         .await
         .unwrap();
     let original=control.store.database.call(|db| {
@@ -249,7 +259,7 @@ async fn repeated_or_late_completion_keeps_original_facts_and_one_event() {
     result.exit_code = Some(99);
     result.output_complete = false;
     result.reason = Some("late result".into());
-    save_completion(&control, &snapshot, "execution", &result)
+    save_completion(&control, &shell_owner, "execution", &result)
         .await
         .unwrap();
     control.store.database.call(move|db| {

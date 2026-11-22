@@ -9,6 +9,18 @@ type Meaning = (
 );
 const MEANINGS: &[Meaning] = &[
     (
+        OperationId::ScheduleAdd,
+        &["schedule", "add"],
+        &[("thread_id", FieldId::Thread)],
+        None,
+    ),
+    (
+        OperationId::ScheduleList,
+        &["schedule", "list"],
+        &[("thread_id", FieldId::Thread)],
+        None,
+    ),
+    (
         OperationId::CompactList,
         &["compact", "list"],
         &[

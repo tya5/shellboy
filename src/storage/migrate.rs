@@ -256,6 +256,15 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         sql: include_str!("../../migrations/0050_attachment_page_order.sql"),
         foreign_keys: Some(Impact::IndexOnly),
     },
+    Migration {
+        version: 51,
+        sql: include_str!("../../migrations/0051_thread_schedule.sql"),
+        foreign_keys: Some(Impact::Tables(&[
+            "schedule",
+            "shell_execution",
+            "output_chunk",
+        ])),
+    },
 ];
 
 pub(super) fn run(
@@ -311,13 +320,13 @@ pub(super) fn run(
             if migration.version == 4 {
                 migrate_attachment_sources(&transaction)?;
             }
-            if migration.version == 39 {
+            if matches!(migration.version, 39 | 51) {
                 super::check_integrity(&transaction, true, false)?;
             }
             transaction.commit()?;
             Ok(())
         };
-        if migration.version == 39 {
+        if matches!(migration.version, 39 | 51) {
             with_foreign_keys_disabled(connection, apply)?;
         } else {
             apply(connection)?;

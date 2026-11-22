@@ -37,6 +37,8 @@ impl Command {
             Self::ThreadArchive(_) => ("thread.archive", CommandRoute::Database),
             Self::ThreadUnarchive(_) => ("thread.unarchive", CommandRoute::Database),
             Self::ThreadTag(_) => ("thread.tag", CommandRoute::Database),
+            Self::ScheduleAdd(_) => ("schedule.add", CommandRoute::Database),
+            Self::ScheduleList(_) => ("schedule.list", CommandRoute::Database),
             Self::ThreadTags(_) => ("thread.tags", CommandRoute::Database),
             Self::ThreadCwds(_) => ("thread.cwds", CommandRoute::Database),
             Self::ThreadSet(_) => ("thread.set", CommandRoute::Database),
@@ -100,6 +102,7 @@ impl Command {
     /// May owner shutdown drop the runtime action before receipt finalization?
     pub(crate) fn runtime_cancellable(&self) -> bool {
         match self {
+            Self::ScheduleAdd(_) => false,
             Self::Status(a) => a.memory,
             Self::ModelList(_)
             | Self::IndexPreview(_)
@@ -121,6 +124,7 @@ impl Command {
             | Self::ThreadList(_)
             | Self::ThreadGet(_)
             | Self::ThreadBranches(_)
+            | Self::ScheduleList(_)
             | Self::ThreadTags(_)
             | Self::ThreadCwds(_)
             | Self::CompactList(_)
@@ -170,6 +174,7 @@ impl Command {
     /// Late runtime cleanup allowed after cancellation; not the IPC reserved lane.
     pub(crate) fn runtime_allowed_while_stopping(&self) -> bool {
         match self {
+            Self::ScheduleAdd(_) => false,
             Self::ShellEof(_) | Self::ShellStop(_) => true,
             Self::OwnerShutdown(_)
             | Self::Status(_)
@@ -177,6 +182,7 @@ impl Command {
             | Self::ThreadList(_)
             | Self::ThreadGet(_)
             | Self::ThreadBranches(_)
+            | Self::ScheduleList(_)
             | Self::ThreadTags(_)
             | Self::ThreadCwds(_)
             | Self::CompactList(_)
@@ -239,6 +245,7 @@ impl Command {
     /// Must finish admission before the graceful-shutdown context capture?
     pub(crate) fn changes_context(&self) -> bool {
         match self {
+            Self::ScheduleAdd(_) => false,
             Self::ThreadCreate(_)
             | Self::ThreadFork(_)
             | Self::ThreadDelete(_)
@@ -263,6 +270,7 @@ impl Command {
             | Self::ThreadList(_)
             | Self::ThreadGet(_)
             | Self::ThreadBranches(_)
+            | Self::ScheduleList(_)
             | Self::ThreadTags(_)
             | Self::ThreadCwds(_)
             | Self::CompactList(_)
@@ -309,11 +317,13 @@ impl Command {
     /// Observes targets without changing their state; receipt metadata and API cost are separate.
     pub fn is_read_only(&self) -> bool {
         match self {
+            Self::ScheduleAdd(_) => false,
             Self::Status(_)
             | Self::ModelList(_)
             | Self::ThreadList(_)
             | Self::ThreadGet(_)
             | Self::ThreadBranches(_)
+            | Self::ScheduleList(_)
             | Self::ThreadTags(_)
             | Self::ThreadCwds(_)
             | Self::CompactList(_)

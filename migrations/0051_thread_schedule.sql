@@ -1,0 +1,50 @@
+CREATE TABLE schedule(
+ id TEXT PRIMARY KEY NOT NULL, thread_id TEXT NOT NULL REFERENCES thread(id) ON DELETE CASCADE,
+ cron TEXT, once_at INTEGER, next_at INTEGER, enabled INTEGER NOT NULL CHECK(enabled IN (0,1)),
+ cwd TEXT NOT NULL, command TEXT NOT NULL, description TEXT, last_skipped_at INTEGER,
+ CHECK((cron IS NULL) <> (once_at IS NULL)));
+CREATE INDEX schedule_thread ON schedule(thread_id,id);
+CREATE INDEX schedule_due ON schedule(next_at,id) WHERE enabled=1 AND next_at IS NOT NULL;
+
+CREATE TABLE scheduled_shell_execution(
+ id TEXT PRIMARY KEY NOT NULL, owner_run_id TEXT REFERENCES run(id),
+ turn_id TEXT REFERENCES turn(id), schedule_id TEXT REFERENCES schedule(id) ON DELETE CASCADE, operation_id TEXT NOT NULL UNIQUE,
+ state TEXT NOT NULL CHECK(state IN ('starting','running','stopping','exited','failed','stopped')), cwd TEXT NOT NULL, shell_json TEXT NOT NULL CHECK(json_valid(shell_json)),
+ input_encoding TEXT NOT NULL, output_encoding TEXT NOT NULL, stdin_state TEXT NOT NULL,
+ saved_sequence INTEGER NOT NULL DEFAULT 0 CHECK(saved_sequence>=0), retention_generation INTEGER NOT NULL DEFAULT 0 CHECK(retention_generation>=0),
+ exit_code INTEGER, end_reason TEXT, output_complete INTEGER CHECK(output_complete IS NULL OR output_complete IN (0,1)), started_at TEXT NOT NULL, ended_at TEXT,
+ CHECK((schedule_id IS NULL AND owner_run_id IS NOT NULL AND turn_id IS NOT NULL)
+    OR (schedule_id IS NOT NULL AND owner_run_id IS NULL AND turn_id IS NULL)));
+INSERT INTO scheduled_shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,saved_sequence,retention_generation,exit_code,end_reason,output_complete,started_at,ended_at) SELECT id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,saved_sequence,retention_generation,exit_code,end_reason,output_complete,started_at,ended_at FROM shell_execution;
+CREATE TABLE scheduled_output_chunk(
+ execution_id TEXT NOT NULL REFERENCES shell_execution(id) ON DELETE CASCADE, sequence INTEGER NOT NULL CHECK(sequence>=0),
+ stream TEXT NOT NULL CHECK(stream IN ('stdout','stderr')),
+ stream_offset INTEGER NOT NULL CHECK(stream_offset>=0), bytes BLOB NOT NULL,
+ received_at TEXT NOT NULL, PRIMARY KEY(execution_id,sequence));
+INSERT INTO scheduled_output_chunk(execution_id,sequence,stream,stream_offset,bytes,received_at) SELECT execution_id,sequence,stream,stream_offset,bytes,received_at FROM output_chunk;
+DROP TABLE output_chunk;
+DROP TABLE shell_execution;
+ALTER TABLE scheduled_shell_execution RENAME TO shell_execution;
+ALTER TABLE scheduled_output_chunk RENAME TO output_chunk;
+CREATE INDEX output_stream ON output_chunk(execution_id,stream,stream_offset);
+CREATE INDEX gc_bytes_output_chunk ON output_chunk(length(bytes));
+CREATE INDEX shell_active_owner ON shell_execution(owner_run_id,state)
+ WHERE state IN ('starting','running','stopping');
+CREATE INDEX shell_terminal_time ON shell_execution(COALESCE(ended_at,started_at))
+ WHERE state IN ('exited','failed','stopped');
+CREATE INDEX shell_started_readback ON shell_execution((CASE WHEN instr(started_at,char(0))=0 AND CAST(substr(started_at,12,2) AS INTEGER)<=23 AND strftime('%Y-%m-%dT%H:%M:%S',upper(substr(started_at,1,17)||CASE WHEN substr(started_at,18,2)='60' THEN '59' ELSE substr(started_at,18,2) END)||'Z')=upper(substr(started_at,1,17)||CASE WHEN substr(started_at,18,2)='60' THEN '59' ELSE substr(started_at,18,2) END) AND (CASE WHEN lower(substr(started_at,-1))='z' THEN 1 ELSE substr(started_at,-6) GLOB '[+-][0-2][0-9]:[0-5][0-9]' AND CAST(substr(started_at,-5,2) AS INTEGER)<=23 END) AND (CASE WHEN substr(started_at,20,1)='.' THEN length(substr(started_at,21,length(started_at)-20-(CASE WHEN lower(substr(started_at,-1))='z' THEN 1 ELSE 6 END)))>0 AND substr(started_at,21,length(started_at)-20-(CASE WHEN lower(substr(started_at,-1))='z' THEN 1 ELSE 6 END)) NOT GLOB '*[^0-9]*' ELSE length(started_at)=19+(CASE WHEN lower(substr(started_at,-1))='z' THEN 1 ELSE 6 END) END) THEN unixepoch(upper(substr(started_at,1,17)||CASE WHEN substr(started_at,18,2)='60' THEN '59' ELSE substr(started_at,18,2) END)||'Z')-(CASE WHEN lower(substr(started_at,-1))='z' THEN 0 ELSE (CASE WHEN substr(started_at,-6,1)='-' THEN -1 ELSE 1 END)*(CAST(substr(started_at,-5,2) AS INTEGER)*3600+CAST(substr(started_at,-2) AS INTEGER)*60) END) ELSE -9223372036854775808 END),(CASE WHEN instr(started_at,char(0))=0 AND CAST(substr(started_at,12,2) AS INTEGER)<=23 AND strftime('%Y-%m-%dT%H:%M:%S',upper(substr(started_at,1,17)||CASE WHEN substr(started_at,18,2)='60' THEN '59' ELSE substr(started_at,18,2) END)||'Z')=upper(substr(started_at,1,17)||CASE WHEN substr(started_at,18,2)='60' THEN '59' ELSE substr(started_at,18,2) END) AND (CASE WHEN lower(substr(started_at,-1))='z' THEN 1 ELSE substr(started_at,-6) GLOB '[+-][0-2][0-9]:[0-5][0-9]' AND CAST(substr(started_at,-5,2) AS INTEGER)<=23 END) AND (CASE WHEN substr(started_at,20,1)='.' THEN length(substr(started_at,21,length(started_at)-20-(CASE WHEN lower(substr(started_at,-1))='z' THEN 1 ELSE 6 END)))>0 AND substr(started_at,21,length(started_at)-20-(CASE WHEN lower(substr(started_at,-1))='z' THEN 1 ELSE 6 END)) NOT GLOB '*[^0-9]*' ELSE length(started_at)=19+(CASE WHEN lower(substr(started_at,-1))='z' THEN 1 ELSE 6 END) END) THEN (CASE WHEN substr(started_at,20,1)='.' THEN CAST(substr((substr(started_at,21,length(started_at)-20-(CASE WHEN lower(substr(started_at,-1))='z' THEN 1 ELSE 6 END)))||'000000000',1,9) AS INTEGER) ELSE 0 END)+(CASE WHEN substr(started_at,18,2)='60' THEN 1000000000 ELSE 0 END) ELSE 0 END),id);
+CREATE INDEX shell_owner_started_readback ON shell_execution(owner_run_id,(CASE WHEN instr(started_at,char(0))=0 AND CAST(substr(started_at,12,2) AS INTEGER)<=23 AND strftime('%Y-%m-%dT%H:%M:%S',upper(substr(started_at,1,17)||CASE WHEN substr(started_at,18,2)='60' THEN '59' ELSE substr(started_at,18,2) END)||'Z')=upper(substr(started_at,1,17)||CASE WHEN substr(started_at,18,2)='60' THEN '59' ELSE substr(started_at,18,2) END) AND (CASE WHEN lower(substr(started_at,-1))='z' THEN 1 ELSE substr(started_at,-6) GLOB '[+-][0-2][0-9]:[0-5][0-9]' AND CAST(substr(started_at,-5,2) AS INTEGER)<=23 END) AND (CASE WHEN substr(started_at,20,1)='.' THEN length(substr(started_at,21,length(started_at)-20-(CASE WHEN lower(substr(started_at,-1))='z' THEN 1 ELSE 6 END)))>0 AND substr(started_at,21,length(started_at)-20-(CASE WHEN lower(substr(started_at,-1))='z' THEN 1 ELSE 6 END)) NOT GLOB '*[^0-9]*' ELSE length(started_at)=19+(CASE WHEN lower(substr(started_at,-1))='z' THEN 1 ELSE 6 END) END) THEN unixepoch(upper(substr(started_at,1,17)||CASE WHEN substr(started_at,18,2)='60' THEN '59' ELSE substr(started_at,18,2) END)||'Z')-(CASE WHEN lower(substr(started_at,-1))='z' THEN 0 ELSE (CASE WHEN substr(started_at,-6,1)='-' THEN -1 ELSE 1 END)*(CAST(substr(started_at,-5,2) AS INTEGER)*3600+CAST(substr(started_at,-2) AS INTEGER)*60) END) ELSE -9223372036854775808 END),(CASE WHEN instr(started_at,char(0))=0 AND CAST(substr(started_at,12,2) AS INTEGER)<=23 AND strftime('%Y-%m-%dT%H:%M:%S',upper(substr(started_at,1,17)||CASE WHEN substr(started_at,18,2)='60' THEN '59' ELSE substr(started_at,18,2) END)||'Z')=upper(substr(started_at,1,17)||CASE WHEN substr(started_at,18,2)='60' THEN '59' ELSE substr(started_at,18,2) END) AND (CASE WHEN lower(substr(started_at,-1))='z' THEN 1 ELSE substr(started_at,-6) GLOB '[+-][0-2][0-9]:[0-5][0-9]' AND CAST(substr(started_at,-5,2) AS INTEGER)<=23 END) AND (CASE WHEN substr(started_at,20,1)='.' THEN length(substr(started_at,21,length(started_at)-20-(CASE WHEN lower(substr(started_at,-1))='z' THEN 1 ELSE 6 END)))>0 AND substr(started_at,21,length(started_at)-20-(CASE WHEN lower(substr(started_at,-1))='z' THEN 1 ELSE 6 END)) NOT GLOB '*[^0-9]*' ELSE length(started_at)=19+(CASE WHEN lower(substr(started_at,-1))='z' THEN 1 ELSE 6 END) END) THEN (CASE WHEN substr(started_at,20,1)='.' THEN CAST(substr((substr(started_at,21,length(started_at)-20-(CASE WHEN lower(substr(started_at,-1))='z' THEN 1 ELSE 6 END)))||'000000000',1,9) AS INTEGER) ELSE 0 END)+(CASE WHEN substr(started_at,18,2)='60' THEN 1000000000 ELSE 0 END) ELSE 0 END),id);
+CREATE INDEX activity_shell_spawned_turn ON shell_execution(turn_id) WHERE CASE WHEN json_valid(shell_json) THEN json_extract(shell_json,'$.spawned')=1 ELSE 1 END;
+CREATE INDEX activity_shell_uncollected_owner ON shell_execution(owner_run_id) WHERE state IN ('exited','failed','stopped') AND output_complete=0;
+CREATE TRIGGER logical_raw_output_chunk_insert AFTER INSERT ON output_chunk BEGIN
+ UPDATE quota_counter SET logical_bytes=logical_bytes+(COALESCE(length(NEW.bytes),0)),revision=revision+1 WHERE category='logical.raw';
+END;
+CREATE TRIGGER logical_raw_output_chunk_delete AFTER DELETE ON output_chunk BEGIN
+ UPDATE quota_counter SET logical_bytes=logical_bytes+-(COALESCE(length(OLD.bytes),0)),revision=revision+1 WHERE category='logical.raw';
+END;
+CREATE TRIGGER logical_raw_output_chunk_update AFTER UPDATE OF bytes ON output_chunk BEGIN
+ UPDATE quota_counter SET logical_bytes=logical_bytes+(COALESCE(length(NEW.bytes),0))-(COALESCE(length(OLD.bytes),0)),revision=revision+1 WHERE category='logical.raw';
+END;
+CREATE INDEX shell_schedule_latest ON shell_execution(schedule_id,started_at DESC,id DESC) WHERE schedule_id IS NOT NULL;
+INSERT INTO schema_migration(version,name) VALUES(51,'0051_thread_schedule');
+PRAGMA user_version=51;

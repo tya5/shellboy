@@ -48,10 +48,12 @@ impl LiveRegistry {
             return None;
         }
         let shells = self.shells.lock().await;
-        if shells
-            .values()
-            .any(|shell| thread_runs.contains(&shell.run_id) || shell.run_id == run)
-        {
+        if shells.values().any(|shell| {
+            shell
+                .run_id
+                .as_ref()
+                .is_some_and(|id| thread_runs.contains(id) || id == run)
+        }) {
             return None;
         }
         Some(RecoveryRewindOwnerGuard {
@@ -444,7 +446,7 @@ impl LiveRegistry {
             .lock()
             .await
             .values()
-            .filter(|shell| shell.run_id == run)
+            .filter(|shell| shell.run_id.as_deref() == Some(run))
         {
             shell.handle.stop();
         }
@@ -461,7 +463,10 @@ impl LiveRegistry {
         }
         {
             let shells = self.shells.lock().await;
-            for shell in shells.values().filter(|shell| runs.contains(&shell.run_id)) {
+            for shell in shells
+                .values()
+                .filter(|shell| shell.run_id.as_ref().is_some_and(|id| runs.contains(id)))
+            {
                 shell.handle.stop();
             }
         }
@@ -479,7 +484,7 @@ impl LiveRegistry {
             .lock()
             .await
             .values()
-            .any(|shell| runs.contains(&shell.run_id));
+            .any(|shell| shell.run_id.as_ref().is_some_and(|id| runs.contains(id)));
         drivers_alive || shells_alive
     }
     pub(super) async fn is_empty(&self) -> bool {

@@ -118,6 +118,11 @@ pub enum CliCommand {
         #[command(subcommand)]
         command: HistoryCommand,
     },
+    /// Manage scheduled commands owned by a Thread.
+    Schedule {
+        #[command(subcommand)]
+        command: ScheduleCommand,
+    },
     /// Inspect and control existing shell executions; shell start is a model tool.
     Shell {
         #[command(subcommand)]
@@ -473,6 +478,53 @@ pub enum HistoryCommand {
     Search(SearchOptions),
     Relations(HistoryRelationsOptions),
 }
+#[derive(Debug, Clone, Subcommand)]
+pub enum ScheduleCommand {
+    /// Add a scheduled shell command.
+    Add(ScheduleAddOptions),
+    /// List schedules and their latest saved results.
+    List {
+        #[arg(long = "thread")]
+        thread_id: Option<String>,
+    },
+}
+
+#[derive(Debug, Clone, Args)]
+#[command(group(clap::ArgGroup::new("when").required(true).args(["cron", "at", "delay"])))]
+pub struct ScheduleAddOptions {
+    #[arg(long = "thread")]
+    thread_id: Option<String>,
+    #[arg(long)]
+    cron: Option<String>,
+    #[arg(long)]
+    at: Option<String>,
+    #[arg(long = "in", value_parser=parse_schedule_delay)]
+    delay: Option<u64>,
+    #[arg(long)]
+    cwd: Option<String>,
+    #[arg(long)]
+    description: Option<String>,
+    #[arg(last = true, required = true, num_args = 1..)]
+    command: Vec<String>,
+}
+
+fn parse_schedule_delay(input: &str) -> Result<u64, String> {
+    let value = input.trim_end_matches(['s', 'm', 'h', 'd']);
+    let scale = match &input[value.len()..] {
+        "" | "s" => 1,
+        "m" => 60,
+        "h" => 3600,
+        "d" => 86400,
+        _ => 0,
+    };
+    value
+        .parse::<u64>()
+        .ok()
+        .and_then(|value| value.checked_mul(scale))
+        .filter(|v| *v > 0)
+        .ok_or_else(|| "Specify a positive duration, such as 10m".into())
+}
+
 #[derive(Debug, Clone, Subcommand)]
 pub enum ShellCommand {
     /// List saved executions across conversations without reading their output.
@@ -1742,6 +1794,20 @@ impl Cli {
                     limit: a.limit,
                     cursor: a.cursor,
                 }),
+            },
+            CliCommand::Schedule { command } => match command {
+                ScheduleCommand::Add(a) => C::ScheduleAdd(wire::ScheduleAddArgs {
+                    thread_id: a.thread_id,
+                    cron: a.cron,
+                    at: a.at,
+                    in_seconds: a.delay,
+                    cwd: a.cwd,
+                    description: a.description,
+                    command: a.command.join(" "),
+                }),
+                ScheduleCommand::List { thread_id } => {
+                    C::ScheduleList(wire::ThreadTarget { thread_id })
+                }
             },
             CliCommand::Shell { command } => match command {
                 ShellCommand::List(a) => C::ShellList(wire::ShellListArgs {

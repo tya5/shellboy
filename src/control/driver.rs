@@ -5,7 +5,7 @@ mod overflow;
 pub(super) mod proactive;
 mod request;
 mod retry;
-mod shell_output;
+pub(super) mod shell_output;
 mod tools;
 mod trim;
 mod trim_observation;
@@ -24,7 +24,6 @@ use crate::{
 };
 use futures_util::FutureExt;
 use rusqlite::{OptionalExtension, params};
-use shell_output::collect_shell;
 use std::collections::BTreeMap;
 
 #[derive(Clone)]
@@ -1243,58 +1242,19 @@ async fn run_shell(
         }
     };
     let handle = spawned.handle.clone();
-    control
-        .live
-        .register_shell(
-            execution.clone(),
-            LiveShell {
-                run_id: snapshot.run.clone(),
-                handle: handle.clone(),
-                last_committed_output: None,
-            },
-        )
-        .await;
-    let collector = control.clone();
-    let current = snapshot.clone();
-    let execution_copy = execution.clone();
-    let nudge = slot.nudge.clone();
-    let (done_send, mut done_receive) = tokio::sync::oneshot::channel();
-    tokio::spawn(async move {
-        let result = collect_shell(&collector, &current, &execution_copy, spawned).await;
-        collector.live.remove_shell(&execution_copy).await;
-        collector.origins.lock().await.remove(&origin.token);
-        if let Err(error) = &result {
-            if error.is_storage_failure() {
-                collector.fail_storage().await;
-            }
-            collector.publish_event(EngineEvent::Error {
-                thread_id: current.thread.clone(),
-                error: error.clone(),
-            });
-        }
-        // Foreground completion uses its direct result. Only an absent observer
-        // needs a separate background completion wakeup.
-        let unobserved = done_send.send(result).is_err();
-        if unobserved {
-            nudge.notify_one();
-        }
-        collector.changed(&current.thread);
-    });
-    // The collector owns the process before any further fallible DB write. A
-    // failed running-state save cannot strand an unobserved OS execution.
-    // Publish this call's release receiver before its running row is observable.
-    let release = (!args.background).then(|| slot.foreground.register(&execution));
-    if let Err(error) = control.reapply_shell_intent(&execution, &handle).await {
-        if release.is_some() {
-            slot.foreground.clear();
-        }
-        handle.stop();
-        if error.is_storage_failure() {
-            control.fail_storage().await;
-        }
-        return Err(error);
-    }
-    control.changed(&snapshot.thread);
+    let (done_receive, release) = shell_output::install_shell(
+        &control,
+        shell_output::ShellOwner::Run {
+            thread: snapshot.thread.clone(),
+            run: snapshot.run.clone(),
+            turn: snapshot.turn.clone(),
+        },
+        Some((slot, origin.token, args.background)),
+        &execution,
+        spawned,
+    )
+    .await?;
+    let mut done_receive = done_receive.expect("Run shell has a completion observer");
     if args.background {
         return Ok((
             json!({"status":"running","execution_id":execution,"background":true}),
@@ -1387,7 +1347,7 @@ async fn shell_result(
 }
 
 #[cfg(test)]
-mod preparation_tests;
+pub(super) mod preparation_tests;
 
 async fn spill_and_summarize(
     compactor: &crate::compaction::Compactor,

@@ -612,6 +612,8 @@ fn operation_label_for(id: OperationId, language: crate::config::UiLanguage) -> 
             "Conversation · Unarchive"
         ),
         OperationId::ThreadTag => local!(language, "会話 · タグ", "Conversation · Tags"),
+        OperationId::ScheduleAdd => local!(language, "予定 · 追加", "Schedule · Add"),
+        OperationId::ScheduleList => local!(language, "予定 · 一覧", "Schedule · List"),
         OperationId::ThreadTags => {
             local!(language, "会話 · タグ一覧", "Conversations · Tag names")
         }
@@ -822,6 +824,16 @@ fn operation_meaning_for(id: OperationId, language: crate::config::UiLanguage) -
             language,
             "指定Threadへタグを付け外しします。置き場所や切り口を表す自由なラベルで、履歴・検索・使用量・受信・一覧の順序は変わりません。",
             "Add or remove tags on the specified Thread: free labels for placement and cross-cutting views. History, search, usage, receiving messages and list order are unchanged."
+        ),
+        OperationId::ScheduleAdd => local!(
+            language,
+            "Thread の予定を追加します。",
+            "Register a Thread-owned command."
+        ),
+        OperationId::ScheduleList => local!(
+            language,
+            "予定と実行結果を表示します。",
+            "Read schedules and their latest results."
         ),
         OperationId::ThreadTags => local!(
             language,

@@ -2,7 +2,7 @@
 use super::*;
 use crate::{
     app::DataOwner,
-    control::{driver::Snapshot, wait},
+    control::wait,
     protocol::{WaitArgs, WaitCondition},
     shell::ShellSupervisor,
 };
@@ -60,31 +60,14 @@ async fn performance_ten_shells_ten_lifecycle_waits() {
             .await
             .unwrap();
         handles.push(shell.handle.clone());
-        let snapshot = Snapshot {
-            clients: control.store.clients.snapshot(),
+        let shell_owner = ShellOwner::Run {
             thread: format!("t{i}"),
             run: format!("r{i}"),
             turn: format!("u{i}"),
-            generation: 0,
-            selection: 0,
-            profile_revision: 0,
-            profile: "fixture".into(),
-            model: "synthetic".into(),
-            cache_comparison_response_id: None,
-            cache_diagnostics_enabled: false,
-            input_bytes: None,
-            effort: None,
-            max_tokens: None,
-            epoch: 0,
-            cwd: root.path().into(),
-            agents: root.path().join("AGENTS.md"),
-            input: None,
-            receipts: vec![],
-            events: vec![],
         };
         let control = control.clone();
         collectors.push(tokio::spawn(async move {
-            collect_shell(&control, &snapshot, &execution, shell)
+            collect_shell(&control, &shell_owner, &execution, shell)
                 .await
                 .unwrap();
         }));

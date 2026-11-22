@@ -1362,6 +1362,19 @@ impl Store {
                     &crate::readback::Window::new(args.since.as_deref(), args.until.as_deref())?,
                 )?)
             }
+            Command::ScheduleAdd(args) => {
+                let thread = target(args.thread_id.as_deref(), caller)?;
+                let mut result = MutationResult::value(super::schedule::add(tx, &thread, args)?)?;
+                self.database
+                    .signals()
+                    .mark(crate::maintenance::Work::Schedule);
+                result.changed_threads.push(thread);
+                Ok(result)
+            }
+            Command::ScheduleList(args) => {
+                let thread = target(args.thread_id.as_deref(), caller)?;
+                MutationResult::value(super::schedule::list(tx, &thread)?)
+            }
             Command::ThreadList(args) => MutationResult::value(thread_list(tx, args)?),
             Command::ThreadTags(args) => MutationResult::value(tags::names(tx, args)?),
             Command::ThreadCwds(args) => MutationResult::value(tags::cwds(tx, args)?),

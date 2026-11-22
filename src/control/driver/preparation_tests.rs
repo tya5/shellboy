@@ -6,7 +6,7 @@ use tokio::{
     net::TcpListener,
 };
 
-pub(super) async fn fixture(
+pub(in crate::control) async fn fixture(
     url: &str,
 ) -> (tempfile::TempDir, DataOwner, Arc<Control>, MessageAccepted) {
     fixture_with_policy(url).await

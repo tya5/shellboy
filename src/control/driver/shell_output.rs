@@ -1,5 +1,6 @@
 //! Raw shell output batching, persistence, and completion publication.
-use super::{Snapshot, invalid, now};
+use super::{invalid, now};
+use crate::control::{DriverSlot, EngineEvent, LiveShell, foreground::ForegroundReceiver};
 #[cfg(all(test, unix))]
 use crate::shell::OutputChunk;
 use crate::{
@@ -10,6 +11,7 @@ use crate::{
 };
 use rusqlite::{OptionalExtension, params};
 use serde_json::{Value, json};
+use std::sync::Arc;
 
 /// Keep original chunks/sequences and their permits; only the transaction
 /// boundary changes. A carry chunk prevents overshooting the byte bound.
@@ -81,9 +83,120 @@ async fn output_batch(
     Some(batch)
 }
 
+#[derive(Clone)]
+pub(in crate::control) enum ShellOwner {
+    Run {
+        thread: String,
+        run: String,
+        turn: String,
+    },
+    Schedule {
+        thread: String,
+    },
+}
+
+impl ShellOwner {
+    fn thread(&self) -> &str {
+        match self {
+            Self::Run { thread, .. } | Self::Schedule { thread } => thread,
+        }
+    }
+
+    fn run(&self) -> Option<&str> {
+        match self {
+            Self::Run { run, .. } => Some(run),
+            Self::Schedule { .. } => None,
+        }
+    }
+
+    fn turn(&self) -> Option<&str> {
+        match self {
+            Self::Run { turn, .. } => Some(turn),
+            Self::Schedule { .. } => None,
+        }
+    }
+}
+
+type CompletionReceiver = tokio::sync::oneshot::Receiver<Result<ShellCompletion, ApiError>>;
+
+pub(in crate::control) async fn install_shell(
+    control: &Arc<Control>,
+    owner: ShellOwner,
+    run_observer: Option<(&DriverSlot, String, bool)>,
+    execution: &str,
+    spawned: crate::shell::ShellExecution,
+) -> Result<(Option<CompletionReceiver>, Option<ForegroundReceiver>), ApiError> {
+    let handle = spawned.handle.clone();
+    control
+        .live
+        .register_shell(
+            execution.to_owned(),
+            LiveShell {
+                run_id: owner.run().map(str::to_owned),
+                handle: handle.clone(),
+                last_committed_output: None,
+            },
+        )
+        .await;
+    let collector = control.clone();
+    let current = owner.clone();
+    let execution_copy = execution.to_owned();
+    let (run_done, done_receive) = if let Some((slot, token, _)) = &run_observer {
+        let (send, receive) = tokio::sync::oneshot::channel();
+        (
+            Some((slot.nudge.clone(), token.clone(), send)),
+            Some(receive),
+        )
+    } else {
+        (None, None)
+    };
+    tokio::spawn(async move {
+        let result = collect_shell(&collector, &current, &execution_copy, spawned).await;
+        collector.live.remove_shell(&execution_copy).await;
+        if let Err(error) = &result {
+            if error.is_storage_failure() {
+                collector.fail_storage().await;
+            }
+            collector.publish_event(EngineEvent::Error {
+                thread_id: current.thread().to_owned(),
+                error: error.clone(),
+            });
+        }
+        // Foreground completion uses its direct result. Only an absent observer
+        // needs a separate background completion wakeup.
+        if let Some((nudge, token, done_send)) = run_done {
+            collector.origins.lock().await.remove(&token);
+            if done_send.send(result).is_err() {
+                nudge.notify_one();
+            }
+        }
+        collector.changed(current.thread());
+    });
+    // The collector owns the process before any further fallible DB write. A
+    // failed running-state save cannot strand an unobserved OS execution.
+    // Publish this call's release receiver before its running row is observable.
+    let foreground = run_observer
+        .as_ref()
+        .filter(|(_, _, background)| !background)
+        .map(|(slot, _, _)| &slot.foreground);
+    let release = foreground.map(|slot| slot.register(execution));
+    if let Err(error) = control.reapply_shell_intent(execution, &handle).await {
+        if let Some(slot) = foreground {
+            slot.clear();
+        }
+        handle.stop();
+        if error.is_storage_failure() {
+            control.fail_storage().await;
+        }
+        return Err(error);
+    }
+    control.changed(owner.thread());
+    Ok((done_receive, release))
+}
+
 pub(super) async fn collect_shell(
     control: &Control,
-    snapshot: &Snapshot,
+    owner: &ShellOwner,
     execution: &str,
     mut shell: crate::shell::ShellExecution,
 ) -> Result<ShellCompletion, ApiError> {
@@ -185,24 +298,24 @@ pub(super) async fn collect_shell(
             crate::diagnostics::DiagnosticEvent::ShellFailure,
             crate::diagnostics::DiagnosticIds {
                 attempt_id: None,
-                thread_id: Some(snapshot.thread.clone()),
-                run_id: Some(snapshot.run.clone()),
-                turn_id: Some(snapshot.turn.clone()),
+                thread_id: Some(owner.thread().to_owned()),
+                run_id: owner.run().map(str::to_owned),
+                turn_id: owner.turn().map(str::to_owned),
                 execution_id: Some(execution.into()),
             },
         );
     }
-    save_completion(control, snapshot, execution, &completion).await?;
+    save_completion(control, owner, execution, &completion).await?;
     Ok(completion)
 }
 
 async fn save_completion(
     control: &Control,
-    snapshot: &Snapshot,
+    owner: &ShellOwner,
     execution: &str,
     completion: &ShellCompletion,
 ) -> Result<(), ApiError> {
-    let current = snapshot.clone();
+    let current = owner.clone();
     let execution = execution.to_owned();
     let completed = completion.clone();
     let index = control.index.clone();
@@ -215,15 +328,17 @@ async fn save_completion(
             return Err(ApiError::new(ErrorCode::OperationConflict,"Shell completion is no longer current").into());
         }
         crate::stdin_facts::save(&tx,&execution,&crate::stdin_facts::StdinFact{open:false,successful_write_at:None})?;
+        if let ShellOwner::Run { thread, run, .. } = &current {
         let nodes:Vec<String>=tx.prepare("SELECT r.node_id FROM tool_result r JOIN tool_call c ON c.group_id=r.group_id AND c.call_id=r.call_id WHERE c.operation_id=?1")?.query_map([&execution],|r|r.get(0))?.collect::<Result<_,_>>()?;
         index.authorize_new_tx(&tx,&nodes).map_err(crate::storage::StorageError::from)?;
         let event=format!("shell-ended-{execution}");
         use super::super::notification::{Fact,Terminal};
         let terminal=match completed.state { ShellState::Exited=>Terminal::Exited,ShellState::Failed=>Terminal::Failed,ShellState::Stopped=>Terminal::Stopped,_=>return Err(ApiError::new(ErrorCode::InvalidState,"Nonterminal shell notification").into()) };
         let semantic=Fact::ShellEnded{execution_id:execution.clone(),state:terminal,exit_code:completed.exit_code}.encoded();
-        tx.execute("INSERT INTO event(id,kind,source_json,target_thread_id,target_run_id,payload_ref_json,created_at)VALUES(?1,'shell_ended',?2,?3,?4,?5,?6)",params![event,json!({"execution_id":execution}).to_string(),current.thread,current.run,json!({"execution_id":execution,"state":completed.state,"exit_code":completed.exit_code,"forced":completed.forced,"exit_signal":completed.exit_signal,"group_cleanup_confirmed":completed.group_cleanup_confirmed,"elapsed_ms":completed.elapsed_ms,"output_complete":completed.output_complete}).to_string(),now()])?;
+        tx.execute("INSERT INTO event(id,kind,source_json,target_thread_id,target_run_id,payload_ref_json,created_at)VALUES(?1,'shell_ended',?2,?3,?4,?5,?6)",params![event,json!({"execution_id":execution}).to_string(),thread,run,json!({"execution_id":execution,"state":completed.state,"exit_code":completed.exit_code,"forced":completed.forced,"exit_signal":completed.exit_signal,"group_cleanup_confirmed":completed.group_cleanup_confirmed,"elapsed_ms":completed.elapsed_ms,"output_complete":completed.output_complete}).to_string(),now()])?;
         tx.execute("UPDATE event SET semantic_json=?2 WHERE id=?1",params![event,semantic])?;
-        tx.execute("INSERT INTO delivery(event_id,recipient_id,state)VALUES(?1,?2,'pending')",params![event,current.run])?;
+        tx.execute("INSERT INTO delivery(event_id,recipient_id,state)VALUES(?1,?2,'pending')",params![event,run])?;
+        }
         tx.commit()?;Ok(())}).await.map_err(storage_error)?;
     control.index.wake();
     // A terminal execution's output becomes eligible for raw retention.
