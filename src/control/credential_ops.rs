@@ -95,26 +95,25 @@ impl Control {
                 let outcome = credential_store::set(&path, &args.connection, &args.value)?;
                 config.stored_keys.set(&args.connection, true);
                 let source = known.key_source(env_value, true);
-                let mut result = json!({
-                    "connection": args.connection,
-                    "stored": true,
-                    "replaced": outcome.existed,
-                    "key_source": source,
-                    "credentials_path": path,
-                    "permissions_tightened": outcome.permissions_tightened,
-                });
-                if let Some(warning) = outcome.warning {
-                    result["warning"] = json!(warning);
-                }
-                Ok(result)
+                Ok(crate::protocol::CredentialsSetResult {
+                    connection: args.connection,
+                    stored: true,
+                    replaced: outcome.existed,
+                    key_source: source_name(source).to_owned(),
+                    credentials_path: path,
+                    permissions_tightened: outcome.permissions_tightened,
+                    warning: outcome.warning.map(str::to_owned),
+                    changed_by: None,
+                })
             })
             .await?;
         self.diagnostics.record_config_change(
             caller_ids(caller),
             vec![format!("credentials.{connection}")],
         );
-        result["changed_by"] = json!(caller.map(Origin::identity));
-        Ok(result)
+        result.changed_by = caller.map(credential_change_origin);
+        serde_json::to_value(result)
+            .map_err(|_| ApiError::new(ErrorCode::IoFailed, "Cannot encode credentials result"))
     }
 
     pub(super) async fn credentials_clear(
@@ -133,12 +132,13 @@ impl Control {
                 let source = known_connection(&config, config_path, &args.connection)
                     .map_or(KeySource::None, |known| known.key_source(env_value, false));
                 Ok((
-                    json!({
-                        "connection": args.connection,
-                        "cleared": outcome.written,
-                        "key_source": source,
-                        "credentials_path": path,
-                    }),
+                    crate::protocol::CredentialsClearResult {
+                        connection: args.connection,
+                        cleared: outcome.written,
+                        key_source: source_name(source).to_owned(),
+                        credentials_path: path,
+                        changed_by: None,
+                    },
                     outcome.written,
                 ))
             })
@@ -149,8 +149,9 @@ impl Control {
                 vec![format!("credentials.{connection}")],
             );
         }
-        result["changed_by"] = json!(caller.map(Origin::identity));
-        Ok(result)
+        result.changed_by = caller.map(credential_change_origin);
+        serde_json::to_value(result)
+            .map_err(|_| ApiError::new(ErrorCode::IoFailed, "Cannot encode credentials result"))
     }
 
     /// A read: `runtime_observation` already drops this future when the caller disconnects or
@@ -382,5 +383,15 @@ fn source_name(source: KeySource) -> &'static str {
         KeySource::Env => "env",
         KeySource::Stored => "stored",
         KeySource::None => "none",
+    }
+}
+
+fn credential_change_origin(origin: &Origin) -> crate::protocol::CredentialChangeOrigin {
+    crate::protocol::CredentialChangeOrigin {
+        instance_id: origin.instance_id.clone(),
+        thread_id: origin.thread_id.clone(),
+        run_id: origin.run_id.clone(),
+        turn_id: origin.turn_id.clone(),
+        execution_id: origin.execution_id.clone(),
     }
 }

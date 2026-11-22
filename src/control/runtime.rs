@@ -765,7 +765,18 @@ impl Control {
                     shell.stop();
                 }
             }
-            Ok(json!({"accepted":true}))
+            if is_eof {
+                encode_result(
+                    Accepted { accepted: true },
+                    ErrorCode::IoFailed,
+                    "Cannot encode shell EOF result",
+                )
+            } else {
+                serde_json::to_value(crate::protocol::ShellStopResult::Accepted(Accepted {
+                    accepted: true,
+                }))
+                .map_err(|_| ApiError::new(ErrorCode::IoFailed, "Cannot encode shell stop result"))
+            }
         } else {
             // Preserve unknown-ID lookup errors, but a known closed stdin
             // rejects EOF instead of treating it as a terminal state query.
@@ -778,16 +789,16 @@ impl Control {
                 .await?;
                 return Err(crate::shell::stdin_closed_error());
             }
-            encode_result(
-                output::ShellOutputReader::new(
-                    self.store.database.clone(),
-                    self.store.instance_id.clone(),
-                )
-                .get(&execution_id)
-                .await?,
-                ErrorCode::IoFailed,
-                "Cannot encode shell details",
+            let details = output::ShellOutputReader::new(
+                self.store.database.clone(),
+                self.store.instance_id.clone(),
             )
+            .get(&execution_id)
+            .await?;
+            serde_json::to_value(crate::protocol::ShellStopResult::Finished(Box::new(
+                details,
+            )))
+            .map_err(|_| ApiError::new(ErrorCode::IoFailed, "Cannot encode shell stop result"))
         }
     }
 

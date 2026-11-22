@@ -258,3 +258,6 @@ mod history_window_items;
 
 #[path = "../message_provenance.rs"]
 mod message_provenance;
+
+#[path = "../support/operation_result_schema.rs"]
+pub(crate) mod operation_result_schema;

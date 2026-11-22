@@ -1831,6 +1831,33 @@
       ],
       "type": "object"
     },
+    "CredentialChangeOrigin": {
+      "properties": {
+        "execution_id": {
+          "type": "string"
+        },
+        "instance_id": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "thread_id": {
+          "type": "string"
+        },
+        "turn_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "instance_id",
+        "thread_id",
+        "run_id",
+        "turn_id",
+        "execution_id"
+      ],
+      "type": "object"
+    },
     "CredentialsClearArgs": {
       "additionalProperties": false,
       "properties": {
@@ -10613,14 +10640,18 @@
     "attachment.remove": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
-        "accepted": {
+        "attachment_id": {
+          "type": "string"
+        },
+        "removed": {
           "type": "boolean"
         }
       },
       "required": [
-        "accepted"
+        "attachment_id",
+        "removed"
       ],
-      "title": "Accepted",
+      "title": "AttachmentRemoveResult",
       "type": "object"
     },
     "compact": true,
@@ -10677,27 +10708,85 @@
     "credentials.clear": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
-        "accepted": {
+        "changed_by": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CredentialChangeOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cleared": {
           "type": "boolean"
+        },
+        "connection": {
+          "type": "string"
+        },
+        "credentials_path": {
+          "type": "string"
+        },
+        "key_source": {
+          "type": "string"
         }
       },
       "required": [
-        "accepted"
+        "connection",
+        "cleared",
+        "key_source",
+        "credentials_path"
       ],
-      "title": "Accepted",
+      "title": "CredentialsClearResult",
       "type": "object"
     },
     "credentials.set": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
-        "accepted": {
+        "changed_by": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CredentialChangeOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "connection": {
+          "type": "string"
+        },
+        "credentials_path": {
+          "type": "string"
+        },
+        "key_source": {
+          "type": "string"
+        },
+        "permissions_tightened": {
           "type": "boolean"
+        },
+        "replaced": {
+          "type": "boolean"
+        },
+        "stored": {
+          "type": "boolean"
+        },
+        "warning": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
-        "accepted"
+        "connection",
+        "stored",
+        "replaced",
+        "key_source",
+        "credentials_path",
+        "permissions_tightened"
       ],
-      "title": "Accepted",
+      "title": "CredentialsSetResult",
       "type": "object"
     },
     "events.wait": {
@@ -11656,16 +11745,15 @@
     },
     "shell.stop": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "properties": {
-        "accepted": {
-          "type": "boolean"
+      "anyOf": [
+        {
+          "$ref": "#/definitions/Accepted"
+        },
+        {
+          "$ref": "#/definitions/ShellDetails"
         }
-      },
-      "required": [
-        "accepted"
       ],
-      "title": "Accepted",
-      "type": "object"
+      "title": "ShellStopResult"
     },
     "shell.write": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",

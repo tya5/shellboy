@@ -477,6 +477,7 @@ async fn the_stored_file_is_private_replaced_atomically_and_keeps_other_entries(
         let mode = |path: &Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
 
         let first = call(&control, set("proxy", KEY)).await.unwrap();
+        crate::operation_result_schema::assert_result("credentials.set", &first);
         assert_eq!(first["stored"], true);
         assert_eq!(first["replaced"], false);
         assert_eq!(first["permissions_tightened"], false);
@@ -517,6 +518,7 @@ async fn the_stored_file_is_private_replaced_atomically_and_keeps_other_entries(
 
         // Clearing removes only the named entry.
         let cleared = call(&control, clear("proxy")).await.unwrap();
+        crate::operation_result_schema::assert_result("credentials.clear", &cleared);
         assert_eq!(cleared["cleared"], true);
         let text = std::fs::read_to_string(&file).unwrap();
         assert!(!text.contains("proxy") && text.contains("second"));

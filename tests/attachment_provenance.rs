@@ -809,7 +809,7 @@ async fn missing_and_excluded_states_stay_at_their_original_source_without_stale
     );
     assert!(!missing.body.to_string().contains("input_image"));
     finish(&control, &thread, missing).await;
-    request(
+    let removed = request(
         &control,
         Command::AttachmentRemove(AttachmentRemoveArgs {
             thread_id: Some(thread.clone()),
@@ -817,6 +817,7 @@ async fn missing_and_excluded_states_stay_at_their_original_source_without_stale
         }),
     )
     .await;
+    crate::operation_result_schema::assert_result("attachment.remove", &removed);
     send(&control, &thread, "file excluded").await;
     let excluded = incoming(&control, &thread, &mut receive).await;
     let excluded_manifest = manifest(&control, &thread).await;

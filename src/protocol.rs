@@ -96,10 +96,10 @@ fn operation_result_schemas(
     result!("shell.read", ShellOutput);
     result!("shell.write", ShellWriteResult);
     result!("shell.eof", Accepted);
-    result!("shell.stop", Accepted);
+    result!("shell.stop", ShellStopResult);
     result!("attachment.add", AttachmentDetails);
     result!("attachment.list", Page<AttachmentDetails>);
-    result!("attachment.remove", Accepted);
+    result!("attachment.remove", AttachmentRemoveResult);
     opaque!("compact.preview");
     opaque!("compact");
     opaque!("context.edit");
@@ -115,8 +115,8 @@ fn operation_result_schemas(
     opaque!("storage.collect");
     result!("config.get", ConfigGetResult);
     opaque!("config.set");
-    result!("credentials.set", Accepted);
-    result!("credentials.clear", Accepted);
+    result!("credentials.set", CredentialsSetResult);
+    result!("credentials.clear", CredentialsClearResult);
     opaque!("connection.test");
     serde_json::Value::Object(results)
 }
@@ -1713,6 +1713,40 @@ record!(ShellDetails {
     #[serde(default, skip_serializing_if = "Option::is_none")] cwd: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")] thread_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")] turn_id: Option<String>
+});
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum ShellStopResult {
+    Accepted(Accepted),
+    Finished(Box<ShellDetails>),
+}
+record!(AttachmentRemoveResult {
+    attachment_id: String,
+    removed: bool
+});
+record!(CredentialChangeOrigin {
+    instance_id: String,
+    thread_id: String,
+    run_id: String,
+    turn_id: String,
+    execution_id: String,
+});
+record!(CredentialsSetResult {
+    connection: String,
+    stored: bool,
+    replaced: bool,
+    key_source: String,
+    credentials_path: std::path::PathBuf,
+    permissions_tightened: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")] warning: Option<String>,
+    changed_by: Option<CredentialChangeOrigin>,
+});
+record!(CredentialsClearResult {
+    connection: String,
+    cleared: bool,
+    key_source: String,
+    credentials_path: std::path::PathBuf,
+    changed_by: Option<CredentialChangeOrigin>,
 });
 record!(ShellOutput {
     execution_id: String,

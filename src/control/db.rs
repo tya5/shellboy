@@ -1575,9 +1575,10 @@ impl Store {
             Command::AttachmentRemove(args) => {
                 let thread = target(args.thread_id.as_deref(), caller)?;
                 let changed = crate::attachments::remove_tx(tx, &thread, &args.attachment_id)?;
-                let mut result = MutationResult::value(
-                    json!({"attachment_id":args.attachment_id,"removed":true}),
-                )?;
+                let mut result = MutationResult::value(crate::protocol::AttachmentRemoveResult {
+                    attachment_id: args.attachment_id.clone(),
+                    removed: true,
+                })?;
                 if changed {
                     result.changed_threads.push(thread);
                 }
