@@ -38,12 +38,16 @@ fn expected_state_for_incomplete_output(reason: &str) -> &'static str {
     );
     let mut non_drain = false;
     for part in components {
-        if part == DRAIN {
+        if matches!(
+            part,
+            DRAIN
+                | "Unix shell reap was not confirmed"
+                | "Unix guardian reap was not confirmed"
+                | "Unix process group cleanup was not confirmed"
+        ) {
             continue;
         }
         let recognized = part == "<raw-limit>"
-            || part == "Unix shell reap was not confirmed"
-            || part == "Unix guardian reap was not confirmed"
             || part == "output receiver disconnected"
             || part == "shell process exit after Job termination is unconfirmed"
             || part.starts_with("shell wait failed: ")

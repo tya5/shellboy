@@ -531,50 +531,27 @@ impl ShellSupervisor {
                     }
                 }
             };
-            if let Err(error) = &status {
-                record_failure(
-                    &io.failure,
-                    FailureKind::ProcessWait,
-                    format!("shell wait failed: {error}"),
-                );
-            }
-            if status.is_ok()
-                && !matches!(timeout(drain_timeout, child.reap_shell()).await, Ok(Ok(())))
-            {
-                record_failure(
-                    &io.failure,
-                    FailureKind::ProcessWait,
-                    "Unix shell reap was not confirmed".into(),
-                );
-            }
+            let reap_confirmed = status.is_ok() && confirm_unix_reap(child.reap_shell()).await;
             let (group_confirmed, group_forced) =
                 cleanup_group(pgid, kill_at, term_grace, drain_timeout).await;
             owned_group.complete(group_confirmed);
             child.release();
-            if !matches!(timeout(drain_timeout, child.child.wait()).await, Ok(Ok(_))) {
-                record_failure(
-                    &io.failure,
-                    FailureKind::ProcessWait,
-                    "Unix guardian reap was not confirmed".into(),
-                );
-            }
-            forced |= group_forced;
-            let (state, reason, output_complete) =
-                io.finish(drain_timeout, stopped_before_exit).await;
-            let completion = ShellCompletion {
-                execution_id,
-                state,
-                exit_code: status.as_ref().ok().and_then(|s| s.code()),
-                exit_signal: {
-                    use std::os::unix::process::ExitStatusExt;
-                    status.ok().and_then(|s| s.signal())
+            let guardian_confirmed = confirm_unix_reap(child.child.wait()).await;
+            let completion = finish_unix_shell(
+                io,
+                status,
+                drain_timeout,
+                stopped_before_exit,
+                UnixCleanup {
+                    reap_confirmed,
+                    group_confirmed,
+                    guardian_confirmed,
+                    forced: forced || group_forced,
                 },
-                reason,
-                forced,
-                output_complete,
-                group_cleanup_confirmed: group_confirmed,
-                elapsed_ms: Some(completion_elapsed_ms(spawned_at)),
-            };
+                execution_id,
+                spawned_at,
+            )
+            .await;
             let _ = done_tx.send(Some(completion));
         });
         Ok(ShellExecution {
@@ -582,6 +559,68 @@ impl ShellSupervisor {
             events: rx,
             completion: done_rx,
         })
+    }
+}
+
+// Native reap confirmation has its own budget, independent of output progress.
+// Keep the former default bound; completion remains correct if it expires.
+#[cfg(unix)]
+const UNIX_REAP_TIMEOUT: Duration = Duration::from_secs(1);
+
+#[cfg(unix)]
+async fn confirm_unix_reap<T>(wait: impl Future<Output = std::io::Result<T>>) -> bool {
+    matches!(timeout(UNIX_REAP_TIMEOUT, wait).await, Ok(Ok(_)))
+}
+
+#[cfg(unix)]
+struct UnixCleanup {
+    reap_confirmed: bool,
+    group_confirmed: bool,
+    guardian_confirmed: bool,
+    forced: bool,
+}
+
+#[cfg(unix)]
+async fn finish_unix_shell(
+    io: IoSession,
+    status: std::io::Result<std::process::ExitStatus>,
+    drain_timeout: Duration,
+    stopped_before_exit: bool,
+    cleanup: UnixCleanup,
+    execution_id: String,
+    spawned_at: Instant,
+) -> ShellCompletion {
+    use std::os::unix::process::ExitStatusExt;
+
+    if let Err(error) = &status {
+        record_failure(
+            &io.failure,
+            FailureKind::ProcessWait,
+            format!("shell wait failed: {error}"),
+        );
+    }
+    let (state, reason, output_complete) = io.finish(drain_timeout, stopped_before_exit).await;
+    let reasons = [
+        reason.as_deref(),
+        (status.is_ok() && !cleanup.reap_confirmed).then_some("Unix shell reap was not confirmed"),
+        (!cleanup.guardian_confirmed).then_some("Unix guardian reap was not confirmed"),
+        (!cleanup.group_confirmed).then_some("Unix process group cleanup was not confirmed"),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>();
+    ShellCompletion {
+        execution_id,
+        state,
+        exit_code: status.as_ref().ok().and_then(|status| status.code()),
+        exit_signal: status.ok().and_then(|status| status.signal()),
+        reason: (!reasons.is_empty()).then(|| reasons.join("; ")),
+        forced: cleanup.forced,
+        output_complete,
+        group_cleanup_confirmed: cleanup.reap_confirmed
+            && cleanup.group_confirmed
+            && cleanup.guardian_confirmed,
+        elapsed_ms: Some(completion_elapsed_ms(spawned_at)),
     }
 }
 
@@ -918,6 +957,76 @@ mod output_failure_tests {
     use super::*;
     use tokio::io::AsyncWriteExt;
 
+    #[cfg(unix)]
+    #[tokio::test(start_paused = true)]
+    async fn unix_reap_deadline_does_not_replace_a_known_shell_exit() {
+        use std::os::unix::process::ExitStatusExt;
+
+        for status in [
+            Ok(std::process::ExitStatus::from_raw(7 << 8)),
+            Ok(std::process::ExitStatus::from_raw(libc::SIGTERM)),
+            Err(std::io::Error::other("status unavailable")),
+        ] {
+            let expected = status
+                .as_ref()
+                .ok()
+                .map(|status| (status.code(), status.signal()));
+            let started = Instant::now();
+            let reap_confirmed = status.is_ok()
+                && confirm_unix_reap(async {
+                    tokio::time::sleep(UNIX_REAP_TIMEOUT + Duration::from_millis(1)).await;
+                    Ok(())
+                })
+                .await;
+            assert!(!reap_confirmed);
+            let (io, _handle, _events) = IoSession::start(
+                Arc::new(Mutex::new(None)),
+                tokio::io::empty(),
+                tokio::io::empty(),
+                None,
+                false,
+                false,
+                8192,
+                &Config::default(),
+            );
+            let completion = finish_unix_shell(
+                io,
+                status,
+                Duration::from_millis(100),
+                false,
+                UnixCleanup {
+                    reap_confirmed,
+                    group_confirmed: true,
+                    guardian_confirmed: true,
+                    forced: false,
+                },
+                "synthetic-reap".into(),
+                started,
+            )
+            .await;
+            assert!(completion.output_complete);
+            assert!(!completion.group_cleanup_confirmed);
+            if let Some((code, signal)) = expected {
+                assert_eq!(completion.state, ShellState::Exited);
+                assert_eq!(
+                    (completion.exit_code, completion.exit_signal),
+                    (code, signal)
+                );
+                assert_eq!(
+                    completion.reason.as_deref(),
+                    Some("Unix shell reap was not confirmed")
+                );
+            } else {
+                assert_eq!(completion.state, ShellState::Failed);
+                assert_eq!((completion.exit_code, completion.exit_signal), (None, None));
+                assert_eq!(
+                    completion.reason.as_deref(),
+                    Some("shell wait failed: status unavailable")
+                );
+            }
+        }
+    }
+
     #[test]
     fn drain_only_failure_keeps_successful_process_exited_but_output_incomplete() {
         let failure = Arc::new(StdMutex::new(ShellFailures::default()));
@@ -938,7 +1047,7 @@ mod output_failure_tests {
         record_failure(
             &failure,
             FailureKind::ProcessWait,
-            "Unix shell reap was not confirmed".into(),
+            "shell wait failed: exit status unknown".into(),
         );
         {
             let failure = failure.lock().unwrap();
