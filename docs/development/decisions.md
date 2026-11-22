@@ -4618,3 +4618,16 @@ saved reset in the same `run.retry` transaction. Preserve eligible parked waits
 across owner lifetimes but do not replay admitted/in-flight work. Do not create
 an automatic held-message continuation: one admission has the same 128-message
 bound as manual retry. Revisit that limit separately only if real queues hit it.
+
+### Opaque external strings (2026-11-20)
+
+Core stores externally defined strings, such as artifact URIs (#316) and
+named ask recipients (#317), without interpreting or rewriting them. It enforces
+length and count limits with reasoned refusals, returns the saved values in
+bounded pages, and signals changes through the existing `events.wait` operation.
+
+External clients own meaning and delivery. Core does not register names, keep a
+list of URI schemes, deliver to external services, or add product-specific
+adapters. New clients can introduce new names or schemes without changing Core.
+Revisit only if a concrete acceptance requirement or safe bound cannot be met
+without interpreting a value.

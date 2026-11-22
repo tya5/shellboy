@@ -526,6 +526,17 @@ async fn models_can_request_and_reply_across_threads_including_their_own() {
         .await
         .unwrap()
         .result;
+    let Command::MessageAsk(mut external) = send(true) else {
+        unreachable!();
+    };
+    external.thread_id = Some("sender".into());
+    external.sender_label = Some("external-tool".into());
+    let external = store
+        .execute(request(Command::MessageAsk(external)), None)
+        .await
+        .unwrap()
+        .result;
+    let external_id = external["message_id"].as_str().unwrap();
     let details = store
         .execute(
             request(Command::ThreadGet(ThreadTarget {
@@ -537,10 +548,15 @@ async fn models_can_request_and_reply_across_threads_including_their_own() {
         .unwrap()
         .result;
     assert!(details.get("awaiting_replies").is_none());
-    assert_eq!(details["pending_replies"]["owed_by"]["count"], 1);
+    assert_eq!(details["pending_replies"]["owed_by"]["count"], 2);
     assert_eq!(details["pending_replies"]["asked_by"]["count"], 2);
     for (owed_by, asked_by, to, expected) in [
-        (Some("sender"), None, None, vec![message_id.as_str()]),
+        (
+            Some("sender"),
+            None,
+            None,
+            vec![message_id.as_str(), external_id],
+        ),
         (
             None,
             Some("sender"),
@@ -579,6 +595,24 @@ async fn models_can_request_and_reply_across_threads_including_their_own() {
             .collect();
         assert_eq!(ids.len(), expected.len());
         assert!(expected.iter().all(|id| ids.contains(id)));
+        for item in page["items"].as_array().unwrap() {
+            if item["message_id"] == external_id {
+                assert_eq!(item["asked_by"], serde_json::Value::Null);
+                assert_eq!(
+                    item["sender"],
+                    serde_json::json!({"kind":"external_cli","label":"external-tool"})
+                );
+            } else {
+                assert_eq!(item["asked_by"], "sender");
+                assert_eq!(
+                    item["sender"],
+                    serde_json::json!({
+                        "kind":"model", "instance_id":"fixture", "thread_id":"sender",
+                        "run_id":"run", "turn_id":"turn", "execution_id":"shell"
+                    })
+                );
+            }
+        }
     }
     let not_applied = store
         .execute(

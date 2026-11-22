@@ -1051,4 +1051,8 @@ Creation order puts null last and breaks ties by descending Thread ID.
 `message.ask` is the only reply-required admission, with a named recipient or
 a Thread target. `message.send` no longer accepts `expect_reply`. Directional
 pending lists use `message.list`; `thread.get` reports bounded `pending_replies`
-counts rather than the mixed list. Schema 55 backfills legacy named asks.
+counts rather than the mixed list. Each `message.list` item returns `message_id`,
+`created_at`, `recipient`, `excerpt`, and the credential-free saved `sender`
+(`MessageSender`), including for owner CLI asks. `asked_by` is nullable and
+identifies only a model Thread; `--asked-by` filters on that same model identity,
+not a sender label. Schema 55 backfills legacy named asks.
