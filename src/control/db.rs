@@ -2765,21 +2765,22 @@ pub(crate) fn thread_list(
         ThreadListOrder::Updated => list_scope(args.archived).to_owned(),
         ThreadListOrder::Created => format!("thread.list.created.{}", args.archived.as_str()),
     };
-    let watermark: i64 = connection
-        .query_row("SELECT COALESCE(MAX(rowid),0) FROM thread", [], |row| {
-            row.get(0)
-        })
-        .map_err(sql_error)?;
-    let (key, watermark) = if let Some(token) = &args.cursor {
-        let cursor = PageCursor::decode(token, &scope, &cursor_filter, 0, None)?;
-        (
-            Some(cursor.last_sort_key),
-            i64::try_from(cursor.watermark)
-                .map_err(|_| error(ErrorCode::CursorExpired, "invalid thread watermark"))?,
-        )
-    } else {
-        (None, watermark)
+    let cursor = args
+        .cursor
+        .as_deref()
+        .map(|token| PageCursor::decode(token, &scope, &cursor_filter, 0, None))
+        .transpose()?;
+    let watermark: i64 = match (args.order, &cursor) {
+        (ThreadListOrder::Created, _) => 0,
+        (ThreadListOrder::Updated, Some(cursor)) => i64::try_from(cursor.watermark)
+            .map_err(|_| error(ErrorCode::CursorExpired, "invalid thread watermark"))?,
+        (ThreadListOrder::Updated, None) => connection
+            .query_row("SELECT COALESCE(MAX(rowid),0) FROM thread", [], |row| {
+                row.get(0)
+            })
+            .map_err(sql_error)?,
     };
+    let key = cursor.map(|cursor| cursor.last_sort_key);
     let position = key
         .as_deref()
         .map(serde_json::from_str::<(Option<String>, String)>)
@@ -2814,7 +2815,10 @@ pub(crate) fn thread_list(
     } else {
         -1
     };
-    let mut binds: Vec<&dyn rusqlite::ToSql> = vec![&watermark, &last_time, &last_id, &page_limit];
+    let mut binds: Vec<&dyn rusqlite::ToSql> = match args.order {
+        ThreadListOrder::Updated => vec![&watermark, &last_time, &last_id, &page_limit],
+        ThreadListOrder::Created => vec![&last_time, &last_id, &page_limit],
+    };
     binds.extend(tags.iter().map(|tag| tag as &dyn rusqlite::ToSql));
     binds.extend(cwd.iter().map(|path| path as &dyn rusqlite::ToSql));
     let mut rows = statement.query(binds.as_slice()).map_err(sql_error)?;
@@ -4046,10 +4050,10 @@ mod thread_list_plan_tests {
                     ErrorCode::CursorExpired
                 );
                 db.execute_batch("UPDATE thread SET updated_at='999' WHERE id='a';
-                INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at,created_at) VALUES('new','/','','p','m','0','1')").unwrap();
+                INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at,created_at) VALUES('new','/','','p','m','0','1'),('above','/','','p','m','0','3')").unwrap();
             }
             let Some(next) = page.next_cursor else { break };
-            assert!(items.len() < 5, "cursor must terminate");
+            assert!(items.len() < 6, "cursor must terminate");
             args.cursor = Some(next);
         }
         assert_eq!(
@@ -4057,6 +4061,7 @@ mod thread_list_plan_tests {
             [
                 ("b", Some("2")),
                 ("a", Some("2")),
+                ("new", Some("1")),
                 ("c", Some("1")),
                 ("y", None),
                 ("x", None)
@@ -4069,12 +4074,12 @@ mod thread_list_plan_tests {
     fn creation_page_seeks_each_archive_and_timestamp_partition() {
         let db = Connection::open_in_memory().unwrap();
         db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
-        for (after, seeks) in [(None, 2), (Some(Some("2".into())), 4), (Some(None), 2)] {
+        for (after, seeks) in [(None, 2), (Some(Some("2".into())), 6), (Some(None), 2)] {
             let sql = thread_summary::created_page_sql(ArchivedFilter::Include, after.as_ref());
             let plan: Vec<String> = db
                 .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
                 .unwrap()
-                .query_map(params![100_i64, "2", "b", 2], |r| r.get(3))
+                .query_map(params!["2", "b", 2], |r| r.get(3))
                 .unwrap()
                 .collect::<rusqlite::Result<_>>()
                 .unwrap();
@@ -4086,6 +4091,37 @@ mod thread_list_plan_tests {
                 "{plan:?}"
             );
         }
+    }
+
+    #[test]
+    fn creation_page_seek_cost_does_not_grow_with_rows_above_the_cursor() {
+        let steps = |count: u32| {
+            let db = Connection::open_in_memory().unwrap();
+            db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+            db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at,created_at) VALUES('a','/','','p','m','0','2'),('older','/','','p','m','0','1')", []).unwrap();
+            db.execute(
+                "WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<?1)
+                INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at,created_at)
+                SELECT printf('z%05d',x),'/','','p','m','0','2' FROM n",
+                [count],
+            )
+            .unwrap();
+            let sql =
+                thread_summary::created_page_sql(ArchivedFilter::Include, Some(&Some("2".into())));
+            let mut statement = db.prepare(&sql).unwrap();
+            let ids = statement
+                .query_map(params!["2", "b", 2], |row| row.get::<_, String>(0))
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap();
+            assert_eq!(ids, ["a", "older"]);
+            statement.get_status(rusqlite::StatementStatus::VmStep)
+        };
+        let (few, many) = (steps(20), steps(3000));
+        assert!(
+            many < few + few / 4,
+            "same-time seek cost grew: {few} -> {many} VM steps"
+        );
     }
 
     #[test]

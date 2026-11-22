@@ -203,8 +203,12 @@ pub(super) fn created_page_sql(mode: ArchivedFilter, after: Option<&Option<Strin
     };
     let ranges: &[&str] = match after {
         None => &[""],
-        Some(Some(_)) => &["AND (created_at,id) < (?2,?3)", "AND created_at IS NULL"],
-        Some(None) => &["AND created_at IS NULL AND id < ?3"],
+        Some(Some(_)) => &[
+            "AND created_at=?1 AND id < ?2",
+            "AND created_at < ?1",
+            "AND created_at IS NULL",
+        ],
+        Some(None) => &["AND created_at IS NULL AND id < ?2"],
     };
     let legs: Vec<_> = partitions
         .iter()
@@ -212,8 +216,8 @@ pub(super) fn created_page_sql(mode: ArchivedFilter, after: Option<&Option<Strin
             ranges.iter().map(move |range| {
                 format!(
                     "SELECT * FROM (SELECT id,created_at FROM thread INDEXED BY threads_created
-             WHERE deleted_at IS NULL AND (archived_at IS NOT NULL)={archived} AND rowid<=?1 {range}
-             ORDER BY created_at DESC,id DESC LIMIT ?4)"
+             WHERE deleted_at IS NULL AND (archived_at IS NOT NULL)={archived} {range}
+             ORDER BY created_at DESC,id DESC LIMIT ?3)"
                 )
             })
         })
@@ -225,7 +229,7 @@ pub(super) fn created_page_sql(mode: ArchivedFilter, after: Option<&Option<Strin
     );
     format!(
         "WITH candidates AS ({}), page AS MATERIALIZED (
-            SELECT id,created_at FROM candidates ORDER BY created_at DESC,id DESC LIMIT ?4
+            SELECT id,created_at FROM candidates ORDER BY created_at DESC,id DESC LIMIT ?3
          ) {summaries} ORDER BY page.created_at DESC,page.id DESC",
         legs.join(" UNION ALL ")
     )

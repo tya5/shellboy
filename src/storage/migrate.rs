@@ -326,11 +326,6 @@ pub(super) fn run(
                 [],
                 |r| r.get::<_, bool>(0),
             )?,
-            53 => transaction.query_row(
-                "SELECT EXISTS(SELECT 1 FROM pragma_table_info('thread') WHERE name='created_at')",
-                [],
-                |r| r.get::<_, bool>(0),
-            )?,
             _ => false,
         };
             if additive_column_already_present {
