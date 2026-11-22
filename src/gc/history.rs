@@ -119,8 +119,11 @@ fn receipts_step(
 ) -> Result<()> {
     let rows=tx.prepare("SELECT rowid,id,octet_length(sender_json)+COALESCE(octet_length(result_json),0) FROM receipt WHERE rowid>?1 AND rowid<=?2 ORDER BY rowid LIMIT ?3").map_err(sql_error)?
         .query_map(params![progress.last_rowid,progress.receipt_horizon,batch as i64],|r|Ok((r.get::<_,i64>(0)?,r.get::<_,String>(1)?,r.get::<_,i64>(2)?))) .map_err(sql_error)?.collect::<rusqlite::Result<Vec<_>>>().map_err(sql_error)?;
+    // Only otherwise-deletable receipts reach this guard, so the candidate
+    // receipt is not itself a live root. A surviving consumer keeps its facts.
+    let reachable = crate::history::reachability::live_root_sql("receipt.message_node_id");
     let sql =
-        format!("DELETE FROM receipt WHERE id=?1 AND {RECEIPT_ELIGIBLE} RETURNING message_node_id");
+        format!("DELETE FROM receipt WHERE id=?1 AND {RECEIPT_ELIGIBLE} AND NOT ({reachable}) RETURNING message_node_id");
     let at = Utc::now().to_rfc3339();
     report.candidates = rows.len() as u64;
     let mut wake_threads = std::collections::BTreeSet::new();
@@ -331,9 +334,7 @@ fn sweep_step(
     // an unbounded set of pins before every batch.
     progress.revalidate_roots = true;
     let rows=tx.prepare("SELECT n.rowid,n.id,COALESCE(length(CAST(n.payload_json AS BLOB)),0),n.kind,n.turn_id FROM node n WHERE n.rowid>?1 AND n.rowid<=?3 ORDER BY n.rowid LIMIT ?2").map_err(sql_error)?.query_map(params![progress.last_rowid,batch as i64,horizon],|row|Ok((row.get::<_,i64>(0)?,row.get::<_,String>(1)?,row.get::<_,i64>(2)? as u64,row.get::<_,String>(3)?,row.get::<_,Option<String>>(4)?))).map_err(sql_error)?.collect::<rusqlite::Result<Vec<_>>>().map_err(sql_error)?;
-    let reachability_sql = format!(
-        "WITH RECURSIVE consumers(id) AS(SELECT ?1 UNION SELECT r.output_node_id FROM consumers c JOIN replacement_source s ON s.source_node_id=c.id JOIN replacement r ON r.id=s.replacement_id AND r.state<>'pruned') SELECT EXISTS(SELECT 1 FROM consumers c JOIN node n ON n.id=c.id WHERE {ROOT_PREDICATE})"
-    );
+    let reachability_sql = crate::history::reachability::live_root_sql("?1");
     let mut current_roots = if progress.revalidate_roots {
         Some(tx.prepare_cached(&reachability_sql).map_err(sql_error)?)
     } else {
@@ -468,6 +469,88 @@ fn finish_step(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn fork_replay_keeps_the_admission_receipt_until_its_body_loses_the_last_root() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('source','/','','p','m','now'); INSERT INTO run(id,thread_id,state,created_at) VALUES('r','source','completed','now'); INSERT INTO turn(id,thread_id,run_id,state,created_at) VALUES('u','source','r','completed','now');").unwrap();
+        let tx = db.transaction().unwrap();
+        crate::history::append_node(
+            &tx,
+            "source",
+            "received",
+            Some("u"),
+            "user",
+            &json!({"role":"user","content":[{"type":"input_text","text":"received body"}]}),
+            "now",
+        )
+        .unwrap();
+        tx.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,path_admission) VALUES('receipt','operation',?1,'source','received','applied','now','admitted')", [json!({"kind":"external_cli","label":"fixture sender"}).to_string()]).unwrap();
+        crate::history::fork_thread(
+            &tx,
+            &crate::protocol::ThreadForkArgs {
+                agents: None,
+                thread_id: "source".into(),
+                node_id: "received".into(),
+                cwd: None,
+            },
+            "fork",
+            "now",
+        )
+        .unwrap();
+        tx.commit().unwrap();
+
+        let cache = crate::control::replay::ReplayCache::new(1024 * 1024);
+        let before = cache.load(&db, "fork").unwrap().materialize();
+        assert_eq!(before.len(), 2);
+        assert!(
+            before[0]["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("fixture sender")
+        );
+        assert_eq!(before[1]["content"][0]["text"], "received body");
+        let collect = |db: &mut Connection, job: &str| {
+            db.execute(
+                "INSERT INTO gc_job VALUES(?1,'history',0,NULL,'pending',NULL)",
+                [job],
+            )
+            .unwrap();
+            let candidate = std::sync::Mutex::new(None);
+            assert!((0..64).any(|_| {
+                history_step(db, job, BATCH, &candidate, None)
+                    .unwrap()
+                    .complete
+            }));
+        };
+        let receipt_exists = |db: &Connection| {
+            db.query_row(
+                "SELECT EXISTS(SELECT 1 FROM receipt WHERE id='receipt')",
+                [],
+                |row| row.get::<_, bool>(0),
+            )
+            .unwrap()
+        };
+        db.execute(
+            "UPDATE thread SET deleted_at='now',cursor_node_id=NULL WHERE id='source'",
+            [],
+        )
+        .unwrap();
+        collect(&mut db, "protected");
+        assert!(receipt_exists(&db));
+        let fresh = crate::control::replay::ReplayCache::new(0);
+        assert_eq!(fresh.load(&db, "fork").unwrap().materialize(), before);
+        assert_eq!(cache.load(&db, "fork").unwrap().materialize(), before);
+
+        db.execute(
+            "UPDATE thread SET deleted_at='now',cursor_node_id=NULL WHERE id='fork'",
+            [],
+        )
+        .unwrap();
+        collect(&mut db, "released");
+        assert!(!receipt_exists(&db));
+    }
+
     #[test]
     fn durable_stage_bytes_and_current_progress_fields_are_required() {
         for (stage, literal) in [

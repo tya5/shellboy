@@ -23,6 +23,15 @@ pub(crate) fn released_by_prune(db: &rusqlite::Connection, id: &str) -> rusqlite
 
 const CONSUMERS: &str = "WITH RECURSIVE consumers(id) AS(SELECT ?1 UNION SELECT r.output_node_id FROM consumers c JOIN replacement_source s ON s.source_node_id=c.id JOIN replacement r ON r.id=s.replacement_id AND r.state<>'pruned')";
 
+/// Current roots only, without the ownerless-history visibility fallback.
+/// `seed` is a SQL expression supplied by the caller, never an external value.
+pub(crate) fn live_root_sql(seed: &str) -> String {
+    let consumers = CONSUMERS.replace("SELECT ?1 UNION", &format!("SELECT {seed} UNION"));
+    format!(
+        "{consumers} SELECT EXISTS(SELECT 1 FROM consumers c JOIN node n ON n.id=c.id WHERE {ROOT_PREDICATE})"
+    )
+}
+
 /// Read-only current visibility. Reverse replacement traversal preserves live
 /// summary/spill provenance even when the original node left every selected path.
 /// UNION terminates cycles; source reverse indexes bound each adjacency lookup.
@@ -32,9 +41,7 @@ const CONSUMERS: &str = "WITH RECURSIVE consumers(id) AS(SELECT ?1 UNION SELECT 
 /// materializing the whole closure (the combined statement references the CTE
 /// twice and always builds it). Only a false root falls back to the full rule.
 pub(crate) fn searchable(db: &rusqlite::Connection, id: &str) -> rusqlite::Result<bool> {
-    let root = format!(
-        "{CONSUMERS} SELECT EXISTS(SELECT 1 FROM consumers c JOIN node n ON n.id=c.id WHERE {ROOT_PREDICATE})"
-    );
+    let root = live_root_sql("?1");
     if db
         .prepare_cached(&root)?
         .query_row([id], |row| row.get(0))?
