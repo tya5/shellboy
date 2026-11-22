@@ -200,7 +200,7 @@ Each Thread retains its own draft and reading position. Switching does not stop 
 when their activity changes. It works with `--archived`; query, tag, cwd, and
 awaiting filters keep their existing list order and cannot be combined with
 `--order created`. Continue paging with the same order and archive selection.
-Every summary carries `created_at`; for Threads created before schema 53,
+Every summary carries `created_at`; for Threads created before schema 54,
 created_at is the earliest recorded activity. If none was recorded, it is null.
 Creation order puts null last and breaks ties by descending Thread ID.
 

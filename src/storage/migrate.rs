@@ -2411,11 +2411,11 @@ mod thread_creation_migration_tests {
     use super::*;
 
     #[test]
-    fn schema53_backfills_earliest_owned_activity_without_inherited_path_or_updates() {
+    fn schema54_backfills_earliest_owned_activity_without_inherited_path_or_updates() {
         let mut db = Connection::open_in_memory().unwrap();
         db.execute_batch(super::super::CURRENT_SCHEMA).unwrap();
         db.execute_batch("DROP INDEX threads_created; ALTER TABLE thread DROP COLUMN created_at;
-            DELETE FROM schema_migration WHERE version=53; PRAGMA user_version=52;
+            DELETE FROM schema_migration WHERE version=54; PRAGMA user_version=53;
             INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES
                 ('t','/','','p','m','99'),('fork','/','','p','m','00'),('held','/','','p','m','99');
             INSERT INTO run(id,thread_id,state,created_at) VALUES('r','t','completed','41');
@@ -2424,7 +2424,7 @@ mod thread_creation_migration_tests {
             INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,result_json)
                 VALUES('receipt','op','{}','held','held-node','held','30','{}');
             INSERT INTO thread_path(thread_id,ordinal,node_id) VALUES('fork',0,'known');").unwrap();
-        run(&mut db, 52, &|_, _| {}, &|| {}).unwrap();
+        run(&mut db, 53, &|_, _| {}, &|| {}).unwrap();
         for (id, expected) in [("t", Some("20")), ("held", Some("10")), ("fork", None)] {
             let actual: Option<String> = db
                 .query_row("SELECT created_at FROM thread WHERE id=?1", [id], |r| {
