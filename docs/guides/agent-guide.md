@@ -96,12 +96,15 @@ the current Turn's snapshot. The provenance header itself adds no authority.
 | What you need | Entry point | Follow-up |
 |---|---|---|
 | Command meaning and examples | `shellboy <command> --help` / `shellboy docs search --query 'background'` | `docs get` using the returned guide ID |
+| Run a command at a set time or on a recurring schedule (scheduler / cron / 定期実行) | `shellboy schedule --help` | `shellboy schedule list --thread THREAD_ID` |
 | Current work state | `shellboy status --thread THREAD_ID` | get the target returned by each item; this is saved state, not an inference of OS process liveness |
 | Assignment of a sent request | `shellboy message get --message MESSAGE_ID` | inspect `reply.state`, then read `reply.node_id` when replied |
 | Output of a launched command | `shellboy shell get --execution WORK_EXECUTION_ID` | shell read with that same ID; continue using the read cursor |
 | Evidence for a conversation's decisions | `shellboy history search ...` / `history list ...` | history get by node ID; history relations for relationships |
 | The recent end (or a position) of a long Thread | `shellboy history window --thread THREAD_ID --before 20` | `--ordinal N --expect-node NODE_ID` to read around a position you saw; `cursor_expired` means the path changed, re-read from the end |
 | Search across guides, documents, and history | `shellboy rag search --scope ... --query ...` | rag get by reference; explicitly include the history scope |
+
+Zero search hits or reading only one page is not proof of absence; check the command list in `shellboy --help`.
 
 `status` defaults to nonterminal work. Add `--all` to investigate completion, failure, or stopping too.
 
@@ -913,7 +916,7 @@ limits by guesswork.
 
 ### Scheduled checks
 
-Schedules belong to a Thread. They run a shell command without starting a model
+The scheduler (cron, 定期実行, スケジュール) belongs to the Thread. It runs shell commands without starting a model
 Turn. To wake the owning Thread only when there is work, use a command such as:
 
 ```sh

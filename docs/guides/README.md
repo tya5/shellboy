@@ -14,6 +14,7 @@ Operation guides for people using Shellboy and models working inside it. Start w
 | Use keys, slash commands, drafts, or paste | [TUI operations](tui.md) |
 | Create subagents, assign work, report, or wait | [Delegation and child agents](delegation.md) |
 | Run shell commands and manage input, output, or background work | [Shell](shell.md) |
+| Run commands at a set time or on a recurring schedule | [Schedule a command](user-guide.md#schedule-a-command) · [Scheduled checks for agents](agent-guide.md#scheduled-checks) |
 | Retrieve history, originals, forks, search, or compaction | [History and search](history-and-search.md) |
 | Attach files or images | [Attachments](attachments.md) |
 | Recover, stop, reclaim capacity, or diagnose errors | [Recovery and storage](recovery-and-storage.md) |

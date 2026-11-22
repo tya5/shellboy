@@ -602,6 +602,8 @@ and font and report whether this option helps.
 
 ### Schedule a command
 
+Use the Thread scheduler (cron, 定期実行, スケジュール) to run commands at set times.
+
 Use `shellboy schedule add --thread THREAD --cron '0 * * * *' -- 'echo check'`
 for a recurring command, or replace `--cron` with `--at` (an RFC 3339 time)
 or `--in 10m` for a one-shot. The command uses the Thread's working directory

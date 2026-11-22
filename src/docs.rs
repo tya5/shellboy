@@ -647,6 +647,29 @@ mod tests {
         );
     }
     #[test]
+    fn bundled_schedule_section_is_discoverable_by_literal_search() {
+        for query in ["scheduler", "cron", "スケジュール"] {
+            let page = execute(DocsCommand::Search {
+                query: query.into(),
+                parent: None,
+                limit: 20,
+                cursor: None,
+            })
+            .unwrap();
+            assert!(
+                page["items"].as_array().unwrap().iter().any(|hit| {
+                    hit["id"] == "shellboy/user-guide"
+                        && hit["excerpt"]
+                            .as_str()
+                            .unwrap()
+                            .contains("### Schedule a command")
+                }),
+                "query {query:?} did not find the bundled schedule section: {page}"
+            );
+        }
+    }
+
+    #[test]
     fn heading_parser_ignores_code_and_disambiguates() {
         let s = sections("# Same\n\n```\n# Hidden\n```\n## Same\n\n## 子\n");
         assert_eq!(
