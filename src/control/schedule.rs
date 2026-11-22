@@ -947,15 +947,6 @@ mod tests {
                 command,
             )
         };
-        // Observe the identity at reservation even if settlement beats the first read.
-        owner.db.call(|db| {
-            db.execute_batch("CREATE TEMP TABLE scheduled_witness(schedule_id TEXT PRIMARY KEY,execution_id TEXT NOT NULL);
-                CREATE TEMP TRIGGER capture_scheduled_witness AFTER INSERT ON main.shell_execution
-                WHEN NEW.schedule_id IS NOT NULL
-                BEGIN INSERT INTO scheduled_witness VALUES(NEW.schedule_id,NEW.id); END;")?;
-            Ok(())
-        }).await.unwrap();
-
         let hold = if cfg!(windows) {
             "echo schedule-witness; Start-Sleep -Seconds 600"
         } else {
@@ -998,29 +989,23 @@ mod tests {
                 db.execute("UPDATE schedule SET next_at=1,once_at=CASE WHEN once_at IS NOT NULL THEN 1 END WHERE id=?1",[key])?;
                 Ok(())
             }).await.unwrap();
-            dispatch(&control).await.unwrap();
-            let key = schedule.clone();
-            let execution: String = owner
-                .db
-                .call(move |db| {
-                    Ok(db.query_row(
-                        "SELECT execution_id FROM scheduled_witness WHERE schedule_id=?1",
-                        [key],
-                        |r| r.get(0),
-                    )?)
-                })
-                .await
-                .unwrap();
-            let get = || {
-                Command::ShellGet(ExecutionTarget {
-                    execution_id: execution.clone(),
-                })
-            };
             let list = || {
                 Command::ShellList(
                     serde_json::from_value::<ShellListArgs>(json!({"thread_id":thread})).unwrap(),
                 )
             };
+            let before = control.request(request(list())).await.result.unwrap();
+            dispatch(&control).await.unwrap();
+            let after = control.request(request(list())).await.result.unwrap();
+            let mut added = after["items"].as_array().unwrap().iter().filter(|item| {
+                !before["items"].as_array().unwrap().iter().any(|prior| {
+                    prior["execution_id"] == item["execution_id"]
+                })
+            });
+            let execution = added.next().expect("dispatch adds an execution")["execution_id"]
+                .as_str().unwrap().to_owned();
+            assert!(added.next().is_none(), "dispatch adds only one execution");
+            let get = || Command::ShellGet(ExecutionTarget { execution_id: execution.clone() });
             if command == hold {
                 let active = control.request(request(list())).await.result.unwrap();
                 let active = active["items"]
