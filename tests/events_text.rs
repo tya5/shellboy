@@ -407,6 +407,15 @@ async fn a_retry_is_a_new_attempt_whose_offsets_restart() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn queued_message_advances_live_boundary_without_losing_previous_end() {
+    witness_previous_end(false).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn fenced_received_success_end_survives_the_successor_live_text() {
+    witness_previous_end(true).await;
+}
+
+async fn witness_previous_end(fenced: bool) {
     bounded("selected input boundary and previous attempt end", async {
         let mut fixture = Fixture::new().await;
         let control = fixture.control.clone();
@@ -420,7 +429,22 @@ async fn queued_message_advances_live_boundary_without_losing_previous_end() {
         let baseline = poll(&control, None, &[&t], 0).await;
         let before = entry(&baseline, &t).unwrap()["input_through_node_id"].as_str().unwrap().to_owned();
         at = cursor(&baseline);
-        first.complete("R0");
+        if fenced {
+            // Commit the interrupt fence with R0's successful settlement, before
+            // the Driver can attempt adoption. Do not cancel the HTTP response.
+            control.store.database.call(|db| {
+                db.execute_batch("CREATE TEMP TRIGGER fence_received_success AFTER UPDATE OF state ON main.model_attempt
+                    WHEN OLD.state != 'completed' AND NEW.state='completed' AND NEW.response_id='r0-fenced'
+                    BEGIN UPDATE turn SET generation=generation+1, interrupt_requested_at=NEW.ended_at WHERE id=NEW.turn_id; END;")?;
+                Ok(())
+            }).await.unwrap();
+            let mut response = answer("R0");
+            response["id"] = json!("r0-fenced");
+            first.raw(sse(&json!({"type":"response.completed","response":response})));
+            drop(first);
+        } else {
+            first.complete("R0");
+        }
         let second = fixture.next_request().await;
         second.delta("R1");
         // Wait for R1's text without advancing the cursor used by the paused consumer.
@@ -441,7 +465,14 @@ async fn queued_message_advances_live_boundary_without_losing_previous_end() {
         let ends = together["attempt_ends"].as_array().unwrap();
         assert_eq!(ends.len(), 1);
         assert_eq!(ends[0]["attempt_id"], r0);
-        assert_eq!(ends[0]["outcome"], "adopted");
+        assert_eq!(ends[0]["outcome"], if fenced { "not_adopted" } else { "adopted" });
+        if fenced {
+            control.store.database.call(move |db| {
+                let facts = db.query_row("SELECT state,response_id,json_extract(input_manifest_json,'$.adoption.reason'),EXISTS(SELECT 1 FROM output_item WHERE attempt_id=a.id) FROM model_attempt a WHERE id=?1",[r0],|row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,String>(2)?,row.get::<_,bool>(3)?)))?;
+                assert_eq!(facts,("completed".into(),"r0-fenced".into(),"turn_fenced".into(),false));
+                Ok(())
+            }).await.unwrap();
+        }
         assert_eq!(poll(&control, Some(&cursor(&together)), &[&t], 0).await["attempt_ends"], json!([]));
         second.complete("R1");
         settled(&control, &t).await;
