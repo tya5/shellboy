@@ -2274,13 +2274,13 @@ mod unified_attempt_purpose_tests {
     use crate::{protocol::UsageGetArgs, usage_totals::breakdown};
     use serde_json::json;
 
-    fn schema50_with_summary() -> (Connection, serde_json::Value) {
+    fn schema51_with_summary() -> (Connection, serde_json::Value) {
         let db = Connection::open_in_memory().unwrap();
         db.execute_batch(include_str!("../../migrations/0001_initial.sql"))
             .unwrap();
         for migration in MIGRATIONS
             .iter()
-            .filter(|migration| migration.version <= 50)
+            .filter(|migration| migration.version <= 51)
         {
             db.execute_batch(migration.sql).unwrap();
         }
@@ -2302,7 +2302,7 @@ mod unified_attempt_purpose_tests {
     #[test]
     fn unrepresentable_summary_ledger_rolls_back_prior_rows_and_schema() {
         for invalid in ["overflow", "above_signed_bound", "run_without_turn"] {
-            let (mut db, mut ledger) = schema50_with_summary();
+            let (mut db, mut ledger) = schema51_with_summary();
             ledger["id"] = json!("z-invalid");
             match invalid {
                 "overflow" => ledger["input_tokens"]["overflow"] = json!(true),
@@ -2316,7 +2316,7 @@ mod unified_attempt_purpose_tests {
                 [ledger.to_string()],
             )
             .unwrap();
-            let error = run(&mut db, 50, &|_, _| {}, &|| {}).unwrap_err();
+            let error = run(&mut db, 51, &|_, _| {}, &|| {}).unwrap_err();
             assert!(
                 matches!(error, StorageError::Schema(message) if message.contains("summary.usage.thread.z-invalid")),
                 "{invalid}"
@@ -2324,7 +2324,7 @@ mod unified_attempt_purpose_tests {
             assert_eq!(
                 db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
                     .unwrap(),
-                50
+                51
             );
             assert_eq!(
                 db.query_row(
@@ -2349,8 +2349,8 @@ mod unified_attempt_purpose_tests {
 
     #[test]
     fn summary_ledger_migration_preserves_breakdown() {
-        let (mut db, ledger) = schema50_with_summary();
-        run(&mut db, 50, &|_, _| {}, &|| {}).unwrap();
+        let (mut db, ledger) = schema51_with_summary();
+        run(&mut db, 51, &|_, _| {}, &|| {}).unwrap();
         let usage = breakdown::read(
             &db,
             &UsageGetArgs {
