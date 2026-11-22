@@ -167,7 +167,8 @@ jobs:
           if [[ "$RELEASE_TARGET" == "aarch64-apple-darwin" ]]; then
             export MACOSX_DEPLOYMENT_TARGET=14.0
           fi
-          git rev-parse HEAD
+          SHELLBOY_BUILD_GIT_SHA=$(git rev-parse HEAD)
+          export SHELLBOY_BUILD_GIT_SHA
           cargo +1.99.1 build --locked --release --bin shellboy --target "$RELEASE_TARGET"
       - name: Smoke-test the native executable
         run: |

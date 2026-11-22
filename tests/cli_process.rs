@@ -1011,6 +1011,7 @@ async fn chat_missing_capability_uses_the_same_typed_cli_envelope_as_message_get
             write_frame(
                 &mut stream,
                 &Welcome {
+                    owner_version: None,
                     protocol_version: PROTOCOL_VERSION,
                     instance_id: "fixture".into(),
                     capabilities: vec![],

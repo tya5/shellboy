@@ -51,10 +51,16 @@ pass writes a `wait.pending.<id>` row to `app_meta` (`wait.rs:212-217`).
 
 - Framing: 4-byte big-endian length + UTF-8 JSON, 8 MiB max (`protocol.rs:840-870`).
 - One connection = `Hello{protocol_version}` → `Welcome{protocol_version,
-  capabilities, instance_id}` → exactly one `Request` → exactly one `Response`, then close
+  capabilities, instance_id, owner_version?}` → exactly one `Request` → exactly one `Response`, then close
   (`src/ipc.rs:72-145`, client `call_stream` `ipc.rs:313-381`). The reply is a
   `oneshot`; while waiting, the server reads one byte to detect peer
   disconnect and cancels `Invocation.disconnected`.
+- Studio #21 and desktop readers should forward only the optional
+  `Welcome.owner_version` associated with the verified `Welcome.instance_id`.
+  Clear it when that owner disconnects or is replaced; absence/malformed data
+  is unknown. A package version without a SHA carries no revision information.
+  Do not substitute the bridge, desktop or installed CLI version, the protocol
+  number, binary metadata, or startup logs. No additional owner read is needed.
 - Admission: 32 connections; permits ordinary 24 / stop 2 / status 2
   (`src/ipc/server.rs:18-21, 38-51`). A long `wait` holds one ordinary permit for
   its whole duration. The 5 s read deadline covers only the request frame, not

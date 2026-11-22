@@ -34,6 +34,51 @@ pub struct Welcome {
     pub instance_id: String,
     #[serde(default)]
     pub capabilities: Vec<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "decode_owner_version"
+    )]
+    #[schemars(length(max = 128))]
+    pub owner_version: Option<String>,
+}
+
+const OWNER_VERSION_MAX_BYTES: usize = 128;
+
+fn valid_build_sha(sha: &str) -> bool {
+    sha.len() == 40
+        && sha
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
+fn valid_owner_version(value: &str) -> bool {
+    if value.len() > OWNER_VERSION_MAX_BYTES || !value.is_ascii() {
+        return false;
+    }
+    let (version, sha) = value
+        .split_once(' ')
+        .map_or((value, None), |(version, sha)| (version, Some(sha)));
+    version.parse::<semver::Version>().is_ok() && sha.is_none_or(valid_build_sha)
+}
+
+fn decode_owner_version<'de, D: serde::Deserializer<'de>>(
+    input: D,
+) -> Result<Option<String>, D::Error> {
+    // Optional metadata must not prevent an otherwise compatible connection.
+    Ok(match Value::deserialize(input)? {
+        Value::String(value) if valid_owner_version(&value) => Some(value),
+        _ => None,
+    })
+}
+
+fn build_owner_version(sha: Option<&str>) -> Option<String> {
+    let version = env!("CARGO_PKG_VERSION");
+    let value = match sha.filter(|sha| valid_build_sha(sha)) {
+        Some(sha) => format!("{version} {sha}"),
+        None => version.to_owned(),
+    };
+    valid_owner_version(&value).then_some(value)
 }
 pub struct Invocation {
     pub request: Request,
@@ -133,6 +178,7 @@ async fn serve_connection<S: AsyncRead + AsyncWrite + Unpin>(
         write_frame(
             &mut stream,
             &Welcome {
+                owner_version: build_owner_version(option_env!("SHELLBOY_BUILD_GIT_SHA")),
                 protocol_version: PROTOCOL_VERSION,
                 capabilities: crate::protocol::PROTOCOL_CAPABILITIES
                     .iter()
@@ -619,6 +665,54 @@ mod frame_delivery_tests {
     }
 
     #[tokio::test]
+    async fn welcome_owner_version_reports_the_running_build() {
+        let (mut client, server) = tokio::io::duplex(4096);
+        let (requests, _incoming) = mpsc::channel(1);
+        let task = tokio::spawn(serve_connection(
+            server,
+            "version-owner".into(),
+            requests,
+            CancellationToken::new(),
+            server::WorkAdmission::new(),
+        ));
+        write_frame(
+            &mut client,
+            &Hello {
+                protocol_version: PROTOCOL_VERSION,
+            },
+        )
+        .await
+        .unwrap();
+        let welcome = read_frame::<_, Welcome>(&mut client)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(welcome.instance_id, "version-owner");
+        assert_eq!(
+            welcome.owner_version,
+            build_owner_version(option_env!("SHELLBOY_BUILD_GIT_SHA"))
+        );
+        assert!(
+            welcome
+                .owner_version
+                .unwrap()
+                .starts_with(env!("CARGO_PKG_VERSION"))
+        );
+        drop(client);
+        let _ = task.await.unwrap();
+
+        let package = env!("CARGO_PKG_VERSION");
+        let sha = "0123456789abcdef0123456789abcdef01234567";
+        assert_eq!(
+            build_owner_version(Some(sha)),
+            Some(format!("{package} {sha}"))
+        );
+        for missing in [None, Some("0123456"), Some("not-a-build-sha")] {
+            assert_eq!(build_owner_version(missing).as_deref(), Some(package));
+        }
+    }
+
+    #[tokio::test]
     async fn handshake_timeout_is_unsent_io_failure_instead_of_protocol_mismatch() {
         let (client, mut peer) = tokio::io::duplex(4096);
         let server = tokio::spawn(async move {
@@ -683,6 +777,7 @@ mod frame_delivery_tests {
             write_frame(
                 &mut peer,
                 &Welcome {
+                    owner_version: None,
                     protocol_version: PROTOCOL_VERSION,
                     capabilities: crate::protocol::PROTOCOL_CAPABILITIES
                         .iter()
@@ -721,6 +816,7 @@ mod frame_delivery_tests {
             write_frame(
                 &mut peer,
                 &Welcome {
+                    owner_version: None,
                     protocol_version: PROTOCOL_VERSION,
                     capabilities: crate::protocol::PROTOCOL_CAPABILITIES
                         .iter()
@@ -789,6 +885,7 @@ mod frame_delivery_tests {
                 write_frame(
                     &mut peer,
                     &Welcome {
+                        owner_version: None,
                         protocol_version: PROTOCOL_VERSION,
                         capabilities: crate::protocol::PROTOCOL_CAPABILITIES
                             .iter()
@@ -868,6 +965,7 @@ mod frame_delivery_tests {
             write_frame(
                 &mut peer,
                 &Welcome {
+                    owner_version: None,
                     protocol_version: PROTOCOL_VERSION,
                     capabilities: crate::protocol::PROTOCOL_CAPABILITIES
                         .iter()
@@ -904,6 +1002,7 @@ mod frame_delivery_tests {
             write_frame(
                 &mut peer,
                 &Welcome {
+                    owner_version: None,
                     protocol_version: PROTOCOL_VERSION,
                     capabilities: crate::protocol::PROTOCOL_CAPABILITIES
                         .iter()
@@ -962,6 +1061,7 @@ mod frame_delivery_tests {
             write_frame(
                 &mut peer,
                 &Welcome {
+                    owner_version: None,
                     protocol_version: PROTOCOL_VERSION,
                     capabilities: vec!["future.capability".into()],
                     instance_id: "instance".into(),
@@ -999,6 +1099,7 @@ mod frame_delivery_tests {
             write_frame(
                 &mut peer,
                 &Welcome {
+                    owner_version: None,
                     protocol_version: PROTOCOL_VERSION - 1,
                     capabilities: Vec::new(),
                     instance_id: "instance".into(),
@@ -1194,6 +1295,7 @@ mod frame_delivery_tests {
             write_frame(
                 &mut peer,
                 &Welcome {
+                    owner_version: None,
                     protocol_version: PROTOCOL_VERSION,
                     capabilities: crate::protocol::PROTOCOL_CAPABILITIES
                         .iter()
@@ -1580,6 +1682,7 @@ mod frame_delivery_tests {
             write_frame(
                 &mut server,
                 &Welcome {
+                    owner_version: None,
                     protocol_version: PROTOCOL_VERSION,
                     instance_id: "instance".into(),
                     capabilities: Vec::new(),

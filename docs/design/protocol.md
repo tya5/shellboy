@@ -28,6 +28,16 @@ The local owner handshake is the compatibility boundary for external clients, in
 
 A wire change that a supported peer cannot safely ignore requires a protocol version bump and coordinated release. Use additive result fields only where the older client uses tolerant decoding; never infer compatibility from syntactic JSON parsing. The dynamic `events.wait` result may carry an additive field only with a protocol-version bump: typed RPC results are strict even when JSON is syntactically extensible. A capability documents the feature but does not make an old client tolerant. External clients may rely on documented commands/arguments, response fields and omission rules, enumerated errors, cursor behavior, sender provenance, capabilities, and documented bounds. They must not depend on SQLite tables, internal logs, undocumented `details`, implementation module names, event timing, or incidental ordering not stated here. Operation receipts make retries safe only with the same operation ID and same request; transport uncertainty is not evidence a mutation was unapplied. Cursor tokens are opaque and scoped to the issuing owner/query; restart or expiry requires resynchronization, not decoding or editing the token.
 
+Core #294 adds `Welcome.owner_version` as optional metadata and does not bump
+protocol 7: existing Welcome decoders ignore additive fields, and older owners
+can omit it. This is the only public owner software-version source. The value
+is at most 128 ASCII bytes: Cargo package SemVer, followed when available by a
+space and a full lowercase 40-hex Git SHA supplied at build time via
+`SHELLBOY_BUILD_GIT_SHA`. If the build does not supply a valid SHA, the revision
+is unknown and only the package version is reported. An absent or malformed
+value means the software version is unknown. The value is fixed for the owner
+instance; it is not read from disk or recomputed from a runtime checkout.
+
 `protocol schema` exports the handshake, envelope, per-operation args/results, capabilities, and version from Rust types to `docs/reference/protocol.schema.json`. Results still represented by `serde_json::Value` are explicitly opaque. The committed document is exact-compared with generated output in the existing test suite; it is a client aid, not a replacement for these behavioral rules.
 
 #### Typed operation results (#278)

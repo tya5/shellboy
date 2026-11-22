@@ -1257,6 +1257,48 @@ fn exported_schema_local_references_resolve() {
 }
 
 #[test]
+fn welcome_owner_version_is_optional_and_additive() {
+    let prior = json!({"protocol_version": 7, "instance_id": "old"});
+    let welcome: shellboy::ipc::Welcome = serde_json::from_value(prior.clone()).unwrap();
+    assert_eq!(welcome.instance_id, "old");
+    assert_eq!(welcome.owner_version, None);
+    assert!(
+        serde_json::to_value(welcome)
+            .unwrap()
+            .get("owner_version")
+            .is_none()
+    );
+
+    let exact = format!("0.13.1 {}", "a".repeat(40));
+    let current = json!({"protocol_version": 7, "instance_id": "current", "owner_version": exact});
+    #[derive(serde::Deserialize)]
+    struct PriorWelcome {
+        protocol_version: u32,
+        instance_id: String,
+    }
+    let old: PriorWelcome = serde_json::from_value(current.clone()).unwrap();
+    assert_eq!(
+        (old.protocol_version, old.instance_id.as_str()),
+        (7, "current")
+    );
+    let new: shellboy::ipc::Welcome = serde_json::from_value(current).unwrap();
+    assert_eq!(new.owner_version.as_deref(), Some(exact.as_str()));
+
+    for invalid in [
+        json!(7),
+        json!("n/a"),
+        json!("1.0.0 abcd"),
+        json!("1.0.0-é"),
+        json!(format!("1.0.0-{}", "a".repeat(123))),
+    ] {
+        let mut frame = prior.clone();
+        frame["owner_version"] = invalid;
+        let decoded: shellboy::ipc::Welcome = serde_json::from_value(frame).unwrap();
+        assert_eq!(decoded.owner_version, None);
+    }
+}
+
+#[test]
 fn protocol_v6_handshake_and_typed_results_cover_existing_wire_modes() {
     let welcome = serde_json::json!({
         "protocol_version": PROTOCOL_VERSION,
