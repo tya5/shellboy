@@ -1,5 +1,5 @@
 {
-  "$id": "https://shellboy.dev/schema/protocol-v7.json",
+  "$id": "https://shellboy.dev/schema/protocol-v8.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "capabilities": [
     "events.reasoning_activity",
@@ -1973,6 +1973,38 @@
       ],
       "type": "string"
     },
+    "EventAttemptEnd": {
+      "properties": {
+        "attempt_id": {
+          "type": "string"
+        },
+        "outcome": {
+          "$ref": "#/definitions/EventAttemptOutcome"
+        },
+        "seq": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "thread_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "thread_id",
+        "attempt_id",
+        "outcome",
+        "seq"
+      ],
+      "type": "object"
+    },
+    "EventAttemptOutcome": {
+      "enum": [
+        "adopted",
+        "not_adopted"
+      ],
+      "type": "string"
+    },
     "EventChange": {
       "properties": {
         "seq": {
@@ -2029,6 +2061,12 @@
         },
         "gap": {
           "type": "boolean"
+        },
+        "input_through_node_id": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "thread_id": {
           "type": "string"
@@ -2125,6 +2163,15 @@
     "EventsWaitResult": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
+        "attempt_ends": {
+          "items": {
+            "$ref": "#/definitions/EventAttemptEnd"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
         "changes": {
           "items": {
             "$ref": "#/definitions/EventChange"
@@ -10640,6 +10687,15 @@
     "events.wait": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
+        "attempt_ends": {
+          "items": {
+            "$ref": "#/definitions/EventAttemptEnd"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
         "changes": {
           "items": {
             "$ref": "#/definitions/EventChange"
@@ -12301,6 +12357,6 @@
       "type": "object"
     }
   },
-  "protocol_version": 7,
-  "title": "Shellboy local RPC protocol v7"
+  "protocol_version": 8,
+  "title": "Shellboy local RPC protocol v8"
 }

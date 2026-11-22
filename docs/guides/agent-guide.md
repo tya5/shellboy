@@ -386,7 +386,7 @@ A known Unix shell exit remains `exited` if native cleanup cannot be confirmed. 
 
 Compare `command` / `cwd` / `thread_id` / `run_id` / `turn_id` from `shellboy shell get --execution ID` against the same fields in the launching tool result. If `command` is `shellboy message send ...`, acceptance JSON from read is that process's actual stdout. Do not infer another shell's successful launch or ID from acceptance JSON. Retrieve the tool result that executed the intended command; if it was never executed, pass that command directly to the shell tool. Prefer saved commands and tool arguments over your own description that you “ran it directly.”
 
-Use the same current release for the owner and CLI. The local RPC handshake uses protocol 7 and checks the advertised capabilities; a version mismatch is rejected before the request. To inspect the generated external-client contract without starting an owner, run `shellboy protocol schema`. The schema describes `status` activity and memory modes, `shell.list`, `usage.get`, and `config.get` from their current wire projections; provider/config-specific leaves remain open and nullable-versus-omitted behavior is significant. Do not interpret a version mismatch as a successful operation or retry side effects under a new operation ID.
+Use the same current release for the owner and CLI. The local RPC handshake uses protocol 8 and checks the advertised capabilities; a version mismatch is rejected before the request. To inspect the generated external-client contract without starting an owner, run `shellboy protocol schema`. The schema describes `status` activity and memory modes, `shell.list`, `usage.get`, and `config.get` from their current wire projections; provider/config-specific leaves remain open and nullable-versus-omitted behavior is significant. Do not interpret a version mismatch as a successful operation or retry side effects under a new operation ID.
 
 ## Resolve saved model response items
 
@@ -951,7 +951,7 @@ does not resume the interrupted deletion on startup.
 
 ### Live attempt order
 
-With protocol 7, `events wait --text` reports a live attempt's
+With protocol 8, `events wait --text` reports a live attempt's
 `input_through_node_id` (the last selected input node, or `null` for no input)
 and cursor-ordered `attempt_ends`. Only a matching `not_adopted` proves that
 attempt was not saved. Keep adopted previews until saved history arrives;
