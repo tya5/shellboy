@@ -3816,7 +3816,7 @@ mod language_rendering_tests {
     }
 
     #[test]
-    fn thread_list_form_wires_human_filter_and_rejects_invalid_values() {
+    fn thread_list_form_wires_named_filter_and_rejects_oversized_values() {
         for language in [UiLanguage::En, UiLanguage::Ja] {
             let mut form = Form::new(OpKind::ThreadList, &Context::default());
             form.language = language;
@@ -3839,21 +3839,15 @@ mod language_rendering_tests {
                 panic!("thread list command");
             };
             assert_eq!(args.awaiting, None);
-            for (value, accepted) in [("human", true), ("thread", false)] {
-                form.fields
-                    .iter_mut()
-                    .find(|field| field.name == "awaiting")
-                    .unwrap()
-                    .value = value.into();
-                if accepted {
-                    let Command::ThreadList(args) = form.command(Path::new("/")).unwrap() else {
-                        panic!("thread list command");
-                    };
-                    assert_eq!(args.awaiting.as_deref(), Some("human"));
-                } else {
-                    assert!(form.command(Path::new("/")).is_err());
-                }
+            for value in ["human".to_owned(), "thread".to_owned(), "n".repeat(256)] {
+                form.fields[form.selected].value = value.clone();
+                let Command::ThreadList(args) = form.command(Path::new("/")).unwrap() else {
+                    panic!("thread list command");
+                };
+                assert_eq!(args.awaiting, Some(value));
             }
+            form.fields[form.selected].value = "n".repeat(257);
+            assert!(form.command(Path::new("/")).is_err());
         }
     }
 

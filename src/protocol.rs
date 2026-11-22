@@ -2489,6 +2489,7 @@ mod message_acknowledgement_tests {
             "message.reply",
             "message.send",
             "message.get",
+            "message.list",
             "message.cancel",
             "operation.get",
             "run.get",
@@ -2540,7 +2541,7 @@ mod message_acknowledgement_tests {
                 "missing result schema for {name}"
             );
         }
-        assert_eq!(results.len(), 70);
+        assert_eq!(results.len(), 71);
         for name in ["thread.create", "connection.test"] {
             assert_eq!(
                 results[name],
