@@ -82,7 +82,8 @@ For a user node created by `message.send`, the selected-path history readers
 `provenance.client_operation_id`. It is read from the unique direct `receipt`
 for that node and its original Thread, using `receipt_message_node` with a
 maximum-two lookup; only a unique, nonempty ID of at most 256 UTF-8 bytes is
-emitted. Zero, duplicate, malformed or oversized candidates are omitted, never
+emitted. An instance prefix plus a UUID fits comfortably within this cap.
+Zero, duplicate, malformed or oversized candidates are omitted, never
 resolved by choosing a winner. A shared node viewed in a different Thread does
 not receive this field. This is an additive read projection: no receipt write,
 index, migration, `operation_receipt` scan, payload JSON parse, or relation API

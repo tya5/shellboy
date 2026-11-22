@@ -164,6 +164,116 @@ async fn start(control: &Arc<Control>) -> MessageAccepted {
     )
     .unwrap()
 }
+#[tokio::test]
+async fn accepted_send_operation_id_is_projected_after_driver_admission() {
+    let (url, mut requests, server) = proxy().await;
+    let (_directory, owner, control) = runtime(&url).await;
+    let thread = command(
+        &control,
+        Command::ThreadCreate(ThreadCreateArgs {
+            agents: None,
+            connection: None,
+            cwd: None,
+            model: None,
+            effort: None,
+            parent_id: None,
+        }),
+    )
+    .await;
+    let thread_id = thread["thread_id"].as_str().unwrap();
+    let send = || {
+        Request::new(
+            format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
+            Command::MessageSend(MessageSendArgs {
+                thread_id: Some(thread_id.into()),
+                text: "same saved request".into(),
+                deliver: Deliver::Next,
+                human: false,
+                resume_recovery: false,
+                to_human: false,
+                expect_reply: false,
+                sender_label: None,
+            }),
+        )
+    };
+    let first = send();
+    let first_id = first.operation_id.clone();
+    let first = control.request(first).await;
+    assert!(first.ok, "{:?}", first.error);
+    let first: MessageAccepted = serde_json::from_value(first.result.unwrap()).unwrap();
+    let first_request = incoming(&mut requests).await;
+
+    let second = send();
+    let second_id = second.operation_id.clone();
+    let second = control.request(second).await;
+    assert!(second.ok, "{:?}", second.error);
+    let second: MessageAccepted = serde_json::from_value(second.result.unwrap()).unwrap();
+    assert_ne!(first_id, second_id);
+    let expected = [
+        (&first.message_id, &first_id),
+        (&second.message_id, &second_id),
+    ];
+    for (node, operation_id) in expected {
+        let get = command(
+            &control,
+            Command::HistoryGet(serde_json::from_value(json!({"node_id":node})).unwrap()),
+        )
+        .await;
+        assert_eq!(
+            get["provenance"]["client_operation_id"].as_str(),
+            Some(operation_id.as_str())
+        );
+        assert!(get["text"].as_str().unwrap().contains("same saved request"));
+    }
+    let list =
+        || Command::HistoryList(serde_json::from_value(json!({"thread_id":thread_id})).unwrap());
+    let before = command(&control, list()).await;
+    assert!(
+        !before["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["node_id"].as_str() == Some(second.message_id.as_str()))
+    );
+
+    first_request
+        .reply
+        .send(final_answer("first complete"))
+        .ok()
+        .unwrap();
+    let second_request = incoming(&mut requests).await;
+    assert!(
+        second_request
+            .body
+            .to_string()
+            .contains("same saved request")
+    );
+    let window = Command::HistoryWindow(
+        serde_json::from_value(json!({"thread_id":thread_id,"before":20,"items":true})).unwrap(),
+    );
+    for projection in [list(), window] {
+        let page = command(&control, projection).await;
+        for (node, operation_id) in expected {
+            let item = page["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|item| item["node_id"].as_str() == Some(node.as_str()))
+                .unwrap();
+            assert_eq!(
+                item["provenance"]["client_operation_id"].as_str(),
+                Some(operation_id.as_str())
+            );
+        }
+    }
+    second_request
+        .reply
+        .send(final_answer("second complete"))
+        .ok()
+        .unwrap();
+    close(control, owner, server).await;
+}
+
 async fn incoming(receiver: &mut mpsc::UnboundedReceiver<Incoming>) -> Incoming {
     crate::test_watchdog::watchdog("tests/runtime.rs: incoming", receiver.recv())
         .await
