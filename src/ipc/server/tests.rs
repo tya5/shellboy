@@ -155,7 +155,7 @@ async fn cli_wait_retries_only_definite_admission_refusals_until_deadline() {
             run_id: "run".into(),
         }],
         timeout_ms: 2350,
-        after: None,
+        after: Some("fixture-cursor".into()),
     };
     let mut attempts = Vec::new();
     let response = super::super::retry_cli_wait(args.clone(), "fixture:wait", |args| {
@@ -172,6 +172,8 @@ async fn cli_wait_retries_only_definite_admission_refusals_until_deadline() {
     assert_eq!(response.operation_id, "fixture:wait");
     let result = response.result.unwrap();
     assert_eq!(result["status"], "timeout");
+    assert_eq!(result["cursor"], "fixture-cursor");
+    assert_eq!(result["snapshot"], json!({"conditions": []}));
     assert_eq!(result["admission_wait_ms"], 2350);
     assert_eq!(result["admission_refusals"], 6);
 
