@@ -3594,7 +3594,11 @@ async fn model_filter_changes_catalog_not_direct_model_execution() {
             vec!["GPT-4", "claude-x", "gpt-4", "gpt-4-preview"],
         ),
         ("empty", false, vec![]),
-        ("gpt", true, vec!["gpt-4"]),
+        (
+            "gpt",
+            true,
+            vec!["GPT-4", "claude-x", "gpt-4", "gpt-4-preview"],
+        ),
     ] {
         let command = if diagnostic {
             Command::ConnectionTest(ConnectionTestArgs {
