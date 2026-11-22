@@ -1004,21 +1004,19 @@ Partial writes, timeouts and in-flight failures retain their typed write result;
 `attachment.remove` returns `AttachmentRemoveResult`, containing `attachment_id` and `removed: true` on success. None of these result declarations changes the existing wire shape or protocol version.
 ### Model Admission Sender Identity (#285)
 
-Admission notices display the owner's saved model sender Thread ID separately
-from a self-asserted label. Existing reply/label event payloads, event kinds and
-context-changed envelopes are unchanged; a separate `from thread <id>` text line
-follows their existing event text. Plain unlabeled model input receives an
-identity-only developer message, not a fabricated event or delivery. It has no
-`Shellboy event v1` prefix or event metadata. Both use the existing admission
-node identity and transaction/deduplication rules. Batch message/notice ordering
-is retained. Human, external CLI, unknown and incomplete saved senders do not
-receive a model identity line. Only a nonempty canonical model `thread_id` is
-eligible. IDs are opaque, not UUID-validated or derived from labels/titles. IDs
-containing control characters are JSON-string escaped for lossless single-line
-presentation. Structured sender DTOs remain the client interface; clients must
-not parse this presentation text. Current title lookup belongs to the UI and
-does not rewrite sender facts or labels. No DTO field, event subtype, schema
-migration or protocol version is added.
+Replay and request inspection derive one developer preamble immediately before
+the received body from its canonical admission receipt (#297; see
+[`control/replay/admission.rs`](../../src/control/replay/admission.rs)). The saved
+model sender identity appears as `Sender Thread` inside that preamble, separately
+from any self-asserted label. The preamble is not stored and is not an event.
+
+Only a nonempty canonical `thread_id` from a saved model sender is eligible;
+human, external CLI, unknown and incomplete senders do not get this line. The
+Thread ID is a routing fact, not a role or authority guarantee. IDs are opaque,
+not UUID-validated or derived from labels or titles. IDs are JSON-string escaped
+so control characters cannot add lines. Structured sender DTOs remain the client
+interface; clients must not parse the preamble. Current title lookup belongs to
+the UI and does not rewrite saved sender facts or labels.
 
 
 ## Protocol 6 (Issue #288)
