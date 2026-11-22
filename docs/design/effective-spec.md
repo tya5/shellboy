@@ -531,7 +531,7 @@ attempts; a preserved overdue wait is eligible once at startup. Turning off
 ## Configuration read and write (#266, 2026-11-07)
 
 `config.get` and `config.set` are adopted owner operations; `config init` and `config check` stay standalone.
-Credential values never leave the owner, connections and defaults apply live (only the embedding connection waits for a restart) and there is no standalone edit path. See
+Credential values never leave the owner, `default_connection`, `default_model`, `extra_instructions` and non-embedding connection changes apply live (every other change, including the embedding connection, requires a restart) and there is no standalone edit path. See
 [config](config.md#reading-and-changing-through-the-owner-266) and
 [protocol](protocol.md#reading-and-changing-the-configuration-file-configget-configset-266).
 
