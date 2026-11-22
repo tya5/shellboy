@@ -48,18 +48,33 @@ pub fn provenance(connection: &Connection, node_id: &str) -> Result<NodeProvenan
         result.attempt_id = saved_attempt_id(connection, node_id)?;
     }
     if result.kind == "user" {
-        let own:Option<Option<String>>=connection.query_row("SELECT CASE WHEN length(CAST(sender_json AS BLOB))<=8192 THEN sender_json END FROM receipt WHERE message_node_id=?1",[node_id],|r|r.get(0)).optional().map_err(sql_error)?;
-        let raw = if let Some(own) = own {
-            own
+        let mut statement = connection.prepare(
+            "SELECT CASE WHEN length(CAST(sender_json AS BLOB))<=8192 THEN sender_json END, CASE WHEN typeof(client_operation_id)='text' AND length(CAST(client_operation_id AS BLOB))<=256 THEN client_operation_id END, target_thread_id FROM receipt INDEXED BY receipt_message_node WHERE message_node_id=?1 LIMIT 2",
+        ).map_err(sql_error)?;
+        let mut rows = statement.query([node_id]).map_err(sql_error)?;
+        let mut sender_raw = None;
+        if let Some(row) = rows.next().map_err(sql_error)? {
+            sender_raw = row.get::<_, Option<String>>(0).map_err(sql_error)?;
+            let operation_id = row.get::<_, Option<String>>(1).map_err(sql_error)?;
+            let target_thread = row.get::<_, Option<String>>(2).map_err(sql_error)?;
+            let duplicate = rows.next().map_err(sql_error)?.is_some();
+            if !duplicate
+                && target_thread.as_deref() == result.origin_thread_id.as_deref()
+                && let Some(operation_id) = operation_id
+                && !operation_id.trim().is_empty()
+            {
+                result.client_operation_id = Some(operation_id);
+            }
         } else if let Some(thread) = result.origin_thread_id.as_deref() {
-            super::message_provenance::unique_reverse(connection, thread, node_id)
+            sender_raw = super::message_provenance::unique_reverse(connection, thread, node_id)
                 .map_err(sql_error)?
                 .and_then(|(_, raw)| serde_json::from_str::<serde_json::Value>(&raw).ok())
                 .and_then(|v| v.pointer("/reply/by").cloned())
-                .and_then(|v| serde_json::to_string(&v).ok())
-        } else {
-            None
-        };
+                .and_then(|v| serde_json::to_string(&v).ok());
+        }
+        drop(rows);
+        drop(statement);
+        let raw = sender_raw;
         result.sender = Some(crate::protocol::MessageSender::from_saved(raw.as_deref()));
     }
     Ok(result)
@@ -77,10 +92,8 @@ pub(super) fn projected_provenance(
     {
         result.message =
             super::message_provenance::project(connection, node_id, thread).map_err(sql_error)?;
-        if selected_thread.is_none() || selected_thread == Some(thread) {
-            result.client_operation_id =
-                super::message_provenance::client_operation_id(connection, node_id, thread)
-                    .map_err(sql_error)?;
+        if selected_thread.is_some_and(|selected| selected != thread) {
+            result.client_operation_id = None;
         }
     }
     if result.kind == "event" {
@@ -101,7 +114,8 @@ pub fn relations(
             "history relation limit must be in 1..=200",
         ));
     }
-    let metadata = provenance(connection, &args.node_id)?;
+    let mut metadata = provenance(connection, &args.node_id)?;
+    metadata.client_operation_id = None;
     let revision = metadata.source_revision as u64;
     let relation = match args.relation {
         HistoryRelation::Previous => "previous",

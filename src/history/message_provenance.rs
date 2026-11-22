@@ -110,42 +110,6 @@ pub(super) fn unique_reverse(
     Ok(bounded_receipt(db, &receipt)?.map(|raw| (body, raw)))
 }
 
-/// Emit a direct receipt operation ID only for one bounded, valid receipt in
-/// the node's originating Thread. An ambiguous node has no deterministic owner.
-pub(super) fn client_operation_id(
-    db: &rusqlite::Connection,
-    node: &str,
-    thread: &str,
-) -> rusqlite::Result<Option<String>> {
-    use rusqlite::types::ValueRef;
-    let mut statement = db.prepare(
-        "SELECT CASE WHEN typeof(client_operation_id)='text' AND length(CAST(client_operation_id AS BLOB))<=?3 THEN client_operation_id END FROM receipt INDEXED BY receipt_message_node WHERE message_node_id=?1 AND target_thread_id=?2 LIMIT 2",
-    )?;
-    let mut rows = statement.query(rusqlite::params![
-        node,
-        thread,
-        MAX_PROVENANCE_ID_BYTES as i64
-    ])?;
-    let Some(row) = rows.next()? else {
-        return Ok(None);
-    };
-    let bytes = match row.get_ref(0)? {
-        ValueRef::Text(bytes) if bytes.len() <= MAX_PROVENANCE_ID_BYTES => Some(bytes),
-        _ => None,
-    };
-    let Some(bytes) = bytes else {
-        return Ok(None);
-    };
-    let candidate = std::str::from_utf8(bytes)
-        .ok()
-        .filter(|value| !value.trim().is_empty())
-        .map(str::to_owned);
-    if rows.next()?.is_some() {
-        return Ok(None);
-    }
-    Ok(candidate)
-}
-
 /// Relate only receipts proved by durable node identity and its creation Thread.
 pub(super) fn project(
     db: &rusqlite::Connection,
@@ -153,21 +117,17 @@ pub(super) fn project(
     thread: &str,
 ) -> rusqlite::Result<Option<MessageProvenance>> {
     let mut own_statement = db.prepare(
-        "SELECT CASE WHEN length(CAST(id AS BLOB))<=?3 THEN id END FROM receipt INDEXED BY receipt_message_node WHERE message_node_id=?1 AND target_thread_id=?2 LIMIT 2",
+        "SELECT id FROM receipt INDEXED BY receipt_message_node WHERE message_node_id=?1 AND target_thread_id=?2 LIMIT 2",
     )?;
-    let mut own_rows = own_statement.query(rusqlite::params![
-        node,
-        thread,
-        MAX_PROVENANCE_ID_BYTES as i64
-    ])?;
+    let mut own_rows = own_statement.query([node, thread])?;
     let first_own = own_rows.next()?;
     let own_present = first_own.is_some();
     let own_id = if let Some(row) = first_own {
-        let id = row.get::<_, Option<String>>(0)?;
+        let id = row.get::<_, String>(0)?;
         if own_rows.next()?.is_some() {
             return Ok(None);
         }
-        id
+        Some(id)
     } else {
         None
     };

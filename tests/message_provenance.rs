@@ -142,7 +142,7 @@ async fn accepted_send_operation_id_is_projected_by_all_history_readers() {
                 ordinal: Some(1),
                 node_id: None,
                 expect_node_id: None,
-                items: false,
+                items: true,
                 excerpt_chars: 0,
             })),
             None,
@@ -242,11 +242,7 @@ async fn ambiguous_or_oversized_direct_receipts_do_not_project_operation_id() {
         }))
     };
     let ambiguous = store.execute(get(), None).await.unwrap().result;
-    assert!(
-        ambiguous["provenance"]["message"]
-            .get("client_operation_id")
-            .is_none()
-    );
+    assert!(ambiguous["provenance"].get("client_operation_id").is_none());
 
     let identity = node.clone();
     store
@@ -262,8 +258,19 @@ async fn ambiguous_or_oversized_direct_receipts_do_not_project_operation_id() {
         .await
         .unwrap();
     let oversized = store.execute(get(), None).await.unwrap().result;
+    assert!(oversized["provenance"].get("client_operation_id").is_none());
+    let identity = node.clone();
+    store
+        .database
+        .call(move |db| {
+            db.execute("DELETE FROM receipt WHERE message_node_id=?1", [identity])?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let without_id = store.execute(get(), None).await.unwrap().result;
     assert!(
-        oversized["provenance"]["message"]
+        without_id["provenance"]
             .get("client_operation_id")
             .is_none()
     );
