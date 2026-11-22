@@ -23,7 +23,7 @@ async fn record_after_storage_fault() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn pre_finish_rejection_and_postcommit_storage_share_the_active_summary_cell() {
+async fn active_summary_adoption_survives_a_later_storage_failure() {
     let (rejected, committed) =
         crate::test_watchdog::watchdog("pre-FINISH rollback versus postcommit adoption", async {
             let rejected = record_boundary(Fault::RejectFact, Scenario::ActiveSummary).await;
@@ -39,8 +39,8 @@ async fn pre_finish_rejection_and_postcommit_storage_share_the_active_summary_ce
     );
     assert!(rejected["committed_stages"]["active_summary"].is_null());
     assert_eq!(
-        committed["outcome"], "adopted",
-        "postcommit FINISH remains durable: {committed}"
+        committed["outcome"], "failed",
+        "the aggregate fails after its active summary stage committed: {committed}"
     );
     assert!(committed["committed_stages"]["active_summary"].is_object());
     assert_eq!(

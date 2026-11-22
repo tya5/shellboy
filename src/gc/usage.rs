@@ -30,8 +30,7 @@ fn sum(db: &Connection, sql: &str) -> Result<u64> {
 // Test oracle only: the O(rows) indexed sums that the schema22 counters
 // replace (#171). Runtime reads the trigger-maintained counters.
 #[cfg(test)]
-const HISTORY_QUERIES: [&str; 11] = [
-    "SELECT COALESCE(SUM(COALESCE(octet_length(token),0)+COALESCE(octet_length(reason),0)+COALESCE(octet_length(trigger_json),0)+COALESCE(octet_length(closed_spill),0)+COALESCE(octet_length(active_spill),0)+COALESCE(octet_length(closed_summary),0)+COALESCE(octet_length(active_summary),0)+COALESCE(octet_length(failure_json),0)+COALESCE(octet_length(outcome),0)+COALESCE(octet_length(result_json),0)+COALESCE(octet_length(ended_at),0)),0) FROM automatic_compaction",
+const HISTORY_QUERIES: [&str; 10] = [
     "SELECT COALESCE(SUM(octet_length(payload_json)),0) FROM node INDEXED BY gc_bytes_node",
     "SELECT COALESCE(SUM(octet_length(payload_json)),0) FROM output_item INDEXED BY gc_bytes_output_item",
     "SELECT COALESCE(SUM(octet_length(body)),0) FROM instruction_snapshot INDEXED BY gc_bytes_instruction_snapshot",

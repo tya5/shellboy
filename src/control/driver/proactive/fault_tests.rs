@@ -120,10 +120,7 @@ enum ObservationPhase {
 
 fn expected_outcome(fault: Fault, scenario: Scenario, phase: ObservationPhase) -> &'static str {
     match phase {
-        // Spill stages retain the shared driver's provisional record until its
-        // terminal writer. Native GC summary stages include strict FINISH in the
-        // same adoption transaction, so their committed checkpoint is already
-        // terminally adopted before any later shutdown fault is injected.
+        // A committed stage does not decide the aggregate outcome.
         ObservationPhase::AtCommittedCheckpoint => "unknown",
         ObservationPhase::AfterRejectedStageTransaction => "failed",
         ObservationPhase::AfterShutdownAndRestart => match fault {
@@ -1628,7 +1625,7 @@ async fn direct_boundary_case(
             )),
         "cursor is the actual full selected-path tail, including audit nodes"
     );
-    let follows_active_summary = scenario == Scenario::ActiveSpill && fault == Fault::Remeasurement;
+    let follows_active_summary = scenario.continues_to_active_summary(fault);
     if follows_active_summary {
         let checkpoint_path = checkpoint_witness
             .selected_path_source_bytes
@@ -1928,10 +1925,8 @@ async fn direct_boundary_case(
         Ok((summaries, spills, record, protected, latest_group_nodes))
     }).await.unwrap();
     let record: Value = serde_json::from_str(&state.2).unwrap();
-    let summary_committed = fault != Fault::RejectFact
-        && !(fault == Fault::RejectFinal && scenario == Scenario::ActiveSpill)
-        && (scenario.summary()
-            || scenario.continues_to_active_summary(fault) && fault == Fault::Remeasurement);
+    let summary_committed =
+        fault != Fault::RejectFact && (scenario.summary() || follows_active_summary);
     if scenario == Scenario::ClosedSpill {
         assert_eq!(
             state.1 > 0,

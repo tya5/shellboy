@@ -728,9 +728,11 @@ mod tests {
             [reason],
         )
         .unwrap();
-        let error = json!({"error":{"kind":"provider","message":"saved reason","status":500},
-            "automatic_trim":{"before_characters":90000,"after_characters":40000,"omitted_nodes":7,"compact":{"spilled_groups":3,"no_target":false}}}).to_string();
-        db.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,error_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='u'),'a','u',2,0,'p','m',0,'incomplete','{}',?1,'now')",[error]).unwrap();
+        let provider_error =
+            json!({"error":{"kind":"provider","message":"saved reason","status":500}}).to_string();
+        db.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,error_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='u'),'a','u',2,0,'p','m',0,'incomplete','{}',?1,'now')",[provider_error]).unwrap();
+        let reduction = json!({"metrics":{"before_characters":90000,"after_characters":40000,"omitted_nodes":7,"compact":{"spilled_groups":3,"no_target":false}}}).to_string();
+        db.execute("INSERT INTO automatic_compaction(attempt_id,turn_id,attempt_started_at,outcome,result_json) VALUES('a','u','now','adopted',?1)", [reduction]).unwrap();
         crate::control::revisit::seed_fixture(&db, "t", "r", 3, false);
         let raw = read_tx(&db, "t").unwrap();
         db.execute("UPDATE run SET state='completed' WHERE id='r'", [])

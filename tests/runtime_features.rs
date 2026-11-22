@@ -4458,7 +4458,7 @@ if let Some(active) = cancel_active {
     // Stop. Retain its typed custody separately from genuinely later arrivals.
     let pending_id=boundary.report.attempt_id.clone();
     let pending_record=automatic_attempt_record(&control,pending_id.clone()).await;
-    assert_eq!(pending_record["outcome"],"unknown","RunStop targets an actually pending Thread-owned Summary");
+    assert_eq!(pending_record["outcome"],Value::Null,"RunStop targets an actually pending Thread-owned Summary");
     assert_eq!(pending_record["unfinished"],true);
     assert_eq!(pending_record["token"],boundary.gc_token);
     assert_eq!(boundary.trigger.run_id,trigger_accept.run_id.as_deref().unwrap());
@@ -7299,7 +7299,10 @@ async fn proactive_shallow_summary_does_not_continue_below_threshold() {
                 .unwrap();
             settled(&control, &target).await;
         }
-        send(&control, &target, "current work").await;
+        let trigger_turn = send_accepted(&control, &target, "current work")
+            .await
+            .turn_id
+            .unwrap();
         incoming(&control, &mut receive)
             .await
             .reply
@@ -7351,6 +7354,7 @@ async fn proactive_shallow_summary_does_not_continue_below_threshold() {
             .send((200, answer_with_usage("done", 140_000)))
             .unwrap();
         settled(&control, &target).await;
+        automatic_attempts_finished_for_turns(&control, &[trigger_turn], 1).await;
         let attempts = bx_attempts(&control, &target).await;
         assert_eq!(attempts.len(), 1, "{attempts:#?}");
         let attempt = &attempts[0];
@@ -7392,12 +7396,12 @@ async fn proactive_next_closed_summary_resummarizes_prior_summary_with_new_older
                 .unwrap();
             settled(&control, &target).await;
         }
-        send(
+        let turn_a = send_accepted(
             &control,
             &target,
             &format!("TURN_A_MARKER {}", "b".repeat(4000)),
         )
-        .await;
+        .await.turn_id.unwrap();
         incoming(&control, &mut receive)
             .await
             .reply
@@ -7416,7 +7420,8 @@ async fn proactive_next_closed_summary_resummarizes_prior_summary_with_new_older
             .send((200, answer_with_usage("turn A finished", 184_622)))
             .unwrap();
         settled(&control, &target).await;
-        send(&control, &target, "TURN_B_MARKER").await;
+        automatic_attempts_finished_for_turns(&control, &[turn_a], 1).await;
+        let turn_b = send_accepted(&control, &target, "TURN_B_MARKER").await.turn_id.unwrap();
         let first = incoming_ordinary(&control, &mut receive).await;
         assert_ne!(
             first.body["tools"],
@@ -7456,6 +7461,7 @@ async fn proactive_next_closed_summary_resummarizes_prior_summary_with_new_older
             .send((200, answer_with_usage("turn B finished", 140_000)))
             .unwrap();
         settled(&control, &target).await;
+        automatic_attempts_finished_for_turns(&control, &[turn_b], 1).await;
         let attempts = bx_attempts(&control, &target).await;
         assert_eq!(attempts.len(), 2, "{attempts:#?}");
         for attempt in &attempts {
