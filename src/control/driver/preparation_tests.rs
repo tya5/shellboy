@@ -1607,6 +1607,56 @@ async fn stop_accepted_after_driver_exit_choice_is_settled_at_retirement() {
 }
 
 #[tokio::test]
+async fn explicit_stop_and_driver_drain_fence_with_distinct_receipt_boundaries() {
+    for explicit in [true, false] {
+        let (_root, owner, control, accepted) = fixture("http://127.0.0.1:1/v1").await;
+        let run = accepted.run_id.unwrap();
+        let before = control.store.database.call(|db| {
+            db.execute_batch("CREATE TEMP TABLE stop_boundary AS SELECT r.state AS run_state,r.stop_reason,u.generation,q.state AS receipt_state,q.hold_reason FROM run r JOIN turn u ON u.run_id=r.id JOIN receipt q ON q.turn_id=u.id WHERE 0;
+                CREATE TEMP TRIGGER driver_boundary BEFORE UPDATE OF state ON main.turn WHEN NEW.state='stopped' BEGIN
+                  INSERT INTO stop_boundary SELECT r.state,r.stop_reason,OLD.generation,q.state,q.hold_reason FROM run r JOIN receipt q ON q.turn_id=OLD.id WHERE r.id=OLD.run_id;
+                END;")?;
+            Ok(db.query_row("SELECT u.generation FROM turn u JOIN receipt q ON q.turn_id=u.id WHERE q.state='accepted' AND q.path_admission='unadmitted'",[],|r|r.get::<_,i64>(0))?)
+        }).await.unwrap();
+        if explicit {
+            control
+                .store
+                .execute(
+                    Request::new(
+                        format!("{}:stop", owner.instance_id),
+                        Command::RunStop(RunTarget { run_id: run }),
+                    ),
+                    None,
+                )
+                .await
+                .unwrap();
+        } else {
+            drain_and_stop(&control, &run, None).await.unwrap();
+        }
+        control.store.database.call(move |db| {
+            let sql = if explicit {
+                "SELECT r.state,r.stop_reason,u.generation,q.state,q.hold_reason FROM run r JOIN turn u ON u.run_id=r.id JOIN receipt q ON q.turn_id=u.id"
+            } else {
+                "SELECT run_state,stop_reason,generation,receipt_state,hold_reason FROM stop_boundary"
+            };
+            let (state,reason,generation,receipt,hold):(String,Option<String>,i64,String,Option<String>) = db.query_row(sql,[],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?)))?;
+            assert_eq!(state,"stopping");
+            assert_eq!(generation,before+1);
+            assert_eq!(reason.as_deref(),explicit.then_some("explicit_stop"));
+            assert_eq!(receipt,if explicit { "held" } else { "accepted" });
+            assert_eq!(hold.as_deref(),explicit.then_some("stopping"));
+            if !explicit {
+                let terminal:(String,String,String) = db.query_row("SELECT r.state,q.state,q.hold_reason FROM run r JOIN receipt q ON q.run_id=r.id",[],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?)))?;
+                assert_eq!(terminal,("stopped".into(),"held".into(),"terminal_before_path_admission".into()));
+            }
+            Ok(())
+        }).await.unwrap();
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+    }
+}
+
+#[tokio::test]
 async fn concurrent_absent_driver_stop_and_retirement_do_not_advance_terminal_generation_twice() {
     crate::test_watchdog::watchdog("serialized absent-driver stop handoff", async {
         let (_root, owner, control, accepted) = fixture("http://127.0.0.1:1/v1").await;

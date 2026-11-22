@@ -106,34 +106,15 @@ pub(super) fn run(
     Ok(result)
 }
 
-/// A new Run is the one event that makes an archived Thread visible again.
-pub(super) fn clear_for_new_run(
-    tx: &rusqlite::Connection,
-    thread: &str,
-    actor: serde_json::Value,
-    now: &str,
-) -> rusqlite::Result<()> {
-    if tx.execute(
-        "UPDATE thread SET archived_at=NULL,revision=revision+1 WHERE id=?1 AND archived_at IS NOT NULL",
-        [thread],
-    )? > 0
-    {
-        super::super::context::record(
-            tx,
-            thread,
-            "thread_unarchived",
-            actor,
-            json!({"reason":"run_started"}),
-            now,
-        )?;
-    }
-    Ok(())
+pub(super) enum UnarchiveReason {
+    RunStarted { actor: serde_json::Value },
+    QuestionAsked,
 }
 
-/// Asking the human is an explicit organization event that reopens the Thread.
-pub(super) fn clear_for_question(
-    tx: &Transaction<'_>,
+pub(super) fn clear_automatically(
+    tx: &rusqlite::Connection,
     thread: &str,
+    reason: UnarchiveReason,
     now: &str,
 ) -> rusqlite::Result<()> {
     if tx.execute(
@@ -141,14 +122,11 @@ pub(super) fn clear_for_question(
         [thread],
     )? > 0
     {
-        super::super::context::record(
-            tx,
-            thread,
-            "thread_unarchived",
-            json!({"kind":"model"}),
-            json!({"reason":"question_asked"}),
-            now,
-        )?;
+        let (actor, reason) = match reason {
+            UnarchiveReason::RunStarted { actor } => (actor, "run_started"),
+            UnarchiveReason::QuestionAsked => (json!({"kind":"model"}), "question_asked"),
+        };
+        super::super::context::record(tx, thread, "thread_unarchived", actor, json!({"reason":reason}), now)?;
     }
     Ok(())
 }

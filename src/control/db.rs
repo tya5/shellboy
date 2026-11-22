@@ -2184,7 +2184,8 @@ impl Store {
         tx.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,run_id,turn_id,state,created_at,updated_at,hold_reason,result_json) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?9,?10,?11)",params![receipt_id,operation_id,serde_json::to_string(&content.sender).unwrap(),id,message_id,accepted.run_id,accepted.turn_id,state,now,reason,saved_acceptance.to_string()]).map_err(sql_error)?;
         if args.to_human {
             // Unarchive immediately, but defer only selected-path mutation to a real path boundary.
-            crate::control::db::archive::clear_for_question(tx, &id, now).map_err(sql_error)?;
+            archive::clear_automatically(tx, &id, archive::UnarchiveReason::QuestionAsked, now)
+                .map_err(sql_error)?;
         }
         tx.execute(
             "UPDATE thread SET revision=revision+1,updated_at=?2 WHERE id=?1",
@@ -2378,7 +2379,12 @@ pub(super) fn start_run_tx(
         json!({"run_id":run}),
         at,
     )?;
-    archive::clear_for_new_run(tx, thread, source, at)?;
+    archive::clear_automatically(
+        tx,
+        thread,
+        archive::UnarchiveReason::RunStarted { actor: source },
+        at,
+    )?;
     let turn = super::state::create_turn_tx(tx, thread, &run, at, at)?;
     Ok((run, turn))
 }
@@ -3145,19 +3151,14 @@ fn stop_run(tx: &Transaction<'_>, id: &str, now: &str) -> Result<MutationResult>
     let mut result = MutationResult::default();
     if matches!(details.state, RunState::Live | RunState::Stopping) {
         result.stop_runs = vec![id.to_owned()];
-        for run in &result.stop_runs {
-            tx.execute("UPDATE run SET state='stopping',stop_reason='explicit_stop' WHERE id=?1 AND state='live'",[run]).map_err(sql_error)?;
-            tx.execute("UPDATE turn SET generation=generation+1 WHERE run_id=?1 AND state IN ('preparing','running','waiting','recovery_wait')",[run]).map_err(sql_error)?;
-            // The stopping state is visible now; do not wait for reply_grace (#243).
-            let thread: String = tx
-                .query_row("SELECT thread_id FROM run WHERE id=?1", [run], |r| r.get(0))
-                .map_err(sql_error)?;
-            if !result.changed_threads.contains(&thread) {
-                result.changed_threads.push(thread);
-            }
-            super::attachment_delivery::hold_run_tx(tx, run)?;
-            tx.execute("UPDATE receipt SET state='held',hold_reason='stopping',updated_at=?2 WHERE run_id=?1 AND state='accepted'",params![run,now]).map_err(sql_error)?;
-        }
+        super::state::admit_run_stop_tx(
+            tx,
+            id,
+            super::state::RunStopAdmission::Explicit { at: now },
+        )
+        .map_err(storage_error)?;
+        // Publish the stopping state without waiting for reply_grace (#243).
+        result.changed_threads.push(details.thread_id);
     }
     result.result = serde_json::to_value(run_details(tx, id)?).unwrap();
     Ok(result)

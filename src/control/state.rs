@@ -302,6 +302,32 @@ pub(super) fn complete_answer_turn(
 }
 
 /// Ownership has already been frozen, and every live handle has drained.
+pub(super) enum RunStopAdmission<'a> {
+    Explicit { at: &'a str },
+    DriverDrain,
+}
+
+/// Fence in-flight results before releasing this transaction to the drain.
+pub(super) fn admit_run_stop_tx(
+    tx: &rusqlite::Transaction<'_>,
+    run: &str,
+    admission: RunStopAdmission<'_>,
+) -> Result<(), StorageError> {
+    let (reason, hold_at) = match admission {
+        RunStopAdmission::Explicit { at } => (Some("explicit_stop"), Some(at)),
+        // Drain preserves a prior explicit reason; accepted receipts are settled
+        // at the terminal boundary, not by a second explicit admission.
+        RunStopAdmission::DriverDrain => (None, None),
+    };
+    tx.execute("UPDATE run SET state='stopping',stop_reason=COALESCE(?2,stop_reason) WHERE id=?1 AND state='live'",params![run,reason])?;
+    tx.execute("UPDATE turn SET generation=generation+1 WHERE run_id=?1 AND state IN ('preparing','running','waiting','recovery_wait')",[run])?;
+    super::attachment_delivery::hold_run_tx(tx, run)?;
+    if let Some(at) = hold_at {
+        tx.execute("UPDATE receipt SET state='held',hold_reason='stopping',updated_at=?2 WHERE run_id=?1 AND state='accepted'",params![run,at])?;
+    }
+    Ok(())
+}
+
 pub(super) fn stop_drained_runs(
     tx: &rusqlite::Transaction<'_>,
     owned: &[(String, String)],

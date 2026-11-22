@@ -1001,17 +1001,27 @@ async fn drain_and_stop(
     current_thread: Option<&str>,
 ) -> Result<(), ApiError> {
     let run_id = run_id.to_owned();
-    let owned = control.store.database.call(move |db| {
-        let tx = db.transaction()?;
-        let owned: Vec<(String,String)> = tx.prepare("SELECT id,thread_id FROM run WHERE id=?1")?.query_map([run_id],|row|Ok((row.get(0)?,row.get(1)?)))?.collect::<Result<_,_>>()?;
-        for (run,_) in &owned {
-            super::attachment_delivery::hold_run_tx(&tx,run).map_err(crate::storage::StorageError::from)?;
-            tx.execute("UPDATE run SET state='stopping' WHERE id=?1 AND state='live'",[run])?;
-            tx.execute("UPDATE turn SET generation=generation+1 WHERE run_id=?1 AND state IN ('preparing','running','waiting','recovery_wait')",[run])?;
-        }
-        tx.commit()?;
-        Ok(owned)
-    }).await.map_err(storage_error)?;
+    let owned = control
+        .store
+        .database
+        .call(move |db| {
+            let tx = db.transaction()?;
+            let owned: Vec<(String, String)> = tx
+                .prepare("SELECT id,thread_id FROM run WHERE id=?1")?
+                .query_map([run_id], |row| Ok((row.get(0)?, row.get(1)?)))?
+                .collect::<Result<_, _>>()?;
+            for (run, _) in &owned {
+                super::state::admit_run_stop_tx(
+                    &tx,
+                    run,
+                    super::state::RunStopAdmission::DriverDrain,
+                )?;
+            }
+            tx.commit()?;
+            Ok(owned)
+        })
+        .await
+        .map_err(storage_error)?;
     let runs: std::collections::HashSet<String> =
         owned.iter().map(|(run, _)| run.clone()).collect();
     control.live.cancel_owned(&runs, current_thread).await;
