@@ -3843,6 +3843,13 @@
             "null"
           ]
         },
+        "client_operation_id": {
+          "description": "Operation that created this user node, when uniquely proven by its receipt.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "created_at": {
           "type": "string"
         },

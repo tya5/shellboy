@@ -77,6 +77,20 @@ P3照合修正: ShellReadArgs.encodingをOptionへ変更し、省略時にexecut
 
 `NodeProvenance` はkind/created_at/source_revisionと任意turn_id/run_id/origin_thread_idを持つ。履歴のassistant_response nodeに限り、既存output_itemのnode associationが一意な場合は任意attempt_idを投影する。association無し／曖昧なら省略し、唯一のowner IDが不正ならinvalid_stateとする。未確定のIDを生成せず省略し、originを共有nodeの全所属と同一視しない。`HistoryBody.provenance` is required and is derived from the saved node. 詳細は[検索・関係設計](search-and-relations.md#provenanceと区間)に従う。
 
+For a user node created by `message.send`, the selected-path history readers
+(`history.list`, `history.window`, and `history.get`) may include
+`provenance.client_operation_id`. It is read from the unique direct `receipt`
+for that node and its original Thread, using `receipt_message_node` with a
+maximum-two lookup; only a unique, nonempty ID of at most 256 UTF-8 bytes is
+emitted. Zero, duplicate, malformed or oversized candidates are omitted, never
+resolved by choosing a winner. A shared node viewed in a different Thread does
+not receive this field. This is an additive read projection: no receipt write,
+index, migration, `operation_receipt` scan, payload JSON parse, or relation API
+change. Studio matches this ID only against its own plain-send pending records;
+the field names the creating send/draft-edit/reply-delivery operation in Core
+general, not a claim about which verb the client invoked.
+
+
 `HistoryRelationsArgs` はnode_id、必須relation（previous/next/sources/replacements）、limit既定50・最大200、任意cursor。`Page<RelationItem>` の各要素はnode_id/provenanceと、置換関係に限るreplacement_id/source_revision/source_hashを持つ。previous/nextは会話辺、sourcesはcompleted置換出力→出典、replacementsは出典→completed置換出力である。relation item直下のsource_revision/hashは置換記録時の出典witness、provenance.source_revisionは返却nodeの現在版であり区別する。cursorは対象node・relation・revisionとwatermarkに束縛し、追加関係を途中pageへ混入させない。履歴変更・無制限の祖先/子孫探索は含めない。採用経路は既存history.listで取得する。
 
 `history.list` and `history.window` execution links may include `description`:

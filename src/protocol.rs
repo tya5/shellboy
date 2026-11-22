@@ -1107,7 +1107,20 @@ record!(MessageProvenance {
     #[serde(default, skip_serializing_if="Option::is_none")] reply_state: Option<MessageReplyState>,
     #[serde(default, skip_serializing_if="Option::is_none")] reply_node_id: Option<String>
 });
-record!(NodeProvenance { #[serde(default, skip_serializing_if="Option::is_none")] notification: Option<NotificationDescriptor>, #[serde(default, skip_serializing_if="Option::is_none")] message: Option<MessageProvenance>, #[serde(default, skip_serializing_if = "Option::is_none")] sender: Option<MessageSender>, #[serde(default, skip_serializing_if = "Option::is_none")] attempt_id: Option<String>, kind: String, created_at: String, source_revision: i64, #[serde(default, skip_serializing_if = "Option::is_none")] turn_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] run_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] origin_thread_id: Option<String> });
+record!(NodeProvenance {
+    #[serde(default, skip_serializing_if="Option::is_none")] notification: Option<NotificationDescriptor>,
+    #[serde(default, skip_serializing_if="Option::is_none")] message: Option<MessageProvenance>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] sender: Option<MessageSender>,
+    /// Operation that created this user node, when uniquely proven by its receipt.
+    #[serde(default, skip_serializing_if = "Option::is_none")] client_operation_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] attempt_id: Option<String>,
+    kind: String,
+    created_at: String,
+    source_revision: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")] turn_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] run_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] origin_thread_id: Option<String>
+});
 record!(RelationItem { node_id: String, provenance: NodeProvenance, #[serde(default, skip_serializing_if = "Option::is_none")] replacement_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] source_revision: Option<i64>, #[serde(default, skip_serializing_if = "Option::is_none")] source_hash: Option<String> });
 args!(ShellReadArgs { execution_id: String, #[serde(default)] cursor: Option<String>, #[serde(default, skip_serializing_if="Option::is_none")] encoding: Option<String>, #[serde(default = "body_limit")] limit_bytes: u32 });
 args!(ShellWriteArgs {

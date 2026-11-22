@@ -49,6 +49,7 @@ fn node_provenance_attempt_id_is_optional_and_legacy_absence_roundtrips() {
         "notification": null,
         "message": null,
         "sender": null,
+        "client_operation_id": null,
         "kind": "assistant_response",
         "created_at": "2026-11-15T00:00:00Z",
         "source_revision": 0,
@@ -58,6 +59,7 @@ fn node_provenance_attempt_id_is_optional_and_legacy_absence_roundtrips() {
     });
     let legacy: NodeProvenance = serde_json::from_value(base.clone()).unwrap();
     assert_eq!(legacy.attempt_id, None);
+    assert_eq!(legacy.client_operation_id, None);
     assert!(
         serde_json::to_value(&legacy)
             .unwrap()
@@ -72,6 +74,30 @@ fn node_provenance_attempt_id_is_optional_and_legacy_absence_roundtrips() {
     assert_eq!(
         serde_json::to_value(decoded).unwrap()["attempt_id"],
         attempt_id
+    );
+}
+
+#[test]
+fn node_provenance_client_operation_id_is_optional() {
+    let base = json!({
+        "kind":"user", "created_at":"2026-11-15T00:00:00Z",
+        "source_revision":0
+    });
+    let legacy: NodeProvenance = serde_json::from_value(base.clone()).unwrap();
+    assert_eq!(legacy.client_operation_id, None);
+    assert!(
+        serde_json::to_value(legacy)
+            .unwrap()
+            .get("client_operation_id")
+            .is_none()
+    );
+
+    let mut current = base;
+    current["client_operation_id"] = json!("instance:operation");
+    let decoded: NodeProvenance = serde_json::from_value(current).unwrap();
+    assert_eq!(
+        decoded.client_operation_id.as_deref(),
+        Some("instance:operation")
     );
 }
 

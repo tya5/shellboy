@@ -59,6 +59,218 @@ async fn saved_request_relation_survives_replay_and_window_read() {
 }
 
 #[tokio::test]
+async fn accepted_send_operation_id_is_projected_by_all_history_readers() {
+    let (_root, store) = fixture().await;
+    let first_request = request(send(false));
+    let first_operation_id = first_request.operation_id.clone();
+    let first = store.execute(first_request, None).await.unwrap().result;
+    let first_node = first["message_id"].as_str().unwrap().to_owned();
+
+    let second_request = request(send(false));
+    let second_operation_id = second_request.operation_id.clone();
+    let second = store.execute(second_request, None).await.unwrap().result;
+    let second_node = second["message_id"].as_str().unwrap().to_owned();
+    assert_ne!(first_operation_id, second_operation_id);
+
+    for (node, expected_operation) in [
+        (&first_node, &first_operation_id),
+        (&second_node, &second_operation_id),
+    ] {
+        let get = store
+            .execute(
+                request(Command::HistoryGet(HistoryGetArgs {
+                    node_id: node.clone(),
+                    ..serde_json::from_value(serde_json::json!({"node_id":node})).unwrap()
+                })),
+                None,
+            )
+            .await
+            .unwrap()
+            .result;
+        assert_eq!(
+            get["provenance"]["client_operation_id"].as_str(),
+            Some(expected_operation.as_str())
+        );
+    }
+
+    let selected = [first_node.clone(), second_node.clone()];
+    store
+        .database
+        .call(move |db| {
+            for node in selected {
+                db.execute(
+                    "INSERT INTO thread_path(thread_id,ordinal,node_id) SELECT 'recipient',COALESCE(MAX(ordinal)+1,0),?1 FROM thread_path WHERE thread_id='recipient'",
+                    [node],
+                )?;
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let list = store
+        .execute(
+            request(Command::HistoryList(HistoryListArgs {
+                thread_id: "recipient".into(),
+                ..serde_json::from_value(serde_json::json!({"thread_id":"recipient"})).unwrap()
+            })),
+            None,
+        )
+        .await
+        .unwrap()
+        .result;
+    for (node, expected_operation) in [
+        (&first_node, &first_operation_id),
+        (&second_node, &second_operation_id),
+    ] {
+        let item = list["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["node_id"].as_str() == Some(node.as_str()))
+            .unwrap();
+        assert_eq!(
+            item["provenance"]["client_operation_id"].as_str(),
+            Some(expected_operation.as_str())
+        );
+    }
+    let window = store
+        .execute(
+            request(Command::HistoryWindow(HistoryWindowArgs {
+                thread_id: "recipient".into(),
+                before: 10,
+                after: 10,
+                ordinal: Some(1),
+                node_id: None,
+                expect_node_id: None,
+                items: false,
+                excerpt_chars: 0,
+            })),
+            None,
+        )
+        .await
+        .unwrap()
+        .result;
+    for (node, expected_operation) in [
+        (&first_node, &first_operation_id),
+        (&second_node, &second_operation_id),
+    ] {
+        let item = window["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["node_id"].as_str() == Some(node.as_str()))
+            .unwrap();
+        assert_eq!(
+            item["provenance"]["client_operation_id"].as_str(),
+            Some(expected_operation.as_str())
+        );
+    }
+    store.database.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn shared_node_has_no_client_operation_id_in_nonorigin_thread() {
+    let (_root, store) = fixture().await;
+    let accepted = store
+        .execute(request(send(false)), None)
+        .await
+        .unwrap()
+        .result;
+    let node = accepted["message_id"].as_str().unwrap().to_owned();
+    let selected = node.clone();
+    store
+        .database
+        .call(move |db| {
+            db.execute(
+                "INSERT INTO thread_path(thread_id,ordinal,node_id)VALUES('sender',0,?1)",
+                [selected],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let result = store
+        .execute(
+            request(Command::HistoryWindow(HistoryWindowArgs {
+                thread_id: "sender".into(),
+                before: 0,
+                after: 0,
+                ordinal: None,
+                node_id: Some(node.clone()),
+                expect_node_id: None,
+                items: false,
+                excerpt_chars: 0,
+            })),
+            None,
+        )
+        .await
+        .unwrap()
+        .result;
+    assert!(
+        result["items"][0]["provenance"]
+            .get("client_operation_id")
+            .is_none()
+    );
+    store.database.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn ambiguous_or_oversized_direct_receipts_do_not_project_operation_id() {
+    let (_root, store) = fixture().await;
+    let accepted = store
+        .execute(request(send(false)), None)
+        .await
+        .unwrap()
+        .result;
+    let node = accepted["message_id"].as_str().unwrap().to_owned();
+    let receipt = node.clone();
+    store
+        .database
+        .call(move |db| {
+            db.execute(
+                "INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at)VALUES('duplicate','duplicate-op','{\"kind\":\"human\"}','recipient',?1,'accepted','now')",
+                [receipt],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let get = || {
+        request(Command::HistoryGet(HistoryGetArgs {
+            node_id: node.clone(),
+            ..serde_json::from_value(serde_json::json!({"node_id":node})).unwrap()
+        }))
+    };
+    let ambiguous = store.execute(get(), None).await.unwrap().result;
+    assert!(
+        ambiguous["provenance"]["message"]
+            .get("client_operation_id")
+            .is_none()
+    );
+
+    let identity = node.clone();
+    store
+        .database
+        .call(move |db| {
+            db.execute("DELETE FROM receipt WHERE id='duplicate'", [])?;
+            db.execute(
+                "UPDATE receipt SET client_operation_id=?1 WHERE message_node_id=?2",
+                rusqlite::params!["x".repeat(257), identity],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let oversized = store.execute(get(), None).await.unwrap().result;
+    assert!(
+        oversized["provenance"]["message"]
+            .get("client_operation_id")
+            .is_none()
+    );
+    store.database.shutdown().await.unwrap();
+}
+
+#[tokio::test]
 async fn human_reply_only_reverse_relation_is_exact_across_unrelated_send() {
     let (_root, store) = fixture().await;
     let accepted = store

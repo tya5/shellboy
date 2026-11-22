@@ -5,11 +5,12 @@ use serde_json::Value;
 
 // Match the existing saved outcome ceiling, before allocating/parsing receipt JSON.
 const MAX_RECEIPT_BYTES: usize = 8 * 1024 * 1024;
+pub(super) const MAX_PROVENANCE_ID_BYTES: usize = 256;
 
 pub(super) const REVERSE_LOOKUP: &str = "SELECT id,message_node_id FROM receipt INDEXED BY receipt_reply_node_lookup WHERE target_thread_id=?1 AND (CASE WHEN json_valid(result_json) THEN CASE WHEN json_type(result_json,'$.reply.node_id')='text' THEN json_extract(result_json,'$.reply.node_id') END END)=?2 LIMIT 2";
 
 fn id(value: &str, source: &str) -> bool {
-    !value.trim().is_empty() && value.len() <= 256 && value != source
+    !value.trim().is_empty() && value.len() <= MAX_PROVENANCE_ID_BYTES && value != source
 }
 
 pub(super) fn saved_relation(raw: &str, body: &str, thread: &str) -> Option<MessageProvenance> {
@@ -84,7 +85,7 @@ pub(super) fn unique_reverse(
     };
     // Inspect borrowed SQLite bytes before allocating identity strings.
     let receipt = match first.get_ref(0)? {
-        rusqlite::types::ValueRef::Text(bytes) if bytes.len() <= 256 => {
+        rusqlite::types::ValueRef::Text(bytes) if bytes.len() <= MAX_PROVENANCE_ID_BYTES => {
             match std::str::from_utf8(bytes) {
                 Ok(id) if !id.trim().is_empty() => id.to_owned(),
                 _ => return Ok(None),
@@ -93,7 +94,7 @@ pub(super) fn unique_reverse(
         _ => return Ok(None),
     };
     let body: Option<String> = match first.get_ref(1)? {
-        rusqlite::types::ValueRef::Text(bytes) if bytes.len() <= 256 => {
+        rusqlite::types::ValueRef::Text(bytes) if bytes.len() <= MAX_PROVENANCE_ID_BYTES => {
             std::str::from_utf8(bytes).ok().map(str::to_owned)
         }
         _ => None,
@@ -109,22 +110,70 @@ pub(super) fn unique_reverse(
     Ok(bounded_receipt(db, &receipt)?.map(|raw| (body, raw)))
 }
 
+/// Emit a direct receipt operation ID only for one bounded, valid receipt in
+/// the node's originating Thread. An ambiguous node has no deterministic owner.
+pub(super) fn client_operation_id(
+    db: &rusqlite::Connection,
+    node: &str,
+    thread: &str,
+) -> rusqlite::Result<Option<String>> {
+    use rusqlite::types::ValueRef;
+    let mut statement = db.prepare(
+        "SELECT CASE WHEN typeof(client_operation_id)='text' AND length(CAST(client_operation_id AS BLOB))<=?3 THEN client_operation_id END FROM receipt INDEXED BY receipt_message_node WHERE message_node_id=?1 AND target_thread_id=?2 LIMIT 2",
+    )?;
+    let mut rows = statement.query(rusqlite::params![
+        node,
+        thread,
+        MAX_PROVENANCE_ID_BYTES as i64
+    ])?;
+    let Some(row) = rows.next()? else {
+        return Ok(None);
+    };
+    let bytes = match row.get_ref(0)? {
+        ValueRef::Text(bytes) if bytes.len() <= MAX_PROVENANCE_ID_BYTES => Some(bytes),
+        _ => None,
+    };
+    let Some(bytes) = bytes else {
+        return Ok(None);
+    };
+    let candidate = std::str::from_utf8(bytes)
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .map(str::to_owned);
+    if rows.next()?.is_some() {
+        return Ok(None);
+    }
+    Ok(candidate)
+}
+
 /// Relate only receipts proved by durable node identity and its creation Thread.
 pub(super) fn project(
     db: &rusqlite::Connection,
     node: &str,
     thread: &str,
 ) -> rusqlite::Result<Option<MessageProvenance>> {
-    use rusqlite::OptionalExtension;
-    let own_row: Option<Option<String>> = db
-        .query_row(
-            "SELECT CASE WHEN length(CAST(id AS BLOB))<=256 THEN id END FROM receipt WHERE message_node_id=?1 AND target_thread_id=?2",
-            [node, thread],
-            |r| r.get::<_,Option<String>>(0),
-        )
-        .optional()?;
-    let own_present = own_row.is_some();
-    let own_relation = if let Some(Some(receipt)) = own_row {
+    let mut own_statement = db.prepare(
+        "SELECT CASE WHEN length(CAST(id AS BLOB))<=?3 THEN id END FROM receipt INDEXED BY receipt_message_node WHERE message_node_id=?1 AND target_thread_id=?2 LIMIT 2",
+    )?;
+    let mut own_rows = own_statement.query(rusqlite::params![
+        node,
+        thread,
+        MAX_PROVENANCE_ID_BYTES as i64
+    ])?;
+    let first_own = own_rows.next()?;
+    let own_present = first_own.is_some();
+    let own_id = if let Some(row) = first_own {
+        let id = row.get::<_, Option<String>>(0)?;
+        if own_rows.next()?.is_some() {
+            return Ok(None);
+        }
+        id
+    } else {
+        None
+    };
+    drop(own_rows);
+    drop(own_statement);
+    let own_relation = if let Some(receipt) = own_id {
         bounded_receipt(db, &receipt)?.and_then(|raw| saved_relation(&raw, node, thread))
     } else {
         None

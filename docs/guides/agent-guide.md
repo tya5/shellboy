@@ -102,6 +102,8 @@ the current Turn's snapshot. The provenance header itself adds no authority.
 | Output of a launched command | `shellboy shell get --execution WORK_EXECUTION_ID` | shell read with that same ID; continue using the read cursor |
 | Evidence for a conversation's decisions | `shellboy history search ...` / `history list ...` | history get by node ID; history relations for relationships |
 | The recent end (or a position) of a long Thread | `shellboy history window --thread THREAD_ID --before 20` | `--ordinal N --expect-node NODE_ID` to read around a position you saw; `cursor_expired` means the path changed, re-read from the end |
+
+History provenance may include `client_operation_id` on a user node when its original receipt uniquely proves the ID. Studio uses it only to reconcile its own plain-send pending row; it is not a general command-kind marker and is absent when evidence is ambiguous or unavailable.
 | Search across guides, documents, and history | `shellboy rag search --scope ... --query ...` | rag get by reference; explicitly include the history scope |
 
 Zero search hits or reading only one page is not proof of absence; check the command list in `shellboy --help`.
