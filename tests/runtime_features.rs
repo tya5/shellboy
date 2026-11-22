@@ -7674,7 +7674,7 @@ fn proactive_wait_witness(
 
 #[tokio::test]
 async fn sender_label_reaches_the_request_only_when_present_and_not_human() {
-    fn events(body: &Value) -> Vec<String> {
+    fn admission_preambles(body: &Value) -> Vec<String> {
         body["input"]
             .as_array()
             .unwrap()
@@ -7682,7 +7682,7 @@ async fn sender_label_reaches_the_request_only_when_present_and_not_human() {
             .filter(|v| v["role"] == "developer")
             .flat_map(|v| v["content"].as_array().into_iter().flatten())
             .filter_map(|v| v["text"].as_str())
-            .filter(|t| t.contains("\"sender_label\""))
+            .filter(|t| t.starts_with("Shellboy received message: "))
             .map(str::to_owned)
             .collect()
     }
@@ -7723,21 +7723,29 @@ async fn sender_label_reaches_the_request_only_when_present_and_not_human() {
         )
         .await;
         let sent = incoming(&control, &mut receive).await;
-        texts.push((text, events(&sent.body)));
+        texts.push((text, admission_preambles(&sent.body)));
         let input = sent.body["input"].as_array().unwrap();
         let position = input
             .iter()
             .position(|v| v["content"][0]["text"] == text)
             .expect("message text is unchanged");
         if label.is_some() && !human {
-            let notice = input[position + 1]["content"][0]["text"].as_str().unwrap();
-            assert!(notice.starts_with("Shellboy event v1: "), "{notice}");
+            let preamble = &input[position
+                .checked_sub(1)
+                .expect("receipt preamble precedes the body")];
+            assert_eq!(preamble["role"], "developer");
+            assert!(
+                preamble["content"][0]["text"]
+                    .as_str()
+                    .unwrap()
+                    .starts_with("Shellboy received message: ")
+            );
         }
     }
     assert_eq!(texts[0].1.len(), 1, "{:?}", texts[0]);
     assert!(texts[0].1[0].contains("app:todo") && texts[0].1[0].contains("not verified"));
-    assert!(texts[1].1.is_empty(), "no label, no notice");
-    assert!(texts[2].1.is_empty(), "human sender, no notice");
+    assert!(texts[1].1.is_empty(), "no label, no preamble");
+    assert!(texts[2].1.is_empty(), "human sender, no preamble");
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
     server.abort();
