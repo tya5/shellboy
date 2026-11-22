@@ -1216,8 +1216,34 @@ async fn attachment_list_pages_in_selected_order_and_observes_only_page_items() 
             .collect::<Vec<_>>(),
         ids[2..4].iter().map(String::as_str).collect::<Vec<_>>()
     );
+    assert!(
+        rest.items
+            .iter()
+            .all(|item| item.unavailable_reason.is_none())
+    );
     assert!(rest.next_cursor.is_some());
     assert_eq!(first.items.len(), 2);
+    let last: Page<AttachmentDetails> = serde_json::from_value(
+        store
+            .execute(request(rest.next_cursor), None)
+            .await
+            .unwrap()
+            .result,
+    )
+    .unwrap();
+    assert_eq!(
+        last.items
+            .iter()
+            .map(|item| item.attachment_id.as_str())
+            .collect::<Vec<_>>(),
+        ids[4..].iter().map(String::as_str).collect::<Vec<_>>()
+    );
+    assert!(last.next_cursor.is_none());
+    assert!(
+        last.items
+            .iter()
+            .all(|item| item.unavailable_reason.is_none())
+    );
 }
 
 #[tokio::test]

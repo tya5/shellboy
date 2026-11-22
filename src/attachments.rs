@@ -690,7 +690,8 @@ pub(crate) fn delivery_status(
 pub const ATTACHMENT_LIST_SQL: &str = "SELECT a.id,a.absolute_path,a.input_kind,a.ownership,s.state,s.reason,a.source_node_id,m.state,m.deleted_reason,s.selected_order FROM attachment_selection s INDEXED BY attachment_page_order JOIN attachment_ref a ON a.id=s.attachment_id LEFT JOIN managed_file m ON m.absolute_path=a.absolute_path WHERE s.thread_id=?1 AND s.selected_order<=?2 AND (s.selected_order,s.attachment_id)>(?3,?4) ORDER BY s.selected_order,s.attachment_id LIMIT ?5";
 
 /// Filesystem observations run only on a file/display worker, not the DB lane.
-pub(crate) fn observe_page(mut items: Vec<AttachmentDetails>) -> Vec<AttachmentDetails> {
+pub(crate) fn observe_page(items: &[AttachmentDetails]) -> Vec<AttachmentDetails> {
+    let mut items = items.to_vec();
     for item in &mut items {
         if item.unavailable_reason.is_some() {
             continue;

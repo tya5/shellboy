@@ -455,7 +455,7 @@ impl Store {
             let next_cursor = page.next_cursor;
             let items = self
                 .instructions
-                .file_work(move || Ok(crate::attachments::observe_page(page.items)))
+                .file_work(move || Ok(crate::attachments::observe_page(&page.items)))
                 .await?;
             return MutationResult::value(crate::protocol::Page { items, next_cursor });
         }
