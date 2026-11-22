@@ -433,7 +433,15 @@ keep the top-level `thread_id` used by queued-message cancellation unchanged.
 No schema/table/migration is added. Input cannot select a sender kind or IDs;
 Control derives them from the authenticated Origin or the trusted internal send
 entry point. Cross-data-dir CLI still strips Origin, retaining only the label.
-When a non-empty label is saved for a non-human sender, admission appends one `sender_label` context notice (message id, label, "self-asserted, not verified") after the message node, through the same append-only admission-notice path as `reply_expected`; message text is not changed and earlier nodes are not rewritten.
+Admission appends the received body, not a sender or reply notice. Replay and
+request inspection derive at most one developer preamble immediately before the
+body from the canonical admission receipt for that body and its creation Thread.
+It includes sender kind, the saved model Thread ID, a non-human sender's unverified
+label, and the exact reply command or original reply-to ID as applicable. It does
+not consult mutable duty state or expose human-only duties. Neither the derived
+preamble nor a substitute notice is stored. Legacy admission nodes retain their
+raw data and ordinals; replay and normal TUI skip them, and item projection
+returns them as `model_context` with no items.
 
 TUI sender display is confined to F6 message details (including the original
 page), fetched on demand through existing bounded original reads. It labels a

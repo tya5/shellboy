@@ -40,13 +40,13 @@ reimplemented. Studio title/header/styling is #25, not a Core prerequisite.
 | Reply-only node | Exact original receipt.reply.node_id/by reverse relation already exists for sender; add request ID projection | Need new synthetic notice for a node that may have no selected notice/path entry |
 | UI | Received body header consumes its own provenance; no notification line needed to identify sender | Two rendered sources require dedup/association/open-state complexity and extra missing-target states |
 | Old records | Unknown sender / absent relation; no reconstruction | Missing target cannot be backfilled from prose/adjacency safely |
-| Model replay | Existing admission notices remain model inputs, not UI authority | Risks changing provider replay/notice semantics just to serve UI |
+| Model replay | Superseded by #297: one receipt-derived developer preamble precedes the body; it is not stored or used as UI authority | Risks changing provider replay/notice semantics just to serve UI |
 
 Choose A. Do not add B as an alternate alias/fallback. Do not add sender fields to
 provider body JSON: the body node is identified by exact public ID and its existing
-NodeProvenance metadata. Keep model-facing notices unchanged for their original
-purpose. Any UI suppression of a redundant notice is a separately reviewed Studio
-presentation decision, never deletion of history or model input.
+NodeProvenance metadata. Core #297 supersedes the original notice behavior for model replay. The derived
+preamble is separate from UI provenance; legacy admission nodes remain in raw
+history without being presented as conversation items.
 
 ## Proposed public contract (not yet implemented)
 

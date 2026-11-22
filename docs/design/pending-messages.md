@@ -254,9 +254,10 @@ the redundant submitted copy must not collect the archived message source.
 `message ask` creates a pending reply duty in the acceptance
 receipt. Ordinary sends use `message send`, retaining their existing fingerprint.
 At most 16 duties (`MAX_PENDING_REPLY_DUTIES`) may remain pending per recipient Thread, including held or
-unassigned input. Replay does not create a second duty. A model may require a reply from any Thread, including its own. Admission appends an ordered, once-only
-`reply_expected` notice after the input in the same transaction. Explicit
-replies use `message reply`; Turn end messages do not satisfy duties.
+unassigned input. Replay does not create a second duty. A model may require a reply from any Thread, including its own. Admission appends only the received body in the revision-checked transaction.
+Replay and inspection derive the reply command from the exact admission receipt
+and put it in the single developer preamble before the body; no separate notice
+is stored. Explicit replies use `message reply`; Turn end messages do not satisfy duties.
 
 Cancellation is available to any model or human caller. A queued input is
 archived and its duty is cancelled together. An admitted input stays in history;
