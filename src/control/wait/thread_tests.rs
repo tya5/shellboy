@@ -157,3 +157,46 @@ async fn reply_waiters_share_one_terminal_fact_and_leave_no_pending_records() {
         owner.shutdown().await.unwrap();
     }).await.unwrap();
 }
+
+#[tokio::test]
+async fn runtime_thread_delete_wakes_parked_thread_and_reply_waits() {
+    use crate::protocol::{Command, PROTOCOL_VERSION, Request, ThreadDeleteArgs};
+
+    crate::test_watchdog::watchdog("runtime deletion wakes registered waits", async {
+        let root = tempfile::tempdir().unwrap();
+        let owner = open(root.path()).await;
+        let control = Control::new(&owner, root.path().into());
+        owner.db.call(|db| {
+            db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('recipient','/','/a','p','m','0');
+                INSERT INTO node(id,kind,created_at,payload_json)VALUES('message','user','0','{}');
+                INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,result_json)
+                VALUES('receipt','send','{}','recipient','message','held','0','{\"expect_reply\":true,\"reply\":{\"state\":\"pending\"}}');")?;
+            Ok(())
+        }).await.unwrap();
+        let timeout_ms = 2 * crate::test_watchdog::WATCHDOG.as_millis() as u64;
+        let mut thread_query = args("recipient", None);
+        thread_query.timeout_ms = timeout_ms;
+        let thread_wait = tokio::spawn(observe(control.clone(), "thread-wait".into(), thread_query, None, CancellationToken::new()));
+        control.waits.parked.notified().await;
+        let reply_wait = tokio::spawn(observe(control.clone(), "reply-wait".into(), WaitArgs {
+            conditions: vec![WaitCondition::ReplyReceived { message_id: "message".into() }],
+            timeout_ms,
+            after: None,
+        }, None, CancellationToken::new()));
+        control.waits.parked.notified().await;
+        let response = control.request(Request {
+            protocol_version: PROTOCOL_VERSION,
+            operation_id: format!("{}:delete-recipient", owner.instance_id),
+            command: Command::ThreadDelete(ThreadDeleteArgs { thread_id: "recipient".into(), descendants: false, preview_marker: None }),
+            origin: None,
+        }).await;
+        assert!(response.ok, "{:?}", response.error);
+        let (thread_result, reply_result) = tokio::join!(thread_wait, reply_wait);
+        assert_eq!(thread_result.unwrap().unwrap()["status"], "unavailable");
+        let reply = reply_result.unwrap().unwrap();
+        assert_eq!(reply["status"], "satisfied");
+        assert_eq!(reply["snapshot"]["conditions"][0]["state"], "recipient_deleted");
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+    }).await.unwrap();
+}

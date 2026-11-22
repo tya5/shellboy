@@ -928,6 +928,7 @@ impl Store {
         delete: impl FnOnce(&Transaction<'_>) -> Result<MutationResult> + Send + 'static,
     ) -> Result<MutationResult> {
         let instance = self.instance_id.clone();
+        let wakes = self.database.wait_wakes();
         self.database
             .call(move |db| {
                 let tx = db.transaction()?;
@@ -950,6 +951,9 @@ impl Store {
                     .map_err(Clone::clone);
                 save_runtime_outcome(&tx, &instance, &operation_id, &response)?;
                 tx.commit()?;
+                if let Ok(result) = &mut outcome {
+                    wakes.publish(std::mem::take(&mut result.wait_keys));
+                }
                 Ok(outcome)
             })
             .await
@@ -2209,7 +2213,8 @@ impl Store {
         let accepted_thread = accepted.thread_id.clone();
         let mut result = MutationResult::value(&accepted)?;
         use super::wait::wakes::Key;
-        if state == "accepted" {
+        if state == "accepted" || recovery_changed {
+            // A successful resume can accept older inputs while the new receipt stays held.
             result.wait_keys.push(Key::CallerInput(id.clone()));
         }
         if matches!(

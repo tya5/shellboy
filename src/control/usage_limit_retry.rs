@@ -122,7 +122,7 @@ pub(super) fn public_reason(reason: Option<String>) -> Option<String> {
 
 pub(super) enum Step {
     Waiting(Option<DateTime<Utc>>),
-    Admitted(String, [super::wait::wakes::Key; 3]),
+    Admitted(String, [super::wait::wakes::Key; 4]),
 }
 
 pub(super) fn step(
@@ -148,9 +148,12 @@ pub(super) fn step(
         serde_json::json!({"kind":"owner"}),
         &now.to_rfc3339(),
     )?;
+    use super::wait::wakes::Key;
+    let [thread, run, turn] =
+        Key::recovery(candidate.thread.clone(), candidate.run, candidate.turn);
     Ok(Step::Admitted(
         candidate.thread.clone(),
-        super::wait::wakes::Key::recovery(candidate.thread, candidate.run, candidate.turn),
+        [thread, run, turn, Key::CallerInput(candidate.thread)],
     ))
 }
 
