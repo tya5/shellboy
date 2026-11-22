@@ -181,12 +181,18 @@ async fn accepted_send_operation_id_is_projected_after_driver_admission() {
     )
     .await;
     let thread_id = thread["thread_id"].as_str().unwrap();
+    // The saved JSON envelope pushes these inputs beyond the window source budget.
+    let prefix = "same saved request";
+    let body = format!(
+        "{prefix}{}",
+        "x".repeat(shellboy::history::items::NODE_SOURCE_BYTES - prefix.len())
+    );
     let send = || {
         Request::new(
             format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
             Command::MessageSend(MessageSendArgs {
                 thread_id: Some(thread_id.into()),
-                text: "same saved request".into(),
+                text: body.clone(),
                 deliver: Deliver::Next,
                 human: false,
                 resume_recovery: false,
@@ -251,7 +257,7 @@ async fn accepted_send_operation_id_is_projected_after_driver_admission() {
     let window = Command::HistoryWindow(
         serde_json::from_value(json!({"thread_id":thread_id,"before":20,"items":true})).unwrap(),
     );
-    for projection in [list(), window] {
+    for (projection, window_items) in [(list(), false), (window, true)] {
         let page = command(&control, projection).await;
         for (node, operation_id) in expected {
             let item = page["items"]
@@ -260,6 +266,9 @@ async fn accepted_send_operation_id_is_projected_after_driver_admission() {
                 .iter()
                 .find(|item| item["node_id"].as_str() == Some(node.as_str()))
                 .unwrap();
+            if window_items {
+                assert_eq!(item["items"][0]["reason"], "source_budget");
+            }
             assert_eq!(
                 item["provenance"]["client_operation_id"].as_str(),
                 Some(operation_id.as_str())
