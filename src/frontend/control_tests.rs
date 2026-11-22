@@ -834,7 +834,7 @@ async fn recovery_projection_uses_saved_failure_and_freezes_time_without_guessin
         let reason = serde_json::json!({"code":"io_failed","message":"provider: fixture failure"});
         let model = serde_json::json!({"error":{"kind":"provider","message":"fixture failure","status":500}});
         db.execute("UPDATE turn SET created_at='2026-10-25T00:00:00Z',recovery_reason_json=?1 WHERE id='target-run'",[reason.to_string()])?;
-        db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,error_json,started_at,ended_at) VALUES('a','target-run',0,0,'fixture','fixture-model',0,'incomplete','{}',?1,'2026-10-25T00:00:00Z','2026-10-25T00:00:02Z')",[model.to_string()])?;
+        db.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,error_json,started_at,ended_at) VALUES('conversation',(SELECT thread_id FROM turn WHERE id='target-run'),'a','target-run',0,0,'fixture','fixture-model',0,'incomplete','{}',?1,'2026-10-25T00:00:00Z','2026-10-25T00:00:02Z')",[model.to_string()])?;
         db.execute("INSERT INTO node(id,kind,created_at,payload_json,payload_bytes) VALUES('pending','message','now','{}',2),('result','tool_result','now','{}',2)",[])?;
         db.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,run_id,turn_id,state,created_at) VALUES('pending','op','{}','thread','pending','target-run','target-run','held','now')",[])?;
         db.execute("INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES('g','a','target-run','completed','now')",[])?;
@@ -979,7 +979,7 @@ async fn recovery_projection_uses_saved_failure_and_freezes_time_without_guessin
 async fn seed_pinned_tool_history(control: &std::sync::Arc<crate::control::Control>) {
     control.store.database.call(|db|{
         let tx=db.transaction()?;
-        tx.execute_batch("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('a','target-run',0,0,'fixture','fixture-model',0,'completed','{}','now'); INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES('g','a','target-run','completed','now'); INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state,operation_id)VALUES('g','call',0,'shell','{\"command\":\"tail -f /dev/null\"}','completed','execution'); INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at)VALUES('execution','target-run','target-run','shell-operation','running','/','{}','UTF-8','UTF-8','closed','now');")?;
+        tx.execute_batch("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='target-run'),'a','target-run',0,0,'fixture','fixture-model',0,'completed','{}','now'); INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES('g','a','target-run','completed','now'); INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state,operation_id)VALUES('g','call',0,'shell','{\"command\":\"tail -f /dev/null\"}','completed','execution'); INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at)VALUES('execution','target-run','target-run','shell-operation','running','/','{}','UTF-8','UTF-8','closed','now');")?;
         crate::history::append_node(&tx,"thread","call-node",Some("target-run"),"assistant_response",&serde_json::json!({"group_id":"g","output":[{"type":"function_call","name":"shell","call_id":"call","arguments":"{\"command\":\"tail -f /dev/null\"}"}]}),"now")?;
         for i in 0..60 {crate::history::append_node(&tx,"thread",&format!("speech-{i}"),Some("target-run"),"assistant_response",&serde_json::json!({"text":format!("saved answer {i}")}),"now")?;}
         tx.commit()?;Ok(())
@@ -1662,7 +1662,7 @@ async fn saved_usage_detail_open_and_changed_refresh_use_scoped_worker_results()
     };
     let (root, owner, control, server) = fixture().await;
     owner.db.call(|db|{
-        db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at,ended_at)VALUES('usage-ui','target-run',0,0,'fixture','fixture-model',0,'completed','{}','{\"input_tokens\":10}','2026-10-30T00:00:00Z','2026-10-30T00:00:00.010Z')",[])?;Ok(())
+        db.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at,ended_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='target-run'),'usage-ui','target-run',0,0,'fixture','fixture-model',0,'completed','{}','{\"input_tokens\":10}','2026-10-30T00:00:00Z','2026-10-30T00:00:00.010Z')",[])?;Ok(())
     }).await.unwrap();
     let (send, receive) = actions::channel(32);
     let (updates, incoming) = std::sync::mpsc::sync_channel(128);

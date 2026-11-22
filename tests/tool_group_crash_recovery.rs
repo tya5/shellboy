@@ -211,7 +211,7 @@ async fn startup_repairs_pending_partial_old_terminal_and_child_groups_idempoten
             tx.execute("INSERT INTO thread(id,parent_thread_id,cwd,agents_path,profile_id,model_id,updated_at)VALUES(?1,?2,?3,'','fixture','fixture','now')",params![thread,child.then_some("parent"),cwd])?;
             tx.execute("INSERT INTO run(id,thread_id,state,created_at) VALUES(?1,?2,?3,'now')",params![run,thread,if terminal{"stopped"}else{"live"}])?;
             tx.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES(?1,?2,?3,?4,'now')",params![turn,thread,run,if terminal{"stopped"}else{"running"}])?;
-            tx.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES(?1,?2,0,0,'fixture','fixture',0,'completed','{}','now')",params![attempt,turn])?;
+            tx.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id=?2),?1,?2,0,0,'fixture','fixture',0,'completed','{}','now')",params![attempt,turn])?;
             tx.execute("INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES(?1,?2,?3,'running','now')",params![group,attempt,turn])?;
             let calls=(0..count).map(|i|json!({"type":"function_call","call_id":format!("call-{thread}-{i}"),"name":"shell","arguments":"{\"command\":\"fixture never executes\"}"})).collect::<Vec<_>>();
             history::append_node(&tx,thread,&source,Some(&turn),"assistant_response",&json!({"output":calls,"group_id":group,"reasoning_epoch":0}),"now")?;
@@ -684,7 +684,7 @@ fn shutdown_owner_crash_child() {
             tx.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','','','fixture','fixture','now')",[])?;
             tx.execute("INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','live','now')",[])?;
             tx.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','t','r','running','now')",[])?;
-            tx.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('a','u',0,0,'fixture','fixture',0,'completed','{}','now')",[])?;
+            tx.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='u'),'a','u',0,0,'fixture','fixture',0,'completed','{}','now')",[])?;
             tx.execute("INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES('g','a','u','running','now')",[])?;
             let calls=(0..3).map(|i|json!({"type":"function_call","call_id":format!("c{i}"),"name":"shell","arguments":"{\"command\":\"MUST_NOT_REEXECUTE\"}"})).collect::<Vec<_>>();
             history::append_node(&tx,"t","calls",Some("u"),"assistant_response",&json!({"output":calls,"group_id":"g","reasoning_epoch":0}),"now")?;

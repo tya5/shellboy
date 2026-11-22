@@ -115,14 +115,19 @@ CREATE TABLE view_state(
  anchor_offset INTEGER NOT NULL DEFAULT 0 CHECK(anchor_offset>=0), follow_tail INTEGER NOT NULL DEFAULT 1 CHECK(follow_tail IN (0,1)),
  input_state_json TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(input_state_json)));
 
-CREATE TABLE model_attempt(
- id TEXT PRIMARY KEY NOT NULL, turn_id TEXT NOT NULL REFERENCES turn(id),
+CREATE TABLE "model_attempt"(
+ id TEXT PRIMARY KEY NOT NULL, turn_id TEXT REFERENCES turn(id),
+ kind TEXT NOT NULL CHECK(kind IN ('conversation','summary')) CHECK(kind='summary' OR turn_id IS NOT NULL),
+ thread_id TEXT NOT NULL REFERENCES thread(id),
  generation INTEGER NOT NULL CHECK(generation>=0), selection_revision INTEGER NOT NULL CHECK(selection_revision>=0),
  profile_id TEXT NOT NULL, model_id TEXT NOT NULL, effort TEXT,
  reasoning_epoch INTEGER NOT NULL CHECK(reasoning_epoch>=0), state TEXT NOT NULL CHECK(state IN ('preparing','inflight','completed','failed','incomplete','cancelled')), input_manifest_json TEXT NOT NULL CHECK(json_valid(input_manifest_json)),
  response_id TEXT, error_json TEXT, usage_json TEXT, started_at TEXT NOT NULL, ended_at TEXT);
 
 CREATE INDEX attempts_by_turn ON model_attempt(turn_id,started_at);
+CREATE INDEX attempts_by_thread_kind ON model_attempt(thread_id,kind,started_at);
+CREATE INDEX summary_attempt_group ON model_attempt(thread_id,json_extract(input_manifest_json,'$.summary.id')) WHERE kind='summary';
+CREATE INDEX attempts_by_kind ON model_attempt(kind);
 
 CREATE TABLE output_item(
  attempt_id TEXT NOT NULL REFERENCES model_attempt(id), ordinal INTEGER NOT NULL CHECK(ordinal>=0),
@@ -354,7 +359,7 @@ CREATE INDEX gc_bytes_operation_receipt ON operation_receipt(octet_length(origin
 
 CREATE INDEX gc_bytes_tool_call ON tool_call(octet_length(arguments_json));
 
-CREATE INDEX gc_bytes_app_meta_history ON app_meta(octet_length(value)) WHERE key LIKE 'summary.part.%' OR key LIKE 'wait.pending.%' OR key LIKE 'compact.result.%' OR key LIKE 'revisit.%' OR key LIKE 'summary.usage.%';
+CREATE INDEX gc_bytes_app_meta_history ON app_meta(octet_length(value)) WHERE key LIKE 'summary.part.%' OR key LIKE 'wait.pending.%' OR key LIKE 'compact.result.%' OR key LIKE 'revisit.%';
 
 CREATE INDEX gc_bytes_output_chunk ON output_chunk(length(bytes));
 
@@ -422,7 +427,7 @@ PRAGMA user_version=18;
 
 -- Display context usage (#141): exact newest matching completed attempt per
 -- turn in one seek. Derived index only; implicit trailing rowid orders it.
-CREATE INDEX attempts_completed_scope ON model_attempt(turn_id,profile_id,model_id) WHERE state='completed';
+CREATE INDEX attempts_completed_scope ON model_attempt(turn_id,profile_id,model_id) WHERE state='completed' AND kind='conversation' AND json_extract(input_manifest_json,'$.adoption.outcome')='adopted';
 INSERT INTO schema_migration(version,name) VALUES(19,'0019_context_attempt_scope');
 PRAGMA user_version=19;
 
@@ -530,13 +535,13 @@ CREATE TRIGGER logical_history_tool_call_update AFTER UPDATE OF arguments_json O
  UPDATE quota_counter SET logical_bytes=logical_bytes+(COALESCE(octet_length(NEW.arguments_json),0))-(COALESCE(octet_length(OLD.arguments_json),0)),revision=revision+1 WHERE category='logical.history';
 END;
 CREATE TRIGGER logical_history_app_meta_insert AFTER INSERT ON app_meta BEGIN
- UPDATE quota_counter SET logical_bytes=logical_bytes+(CASE WHEN (NEW.key LIKE 'summary.part.%' OR NEW.key LIKE 'wait.pending.%' OR NEW.key LIKE 'compact.result.%' OR NEW.key LIKE 'revisit.%' OR NEW.key LIKE 'summary.usage.%') THEN COALESCE(octet_length(NEW.value),0) ELSE 0 END),revision=revision+1 WHERE category='logical.history';
+ UPDATE quota_counter SET logical_bytes=logical_bytes+(CASE WHEN (NEW.key LIKE 'summary.part.%' OR NEW.key LIKE 'wait.pending.%' OR NEW.key LIKE 'compact.result.%' OR NEW.key LIKE 'revisit.%') THEN COALESCE(octet_length(NEW.value),0) ELSE 0 END),revision=revision+1 WHERE category='logical.history';
 END;
 CREATE TRIGGER logical_history_app_meta_delete AFTER DELETE ON app_meta BEGIN
- UPDATE quota_counter SET logical_bytes=logical_bytes+-(CASE WHEN (OLD.key LIKE 'summary.part.%' OR OLD.key LIKE 'wait.pending.%' OR OLD.key LIKE 'compact.result.%' OR OLD.key LIKE 'revisit.%' OR OLD.key LIKE 'summary.usage.%') THEN COALESCE(octet_length(OLD.value),0) ELSE 0 END),revision=revision+1 WHERE category='logical.history';
+ UPDATE quota_counter SET logical_bytes=logical_bytes+-(CASE WHEN (OLD.key LIKE 'summary.part.%' OR OLD.key LIKE 'wait.pending.%' OR OLD.key LIKE 'compact.result.%' OR OLD.key LIKE 'revisit.%') THEN COALESCE(octet_length(OLD.value),0) ELSE 0 END),revision=revision+1 WHERE category='logical.history';
 END;
 CREATE TRIGGER logical_history_app_meta_update AFTER UPDATE OF key,value ON app_meta BEGIN
- UPDATE quota_counter SET logical_bytes=logical_bytes+(CASE WHEN (NEW.key LIKE 'summary.part.%' OR NEW.key LIKE 'wait.pending.%' OR NEW.key LIKE 'compact.result.%' OR NEW.key LIKE 'revisit.%' OR NEW.key LIKE 'summary.usage.%') THEN COALESCE(octet_length(NEW.value),0) ELSE 0 END)-(CASE WHEN (OLD.key LIKE 'summary.part.%' OR OLD.key LIKE 'wait.pending.%' OR OLD.key LIKE 'compact.result.%' OR OLD.key LIKE 'revisit.%' OR OLD.key LIKE 'summary.usage.%') THEN COALESCE(octet_length(OLD.value),0) ELSE 0 END),revision=revision+1 WHERE category='logical.history';
+ UPDATE quota_counter SET logical_bytes=logical_bytes+(CASE WHEN (NEW.key LIKE 'summary.part.%' OR NEW.key LIKE 'wait.pending.%' OR NEW.key LIKE 'compact.result.%' OR NEW.key LIKE 'revisit.%') THEN COALESCE(octet_length(NEW.value),0) ELSE 0 END)-(CASE WHEN (OLD.key LIKE 'summary.part.%' OR OLD.key LIKE 'wait.pending.%' OR OLD.key LIKE 'compact.result.%' OR OLD.key LIKE 'revisit.%') THEN COALESCE(octet_length(OLD.value),0) ELSE 0 END),revision=revision+1 WHERE category='logical.history';
 END;
 CREATE TRIGGER logical_raw_output_chunk_insert AFTER INSERT ON output_chunk BEGIN
  UPDATE quota_counter SET logical_bytes=logical_bytes+(COALESCE(length(NEW.bytes),0)),revision=revision+1 WHERE category='logical.raw';
@@ -782,4 +787,5 @@ INSERT INTO schema_migration(version,name) VALUES(48,'0048_human_question_path_a
 INSERT INTO schema_migration(version,name) VALUES(49,'0049_generated_summary_user_role');
 INSERT INTO schema_migration(version,name) VALUES(50,'0050_attachment_page_order');
 INSERT INTO schema_migration(version,name) VALUES(51,'0051_thread_schedule');
-PRAGMA user_version=51;
+INSERT INTO schema_migration(version,name) VALUES(52,'0052_unified_model_attempt');
+PRAGMA user_version=52;

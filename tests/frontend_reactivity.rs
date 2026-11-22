@@ -98,7 +98,7 @@ impl Fixture {
                     tx.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at,ended_at)VALUES(?1,'reactive','lr','completed',?2,?2)",rusqlite::params![format!("lt{i:03}"),format!("2026-01-01T00:{:02}:{:02}Z",i/60,i%60)])?;
                     for a in 0..40usize {
                         let usage=(i==89&&a==39).then(||"{\"input_tokens\":159534,\"input_tokens_details\":{\"cached_tokens\":103424}}".to_owned());
-                        tx.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at)VALUES(?1,?2,0,0,'fixture','fixture0',0,'completed','{}',?3,?4)",rusqlite::params![format!("la{i:03}-{a:02}"),format!("lt{i:03}"),usage,format!("2026-01-01T00:00:{a:02}Z")])?;
+                        tx.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id=?2),?1,?2,0,0,'fixture','fixture0',0,'completed',json_object('adoption',json_object('outcome','adopted')),?3,?4)",rusqlite::params![format!("la{i:03}-{a:02}"),format!("lt{i:03}"),usage,format!("2026-01-01T00:00:{a:02}Z")])?;
                     }
                 }
             }
@@ -808,7 +808,7 @@ async fn real_cli_raw_gc_updates_open_f6_without_input_or_source_rewrite() {
         let tx=db.transaction()?;
         tx.execute("INSERT INTO run(id,thread_id,state,created_at,ended_at)VALUES('gc-run','reactive','completed',?1,?1)",[&stamp])?;
         tx.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at,ended_at)VALUES('gc-turn','reactive','gc-run','completed',?1,?1)",[&stamp])?;
-        tx.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('gc-attempt','gc-turn',0,0,'fixture','fixture0',0,'completed','{}',?1)",[&stamp])?;
+        tx.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='gc-turn'),'gc-attempt','gc-turn',0,0,'fixture','fixture0',0,'completed','{}',?1)",[&stamp])?;
         tx.execute("INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES('gc-group','gc-attempt','gc-turn','completed',?1)",[&stamp])?;
         tx.execute("INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,saved_sequence,exit_code,output_complete,started_at,ended_at)VALUES('gc-shell','gc-run','gc-turn','gc-shell','exited','/','{}','UTF-8','UTF-8','closed',1,0,1,?1,?1)",[&stamp])?;
         tx.execute("INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state,operation_id)VALUES('gc-group','gc-call',0,'shell','{\"command\":\"printf GC_SOURCE_COMMAND\"}','completed','gc-shell')",[])?;
@@ -1237,7 +1237,7 @@ async fn history_gc_f7_ordering(hint_first: bool) {
         tx.execute("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES('f7-parent','F7_PARENT',?1,'','fixture','fixture0',?2)",rusqlite::params![cwd,stamp])?;
         tx.execute("INSERT INTO run(id,thread_id,state,created_at,ended_at)VALUES('f7-run','f7-parent','completed',?1,?1)",[&stamp])?;
         tx.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at,ended_at)VALUES('f7-turn','f7-parent','f7-run','completed',?1,?1)",[&stamp])?;
-        tx.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('f7-attempt','f7-turn',0,0,'fixture','fixture0',0,'completed','{}',?1)",[&stamp])?;
+        tx.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='f7-turn'),'f7-attempt','f7-turn',0,0,'fixture','fixture0',0,'completed','{}',?1)",[&stamp])?;
         tx.execute("INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES('f7-group','f7-attempt','f7-turn','completed',?1)",[&stamp])?;
         shellboy::history::append_node(&tx,"f7-parent","f7-paid-prefix",Some("f7-turn"),"assistant_response",&json!({"text":"PAID_R6_HISTORY shared parent prefix remains in the child"}),&stamp)?;
         shellboy::history::append_node(&tx,"f7-parent",CALL,Some("f7-turn"),"assistant_response",&call_payload,&stamp)?;

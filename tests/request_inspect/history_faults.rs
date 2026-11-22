@@ -112,7 +112,7 @@ async fn diagnosis_284_active_incomplete_and_settled_corrupt_groups() {
         .unwrap();
         tx.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('turn','fixture','run',?1,'now')", [turn_state]).unwrap();
         let manifest = json!({"replay":{"nodes":0,"sha256":sha256(b"")}}).to_string();
-        tx.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('attempt','turn',0,0,'fixture','synthetic',0,'completed',?1,'now')", [&manifest]).unwrap();
+        tx.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='turn'),'attempt','turn',0,0,'fixture','synthetic',0,'completed',?1,'now')", [&manifest]).unwrap();
         tx.execute(
             "INSERT INTO tool_group VALUES('group','attempt','turn',?1,'now')",
             [group_state],
@@ -225,10 +225,10 @@ async fn diagnosis_284_active_incomplete_and_settled_corrupt_groups() {
             .unwrap();
         let full_manifest =
             json!({"replay":{"nodes":count,"sha256":sha256(framed.as_bytes())}}).to_string();
-        tx.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('full-attempt','turn',0,0,'fixture','synthetic',0,'completed',?1,'later')",[full_manifest]).unwrap();
+        tx.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='turn'),'full-attempt','turn',0,0,'fixture','synthetic',0,'completed',?1,'later')",[full_manifest]).unwrap();
         let stale_manifest =
             json!({"replay":{"nodes":count,"sha256":"not-the-selected-prefix"}}).to_string();
-        tx.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('stale-attempt','turn',0,0,'fixture','synthetic',0,'completed',?1,'later')",[stale_manifest]).unwrap();
+        tx.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='turn'),'stale-attempt','turn',0,0,'fixture','synthetic',0,'completed',?1,'later')",[stale_manifest]).unwrap();
         tx.commit().unwrap();
         drop(db);
         let before = std::fs::read(&path).unwrap();

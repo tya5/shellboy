@@ -12,7 +12,7 @@ pub(crate) fn terminal_attempt_fixture(attempt_id: &str, state: &str) -> Connect
          CREATE TABLE run(id TEXT PRIMARY KEY,thread_id TEXT NOT NULL,state TEXT NOT NULL);
          CREATE TABLE turn(id TEXT PRIMARY KEY,thread_id TEXT NOT NULL,run_id TEXT NOT NULL,state TEXT NOT NULL,generation INTEGER NOT NULL);
          CREATE TABLE model_attempt(
-             id TEXT PRIMARY KEY,turn_id TEXT NOT NULL,state TEXT NOT NULL,generation INTEGER NOT NULL,
+             id TEXT PRIMARY KEY,kind TEXT NOT NULL,thread_id TEXT NOT NULL,turn_id TEXT NOT NULL,state TEXT NOT NULL,generation INTEGER NOT NULL,
              error_json TEXT,response_id TEXT,usage_json TEXT,ended_at TEXT,
              input_manifest_json TEXT NOT NULL DEFAULT '{}',profile_id TEXT NOT NULL,model_id TEXT NOT NULL
          );
@@ -22,8 +22,8 @@ pub(crate) fn terminal_attempt_fixture(attempt_id: &str, state: &str) -> Connect
     )
     .expect("create relational terminal-attempt fixture");
     db.execute(
-        "INSERT INTO model_attempt(id,turn_id,state,generation,error_json,response_id,usage_json,ended_at,input_manifest_json,profile_id,model_id)
-         VALUES(?1,'turn',?2,1,'{\"original\":true}','original','{}','original','{}','c','m')",
+        "INSERT INTO model_attempt(kind,thread_id,id,turn_id,state,generation,error_json,response_id,usage_json,ended_at,input_manifest_json,profile_id,model_id)
+         VALUES('conversation',(SELECT thread_id FROM turn WHERE id='turn'),?1,'turn',?2,1,'{\"original\":true}','original','{}','original','{}','c','m')",
         rusqlite::params![attempt_id, state],
     )
     .expect("insert scoped model-attempt fixture");

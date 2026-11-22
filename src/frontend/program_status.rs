@@ -288,7 +288,7 @@ mod tests {
                 insert(&tx, "stopped", Some("stopped"), "stopped", None, None)?;
                 insert(&tx, "idle", None, "completed", None, None)?;
                 tx.execute(
-                    "INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at) SELECT 'a-'||id,id,0,0,'fixture','fixture',0,CASE WHEN state='running' THEN 'inflight' WHEN state='recovery_wait' THEN 'failed' ELSE 'completed' END,'{}','2026-01-01' FROM turn",
+                    "INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at) SELECT 'conversation',thread_id, 'a-'||id,id,0,0,'fixture','fixture',0,CASE WHEN state='running' THEN 'inflight' WHEN state='recovery_wait' THEN 'failed' ELSE 'completed' END,'{}','2026-01-01' FROM turn",
                     [],
                 )?;
                 tx.commit()?;

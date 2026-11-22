@@ -2253,7 +2253,7 @@ async fn saved_usage_queries_and_gets_share_totals_without_receipts_or_schema_ch
         for (id,thread) in [("usage-parent",p),("usage-child",c)] {
             db.execute("INSERT INTO run(id,thread_id,state,created_at,ended_at)VALUES(?1,?2,'completed','2026-10-30T00:00:00+00:00','2026-10-30T00:00:01+00:00')",rusqlite::params![id,thread])?;
             db.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at,ended_at)VALUES(?1,?2,?1,'completed','2026-10-30T00:00:00+00:00','2026-10-30T00:00:01+00:00')",rusqlite::params![id,thread])?;
-            db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at,ended_at)VALUES(?1,?1,0,0,'test','fixture',0,'completed','{}','{\"input_tokens\":10,\"input_tokens_details\":{\"cached_tokens\":0}}','2026-10-30T00:00:00+00:00','2026-10-30T00:00:00.010+00:00')",[id])?;
+            db.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at,ended_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id=?1),?1,?1,0,0,'test','fixture',0,'completed','{}','{\"input_tokens\":10,\"input_tokens_details\":{\"cached_tokens\":0}}','2026-10-30T00:00:00+00:00','2026-10-30T00:00:00.010+00:00')",[id])?;
         }
         Ok(())
     }).await.unwrap();

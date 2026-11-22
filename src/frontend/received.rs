@@ -881,7 +881,7 @@ mod tests {
         owner.db.call(move |db| {
             db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','fixture','fixture','fixture','fixture','now'); INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','live','now'); INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','t','r','recovery_wait','now'); INSERT INTO node(id,turn_id,kind,created_at,payload_json,payload_bytes)VALUES('anchor','u','user_message','now','{}',2); INSERT INTO thread_path(thread_id,node_id,ordinal)VALUES('t','anchor',0); UPDATE thread SET cursor_node_id='anchor' WHERE id='t';")?;
             db.execute("INSERT INTO node(id,turn_id,kind,created_at,payload_json,payload_bytes)VALUES('audit','u','incomplete_response','now',?1,length(?1))", [&saved])?;
-            db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,error_json,started_at)VALUES('a','u',0,0,'fixture','fixture',0,'incomplete','{}',?1,'now')", [&saved])?;
+            db.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,error_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='u'),'a','u',0,0,'fixture','fixture',0,'incomplete','{}',?1,'now')", [&saved])?;
             Ok(())
         }).await.unwrap();
         let control = Control::new(&owner, root.path().into());

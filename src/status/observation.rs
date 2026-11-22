@@ -719,8 +719,8 @@ mod tests {
           INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,created_at) VALUES('message-op','fixture','{}','h','completed','2026-11-01T00:00:00Z');
           INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,run_id,turn_id,state,created_at,updated_at,hold_reason,result_json) VALUES
             ('receipt','message-op','{}','scope','message','r','t','applied','2026-11-01T00:00:00Z','2026-11-01T00:00:02Z','saved-hold','{"deliver":"complete","delivery_context":{"reason":"run_completion"}}');
-          INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at,ended_at,error_json) VALUES
-            ('a','t',0,0,'attempt-profile','attempt-model',0,'failed','{}','2026-11-01T00:00:00Z','2026-11-01T00:00:02Z','{"code":"saved-attempt"}');
+          INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at,ended_at,error_json) VALUES
+            ('conversation',(SELECT thread_id FROM turn WHERE id='t'),'a','t',0,0,'attempt-profile','attempt-model',0,'failed','{}','2026-11-01T00:00:00Z','2026-11-01T00:00:02Z','{"code":"saved-attempt"}');
         "#).unwrap();
         db
     }

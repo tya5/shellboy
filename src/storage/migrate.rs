@@ -3,6 +3,7 @@ use super::{StorageError, migration_integrity::Impact, validate_schema};
 use rusqlite::Connection;
 
 mod a_state_scope;
+mod summary_attempts;
 
 pub(super) struct Migration {
     pub version: i64,
@@ -265,6 +266,11 @@ pub(super) const MIGRATIONS: &[Migration] = &[
             "output_chunk",
         ])),
     },
+    Migration {
+        version: 52,
+        sql: include_str!("../../migrations/0052_unified_model_attempt.sql"),
+        foreign_keys: None,
+    },
 ];
 
 pub(super) fn run(
@@ -333,13 +339,17 @@ pub(super) fn run(
             if migration.version == 4 {
                 migrate_attachment_sources(&transaction)?;
             }
-            if matches!(migration.version, 39 | 51) {
+            if migration.version == 52 {
+                summary_attempts::convert(&transaction)?;
+                transaction.execute_batch(include_str!("migrate/retire_summary_ledger.sql"))?;
+            }
+            if matches!(migration.version, 39 | 51 | 52) {
                 super::check_integrity(&transaction, true, false)?;
             }
             transaction.commit()?;
             Ok(())
         };
-        if matches!(migration.version, 39 | 51) {
+        if matches!(migration.version, 39 | 51 | 52) {
             with_foreign_keys_disabled(connection, apply)?;
         } else {
             apply(connection)?;
@@ -1099,7 +1109,7 @@ mod activity_migration_tests {
         // by downgrading today's schema or replaying the executor under test.
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("conversation.sqlite");
-        let usage = r#"{"id":"saved","thread_id":"old","requests":3,"map_requests":2,"reduce_requests":1,"oversized_reduce_parts":4,"input_tokens":{"known_sum":10,"unknown_count":0,"overflow":false},"cached_tokens":{"known_sum":10,"unknown_count":0,"overflow":false},"cache_creation_tokens":{"known_sum":10,"unknown_count":0,"overflow":false},"output_tokens":{"known_sum":10,"unknown_count":0,"overflow":false}}"#;
+        let usage = r#"{"id":"saved","thread_id":"old","profile_id":"p","model_id":"m","started_at":"2026-10-31T00:00:00Z","updated_at":"2026-10-31T00:00:00Z","requests":3,"map_requests":2,"reduce_requests":1,"oversized_reduce_parts":4,"input_tokens":{"known_sum":10,"unknown_count":0,"overflow":false},"cached_tokens":{"known_sum":10,"unknown_count":0,"overflow":false},"cache_creation_tokens":{"known_sum":10,"unknown_count":0,"overflow":false},"output_tokens":{"known_sum":10,"unknown_count":0,"overflow":false}}"#;
         let node = r#"{"summary_usage":{"map_requests":4,"reduce_requests":5,"oversized_reduce_parts":6},"kept":"safe"}"#;
         {
             let db = Connection::open(&path).unwrap();
@@ -1135,13 +1145,9 @@ mod activity_migration_tests {
             // No new table, and saved history/usage is not rewritten.
             let tables:i64=db.query_row("SELECT count(*) FROM sqlite_schema WHERE type='table' AND name IN ('thread_retired_summary_settings','summary_usage_stage_archive')",[],|r|r.get(0))?;
             assert_eq!(tables,0);
-            let saved:String=db.query_row("SELECT value FROM app_meta WHERE key='summary.usage.old.saved'",[],|r|r.get(0))?;
-            assert_eq!(saved,usage);
+            assert_eq!(db.query_row("SELECT count(*) FROM model_attempt WHERE kind='summary' AND thread_id='old'",[],|r|r.get::<_,i64>(0))?,3);
             let summary:String=db.query_row("SELECT payload_json FROM node WHERE id='summary-old'",[],|r|r.get(0))?;
             assert_eq!(summary,node);
-            // A retired counter in a saved usage record must still be readable.
-            let parsed:crate::compaction::SummaryUsage=serde_json::from_str(&saved).unwrap();
-            assert_eq!(parsed.requests,3);
             assert!(db.prepare("PRAGMA foreign_key_check").unwrap().query([])?.next()?.is_none());
             db.execute("UPDATE thread SET auto_compact_target_percent=80,summary_max_chars=24000 WHERE id='old'",[])?;
             Ok(())
@@ -1524,10 +1530,10 @@ mod activity_migration_tests {
             INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('t','/','/a','p','m','now');
             INSERT INTO run(id,thread_id,state,created_at) VALUES('r','t','stopped','now');
             INSERT INTO turn(id,thread_id,run_id,state,created_at) VALUES('u','t','r','stopped','now');
-            INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at) VALUES
-              ('preparing','u',0,0,'p','m',0,'preparing','{}','now'),
-              ('inflight','u',1,0,'p','m',0,'inflight','{}','now'),
-              ('completed','u',2,0,'p','m',0,'completed','{}','now');").unwrap();
+            INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at) VALUES
+              ('conversation','t','preparing','u',0,0,'p','m',0,'preparing','{}','now'),
+              ('conversation','t','inflight','u',1,0,'p','m',0,'inflight','{}','now'),
+              ('conversation','t','completed','u',2,0,'p','m',0,'completed','{}','now');").unwrap();
         run(&mut db, 28, &|_, _| {}, &|| {}).unwrap();
         let changed = db.execute("UPDATE model_attempt SET state='incomplete',ended_at='now',error_json='{}' WHERE state IN ('preparing','inflight')", []).unwrap();
         assert_eq!(changed, 2);
@@ -1560,7 +1566,7 @@ mod activity_migration_tests {
             INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','stopped','old');
             INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','t','r','stopped','old');
             INSERT INTO node(id,turn_id,kind,created_at,payload_json)VALUES('n','u','tool_result','old','{}');
-            INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('a','u',0,0,'p','m',0,'completed','{}','old');
+            INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation','t','a','u',0,0,'p','m',0,'completed','{}','old');
             INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES('old-open','a','u','running','old'),('old-done','a','u','completed','old'),('old-missing','a','u','completed','old');
             INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state)VALUES('old-done','done',0,'shell','{}','completed'),('old-missing','missing',0,'shell','{}','completed');
             INSERT INTO tool_result(group_id,call_id,node_id,status)VALUES('old-done','done','n','completed');").unwrap();
@@ -2226,7 +2232,7 @@ mod schedule_migration_tests {
         let mut db = schema50();
         let (shells, output, indexes, bytes) = saved_rows(&db);
         run(&mut db, 50, &|_, _| {}, &|| {}).unwrap();
-        assert_eq!(validate_schema(&db).unwrap(), 51);
+        assert_eq!(validate_schema(&db).unwrap(), super::super::SCHEMA_VERSION);
         let (actual_shells, actual_output, actual_indexes, actual_bytes) = saved_rows(&db);
         assert_eq!(actual_shells, shells);
         assert_eq!(actual_output, output);
@@ -2258,6 +2264,134 @@ mod schedule_migration_tests {
         assert!(
             db.pragma_query_value(None, "foreign_keys", |row| row.get::<_, bool>(0))
                 .unwrap()
+        );
+    }
+}
+
+#[cfg(test)]
+mod unified_attempt_purpose_tests {
+    use super::*;
+    use crate::{protocol::UsageGetArgs, usage_totals::breakdown};
+    use serde_json::json;
+
+    fn schema49_with_summary() -> (Connection, serde_json::Value) {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(include_str!("../../migrations/0001_initial.sql"))
+            .unwrap();
+        for migration in MIGRATIONS
+            .iter()
+            .filter(|migration| migration.version <= 49)
+        {
+            db.execute_batch(migration.sql).unwrap();
+        }
+        db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('thread','/','','p','m','now');").unwrap();
+        let number = |known_sum, unknown_count| json!({"known_sum":known_sum,"unknown_count":unknown_count,"overflow":false});
+        let ledger = json!({"id":"compaction", "thread_id":"thread", "turn_id":null, "run_id":null,
+            "profile_id":"p", "model_id":"m", "started_at":"2026-10-31T00:00:00Z", "updated_at":"2026-11-01T00:00:00Z",
+            "requests":3, "input_tokens":number(Some(70),1), "cached_tokens":number(Some(0),2),
+            "cache_creation_tokens":number(None,3), "output_tokens":number(Some(5),0),
+            "rate_observations":[{"status":429,"applied_wait_ms":100},null,{"status":200,"applied_wait_ms":0}]});
+        db.execute(
+            "INSERT INTO app_meta(key,value) VALUES('summary.usage.thread.compaction',?1)",
+            [ledger.to_string()],
+        )
+        .unwrap();
+        (db, ledger)
+    }
+
+    #[test]
+    fn unrepresentable_summary_ledger_rolls_back_prior_rows_and_schema() {
+        for invalid in ["overflow", "above_signed_bound", "run_without_turn"] {
+            let (mut db, mut ledger) = schema49_with_summary();
+            ledger["id"] = json!("z-invalid");
+            match invalid {
+                "overflow" => ledger["input_tokens"]["overflow"] = json!(true),
+                "above_signed_bound" => {
+                    ledger["input_tokens"]["known_sum"] = json!(i64::MAX as u64 + 1)
+                }
+                _ => ledger["run_id"] = json!("missing-turn"),
+            }
+            db.execute(
+                "INSERT INTO app_meta(key,value) VALUES('summary.usage.thread.z-invalid',?1)",
+                [ledger.to_string()],
+            )
+            .unwrap();
+            let error = run(&mut db, 49, &|_, _| {}, &|| {}).unwrap_err();
+            assert!(
+                matches!(error, StorageError::Schema(message) if message.contains("summary.usage.thread.z-invalid")),
+                "{invalid}"
+            );
+            assert_eq!(
+                db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
+                    .unwrap(),
+                49
+            );
+            assert_eq!(
+                db.query_row(
+                    "SELECT count(*) FROM app_meta WHERE key LIKE 'summary.usage.%'",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )
+                .unwrap(),
+                2
+            );
+            assert_eq!(
+                db.query_row(
+                    "SELECT count(*) FROM pragma_table_info('model_attempt') WHERE name='kind'",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )
+                .unwrap(),
+                0
+            );
+        }
+    }
+
+    #[test]
+    fn summary_ledger_migration_preserves_breakdown() {
+        let (mut db, ledger) = schema49_with_summary();
+        run(&mut db, 49, &|_, _| {}, &|| {}).unwrap();
+        let usage = breakdown::read(
+            &db,
+            &UsageGetArgs {
+                group_by: Some("day".into()),
+                timezone: Some("UTC".into()),
+                since: Some("2026-10-31T00:00:00Z".into()),
+                until: Some("2026-11-01T00:00:00Z".into()),
+                ..Default::default()
+            },
+            "fixture",
+        )
+        .unwrap();
+        let item = &usage["items"][0];
+        assert_eq!(item["key"], "2026-10-31");
+        assert_eq!(item["compaction"]["compactions"], 1);
+        assert_eq!(item["compaction"]["requests"], 3);
+        for field in [
+            "input_tokens",
+            "cached_tokens",
+            "cache_creation_tokens",
+            "output_tokens",
+        ] {
+            assert_eq!(item["compaction"][field], ledger[field], "{field}");
+        }
+        assert_eq!(
+            db.query_row(
+                "SELECT count(*) FROM app_meta WHERE key LIKE 'summary.usage.%'",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0
+        );
+        assert_eq!(
+            db.query_row(
+                "SELECT count(*) FROM model_attempt WHERE kind='summary' AND turn_id IS NULL",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            3
         );
     }
 }

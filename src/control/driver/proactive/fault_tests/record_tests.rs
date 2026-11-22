@@ -441,7 +441,7 @@ async fn uncalibrated_site(fault: Fault, active: bool) {
         let mut attempt=uuid::Uuid::new_v4().to_string();
         let insert_attempt=|tx:&rusqlite::Transaction<'_>,attempt:&str,turn:&str|->Result<(),crate::storage::StorageError>{
             let revision:i64=tx.query_row("SELECT selection_revision FROM thread WHERE id=?1",[&target_for_seed],|r|r.get(0))?;
-            tx.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,effort,reasoning_epoch,state,input_manifest_json,started_at)VALUES(?1,?2,0,?3,?4,?5,?6,0,'completed','{}','fixture')",rusqlite::params![attempt,turn,revision,profile,model,effort])?;Ok(())
+            tx.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,effort,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id=?2),?1,?2,0,?3,?4,?5,?6,0,'completed',json_object('adoption',json_object('outcome','adopted')),'fixture')",rusqlite::params![attempt,turn,revision,profile,model,effort])?;Ok(())
         };
         if active{
             let user=uuid::Uuid::new_v4().to_string();

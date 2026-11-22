@@ -44,7 +44,7 @@ impl ResponseFacts {
         self.terminal_received = parsed.is_terminal();
     }
 }
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct AttemptFailure {
     pub error: ModelError,
     pub partial_text: String,
@@ -157,16 +157,6 @@ impl HttpModelClient {
         result
     }
 
-    #[allow(clippy::result_large_err)]
-    pub(crate) async fn response_for_thread_pre_admitted(
-        &self,
-        thread: &str,
-        request: Value,
-        cancel: CancellationToken,
-    ) -> Result<ModelResponse, AttemptFailure> {
-        self.response_inner(request, cancel, None, Some(thread), None)
-            .await
-    }
     // Preserve the same bounded recovery payload as response().
     #[allow(clippy::result_large_err)]
     pub(crate) async fn response_observed(

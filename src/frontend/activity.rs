@@ -658,7 +658,7 @@ mod tests {
     fn result_counts_are_bounded_even_when_groups_or_results_are_sparse() {
         let db = Connection::open_in_memory().unwrap();
         db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
-        db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('t','/','','p','m','now'); INSERT INTO run(id,thread_id,state,created_at) VALUES('r','t','completed','now'); INSERT INTO turn(id,thread_id,run_id,state,created_at) VALUES('u','t','r','completed','now'); INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at) VALUES('a','u',0,0,'p','m',0,'completed','{}','now'); INSERT INTO node(id,kind,created_at,payload_json) VALUES('n','user','now','{}');").unwrap();
+        db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('t','/','','p','m','now'); INSERT INTO run(id,thread_id,state,created_at) VALUES('r','t','completed','now'); INSERT INTO turn(id,thread_id,run_id,state,created_at) VALUES('u','t','r','completed','now'); INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at) VALUES('conversation',(SELECT thread_id FROM turn WHERE id='u'),'a','u',0,0,'p','m',0,'completed','{}','now'); INSERT INTO node(id,kind,created_at,payload_json) VALUES('n','user','now','{}');").unwrap();
         for i in 0..127 {
             db.execute("INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at) VALUES(?1,'a','u','done','now')", [format!("g{i:03}")]).unwrap();
         }
@@ -694,7 +694,7 @@ mod tests {
     fn attachment_warning_reads_only_the_latest_attempt_and_distinguishes_format() {
         let db = Connection::open_in_memory().unwrap();
         db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
-        db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','/AGENTS.md','p','m','now'); INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','completed','now'); INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','t','r','completed','now'); INSERT INTO node(id,kind,created_at,payload_json)VALUES('n','user','now','{}'); INSERT INTO attachment_ref(id,source_node_id,absolute_path,input_kind,ownership,created_at)VALUES('file','n','/synthetic','file','external','now'); INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('a','u',0,0,'p','m',0,'completed','{}','now');").unwrap();
+        db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','/AGENTS.md','p','m','now'); INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','completed','now'); INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','t','r','completed','now'); INSERT INTO node(id,kind,created_at,payload_json)VALUES('n','user','now','{}'); INSERT INTO attachment_ref(id,source_node_id,absolute_path,input_kind,ownership,created_at)VALUES('file','n','/synthetic','file','external','now'); INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='u'),'a','u',0,0,'p','m',0,'completed','{}','now');").unwrap();
         db.execute("INSERT INTO attachment_send(attempt_id,ordinal,attachment_id,state,error_json)VALUES('a',0,'file','unavailable',?1)", [json!({"message":crate::attachments::UNSUPPORTED_FORMAT_ERROR}).to_string()]).unwrap();
         let snapshot = prepare(read_tx(&db, "t").unwrap()).snapshot;
         assert!(snapshot.attachment_unavailable);
@@ -707,7 +707,7 @@ mod tests {
         let snapshot = prepare(read_tx(&db, "t").unwrap()).snapshot;
         assert!(snapshot.attachment_unavailable);
         assert!(!snapshot.attachment_unsupported);
-        db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('b','u',0,0,'p','m',0,'completed','{}','later')", []).unwrap();
+        db.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='u'),'b','u',0,0,'p','m',0,'completed','{}','later')", []).unwrap();
         let snapshot = prepare(read_tx(&db, "t").unwrap()).snapshot;
         assert!(!snapshot.attachment_unavailable);
         assert!(!snapshot.attachment_unsupported);
@@ -746,7 +746,7 @@ mod tests {
         .unwrap();
         let error = json!({"error":{"kind":"provider","message":"saved reason","status":500},
             "automatic_trim":{"before_characters":90000,"after_characters":40000,"omitted_nodes":7,"compact":{"spilled_groups":3,"no_target":false}}}).to_string();
-        db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,error_json,started_at)VALUES('a','u',2,0,'p','m',0,'incomplete','{}',?1,'now')",[error]).unwrap();
+        db.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,error_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='u'),'a','u',2,0,'p','m',0,'incomplete','{}',?1,'now')",[error]).unwrap();
         crate::control::revisit::seed_fixture(&db, "t", "r", 3, false);
         let raw = read_tx(&db, "t").unwrap();
         db.execute("UPDATE run SET state='completed' WHERE id='r'", [])

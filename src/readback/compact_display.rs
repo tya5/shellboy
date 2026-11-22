@@ -177,7 +177,7 @@ mod outcome_tests {
         db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','','p','m','now');
             INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','completed','2026-11-01T00:00:00Z');
             INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','t','r','completed','2026-11-01T00:00:00Z');
-            INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,error_json,started_at)VALUES('a','u',0,0,'p','m',0,'completed','{}','{}','2026-11-01T00:00:00Z');").unwrap();
+            INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,error_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='u'),'a','u',0,0,'p','m',0,'completed','{}','{}','2026-11-01T00:00:00Z');").unwrap();
         let fact = json!({"phase":"closed_summary","elapsed_ms":17,"outcome":{"kind":"failed","reason":"provider_error","origin":"provider_response","http_status":401}});
         let mut usage = crate::compaction::SummaryUsage {
             requests: 1,

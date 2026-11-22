@@ -58,7 +58,7 @@ async fn history_usage_is_bound_to_exact_adopted_attempt_and_keeps_saved_json_un
             ("invalid",r#"{"input_tokens_details":{"cached_tokens":"9000"}}"#),
             ("oversized",&format!(r#"{{"input_tokens_details":{{"cached_tokens":999}},"extra":"{}"}}"#,"x".repeat(128 * 1024))),
         ] {
-            db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at)VALUES(?1,'u',0,0,'p','m',0,'completed','{}',?2,'now')",rusqlite::params![id,usage])?;
+            db.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='u'),?1,'u',0,0,'p','m',0,'completed','{}',?2,'now')",rusqlite::params![id,usage])?;
             db.execute("INSERT INTO node(id,turn_id,kind,created_at,payload_json,payload_bytes)VALUES(?1,'u','assistant_response','now','{}',2)",[id])?;
             db.execute("INSERT INTO output_item(attempt_id,ordinal,item_type,status,payload_json,node_id)VALUES(?1,0,'message','completed','{}',?1)",[id])?;
         }
@@ -260,7 +260,7 @@ async fn details_show_request_bytes_beside_reported_tokens_in_both_languages() {
             ("measured", manifest.as_str(), r#"{"input_tokens":4500,"input_tokens_details":{"cached_tokens":3000}}"#),
             ("legacy", "{}", "{}"),
         ] {
-            db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at)VALUES(?1,'u',0,0,'p','m',0,'completed',?2,?3,'now')",rusqlite::params![id,manifest,usage])?;
+            db.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='u'),?1,'u',0,0,'p','m',0,'completed',?2,?3,'now')",rusqlite::params![id,manifest,usage])?;
             db.execute("INSERT INTO node(id,turn_id,kind,created_at,payload_json,payload_bytes)VALUES(?1,'u','assistant_response','now','{}',2)",[id])?;
             db.execute("INSERT INTO output_item(attempt_id,ordinal,item_type,status,payload_json,node_id)VALUES(?1,0,'message','completed','{}',?1)",[id])?;
         }

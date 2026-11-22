@@ -38,7 +38,7 @@ async fn startup_cancels_unadopted_local_and_cross_thread_shell_sources_before_g
         for thread in ["origin","target"] {tx.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES(?1,?2,'','fixture','fixture','before')",params![thread,cwd])?;}
         tx.execute("INSERT INTO run(id,thread_id,state,created_at)VALUES('origin-run','origin','live','before')",[])?;
         tx.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('origin-turn','origin','origin-run','running','before')",[])?;
-        tx.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('attempt','origin-turn',0,0,'fixture','fixture',0,'completed','{}','before')",[])?;
+        tx.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='origin-turn'),'attempt','origin-turn',0,0,'fixture','fixture',0,'completed','{}','before')",[])?;
         let item=json!({"type":"function_call","call_id":"call-origin","name":"shell","arguments":"{\"command\":\"synthetic saved state never executes\"}"});
         history::append_node(&tx,"origin","call-source",Some("origin-turn"),"assistant_response",&json!({"group_id":"group","reasoning_epoch":0,"output":[item]}),"before")?;
         tx.execute("INSERT INTO output_item(attempt_id,ordinal,item_type,status,payload_json,node_id)VALUES('attempt',0,'function_call','completed',?1,'call-source')",[item.to_string()])?;

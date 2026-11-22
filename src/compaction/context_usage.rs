@@ -82,8 +82,9 @@ fn latest_query() -> String {
           OR (EXISTS(SELECT 1 FROM output_item o WHERE o.attempt_id=a.id) AND NOT EXISTS(SELECT 1 FROM output_item o JOIN thread_path p ON p.thread_id=t.id AND p.node_id=o.node_id WHERE o.attempt_id=a.id))),
         COALESCE(octet_length(a.id)>?2 OR octet_length(a.started_at)>?2
           OR COALESCE(octet_length(a.ended_at)>?2,0),0)
-        FROM thread t JOIN turn u ON u.thread_id=t.id JOIN model_attempt a ON a.turn_id=u.id
-        WHERE t.id=?1 AND a.state='completed' AND a.profile_id=t.profile_id AND a.model_id=t.model_id
+        FROM thread t CROSS JOIN turn u INDEXED BY turns_by_thread ON u.thread_id=t.id
+        CROSS JOIN model_attempt a INDEXED BY attempts_completed_scope ON a.turn_id=u.id AND a.kind='conversation'
+        WHERE t.id=?1 AND a.state='completed' AND json_extract(a.input_manifest_json,'$.adoption.outcome')='adopted' AND a.profile_id=t.profile_id AND a.model_id=t.model_id
         ORDER BY a.rowid DESC LIMIT 1", usage::sql_projection("a.usage_json"))
 }
 
@@ -238,7 +239,7 @@ mod tests {
             model.to_owned(),
             started.to_owned(),
         );
-        db.call(move|db|{db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at,ended_at)VALUES(?1,'u',0,0,?2,?3,0,?4,'{}',?5,?6,NULL)",rusqlite::params![id,profile,model,state,usage,started])?;Ok(())}).await.unwrap();
+        db.call(move|db|{db.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at,ended_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='u'),?1,'u',0,0,?2,?3,0,?4,json_object('adoption',json_object('outcome','adopted')),?5,?6,NULL)",rusqlite::params![id,profile,model,state,usage,started])?;Ok(())}).await.unwrap();
     }
     #[tokio::test]
     async fn canonical_and_shared_transaction_agree_on_absence_latest_matching_scope_and_pending_edit()
@@ -301,6 +302,21 @@ mod tests {
         )
         .await;
         db.call(|db|{db.execute_batch("INSERT INTO node(id,kind,created_at,payload_json)VALUES('marker','summary','now','{}'); INSERT INTO replacement(id,output_node_id,input_key,format_version,prompt_version,state,created_at)VALUES('edit','marker','key','format','prompt','completed','2021-01-01T00:00:00Z'); INSERT INTO thread_replacement VALUES('t','edit');")?;Ok(())}).await.unwrap();
+        db.call(|db| {
+            db.execute("UPDATE model_attempt SET response_id='adopted-provider-id' WHERE id='newest'", [])?;
+            for (id, manifest) in [("received", "{}"), ("fenced", r#"{"adoption":{"outcome":"not_adopted"}}"#)] {
+                db.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,response_id,usage_json,started_at) VALUES('conversation','t',?1,'u',0,0,'p','m',0,'completed',?2,'unadopted-provider-id','{\"input_tokens\":100}','2020-01-02T00:00:00Z')", params![id,manifest])?;
+                assert_eq!(crate::model::cache_diagnostics::last_response_id(db,"t")?.as_deref(), Some("adopted-provider-id"));
+                let totals=crate::usage_totals::read(db,&crate::usage_totals::Scope::Turn("u".into())).map_err(StorageError::from)?;
+                let expected=if id=="received" { 1 } else { 2 };
+                assert!(totals["model_attempts"]["completed"]["input_tokens"]["known_sum"].as_u64().unwrap() >= 100*expected);
+                for bound in [None,Some(512)] {
+                    let shown=prepare_context_usage(read_context_usage_tx(db,"t",bound)?).0;
+                    assert_eq!(shown["last_successful_attempt"]["attempt_id"], "newest");
+                }
+            }
+            Ok(())
+        }).await.unwrap();
         let expected = json!({"last_successful_attempt":{"attempt_id":"newest","input_tokens":5,"cached_tokens":1,"started_at":"2020-01-01T00:00:00Z","ended_at":null,"next_request_pending":true}});
         assert_eq!(compactor.context_metrics("t").await.unwrap(), expected);
         let raw = db
@@ -572,7 +588,7 @@ mod query_cost_tests {
     fn attempts(db: &Connection, turn: &str, prefix: &str, from: usize, until: usize) {
         db.execute_batch("BEGIN").unwrap();
         for i in from..until {
-            db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at)VALUES(?1,?2,0,0,'p','m',0,'completed','{}','{\"input_tokens\":11,\"input_tokens_details\":{\"cached_tokens\":3}}','2026-01-01T00:00:00Z')",params![format!("{prefix}-{i:06}"),turn]).unwrap();
+            db.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id=?2),?1,?2,0,0,'p','m',0,'completed',json_object('adoption',json_object('outcome','adopted')),'{\"input_tokens\":11,\"input_tokens_details\":{\"cached_tokens\":3}}','2026-01-01T00:00:00Z')",params![format!("{prefix}-{i:06}"),turn]).unwrap();
         }
         db.execute_batch("COMMIT").unwrap();
     }
@@ -771,7 +787,7 @@ mod bounded_cost_tests {
             let turn = format!("u{i:06}");
             db.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES(?1,'t','r','completed',?2)",params![turn,format!("{i:08}")]).unwrap();
             for a in 0..64 {
-                db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at)VALUES(?1,?2,0,0,'p','m',0,'completed','{}','{\"input_tokens\":11}',?3)",params![format!("a{i:06}-{a:02}"),turn,format!("{a:08}")]).unwrap();
+                db.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id=?2),?1,?2,0,0,'p','m',0,'completed',json_object('adoption',json_object('outcome','adopted')),'{\"input_tokens\":11}',?3)",params![format!("a{i:06}-{a:02}"),turn,format!("{a:08}")]).unwrap();
             }
             for edit in 0..4 {
                 let id = format!("edit{i:06}-{edit}");
@@ -813,7 +829,7 @@ mod bounded_cost_tests {
                 } else {
                     "completed"
                 };
-                db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at)VALUES(?1,?2,0,0,'p','m',0,?3,'{}',?4,?5)",
+                db.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id=?2),?1,?2,0,0,'p','m',0,?3,json_object('adoption',json_object('outcome','adopted')),?4,?5)",
                     params![format!("a{i:06}-{a:02}"),turn,state,format!("{{\"input_tokens\":{},\"input_tokens_details\":{{\"cached_tokens\":{}}}}}",1000+i*10+a,i),format!("{a:08}")]).unwrap();
             }
             let id = format!("edit{i:06}");
@@ -903,7 +919,7 @@ mod bounded_cost_tests {
     fn rowid_winner_with_older_timestamp_is_the_exact_latest_in_display_too() {
         let db = fixture();
         grow(&db, 0, 1);
-        db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('late-rowid','u000000',0,0,'p','m',0,'completed','{}','00000000')",[]).unwrap();
+        db.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='u000000'),'late-rowid','u000000',0,0,'p','m',0,'completed',json_object('adoption',json_object('outcome','adopted')),'00000000')",[]).unwrap();
         let exact = read_context_usage_tx(&db, "t", None).unwrap();
         assert_eq!(exact.latest.as_ref().unwrap().attempt_id, "late-rowid");
         assert!(exact.latest.as_ref().unwrap().usage.input_tokens.is_none());

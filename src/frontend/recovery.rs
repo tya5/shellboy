@@ -308,7 +308,7 @@ mod tests {
         control.store.database.call(move|db|{
             db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','/AGENTS.md','p','m','now'); INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','completed','2026-10-25T00:00:00Z'); INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','t','r','completed','2026-10-25T00:00:00Z'),('other','t','r','recovery_wait','2026-10-25T00:00:10Z');")?;
             for (id,turn,at) in [("first","u","01"),("second","u","02"),("later","u","04"),("unrelated","other","01")] {
-                db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,error_json,started_at,ended_at)VALUES(?1,?2,0,0,'p','m',0,'incomplete','{}',?3,'2026-10-25T00:00:00Z',?4)",rusqlite::params![id,turn,latest,format!("2026-10-25T00:00:{at}Z")])?;
+                db.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,error_json,started_at,ended_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id=?2),?1,?2,0,0,'p','m',0,'incomplete','{}',?3,'2026-10-25T00:00:00Z',?4)",rusqlite::params![id,turn,latest,format!("2026-10-25T00:00:{at}Z")])?;
             }
             db.execute("INSERT INTO event(id,kind,source_json,target_thread_id,payload_ref_json,created_at)VALUES('resume','context_changed','{}','t',?1,'2026-10-25T00:00:03Z')",[json!({"kind":"recovery_resumed","change":{"run_id":"r","turn_id":"u"}}).to_string()])?;
             db.execute("INSERT INTO node(id,kind,created_at,payload_json,payload_bytes)VALUES('saved-resume','event','now',?1,length(?1))",[saved])?;

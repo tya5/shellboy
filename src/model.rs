@@ -6,6 +6,7 @@ pub mod dialect;
 pub mod http;
 pub mod opaque;
 mod reconcile;
+pub(crate) mod request_path;
 mod stream_error;
 pub use stream_error::{StreamProviderStatus, StreamProviderStatusSource};
 pub(crate) mod retry_class;

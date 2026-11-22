@@ -39,6 +39,7 @@ def registered_migration_versions(registry):
 
 REGISTERED_MIGRATION_VERSIONS = registered_migration_versions(_migration_names)
 CURRENT_SCHEMA_VERSION = REGISTERED_MIGRATION_VERSIONS[-1]
+RETIRE_SUMMARY_LEDGER_SQL = ROOT / 'src/storage/migrate/retire_summary_ledger.sql'
 SPILL_OVERRIDE_SCHEMA_VERSION = 45
 if SPILL_OVERRIDE_SCHEMA_VERSION not in REGISTERED_MIGRATION_VERSIONS:
     raise ValueError('spill override schema version is not registered')
@@ -90,16 +91,18 @@ def check_migration(db, before, start, target):
             'parent_thread_id', 'id']
     if target >= 18:
         row = db.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='gc_bytes_app_meta_history'").fetchone()
-        expected_index = next(line for line in DERIVED[18].read_text(encoding='utf-8').splitlines()
+        source = RETIRE_SUMMARY_LEDGER_SQL if target >= 52 else DERIVED[18]
+        expected_index = next(line for line in source.read_text(encoding='utf-8').splitlines()
                               if line.startswith('CREATE INDEX gc_bytes_app_meta_history '))
         assert row and ' '.join(row[0].rstrip(';').split()) == ' '.join(expected_index.rstrip(';').split()), \
-            'history accounting index differs from migration 18'
+            f'history accounting index differs from {source.name}'
     if target >= 19:
         row = db.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='attempts_completed_scope'").fetchone()
-        expected_index = next(line for line in DERIVED[19].read_text(encoding='utf-8').splitlines()
+        source = MIGRATIONS / '0052_unified_model_attempt.sql' if target >= 52 else DERIVED[19]
+        expected_index = next(line for line in source.read_text(encoding='utf-8').splitlines()
                               if line.startswith('CREATE INDEX attempts_completed_scope '))
         assert row and ' '.join(row[0].rstrip(';').split()) == ' '.join(expected_index.rstrip(';').split()), \
-            'context attempt scope index differs from migration 19'
+            f'context attempt scope index differs from {source.name}'
     if target >= 21:
         for name in ('node_event_retention', 'delivery_event_state'):
             row = db.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name=?", (name,)).fetchone()
@@ -306,20 +309,30 @@ def require_empty_generated_summary_role_candidates_for_sql_staging(db):
         )
 
 
+def require_empty_summary_ledger_for_sql_staging(db):
+    record = db.execute("SELECT key FROM app_meta WHERE key >= 'summary.usage.' AND key < 'summary.usage/' ORDER BY key LIMIT 1").fetchone()
+    if record:
+        raise AssertionError(f'schema50 Summary usage requires the native startup converter; SQL-only staging refuses before migration for {record[0]!r}')
+
+
 def apply_migration(db, version):
     if version == 46:
         require_empty_scope_facts_for_sql_staging(db)
     if version == 49:
         require_empty_generated_summary_role_candidates_for_sql_staging(db)
-    if version not in (39, 51):
-        sql=DERIVED[version].read_text() if version in DERIVED else next(MIGRATIONS.glob(f'{version:04d}_*.sql')).read_text()
+    if version == 52:
+        require_empty_summary_ledger_for_sql_staging(db)
+        sql = (MIGRATIONS / '0052_unified_model_attempt.sql').read_text() + RETIRE_SUMMARY_LEDGER_SQL.read_text()
+    else:
+        sql = DERIVED[version].read_text() if version in DERIVED else next(MIGRATIONS.glob(f'{version:04d}_*.sql')).read_text()
+    if version not in (39, 51, 52):
         db.executescript('BEGIN IMMEDIATE;\n' + sql + '\nCOMMIT;')
         return
-    # Mirror the approved migration contract: check FK before committing.
+    # Mirror the table-rebuild contract: check FK before committing.
     db.commit()
     db.execute('PRAGMA foreign_keys=OFF')
     try:
-        db.executescript('BEGIN IMMEDIATE;\n' + next(MIGRATIONS.glob(f'{version:04d}_*.sql')).read_text())
+        db.executescript('BEGIN IMMEDIATE;\n' + sql)
         assert db.execute('PRAGMA foreign_key_check').fetchall() == [], f'migration {version} foreign key violation'
         db.commit()
     except BaseException:
@@ -332,11 +345,13 @@ def prepare_schema(db, target):
     start = db.execute('PRAGMA user_version').fetchone()[0]
     if start == target:
         return
-    assert start in (14, 17, 19, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, CURRENT_SCHEMA_VERSION) and target in (14, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, CURRENT_SCHEMA_VERSION) and start <= target, 'unexpected synthetic fixture schema'
+    assert start in (14, 17, 19, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, CURRENT_SCHEMA_VERSION) and target in (14, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, CURRENT_SCHEMA_VERSION) and start <= target, 'unexpected synthetic fixture schema'
     if start < 46 <= target:
         require_empty_scope_facts_for_sql_staging(db)
     if start < 49 <= target:
         require_empty_generated_summary_role_candidates_for_sql_staging(db)
+    if start < 52 <= target:
+        require_empty_summary_ledger_for_sql_staging(db)
     before, records = ledger(db), snapshot(db)
     for version in range(start + 1, target + 1):
         apply_migration(db, version)
@@ -350,11 +365,11 @@ def parse_args(argv=None):
     parser.add_argument('--new', type=Path, required=True)
     parser.add_argument('--root', type=Path, required=True)
     parser.add_argument('--old-version', choices=tuple(PUBLIC_SCHEMA), default='0.10.0')
-    parser.add_argument('--start-schema', type=int, choices=(14, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, CURRENT_SCHEMA_VERSION), default=None,
+    parser.add_argument('--start-schema', type=int, choices=(14, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, CURRENT_SCHEMA_VERSION), default=None,
                         help='defaults to the public old schema; 16/17 can stage derived indexes on a stopped schema 14 copy')
     parser.add_argument('--expected-version', default=CARGO_VERSION, help='defaults to the Cargo.toml package version')
-    parser.add_argument('--expected-new-schema', type=int, choices=(14, 15, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, CURRENT_SCHEMA_VERSION), default=CURRENT_SCHEMA_VERSION,
-                        help='49 for generated-summary message-role migration; 48 for human-question path-admission settlement; 47 for dropping the retired selection witness; 46 for canonical fact scope identity; 45 for the per-Thread automatic-spill override; 44 for the per-Thread output limit; 43 for Thread summary settings; 42 for notification semantic metadata; 40 for the non-append selection witness; 39 for independent Runs; 38 for the human-reply pending index; 34 for the Thread tag table and cwd list index; 33 for the index space int8 scale column; 32 for the Thread archive column and partial list indexes; 31 for the per-Thread summary parameter columns; 30 for the per-Thread compaction threshold column; 29 for the active-attempt recovery index; earlier versions retain historical release checks')
+    parser.add_argument('--expected-new-schema', type=int, choices=(14, 15, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, CURRENT_SCHEMA_VERSION), default=CURRENT_SCHEMA_VERSION,
+                        help='52 for unified model attempts; 51 for Thread schedules; 50 for attachment page order; 49 for generated-summary message-role migration; 48 for human-question path-admission settlement; 47 for dropping the retired selection witness; 46 for canonical fact scope identity; 45 for the per-Thread automatic-spill override; 44 for the per-Thread output limit; 43 for Thread summary settings; 42 for notification semantic metadata; 40 for the non-append selection witness; 39 for independent Runs; 38 for the human-reply pending index; 34 for the Thread tag table and cwd list index; 33 for the index space int8 scale column; 32 for the Thread archive column and partial list indexes; 31 for the per-Thread summary parameter columns; 30 for the per-Thread compaction threshold column; 29 for the active-attempt recovery index; earlier versions retain historical release checks')
     args = parser.parse_args(argv)
     public_schema = PUBLIC_SCHEMA[args.old_version]
     if args.start_schema is None:

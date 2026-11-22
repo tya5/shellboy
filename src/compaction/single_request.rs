@@ -8,7 +8,7 @@ pub(super) struct SummaryRequest<'a, 'boundary> {
     pub(super) snapshot: Snapshot,
     pub(super) original: Range<usize>,
     pub(super) cancel: CancellationToken,
-    pub(super) ledger: &'a mut usage::UsageLedger,
+    pub(super) ledger: &'a mut usage::SummaryRequests,
     pub(super) boundary: Option<&'a mut boundary::Boundary<'boundary>>,
     pub(super) automatic: Option<AutomaticStage>,
     pub(super) drop_all_reasoning: bool,
@@ -21,6 +21,7 @@ pub(super) struct RequestGroupText<'a> {
     pub(super) text: &'a str,
     pub(super) projection_weight: u128,
     pub(super) source_count: u64,
+    pub(super) stamps: Vec<super::summary::FinalRSource>,
 }
 pub(super) struct SummaryMaterial<'a> {
     pub(super) thread: &'a str,
@@ -45,6 +46,17 @@ fn snapshot_request_groups<'a>(
                 .map(|source| edit::projection_characters(&source.payload, snapshot.epoch) as u128)
                 .sum(),
             source_count: group.sources.len() as u64,
+            stamps: group
+                .sources
+                .iter()
+                .map(|source| {
+                    super::summary::final_r_source(
+                        source,
+                        group.complete,
+                        snapshot.protected.contains(&source.id),
+                    )
+                })
+                .collect(),
         })
         .collect()
 }
@@ -212,6 +224,7 @@ pub(super) fn is_typed_refusal(output: &[Value]) -> bool {
 pub(super) enum DispatchOwner<'a, 'b> {
     Manual {
         boundary: Option<&'a mut boundary::Boundary<'b>>,
+        markers: Vec<super::summary::FinalRSource>,
     },
     Gc,
 }
@@ -221,8 +234,94 @@ pub(super) struct DispatchRequest<'a, 'b> {
     pub(super) selected: Range<usize>,
     pub(super) limit: OutputLimit,
     pub(super) cancel: &'a CancellationToken,
-    pub(super) ledger: &'a mut usage::UsageLedger,
+    pub(super) ledger: &'a mut usage::SummaryRequests,
     pub(super) eligible: Box<dyn Fn(Range<usize>) -> bool + Send + 'a>,
+}
+
+struct SummaryCaller<'a, 'o, 'b> {
+    owner: &'a mut DispatchOwner<'o, 'b>,
+    input: &'a SummaryMaterial<'a>,
+    selected: Range<usize>,
+    limit: OutputLimit,
+    ledger: &'a mut usage::SummaryRequests,
+}
+
+impl model::request_path::RequestCaller for SummaryCaller<'_, '_, '_> {
+    type Context = ();
+
+    fn pause<'a, T: Send + 'a>(
+        &'a mut self,
+        cancel: &'a CancellationToken,
+        wait: impl Future<Output = T> + Send + 'a,
+    ) -> futures_util::future::BoxFuture<'a, Option<T>> {
+        Box::pin(async move {
+            match self.owner {
+                DispatchOwner::Manual {
+                    boundary: Some(boundary),
+                    ..
+                } => boundary.pause(cancel, wait).await.ok(),
+                _ => Some(wait.await),
+            }
+        })
+    }
+
+    async fn prepare(
+        &mut self,
+        _: bool,
+    ) -> Result<Option<model::request_path::PreparedInput<()>>, ApiError> {
+        use model::request_path::{AttemptAdmission, AttemptKind, AttemptScope, PreparedInput};
+        let payload = request(self.input, self.selected.clone(), self.limit);
+        let stamps = self.input.groups[self.selected.clone()]
+            .iter()
+            .flat_map(|group| group.stamps.iter().cloned())
+            .collect::<Vec<_>>();
+        let started = timestamp();
+        if self.ledger.group.started_at.is_empty() {
+            self.ledger.group.started_at.clone_from(&started);
+        }
+        let group = self.ledger.group.clone();
+        let turn = self.ledger.turn_id.clone();
+        let thread = self.input.thread.to_owned();
+        let profile = self.input.profile.to_owned();
+        let model = self.input.model.to_owned();
+        let effort = self.input.effort.map(str::to_owned);
+        let admission = AttemptAdmission {
+            scope: AttemptScope {
+                kind: AttemptKind::Summary,
+                thread: thread.clone(),
+                turn,
+                generation: 0,
+                selection_revision: 0,
+                reasoning_epoch: 0,
+            },
+            profile,
+            model,
+            effort,
+            manifest: json!({"summary":group}),
+            started_at: started,
+        };
+        let markers = match self.owner {
+            DispatchOwner::Manual { markers, .. } => markers.clone(),
+            DispatchOwner::Gc => Vec::new(),
+        };
+        let qualify = Box::new(
+            move |tx: &rusqlite::Transaction<'_>, _: &mut AttemptAdmission| {
+                super::summary::qualify_r(tx, &thread, &stamps, &markers)?;
+                Ok(true)
+            },
+        );
+        Ok(Some(PreparedInput {
+            payload,
+            context: (),
+            admission,
+            qualify,
+            link: None,
+        }))
+    }
+
+    fn received(&mut self, usage: crate::usage::StandardUsage) {
+        self.ledger.observe(usage);
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -339,7 +438,20 @@ impl Compactor {
         let dispatched = self
             .dispatch_single_summary(DispatchRequest {
                 input: &material,
-                owner: DispatchOwner::Manual { boundary },
+                owner: DispatchOwner::Manual {
+                    boundary,
+                    markers: snapshot
+                        .extra_sources
+                        .iter()
+                        .map(|source| {
+                            super::summary::final_r_source(
+                                source,
+                                true,
+                                snapshot.protected.contains(&source.id),
+                            )
+                        })
+                        .collect(),
+                },
                 selected: 0..material_groups.len(),
                 limit,
                 cancel: &cancel,
@@ -582,8 +694,8 @@ impl Compactor {
                 },
             )
         })?;
+        let mut budget = model::request_path::RetryBudget::default();
         let mut trial = Trial::new(selected).ok_or_else(|| invalid("No summary range"))?;
-        let mut retries = 0u32;
         loop {
             if cancel.is_cancelled() {
                 return Err(discard::rejected(
@@ -594,32 +706,52 @@ impl Compactor {
             let selected = trial
                 .selected()
                 .ok_or_else(|| invalid("Summary trial already ended"))?;
-            let payload = super::single_request::request(input, selected.clone(), limit);
-            let admission = self.summary_admission(&client, &mut owner, cancel).await?;
-            let observation = ledger.begin(&self.database).await?;
-            let result =
-                Self::summary_response(&client, input.thread, payload, cancel.clone(), admission)
-                    .await;
-            let response = match result {
-                Ok(response) => {
-                    ledger
-                        .observe_http(&self.database, observation, response.response_facts)
-                        .await?;
-                    ledger
-                        .observe(&self.database, usage::usage_of(Some(&response.raw)))
-                        .await?;
-                    response
-                }
-                Err(failure) => {
-                    ledger
-                        .observe_http(&self.database, observation, failure.facts)
-                        .await?;
-                    ledger
-                        .observe(
-                            &self.database,
-                            usage::usage_of(failure.raw_response.as_ref()),
+            let result = {
+                use model::request_path::{AttemptKind, Execution, RequestScope, execute_request};
+                let mut caller = SummaryCaller {
+                    owner: &mut owner,
+                    input,
+                    selected: selected.clone(),
+                    limit,
+                    ledger,
+                };
+                match execute_request(
+                    RequestScope {
+                        database: &self.database,
+                        client: &client,
+                        connection,
+                        kind: AttemptKind::Summary,
+                        adapt_after_transient: false,
+                    },
+                    &mut caller,
+                    &mut budget,
+                    cancel,
+                    &mut Vec::new(),
+                )
+                .await?
+                {
+                    Execution::Finished { outcome, .. } => *outcome,
+                    Execution::BudgetExhausted => {
+                        return Err(ApiError::new(
+                            ErrorCode::IoFailed,
+                            "Summary retry budget exhausted; original path retained",
                         )
-                        .await?;
+                        .details(json!({"reason":"retry_budget_exhausted"})));
+                    }
+                    Execution::AdaptationSuggested { .. } => {
+                        unreachable!("Summary does not request Driver adaptation")
+                    }
+                    Execution::InputChanged | Execution::Fenced => {
+                        return Err(discard::rejected(
+                            discard::RejectionReason::Cancelled,
+                            "Compaction cancelled; original path retained",
+                        ));
+                    }
+                }
+            };
+            let response = match result {
+                Ok(response) => response,
+                Err(failure) => {
                     if cancel.is_cancelled() {
                         return Err(discard::failed(
                             discard::FailureReason::Cancelled,
@@ -646,11 +778,6 @@ impl Compactor {
                         !veto_halving && (complete_http_refusal || trusted_stream_refusal);
                     let shrink = context_refusal || input_refusal;
                     if !shrink {
-                        if let Some(delay) = retry::retry_delay(connection, &failure, retries) {
-                            retries += 1;
-                            self.summary_backoff(&mut owner, delay, cancel).await?;
-                            continue;
-                        }
                         // Keep the provider's reason: the user needs it to act
                         // (credentials, quota, a rejected request).
                         let cause = discard::model_cause(&failure.error, failure.facts.status);
@@ -667,10 +794,7 @@ impl Compactor {
                         ));
                     }
                     match trial.finish_input(input, Err(&failure.error), shrink, &eligible) {
-                        Next::RetryPrefix(_) => {
-                            retries = 0;
-                            continue;
-                        }
+                        Next::RetryPrefix(_) => continue,
                         Next::Done | Next::Failed => {
                             if context_refusal {
                                 let groups = trial.selected.end - trial.selected.start;
@@ -1060,6 +1184,7 @@ mod tests {
                     })
                     .sum(),
                 source_count: group.sources.len() as u64,
+                stamps: vec![],
             })
             .collect()
     }

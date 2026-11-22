@@ -54,7 +54,7 @@ async fn bad_cursor_does_not_block_owner_good_conversation_or_cli_deletion() {
             tx.execute("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at) VALUES(?1,?1,?2,?3,'p','m','old')",rusqlite::params![id,cwd,format!("{cwd}/AGENTS.md")])?;
             tx.execute("INSERT INTO run(id,thread_id,state,created_at) VALUES(?1,?1,'live','old')",[id])?;
             tx.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at) VALUES(?1,?1,?1,'running','old')",[id])?;
-            tx.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at) VALUES(?1,?1,0,0,'p','m',0,'completed','{}','old')",[id])?;
+            tx.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at) VALUES('conversation',(SELECT thread_id FROM turn WHERE id=?1),?1,?1,0,0,'p','m',0,'completed','{}','old')",[id])?;
             tx.execute("INSERT INTO tool_group VALUES(?1,?1,?1,'running','old')",[id])?;
             let call=json!({"type":"function_call","call_id":format!("call-{id}"),"name":"shell","arguments":"{}"});
             if id=="1c0a0000-0000-4000-8000-000000000003" {

@@ -1,5 +1,15 @@
 # 開発判断
 
+## One budget for every additional Responses network attempt (#328)
+
+`response_max_retries` bounds every additional network attempt in a budget
+scope, including refused connections, reduced input and #182's one-shot
+reasoning-stripped resend. This
+supersedes the free #182 resend at zero slots: preserve the typed refusal
+without a POST. With a slot available, the stripped resend still occurs once
+and consumes that slot. The Responses executor is the sole budget owner;
+callers retain input changes and scope, not free retry exceptions.
+
 ## No stop/retry authority check (#256, user decision 2026-11-07)
 
 User's reason: Shellboy assumes personal use, and pointless restrictions make for

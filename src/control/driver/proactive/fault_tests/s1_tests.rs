@@ -130,7 +130,6 @@ async fn terminal_public_case(case: &str) {
     let zero_retry_eof = case.contains("_r0_");
     let stream_case = sse_terminal || sse_eof;
     let chat_api = case.ends_with("_chat");
-    let retry_limit = if stream_case && !zero_retry_eof { 2 } else { 0 };
     let embedded_status = if case == "sse_terminal_429_responses" {
         429
     } else {
@@ -146,14 +145,17 @@ async fn terminal_public_case(case: &str) {
         } else {
             1
         };
+    // These cases exercise the shape and terminal outcome of eligible
+    // reductions, not the zero-budget boundary. Every reduced POST costs a slot.
+    let retry_limit = if stream_case && !zero_retry_eof {
+        2
+    } else {
+        expected_summary_posts - 1
+    };
     crate::test_watchdog::watchdog("public terminal compaction contract", async {
         let root = tempfile::tempdir().unwrap();
         let (url, mut receive, mut heads, server) = proxy().await;
-        let owner = if stream_case {
-            proactive_owner_retries(root.path(), &url, "[compaction]\nauto_at_tokens=200\nsummary_max_chars=4000\n", retry_limit, chat_api).await
-        } else {
-            proactive_owner(root.path(), &url, "[compaction]\nauto_at_tokens=200\nsummary_max_chars=4000\n").await
-        };
+        let owner = proactive_owner_retries(root.path(), &url, "[compaction]\nauto_at_tokens=200\nsummary_max_chars=4000\n", retry_limit, chat_api).await;
         let control = Control::new(&owner, root.path().into());
         let target = thread(&control).await;
         let first = |text: &str, input| if chat_api { chat_answer_with_usage(text, input) } else { answer_with_usage(text, input) };
@@ -469,7 +471,7 @@ async fn all_canonical_guard_causes_share_one_public_projection_without_requests
         let attempt = id.clone();
         control.store.database.call(move |db| {
             let tx = db.transaction()?;
-            tx.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES(?1,'guard-turn',0,0,'fixture','fixture',0,'completed','{}','2026-11-01T00:00:00Z')", [&attempt])?;
+            tx.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='guard-turn'),?1,'guard-turn',0,0,'fixture','fixture',0,'completed','{}','2026-11-01T00:00:00Z')", [&attempt])?;
             crate::compaction::attempt_begin_tx(
                 &tx,
                 &attempt,

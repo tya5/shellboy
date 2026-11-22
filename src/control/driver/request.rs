@@ -47,19 +47,16 @@ impl Instructions {
     }
 }
 
-pub(super) struct AdmittedRequest {
-    pub(super) client: HttpModelClient,
-    pub(super) prepared: Arc<crate::attachments::PreparedAttachments>,
-    pub(super) request: Value,
-    pub(super) attempt: String,
-}
 pub(super) async fn prepare_attempt(
     control: &Arc<Control>,
     snapshot: &mut Snapshot,
     slot: &DriverSlot,
     instruction_body: Option<&Arc<str>>,
-    client: HttpModelClient,
-) -> Result<Option<AdmittedRequest>, ApiError> {
+    client: &HttpModelClient,
+) -> Result<
+    Option<model::request_path::PreparedInput<Arc<crate::attachments::PreparedAttachments>>>,
+    ApiError,
+> {
     let mut prepared = match control
         .attachments
         .prepare_at_revision(
@@ -112,30 +109,31 @@ pub(super) async fn prepare_attempt(
         return Ok(None);
     }
     let prepared = Arc::new(prepared);
-    let attempt = id();
-    let started = match admit_attempt_with_digest(
-        control,
-        snapshot,
-        &attempt,
-        prepared.clone(),
-        input_characters,
-        history_characters,
-        client.extra_digest(),
-    )
-    .await
-    {
-        Ok(started) => started,
-        Err(error) if error.code == ErrorCode::OperationConflict => return Ok(None),
-        Err(error) => return Err(error),
-    };
-    if !started {
-        return Ok(None);
-    }
-    Ok(Some(AdmittedRequest {
-        client,
-        prepared,
-        request,
-        attempt,
+    let attachments = prepared.clone();
+    let current = snapshot.clone();
+    let linker = snapshot.clone();
+    let link_attachments = prepared.clone();
+    let digest = client.extra_digest();
+    let qualify = Box::new(
+        move |tx: &rusqlite::Transaction<'_>, row: &mut model::request_path::AttemptAdmission| {
+            current.admit_attempt_tx(
+                tx,
+                row,
+                &attachments,
+                input_characters,
+                history_characters,
+                digest,
+            )
+        },
+    );
+    Ok(Some(model::request_path::PreparedInput {
+        payload: request,
+        context: prepared,
+        admission: snapshot.attempt_admission(),
+        qualify,
+        link: Some(Box::new(move |tx, attempt| {
+            linker.link_attempt_tx(tx, attempt, &link_attachments)
+        })),
     }))
 }
 pub(super) fn model_client(
@@ -304,61 +302,79 @@ pub(super) fn prepare_request(
     );
     Ok((request, tags))
 }
-// Preserve the client's existing bounded partial-text/items/raw recovery type.
-#[allow(clippy::result_large_err)]
-pub(super) async fn stream_response(
-    control: &Control,
-    thread: &str,
-    attempt: &str,
-    client: &HttpModelClient,
-    request: Value,
-    bypass_usage_limit: Option<model::usage_limit::UsageLimit>,
-    stop: &CancellationToken,
-) -> Result<model::ModelResponse, model::http::AttemptFailure> {
-    let (send, mut receive) = mpsc::channel::<model::http::ObservedEvent>(32);
+pub(super) async fn stream_observer<'a>(
+    control: &'a Control,
+    thread: &'a str,
+    attempt: &'a str,
+) -> model::request_path::Observer<'a> {
     let live_text = control.admit_live_stream(thread, attempt).await;
     let mut stream_chars = 0usize;
     let mut last_receive_notice: Option<std::time::Instant> = None;
-    let response = client.response_observed(
-        thread,
-        request,
-        stop.clone(),
-        Some(send),
-        bypass_usage_limit,
-    );
-    tokio::pin!(response);
-    loop {
-        tokio::select! {
-            result=&mut response=>break result,
-            Some(event)=receive.recv()=>{
-                let (event, observed_at) = match event {
-                    model::http::ObservedEvent::Received(at) => (None, at),
-                    model::http::ObservedEvent::Model { value, received_at } => (Some(value), received_at),
-                };
-                // Bound additional UI traffic, including byte-sized keepalives.
-                // A receipt after a long silence is always forwarded immediately.
-                if last_receive_notice.is_none_or(|last| observed_at.saturating_duration_since(last) >= std::time::Duration::from_secs(1)) {
-                    last_receive_notice = Some(observed_at);
-                    control.publish_event(EngineEvent::ModelReceive {
-                        thread_id: thread.into(),
-                        attempt_id: attempt.into(),
-                        observed_at,
-                    });
-                }
-                let Some(event) = event else { continue; };
-                let kind=model::classify_stream_event(&event);
-                let reasoning=kind==model::StreamEventKind::ReasoningDelta;
-                if matches!(kind,model::StreamEventKind::TextDelta|model::StreamEventKind::ReasoningDelta) && let Some(delta)=event.get("delta").and_then(Value::as_str){let stream_char_offset=stream_chars;stream_chars+=delta.chars().count();control.stream_admitted_delta(&live_text,thread,attempt,delta,reasoning,stream_char_offset);}
-            }
+    Box::new(move |event| {
+        let (event, observed_at) = match event {
+            model::http::ObservedEvent::Received(at) => (None, at),
+            model::http::ObservedEvent::Model { value, received_at } => (Some(value), received_at),
+        };
+        // Bound additional UI traffic, including byte-sized keepalives.
+        // A receipt after a long silence is always forwarded immediately.
+        if last_receive_notice.is_none_or(|last| {
+            observed_at.saturating_duration_since(last) >= std::time::Duration::from_secs(1)
+        }) {
+            last_receive_notice = Some(observed_at);
+            control.publish_event(EngineEvent::ModelReceive {
+                thread_id: thread.into(),
+                attempt_id: attempt.into(),
+                observed_at,
+            });
         }
-    }
+        let Some(event) = event else {
+            return;
+        };
+        let kind = model::classify_stream_event(&event);
+        let reasoning = kind == model::StreamEventKind::ReasoningDelta;
+        if matches!(
+            kind,
+            model::StreamEventKind::TextDelta | model::StreamEventKind::ReasoningDelta
+        ) && let Some(delta) = event.get("delta").and_then(Value::as_str)
+        {
+            let stream_char_offset = stream_chars;
+            stream_chars += delta.chars().count();
+            control.stream_admitted_delta(
+                &live_text,
+                thread,
+                attempt,
+                delta,
+                reasoning,
+                stream_char_offset,
+            );
+        }
+    })
 }
 
 impl Snapshot {
+    pub(super) fn attempt_admission(&self) -> model::request_path::AttemptAdmission {
+        use model::request_path::{AttemptAdmission, AttemptKind, AttemptScope};
+        AttemptAdmission {
+            scope: AttemptScope {
+                kind: AttemptKind::Conversation,
+                thread: self.thread.clone(),
+                turn: Some(self.turn.clone()),
+                generation: self.generation,
+                selection_revision: self.selection,
+                reasoning_epoch: self.epoch,
+            },
+            profile: self.profile.clone(),
+            model: self.model.clone(),
+            effort: self.effort.clone(),
+            manifest: json!({}),
+            started_at: now(),
+        }
+    }
+
     pub(super) fn admit_attempt_tx(
         &self,
         tx: &rusqlite::Transaction<'_>,
-        attempt_id: &str,
+        row: &mut model::request_path::AttemptAdmission,
         attempt_attachments: &crate::attachments::PreparedAttachments,
         input_characters: u64,
         history_characters: u64,
@@ -405,13 +421,24 @@ impl Snapshot {
         if let Some(digest) = extra_digest {
             manifest["extra_digest"] = json!(digest);
         }
-        tx.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,effort,reasoning_epoch,state,input_manifest_json,started_at)VALUES(?1,?2,?3,?4,?5,?6,?7,?8,'inflight',?9,?10)",params![attempt_id,self.turn,self.generation,self.selection,self.profile,self.model,self.effort,self.epoch,manifest.to_string(),now()])?;
+        row.manifest = manifest;
+        row.scope.selection_revision =
+            crate::attachments::qualify_prepared_tx(tx, attempt_attachments)
+                .map_err(crate::storage::StorageError::from)?;
+        Ok(true)
+    }
+
+    pub(super) fn link_attempt_tx(
+        &self,
+        tx: &rusqlite::Transaction<'_>,
+        attempt_id: &str,
+        attempt_attachments: &crate::attachments::PreparedAttachments,
+    ) -> Result<(), crate::storage::StorageError> {
         for event in &self.events {
             tx.execute("UPDATE delivery SET included_attempt_id=?3 WHERE event_id=?1 AND recipient_id=?2 AND state='pending'",params![event,self.run,attempt_id])?;
         }
-        crate::attachments::adopt_prepared_tx(tx, attempt_attachments, attempt_id)
-            .map_err(crate::storage::StorageError::from)?;
-        Ok(true)
+        crate::attachments::record_prepared_tx(tx, attempt_attachments, attempt_id)
+            .map_err(crate::storage::StorageError::from)
     }
 }
 

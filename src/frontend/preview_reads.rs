@@ -134,7 +134,7 @@ mod terminal_refresh_tests {
     async fn repeated_failed_metadata_refreshes_do_not_read_raw_or_mint_observation_notices() {
         let (_root, owner, control, server) = crate::frontend::control_tests::fixture().await;
         owner.db.call(|db| {
-            db.execute_batch("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('no-raw-attempt','target-run',0,0,'fixture','fixture-model',0,'completed','{}','now');
+            db.execute_batch("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='target-run'),'no-raw-attempt','target-run',0,0,'fixture','fixture-model',0,'completed','{}','now');
               INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES('no-raw-group','no-raw-attempt','target-run','completed','now');
               INSERT INTO node(id,turn_id,kind,created_at,payload_json)VALUES('no-raw-node','target-run','tool_result','now','{\"group_id\":\"no-raw-group\",\"item\":{\"type\":\"function_call_output\",\"call_id\":\"one\",\"output\":\"{\\\"status\\\":\\\"exited\\\",\\\"exit_code\\\":1}\"}}');
               INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,exit_code,output_complete,started_at)VALUES('no-raw-exec','target-run','target-run','no-raw-exec','exited','/','{}','UTF-8','UTF-8','closed',1,1,'now');

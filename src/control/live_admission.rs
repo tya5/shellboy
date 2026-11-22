@@ -155,7 +155,7 @@ mod tests {
         .unwrap();
         let control = Control::new(&owner, root.path().into());
         control.store.database.call(|db| {
-            db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('t','/','','p','m','2026-01-01T00:00:00Z'); INSERT INTO run(id,thread_id,state,created_at) VALUES('r','t','live','2026-01-01T00:00:00Z'); INSERT INTO turn(id,thread_id,run_id,state,created_at) VALUES('u','t','r','running','2026-01-01T00:00:00Z'); INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at) VALUES('a','u',0,0,'p','m',0,'inflight','{}','2026-01-01T00:00:00Z');")?;Ok(())
+            db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('t','/','','p','m','2026-01-01T00:00:00Z'); INSERT INTO run(id,thread_id,state,created_at) VALUES('r','t','live','2026-01-01T00:00:00Z'); INSERT INTO turn(id,thread_id,run_id,state,created_at) VALUES('u','t','r','running','2026-01-01T00:00:00Z'); INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at) VALUES('conversation',(SELECT thread_id FROM turn WHERE id='u'),'a','u',0,0,'p','m',0,'inflight','{}','2026-01-01T00:00:00Z');")?;Ok(())
         }).await.unwrap();
         for state in ["completed", "failed", "incomplete", "cancelled"] {
             // Recreate a synthetic inflight fixture between independently fenced cases.

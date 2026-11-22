@@ -586,7 +586,7 @@ mod tests {
             db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','/AGENTS.md','p','m','now');
                 INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','completed','now');
                 INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','t','r','completed','now');
-                INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('attempt','u',0,0,'p','m',0,'completed','{}','now');
+                INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='u'),'attempt','u',0,0,'p','m',0,'completed','{}','now');
                 INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES('g','attempt','u','completed','now');
                 INSERT INTO node(id,turn_id,kind,created_at,payload_json)VALUES('calls','u','assistant_response','now','{\"group_id\":\"g\"}');")?;
             for (ordinal,call) in [(0,"a"),(1,"b")] {

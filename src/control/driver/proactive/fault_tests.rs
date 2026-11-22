@@ -2415,9 +2415,9 @@ async fn proactive_growing_active_range_permits_one_summary_per_new_report() {
                     let token = crate::compaction::a_state::begin_report_tx(
                         &tx, thread, "fixture", "fixture",
                     )?;
-                    let manifest = json!({"compaction_report_token":token}).to_string();
+                    let manifest = json!({"adoption":{"outcome":"adopted"},"compaction_report_token":token}).to_string();
                     let report_usage = json!({"input_tokens":usage}).to_string();
-                    tx.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at,ended_at) SELECT ?1,?2,0,revision,profile_id,model_id,reasoning_epoch,'completed',?3,?4,'growth','growth' FROM thread WHERE id=?5", rusqlite::params![attempt, turn, manifest, report_usage, thread])?;
+                    tx.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at,ended_at) SELECT 'conversation',(SELECT thread_id FROM turn WHERE id=?2), ?1,?2,0,revision,profile_id,model_id,reasoning_epoch,'completed',?3,?4,'growth','growth' FROM thread WHERE id=?5", rusqlite::params![attempt, turn, manifest, report_usage, thread])?;
                     append_completed_tool_group(&tx, thread, attempt, turn, "g4", 4_000, "out-g4")?;
                     tx.execute("INSERT INTO output_item(attempt_id,ordinal,item_type,status,payload_json,node_id) VALUES(?1,0,'function_call','completed',?2,'g4-call')", rusqlite::params![attempt, json!({"type":"function_call","call_id":"g4","name":"shell","arguments":"{}"}).to_string()])?;
                     crate::compaction::a_state::complete_report_tx(
@@ -3391,7 +3391,7 @@ async fn progress(control: &Control) -> Result<Value, crate::storage::StorageErr
         let mut state = serde_json::Map::new();
         for (name, query) in [
             ("runs", "SELECT json_object('id',substr(id,1,128),'thread_id',substr(thread_id,1,128),'state',substr(state,1,64),'stop_reason',substr(stop_reason,1,128)) FROM run ORDER BY rowid DESC LIMIT 8"),
-            ("turns", "SELECT json_object('id',substr(t.id,1,128),'thread_id',substr(t.thread_id,1,128),'run_id',substr(t.run_id,1,128),'state',substr(t.state,1,64),'generation',t.generation,'instruction_snapshot_present',t.instruction_snapshot_id IS NOT NULL,'run_state',substr(r.state,1,64),'recovery_code',substr(json_extract(t.recovery_reason_json,'$.code'),1,128),'attempt_state',substr(a.state,1,64),'error_kind',substr(json_extract(a.error_json,'$.error.kind'),1,128),'http_phase',substr(json_extract(a.error_json,'$.error.http_observation.phase'),1,128)) FROM turn t JOIN run r ON r.id=t.run_id LEFT JOIN model_attempt a ON a.id=(SELECT latest.id FROM model_attempt latest WHERE latest.turn_id=t.id ORDER BY latest.rowid DESC LIMIT 1) ORDER BY t.rowid DESC LIMIT 8"),
+            ("turns", "SELECT json_object('id',substr(t.id,1,128),'thread_id',substr(t.thread_id,1,128),'run_id',substr(t.run_id,1,128),'state',substr(t.state,1,64),'generation',t.generation,'instruction_snapshot_present',t.instruction_snapshot_id IS NOT NULL,'run_state',substr(r.state,1,64),'recovery_code',substr(json_extract(t.recovery_reason_json,'$.code'),1,128),'attempt_state',substr(a.state,1,64),'error_kind',substr(json_extract(a.error_json,'$.error.kind'),1,128),'http_phase',substr(json_extract(a.input_manifest_json,'$.http_observation.phase'),1,128)) FROM turn t JOIN run r ON r.id=t.run_id LEFT JOIN model_attempt a ON a.id=(SELECT latest.id FROM model_attempt latest WHERE latest.turn_id=t.id ORDER BY latest.rowid DESC LIMIT 1) ORDER BY t.rowid DESC LIMIT 8"),
         ] {
             let rows = db.prepare(query)?.query_map([], |row| row.get::<_, String>(0))?
                 .collect::<rusqlite::Result<Vec<_>>>()?;

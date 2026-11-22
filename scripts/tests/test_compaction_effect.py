@@ -47,7 +47,7 @@ class CompactionEffectTests(unittest.TestCase):
                     'reason':'proactive_threshold' if i != 3 else 'overflow_retry',
                     'outcome':{2:'adopted',3:'rejected',5:'no_safe_reduction'}[i],
                 }
-            db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,error_json,started_at) VALUES(?,?,0,0,'profile',?,0,'completed','{}',?,?,?)", (f'a{i}',turn,'m1' if i < 4 else 'm2',json.dumps(usage),json.dumps(error),started))
+            db.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,error_json,started_at) VALUES('conversation','thread',?,?,0,0,'profile',?,0,'completed','{}',?,?,?)", (f'a{i}',turn,'m1' if i < 4 else 'm2',json.dumps(usage),json.dumps(error),started))
         db.commit()
         return db
 

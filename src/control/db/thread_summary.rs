@@ -15,7 +15,7 @@ LEFT JOIN turn u ON u.id=(SELECT id FROM turn WHERE run_id=latest.id ORDER BY cr
 fn activity_joins() -> String {
     format!(
         "{RUN_TURN_JOINS}
-LEFT JOIN model_attempt a ON a.rowid=(SELECT rowid FROM model_attempt WHERE turn_id=u.id
+LEFT JOIN model_attempt a ON a.rowid=(SELECT rowid FROM model_attempt WHERE turn_id=u.id AND kind='conversation'
     AND latest.state='live' AND u.state='running' ORDER BY rowid DESC LIMIT 1)"
     )
 }

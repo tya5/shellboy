@@ -109,7 +109,7 @@ def main():
         db.execute("INSERT INTO node(id,turn_id,kind,created_at,payload_json,payload_bytes) VALUES('request','turn','assistant',?,?,?)", (stamp, payload, len(payload)))
         db.execute("INSERT INTO thread_path(thread_id,ordinal,node_id) VALUES('parent',0,'request')")
         db.execute("UPDATE thread SET cursor_node_id='request' WHERE id='parent'")
-        db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at,ended_at) VALUES('attempt','turn',0,0,'fixture','actual-model',0,'completed','{}',?,?)", (stamp, ended))
+        db.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at,ended_at) VALUES('conversation','parent','attempt','turn',0,0,'fixture','actual-model',0,'completed','{}',?,?)", (stamp, ended))
         db.execute("INSERT INTO output_item(attempt_id,ordinal,item_type,status,payload_json,node_id) VALUES('attempt',0,'function_call','completed','{}','request')")
         db.execute("INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at) VALUES('group','attempt','turn','completed',?)", (stamp,))
         db.execute("INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state,operation_id) VALUES('group','call',0,'shell',?,'completed','execution')", (json.dumps({'command': command}),))

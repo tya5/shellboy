@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 mod interrupted_tools;
 pub(crate) use interrupted_tools::{RepairReport, repair_interrupted_tool_groups};
 
-pub(super) fn now() -> String {
+pub(crate) fn now() -> String {
     chrono::Utc::now().to_rfc3339()
 }
 
@@ -77,67 +77,28 @@ pub(super) fn resume_recovery_turn_tx(
 
 /// A DB transition result, not a second in-memory attempt state machine.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum AttemptTransition {
+pub(crate) enum AttemptTransition {
     Applied,
     AlreadyApplied,
     Obsolete,
 }
 
-const ACTIVE_ATTEMPTS: &[AttemptState] = &[AttemptState::Preparing, AttemptState::Inflight];
-const REQUEST_TURNS: &[TurnState] = &[TurnState::Preparing, TurnState::Running, TurnState::Waiting];
-
-pub(super) fn fail_attempt(
+pub(super) fn adopt_attempt(
     db: &Connection,
     attempt: &str,
-    error: &Value,
-    at: &str,
-) -> Result<AttemptTransition, StorageError> {
-    let (error, usage) = normalized_failure(error);
-    let changed = db.execute(
-        "UPDATE model_attempt SET state='failed',error_json=CASE WHEN json_valid(error_json) AND json_type(error_json,'$.automatic_trim_attempt')='object' THEN json_set(json_remove(?2,'$.automatic_trim_attempt'),'$.automatic_trim_attempt',json_extract(error_json,'$.automatic_trim_attempt')) WHEN json_type(?2,'$.automatic_trim_attempt') IS NULL THEN ?2 ELSE json_remove(?2,'$.automatic_trim_attempt') END,ended_at=?3,usage_json=COALESCE(?4,usage_json),
-         input_manifest_json=json_set(input_manifest_json,'$.prompt_cache_diagnostics',json(CASE WHEN json_extract(input_manifest_json,'$.prompt_cache.diagnostics_enabled')=1 THEN ?5 ELSE 'null' END))
-         WHERE id=?1 AND state IN ('preparing','inflight')
-         AND EXISTS(SELECT 1 FROM turn u JOIN run r ON r.id=u.run_id
-                    WHERE u.id=model_attempt.turn_id AND u.generation=model_attempt.generation
-                    AND u.state IN ('preparing','running','waiting') AND r.state='live')",
-        params![attempt, error.to_string(), at, usage.map(|u| u.to_value().to_string()), diagnostic_json(&error["raw_response"])],
-    )?;
-    if changed == 1 && error.get("rate_observation").is_some() {
-        db.execute(
-            "UPDATE model_attempt SET input_manifest_json=json_set(input_manifest_json,'$.rate_observation',json(?2)) WHERE id=?1",
-            params![attempt, error["rate_observation"].to_string()],
-        )?;
-    }
-    attempt_outcome(db, attempt, AttemptState::Failed, changed)
-}
-pub(super) fn complete_attempt(
-    db: &Connection,
-    attempt: &str,
-    response: &Value,
-    at: &str,
 ) -> Result<AttemptTransition, StorageError> {
     let changed = db.execute(
-        "UPDATE model_attempt SET state='completed',response_id=?2,usage_json=?3,ended_at=?4,
-         input_manifest_json=json_set(input_manifest_json,'$.prompt_cache_diagnostics',json(CASE WHEN json_extract(input_manifest_json,'$.prompt_cache.diagnostics_enabled')=1 THEN ?5 ELSE 'null' END))
-         WHERE id=?1 AND state='inflight'
+        "UPDATE model_attempt SET input_manifest_json=json_set(input_manifest_json,'$.adoption',json_object('outcome','adopted'))
+         WHERE id=?1 AND state='completed' AND json_type(input_manifest_json,'$.adoption') IS NULL
          AND EXISTS(SELECT 1 FROM turn u JOIN run r ON r.id=u.run_id
                     WHERE u.id=model_attempt.turn_id AND u.generation=model_attempt.generation
                     AND u.state='running' AND r.state='live')",
-        params![
-            attempt,
-            response.get("id").and_then(Value::as_str),
-            response
-                .get("usage")
-                .map(crate::usage::StandardUsage::from_value)
-                .map(|u| u.to_value().to_string()),
-            at,
-            diagnostic_json(response)
-        ],
+        [attempt],
     )?;
     if changed == 1 {
-        let evidence:(String,String,String,Option<String>)=db.query_row(
-            "SELECT t.thread_id,a.profile_id,a.model_id,CASE WHEN json_type(a.input_manifest_json,'$.compaction_report_token') IS NULL THEN NULL WHEN json_type(a.input_manifest_json,'$.compaction_report_token')='object' THEN json_extract(a.input_manifest_json,'$.compaction_report_token') ELSE 'invalid-type' END FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE a.id=?1",
-            [attempt],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)))?;
+        let evidence:(String,String,String,Option<String>,Option<i64>)=db.query_row(
+            "SELECT t.thread_id,a.profile_id,a.model_id,CASE WHEN json_type(a.input_manifest_json,'$.compaction_report_token') IS NULL THEN NULL WHEN json_type(a.input_manifest_json,'$.compaction_report_token')='object' THEN json_extract(a.input_manifest_json,'$.compaction_report_token') ELSE 'invalid-type' END, json_extract(a.usage_json,'$.input_tokens') FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE a.id=?1",
+            [attempt],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?)))?;
         crate::compaction::a_state::complete_report_tx(
             db,
             &evidence.0,
@@ -152,157 +113,49 @@ pub(super) fn complete_attempt(
                         .map_err(|e| crate::storage::StorageError::Schema(e.to_string()))
                 })
                 .transpose()?,
-            crate::usage::StandardUsage::from_value(&response["usage"]).input_tokens,
+            evidence.4.and_then(|input| u64::try_from(input).ok()),
         )?;
     }
-    attempt_outcome(db, attempt, AttemptState::Completed, changed)
-}
-fn diagnostic_json(response: &Value) -> String {
-    crate::model::cache_diagnostics::bounded(&response["prompt_cache_diagnostics"])
-        .unwrap_or(Value::Null)
-        .to_string()
-}
-fn normalized_failure(error: &Value) -> (Value, Option<crate::usage::StandardUsage>) {
-    let mut error = error.clone();
-    let usage = error
-        .pointer("/raw_response/usage")
-        .map(crate::usage::StandardUsage::from_value);
-    if let Some(raw) = error.get_mut("raw_response") {
-        crate::usage::normalize_response(raw);
-        crate::model::cache_diagnostics::normalize_response(raw);
-    }
-    (error, usage)
-}
-
-fn failed_context_limit(body: Option<&str>) -> bool {
-    #[derive(serde::Deserialize)]
-    struct SavedFailure {
-        error: crate::model::ModelError,
-    }
-    body.and_then(|body| serde_json::from_str::<SavedFailure>(body).ok())
-        .is_some_and(|saved| saved.error.is_context_limit())
-}
-
-pub(super) fn incomplete_attempt(
-    db: &Connection,
-    attempt: &str,
-    error: &Value,
-    at: &str,
-) -> Result<AttemptTransition, StorageError> {
-    // Only a saved, typed context-limit failure may be reclassified after
-    // reduction. CAS the exact saved cause so caller data cannot replace it.
-    let saved_failure: Option<Option<String>> = db
-        .query_row(
-            "SELECT error_json FROM model_attempt WHERE id=?1 AND state='failed'",
-            [attempt],
-            |row| row.get(0),
-        )
-        .optional()?;
-    let permitted_failure = saved_failure
-        .flatten()
-        .filter(|body| failed_context_limit(Some(body)));
-    let (error, usage) = normalized_failure(error);
-    let changed = db.execute(
-        "UPDATE model_attempt SET state='incomplete',error_json=CASE WHEN json_valid(error_json) AND json_type(error_json,'$.automatic_trim_attempt')='object' THEN json_set(json_remove(?2,'$.automatic_trim_attempt'),'$.automatic_trim_attempt',json_extract(error_json,'$.automatic_trim_attempt')) WHEN json_type(?2,'$.automatic_trim_attempt') IS NULL THEN ?2 ELSE json_remove(?2,'$.automatic_trim_attempt') END,ended_at=?3,usage_json=COALESCE(?5,usage_json),
-         input_manifest_json=json_set(input_manifest_json,'$.prompt_cache_diagnostics',json(CASE WHEN json_extract(input_manifest_json,'$.prompt_cache.diagnostics_enabled')=1 THEN ?6 ELSE 'null' END))
-         WHERE id=?1 AND (state IN ('preparing','inflight') OR (state='failed' AND error_json=?4))
-         AND EXISTS(SELECT 1 FROM turn u JOIN run r ON r.id=u.run_id
-                    WHERE u.id=model_attempt.turn_id AND u.generation=model_attempt.generation
-                    AND u.state IN ('preparing','running','waiting','recovery_wait') AND r.state='live')",
-        params![attempt, error.to_string(), at, permitted_failure, usage.map(|u| u.to_value().to_string()), diagnostic_json(&error["raw_response"])],
-    )?;
-    if changed == 1 && error.get("rate_observation").is_some() {
-        db.execute(
-            "UPDATE model_attempt SET input_manifest_json=json_set(input_manifest_json,'$.rate_observation',json(?2)) WHERE id=?1",
-            params![attempt, error["rate_observation"].to_string()],
-        )?;
-    }
-    attempt_outcome(db, attempt, AttemptState::Incomplete, changed)
-}
-fn attempt_outcome(
-    db: &Connection,
-    attempt: &str,
-    target: AttemptState,
-    changed: usize,
-) -> Result<AttemptTransition, StorageError> {
     if changed == 1 {
         return Ok(AttemptTransition::Applied);
     }
-    let row = db
-        .query_row(
-            "SELECT a.state,a.generation,u.generation,u.state,r.state,a.error_json
-         FROM model_attempt a JOIN turn u ON u.id=a.turn_id JOIN run r ON r.id=u.run_id
-         WHERE a.id=?1",
-            [attempt],
-            |r| {
-                Ok((
-                    r.get::<_, String>(0)?,
-                    r.get::<_, i64>(1)?,
-                    r.get::<_, i64>(2)?,
-                    r.get::<_, String>(3)?,
-                    r.get::<_, String>(4)?,
-                    r.get::<_, Option<String>>(5)?,
-                ))
-            },
+    let row = db.query_row("SELECT a.state,a.generation,u.generation,u.state,r.state FROM model_attempt a JOIN turn u ON u.id=a.turn_id JOIN run r ON r.id=u.run_id WHERE a.id=?1", [attempt], |row| Ok((row.get::<_,String>(0)?,row.get::<_,i64>(1)?,row.get::<_,i64>(2)?,row.get::<_,String>(3)?,row.get::<_,String>(4)?))).optional()?;
+    let Some((state, generation, current, turn, run)) = row else {
+        return Err(ApiError::new(
+            ErrorCode::TargetUnavailable,
+            "Model attempt is no longer available",
         )
-        .optional()?
-        .ok_or_else(|| {
-            ApiError::new(
-                ErrorCode::TargetUnavailable,
-                "Model attempt is no longer available",
-            )
-        })?;
-    let (state, generation, turn_generation, turn, run, saved_error) = row;
+        .into());
+    };
     let state: AttemptState = serde_json::from_value(Value::String(state))
         .map_err(|_| ApiError::new(ErrorCode::InvalidState, "Unknown saved model attempt state"))?;
-    let turn: TurnState = serde_json::from_value(Value::String(turn))
-        .map_err(|_| ApiError::new(ErrorCode::InvalidState, "Unknown saved Turn state"))?;
-    let run: RunState = serde_json::from_value(Value::String(run))
-        .map_err(|_| ApiError::new(ErrorCode::InvalidState, "Unknown saved Run state"))?;
-    if generation != turn_generation || run != RunState::Live {
+    if generation != current || run != "live" {
         return Ok(AttemptTransition::Obsolete);
     }
-    if state == target {
+    if state == AttemptState::Completed {
         return Ok(AttemptTransition::AlreadyApplied);
     }
-    let active_turn = match target {
-        AttemptState::Completed => turn == TurnState::Running,
-        AttemptState::Incomplete => {
-            REQUEST_TURNS.contains(&turn) || turn == TurnState::RecoveryWait
-        }
-        _ => REQUEST_TURNS.contains(&turn),
-    };
-    if !active_turn
+    if turn != "running"
         || matches!(
             state,
-            AttemptState::Completed | AttemptState::Incomplete | AttemptState::Cancelled
+            AttemptState::Failed | AttemptState::Incomplete | AttemptState::Cancelled
         )
-        || (state == AttemptState::Failed && target != AttemptState::Incomplete)
     {
         return Ok(AttemptTransition::Obsolete);
     }
-    let predecessor_permits = match target {
-        AttemptState::Completed => state == AttemptState::Inflight,
-        AttemptState::Incomplete => {
-            ACTIVE_ATTEMPTS.contains(&state)
-                || (state == AttemptState::Failed && failed_context_limit(saved_error.as_deref()))
-        }
-        _ => ACTIVE_ATTEMPTS.contains(&state),
-    };
-    let (code, message) = if predecessor_permits {
-        (
+    Err(if state == AttemptState::Inflight {
+        ApiError::new(
             ErrorCode::OperationConflict,
             "Model attempt was not changed at its expected boundary",
         )
     } else {
-        (
+        ApiError::new(
             ErrorCode::InvalidState,
             "Model attempt predecessor does not permit this transition",
         )
-    };
-    Err(ApiError::new(code, message).into())
+    }
+    .into())
 }
-
 pub(super) fn cancel_run_attempts(
     db: &Connection,
     run: &str,
@@ -637,6 +490,7 @@ fn finish_shell_spawn(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::request_path::{fail_attempt, incomplete_attempt};
     use serde_json::json;
 
     fn fixture(state: &str) -> Connection {
@@ -677,10 +531,10 @@ mod tests {
         }
     }
     #[test]
-    fn terminal_usage_is_normalized_atomically_and_replay_does_not_replace_it() {
+    fn terminal_usage_is_normalized_atomically() {
         let usage = json!({"input_tokens":123,"input_tokens_details":{"cached_tokens":0,"extra":"x".repeat(128*1024)},"output_tokens":4,"output_tokens_details":{"reasoning_tokens":-1},"total_tokens":127,"attribution":"x".repeat(128*1024)});
         let canonical = json!({"input_tokens":123,"input_tokens_details":{"cached_tokens":0},"output_tokens":4,"total_tokens":127});
-        for operation in [complete_attempt, fail_attempt, incomplete_attempt] {
+        for operation in [fail_attempt, incomplete_attempt] {
             let mut db = fixture("inflight");
             let body = json!({"id":"response","usage":usage,"raw_response":{"usage":usage,"output":[{"usage":"user content"}]},"error":{"kind":"fixture"}});
             // Transaction rollback must discard both terminal state and usage.
@@ -725,238 +579,32 @@ mod tests {
                 );
                 assert_eq!(error["error"], body["error"]);
             }
-            assert_eq!(
-                operation(
-                    &db,
-                    "attempt",
-                    &json!({"usage":{"input_tokens":999}}),
-                    "late"
-                )
-                .unwrap(),
-                AttemptTransition::AlreadyApplied
-            );
-            assert_eq!(read(&db), saved);
         }
     }
-
     #[test]
-    fn late_failures_never_reclassify_completed_or_cancelled_attempts() {
-        for state in ["completed", "cancelled"] {
+    fn adoption_transition_respects_predecessor_and_generation() {
+        for (state, expected) in [
+            ("completed", AttemptTransition::Applied),
+            ("failed", AttemptTransition::Obsolete),
+            ("incomplete", AttemptTransition::Obsolete),
+            ("cancelled", AttemptTransition::Obsolete),
+        ] {
             let db = fixture(state);
-            let original = saved(&db);
-            fail_attempt(&db, "attempt", &json!({"late":true}), "late").unwrap();
-            assert_eq!(saved(&db), original);
-            incomplete_attempt(&db, "attempt", &json!({"late":true}), "late").unwrap();
-            assert_eq!(saved(&db), original);
-        }
-    }
-    #[test]
-    fn attempt_results_from_an_old_generation_cannot_replace_current_audit_fields() {
-        for state in ["inflight", "failed"] {
-            for operation in [fail_attempt, incomplete_attempt, complete_attempt] {
-                let db = fixture(state);
-                db.execute("UPDATE turn SET generation=2", []).unwrap();
-                let original = saved(&db);
-                assert_eq!(
-                    operation(&db, "attempt", &json!({"id":"late"}), "late").unwrap(),
-                    AttemptTransition::Obsolete
-                );
-                assert_eq!(saved(&db), original);
-            }
-        }
-    }
-    #[test]
-    fn attempt_terminal_boundaries_cover_every_saved_predecessor() {
-        use AttemptTransition::{AlreadyApplied, Applied, Obsolete};
-        // Columns: failure, completion, incomplete recovery. None is a
-        // genuinely invalid predecessor, distinct from a settled late result.
-        let cases = [
-            ("preparing", Some(Applied), None, Some(Applied)),
-            ("inflight", Some(Applied), Some(Applied), Some(Applied)),
-            ("failed", Some(AlreadyApplied), Some(Obsolete), None),
-            (
-                "completed",
-                Some(Obsolete),
-                Some(AlreadyApplied),
-                Some(Obsolete),
-            ),
-            (
-                "incomplete",
-                Some(Obsolete),
-                Some(Obsolete),
-                Some(AlreadyApplied),
-            ),
-            ("cancelled", Some(Obsolete), Some(Obsolete), Some(Obsolete)),
-        ];
-        for (state, fail, complete, incomplete) in cases {
-            for ((operation, target), expected) in [
-                (
-                    fail_attempt as fn(&Connection, &str, &Value, &str) -> _,
-                    "failed",
-                ),
-                (complete_attempt, "completed"),
-                (incomplete_attempt, "incomplete"),
-            ]
-            .into_iter()
-            .zip([fail, complete, incomplete])
-            {
-                let db = fixture(state);
-                let original = saved(&db);
-                let result = operation(
-                    &db,
-                    "attempt",
-                    &json!({"id":"new","usage":{"tokens":1}}),
-                    "new",
-                );
-                match expected {
-                    Some(outcome) => {
-                        assert_eq!(result.unwrap(), outcome, "{state} -> {target}");
-                        if outcome == Applied {
-                            let actual = saved(&db);
-                            assert_eq!(actual.0, target);
-                            assert_eq!(actual.2, "new");
-                        } else {
-                            assert_eq!(saved(&db), original);
-                        }
-                    }
-                    None => assert_eq!(
-                        result.unwrap_err().into_api_error().code,
-                        ErrorCode::InvalidState
-                    ),
-                }
-            }
-        }
-    }
-    #[test]
-    fn failed_raw_survives_reduction_and_incomplete_reclassification_rolls_back_atomically() {
-        let mut db = fixture("inflight");
-        let raw = json!({"error":crate::model::ModelError::provider(Some(400), &json!({"error":{"code":"context_length_exceeded","message":"context limit"}})),"raw_response":"context-limit","partial_text":"audit"});
-        assert_eq!(
-            fail_attempt(&db, "attempt", &raw, "failed").unwrap(),
-            AttemptTransition::Applied
-        );
-        let failed = saved(&db);
-        assert_eq!(failed.1, raw.to_string());
-        db.execute("UPDATE turn SET state='recovery_wait'", [])
-            .unwrap();
-        {
-            let tx = db.transaction().unwrap();
-            assert_eq!(
-                incomplete_attempt(&tx, "attempt", &raw, "incomplete").unwrap(),
-                AttemptTransition::Applied
-            );
-            assert_eq!(saved(&tx).0, "incomplete");
-            tx.rollback().unwrap();
-        }
-        assert_eq!(
-            saved(&db),
-            failed,
-            "a failed recovery transaction keeps the previously committed raw"
-        );
-        assert_eq!(
-            incomplete_attempt(&db, "attempt", &raw, "incomplete").unwrap(),
-            AttemptTransition::Applied
-        );
-        assert_eq!(
-            saved(&db),
-            ("incomplete".into(), raw.to_string(), "incomplete".into())
-        );
-    }
-    #[test]
-    fn stopped_ownership_and_terminal_turns_make_late_attempt_results_obsolete() {
-        for update in [
-            "UPDATE run SET state='stopping'",
-            "UPDATE run SET state='stopped'",
-            "UPDATE turn SET state='stopped'",
-            "UPDATE turn SET state='completed'",
-        ] {
-            for operation in [fail_attempt, incomplete_attempt, complete_attempt] {
-                let db = fixture("inflight");
-                db.execute(update, []).unwrap();
-                let original = saved(&db);
-                assert_eq!(
-                    operation(&db, "attempt", &json!({}), "late").unwrap(),
-                    AttemptTransition::Obsolete
-                );
-                assert_eq!(saved(&db), original);
-            }
-        }
-    }
-    #[test]
-    fn failed_incomplete_reclassification_requires_the_saved_typed_context_limit() {
-        for code in [
-            "context_length_exceeded",
-            "max_context_length_exceeded",
-            "context_window_exceeded",
-        ] {
-            let db = fixture("failed");
-            let raw = json!({"error":{"kind":"provider","message":"context limit","provider_code":code,"status":400},"raw_response":"paid received text"});
-            db.execute("UPDATE model_attempt SET error_json=?1", [raw.to_string()])
-                .unwrap();
-            assert_eq!(
-                incomplete_attempt(&db, "attempt", &raw, "new").unwrap(),
-                AttemptTransition::Applied
-            );
-            assert_eq!(
-                saved(&db),
-                ("incomplete".into(), raw.to_string(), "new".into())
-            );
-        }
-        for body in [
-            "not JSON".to_owned(),
-            json!({"error":{"provider_code":"context_length_exceeded"}}).to_string(),
-            json!({"error":{"kind":"provider","message":"auth","provider_code":"invalid_api_key","status":401}}).to_string(),
-            json!({"error":{"kind":"transport","message":"network unavailable"}}).to_string(),
-            json!({"error":{"kind":"provider","message":"context_length_exceeded"}}).to_string(),
-        ] {
-            let db = fixture("failed");
-            db.execute("UPDATE model_attempt SET error_json=?1",[body]).unwrap();
             let before = saved(&db);
-            let forged = json!({"error":{"kind":"provider","message":"new claimed cause","provider_code":"context_length_exceeded"}});
-            assert_eq!(incomplete_attempt(&db,"attempt",&forged,"new").unwrap_err().into_api_error().code,ErrorCode::InvalidState);
-            assert_eq!(saved(&db),before,"incoming error cannot reclassify an unrelated saved failure");
-        }
-    }
-
-    #[test]
-    fn missing_unknown_and_real_database_failures_remain_distinct() {
-        let db = fixture("unknown");
-        let error = fail_attempt(&db, "missing", &json!({}), "now")
-            .unwrap_err()
-            .into_api_error();
-        assert_eq!(error.code, ErrorCode::TargetUnavailable);
-        let error = fail_attempt(&db, "attempt", &json!({}), "now")
-            .unwrap_err()
-            .into_api_error();
-        assert_eq!(error.code, ErrorCode::InvalidState);
-        db.execute("DROP TABLE model_attempt", []).unwrap();
-        let error = fail_attempt(&db, "attempt", &json!({}), "now")
-            .unwrap_err()
-            .into_api_error();
-        assert_eq!(error.code, ErrorCode::SaveFailed);
-    }
-    #[test]
-    fn current_eligible_but_unchanged_attempt_is_a_conflict_not_storage_failure() {
-        for (state, operation) in [
-            (
-                "inflight",
-                complete_attempt as fn(&Connection, &str, &Value, &str) -> _,
-            ),
-            ("inflight", fail_attempt),
-            ("failed", incomplete_attempt),
-        ] {
-            let db = fixture(state);
-            if state == "failed" {
-                db.execute("UPDATE model_attempt SET error_json=?1", [json!({"error":{"kind":"provider","message":"context limit","provider_code":"context_length_exceeded","status":400}}).to_string()]).unwrap();
+            assert_eq!(adopt_attempt(&db, "attempt").unwrap(), expected);
+            if expected != AttemptTransition::Applied {
+                assert_eq!(saved(&db), before);
             }
-            db.execute_batch("CREATE TRIGGER suppress_attempt BEFORE UPDATE ON model_attempt BEGIN SELECT RAISE(IGNORE); END;").unwrap();
-            let original = saved(&db);
-            let error = operation(&db, "attempt", &json!({}), "now")
-                .unwrap_err()
-                .into_api_error();
-            assert_eq!(error.code, ErrorCode::OperationConflict);
-            assert_eq!(saved(&db), original);
         }
+        let db = fixture("completed");
+        db.execute("UPDATE turn SET generation=generation+1", [])
+            .unwrap();
+        let before = saved(&db);
+        assert_eq!(
+            adopt_attempt(&db, "attempt").unwrap(),
+            AttemptTransition::Obsolete
+        );
+        assert_eq!(saved(&db), before);
     }
     #[test]
     fn spawn_failure_settles_stopping_but_never_rewrites_terminal_shell_facts() {
@@ -1128,50 +776,115 @@ mod exit_reason_tests {
 #[cfg(test)]
 mod cache_diagnostic_tests {
     use super::*;
-    #[test]
-    fn diagnostics_share_terminal_cas_and_disabled_or_stale_never_overwrites() {
-        for operation in [complete_attempt, fail_attempt, incomplete_attempt] {
+    #[tokio::test]
+    async fn diagnostics_are_gated_at_receipt_and_adoption_preserves_them() {
+        for operation in [
+            None,
+            Some(
+                crate::model::request_path::fail_attempt
+                    as fn(
+                        &Connection,
+                        &str,
+                        &Value,
+                        &str,
+                    ) -> Result<AttemptTransition, StorageError>,
+            ),
+            Some(crate::model::request_path::incomplete_attempt),
+        ] {
             for enabled in [false, true] {
-                let db = Connection::open_in_memory().unwrap();
-                db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+                let root = tempfile::tempdir().unwrap();
+                let worker = crate::storage::DbWorker::open(root.path().join("fixture.db"))
+                    .await
+                    .unwrap();
+                let raw = json!({"id":"native-id","status":"completed","output":[],"prompt_cache_diagnostics":{"type":"cache_miss","reason":"reported","cache_missed_tokens":0,"unknown":"x".repeat(8192)}});
+                for (generation, expected_live) in [(1, false), (0, true)] {
+                    let failure_raw = raw.clone();
+                    worker.call(move |db| {
+                    if !expected_live {
                 db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','','p','m','now');INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','live','now');INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','t','r','running','now');").unwrap();
                 let manifest=json!({"prompt_cache":{"diagnostics_enabled":enabled,"comparison_response_id":null},"prompt_cache_diagnostics":null}).to_string();
-                db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('a','u',0,0,'p','m',0,'inflight',?1,'now')",[&manifest]).unwrap();
-                let diagnostic = json!({"type":"cache_miss","reason":"reported","cache_missed_tokens":0,"unknown":"x".repeat(8192)});
-                let raw = json!({"id":"native-id","prompt_cache_diagnostics":diagnostic});
-                let body = json!({"id":"native-id","prompt_cache_diagnostics":diagnostic,"raw_response":raw});
-                db.execute("UPDATE turn SET generation=1", []).unwrap();
-                assert_eq!(
-                    operation(&db, "a", &body, "stale").unwrap(),
-                    AttemptTransition::Obsolete
-                );
-                assert_eq!(
-                    db.query_row("SELECT input_manifest_json FROM model_attempt", [], |r| {
-                        r.get::<_, String>(0)
-                    })
-                    .unwrap(),
-                    manifest
-                );
-                db.execute("UPDATE turn SET generation=0", []).unwrap();
-                assert_eq!(
-                    operation(&db, "a", &body, "done").unwrap(),
-                    AttemptTransition::Applied
-                );
-                let saved: String = db
-                    .query_row("SELECT input_manifest_json FROM model_attempt", [], |r| {
-                        r.get(0)
-                    })
-                    .unwrap();
-                let saved: Value = serde_json::from_str(&saved).unwrap();
-                assert_eq!(
-                    saved["prompt_cache_diagnostics"],
-                    if enabled {
-                        json!({"type":"cache_miss","reason":"reported","cache_missed_tokens":0})
-                    } else {
-                        Value::Null
+                db.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='u'),'a','u',0,0,'p','m',0,'inflight',?1,'now')",[&manifest]).unwrap();
                     }
-                );
+                    db.execute("UPDATE turn SET generation=?1", [generation])?;
+                    if let Some(write) = operation.filter(|_| expected_live) {
+                        let body = json!({"raw_response":failure_raw});
+                        assert_eq!(write(db,"a",&body,"done")?, if expected_live { AttemptTransition::Applied } else { AttemptTransition::Obsolete });
+                    }
+                    Ok(())
+                    }).await.unwrap();
+                    if operation.is_none() {
+                        let mut response =
+                            crate::model::ModelResponse::completed(raw.clone(), false).unwrap();
+                        response.raw["prompt_cache_diagnostics"] =
+                            raw["prompt_cache_diagnostics"].clone();
+                        crate::model::request_path::persist_received_attempt(
+                            &worker,
+                            "a",
+                            crate::model::request_path::AttemptKind::Conversation,
+                            false,
+                            &Ok(response),
+                        )
+                        .await
+                        .unwrap();
+                        worker
+                            .call(move |db| {
+                                assert_eq!(
+                                    adopt_attempt(db, "a")?,
+                                    if expected_live {
+                                        AttemptTransition::Applied
+                                    } else {
+                                        AttemptTransition::Obsolete
+                                    }
+                                );
+                                Ok(())
+                            })
+                            .await
+                            .unwrap();
+                    }
+                    let saved = worker
+                        .call(|db| {
+                            Ok(db.query_row(
+                                "SELECT input_manifest_json FROM model_attempt",
+                                [],
+                                |r| r.get::<_, String>(0),
+                            )?)
+                        })
+                        .await
+                        .unwrap();
+                    let saved: Value = serde_json::from_str(&saved).unwrap();
+                    assert_eq!(
+                        saved["prompt_cache_diagnostics"],
+                        if enabled && (expected_live || operation.is_none()) {
+                            json!({"type":"cache_miss","reason":"reported","cache_missed_tokens":0})
+                        } else {
+                            Value::Null
+                        }
+                    );
+                }
+                worker.shutdown().await.unwrap();
             }
         }
     }
+}
+
+// Audit-only received responses are retained through their live Turn, outside
+// thread_path/model replay. Share the same atomic insert/root revision boundary
+// for explicit recovery and automatic partial-response retries.
+pub(crate) fn save_received_failure(
+    db: &rusqlite::Connection,
+    turn: &str,
+    body: &Value,
+) -> Result<(), crate::storage::StorageError> {
+    let body = body.to_string();
+    db.execute("INSERT INTO node(id,turn_id,kind,created_at,payload_json,payload_bytes)VALUES(?1,?2,'incomplete_response',?3,?4,?5)",params![uuid::Uuid::new_v4().to_string(),turn,now(),body,body.len() as i64])?;
+    if db.execute(
+        "UPDATE app_meta SET value=CAST(value AS INTEGER)+1 WHERE key='root_revision'",
+        [],
+    )? != 1
+    {
+        return Err(crate::storage::StorageError::Schema(
+            "root revision metadata missing".into(),
+        ));
+    }
+    Ok(())
 }

@@ -292,7 +292,7 @@ async fn explicit_tool_span_summary_sends_complete_groups_in_one_request() {
     fixture.db.call(|db| {
         db.execute_batch("INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','completed','now');
             INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','t','r','completed','now');
-            INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('attempt','u',0,0,'p','m',0,'completed','{}','now');")?;Ok(())
+            INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='u'),'attempt','u',0,0,'p','m',0,'completed','{}','now');")?;Ok(())
     }).await.unwrap();
     for group in ["g-a", "g-b"] {
         let saved = group.to_owned();

@@ -288,7 +288,7 @@ impl Fixture {
     async fn attempts(&self) -> Vec<(String, Option<Value>)> {
         let turn = self.accepted.turn_id.clone().unwrap();
         self.control.store.database.call(move |db| {
-            let rows = db.prepare("SELECT state,error_json FROM model_attempt WHERE turn_id=?1 ORDER BY rowid")?
+            let rows = db.prepare("SELECT state,CASE WHEN error_json IS NULL THEN NULL ELSE json_set(error_json,'$.rate_observation',json_extract(input_manifest_json,'$.rate_observation')) END FROM model_attempt WHERE turn_id=?1 ORDER BY rowid")?
                 .query_map([turn], |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)))?
                 .collect::<Result<Vec<_>, _>>()?;
             Ok(rows.into_iter().map(|(state, error)| (state, error.map(|value| serde_json::from_str(&value).unwrap()))).collect())
@@ -362,8 +362,8 @@ impl Fixture {
                         }) {
                             return;
                         }
-                        // retry_or_recover publishes Changed after the automatic_retry
-                        // transaction commits, before releasing its boundary/waiting.
+                        // The executor publishes Changed after the automatic_retry
+                        // transaction commits, before releasing the boundary for backoff.
                         changed(&mut events, &thread, caller).await;
                     }
                 },
@@ -449,7 +449,7 @@ async fn progress(
         for (name, query) in [
             ("runs", "SELECT json_object('id',substr(id,1,128),'state',substr(state,1,64),'stop_reason',substr(stop_reason,1,128)) FROM run WHERE (?1 IS NULL OR id=(SELECT run_id FROM turn WHERE id=?1)) ORDER BY rowid DESC LIMIT 8"),
             ("turns", "SELECT json_object('id',substr(id,1,128),'state',substr(state,1,64),'generation',generation,'instruction_snapshot_present',instruction_snapshot_id IS NOT NULL,'recovery_code',substr(json_extract(recovery_reason_json,'$.code'),1,128)) FROM turn WHERE (?1 IS NULL OR id=?1) ORDER BY rowid DESC LIMIT 8"),
-            ("attempts", "SELECT json_object('id',substr(id,1,128),'state',substr(state,1,64),'error_kind',substr(json_extract(error_json,'$.error.kind'),1,128),'http_phase',substr(json_extract(error_json,'$.error.http_observation.phase'),1,128),'retry_number',json_extract(error_json,'$.automatic_retry.number'),'retry_delay_ms',json_extract(error_json,'$.automatic_retry.delay_ms')) FROM model_attempt WHERE (?1 IS NULL OR turn_id=?1) ORDER BY rowid DESC LIMIT 8"),
+            ("attempts", "SELECT json_object('id',substr(id,1,128),'state',substr(state,1,64),'error_kind',substr(json_extract(error_json,'$.error.kind'),1,128),'http_phase',substr(json_extract(input_manifest_json,'$.http_observation.phase'),1,128),'retry_number',json_extract(error_json,'$.automatic_retry.number'),'retry_delay_ms',json_extract(error_json,'$.automatic_retry.delay_ms')) FROM model_attempt WHERE (?1 IS NULL OR turn_id=?1) ORDER BY rowid DESC LIMIT 8"),
         ] {
             let rows = db.prepare(query)?.query_map([turn.as_deref()], |row| row.get::<_, String>(0))?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -524,6 +524,7 @@ async fn transient_http_errors_retry_consumed_error_bodies_with_bounded_backoff(
             .ok()
             .unwrap();
         let second = fixture.incoming().await;
+        let saved_before_retry = fixture.attempts().await[0].clone();
         assert_eq!(second.body, original, "retry changed the prepared request");
         second.reply.send(Reply::success()).ok().unwrap();
         assert_eq!(fixture.settled().await, "completed", "HTTP {status}");
@@ -535,11 +536,32 @@ async fn transient_http_errors_retry_consumed_error_bodies_with_bounded_backoff(
         assert_eq!(first_error["rate_observation"]["status"], status);
         assert_eq!(first_error["rate_observation"]["retry_after_present"], true);
         assert!(first_error["rate_observation"]["retry_after_ms"].is_null());
-        assert!(
-            first_error["rate_observation"]["applied_wait_ms"]
-                .as_u64()
-                .is_some()
-        );
+        assert_eq!(first_error["rate_observation"]["applied_wait_ms"], 0);
+        assert_eq!(attempts[0], saved_before_retry);
+        let turn = fixture.accepted.turn_id.clone().unwrap();
+        let wait=fixture.control.store.database.call({let turn=turn.clone(); move |db| Ok(db.query_row("SELECT json_extract(input_manifest_json,'$.rate_observation.applied_wait_ms') FROM model_attempt WHERE turn_id=?1 AND state='completed'",[turn],|r|r.get::<_,i64>(0))?)}).await.unwrap();
+        assert!(wait >= 10);
+        for group_by in [None, Some("thread".into())] {
+            let grouped = group_by.is_some();
+            let result = request(
+                &fixture.control,
+                Command::UsageGet(UsageGetArgs {
+                    turn_id: Some(turn.clone()),
+                    group_by,
+                    ..Default::default()
+                }),
+            )
+            .await;
+            let result = if grouped {
+                &result["items"][0]
+            } else {
+                &result
+            };
+            let rates = &result["connection_rates"]["by_connection"]["fixture"];
+            assert_eq!(rates["applied_wait_ms"], wait);
+            assert_eq!(rates["http_429"], u64::from(status == 429));
+            assert_eq!(rates["http_5xx"], u64::from(status >= 500));
+        }
         let retry = &first_error["automatic_retry"];
         assert_eq!(retry["number"], 1);
         assert_eq!(retry["limit"], 2);
@@ -593,7 +615,10 @@ async fn retry_budget_is_exact_and_zero_disables_retries() {
         assert!(error.get("automatic_retry").is_none());
         assert_eq!(error["rate_observation"]["status"], status);
         assert_eq!(error["rate_observation"]["retry_after_present"], false);
-        assert_eq!(error["rate_observation"]["applied_wait_ms"], 0);
+        let wait = error["rate_observation"]["applied_wait_ms"]
+            .as_u64()
+            .unwrap();
+        assert_eq!(wait == 0, limit == 0);
         if limit > 0 {
             assert_eq!(error["automatic_retry_exhausted"]["retries"], limit);
             assert_eq!(error["automatic_retry_exhausted"]["limit"], limit);
@@ -935,7 +960,7 @@ async fn stop_cancels_a_persisted_retry_wait_without_another_request() {
     let rate = &attempts[0].1.as_ref().unwrap()["rate_observation"];
     assert_eq!(rate["status"], 429);
     assert_eq!(rate["retry_after_ms"], 30_000);
-    assert!(rate["applied_wait_ms"].as_u64().is_some());
+    assert_eq!(rate["applied_wait_ms"], 0);
     fixture.no_more_requests().await;
     fixture.close().await;
 }
@@ -1915,10 +1940,9 @@ async fn unknown_429_keeps_retry_policy_without_inferred_usage_limit() {
     f.close().await;
 }
 
-/// #182 rule 4: the documented thinking-binding rejection is resent once with
-/// every earlier reasoning item dropped (new epoch), even with no ordinary
-/// retries configured, and the resend is recorded on the failed attempt. A
-/// second rejection is not resent again.
+/// A documented thinking-binding refusal consumes one shared retry slot for
+/// the reasoning-stripped POST. Zero slots permit no resend. A second refusal
+/// never resends, even when another slot remains.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn thinking_binding_rejection_is_resent_once_without_reasoning_and_recorded() {
     const BINDING: &str = "messages.3.content.0: Invalid `signature` in `thinking` block. The block is bound to a different conversation. Remove the block, or set `thinking.block_binding.prefix_mismatch_behavior` to \"drop_block\".";
@@ -1931,8 +1955,8 @@ async fn thinking_binding_rejection_is_resent_once_without_reasoning_and_recorde
             "",
         )
     };
-    for second_rejection in [false, true] {
-        let mut f = Fixture::new(0, 10, 5_000).await;
+    for (slots, second_rejection) in [(0, false), (1, false), (2, true)] {
+        let mut f = Fixture::new(slots, 10, 5_000).await;
         let first = f.incoming().await;
         first.reply.send(Reply::http(200,"application/json",&json!({"id":"tool","status":"completed","output":[
             {"type":"reasoning","id":"rs-tool","summary":[],"encrypted_content":"SIGNED"},
@@ -1944,6 +1968,22 @@ async fn thinking_binding_rejection_is_resent_once_without_reasoning_and_recorde
             "reasoning is replayed before the rejection"
         );
         after_tool.reply.send(binding()).ok().unwrap();
+        if slots == 0 {
+            assert_eq!(f.settled().await, "recovery_wait");
+            let attempts = f.attempts().await;
+            assert_eq!(
+                attempts.len(),
+                2,
+                "only the tool POST and the rejected POST"
+            );
+            let error = attempts[1].1.as_ref().unwrap();
+            assert_eq!(error["error"]["provider_code"], "invalid_request_error");
+            assert_eq!(error["error"]["status"], 400);
+            assert!(error.get("thinking_binding_retry").is_none());
+            f.no_more_requests().await;
+            f.close().await;
+            continue;
+        }
         let resent = f.incoming().await;
         let input = resent.body["input"].as_array().unwrap();
         assert!(
@@ -1971,6 +2011,8 @@ async fn thinking_binding_rejection_is_resent_once_without_reasoning_and_recorde
             .collect();
         assert_eq!(recorded.len(), 1, "{attempts:?}");
         assert_eq!(recorded[0]["automatic_retry"]["reason"], "thinking_binding");
+        assert_eq!(recorded[0]["automatic_retry"]["number"], 1);
+        assert_eq!(recorded[0]["automatic_retry"]["limit"], slots);
         assert_eq!(
             attempts.len(),
             3,
@@ -1984,6 +2026,7 @@ async fn thinking_binding_rejection_is_resent_once_without_reasoning_and_recorde
             .await
             .unwrap();
         assert_eq!(epoch, 1);
+        f.no_more_requests().await;
         f.close().await;
     }
 }
@@ -2293,8 +2336,10 @@ async fn manual_summary_waits_for_connection_cooldown_and_shutdown_cancels_it() 
         .database
         .call(move |db| {
             Ok(db.query_row(
-        "SELECT COALESCE(SUM(json_extract(value,'$.requests')),0) FROM app_meta WHERE key LIKE ?1",
-        [format!("summary.usage.{thread}.%")], |r| r.get(0))?)
+                "SELECT count(*) FROM model_attempt WHERE kind='summary' AND thread_id=?1",
+                [thread],
+                |r| r.get(0),
+            )?)
         })
         .await
         .unwrap();
@@ -2571,8 +2616,8 @@ async fn summary_connection_wait_is_recorded_in_existing_usage() {
     .unwrap();
     assert_eq!(state, "completed");
     let observation: String = fixture.control.store.database.call(move |db| Ok(db.query_row(
-        "SELECT json_extract(value,'$.rate_observations[0]') FROM app_meta WHERE key LIKE ?1 ORDER BY key LIMIT 1",
-        [format!("summary.usage.{target}.%")], |r| r.get(0))?)).await.unwrap();
+        "SELECT json_extract(input_manifest_json,'$.rate_observation') FROM model_attempt WHERE kind='summary' AND thread_id=?1 ORDER BY rowid LIMIT 1",
+        [target], |r| r.get(0))?)).await.unwrap();
     let observation: Value = serde_json::from_str(&observation).unwrap();
     assert_eq!(observation["status"], 200);
     let wait = observation["admission_wait_ms"].as_u64().unwrap();
@@ -3134,6 +3179,92 @@ async fn genuine_eof_partial_output_retries_and_never_executes_saved_tools() {
         tool_executions, 0,
         "partial completed tool items are retained but not run"
     );
+    fixture.no_more_requests().await;
+    fixture.close().await;
+}
+
+#[tokio::test]
+async fn conversation_and_summary_commit_each_transient_retry_before_dispatch() {
+    let mut fixture =
+        Fixture::with_history(1, 10, 5_000, false, Some(1_000), "shared request policy").await;
+    for kind in ["conversation", "summary"] {
+        let operation = if kind == "summary" {
+            let accepted = request(
+                &fixture.control,
+                Command::ContextEdit(ContextEditArgs {
+                    thread_id: Some(fixture.accepted.thread_id.clone()),
+                    action: ContextEditAction::Summary,
+                    from_node_id: Some("old-large-context".into()),
+                    to_node_id: Some("old-answer".into()),
+                    max_chars: None,
+                }),
+            )
+            .await;
+            Some(accepted["operation_id"].as_str().unwrap().to_owned())
+        } else {
+            None
+        };
+        let mut previous = None;
+        let mut first_body = None;
+        for ordinal in 1..=2 {
+            let incoming = fixture.incoming().await;
+            if let Some(first) = &first_body {
+                assert_eq!(
+                    first, &incoming.body,
+                    "{kind} transient retry must resend the same input"
+                );
+            } else {
+                first_body = Some(incoming.body.clone());
+            }
+            let thread = fixture.accepted.thread_id.clone();
+            let ids = fixture.control.store.database.call(move |db| {
+                Ok(db.prepare("SELECT id FROM model_attempt WHERE thread_id=?1 AND kind=?2 ORDER BY rowid")?
+                    .query_map(rusqlite::params![thread,kind], |row| row.get::<_,String>(0))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?)
+            }).await.unwrap();
+            assert_eq!(
+                ids.len(),
+                ordinal,
+                "{kind} dispatch {ordinal} requires a committed attempt"
+            );
+            assert_ne!(previous, ids.last().cloned());
+            previous = ids.last().cloned();
+            incoming
+                .reply
+                .send(if ordinal == 1 {
+                    Reply::error(500, "")
+                } else {
+                    Reply::success()
+                })
+                .ok()
+                .unwrap();
+        }
+        if let Some(operation) = operation {
+            crate::test_watchdog::watchdog(
+                "shared request policy Summary terminal result",
+                async {
+                    loop {
+                        let status = request(
+                            &fixture.control,
+                            Command::OperationGet(OperationTarget {
+                                operation_id: operation.clone(),
+                            }),
+                        )
+                        .await;
+                        match status["downstream"]["state"].as_str() {
+                            Some("completed") => break,
+                            Some("failed") => panic!("Summary did not adopt: {status}"),
+                            _ => tokio::task::yield_now().await,
+                        }
+                    }
+                },
+            )
+            .await
+            .unwrap();
+        } else {
+            assert_eq!(fixture.settled().await, "completed");
+        }
+    }
     fixture.no_more_requests().await;
     fixture.close().await;
 }

@@ -156,7 +156,7 @@ mod bounded_comparison_tests {
         db.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES(?1,'t','r','completed',?1)",[id]).unwrap();
     }
     fn attempt(db: &Connection, id: &str, turn: &str, state: &str, response: Option<&str>) {
-        db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,response_id,started_at)VALUES(?1,?2,0,0,'p','m',0,?3,'{}',?4,'now')",params![id,turn,state,response]).unwrap();
+        db.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,response_id,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id=?2),?1,?2,0,0,'p','m',0,?3,json_object('adoption',json_object('outcome','adopted')),?4,'now')",params![id,turn,state,response]).unwrap();
     }
     #[test]
     fn cache_comparison_is_exactly_the_shared_33_turn_window_and_never_falls_back() {

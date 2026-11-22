@@ -131,7 +131,7 @@ mod interruption_tests {
             INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('t','/','/','p','m','before');
             INSERT INTO run(id,thread_id,state,created_at,ended_at,stop_reason) VALUES('r','t','stopped','before','before',NULL);
             INSERT INTO turn(id,thread_id,run_id,state,created_at) VALUES('u','t','r','stopped','before');
-            INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at) VALUES('a','u',0,0,'p','m',0,'completed','{}','before');
+            INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at) VALUES('conversation',(SELECT thread_id FROM turn WHERE id='u'),'a','u',0,0,'p','m',0,'completed','{}','before');
             INSERT INTO tool_group VALUES('g','a','u','running','before');
             INSERT INTO tool_call VALUES('g','c',0,'shell','{}','completed','s');
             INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at) VALUES('s','r','u','s','stopped','/','{}','UTF-8','UTF-8','closed','before');

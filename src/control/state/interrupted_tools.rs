@@ -342,7 +342,7 @@ mod tests {
             INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','/AGENTS.md','p','m','old');
             INSERT INTO run(id,thread_id,state,created_at)VALUES('run','t','stopped','old');
             INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('turn','t','run','stopped','old');
-            INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('attempt','turn',0,0,'p','m',0,'completed','{}','old');
+            INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='turn'),'attempt','turn',0,0,'p','m',0,'completed','{}','old');
             INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES('group','attempt','turn','running','old');
             INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,output_complete,end_reason,started_at)VALUES('exec','run','turn','exec','stopped','/','{\"command\":\"never repeated\"}','UTF-8','UTF-8','closed',0,'previous_instance_interrupted','old');").unwrap();
         let tx = db.transaction().unwrap();
@@ -414,7 +414,7 @@ mod tests {
             INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('bad-thread','/','/','p','m','old');
             INSERT INTO run(id,thread_id,state,created_at) VALUES('bad-run','bad-thread','stopped','old');
             INSERT INTO turn(id,thread_id,run_id,state,created_at) VALUES('bad-turn','bad-thread','bad-run','stopped','old');
-            INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at) VALUES('bad-attempt','bad-turn',0,0,'p','m',0,'completed','{}','old');
+            INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at) VALUES('conversation',(SELECT thread_id FROM turn WHERE id='bad-turn'),'bad-attempt','bad-turn',0,0,'p','m',0,'completed','{}','old');
             INSERT INTO tool_group VALUES('aaa-bad','bad-attempt','bad-turn','running','old');
             INSERT INTO tool_call VALUES('aaa-bad','first',0,'shell','{}','running','bad-exec');
             INSERT INTO tool_call VALUES('aaa-bad','missing',1,'shell','{}','pending',NULL);
@@ -794,7 +794,7 @@ mod tests {
         tx.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('live','/','/AGENTS.md','p','m','old');
             INSERT INTO run(id,thread_id,state,created_at)VALUES('live-run','live','stopped','old');
             INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('live-turn','live','live-run','stopped','old');
-            INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('live-attempt','live-turn',0,0,'p','m',0,'completed','{}','old');
+            INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='live-turn'),'live-attempt','live-turn',0,0,'p','m',0,'completed','{}','old');
             INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES('z-live-group','live-attempt','live-turn','running','old');
             INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state)VALUES('z-live-group','live-call',0,'shell','{}','pending');").unwrap();
         let call =

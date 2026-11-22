@@ -634,6 +634,15 @@ async fn completed_attempt_cannot_adopt_its_tool_group_a_second_time() {
         .unwrap()
     );
     let response = model::ModelResponse::completed(json!({"id":"response","status":"completed","output":[{"type":"function_call","name":"shell","call_id":"call","arguments":"{\"command\":\"printf unused\"}"}]}),true).unwrap();
+    model::request_path::persist_received_attempt(
+        &control.store.database,
+        "deduplicated-attempt",
+        model::request_path::AttemptKind::Conversation,
+        false,
+        &Ok(response.clone()),
+    )
+    .await
+    .unwrap();
     assert!(
         adopt_response(
             &control,
@@ -641,7 +650,8 @@ async fn completed_attempt_cannot_adopt_its_tool_group_a_second_time() {
             "deduplicated-attempt",
             &response,
             prepared.clone(),
-            Some("first-group".into())
+            Some("first-group".into()),
+            Vec::new(),
         )
         .await
         .unwrap()
@@ -653,7 +663,8 @@ async fn completed_attempt_cannot_adopt_its_tool_group_a_second_time() {
             "deduplicated-attempt",
             &response,
             prepared.clone(),
-            Some("duplicate-group".into())
+            Some("duplicate-group".into()),
+            Vec::new(),
         )
         .await
         .unwrap()
@@ -684,7 +695,7 @@ async fn completed_attempt_cannot_adopt_its_tool_group_a_second_time() {
 }
 
 #[tokio::test]
-async fn obsolete_recovery_keeps_raw_audit_without_reviving_cancelled_attempt_or_path() {
+async fn obsolete_recovery_leaves_history_unchanged_and_keeps_attempt_audit() {
     let (_root, owner, control, accepted) = fixture("http://127.0.0.1:1/v1").await;
     let snapshot = ready(&control, &accepted).await;
     let prepared = Arc::new(
@@ -721,11 +732,6 @@ async fn obsolete_recovery_keeps_raw_audit_without_reviving_cancelled_attempt_or
                 "UPDATE turn SET state='stopped',generation=generation+1",
                 [],
             )?;
-            super::super::state::cancel_run_attempts(
-                &tx,
-                &tx.query_row("SELECT id FROM run", [], |r| r.get::<_, String>(0))?,
-                "stopped",
-            )?;
             let revision = tx.query_row(
                 "SELECT CAST(value AS INTEGER) FROM app_meta WHERE key='root_revision'",
                 [],
@@ -740,16 +746,27 @@ async fn obsolete_recovery_keeps_raw_audit_without_reviving_cancelled_attempt_or
         })
         .await
         .unwrap();
-    let mut body = json!({"error":{"kind":"late"},"partial_text":"saved partial","completed_items":[],"raw_response":{"fixture":"raw bytes represented as JSON"}});
+    let mut failure: model::http::AttemptFailure =
+        model::ModelError::new("late", "late failure").into();
+    failure.partial_text = "saved partial".into();
+    failure.raw_response = Some(json!({"fixture":"raw bytes represented as JSON"}));
+    model::request_path::persist_received_attempt(
+        &control.store.database,
+        "late-cancelled",
+        model::request_path::AttemptKind::Conversation,
+        true,
+        &Err(failure.clone()),
+    )
+    .await
+    .unwrap();
     recover(
         &control,
         &snapshot,
         ApiError::new(ErrorCode::IoFailed, "late failure"),
-        Some(("late-cancelled".into(), body.clone())),
+        Some("late-cancelled".into()),
     )
     .await
     .unwrap();
-    body["attempt_id"] = json!("late-cancelled");
     control
         .store
         .database
@@ -765,24 +782,33 @@ async fn obsolete_recovery_keeps_raw_audit_without_reviving_cancelled_attempt_or
                     ))
                 },
             )?;
-            assert_eq!(saved, ("cancelled".into(), "stopped".into(), None));
+            assert_eq!(saved.0, "cancelled");
+            assert!(!saved.1.is_empty());
+            let audit: Value = serde_json::from_str(&saved.2.unwrap()).unwrap();
+            assert_eq!(audit["partial_text"], "saved partial");
+            assert_eq!(
+                audit["raw_response"],
+                json!({"fixture":"raw bytes represented as JSON"})
+            );
             assert_eq!(
                 db.query_row("SELECT state FROM turn", [], |r| r.get::<_, String>(0))?,
                 "stopped"
             );
-            let audit = db.query_row(
-                "SELECT payload_json FROM node WHERE kind='incomplete_response'",
-                [],
-                |r| r.get::<_, String>(0),
-            )?;
-            assert_eq!(serde_json::from_str::<Value>(&audit).unwrap(), body);
+            assert_eq!(
+                db.query_row(
+                    "SELECT count(*) FROM node WHERE kind='incomplete_response'",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )?,
+                0
+            );
             assert_eq!(
                 db.query_row(
                     "SELECT CAST(value AS INTEGER) FROM app_meta WHERE key='root_revision'",
                     [],
                     |r| r.get::<_, i64>(0)
                 )?,
-                before.0 + 1
+                before.0
             );
             let path = db
                 .prepare("SELECT node_id FROM thread_path ORDER BY ordinal")?
@@ -913,6 +939,15 @@ async fn saved_tool_result_notifies_its_selected_history_only_after_commit() {
             true,
         )
         .unwrap();
+        model::request_path::persist_received_attempt(
+            &control.store.database,
+            "result-attempt",
+            model::request_path::AttemptKind::Conversation,
+            false,
+            &Ok(response.clone()),
+        )
+        .await
+        .unwrap();
         assert!(
             adopt_response(
                 &control,
@@ -921,6 +956,7 @@ async fn saved_tool_result_notifies_its_selected_history_only_after_commit() {
                 &response,
                 prepared,
                 Some("result-group".into()),
+                Vec::new(),
             )
             .await
             .unwrap()
@@ -999,6 +1035,15 @@ async fn already_admitted_tool_calls_cannot_create_an_execution_or_spawn_again()
                 .unwrap()
         );
         let response=model::ModelResponse::completed(json!({"id":"response","status":"completed","output":[{"type":"function_call","name":"shell","call_id":"call","arguments":"{\"command\":\"printf unused\"}"}]}),true).unwrap();
+        model::request_path::persist_received_attempt(
+            &control.store.database,
+            "tool-attempt",
+            model::request_path::AttemptKind::Conversation,
+            false,
+            &Ok(response.clone()),
+        )
+        .await
+        .unwrap();
         assert!(
             adopt_response(
                 &control,
@@ -1006,7 +1051,8 @@ async fn already_admitted_tool_calls_cannot_create_an_execution_or_spawn_again()
                 "tool-attempt",
                 &response,
                 prepared.clone(),
-                Some("group".into())
+                Some("group".into()),
+                Vec::new(),
             )
             .await
             .unwrap()
@@ -1203,7 +1249,7 @@ async fn interrupted_reserved_call_finishes_its_pair_without_native_creation() {
     let mut gate = binding.start_gate.lock().await;
     let turn = snapshot.turn.clone();
     control.store.database.call(move|db|{
-        db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('gate-attempt',?1,0,0,'fixture','fixture',0,'completed','{}','now')",[&turn])?;
+        db.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id=?1),'gate-attempt',?1,0,0,'fixture','fixture',0,'completed','{}','now')",[&turn])?;
         db.execute("INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES('gate-group','gate-attempt',?1,'running','now')",[turn])?;
         db.execute("INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state)VALUES('gate-group','gate-call',0,'shell','{}','pending')",[])?;Ok(())
     }).await.unwrap();
@@ -1283,7 +1329,7 @@ async fn interrupted_unfinished_group_waits_for_pairs_instead_of_rechecking() {
         let saved_turn = snapshot.turn.clone();
         control.store.database.call(move |db| {
             let tx = db.transaction()?;
-            tx.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('orphan-attempt',?1,0,0,'fixture','fixture',0,'completed','{}','now')", [&saved_turn])?;
+            tx.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id=?1),'orphan-attempt',?1,0,0,'fixture','fixture',0,'completed','{}','now')", [&saved_turn])?;
             tx.execute("INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES('orphan-group','orphan-attempt',?1,'running','now')", [&saved_turn])?;
             tx.execute("INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state)VALUES('orphan-group','orphan-call',0,'shell','{}','running')", [])?;
             tx.execute("UPDATE turn SET state=?2 WHERE id=?1", params![saved_turn,state])?;
@@ -1400,7 +1446,7 @@ async fn running_shell_publication_has_a_registered_foreground_receiver() {
         let snapshot = ready(&control, &accepted).await;
         let turn = snapshot.turn.clone();
         control.store.database.call(move |db| {
-            db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('publication-attempt',?1,0,0,'fixture','fixture',0,'completed','{}','now')", [&turn])?;
+            db.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id=?1),'publication-attempt',?1,0,0,'fixture','fixture',0,'completed','{}','now')", [&turn])?;
             db.execute("INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES('publication-group','publication-attempt',?1,'running','now')", [turn])?;
             db.execute("INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state)VALUES('publication-group','publication-call',0,'shell','{}','pending')", [])?;
             Ok(())
@@ -1799,7 +1845,7 @@ async fn unknown_arguments_are_ignored_with_a_warning_and_other_calls_continue()
     };
     let turn = snapshot.turn.clone();
     control.store.database.call(move |db| {
-        db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('policy-attempt',?1,0,0,'fixture','fixture',0,'completed','{}','now')", [&turn])?;
+        db.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id=?1),'policy-attempt',?1,0,0,'fixture','fixture',0,'completed','{}','now')", [&turn])?;
         db.execute("INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES('policy-group','policy-attempt',?1,'running','now')", [&turn])?;
         for (i, name) in ["bad", "combined", "duplicate", "encoding", "unknown", "valid"].iter().enumerate() {
             db.execute("INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state)VALUES('policy-group',?1,?2,'shell','{}','pending')", params![name,i as i64])?;
@@ -2008,10 +2054,27 @@ async fn ordinary_admission_and_completion_preserve_long_model_names_with_gc_ena
             );
             assert_eq!(request["model"], model);
             let response=model::ModelResponse::completed(json!({"id":"long-model-response","status":"completed","usage":{"input_tokens":123,"output_tokens":1},"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"synthetic answer"}]}]}),true).unwrap();
+            model::request_path::persist_received_attempt(
+                &control.store.database,
+                &attempt,
+                model::request_path::AttemptKind::Conversation,
+                false,
+                &Ok(response.clone()),
+            )
+            .await
+            .unwrap();
             assert!(
-                adopt_response(&control, &snapshot, &attempt, &response, prepared, None)
-                    .await
-                    .unwrap()
+                adopt_response(
+                    &control,
+                    &snapshot,
+                    &attempt,
+                    &response,
+                    prepared,
+                    None,
+                    Vec::new()
+                )
+                .await
+                .unwrap()
             );
             let thread = accepted.thread_id.clone();
             control.store.database.call(move |db| {
@@ -2062,7 +2125,7 @@ async fn enter_synthetic_recovery_wait(
         .call(move |db| {
             let tx = db.transaction()?;
             assert_eq!(
-                super::super::state::fail_attempt(
+                model::request_path::fail_attempt(
                     &tx,
                     &saved_attempt,
                     &json!({"kind":"network","message":"synthetic pre-response failure"}),
@@ -2748,4 +2811,95 @@ async fn recovery_rewind_terminal_reply_creates_run_after_path_rewrite() {
     );
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn received_attempt_is_not_adopted_after_interrupt_and_run_carries_next_turn() {
+    let (_root, owner, control, accepted) = fixture("http://127.0.0.1:1/v1").await;
+    let snapshot = ready(&control, &accepted).await;
+    let prepared = Arc::new(
+        control
+            .attachments
+            .prepare_at_revision(
+                &snapshot.thread,
+                CancellationToken::new(),
+                false,
+                snapshot.selection,
+            )
+            .await
+            .unwrap(),
+    );
+    let attempt = "received-before-interrupt";
+    assert!(
+        admit_attempt(&control, &snapshot, attempt, prepared.clone(), 0, 0)
+            .await
+            .unwrap()
+    );
+    let response = model::ModelResponse::completed(json!({"id":"received","status":"completed","usage":{"input_tokens":17},"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"not selected"}]}]}), false).unwrap();
+    model::request_path::persist_received_attempt(
+        &control.store.database,
+        attempt,
+        model::request_path::AttemptKind::Conversation,
+        false,
+        &Ok(response.clone()),
+    )
+    .await
+    .unwrap();
+    let queued = control
+        .store
+        .execute(
+            Request::new(
+                format!("{}:queued", owner.instance_id),
+                Command::MessageSend(MessageSendArgs {
+                    resume_recovery: false,
+                    human: false,
+                    to_human: false,
+                    expect_reply: false,
+                    sender_label: None,
+                    deliver: crate::protocol::Deliver::Next,
+                    thread_id: Some(snapshot.thread.clone()),
+                    text: "carry into successor".into(),
+                }),
+            ),
+            None,
+        )
+        .await
+        .unwrap();
+    let queued = queued.result["message_id"].as_str().unwrap().to_owned();
+    let interruption = super::super::turn_interrupt::admit_locked(
+        &control,
+        &snapshot.thread,
+        &snapshot.turn,
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(interruption["requested"], true);
+    assert!(
+        !adopt_response(
+            &control,
+            &snapshot,
+            attempt,
+            &response,
+            prepared,
+            None,
+            Vec::new()
+        )
+        .await
+        .unwrap()
+    );
+    super::super::turn_interrupt::acknowledge(&control, &snapshot.thread, &snapshot.run)
+        .await
+        .unwrap();
+    let (old_turn, run) = (snapshot.turn.clone(), snapshot.run.clone());
+    control.store.database.call(move |db| {
+        let result = db.query_row("SELECT state,json_extract(input_manifest_json,'$.adoption.outcome'),json_extract(input_manifest_json,'$.adoption.reason'),ended_at FROM model_attempt WHERE id=?1",[attempt],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,String>(3)?)))?;
+        assert_eq!((&*result.0,&*result.1,&*result.2),("completed","not_adopted","turn_fenced"));
+        assert_eq!(db.query_row("SELECT response_id,json_extract(usage_json,'$.input_tokens') FROM model_attempt WHERE id=?1", [attempt], |r| Ok((r.get::<_,String>(0)?,r.get::<_,i64>(1)?)))?, ("received".into(),17));
+        assert!(!result.3.is_empty());
+        assert_eq!(db.query_row("SELECT count(*) FROM node WHERE turn_id=?1 AND kind IN ('assistant_response','incomplete_response')",[&old_turn],|r|r.get::<_,i64>(0))?,0);
+        assert!(db.query_row("SELECT EXISTS(SELECT 1 FROM receipt q JOIN turn u ON u.id=json_extract(q.result_json,'$.delivery_context.turn_id') JOIN run r ON r.id=u.run_id JOIN thread_path p ON p.thread_id=q.target_thread_id AND p.node_id=q.message_node_id WHERE q.message_node_id=?1 AND q.turn_id=?2 AND q.state='applied' AND q.hold_reason='carried_after_turn_interruption' AND u.id<>?2 AND r.id=?3 AND r.state='live')",params![queued,old_turn,run],|r|r.get::<_,bool>(0))?);
+        Ok(())
+    }).await.unwrap();
+    close(control, owner).await;
 }

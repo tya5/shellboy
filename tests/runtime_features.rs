@@ -234,7 +234,7 @@ async fn progress(control: &Control) -> Result<Value, shellboy::storage::Storage
         let mut state = serde_json::Map::new();
         for (name, query) in [
             ("runs", "SELECT json_object('id',substr(id,1,128),'thread_id',substr(thread_id,1,128),'state',substr(state,1,64),'stop_reason',substr(stop_reason,1,128)) FROM run ORDER BY rowid DESC LIMIT 8"),
-            ("turns", "SELECT json_object('id',substr(t.id,1,128),'thread_id',substr(t.thread_id,1,128),'run_id',substr(t.run_id,1,128),'state',substr(t.state,1,64),'generation',t.generation,'instruction_snapshot_present',t.instruction_snapshot_id IS NOT NULL,'run_state',substr(r.state,1,64),'recovery_code',substr(json_extract(t.recovery_reason_json,'$.code'),1,128),'attempt_state',substr(a.state,1,64),'error_kind',substr(json_extract(a.error_json,'$.error.kind'),1,128),'http_phase',substr(json_extract(a.error_json,'$.error.http_observation.phase'),1,128)) FROM turn t JOIN run r ON r.id=t.run_id LEFT JOIN model_attempt a ON a.id=(SELECT latest.id FROM model_attempt latest WHERE latest.turn_id=t.id ORDER BY latest.rowid DESC LIMIT 1) ORDER BY t.rowid DESC LIMIT 8"),
+            ("turns", "SELECT json_object('id',substr(t.id,1,128),'thread_id',substr(t.thread_id,1,128),'run_id',substr(t.run_id,1,128),'state',substr(t.state,1,64),'generation',t.generation,'instruction_snapshot_present',t.instruction_snapshot_id IS NOT NULL,'run_state',substr(r.state,1,64),'recovery_code',substr(json_extract(t.recovery_reason_json,'$.code'),1,128),'attempt_state',substr(a.state,1,64),'error_kind',substr(json_extract(a.error_json,'$.error.kind'),1,128),'http_phase',substr(json_extract(a.input_manifest_json,'$.http_observation.phase'),1,128)) FROM turn t JOIN run r ON r.id=t.run_id LEFT JOIN model_attempt a ON a.id=(SELECT latest.id FROM model_attempt latest WHERE latest.turn_id=t.id ORDER BY latest.rowid DESC LIMIT 1) ORDER BY t.rowid DESC LIMIT 8"),
         ] {
             let rows = db.prepare(query)?.query_map([], |row| row.get::<_, String>(0))?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -324,22 +324,18 @@ pub(crate) fn incoming_ordinary<'a>(
     incoming_kind(control, receive, ProviderRequestKind::Ordinary)
 }
 
-// Summary usage `begin` saves and awaits its ledger update before the POST dispatch
-// (src/compaction/usage.rs:151-160; src/compaction/single_request.rs:599-602).
-// Therefore summed persisted `requests` is the exact count of admitted Summary POSTs.
+// Summary and Conversation admissions both commit before their provider POST.
 async fn summary_request_count_for_thread(control: &Control, thread: &str) -> i64 {
-    let low = format!("summary.usage.{thread}.");
-    let high = format!("summary.usage.{thread}/");
+    let thread = thread.to_owned();
     control
         .store
         .database
         .call(move |db| {
-            db.query_row(
-                "SELECT COALESCE(sum(CAST(json_extract(value,'$.requests') AS INTEGER)),0) FROM app_meta WHERE key>=?1 AND key<?2",
-                rusqlite::params![low, high],
+            Ok(db.query_row(
+                "SELECT count(*) FROM model_attempt WHERE thread_id=?1 AND kind='summary'",
+                [thread],
                 |row| row.get(0),
-            )
-            .map_err(Into::into)
+            )?)
         })
         .await
         .unwrap()
@@ -352,7 +348,7 @@ async fn model_attempt_count_for_thread(control: &Control, thread: &str) -> i64 
         .database
         .call(move |db| {
             db.query_row(
-                "SELECT count(*) FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE t.thread_id=?1",
+                "SELECT count(*) FROM model_attempt WHERE thread_id=?1 AND kind='conversation'",
                 [thread],
                 |row| row.get(0),
             )
@@ -2886,7 +2882,7 @@ async fn automatic_nonshrinking_summary_enters_recovery_without_adoption_or_rese
         }
         control.store.database.call(|db| {
             assert_eq!(db.query_row("SELECT count(*) FROM node WHERE kind='summary'",[],|r|r.get::<_,i64>(0))?,0);
-            assert_eq!(db.query_row("SELECT count(*) FROM model_attempt",[],|r|r.get::<_,i64>(0))?,3);
+            assert_eq!(db.query_row("SELECT count(*) FROM model_attempt WHERE kind='conversation'",[],|r|r.get::<_,i64>(0))?,3);
             let raw:String=db.query_row("SELECT error_json FROM model_attempt WHERE state='incomplete'",[],|r|r.get(0))?;
             let value:Value=serde_json::from_str(&raw).unwrap();let facts=&value["automatic_trim_attempt"]["error"]["details"];
             // Overflow has no Automatic::observed stage/token. S1 must not
@@ -3739,7 +3735,7 @@ async fn prepared_report_from_incoming(
         .database
         .call(move |db| {
             db.query_row(
-                "SELECT id,json_extract(input_manifest_json,'$.compaction_report_token') FROM model_attempt WHERE turn_id=?1 ORDER BY rowid LIMIT 1 OFFSET ?2",
+                "SELECT id,json_extract(input_manifest_json,'$.compaction_report_token') FROM model_attempt WHERE turn_id=?1 AND kind='conversation' ORDER BY rowid LIMIT 1 OFFSET ?2",
                 rusqlite::params![turn, ordinal],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
@@ -4336,7 +4332,7 @@ if !oversized && cancel_active.is_none() {
     let spill_run = spill_trigger.run_id.clone().expect("accepted spill-only trigger Run");
     let summary_requests: i64 = control.store.database.call(move |db| {
         Ok(db.query_row(
-            "SELECT count(*) FROM app_meta WHERE key LIKE 'summary.usage.%' AND json_extract(value,'$.run_id')=?1 AND json_extract(value,'$.requests')>0",
+            "SELECT count(*) FROM model_attempt a JOIN turn t ON a.turn_id=t.id WHERE a.kind='summary' AND t.run_id=?1",
             [spill_run],
             |row| row.get(0),
         )?)
@@ -4383,6 +4379,11 @@ let pending_events=proactive_events(&control,&target).await;
 assert_eq!(pending_events.len(),1,"one exact report owner reaches this Summary boundary: {pending_events:#?}");
 let boundary=start_report_boundary(&control,&pending_events[0],prepared_report.clone().expect("source report captured from its ordinary request before response"),&trigger_accept).await;
 if let Some(active) = cancel_active {
+    let summary_turn=boundary.report.row_turn_id.clone();
+    let committed_summary=control.store.database.call(move |db| {
+        Ok(db.query_row("SELECT count(*) FROM model_attempt WHERE turn_id=?1 AND kind='summary'", [summary_turn], |row| row.get::<_,i64>(0))?)
+    }).await.unwrap();
+    assert_eq!(committed_summary,1,"the Summary provider cannot receive the request before its attempt commits");
     assert_eq!(summary.body["tools"], json!([]), "cancel at the summary HTTP boundary, after spill commit");
     if active {
         let selected = summary.body["input"].to_string();
@@ -5705,7 +5706,7 @@ async fn bx_token_growth(
         );
         let target=thread.clone();
         let (report_token,a_boundary):(String,String)=control.store.database.call(move|db|{
-            assert_eq!(db.query_row("SELECT count(*) FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE t.thread_id=?1 AND json_extract(a.usage_json,'$.input_tokens')=9999 AND json_type(a.error_json,'$.automatic_trim_attempt')='object'",[&target],|r|r.get::<_,i64>(0))?,1,
+            assert_eq!(db.query_row("SELECT count(*) FROM model_attempt a WHERE thread_id=?1 AND kind='conversation' AND json_extract(a.usage_json,'$.input_tokens')=9999 AND json_type(a.error_json,'$.automatic_trim_attempt')='object'",[&target],|r|r.get::<_,i64>(0))?,1,
                 "the exact 9999-token report content identifies one model_attempt row");
             db.query_row(
                 "SELECT json_extract(a.input_manifest_json,'$.compaction_report_token'),json_extract(a.error_json,'$.automatic_trim_attempt.trigger.a_boundary') FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE t.thread_id=?1 AND json_extract(a.usage_json,'$.input_tokens')=9999 AND json_type(a.error_json,'$.automatic_trim_attempt')='object'",
@@ -5763,7 +5764,7 @@ async fn bx_token_growth(
         let slots = bx_failure_slots(&control, &thread).await;
         let target=thread.clone();
         let stale_a_tokens:(String,String)=control.store.database.call(move|db|{
-            assert_eq!(db.query_row("SELECT count(*) FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE t.thread_id=?1 AND json_extract(a.usage_json,'$.input_tokens')=9999 AND json_type(a.error_json,'$.automatic_trim_attempt')='object'",[&target],|r|r.get::<_,i64>(0))?,1,
+            assert_eq!(db.query_row("SELECT count(*) FROM model_attempt a WHERE thread_id=?1 AND kind='conversation' AND json_extract(a.usage_json,'$.input_tokens')=9999 AND json_type(a.error_json,'$.automatic_trim_attempt')='object'",[&target],|r|r.get::<_,i64>(0))?,1,
                 "the exact 9999-token report content identifies one model_attempt row");
             db.query_row(
                 "SELECT json_extract(a.input_manifest_json,'$.compaction_report_token'),json_extract(a.error_json,'$.automatic_trim_attempt.trigger.a_boundary') FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE t.thread_id=?1 AND json_extract(a.usage_json,'$.input_tokens')=9999 AND json_type(a.error_json,'$.automatic_trim_attempt')='object'",

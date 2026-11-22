@@ -268,7 +268,7 @@ fn compaction_sources_merge_without_merging_restore_into_its_omission() {
             json!({"item":{"role":"developer","content":[]},"context_trim":{"reason":"failure","history_characters":1000,"omitted_nodes":1,"after_current_request_nodes":1}}),
         );
         let trimmed = json!({"marker_node_id":"marker","before_characters":1000,"after_characters":200,"omitted_nodes":1,"compact":{"source_nodes":1,"original_node_ids":["original"]}});
-        c.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,error_json,started_at,ended_at)VALUES('auto','t',0,0,'p','m',0,'failed','{}',?1,'2026-10-31T00:01:59Z','2026-10-31T00:02:01Z')",[json!({"error":{"kind":"provider"},"automatic_retry":{"number":2},"automatic_trim":trimmed}).to_string()]).unwrap();
+        c.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,error_json,started_at,ended_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='t'),'auto','t',0,0,'p','m',0,'failed','{}',?1,'2026-10-31T00:01:59Z','2026-10-31T00:02:01Z')",[json!({"error":{"kind":"provider"},"automatic_retry":{"number":2},"automatic_trim":trimmed}).to_string()]).unwrap();
         operation(
             &c,
             "restore-op",
@@ -432,7 +432,7 @@ fn readback_plans_seek_shared_tables_and_indexes_have_measured_sizes() {
         for i in 0..5000 {
             let t = if i % 2 == 0 { "t" } else { "other" };
             tx.execute("INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,result_ref_json,created_at)VALUES(?1,'test','{}','hash','completed',?2,'2026-10-31T00:00:00Z')",params![format!("op{i}"),json!({"result":{"thread_id":t,"status":"queued"}}).to_string()]).unwrap();
-            tx.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,error_json,started_at)VALUES(?1,?2,0,0,'p','m',0,'failed','{}','{\"automatic_trim\":{}}','2026-10-31T00:00:00Z')",params![format!("a{i}"),t]).unwrap();
+            tx.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,error_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id=?2),?1,?2,0,0,'p','m',0,'failed','{}','{\"automatic_trim\":{}}','2026-10-31T00:00:00Z')",params![format!("a{i}"),t]).unwrap();
         }
         tx.commit().unwrap();
         for thread in [false, true] {
@@ -568,7 +568,7 @@ fn automatic_metrics_reason_falls_back_to_failure_without_a_replacement() {
             json!({"automatic_trim_attempt":{"outcome":"no_safe_reduction"}}),
         ),
     ] {
-        c.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,error_json,started_at)VALUES(?1,'t',0,0,'p','m',0,'failed','{}',?2,'2026-10-31T00:00:00Z')",params![id,record.to_string()]).unwrap();
+        c.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,error_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='t'),?1,'t',0,0,'p','m',0,'failed','{}',?2,'2026-10-31T00:00:00Z')",params![id,record.to_string()]).unwrap();
     }
     let page = compactions(&c, "t", &comp_args()).unwrap();
     let rows = page["items"].as_array().unwrap();
@@ -580,7 +580,7 @@ fn automatic_metrics_reason_falls_back_to_failure_without_a_replacement() {
     }
 }
 fn attempt_at(c: &Connection, id: &str, turn: &str, at: &str, usage: Option<Value>) {
-    c.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at)VALUES(?1,?2,0,0,'p','m',0,'completed','{}',?3,?4)",params![id,turn,usage.map(|u|u.to_string()),at]).unwrap();
+    c.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id=?2),?1,?2,0,0,'p','m',0,'completed','{}',?3,?4)",params![id,turn,usage.map(|u|u.to_string()),at]).unwrap();
 }
 #[test]
 fn compaction_links_first_request_after_adoption_without_storage_or_estimates() {

@@ -857,7 +857,7 @@ mod tool_snapshot_tests {
             INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('t','/','/','p','m','before');
             INSERT INTO run(id,thread_id,state,created_at,ended_at,stop_reason) VALUES('r','t','stopped','before','before',NULL);
             INSERT INTO turn(id,thread_id,run_id,state,created_at) VALUES('u','t','r','stopped','before');
-            INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at) VALUES('a','u',0,0,'p','m',0,'completed','{}','before');
+            INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at) VALUES('conversation',(SELECT thread_id FROM turn WHERE id='u'),'a','u',0,0,'p','m',0,'completed','{}','before');
             INSERT INTO tool_group VALUES('g','a','u','running','before');
             INSERT INTO tool_call VALUES('g','not-started',0,'shell','{"command":"private command"}','pending',NULL);
             INSERT INTO tool_call VALUES('g','uncertain',1,'shell','{}','running','s');

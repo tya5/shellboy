@@ -22,6 +22,7 @@ impl DriverTrimObservation {
         // discard/token/active_stage/committed_stages are NOT transferable.
         Self(Value::Object(allowed))
     }
+    #[cfg(test)]
     pub(super) fn persist_applied(
         &self,
         db: &rusqlite::Connection,
@@ -31,6 +32,14 @@ impl DriverTrimObservation {
         if transition != super::super::state::AttemptTransition::Applied {
             return Ok(());
         }
+        self.persist_trim(db, attempt)
+    }
+
+    pub(super) fn persist_trim(
+        &self,
+        db: &rusqlite::Connection,
+        attempt: &str,
+    ) -> Result<(), crate::storage::StorageError> {
         // Caller holds the original fail/recovery transaction. A current DB
         // observation wins; this capability restores only legacy driver facts.
         db.execute("UPDATE model_attempt SET error_json=json_set(error_json,'$.automatic_trim_attempt',json(?2)) WHERE id=?1 AND state IN ('failed','incomplete') AND json_valid(error_json) AND json_type(error_json,'$.automatic_trim_attempt') IS NULL",

@@ -24,14 +24,27 @@ impl SummaryUsage {
             &mut self.output_tokens,
         ]
     }
-    pub(super) fn begin(&mut self) {
+    pub(crate) fn add_attempt(&mut self, usage: StandardUsage) {
+        self.requests = self.requests.saturating_add(1);
+        for (field, value) in self.fields().into_iter().zip([
+            usage.input_tokens,
+            usage.cached_tokens,
+            usage.cache_creation_tokens,
+            usage.output_tokens,
+        ]) {
+            field.add(value.map(u128::from), u64::from(value.is_none()));
+        }
+    }
+    #[cfg(test)]
+    fn begin(&mut self) {
         self.requests += 1;
         for field in self.fields() {
             field.add(None, 1);
         }
     }
     /// Resolve the latest pending request. `None` keeps all four values unknown.
-    pub(super) fn observe(&mut self, usage: Option<StandardUsage>) {
+    #[cfg(test)]
+    fn observe(&mut self, usage: Option<StandardUsage>) {
         let Some(usage) = usage else { return };
         let values = [
             usage.input_tokens,
@@ -64,139 +77,27 @@ impl SummaryUsage {
             .map_or(Value::Null, |usage| json!(usage))
     }
 }
-pub(crate) fn usage_of(response: Option<&Value>) -> Option<StandardUsage> {
-    response
-        .and_then(|raw| raw.get("usage"))
-        .filter(|usage| usage.is_object())
-        .map(StandardUsage::from_value)
+pub(super) struct SummaryRequests {
+    pub(super) group: crate::model::request_path::SummaryGroup,
+    pub(super) turn_id: Option<String>,
+    usage: SummaryUsage,
 }
-
-/// The durable record. `turn_id`/`run_id` are the Thread's current Turn/Run
-/// when the compaction snapshot was taken (null outside a live Run).
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct UsageRecord {
-    pub id: String,
-    pub thread_id: String,
-    pub turn_id: Option<String>,
-    pub run_id: Option<String>,
-    pub profile_id: String,
-    pub model_id: String,
-    pub started_at: String,
-    pub updated_at: String,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub rate_observations: Vec<Value>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub rate_observation_pending: Option<u64>,
-    #[serde(flatten)]
-    pub usage: SummaryUsage,
-}
-pub(crate) const RECORD_PREFIX: &str = "summary.usage.";
-/// Bounds each per-summary accounting record, including retry observations.
-pub(crate) const RECORD_MAX_BYTES: i64 = 2 * 1024 * 1024;
-pub(crate) fn record_key(thread: &str, id: &str) -> String {
-    format!("{RECORD_PREFIX}{thread}.{id}")
-}
-/// Half-open key range of one Thread's records; '/' follows '.' in byte order.
-/// `COMPACTION_USAGE_SQL` builds the same bounds.
-#[cfg(test)]
-fn thread_range(thread: &str) -> (String, String) {
-    (
-        format!("{RECORD_PREFIX}{thread}."),
-        format!("{RECORD_PREFIX}{thread}/"),
-    )
-}
-
-pub(super) struct UsageLedger {
-    record: UsageRecord,
-}
-impl UsageLedger {
-    pub(super) fn new(snapshot: &Snapshot) -> Self {
-        Self::from_context(
-            &snapshot.thread,
-            &snapshot.profile,
-            &snapshot.model,
-            snapshot.current_turn.clone(),
-            snapshot.run_fence.clone(),
-        )
-    }
-    pub(super) fn from_context(
-        thread: &str,
-        profile: &str,
-        model: &str,
-        turn_id: Option<String>,
-        run_id: Option<String>,
-    ) -> Self {
-        let now = timestamp();
+impl SummaryRequests {
+    pub(super) fn new(turn_id: Option<String>) -> Self {
         Self {
-            record: UsageRecord {
+            group: crate::model::request_path::SummaryGroup {
                 id: uid(),
-                thread_id: thread.to_owned(),
-                turn_id,
-                run_id,
-                profile_id: profile.to_owned(),
-                model_id: model.to_owned(),
-                started_at: now.clone(),
-                updated_at: now,
-                rate_observations: Vec::new(),
-                rate_observation_pending: None,
-                usage: SummaryUsage::default(),
+                started_at: String::new(),
             },
+            turn_id,
+            usage: SummaryUsage::default(),
         }
     }
     pub(super) fn usage(&self) -> &SummaryUsage {
-        &self.record.usage
+        &self.usage
     }
-    /// Count the request durably before it is sent, so an interrupted request
-    /// remains a request with unknown usage rather than disappearing.
-    pub(super) async fn begin(&mut self, database: &DbWorker) -> Result<usize, ApiError> {
-        if self.record.usage.requests == 0 {
-            self.record.started_at = timestamp();
-        }
-        self.record.usage.begin();
-        let index = self.record.rate_observations.len();
-        self.record.rate_observation_pending = Some(index as u64);
-        self.record.rate_observations.push(Value::Null);
-        self.save(database).await?;
-        Ok(index)
-    }
-    pub(super) async fn observe(
-        &mut self,
-        database: &DbWorker,
-        usage: Option<StandardUsage>,
-    ) -> Result<(), ApiError> {
-        if usage.is_none() {
-            return Ok(());
-        }
-        self.record.usage.observe(usage);
-        self.save(database).await
-    }
-    pub(super) async fn observe_http(
-        &mut self,
-        database: &DbWorker,
-        index: usize,
-        facts: crate::model::http::ResponseFacts,
-    ) -> Result<(), ApiError> {
-        let mut observation = facts.rate_metadata();
-        observation["applied_wait_ms"] = json!(facts.admission_wait_ms.unwrap_or(0));
-        if let Some(slot) = self.record.rate_observations.get_mut(index) {
-            *slot = observation;
-        }
-        if self.record.rate_observations.iter().all(|o| !o.is_null()) {
-            self.record.rate_observation_pending = None;
-        }
-        self.save(database).await
-    }
-    async fn save(&mut self, database: &DbWorker) -> Result<(), ApiError> {
-        self.record.updated_at = timestamp();
-        let key = record_key(&self.record.thread_id, &self.record.id);
-        let body = serde_json::to_string(&self.record).expect("summary usage record");
-        database
-            .call(move |db| {
-                db.execute("INSERT INTO app_meta(key,value)VALUES(?1,?2)ON CONFLICT(key)DO UPDATE SET value=excluded.value",params![key,body])?;
-                Ok(())
-            })
-            .await
-            .map_err(storage_error)
+    pub(super) fn observe(&mut self, usage: StandardUsage) {
+        self.usage.add_attempt(usage);
     }
 }
 
@@ -253,16 +154,6 @@ mod tests {
         assert_eq!(total.cache_creation_tokens.unknown_count, 6);
         assert_eq!(SummaryUsage::sanitize(&json!(usage)), json!(usage));
         assert_eq!(SummaryUsage::sanitize(&json!({"requests":-1})), Value::Null);
-    }
-    #[test]
-    fn record_keys_scope_one_thread_by_range() {
-        let (low, high) = thread_range("a");
-        let own = record_key("a", "x");
-        let other = record_key("a.b", "x");
-        assert!(own >= low && own < high);
-        // A dotted Thread ID can share the prefix; readers also compare thread_id.
-        assert!(other >= low && other < high);
-        assert!(record_key("ab", "x") >= high || record_key("ab", "x") < low);
     }
 }
 

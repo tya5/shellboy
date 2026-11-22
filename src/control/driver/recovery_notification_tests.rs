@@ -427,7 +427,7 @@ async fn terminal_provider_failure_through_retry_persists_one_transition_time() 
     let model = snapshot.model.clone();
     owner.db.call({let turn = turn.clone(); move |db| {
         db.execute("UPDATE turn SET state='running' WHERE id=?1", [&turn])?;
-        db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at) VALUES('synthetic-attempt',?1,?2,?3,?4,?5,0,'inflight','{}','now')", params![turn,generation,selection,profile,model])?;
+        db.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at) VALUES('conversation',(SELECT thread_id FROM turn WHERE id=?1),'synthetic-attempt',?1,?2,?3,?4,?5,0,'inflight','{}','now')", params![turn,generation,selection,profile,model])?;
         Ok(())
     }}).await.unwrap();
     let slot = DriverSlot {
@@ -446,6 +446,18 @@ async fn terminal_provider_failure_through_retry_persists_one_transition_time() 
     let mut failure: model::http::AttemptFailure =
         model::ModelError::new("provider", "synthetic permanent failure").into();
     failure.facts.status = Some(400);
+    let body = json!({"error":failure.error});
+    owner
+        .db
+        .call(move |db| {
+            assert_eq!(
+                model::request_path::incomplete_attempt(db, "synthetic-attempt", &body, &now())?,
+                super::super::state::AttemptTransition::Applied
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
     let mutex = tokio::sync::Mutex::new(());
     let returned = retry::retry_or_recover(
         &control,
@@ -453,11 +465,18 @@ async fn terminal_provider_failure_through_retry_persists_one_transition_time() 
         &slot,
         "synthetic-attempt".into(),
         failure,
+        false,
+        model::request_path::FailureDecision {
+            policy: model::retry_class::RetryPolicy::Ineligible,
+            used: 0,
+            limit: 0,
+            drop_reasoning: false,
+        },
         &mut retry::RetryBudget::default(),
         &mut OverflowBudget::default(),
         &mut None,
-        &mutex,
-        mutex.lock().await,
+        &mut crate::compaction::boundary::Boundary::new(&mutex, mutex.lock().await),
+        Vec::new(),
     )
     .await
     .unwrap_err();

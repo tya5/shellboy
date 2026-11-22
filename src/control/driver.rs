@@ -10,12 +10,15 @@ mod tools;
 mod trim;
 mod trim_observation;
 use adoption::adopt_response;
+use model::request_path::{
+    AttemptKind, Execution, PreparedInput, RequestCaller, RequestScope, execute_request,
+};
 use overflow::OverflowBudget;
-use request::{AdmittedRequest, Instructions, model_client, prepare_attempt, stream_response};
 pub(crate) use request::{ContextLine, context_item, last_saved_context, leading_items};
+use request::{Instructions, model_client, prepare_attempt, stream_observer};
 use tools::run_tool_group;
 
-use super::state::{now, recover_turn_tx};
+use super::state::{now, recover_turn_tx, save_received_failure};
 use super::*;
 use crate::{
     history,
@@ -90,6 +93,7 @@ async fn admit_attempt(
     .await
 }
 
+#[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 async fn admit_attempt_with_digest(
     control: &Arc<Control>,
@@ -107,9 +111,10 @@ async fn admit_attempt_with_digest(
         .database
         .call(move |db| {
             let tx = db.transaction()?;
+            let mut row = current.attempt_admission();
             let admitted = current.admit_attempt_tx(
                 &tx,
-                &attempt_id,
+                &mut row,
                 &attempt_attachments,
                 input_characters,
                 history_characters,
@@ -118,6 +123,8 @@ async fn admit_attempt_with_digest(
             if !admitted {
                 return Ok(false);
             }
+            model::request_path::admit_attempt(&tx, &attempt_id, row)?;
+            current.link_attempt_tx(&tx, &attempt_id, &attempt_attachments)?;
             tx.commit()?;
             Ok(true)
         })
@@ -282,190 +289,100 @@ async fn drive_inner(
         if turn_binding.cancel.is_cancelled() {
             continue;
         }
-        let Some(mut snapshot) = refreshed? else {
+        let Some(snapshot) = refreshed? else {
             continue;
         };
         let rate_client = match model_client(&control, &snapshot) {
             Ok(client) => client,
             Err(error) => return fail_turn(&control, &snapshot, error).await,
         };
-        let (mut snapshot, boundary_guard, rate_lease, admission_wait_ms) = match rate_client
-            .reserve_rate_admission(retry_budget.usage_limit_retry_bypass())
-        {
-            Ok(model::http::RateReservation::Ready(lease)) => (snapshot, boundary_guard, lease, 0),
-            pending => {
-                // Waiting must not hold the Thread boundary or a pinned replay snapshot.
-                let witness = (
-                    snapshot.turn.clone(),
-                    snapshot.generation,
-                    snapshot.selection,
-                    snapshot.profile_revision,
-                );
-                snapshot.input.take();
-                drop(boundary_guard);
-                let wait_started = tokio::time::Instant::now();
-                let rate_result = match pending {
-                    Ok(model::http::RateReservation::Waiting(waiter)) => {
-                        let waited = waiter.wait(&turn_binding.cancel).await;
-                        rate_client
-                            .admission_after_wait(waited, retry_budget.usage_limit_retry_bypass())
-                    }
-                    Err(error) => Err(error),
-                    Ok(model::http::RateReservation::Ready(_)) => unreachable!(),
-                };
-                let admission_wait_ms =
-                    wait_started.elapsed().as_millis().min(u64::MAX as u128) as u64;
-                if slot.stop.is_cancelled() {
-                    return drain_and_stop(&control, &slot.run_id, Some(&thread)).await;
-                }
-                if turn_binding.cancel.is_cancelled() {
-                    continue;
-                }
-                let boundary_guard = tokio::select! { biased;
-                    _ = slot.stop.cancelled() => return drain_and_stop(&control, &slot.run_id, Some(&thread)).await,
-                    _ = turn_binding.cancel.cancelled() => continue,
-                    guard = boundary.lock() => guard,
-                };
-                let Next::Ready(refreshed) =
-                    next_with_clients(&control, &thread, &slot.run_id, clients.clone()).await?
-                else {
-                    continue;
-                };
-                if (
-                    refreshed.turn.clone(),
-                    refreshed.generation,
-                    refreshed.selection,
-                    refreshed.profile_revision,
-                ) != witness
-                {
-                    continue;
-                }
-                let lease = match rate_result {
-                    Ok(lease) => lease,
-                    Err(error) => {
-                        return fail_turn(
-                            &control,
-                            &refreshed,
-                            ApiError::new(ErrorCode::IoFailed, "Connection admission deferred")
-                                .details(json!({"kind": error.kind})),
-                        )
-                        .await;
-                    }
-                };
-                (refreshed, boundary_guard, lease, admission_wait_ms)
-            }
+        let Some(connection) = clients.connections.get(&snapshot.profile) else {
+            return fail_turn(
+                &control,
+                &snapshot,
+                invalid("Model connection not configured"),
+            )
+            .await;
         };
-        let admitted = prepare_attempt(
-            &control,
-            &mut snapshot,
-            &request_slot,
-            instructions.body(),
-            rate_client,
+        let mut caller = ConversationCaller {
+            control: &control,
+            slot: &request_slot,
+            client: &rate_client,
+            snapshot: *snapshot,
+            instruction: instructions.body(),
+            boundary: crate::compaction::boundary::Boundary::new(&boundary, boundary_guard),
+        };
+        let mut partial_attempts = Vec::new();
+        let result = execute_request(
+            RequestScope {
+                database: &control.store.database,
+                client: &rate_client,
+                connection,
+                kind: AttemptKind::Conversation,
+                adapt_after_transient: connection.auto_trim_on_disconnect,
+            },
+            &mut caller,
+            &mut retry_budget,
+            &turn_binding.cancel,
+            &mut partial_attempts,
         )
         .await;
-        if turn_binding.cancel.is_cancelled() {
-            continue;
-        }
-        let Some(AdmittedRequest {
-            client,
-            prepared,
-            request,
-            attempt,
-            ..
-        }) = admitted?
-        else {
-            continue;
-        };
-        if slot.stop.is_cancelled() {
-            return drain_and_stop(&control, &slot.run_id, Some(&thread)).await;
-        }
-        let mut outcome = match &rate_lease {
-            _ if turn_binding.cancel.is_cancelled() => {
-                Err(model::ModelError::new("cancelled", "Model request was cancelled").into())
-            }
-            model::http::RateAdmission::QuotaBlocked(fact) => Err(fact.error().into()),
-            model::http::RateAdmission::Lease(_) => {
-                stream_response(
+        let snapshot = caller.snapshot;
+        let mut request_boundary = caller.boundary;
+        let (attempt, outcome, prepared, adaptation, decision) = match result {
+            Ok(Execution::Finished {
+                attempt,
+                outcome,
+                context,
+                failure_decision,
+            }) => (attempt, *outcome, Some(context), false, failure_decision),
+            Ok(Execution::AdaptationSuggested {
+                attempt,
+                failure,
+                decision,
+            }) => (attempt, Err(*failure), None, true, Some(decision)),
+            Ok(Execution::InputChanged | Execution::Fenced) => continue,
+            Ok(Execution::BudgetExhausted) => {
+                return fail_turn(
                     &control,
-                    &thread,
-                    &attempt,
-                    &client,
-                    request,
-                    retry_budget.usage_limit_retry_bypass(),
-                    &turn_binding.cancel,
+                    &snapshot,
+                    ApiError::new(ErrorCode::IoFailed, "Model retry budget exhausted"),
                 )
-                .await
+                .await;
             }
-        };
-        match &mut outcome {
-            Ok(response) => response.response_facts.admission_wait_ms = Some(admission_wait_ms),
-            Err(failure) => failure.facts.admission_wait_ms = Some(admission_wait_ms),
-        }
-        if let model::http::RateAdmission::Lease(lease) = &rate_lease {
-            let facts = match &outcome {
-                Ok(response) => Some(response.response_facts),
-                Err(failure)
-                    if failure.facts.terminal_received || failure.facts.http_error_complete =>
-                {
-                    Some(failure.facts)
-                }
-                Err(_) => None,
-            };
-            if let Some(status) = facts.and_then(|facts| facts.status) {
-                lease.complete(status);
-            }
-        }
-        drop(rate_lease);
-        // The request ended; release its replay pin before any DB wait.
-        snapshot.input.take();
-        // Persist received metadata independently of later adoption or stop.
-        // A missing wait remains unknown until the retry wait is resolved.
-        let facts = match &outcome {
-            Ok(response) => response.response_facts,
-            Err(failure) => failure.facts,
-        };
-        if facts.status.is_some() {
-            let mut observation = facts.rate_metadata();
-            if outcome.is_ok() {
-                observation["applied_wait_ms"] = json!(admission_wait_ms);
-            }
-            let saved_attempt = attempt.clone();
-            let observation = observation.to_string();
-            let result = control.store.database.call(move |db| {
-                db.execute("UPDATE model_attempt SET input_manifest_json=json_set(input_manifest_json,'$.rate_observation',json(?2)) WHERE id=?1", params![saved_attempt, observation])?;
-                Ok(())
-            }).await;
-            if let Err(error) = result {
+            Err(error) if error.code == ErrorCode::OperationConflict => continue,
+            Err(error) => {
                 if slot.stop.is_cancelled() {
                     drain_and_stop(&control, &slot.run_id, Some(&thread)).await?;
                 }
-                return Err(storage_error(error));
+                return Err(error);
             }
-        }
-        if slot.stop.is_cancelled() {
-            return drain_and_stop(&control, &slot.run_id, Some(&thread)).await;
-        }
-        if turn_binding.cancel.is_cancelled() {
-            let body = match outcome {
-                Ok(response) => {
-                    json!({"reason":"human_turn_interrupted","attempt_id":attempt,"raw_response":response.raw})
+        };
+        if turn_binding.cancel.is_cancelled() || slot.stop.is_cancelled() {
+            match outcome {
+                Ok(_) => {
+                    let current = snapshot.clone();
+                    control
+                        .store
+                        .database
+                        .call(move |db| {
+                            let tx = db.transaction()?;
+                            reject_adoption(&tx, &current, &attempt)?;
+                            tx.commit()?;
+                            Ok(())
+                        })
+                        .await
+                        .map_err(storage_error)?;
                 }
-                Err(failure) => {
-                    json!({"reason":"human_turn_interrupted","attempt_id":attempt,"partial_text":failure.partial_text,"partial_reasoning":failure.partial_reasoning,"completed_items":failure.completed_items,"raw_response":failure.raw_response})
+                Err(failure) if !slot.stop.is_cancelled() => {
+                    let body = json!({"reason":"human_turn_interrupted","attempt_id":attempt,"partial_text":failure.partial_text,"partial_reasoning":failure.partial_reasoning,"completed_items":failure.completed_items,"raw_response":failure.raw_response});
+                    record_interrupted_outcome(&control, &snapshot, &body).await?;
                 }
-            };
-            let turn = snapshot.turn.clone();
-            control
-                .store
-                .database
-                .call(move |db| {
-                    let tx = db.transaction()?;
-                    save_received_failure(&tx, &turn, &body)?;
-                    tx.commit()?;
-                    Ok(())
-                })
-                .await
-                .map_err(storage_error)?;
+                Err(_) => {}
+            }
+            if slot.stop.is_cancelled() {
+                return drain_and_stop(&control, &slot.run_id, Some(&thread)).await;
+            }
             control.changed(&thread);
             continue;
         }
@@ -516,21 +433,24 @@ async fn drive_inner(
                     &failure.error,
                 );
                 {
-                    let mut proactive_job = slot.proactive_job.lock().await;
+                    let mut job = request_slot.proactive_job.lock().await;
                     retry::retry_or_recover(
                         &control,
                         &snapshot,
                         &request_slot,
                         attempt,
                         failure,
+                        adaptation,
+                        decision.expect("non-cancelled failure has an executor decision"),
                         &mut retry_budget,
                         &mut overflow,
-                        &mut proactive_job,
-                        &boundary,
-                        boundary_guard,
+                        &mut job,
+                        &mut request_boundary,
+                        partial_attempts,
                     )
                     .await?;
                 }
+                drop(request_boundary);
                 control
                     .live
                     .prune_idle_background(&thread, &slot.proactive_job)
@@ -538,6 +458,8 @@ async fn drive_inner(
                 continue;
             }
         };
+        let prepared = prepared.expect("successful response has a committed attempt context");
+        let _boundary_guard = request_boundary.into_guard();
         let group = if response.calls.is_empty() {
             None
         } else {
@@ -550,29 +472,10 @@ async fn drive_inner(
             &response,
             prepared.clone(),
             group.clone(),
+            partial_attempts,
         )
         .await?;
         if !may_execute {
-            let target = snapshot.turn.clone();
-            let body = json!({"reason":"human_turn_interrupted","attempt_id":attempt,"raw_response":response.raw});
-            control
-                .store
-                .database
-                .call(move |db| {
-                    let requested: bool = db.query_row(
-                        "SELECT interrupt_requested_at IS NOT NULL FROM turn WHERE id=?1",
-                        [&target],
-                        |r| r.get(0),
-                    )?;
-                    if requested {
-                        let tx = db.transaction()?;
-                        save_received_failure(&tx, &target, &body)?;
-                        tx.commit()?;
-                    }
-                    Ok(())
-                })
-                .await
-                .map_err(storage_error)?;
             continue;
         }
         retry_budget.succeeded();
@@ -582,6 +485,76 @@ async fn drive_inner(
             continue;
         };
         run_tool_group(&control, &snapshot, &slot, &group, response.calls).await?;
+    }
+}
+
+struct ConversationCaller<'a, 'b> {
+    control: &'a Arc<Control>,
+    slot: &'a DriverSlot,
+    client: &'a HttpModelClient,
+    snapshot: Snapshot,
+    instruction: Option<&'a Arc<str>>,
+    boundary: crate::compaction::boundary::Boundary<'b>,
+}
+
+impl RequestCaller for ConversationCaller<'_, '_> {
+    type Context = Arc<crate::attachments::PreparedAttachments>;
+
+    fn pause<'a, T: Send + 'a>(
+        &'a mut self,
+        cancel: &'a CancellationToken,
+        wait: impl Future<Output = T> + Send + 'a,
+    ) -> futures_util::future::BoxFuture<'a, Option<T>> {
+        Box::pin(async move { self.boundary.pause(cancel, wait).await.ok() })
+    }
+    fn release_pins(&mut self) {
+        self.snapshot.input.take();
+    }
+
+    async fn prepare(
+        &mut self,
+        waited: bool,
+    ) -> Result<Option<PreparedInput<Self::Context>>, ApiError> {
+        if waited || self.snapshot.input.is_none() {
+            let Next::Ready(refreshed) = next_with_clients(
+                self.control,
+                &self.snapshot.thread,
+                &self.slot.run_id,
+                self.snapshot.clients.clone(),
+            )
+            .await?
+            else {
+                return Ok(None);
+            };
+            if refreshed.turn != self.snapshot.turn
+                || refreshed.generation != self.snapshot.generation
+                || refreshed.selection != self.snapshot.selection
+                || refreshed.profile_revision != self.snapshot.profile_revision
+            {
+                return Ok(None);
+            }
+            self.snapshot = *refreshed;
+        }
+        prepare_attempt(
+            self.control,
+            &mut self.snapshot,
+            self.slot,
+            self.instruction,
+            self.client,
+        )
+        .await
+    }
+
+    fn attempt_changed(&self) {
+        self.control.changed(&self.snapshot.thread);
+    }
+
+    async fn observe<'a>(
+        &'a mut self,
+        attempt: &'a str,
+    ) -> Option<model::request_path::Observer<'a>> {
+        self.attempt_changed();
+        Some(stream_observer(self.control, &self.snapshot.thread, attempt).await)
     }
 }
 
@@ -803,42 +776,88 @@ async fn recover_preparation(
     Ok(())
 }
 
-// Audit-only received responses are retained through their live Turn, outside
-// thread_path/model replay. Share the same atomic insert/root revision boundary
-// for explicit recovery and automatic partial-response retries.
-fn save_received_failure(
-    db: &rusqlite::Connection,
-    turn: &str,
-    body: &Value,
+fn save_partial_attempts(
+    tx: &rusqlite::Transaction<'_>,
+    snapshot: &Snapshot,
+    attempts: &[String],
 ) -> Result<(), crate::storage::StorageError> {
-    let body = body.to_string();
-    db.execute("INSERT INTO node(id,turn_id,kind,created_at,payload_json,payload_bytes)VALUES(?1,?2,'incomplete_response',?3,?4,?5)",params![id(),turn,now(),body,body.len() as i64])?;
-    if db.execute(
-        "UPDATE app_meta SET value=CAST(value AS INTEGER)+1 WHERE key='root_revision'",
-        [],
-    )? != 1
-    {
-        return Err(crate::storage::StorageError::Schema(
-            "root revision metadata missing".into(),
-        ));
+    for attempt in attempts {
+        let body: String = tx.query_row(
+            "SELECT error_json FROM model_attempt WHERE id=?1 AND turn_id=?2 AND generation=?3",
+            params![attempt, snapshot.turn, snapshot.generation],
+            |row| row.get(0),
+        )?;
+        let body = serde_json::from_str(&body)
+            .map_err(|e| crate::storage::StorageError::Schema(e.to_string()))?;
+        save_received_failure(tx, &snapshot.turn, &body)?;
     }
     Ok(())
+}
+
+fn reject_adoption(
+    tx: &rusqlite::Transaction<'_>,
+    snapshot: &Snapshot,
+    attempt: &str,
+) -> rusqlite::Result<()> {
+    tx.execute("UPDATE model_attempt SET input_manifest_json=json_set(input_manifest_json,'$.adoption',json_object('outcome','not_adopted','reason','turn_fenced')) WHERE id=?1 AND turn_id=?2 AND generation=?3 AND state IN ('completed','cancelled') AND json_type(input_manifest_json,'$.adoption') IS NULL",params![attempt,snapshot.turn,snapshot.generation])?;
+    Ok(())
+}
+
+fn save_interrupted_outcome(
+    tx: &rusqlite::Transaction<'_>,
+    snapshot: &Snapshot,
+    body: &Value,
+) -> Result<bool, crate::storage::StorageError> {
+    // Interrupt owns a single generation increment; this audit is for that exact successor only.
+    let interrupted: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM turn WHERE id=?1 AND generation=?2+1 AND interrupt_requested_at IS NOT NULL)", params![snapshot.turn,snapshot.generation], |row| row.get(0))?;
+    if interrupted {
+        save_received_failure(tx, &snapshot.turn, body)?;
+    }
+    Ok(interrupted)
+}
+
+async fn record_interrupted_outcome(
+    control: &Control,
+    snapshot: &Snapshot,
+    body: &Value,
+) -> Result<(), ApiError> {
+    let snapshot = snapshot.clone();
+    let body = body.clone();
+    control
+        .store
+        .database
+        .call(move |db| {
+            let tx = db.transaction()?;
+            save_interrupted_outcome(&tx, &snapshot, &body)?;
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+        .map_err(storage_error)
+}
+
+fn live_outcome_generation(
+    tx: &rusqlite::Transaction<'_>,
+    snapshot: &Snapshot,
+) -> rusqlite::Result<bool> {
+    tx.query_row("SELECT EXISTS(SELECT 1 FROM turn u JOIN run r ON r.id=u.run_id WHERE u.id=?1 AND u.generation=?2 AND u.state IN ('preparing','running','waiting') AND r.state='live')", params![snapshot.turn,snapshot.generation], |row| row.get(0))
 }
 
 async fn recover(
     control: &Arc<Control>,
     snapshot: &Snapshot,
     error: ApiError,
-    attempt: Option<(String, Value)>,
+    attempt: Option<String>,
 ) -> Result<(), ApiError> {
-    recover_with_observation(control, snapshot, error, attempt, None).await
+    recover_with_observation(control, snapshot, error, attempt, None, Vec::new()).await
 }
 async fn recover_with_observation(
     control: &Arc<Control>,
     snapshot: &Snapshot,
     error: ApiError,
-    attempt: Option<(String, Value)>,
+    attempt: Option<String>,
     observation: Option<trim_observation::DriverTrimObservation>,
+    partial_attempts: Vec<String>,
 ) -> Result<(), ApiError> {
     let error = crate::config_setup::enrich(
         &control.store.config,
@@ -874,12 +893,16 @@ async fn recover_with_observation(
                 snapshot.generation,
                 &error,
             )?;
-            if let Some((attempt, mut body)) = attempt {
-                body["attempt_id"] = json!(attempt);
-                let transition = super::state::incomplete_attempt(&tx, &attempt, &body, &now())?;
+            if !recovered {
+                return Ok(false);
+            }
+            save_partial_attempts(&tx, &snapshot, &partial_attempts)?;
+            if let Some(attempt) = attempt {
                 if let Some(observation) = &observation {
-                    observation.persist_applied(&tx, &attempt, transition)?;
+                    observation.persist_trim(&tx, &attempt)?;
                 }
+                let saved: String = tx.query_row("SELECT error_json FROM model_attempt WHERE id=?1 AND turn_id=?2 AND generation=?3", params![attempt,snapshot.turn,snapshot.generation], |r|r.get(0))?;
+                let body = serde_json::from_str(&saved).map_err(|e| crate::storage::StorageError::Schema(e.to_string()))?;
                 save_received_failure(&tx, &snapshot.turn, &body)?;
             }
             tx.commit()?;

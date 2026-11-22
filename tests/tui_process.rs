@@ -770,7 +770,7 @@ async fn seed_collapsed_history(data: &std::path::Path, cwd: &std::path::Path) -
         tx.execute("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at) VALUES(?1,'Short tools',?2,'AGENTS.md','fixture','fixture-model','2026-01-01')", rusqlite::params![id,cwd])?;
         tx.execute("INSERT INTO run(id,thread_id,state,created_at,ended_at) VALUES('old-run',?1,'completed','2026-01-01','2026-01-01')",[&id])?;
         tx.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at,ended_at) VALUES('old-turn',?1,'old-run','completed','2026-01-01','2026-01-01')",[&id])?;
-        tx.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at) VALUES('old-attempt','old-turn',0,0,'fixture','fixture-model',0,'completed','{}','2026-01-01')",[])?;
+        tx.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at) VALUES('conversation',(SELECT thread_id FROM turn WHERE id='old-turn'),'old-attempt','old-turn',0,0,'fixture','fixture-model',0,'completed','{}','2026-01-01')",[])?;
         tx.execute("INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at) VALUES('group','old-attempt','old-turn','completed','2026-01-01')",[])?;
         let calls = (0..120).map(|i|json!({"type":"function_call","call_id":format!("call-{i}"),"name":"shell","arguments":json!({"command":format!("printf CMD{i:03}")}).to_string(),"status":"completed"})).collect::<Vec<_>>();
         let mut previous: Option<String> = None;

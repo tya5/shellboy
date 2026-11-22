@@ -12,7 +12,7 @@ pub(crate) fn latest_completed_cte() -> &'static str {
  ORDER BY created_at DESC, rowid DESC LIMIT 33
 ), per_turn AS MATERIALIZED (
  SELECT (SELECT a.rowid FROM model_attempt a INDEXED BY attempts_completed_scope
-   WHERE a.turn_id=u.id AND a.state='completed' AND a.profile_id=t.profile_id
+   WHERE a.turn_id=u.id AND a.kind='conversation' AND a.state='completed' AND json_extract(a.input_manifest_json,'$.adoption.outcome')='adopted' AND a.profile_id=t.profile_id
    AND a.model_id=t.model_id ORDER BY a.rowid DESC LIMIT 1) AS native_rowid
  FROM recent_turns u CROSS JOIN thread t ON t.id=?1
 ), selected AS MATERIALIZED (

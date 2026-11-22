@@ -40,7 +40,7 @@ fn fixture() -> Connection {
 }
 
 fn attempt(db: &Connection, id: &str, turn: &str, second: &str, body: &str) {
-    db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,error_json,started_at,ended_at)VALUES(?1,?2,0,0,'p','m',0,'failed','{}',?3,'2026-10-25T00:00:00Z',?4)", params![id,turn,body,format!("2026-10-25T00:00:{second}Z")]).unwrap();
+    db.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,error_json,started_at,ended_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id=?2),?1,?2,0,0,'p','m',0,'failed','{}',?3,'2026-10-25T00:00:00Z',?4)", params![id,turn,body,format!("2026-10-25T00:00:{second}Z")]).unwrap();
 }
 
 fn source(db: &Connection, id: &str, turn: &str, body: &str) {

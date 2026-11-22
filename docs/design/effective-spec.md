@@ -108,7 +108,9 @@ active-Turn summary. Proactive order: ordinary summary of earlier Turns first,
 then the active-Turn summary, which replaces every tool round of the Turn with
 one summary carrying the latest round as text and keeps the request prefix
 byte-identical. A documented thinking-binding rejection is resent once with
-the epoch advanced, and recorded. No vendor knob is sent. See
+the epoch advanced and the resend recorded, only when a retry slot remains.
+With zero slots the typed refusal is retained without resending. No vendor
+knob is sent. See
 [compaction](compaction.md#summary-adoption).
 
 ## 0.2.0 compatibility boundary

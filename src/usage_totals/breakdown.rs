@@ -92,7 +92,6 @@ struct Scan {
     until: String,
     after: i64,
     compaction_after: i64,
-    compaction_watermark: i64,
     group_offset: usize,
     continued: bool,
 }
@@ -102,7 +101,7 @@ fn query() -> String {
     let source = "CASE WHEN a.started_at>=?1 AND a.started_at<?2 THEN a.usage_json END";
     format!(
         "WITH candidates AS MATERIALIZED (
-        SELECT rowid scan_id,id FROM model_attempt WHERE rowid>?3 AND rowid<=?4
+        SELECT rowid scan_id,id FROM model_attempt WHERE rowid>?3 AND rowid<=?4 AND kind='conversation'
         ORDER BY rowid LIMIT {}
         ) SELECT c.scan_id,a.id,a.turn_id,u.run_id,u.thread_id,t.deleted_at,
             a.state,a.started_at,a.ended_at,
@@ -357,10 +356,15 @@ fn bucket(row: &Row, group: &str, zone: Option<FixedOffset>) -> Option<String> {
     Some(bucket_time(time, group, zone))
 }
 fn compaction_query() -> String {
+    // Sample candidates by rowid before filtering. A group is read once, at
+    // its first attempt, and each member is constrained by the same watermark.
     format!(
-        "SELECT rowid,CASE WHEN octet_length(key)<=?3 THEN key ELSE '' END,
-         CASE WHEN octet_length(value)<=?3 THEN value END
-         FROM app_meta WHERE rowid>?1 AND rowid<=?2 ORDER BY rowid LIMIT {}",
+        "WITH candidates AS MATERIALIZED (SELECT rowid FROM model_attempt WHERE kind='summary' AND rowid>?1 AND rowid<=?2 ORDER BY rowid LIMIT {})
+        SELECT c.rowid,a.thread_id,{SUMMARY_ID},{SUMMARY_START},a.profile_id,a.turn_id,u.run_id,t.deleted_at
+        FROM candidates c LEFT JOIN model_attempt a ON a.rowid=c.rowid AND a.kind='summary' AND c.rowid=(
+            SELECT g.rowid FROM model_attempt g WHERE g.kind='summary' AND g.thread_id=a.thread_id
+            AND json_extract(g.input_manifest_json,'$.summary.id')={SUMMARY_ID} ORDER BY g.rowid LIMIT 1)
+        LEFT JOIN turn u ON u.id=a.turn_id LEFT JOIN thread t ON t.id=a.thread_id ORDER BY c.rowid",
         ROW_LIMIT + 1
     )
 }
@@ -591,20 +595,11 @@ pub(crate) fn read(db: &Connection, a: &UsageGetArgs, instance: &str) -> Result<
         .as_deref()
         .ok_or_else(|| invalid("group_by required"))?;
     let include_compaction = group_by != "model";
-    let initial_compaction_watermark = if include_compaction {
-        db.query_row("SELECT COALESCE(max(rowid),0) FROM app_meta", [], |r| {
-            r.get(0)
-        })
-        .map_err(error)?
-    } else {
-        0
-    };
     let mut scan = saved.unwrap_or_else(|| Scan {
         since: w.since.unwrap().to_rfc3339(),
         until: w.until.unwrap().to_rfc3339(),
         after: 0,
         compaction_after: 0,
-        compaction_watermark: initial_compaction_watermark,
         group_offset: 0,
         continued: false,
     });
@@ -677,68 +672,39 @@ pub(crate) fn read(db: &Connection, a: &UsageGetArgs, instance: &str) -> Result<
     rows.truncate(ROW_LIMIT);
     let scanned = rows.len();
     let tail = rows.last().map(|r| r.key);
-    let mut compaction_statement = if include_compaction {
-        Some(db.prepare(&compaction_query()).map_err(error)?)
-    } else {
-        None
-    };
-    let mut candidate_rows = match compaction_statement.as_mut() {
-        Some(statement) => Some(
-            statement
-                .query(params![
-                    scan.compaction_after,
-                    scan.compaction_watermark,
-                    crate::compaction::SUMMARY_USAGE_MAX_BYTES
-                ])
-                .map_err(error)?,
-        ),
-        None => None,
-    };
     let mut compaction_rows = Vec::new();
-    let mut compaction_bytes = 0usize;
+    let mut compaction_bytes = 0;
     let mut compaction_row_more = false;
-    while let Some(row) = match candidate_rows.as_mut() {
-        Some(rows) => rows.next().map_err(error)?,
-        None => None,
-    } {
-        let id: i64 = row.get(0).map_err(error)?;
-        let key_bytes = row
-            .get_ref(1)
-            .map_err(error)?
-            .as_bytes()
-            .map_err(|e| {
-                error(rusqlite::Error::FromSqlConversionFailure(
-                    1,
-                    rusqlite::types::Type::Text,
-                    Box::new(e),
-                ))
-            })?
-            .len();
-        let body_bytes = match row.get_ref(2).map_err(error)? {
-            rusqlite::types::ValueRef::Null => 0,
-            value => value
-                .as_bytes()
-                .map_err(|e| {
-                    error(rusqlite::Error::FromSqlConversionFailure(
-                        2,
-                        rusqlite::types::Type::Text,
-                        Box::new(e),
-                    ))
-                })?
-                .len(),
-        };
-        let bytes = key_bytes.saturating_add(body_bytes);
-        if compaction_rows.len() == ROW_LIMIT
-            || (!compaction_rows.is_empty()
-                && compaction_bytes.saturating_add(bytes) > COMPACTION_PAGE_BYTES)
-        {
-            compaction_row_more = true;
-            break;
+    if include_compaction {
+        let mut query = db.prepare(&compaction_query()).map_err(error)?;
+        let mut candidates = query
+            .query(params![scan.compaction_after, watermark])
+            .map_err(error)?;
+        while let Some(row) = candidates.next().map_err(error)? {
+            let mut bytes = 0;
+            for col in 1..8 {
+                if let rusqlite::types::ValueRef::Text(value) = row.get_ref(col).map_err(error)? {
+                    bytes += value.len();
+                }
+            }
+            if compaction_rows.len() == ROW_LIMIT
+                || (!compaction_rows.is_empty() && compaction_bytes + bytes > COMPACTION_PAGE_BYTES)
+            {
+                compaction_row_more = true;
+                break;
+            }
+            compaction_bytes += bytes;
+            compaction_rows.push((
+                row.get::<_, i64>(0).map_err(error)?,
+                row.get::<_, Option<String>>(1).map_err(error)?,
+                row.get::<_, Option<String>>(2).map_err(error)?,
+                row.get::<_, Option<String>>(3).map_err(error)?,
+                row.get::<_, Option<String>>(4).map_err(error)?,
+                row.get::<_, Option<String>>(5).map_err(error)?,
+                row.get::<_, Option<String>>(6).map_err(error)?,
+                row.get::<_, Option<String>>(7).map_err(error)?.is_some(),
+            ));
         }
-        compaction_bytes = compaction_bytes.saturating_add(bytes);
-        let key: String = row.get(1).map_err(error)?;
-        let body: Option<String> = row.get(2).map_err(error)?;
-        compaction_rows.push((id, key, body));
     }
     let compaction_scanned = compaction_rows.len();
     let compaction_tail = compaction_rows.last().map(|row| row.0);
@@ -781,75 +747,41 @@ pub(crate) fn read(db: &Connection, a: &UsageGetArgs, instance: &str) -> Result<
             groups.entry(key).or_default().add(row);
         }
     }
-    let mut live_thread = db
-        .prepare("SELECT 1 FROM thread WHERE id=?1 AND deleted_at IS NULL")
-        .map_err(error)?;
-    for (_rowid, key, body) in &compaction_rows {
-        let Some(suffix) = key.strip_prefix(crate::compaction::SUMMARY_USAGE_PREFIX) else {
+    let member_sql = format!(
+        "SELECT {},CASE WHEN json_valid(a.usage_json) THEN {} END,{},{} FROM model_attempt a
+        WHERE a.kind='summary' AND a.thread_id=?1 AND {SUMMARY_ID}=?2 AND a.rowid<=?3",
+        usage::sql_projection("a.usage_json"),
+        usage::sql_valid_integer(
+            "a.usage_json",
+            "$.input_tokens_details.cache_creation_tokens"
+        ),
+        usage::sql_valid_integer("a.input_manifest_json", "$.rate_observation.status"),
+        usage::sql_valid_integer(
+            "a.input_manifest_json",
+            "$.rate_observation.applied_wait_ms"
+        )
+    );
+    let mut members = db.prepare(&member_sql).map_err(error)?;
+    for (_, thread, id, started, profile, turn, run, deleted) in compaction_rows {
+        let Some(thread) = thread else { continue };
+        let (Some(id), Some(profile)) = (id, profile) else {
+            malformed_compactions += 1;
             continue;
         };
-        if selection.as_ref().is_some_and(|selected| {
-            !selected
-                .threads
-                .iter()
-                .any(|id| suffix.starts_with(&format!("{id}.")))
-        }) {
+        if deleted
+            || selection.as_ref().is_some_and(|s| match s.kind {
+                "turn" => turn.as_deref() != a.turn_id.as_deref(),
+                "run" => run.as_deref() != a.run_id.as_deref(),
+                _ => !s.threads.contains(&thread),
+            })
+        {
             continue;
         }
-        let Some(body) = body.as_deref() else {
-            malformed_compactions = malformed_compactions.saturating_add(1);
-            continue;
-        };
-        let Ok(mut raw) = serde_json::from_str::<Value>(body) else {
-            malformed_compactions = malformed_compactions.saturating_add(1);
-            continue;
-        };
-        let started_at = raw
-            .get("started_at")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_owned();
-        if !raw.get("started_at").is_some_and(Value::is_string) {
-            let Some(fields) = raw.as_object_mut() else {
-                malformed_compactions = malformed_compactions.saturating_add(1);
-                continue;
-            };
-            // Keep an otherwise valid legacy record countable when its time is absent.
-            fields.insert("started_at".into(), Value::String(String::new()));
-        }
-        let Ok(record) = serde_json::from_value::<crate::compaction::SummaryUsageRecord>(raw)
+        let Some(at) = started
+            .as_deref()
+            .and_then(|start| DateTime::parse_from_rfc3339(start).ok())
         else {
-            malformed_compactions = malformed_compactions.saturating_add(1);
-            continue;
-        };
-        if key
-            != &format!(
-                "{}{}.{}",
-                crate::compaction::SUMMARY_USAGE_PREFIX,
-                record.thread_id,
-                record.id
-            )
-            || !suffix.starts_with(&format!("{}.", record.thread_id))
-        {
-            malformed_compactions = malformed_compactions.saturating_add(1);
-            continue;
-        }
-        if live_thread
-            .query_row([&record.thread_id], |_| Ok(()))
-            .optional()
-            .map_err(error)?
-            .is_none()
-            || selection.as_ref().is_some_and(|selected| {
-                selected.kind == "turn" && record.turn_id.as_deref() != a.turn_id.as_deref()
-            })
-            || selection.as_ref().is_some_and(|selected| {
-                selected.kind == "run" && record.run_id.as_deref() != a.run_id.as_deref()
-            })
-        {
-            continue;
-        }
-        let Ok(at) = DateTime::parse_from_rfc3339(&started_at) else {
-            unknown_time_compactions = unknown_time_compactions.saturating_add(1);
+            unknown_time_compactions += 1;
             continue;
         };
         let at_utc = at.with_timezone(&Utc);
@@ -857,24 +789,34 @@ pub(crate) fn read(db: &Connection, a: &UsageGetArgs, instance: &str) -> Result<
             continue;
         }
         let group_key = if group_by == "thread" {
-            record.thread_id.clone()
+            thread.clone()
         } else {
             bucket_time(at, group_by, zone)
         };
-        matched_compactions = matched_compactions.saturating_add(1);
         let group = groups.entry(group_key).or_default();
-        group.add_compaction(&record.usage);
-        let entry = group.rates.entry(record.profile_id).or_default();
-        let observed = (record.rate_observations.len() as u64).min(record.usage.requests);
-        for fact in record.rate_observations.into_iter().take(observed as usize) {
-            entry.add(
-                fact.get("status").and_then(Value::as_u64),
-                fact.get("applied_wait_ms").and_then(Value::as_u64),
+        let mut aggregate = crate::compaction::SummaryUsage::default();
+        let mut rows = members
+            .query(params![thread, id, watermark])
+            .map_err(error)?;
+        let rates = group.rates.entry(profile).or_default();
+        while let Some(row) = rows.next().map_err(error)? {
+            let mut usage = usage::StandardUsage::read(row, 0).map_err(error)?;
+            usage.cache_creation_tokens = row
+                .get::<_, Option<i64>>(5)
+                .map_err(error)?
+                .map(|v| v as u64);
+            aggregate.add_attempt(usage);
+            rates.add(
+                row.get::<_, Option<i64>>(6)
+                    .map_err(error)?
+                    .map(|v| v as u64),
+                row.get::<_, Option<i64>>(7)
+                    .map_err(error)?
+                    .map(|v| v as u64),
             );
         }
-        let unknown = record.usage.requests.saturating_sub(observed);
-        entry.status_unknown = entry.status_unknown.saturating_add(unknown);
-        entry.wait_unknown = entry.wait_unknown.saturating_add(unknown);
+        matched_compactions += 1;
+        group.add_compaction(&aggregate);
     }
     let group_more = groups.len() > scan.group_offset + a.limit.unwrap_or(GROUP_LIMIT) as usize;
     let items = groups

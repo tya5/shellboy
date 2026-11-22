@@ -249,7 +249,7 @@ fn model_sql(s: &Selection, wide: bool) -> String {
     select.push_str(",min(start_key),max(start_key),count(*)-count(start_key)");
     let block = if wide { ",block" } else { "" };
     format!(
-        "WITH docs AS MATERIALIZED (SELECT a.rowid/65536 block,a.state,{} standard_values,CASE WHEN a.state IN ('preparing','inflight') THEN usage_saved_ms(a.started_at,?2) ELSE usage_saved_ms(a.started_at,a.ended_at) END duration_ms,CASE WHEN a.state IN ('completed','failed','incomplete') THEN usage_saved_start(a.started_at) END start_key FROM model_attempt a INDEXED BY attempts_by_turn WHERE a.turn_id IN ({}) AND a.state IN ('completed','failed','incomplete','preparing','inflight') AND {}),values_read(block,state,input_tokens,cached_tokens,output_tokens,reasoning_tokens,total_tokens,duration_ms,start_key) AS MATERIALIZED (SELECT block,state,{projected},duration_ms,start_key FROM docs) SELECT {select} FROM values_read GROUP BY state{block}",
+        "WITH docs AS MATERIALIZED (SELECT a.rowid/65536 block,a.state,{} standard_values,CASE WHEN a.state IN ('preparing','inflight') THEN usage_saved_ms(a.started_at,?2) ELSE usage_saved_ms(a.started_at,a.ended_at) END duration_ms,CASE WHEN a.state IN ('completed','failed','incomplete') THEN usage_saved_start(a.started_at) END start_key FROM model_attempt a INDEXED BY attempts_by_turn WHERE a.turn_id IN ({}) AND a.kind='conversation' AND a.state IN ('completed','failed','incomplete','preparing','inflight') AND {}),values_read(block,state,input_tokens,cached_tokens,output_tokens,reasoning_tokens,total_tokens,duration_ms,start_key) AS MATERIALIZED (SELECT block,state,{projected},duration_ms,start_key FROM docs) SELECT {select} FROM values_read GROUP BY state{block}",
         standard_values_sql(),
         turn_source(s),
         s.window.sql("a.started_at")
@@ -368,53 +368,54 @@ fn timing(
     }
     unreachable!("wide timing aggregation returns or fails")
 }
-/// Summary requests of compaction (#133), read from their per-compaction
-/// `app_meta` records by a primary-key range per selected Thread. Turn and Run
-/// scopes keep records whose snapshot saw that Turn/Run as current. A record
-/// belongs to the period of its first summary request.
-pub(crate) const COMPACTION_USAGE_SQL: &str = "SELECT j.value,m.value FROM json_each(?1) j JOIN app_meta m ON m.key>=?2||j.value||'.' AND m.key<?2||j.value||'/' WHERE octet_length(m.value)<=?3";
-fn compaction_usage(
-    db: &Connection,
-    scope: &Scope,
-    s: &Selection,
-    trace: &mut Trace,
-) -> rusqlite::Result<Value> {
-    let threads = serde_json::to_string(&s.threads).expect("IDs serialize");
-    let mut statement = db.prepare(COMPACTION_USAGE_SQL)?;
+const SUMMARY_ID: &str = "json_extract(a.input_manifest_json,'$.summary.id')";
+const SUMMARY_START: &str = "json_extract(a.input_manifest_json,'$.summary.started_at')";
+
+fn summary_scope(s: &Selection) -> &'static str {
+    match s.kind {
+        "turn" => "a.turn_id=?1",
+        "run" => "a.turn_id IN (SELECT id FROM turn WHERE run_id=?1)",
+        _ => "a.thread_id IN (SELECT value FROM json_each(?1))",
+    }
+}
+
+fn compaction_usage(db: &Connection, s: &Selection, trace: &mut Trace) -> rusqlite::Result<Value> {
+    let sql = format!(
+        "SELECT a.thread_id,{SUMMARY_ID},{SUMMARY_START},{},CASE WHEN json_valid(a.usage_json) THEN {} END FROM model_attempt a WHERE a.kind='summary' AND {}",
+        usage::sql_projection("a.usage_json"),
+        usage::sql_valid_integer(
+            "a.usage_json",
+            "$.input_tokens_details.cache_creation_tokens"
+        ),
+        summary_scope(s)
+    );
+    let mut statement = db.prepare(&sql)?;
     let mut total = crate::compaction::SummaryUsage::default();
-    let (mut compactions, mut skipped) = (0u64, 0u64);
+    let mut identities = std::collections::BTreeSet::new();
+    let mut skipped = 0u64;
     {
-        let mut rows = statement.query(params![
-            threads,
-            crate::compaction::SUMMARY_USAGE_PREFIX,
-            crate::compaction::SUMMARY_USAGE_MAX_BYTES
-        ])?;
+        let mut rows = statement.query([&s.parameter])?;
         while let Some(row) = rows.next()? {
-            let thread: String = row.get(0)?;
-            let body: String = row.get(1)?;
-            let Ok(record) = serde_json::from_str::<crate::compaction::SummaryUsageRecord>(&body)
-            else {
+            let (Some(id), Some(start)) = (
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, Option<String>>(2)?,
+            ) else {
                 skipped += 1;
                 continue;
             };
-            let selected = record.thread_id == thread
-                && match scope {
-                    Scope::Turn(id) => record.turn_id.as_ref() == Some(id),
-                    Scope::Run(id) => record.run_id.as_ref() == Some(id),
-                    Scope::Thread { .. } => true,
-                }
-                && s.window.includes(Some(&record.started_at));
-            if selected {
-                compactions += 1;
-                total.merge(&record.usage);
+            if !s.window.includes(Some(&start)) {
+                continue;
             }
+            identities.insert((row.get::<_, String>(0)?, id));
+            let mut usage = usage::StandardUsage::read(row, 3)?;
+            usage.cache_creation_tokens = row.get::<_, Option<i64>>(8)?.map(|v| v as u64);
+            total.add_attempt(usage);
         }
     }
-    trace.statements.push((
-        COMPACTION_USAGE_SQL.into(),
-        statement.get_status(StatementStatus::VmStep) as u64,
-    ));
-    let mut value = json!({"compactions":compactions,"malformed_records":skipped});
+    trace
+        .statements
+        .push((sql, statement.get_status(StatementStatus::VmStep) as u64));
+    let mut value = json!({"compactions":identities.len(),"malformed_records":skipped});
     if let (Value::Object(target), Value::Object(fields)) = (&mut value, json!(total)) {
         target.extend(fields);
     }
@@ -446,10 +447,10 @@ impl RateCounts {
         }
     }
 }
-fn connection_rates(db: &Connection, scope: &Scope, s: &Selection) -> rusqlite::Result<Value> {
+fn connection_rates(db: &Connection, s: &Selection) -> rusqlite::Result<Value> {
     let mut counts = BTreeMap::<String, RateCounts>::new();
     let sql = format!(
-        "SELECT a.profile_id,CASE WHEN json_type(a.input_manifest_json,'$.rate_observation.status')='integer' AND typeof(json_extract(a.input_manifest_json,'$.rate_observation.status'))='integer' THEN json_extract(a.input_manifest_json,'$.rate_observation.status') END,CASE WHEN json_type(a.input_manifest_json,'$.rate_observation.applied_wait_ms')='integer' AND typeof(json_extract(a.input_manifest_json,'$.rate_observation.applied_wait_ms'))='integer' THEN json_extract(a.input_manifest_json,'$.rate_observation.applied_wait_ms') END FROM model_attempt a INDEXED BY attempts_by_turn WHERE a.turn_id IN ({}) AND {}",
+        "SELECT a.profile_id,CASE WHEN json_type(a.input_manifest_json,'$.rate_observation.status')='integer' AND typeof(json_extract(a.input_manifest_json,'$.rate_observation.status'))='integer' THEN json_extract(a.input_manifest_json,'$.rate_observation.status') END,CASE WHEN json_type(a.input_manifest_json,'$.rate_observation.applied_wait_ms')='integer' AND typeof(json_extract(a.input_manifest_json,'$.rate_observation.applied_wait_ms'))='integer' THEN json_extract(a.input_manifest_json,'$.rate_observation.applied_wait_ms') END FROM model_attempt a INDEXED BY attempts_by_turn WHERE a.turn_id IN ({}) AND a.kind='conversation' AND {}",
         turn_source(s),
         s.window.sql("a.started_at")
     );
@@ -464,41 +465,26 @@ fn connection_rates(db: &Connection, scope: &Scope, s: &Selection) -> rusqlite::
             wait.and_then(|v| u64::try_from(v).ok()),
         );
     }
-    let threads = serde_json::to_string(&s.threads).expect("IDs serialize");
-    let mut statement = db.prepare(COMPACTION_USAGE_SQL)?;
-    let mut rows = statement.query(params![
-        threads,
-        crate::compaction::SUMMARY_USAGE_PREFIX,
-        crate::compaction::SUMMARY_USAGE_MAX_BYTES
-    ])?;
+    let rate_status =
+        usage::sql_valid_integer("a.input_manifest_json", "$.rate_observation.status");
+    let rate_wait = usage::sql_valid_integer(
+        "a.input_manifest_json",
+        "$.rate_observation.applied_wait_ms",
+    );
+    let sql = format!(
+        "SELECT a.profile_id,{SUMMARY_START},{rate_status},{rate_wait} FROM model_attempt a WHERE a.kind='summary' AND {}",
+        summary_scope(s)
+    );
+    let mut statement = db.prepare(&sql)?;
+    let mut rows = statement.query([&s.parameter])?;
     while let Some(row) = rows.next()? {
-        let thread: String = row.get(0)?;
-        let body: String = row.get(1)?;
-        let Ok(record) = serde_json::from_str::<crate::compaction::SummaryUsageRecord>(&body)
-        else {
-            continue;
-        };
-        let selected = record.thread_id == thread
-            && match scope {
-                Scope::Turn(id) => record.turn_id.as_ref() == Some(id),
-                Scope::Run(id) => record.run_id.as_ref() == Some(id),
-                Scope::Thread { .. } => true,
-            }
-            && s.window.includes(Some(&record.started_at));
-        if !selected {
-            continue;
-        }
-        let entry = counts.entry(record.profile_id).or_default();
-        let observed = (record.rate_observations.len() as u64).min(record.usage.requests);
-        for fact in record.rate_observations.into_iter().take(observed as usize) {
-            entry.add(
-                fact.get("status").and_then(Value::as_u64),
-                fact.get("applied_wait_ms").and_then(Value::as_u64),
+        let start: Option<String> = row.get(1)?;
+        if s.window.includes(start.as_deref()) {
+            counts.entry(row.get(0)?).or_default().add(
+                row.get::<_, Option<i64>>(2)?.map(|v| v as u64),
+                row.get::<_, Option<i64>>(3)?.map(|v| v as u64),
             );
         }
-        let unknown = record.usage.requests.saturating_sub(observed);
-        entry.status_unknown = entry.status_unknown.saturating_add(unknown);
-        entry.wait_unknown = entry.wait_unknown.saturating_add(unknown);
     }
     Ok(
         json!({"by_connection":counts,"coverage":"recorded_observations; missing or interrupted facts are unknown"}),
@@ -613,9 +599,9 @@ fn inspect_period(
     } else {
         None
     };
-    let compaction = compaction_usage(db, scope, &s, trace).map_err(error)?;
+    let compaction = compaction_usage(db, &s, trace).map_err(error)?;
     let connection_rates = if include_connection_rates {
-        Some(connection_rates(db, scope, &s).map_err(error)?)
+        Some(connection_rates(db, &s).map_err(error)?)
     } else {
         None
     };
@@ -783,7 +769,7 @@ pub(crate) fn read_latest_request(db: &Connection, scope: &Scope) -> Result<Valu
     let sql = format!(
         "WITH recent(id) AS ({recent})
          SELECT a.id,a.turn_id,a.state,a.started_at,{},{INPUT_BYTES_SQL}
-         FROM recent r JOIN model_attempt a ON a.id=(SELECT x.id FROM model_attempt x WHERE x.turn_id=r.id ORDER BY x.started_at DESC,x.rowid DESC LIMIT 1)
+         FROM recent r JOIN model_attempt a ON a.id=(SELECT x.id FROM model_attempt x WHERE x.turn_id=r.id AND x.kind='conversation' ORDER BY x.started_at DESC,x.rowid DESC LIMIT 1)
          ORDER BY a.started_at DESC,a.rowid DESC LIMIT 1",
         usage::sql_projection("a.usage_json")
     );

@@ -713,8 +713,15 @@ async fn changed_file_retry_keeps_update_identity_and_success_advances_only_that
     assert_eq!(rate["retry_after_present"], false);
     assert_eq!(rate["applied_wait_ms"], 0);
     assert_eq!(
+        completed_request
+            .as_object_mut()
+            .unwrap()
+            .remove("adoption"),
+        Some(json!({"outcome":"adopted"}))
+    );
+    assert_eq!(
         completed_request, retried,
-        "completion only adds transport observations; the sent request/attachment evidence is immutable"
+        "completion and adoption add only their outcome facts; the sent request/attachment evidence is immutable"
     );
     send(&control, &thread, "same new version again").await;
     let next = incoming(&control, &thread, &mut receive).await;

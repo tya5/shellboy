@@ -1,76 +1,26 @@
 //! Consecutive conversation retries; the HTTP client reports facts only.
 use super::*;
-use model::http::{AttemptFailure, ResponseFacts, ResponseReceived};
+#[cfg(test)]
+use model::http::ResponseFacts;
+#[cfg(test)]
+use model::http::{AttemptFailure, ResponseReceived};
+#[cfg(test)]
+use model::request_path::AttemptKind;
+pub(super) use model::request_path::RetryBudget;
+#[cfg(test)]
+use model::request_path::classify_attempt_retry;
+#[cfg(test)]
+use model::request_path::eligible_trim_failure;
+#[cfg(test)]
 use std::time::Duration;
 
-pub(super) use crate::model::retry_class::{MAX_RETRY_AFTER, RetryPolicy, classify_retry};
+pub(super) use crate::model::retry_class::RetryPolicy;
+#[cfg(test)]
+use crate::model::retry_class::classify_retry;
 
+#[cfg(test)]
 fn classify_conversation_retry(failure: &AttemptFailure) -> RetryPolicy {
-    let AttemptFailure { error, facts, .. } = failure;
-    if facts.terminal_received
-        && matches!(facts.status, Some(200..=299))
-        && error.kind == "provider"
-        && !error.is_context_limit()
-        && !error.is_thinking_binding()
-        && error.usage_limit.is_none()
-        && matches!(
-            error.untyped_stream_error_witness(),
-            Some(model::StreamProviderStatus {
-                value: 429 | 500..=599,
-                source: model::StreamProviderStatusSource::StreamErrorCode,
-            })
-        )
-    {
-        if let Some(delay) = facts.retry_after
-            && delay > MAX_RETRY_AFTER
-        {
-            return RetryPolicy::Deferred(delay);
-        }
-        return RetryPolicy::Retry {
-            partial_output: facts.received == ResponseReceived::Output,
-        };
-    }
-    classify_retry(error, facts)
-}
-
-/// Large-input activation is distinct from the ordinary transient retry list:
-/// every 5xx may benefit, but terminal reception and deferred
-/// Retry-After still prohibit an automatic new request.
-fn eligible_trim_failure(error: &model::ModelError, facts: &ResponseFacts) -> bool {
-    if facts.terminal_received
-        || error.is_context_limit()
-        || facts
-            .retry_after
-            .is_some_and(|delay| delay > MAX_RETRY_AFTER)
-        || facts
-            .http_observation
-            .is_some_and(|http| http.phase == model::http::HttpPhase::BeforeBodySource)
-    {
-        return false;
-    }
-    let server_failure = facts
-        .status
-        .is_some_and(|status| (500..600).contains(&status));
-    match error.kind.as_str() {
-        "http" | "provider" => server_failure,
-        "transport" | "incomplete" => {
-            server_failure
-                || (facts.http_observation.is_some()
-                    && facts
-                        .status
-                        .is_none_or(|status| (200..300).contains(&status)))
-        }
-        "timeout" => {
-            server_failure
-                || (facts
-                    .http_observation
-                    .is_some_and(|http| http.phase != model::http::HttpPhase::BodyReceive)
-                    && facts
-                        .status
-                        .is_none_or(|status| (200..300).contains(&status)))
-        }
-        _ => false,
-    }
+    classify_attempt_retry(failure, AttemptKind::Conversation)
 }
 
 /// #182 rule 4: the provider rejected a replayed signed thinking block as bound
@@ -81,29 +31,23 @@ async fn thinking_binding_retry(
     control: &Arc<Control>,
     snapshot: &Snapshot,
     attempt: &str,
-    failure: &model::http::AttemptFailure,
-    used: u32,
-    limit: u32,
+    partial_attempts: &[String],
 ) -> Result<bool, ApiError> {
-    let mut body = json!({"error":failure.error,"partial_text":failure.partial_text,
-        "partial_reasoning":failure.partial_reasoning,"completed_items":failure.completed_items,
-        "raw_response":failure.raw_response,"attempt_id":attempt,
-        "automatic_retry":{"number":used+1,"limit":limit,"delay_ms":0,
-            "partial_response_discarded":false,"possible_duplicate_charge":false,
-            "reason":"thinking_binding"},
-        "thinking_binding_retry":{"reasoning_dropped":true}});
-    body["rate_observation"] = failure.facts.rate_metadata();
-    body["rate_observation"]["applied_wait_ms"] =
-        json!(failure.facts.admission_wait_ms.unwrap_or(0));
     let (saved_attempt, thread) = (attempt.to_owned(), snapshot.thread.clone());
+    let current = snapshot.clone();
+    let partial_attempts = partial_attempts.to_vec();
     let applied = control
         .store
         .database
         .call(move |db| {
             let tx = db.transaction()?;
-            let transition = super::super::state::fail_attempt(&tx, &saved_attempt, &body, &now())?;
-            let applied = transition == super::super::state::AttemptTransition::Applied;
+            if !live_outcome_generation(&tx, &current)? {
+                return Ok(false);
+            }
+            let applied: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM model_attempt WHERE id=?1 AND turn_id=?2 AND generation=?3 AND state='failed' AND json_extract(error_json,'$.automatic_retry.reason')='thinking_binding')",params![saved_attempt,current.turn,current.generation],|r|r.get(0))?;
             if applied {
+                save_partial_attempts(&tx, &current, &partial_attempts)?;
+                tx.execute("UPDATE model_attempt SET error_json=json_set(error_json,'$.thinking_binding_retry',json('{\"reasoning_dropped\":true}')) WHERE id=?1",[&saved_attempt])?;
                 tx.execute(
                     "UPDATE thread SET reasoning_epoch=reasoning_epoch+1 WHERE id=?1",
                     [&thread],
@@ -169,130 +113,51 @@ async fn open_loop_reduce(
     })
 }
 
-#[derive(Default)]
-pub(super) struct RetryBudget {
-    turn: String,
-    generation: i64,
-    used: u32,
-    usage_limit_retry_fact: Option<model::usage_limit::UsageLimit>,
-    /// #182: the one resend after a thinking-binding rejection was used.
-    thinking_binding_retried: bool,
-}
-impl RetryBudget {
-    pub(super) fn observe(&mut self, turn: &str, generation: i64) {
-        if self.turn != turn || self.generation != generation {
-            self.turn = turn.into();
-            self.generation = generation;
-            self.used = 0;
-            self.usage_limit_retry_fact = None;
-            self.thinking_binding_retried = false;
-        }
-    }
-    pub(super) fn usage_limit_retry_bypass(&self) -> Option<model::usage_limit::UsageLimit> {
-        self.usage_limit_retry_fact
-    }
-    pub(super) fn clear_usage_limit_retry_bypass(&mut self) {
-        self.usage_limit_retry_fact = None;
-    }
-    /// Reset only after the completed response has been durably adopted.
-    pub(super) fn succeeded(&mut self) {
-        self.used = 0;
-        self.thinking_binding_retried = false;
-        self.clear_usage_limit_retry_bypass();
-    }
-    fn delay(&self, limit: u32, cap: Duration, retry_after: Option<Duration>) -> Option<Duration> {
-        (self.used < limit).then(|| {
-            retry_after
-                .unwrap_or_else(|| Duration::from_millis(1_000u64 << self.used.min(20)).min(cap))
-        })
-    }
-    fn planned_wait(&self, limit: u32, cap: Duration, retry_after: Option<Duration>) -> Duration {
-        (self.used..limit).fold(Duration::ZERO, |total, used| {
-            let backoff = Duration::from_millis(1_000u64 << used.min(20)).min(cap);
-            total.saturating_add(if used == self.used {
-                retry_after.unwrap_or(backoff)
-            } else {
-                backoff
-            })
-        })
-    }
-}
-
 #[allow(clippy::too_many_arguments)]
-pub(super) async fn retry_or_recover<'a>(
+pub(super) async fn retry_or_recover(
     control: &Arc<Control>,
     snapshot: &Snapshot,
     slot: &DriverSlot,
     attempt: String,
     mut failure: model::http::AttemptFailure,
+    adaptation: bool,
+    decision: model::request_path::FailureDecision,
     budget: &mut RetryBudget,
     overflow: &mut OverflowBudget,
     proactive_job: &mut Option<super::proactive::BackgroundJob>,
-    boundary: &'a tokio::sync::Mutex<()>,
-    boundary_guard: tokio::sync::MutexGuard<'a, ()>,
+    boundary_guard: &mut crate::compaction::boundary::Boundary<'_>,
+    partial_attempts: Vec<String>,
 ) -> Result<(), ApiError> {
-    let mut boundary_guard = crate::compaction::boundary::Boundary::new(boundary, boundary_guard);
     let clients = &snapshot.clients;
-    let Some(connection) = clients.connections.get(&snapshot.profile) else {
-        return recover(
+    if !clients.connections.contains_key(&snapshot.profile) {
+        return recover_with_observation(
             control,
             snapshot,
             ApiError::new(
                 ErrorCode::ConfigInvalid,
                 "Model connection is not configured",
             ),
-            Some((attempt.clone(), json!({"error":failure.error,"partial_text":failure.partial_text,
-                "partial_reasoning":failure.partial_reasoning,"completed_items":failure.completed_items,
-                "raw_response":failure.raw_response,"attempt_id":attempt,"rate_observation":failure.facts.rate_metadata()}))),
+            Some(attempt),
+            None,
+            partial_attempts,
         )
         .await;
     };
-    let limit = connection.response_max_retries;
-    if failure.error.is_thinking_binding() && !budget.thinking_binding_retried {
-        budget.thinking_binding_retried = true;
-        if thinking_binding_retry(control, snapshot, &attempt, &failure, budget.used, limit).await?
-        {
-            drop(boundary_guard);
-            return Ok(());
-        }
+    let model::request_path::FailureDecision {
+        policy,
+        used,
+        limit,
+        drop_reasoning,
+    } = decision;
+    if drop_reasoning
+        && thinking_binding_retry(control, snapshot, &attempt, &partial_attempts).await?
+    {
+        return Ok(());
     }
-    let policy = classify_conversation_retry(&failure);
-    // Only defer explicit provider reset facts beyond the complete remaining
-    // retry schedule; missing or short reset data keeps the ordinary policy.
-    let retryable_usage_limit = failure
-        .error
-        .usage_limit
-        .as_deref()
-        .filter(|fact| !fact.locally_blocked)
-        .copied();
-    let policy = if failure.error.usage_limit.as_deref().is_some_and(|fact| {
-        let remaining = fact
-            .resets_at
-            .saturating_sub(chrono::Utc::now().timestamp());
-        u64::try_from(remaining).is_ok_and(|seconds| {
-            Duration::from_secs(seconds)
-                > budget.planned_wait(
-                    limit,
-                    Duration::from_millis(connection.response_retry_max_delay_ms),
-                    failure.facts.retry_after,
-                )
-        })
-    }) {
-        RetryPolicy::Ineligible
-    } else {
-        policy
-    };
-    let mut delay = if matches!(policy, RetryPolicy::Retry { .. }) {
-        budget.delay(
-            limit,
-            Duration::from_millis(connection.response_retry_max_delay_ms),
-            failure.facts.retry_after,
-        )
-    } else {
-        None
-    };
+    let mut can_rebuild = adaptation;
     let mut trim_not_applied = None;
     let mut proactive_adopted = false;
+    // Join already-admitted compaction even when there is no slot to rebuild.
     if failure.error.is_context_limit() && proactive_job.is_some() {
         let waited = {
             let job = proactive_job
@@ -318,22 +183,21 @@ pub(super) async fn retry_or_recover<'a>(
             Err(_) => return Err(invalid("proactive summary task panicked")),
         }
     }
-    if delay.is_some() && !proactive_adopted {
+    if adaptation && !proactive_adopted {
         let open_loop = control.compactor.tool_loop_open(&snapshot.thread).await?;
         if failure.error.is_context_limit() && open_loop {
             // #182 rule 3: before a closed-loop boundary, selective trims and
             // spills wait; overflow falls back to the active-Turn summary.
             let mut observation = json!({"outcome":"stages_exhausted"});
             if overflow.begin().is_some() {
-                observation =
-                    open_loop_reduce(control, snapshot, slot, &mut boundary_guard).await?;
+                observation = open_loop_reduce(control, snapshot, slot, boundary_guard).await?;
                 if !boundary_guard.is_held() {
                     return Ok(());
                 }
                 control.changed(&snapshot.thread);
             }
             if observation["outcome"] != "adopted" {
-                delay = None;
+                can_rebuild = false;
             }
             trim_not_applied = Some(observation);
         } else if failure.error.is_context_limit() {
@@ -356,7 +220,7 @@ pub(super) async fn retry_or_recover<'a>(
                     &control.compactor.pinned(snapshot.clients.clone()),
                     &snapshot.thread,
                     slot.stop.clone(),
-                    Some(&mut boundary_guard),
+                    Some(boundary_guard),
                 )
                 .await
                 {
@@ -375,13 +239,10 @@ pub(super) async fn retry_or_recover<'a>(
                 control.changed(&snapshot.thread);
             }
             if observation["outcome"] != "adopted" {
-                delay = None;
+                can_rebuild = false;
             }
             trim_not_applied = Some(observation);
-        } else if budget.used >= 1
-            && connection.auto_trim_on_disconnect
-            && eligible_trim_failure(&failure.error, &failure.facts)
-        {
+        } else {
             trim_not_applied = Some(if open_loop {
                 // #182: the large-input trim is a selective edit; it waits.
                 json!({"outcome":"deferred","reason":"open_tool_loop"})
@@ -393,97 +254,43 @@ pub(super) async fn retry_or_recover<'a>(
     if slot.stop.is_cancelled() {
         return Ok(());
     }
-    if let Some(delay) = delay {
-        let partial = matches!(
-            policy,
-            RetryPolicy::Retry {
-                partial_output: true
-            }
-        );
-        let mut body = json!({"error":failure.error,"partial_text":failure.partial_text,
-            "partial_reasoning":failure.partial_reasoning,"completed_items":failure.completed_items,
-            "raw_response":failure.raw_response,"attempt_id":attempt,
-            "automatic_retry":{"number":budget.used+1,"limit":limit,
-                "delay_ms":delay.as_millis() as u64,"partial_response_discarded":partial,
-                "possible_duplicate_charge":true}});
-        body["rate_observation"] = failure.facts.rate_metadata();
-        let trusted_observation = trim_not_applied
-            .clone()
-            .map(super::trim_observation::DriverTrimObservation::from_reduction);
-        if let Some(observation) = trim_not_applied {
-            if observation["outcome"] == "adopted" && observation.get("result").is_some() {
-                body["automatic_trim"] = observation["result"].clone();
-            }
-            body["automatic_trim_attempt"] = observation;
-        }
-        let saved_attempt = attempt.clone();
-        let turn = snapshot.turn.clone();
-        let transition = control
-            .store
-            .database
-            .call(move |db| {
-                let tx = db.transaction()?;
-                let transition =
-                    super::super::state::fail_attempt(&tx, &saved_attempt, &body, &now())?;
-                if let Some(observation) = &trusted_observation {
-                    observation.persist_applied(&tx, &saved_attempt, transition)?;
-                }
-                if transition == super::super::state::AttemptTransition::Applied && partial {
-                    save_received_failure(&tx, &turn, &body)?;
-                }
-                tx.commit()?;
-                Ok(transition)
-            })
-            .await
-            .map_err(storage_error)?;
-        if transition != super::super::state::AttemptTransition::Applied {
-            return Ok(());
-        }
-        budget.used += 1;
-        if let Some(fact) = retryable_usage_limit {
-            budget.usage_limit_retry_fact = Some(fact);
-        }
-        control.changed(&snapshot.thread);
-        // Admission is released while waiting; ordinary boundaries are checked
-        // again before the next POST. Stop/shutdown wins over even a zero delay.
-        drop(boundary_guard);
-        let admission_wait_ms = failure
-            .facts
-            .admission_wait_ms
-            .unwrap_or(0)
-            .min(i64::MAX as u64) as i64;
-        let wait_started = tokio::time::Instant::now();
-        tokio::select! {
-            biased;
-            _ = slot.stop.cancelled() => {},
-            _ = tokio::time::sleep(delay) => {},
-        }
-        let applied_ms = (wait_started.elapsed().as_millis().min(i64::MAX as u128) as i64)
-            .saturating_add(admission_wait_ms);
-        let saved_attempt = attempt.clone();
+    if can_rebuild {
+        let current = snapshot.clone();
         control.store.database.call(move |db| {
-            db.execute("UPDATE model_attempt SET error_json=json_set(error_json, '$.rate_observation.applied_wait_ms', ?2), input_manifest_json=json_set(input_manifest_json, '$.rate_observation.applied_wait_ms', ?2) WHERE id=?1 AND json_valid(error_json)", params![saved_attempt, applied_ms])?;
+            let tx = db.transaction()?;
+            if !live_outcome_generation(&tx,&current)? { return Ok(()); }
+            save_partial_attempts(&tx,&current,&partial_attempts)?;
+            if let Some(observation) = trim_not_applied {
+                let trusted = super::trim_observation::DriverTrimObservation::from_reduction(observation.clone());
+                trusted.persist_trim(&tx, &attempt)?;
+                if observation["outcome"] == "adopted" && observation.get("result").is_some() {
+                    tx.execute("UPDATE model_attempt SET error_json=json_set(error_json,'$.automatic_trim',json(?2)) WHERE id=?1 AND state IN ('failed','incomplete')",params![attempt,observation["result"].to_string()])?;
+                }
+            }
+            tx.commit()?;
             Ok(())
         }).await.map_err(storage_error)?;
+        control.changed(&snapshot.thread);
         return Ok(());
     }
+    budget.abandon_retry();
     if let RetryPolicy::Deferred(delay) = policy {
         failure.error.message.push_str(&format!(
             "; server requested Retry-After {}s; automatic wait limit is 600s",
             delay.as_secs()
         ));
     }
-    budget.clear_usage_limit_retry_bypass();
     overflow::retry_or_recover(
         control,
         snapshot,
         slot,
         attempt,
         failure,
-        budget.used,
+        used,
         limit,
         policy,
         trim_not_applied,
+        partial_attempts,
     )
     .await
 }
@@ -803,6 +610,7 @@ mod trim_budget_tests {
         use model::http::{ConnectionReuse, HttpObservation, HttpPhase};
         let mut facts = ResponseFacts {
             http_observation: Some(HttpObservation {
+                network_started: true,
                 phase: HttpPhase::BodyReceive,
                 request_body_bytes: 100,
                 body_source_bytes_consumed: 100,

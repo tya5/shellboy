@@ -177,7 +177,7 @@ mod tests {
             db.execute("INSERT INTO app_meta(key,value)VALUES(?1,?2)",params![format!("compact.result.{id}"),json!({"state":"completed","ended_at":at,"outcome":{"result":{"omitted_nodes":0}}}).to_string()]).unwrap();
             let turn = format!("turn{i:06}");
             db.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES(?1,'t','r','completed','2026-01-01T00:00:00Z')",[&turn]).unwrap();
-            db.execute(r#"INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,error_json,started_at)VALUES(?1,?2,0,0,'p','m',0,'failed','{}','{"automatic_trim_attempt":{"outcome":"failed"}}','2026-01-01T00:00:00Z')"#,params![format!("attempt{i:06}"),turn]).unwrap();
+            db.execute(r#"INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,error_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id=?2),?1,?2,0,0,'p','m',0,'failed','{}','{"automatic_trim_attempt":{"outcome":"failed"}}','2026-01-01T00:00:00Z')"#,params![format!("attempt{i:06}"),turn]).unwrap();
             let replacement = format!("replacement{i:06}");
             db.execute("INSERT INTO replacement(id,output_node_id,input_key,format_version,prompt_version,state,created_at)VALUES(?1,'marker',?1,'summary-v1','test','completed','2026-01-01T00:00:00Z')",[&replacement]).unwrap();
             db.execute(

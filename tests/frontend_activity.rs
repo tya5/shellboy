@@ -30,8 +30,8 @@ async fn automatic_reduction_summary_survives_later_failures_without_crossing_ge
     .unwrap();
     db.call(move|db| {
         db.execute("UPDATE turn SET recovery_reason_json=?1 WHERE id='u'",[reason])?;
-        db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,error_json,started_at)VALUES('trimmed','u',2,0,'p','m',0,'failed','{}',?1,'now')",[saved])?;
-        db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,error_json,started_at)VALUES('latest','u',2,0,'p','m',0,'incomplete','{}','{}','now')",[])?;
+        db.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,error_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='u'),'trimmed','u',2,0,'p','m',0,'failed','{}',?1,'now')",[saved])?;
+        db.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,error_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='u'),'latest','u',2,0,'p','m',0,'incomplete','{}','{}','now')",[])?;
         Ok(())
     }).await.unwrap();
     let observed = projection(&db).await;
@@ -156,7 +156,7 @@ async fn activity_uses_recorded_run_turn_attempt_priority_and_remains_read_only(
     assert_eq!(prepared.snapshot.run_id.as_deref(), Some("r"));
     assert_eq!(prepared.snapshot.turn_id.as_deref(), Some("u"));
     assert!(prepared.poll_running);
-    change(&db,"UPDATE turn SET state='running'; INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('a','u',0,0,'p','m',0,'inflight','{}','2026-10-25T00:00:00Z'); INSERT INTO tool_group VALUES('g','a','u','running','2026-10-25T00:00:00Z');").await;
+    change(&db,"UPDATE turn SET state='running'; INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='u'),'a','u',0,0,'p','m',0,'inflight','{}','2026-10-25T00:00:00Z'); INSERT INTO tool_group VALUES('g','a','u','running','2026-10-25T00:00:00Z');").await;
     let waiting = projection(&db).await;
     assert_eq!(
         waiting.snapshot.phase,
@@ -597,7 +597,7 @@ async fn human_model_failure_message_keeps_saved_error_and_does_not_guess_prefix
     db.call(move |db| {
         db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','/AGENTS.md','p','m','now'); INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','live','now'); INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','t','r','recovery_wait','now');")?;
         db.execute("UPDATE turn SET recovery_reason_json=?1",[receipt])?;
-        db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,error_json,started_at)VALUES('a','u',0,0,'p','m',0,'incomplete','{}',?1,'now')",[attempt])?;
+        db.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,error_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='u'),'a','u',0,0,'p','m',0,'incomplete','{}',?1,'now')",[attempt])?;
         Ok(())
     }).await.unwrap();
     let recovery = projection(&db).await.snapshot.recovery.unwrap();
@@ -678,8 +678,8 @@ async fn retry_projection_requires_current_failed_attempt_and_live_running_turn(
         INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('t','/','/AGENTS.md','p','m','now');
         INSERT INTO run(id,thread_id,state,created_at) VALUES('r','t','live','now');
         INSERT INTO turn(id,thread_id,run_id,state,generation,created_at) VALUES('u','t','r','running',2,'now');
-        INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at,error_json)
-        VALUES('a','u',2,0,'p','m',0,'failed','{}','now','{"automatic_retry":{"number":1,"limit":2,"delay_ms":1000,"partial_response_discarded":false,"possible_duplicate_charge":true}}');
+        INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at,error_json)
+        VALUES('conversation',(SELECT thread_id FROM turn WHERE id='u'),'a','u',2,0,'p','m',0,'failed','{}','now','{"automatic_retry":{"number":1,"limit":2,"delay_ms":1000,"partial_response_discarded":false,"possible_duplicate_charge":true}}');
     "#).await;
     let retry = projection(&db).await;
     assert_eq!(retry.snapshot.phase, ActivityPhase::Retrying);
@@ -737,8 +737,8 @@ async fn retry_projection_requires_current_failed_attempt_and_live_running_turn(
         assert!(saved.automatic_retry.is_none());
     }
     change(&db, r#"UPDATE model_attempt SET error_json='{"automatic_retry":{"number":2,"limit":2,"delay_ms":1000,"partial_response_discarded":false}}';
-        INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)
-        VALUES('b','u',2,0,'p','m',0,'inflight','{}','now');"#).await;
+        INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)
+        VALUES('conversation',(SELECT thread_id FROM turn WHERE id='u'),'b','u',2,0,'p','m',0,'inflight','{}','now');"#).await;
     let next = projection(&db).await.snapshot;
     assert_eq!(next.phase, ActivityPhase::AwaitingModel);
     assert_eq!(next.attempt_id.as_deref(), Some("b"));
@@ -755,7 +755,7 @@ async fn exhausted_retry_recovery_stage_requires_exact_saved_model_and_counts() 
     };
     let root = tempfile::tempdir().unwrap();
     let db = DbWorker::open(root.path().join("db")).await.unwrap();
-    change(&db, "INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','/AGENTS.md','p','m','now'); INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','live','now'); INSERT INTO turn(id,thread_id,run_id,state,generation,created_at)VALUES('u','t','r','recovery_wait',2,'now'); INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('a','u',2,0,'p','m',0,'incomplete','{}','now');").await;
+    change(&db, "INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','/AGENTS.md','p','m','now'); INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','live','now'); INSERT INTO turn(id,thread_id,run_id,state,generation,created_at)VALUES('u','t','r','recovery_wait',2,'now'); INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='u'),'a','u',2,0,'p','m',0,'incomplete','{}','now');").await;
     let model = ModelError::new("provider", "rate limited; original provider message");
     let suffix = " (automatic retries exhausted: 2/2)";
     let message = format!("{model}{suffix}");

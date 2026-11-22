@@ -4409,8 +4409,8 @@ mod activity_list_tests {
             .unwrap();
         db.execute("UPDATE turn SET state='running' WHERE id='u'", [])
             .unwrap();
-        db.execute_batch("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at,error_json)
-          VALUES('a','u',1,0,'p','m',0,'failed','{}','2026-10-29T00:00:00Z','{\"automatic_retry\":{\"number\":1,\"limit\":2,\"delay_ms\":10,\"partial_response_discarded\":false}}');").unwrap();
+        db.execute_batch("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at,error_json)
+          VALUES('conversation',(SELECT thread_id FROM turn WHERE id='u'),'a','u',1,0,'p','m',0,'failed','{}','2026-10-29T00:00:00Z','{\"automatic_retry\":{\"number\":1,\"limit\":2,\"delay_ms\":10,\"partial_response_discarded\":false}}');").unwrap();
         verify(ActivityPhase::Running, "running");
         db.execute("UPDATE model_attempt SET generation=0", [])
             .unwrap();
@@ -7192,7 +7192,7 @@ mod retry_tracking_diagnosis_287 {
             );
             let tx = db.transaction().unwrap();
             if case != "no_attempt_failure" {
-                tx.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('retry-attempt','turn',1,0,'synthetic','synthetic',0,'inflight','{}','accepted')", []).unwrap();
+                tx.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='turn'),'retry-attempt','turn',1,0,'synthetic','synthetic',0,'inflight','{}','accepted')", []).unwrap();
                 tx.execute("UPDATE turn SET state='running' WHERE id='turn'", [])
                     .unwrap();
             }

@@ -61,14 +61,10 @@ pub(super) async fn retry_or_recover(
     retry_limit: u32,
     retry_policy: super::retry::RetryPolicy,
     trim_not_applied: Option<serde_json::Value>,
+    partial_attempts: Vec<String>,
 ) -> Result<(), super::ApiError> {
     use super::*;
 
-    let deferred = if let super::retry::RetryPolicy::Deferred(delay) = retry_policy {
-        Some(delay)
-    } else {
-        None
-    };
     let exhausted = matches!(retry_policy, super::retry::RetryPolicy::Retry { .. })
         && automatic_retries >= retry_limit
         && retry_limit > 0;
@@ -118,29 +114,15 @@ pub(super) async fn retry_or_recover(
             details["content_filter"] = json!(facts);
         }
     }
-    let mut saved = json!({"error":failure.error,"partial_text":failure.partial_text,"partial_reasoning":failure.partial_reasoning,"attempt_id":attempt,"completed_items":failure.completed_items,"raw_response":failure.raw_response});
-    saved["rate_observation"] = failure.facts.rate_metadata();
-    saved["rate_observation"]["applied_wait_ms"] =
-        json!(failure.facts.admission_wait_ms.unwrap_or(0));
-    let trusted_observation = trim_not_applied
-        .clone()
-        .map(super::trim_observation::DriverTrimObservation::from_reduction);
-    if let Some(observation) = trim_not_applied {
-        saved["automatic_trim_attempt"] = observation;
-    }
-    if let Some(delay) = deferred {
-        saved["automatic_retry_deferred"] = json!({"retry_after_ms":delay.as_millis().min(u64::MAX as u128) as u64,"maximum_automatic_wait_ms":600_000});
-    }
-    if exhausted {
-        saved["automatic_retry_exhausted"] =
-            json!({"retries":automatic_retries,"limit":retry_limit});
-    }
+    let trusted_observation =
+        trim_not_applied.map(super::trim_observation::DriverTrimObservation::from_reduction);
     recover_with_observation(
         control,
         snapshot,
         error.clone(),
-        Some((attempt, saved)),
+        Some(attempt),
         trusted_observation,
+        partial_attempts,
     )
     .await?;
     Err(error)

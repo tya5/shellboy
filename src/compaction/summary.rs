@@ -36,6 +36,22 @@ pub(super) fn final_r_source(
     }
 }
 
+pub(super) fn qualify_r(
+    tx: &rusqlite::Transaction<'_>,
+    thread: &str,
+    expected: &[FinalRSource],
+    markers: &[FinalRSource],
+) -> Result<(), StorageError> {
+    current_r_sources(tx, thread, expected)?;
+    let ids = expected
+        .iter()
+        .map(|source| source.fact.id.clone())
+        .collect::<Vec<_>>();
+    let (_, path) = current_path_ids(tx, thread, markers)?;
+    locate_r(&path, &ids)?;
+    Ok(())
+}
+
 pub(super) fn current_r_sources(
     tx: &rusqlite::Transaction<'_>,
     thread: &str,
@@ -1277,8 +1293,8 @@ mod final_r_adoption_tests {
             tx.execute_batch(
                 "INSERT INTO run(id,thread_id,state,created_at) VALUES('run','t','completed','now');
                  INSERT INTO turn(id,thread_id,run_id,state,created_at) VALUES('u','t','run','completed','now');
-                 INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)
-                   VALUES('attempt','u',0,0,'fixture','fixture',0,'completed','{}','now');
+                 INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)
+                   VALUES('conversation',(SELECT thread_id FROM turn WHERE id='u'),'attempt','u',0,0,'fixture','fixture',0,'completed','{}','now');
                  INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at) VALUES('g','attempt','u','completed','now');
                  INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state)
                    VALUES('g','call',0,'shell','{}','completed');",

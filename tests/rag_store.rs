@@ -936,7 +936,7 @@ async fn history_keyword_streams_large_raw_and_keeps_bounded_witnesses_read_only
         c.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/tmp','/tmp/AGENTS.md','fixture','model','now');
         INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','completed','now');
         INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('turn','t','r','completed','now');
-        INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('a','turn',0,0,'fixture','model',0,'completed','{}','now');
+        INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='turn'),'a','turn',0,0,'fixture','model',0,'completed','{}','now');
         INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES('g','a','turn','completed','now');")?;
         for (id,ordinal,encoding,canonical) in [("large",0,"UTF-8","CANONICAL"),("bad",1,"not-an-encoding","UNRELATED_CANONICAL")] {
             let payload=json!({"item":{"type":"function_call_output","call_id":id,"output":canonical}}).to_string();
@@ -1969,7 +1969,7 @@ async fn history_semantic_streams_large_raw_spans_and_preserves_valid_hits() {
         c.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/tmp','/tmp/AGENTS.md','fixture','model','now');
         INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','completed','now');
         INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('turn','t','r','completed','now');
-        INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('a','turn',0,0,'fixture','model',0,'completed','{}','now');
+        INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='turn'),'a','turn',0,0,'fixture','model',0,'completed','{}','now');
         INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES('g','a','turn','completed','now');
         INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state,operation_id)VALUES('g','large',0,'shell','{}','completed','large');
         INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,saved_sequence,exit_code,output_complete,started_at,ended_at)VALUES('large','r','turn','large','exited','/tmp','{}','UTF-8','UTF-8','closed',1,0,1,'now','now');")?;

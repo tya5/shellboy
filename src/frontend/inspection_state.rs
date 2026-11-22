@@ -2253,7 +2253,7 @@ mod grouped_usage_reader_tests {
         db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','','p','m','now');
           INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','completed','now');
           INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','t','r','completed','now');
-          INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at)VALUES('a','u',0,0,'p','m',0,'completed','{}','{\"input_tokens\":100}','2026-10-31T00:00:00+00:00');").unwrap();
+          INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='u'),'a','u',0,0,'p','m',0,'completed','{}','{\"input_tokens\":100}','2026-10-31T00:00:00+00:00');").unwrap();
         db.pragma_update(None, "query_only", true).unwrap();
         assert!(read_usage_tx(&db, &ticket, None).is_err());
         let raw = read_usage_tx(&db, &ticket, Some("owner-instance")).unwrap();
@@ -2399,7 +2399,7 @@ mod cache_attempt_reader_tests {
         db.execute_batch(r#"INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('source','/','','p','m','now');
           INSERT INTO run(id,thread_id,state,created_at)VALUES('r','source','completed','now');
           INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','source','r','completed','now');
-          INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('a','u',0,0,'p','m',0,'completed','{"prompt_cache_diagnostics":{"type":"cache_miss","cache_missed_tokens":0}}','now');"#).unwrap();
+          INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='u'),'a','u',0,0,'p','m',0,'completed','{"prompt_cache_diagnostics":{"type":"cache_miss","cache_missed_tokens":0}}','now');"#).unwrap();
         db.pragma_update(None, "query_only", true).unwrap();
         let before = db.total_changes();
         let raw = read_usage_tx(&db, &ticket, None).unwrap();

@@ -416,7 +416,7 @@ mod tests {
     async fn seed(control: &Control) {
         control.store.database.call(|db| {
             db.execute("UPDATE turn SET state='running' WHERE id='target-run'", [])?;
-            db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('a','target-run',0,0,'fixture','fixture-model',0,'inflight','{}','now')", [])?;
+            db.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='target-run'),'a','target-run',0,0,'fixture','fixture-model',0,'inflight','{}','now')", [])?;
             Ok(())
         }).await.unwrap();
     }

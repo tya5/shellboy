@@ -26,7 +26,7 @@ async fn latest_group_spill_is_progress_even_when_the_summary_has_no_prefix() {
         let tx = db.transaction()?;
         tx.execute_batch("INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','completed','now');
             INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','t','r','completed','now');
-            INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('attempt','u',0,0,'fixture','fixture',0,'completed','{}','now');
+            INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='u'),'attempt','u',0,0,'fixture','fixture',0,'completed','{}','now');
             INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES('g','attempt','u','completed','now');
             INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state)VALUES('g','call',0,'shell','{}','completed');")?;
         history::append_node(&tx,"t","call",Some("u"),"assistant_response",&json!({"group_id":"g","output":[{"type":"function_call","call_id":"call","name":"shell","arguments":"{}"}]}),"now")?;

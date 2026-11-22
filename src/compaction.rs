@@ -20,7 +20,6 @@ mod attempt;
 pub(crate) mod boundary;
 pub(crate) mod context_usage;
 pub mod discard;
-mod retry;
 pub(crate) use attempt::{
     ABoundaryObservation, AutomaticStage, GcStage, GcStageFact, begin_tx as attempt_begin_tx,
     finish_tx as attempt_finish_tx,
@@ -57,10 +56,6 @@ use policy::*;
 use std::ops::Range;
 use summary::SummaryAdoption;
 pub use usage::SummaryUsage;
-pub(crate) use usage::{
-    RECORD_MAX_BYTES as SUMMARY_USAGE_MAX_BYTES, RECORD_PREFIX as SUMMARY_USAGE_PREFIX,
-    UsageRecord as SummaryUsageRecord,
-};
 
 // A graph-work bound, independent of provider context capacity.
 const TURN_BOUNDARY_IDS: usize = 65_536;
@@ -273,7 +268,8 @@ pub(crate) fn inspect_parts(db: &Connection, payload: &Value) -> Result<(Value, 
             items.push(json!({"key":key,"listed_as":listed_as,"state":"unreadable"}));
             continue;
         };
-        let usage = usage::usage_of(part.raw_response.as_ref()).map(|u| u.to_value());
+        let usage =
+            crate::model::request_path::usage_of(part.raw_response.as_ref()).map(|u| u.to_value());
         items.push(json!({
             "key":key,
             "listed_as":listed_as,
@@ -406,6 +402,14 @@ fn gc_request_groups(captured: &CapturedSummaryInput) -> Vec<single_request::Req
             text: group.text.as_str(),
             projection_weight: group.projection_weight,
             source_count: group.stamps.len() as u64,
+            stamps: group
+                .stamps
+                .iter()
+                .map(|stamp| summary::FinalRSource {
+                    fact: stamp.source.clone(),
+                    hash: stamp.hash.clone(),
+                })
+                .collect(),
         })
         .collect()
 }
@@ -754,7 +758,7 @@ impl Compactor {
                 ..Default::default()
             });
         };
-        let mut ledger = usage::UsageLedger::new(&snapshot);
+        let mut ledger = usage::SummaryRequests::new(snapshot.current_turn.clone());
         let range = plan.start..plan.end();
         self.summarize_single(single_request::SummaryRequest {
             snapshot,
@@ -919,7 +923,7 @@ impl Compactor {
             let material=single_request::SummaryMaterial{thread:&captured.thread,profile:&captured.profile,model:&captured.model,effort:captured.effort.as_deref(),groups:&material_groups};
             let output_limit=single_request::resolved_limit(None,captured.thread_summary_max_chars,config.connections.get(&captured.profile),&config.compaction);
             let failure_setup=compactor.prepare_gc_failure_setup(&captured,output_limit).await;
-            let mut ledger=usage::UsageLedger::from_context(&captured.thread,&captured.profile,&captured.model,captured.origin_turn.clone(),captured.origin_run.clone());
+            let mut ledger=usage::SummaryRequests::new(captured.origin_turn.clone());
             let eligible_capture=captured.clone();
             let eligible=Box::new(move|range:Range<usize>|{
                 if range.is_empty()||range.end>eligible_capture.groups.len()||range.clone().any(|i|!eligible_capture.groups[i].complete||eligible_capture.groups[i].stamps.iter().any(|s|s.protected)){return false;}
@@ -997,100 +1001,6 @@ impl Compactor {
         }
     }
 
-    async fn summary_admission(
-        &self,
-        client: &crate::model::http::HttpModelClient,
-        owner: &mut single_request::DispatchOwner<'_, '_>,
-        cancel: &CancellationToken,
-    ) -> Result<(crate::model::http::RateAdmission, u64), ApiError> {
-        let reservation = client.reserve_rate_admission(None).map_err(|error| {
-            ApiError::new(ErrorCode::IoFailed, "Summary admission deferred")
-                .details(json!({"kind":error.kind}))
-        })?;
-        match reservation {
-            crate::model::http::RateReservation::Ready(admission) => Ok((admission, 0)),
-            crate::model::http::RateReservation::Waiting(waiter) => {
-                let started = tokio::time::Instant::now();
-                let wait = async {
-                    let result = waiter.wait(cancel).await;
-                    (result, started.elapsed())
-                };
-                let (result, elapsed) = match owner {
-                    single_request::DispatchOwner::Manual { boundary } => {
-                        if let Some(boundary) = boundary.as_deref_mut() {
-                            let (result, elapsed) =
-                                boundary.pause(cancel, wait).await.map_err(|_| {
-                                    discard::rejected(
-                                        discard::RejectionReason::Cancelled,
-                                        "Summary cancelled; original path retained",
-                                    )
-                                })?;
-                            (result, elapsed)
-                        } else {
-                            wait.await
-                        }
-                    }
-                    single_request::DispatchOwner::Gc => wait.await,
-                };
-                let lease = client.admission_after_wait(result, None).map_err(|error| {
-                    if error.kind == "cancelled" {
-                        discard::rejected(
-                            discard::RejectionReason::Cancelled,
-                            "Summary cancelled; original path retained",
-                        )
-                    } else {
-                        ApiError::new(ErrorCode::IoFailed, "Summary admission deferred")
-                            .details(json!({"kind":error.kind}))
-                    }
-                })?;
-                Ok((lease, elapsed.as_millis().min(u64::MAX as u128) as u64))
-            }
-        }
-    }
-
-    #[allow(clippy::result_large_err)]
-    async fn summary_response(
-        client: &crate::model::http::HttpModelClient,
-        thread: &str,
-        request: Value,
-        cancel: CancellationToken,
-        (admission, elapsed): (crate::model::http::RateAdmission, u64),
-    ) -> Result<crate::model::ModelResponse, crate::model::http::AttemptFailure> {
-        let mut response: Result<crate::model::ModelResponse, crate::model::http::AttemptFailure> =
-            match &admission {
-                _ if cancel.is_cancelled() => Err(crate::model::ModelError::new(
-                    "cancelled",
-                    "Model request was cancelled",
-                )
-                .into()),
-                crate::model::http::RateAdmission::QuotaBlocked(fact) => Err(fact.error().into()),
-                crate::model::http::RateAdmission::Lease(_) => {
-                    client
-                        .response_for_thread_pre_admitted(thread, request, cancel)
-                        .await
-                }
-            };
-        match &mut response {
-            Ok(response) => response.response_facts.admission_wait_ms = Some(elapsed),
-            Err(failure) => failure.facts.admission_wait_ms = Some(elapsed),
-        }
-        if let crate::model::http::RateAdmission::Lease(lease) = &admission {
-            let facts = match &response {
-                Ok(response) => Some(response.response_facts),
-                Err(failure)
-                    if failure.facts.terminal_received || failure.facts.http_error_complete =>
-                {
-                    Some(failure.facts)
-                }
-                Err(_) => None,
-            };
-            if let Some(status) = facts.and_then(|facts| facts.status) {
-                lease.complete(status);
-            }
-        }
-        response
-    }
-
     async fn summarize_range(
         &self,
         snapshot: Snapshot,
@@ -1100,7 +1010,7 @@ impl Compactor {
         automatic: Option<AutomaticStage>,
         requested_limit: Option<u64>,
     ) -> Result<CompactResult, ApiError> {
-        let mut ledger = usage::UsageLedger::new(&snapshot);
+        let mut ledger = usage::SummaryRequests::new(snapshot.current_turn.clone());
         self.summarize_single(single_request::SummaryRequest {
             snapshot,
             original: range,
@@ -2104,7 +2014,7 @@ mod tests {
             let tx = db.transaction()?;
             tx.execute_batch("INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','completed','now');
                 INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','t','r','completed','now');
-                INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('attempt','u',0,0,'fixture','fixture',0,'completed','{}','now');
+                INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='u'),'attempt','u',0,0,'fixture','fixture',0,'completed','{}','now');
                 INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES('g','attempt','u','completed','now');
                 INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state)VALUES('g','call',0,'shell','{}','completed');")?;
             for (id, payload) in [
@@ -2469,7 +2379,7 @@ mod tests {
         let saved: String = db
             .call(|db| {
                 Ok(db.query_row(
-                    "SELECT value FROM app_meta WHERE key LIKE 'summary.usage.t.%'",
+                    "SELECT input_manifest_json FROM model_attempt WHERE kind='summary' AND thread_id='t'",
                     [],
                     |r| r.get(0),
                 )?)
@@ -2477,10 +2387,9 @@ mod tests {
             .await
             .unwrap();
         let saved: Value = serde_json::from_str(&saved).unwrap();
-        assert_eq!(saved["requests"], 1);
-        assert_eq!(saved["rate_observations"][0]["status"], 429);
-        assert_eq!(saved["rate_observations"][0]["retry_after_ms"], 2000);
-        assert_eq!(saved["rate_observations"][0]["applied_wait_ms"], 0);
+        assert_eq!(saved["rate_observation"]["status"], 429);
+        assert_eq!(saved["rate_observation"]["retry_after_ms"], 2000);
+        assert_eq!(saved["rate_observation"]["applied_wait_ms"], 0);
         db.shutdown().await.unwrap();
     }
     #[tokio::test]
@@ -3475,7 +3384,7 @@ mod tests {
             let tx=db.transaction()?;
             tx.execute_batch("INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','live','now');
                 INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('old','t','r','completed','now'),('last','t','r','completed','now'),('current','t','r','running','now');
-                INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('attempt','current',0,0,'fixture','fixture',0,'completed','{}','now');")?;
+                INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='current'),'attempt','current',0,0,'fixture','fixture',0,'completed','{}','now');")?;
             for (id, turn, text) in [("old-user","old","old".into()),("last-user","last","last".into()),("current-user","current","u".repeat(32_000)),("current-answer","current","a".repeat(32_000))] {
                 history::append_node(&tx,"t",id,Some(turn),"message",&json!({"role":"user","content":text}),"now")?;
             }
@@ -3761,7 +3670,7 @@ mod tests {
         .unwrap();
         db.call(|db| {
             let tx=db.transaction()?;
-            tx.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('attempt','current',0,0,'fixture','fixture',0,'completed','{}','now')",[])?;
+            tx.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='current'),'attempt','current',0,0,'fixture','fixture',0,'completed','{}','now')",[])?;
             for group in ["g1","g2"] {
                 tx.execute("INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES(?1,'attempt','current','completed','now')",[group])?;
                 tx.execute("INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state)VALUES(?1,?1,0,'shell','{}','completed')",[group])?;
@@ -3906,26 +3815,6 @@ mod tests {
             );
             assert!(c.get("map_requests").is_none() && c.get("reduce_requests").is_none());
             assert_eq!(totals["model_attempts"], json!({}));
-            let plan = db
-                .prepare(&format!(
-                    "EXPLAIN QUERY PLAN {}",
-                    crate::usage_totals::COMPACTION_USAGE_SQL
-                ))?
-                .query_map(
-                    params![
-                        r#"["t"]"#,
-                        crate::compaction::SUMMARY_USAGE_PREFIX,
-                        crate::compaction::SUMMARY_USAGE_MAX_BYTES
-                    ],
-                    |r| r.get::<_, String>(3),
-                )?
-                .collect::<rusqlite::Result<Vec<_>>>()?;
-            assert!(
-                plan.iter()
-                    .any(|line| line.starts_with("SEARCH m USING INDEX")
-                        && line.contains("key>? AND key<?")),
-                "{plan:?}"
-            );
             let args: crate::protocol::CompactListArgs =
                 serde_json::from_value(json!({"thread_id":"t"})).unwrap();
             let listed = crate::readback::compactions(db, "t", &args).unwrap();

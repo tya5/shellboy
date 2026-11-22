@@ -64,7 +64,7 @@ impl Fixture {
         self.db.call(|db| {
             db.execute_batch("INSERT INTO run(id,thread_id,state,created_at)VALUES('old-run','t','completed','now');
                 INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('old-turn','t','old-run','completed','now');
-                INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('old-attempt','old-turn',0,0,'p','m',0,'completed','{}','now');
+                INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='old-turn'),'old-attempt','old-turn',0,0,'p','m',0,'completed','{}','now');
                 INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES('g-old','old-attempt','old-turn','completed','now'),('g-new','old-attempt','old-turn','completed','now');")?;
             Ok(())
         }).await.unwrap();
@@ -378,14 +378,14 @@ async fn estimates_use_replay_unicode_and_same_model_usage_with_current_fixed_ov
     fixture.db.call(|db| {
         db.execute_batch("INSERT INTO run(id,thread_id,state,created_at)VALUES('past','t','completed','now');
             INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('past','t','past','completed','now');
-            INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at)VALUES
-            ('baseline','past',0,0,'p','m',0,'completed','{\"input_characters\":100,\"history_characters\":80}','{\"input_tokens\":50,\"input_tokens_details\":{\"cached_tokens\":0}}','now'),
-            ('other-model','past',0,0,'p','other',0,'completed','{\"input_characters\":100,\"history_characters\":80}','{\"input_tokens\":99999}','now'),
-            ('legacy','past',0,0,'p','m',0,'completed','{}','{\"input_tokens\":99999}','now');
+            INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at)VALUES
+            ('conversation',(SELECT thread_id FROM turn WHERE id='past'),'baseline','past',0,0,'p','m',0,'completed','{\"input_characters\":100,\"history_characters\":80}','{\"input_tokens\":50,\"input_tokens_details\":{\"cached_tokens\":0}}','now'),
+            ('conversation',(SELECT thread_id FROM turn WHERE id='past'),'other-model','past',0,0,'p','other',0,'completed','{\"input_characters\":100,\"history_characters\":80}','{\"input_tokens\":99999}','now'),
+            ('conversation',(SELECT thread_id FROM turn WHERE id='past'),'legacy','past',0,0,'p','m',0,'completed','{}','{\"input_tokens\":99999}','now');
             INSERT INTO run(id,thread_id,state,created_at)VALUES('current','t','live','now');
             INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('current','t','current','running','now');
-            INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)
-            VALUES('inflight','current',0,(SELECT selection_revision FROM thread WHERE id='t'),'p','m',0,'inflight','{\"input_characters\":200,\"history_characters\":100}','now');")?;
+            INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)
+            VALUES('conversation',(SELECT thread_id FROM turn WHERE id='current'),'inflight','current',0,(SELECT selection_revision FROM thread WHERE id='t'),'p','m',0,'inflight','{\"input_characters\":200,\"history_characters\":100}','now');")?;
         Ok(())
     }).await.unwrap();
     let snapshot = fixture.compactor.snapshot("t", false).await.unwrap();
@@ -431,8 +431,8 @@ async fn activation_measures_failed_request_not_later_appended_input() {
     fixture.db.call(|db| {
         db.execute_batch("INSERT INTO run(id,thread_id,state,created_at)VALUES('current','t','live','now');
             INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('current','t','current','running','now');
-            INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)
-            VALUES('failed-request','current',0,(SELECT selection_revision FROM thread WHERE id='t'),'p','m',0,'inflight','{\"input_characters\":4000,\"history_characters\":100}','now');")?;
+            INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)
+            VALUES('conversation',(SELECT thread_id FROM turn WHERE id='current'),'failed-request','current',0,(SELECT selection_revision FROM thread WHERE id='t'),'p','m',0,'inflight','{\"input_characters\":4000,\"history_characters\":100}','now');")?;
         Ok(())
     }).await.unwrap();
     fixture
@@ -873,7 +873,7 @@ async fn legacy_large_usage_feeds_context_and_baseline_without_rewriting_rows() 
     let saved = raw.clone();
     fixture.db.call(move |db| {
         db.execute_batch("INSERT INTO run(id,thread_id,state,created_at)VALUES('past','t','completed','now'); INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('past','t','past','completed','now');")?;
-        db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at)VALUES('large','past',0,0,'p','m',0,'completed','{\"input_characters\":100,\"history_characters\":80}',?1,'now')",[raw])?;
+        db.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='past'),'large','past',0,0,'p','m',0,'completed','{\"adoption\":{\"outcome\":\"adopted\"},\"input_characters\":100,\"history_characters\":80}',?1,'now')",[raw])?;
         Ok(())
     }).await.unwrap();
     let metrics = fixture.compactor.context_metrics("t").await.unwrap();

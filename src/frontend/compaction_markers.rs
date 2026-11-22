@@ -198,7 +198,7 @@ mod tests {
             json!({}),
         );
         let attempt = |id: &str, at: &str, record: Value| {
-            db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,error_json,usage_json,started_at,ended_at)VALUES(?1,'u',0,0,'p','m',0,'completed','{}',?2,?3,?4,?4)",
+            db.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,error_json,usage_json,started_at,ended_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='u'),?1,'u',0,0,'p','m',0,'completed','{}',?2,?3,?4,?4)",
                 params![id, json!({"automatic_trim_attempt":record}).to_string(), json!({"input_tokens":32000}).to_string(), at]).unwrap();
         };
         attempt(

@@ -22,6 +22,9 @@ pub enum ConnectionReuse {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HttpObservation {
+    /// The HTTP dispatch future was polled, not proof of peer delivery.
+    #[serde(skip)]
+    pub(crate) network_started: bool,
     pub phase: HttpPhase,
     pub request_body_bytes: usize,
     pub body_source_bytes_consumed: usize,

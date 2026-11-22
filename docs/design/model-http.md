@@ -109,11 +109,28 @@ nonempty body bytes still count conservatively as output.
 
 response_max_retriesは既定8、0〜20。連続した失敗に対する追加試行回数で、最終responseを検証・DBへ採用した後だけ0へ戻す。受信開始、tool実行だけ、context超過圧縮だけでは補充しない。Turn/generation変更でもリセットする。指数待機は1秒開始で倍にし、response_retry_max_delay_ms（既定60000、範囲1〜300000）で上限を設ける。既定8回では1/2/4/8/16/32/60/60秒、合計183秒となる。
 
+The Responses executor owns one network-attempt budget per request sequence,
+ending when a response is adopted or the Turn/generation changes. The first
+network attempt is free; every later one uses a slot, including connect
+failures, refusals, resets, and POSTs with unchanged or changed input. An
+attempt starts when the HTTP send future starts, after reservation and
+admission. Local validation/rejection or cancellation before that point does
+not use a slot. This boundary does not establish that a POST body was sent.
+With zero slots, a thinking-binding refusal (#182) is retained without another
+network attempt; with a slot available, the Driver may strip reasoning once.
+
+Each attempt's `applied_wait_ms` is saved once, with its received outcome. It
+includes the preceding backoff and that attempt's connection admission wait.
+Cancellation during backoff before another attempt starts records neither a
+new attempt nor that wait. Provider response ID and usage remain on the
+attempt even if Conversation adoption is fenced. Context size and cache
+comparison select only adopted attempts; billing uses provider usage.
+
 Retry-Afterの秒/HTTP dateが有効なら指数待機上限と別に、その指示を短縮せず待つ。固定600秒を超える場合は自動再送せず、指定待機時間と上限、automatic_retry_deferredを保全して復旧へ進む。不正な値は指数待機へ戻す。再起動後に自動継続しない。
 
 HTTP 429 bodyの明示的な `usage_limit_reached` / reset事実（解除時刻または解除までの秒数）が、現在の連続retry予算に残る指数待機予定の合計より後なら、追加POSTを行わず既存の復旧待ちへ進む。既定8回の残り予定は1/2/4/8/16/32/60/60秒（合計183秒）で、接続別retry上限と使用済みbudgetから同じ式で計算する。現在の応答のRetry-Afterは次の待機だけに適用し、未来の応答ヘッダーは推測しない。解除がその範囲内なら通常のretry判定を使い、そのretryだけ接続共有のローカルreset guardをbypassし、成功時は同じ事実が更新されていない場合に限り解除する。reset事実が無い/不正なら通常のretry動作を維持する。復旧理由には提供元の種類と時刻を既存の文言・記号で表示する。推測reset値、新設定、provider switchは加えない。
 
-失敗attemptをfailedへ保存し、error_json.automatic_retryへnumber/limit/delay_ms/partial_response_discarded/possible_duplicate_chargeを残してからChanged通知と取消し可能なsleepへ進む。部分出力の場合は同じtransactionでincomplete_responseの監査nodeも保存し、GC root_revisionを更新する。通常の復旧保存と同じ処理を使う。保存した本文・完了item・raw responseは/receivedから参照でき、採用pathや次のモデル入力へ混入しない。失敗した途中のtool callは実行せず、正常な最終responseの採用成功後だけ実行する。
+失敗attemptをfailedへ保存し、error_json.automatic_retryへnumber/limit/delay_ms/partial_response_discarded/possible_duplicate_chargeを残してからChanged通知と取消し可能なsleepへ進む。部分出力の監査は試行行に先に保存する。Driver は結果を照合し、Turn と世代が有効な場合だけ会話の監査ノードを結果の transaction に含める。Run Stop 後の古い結果は会話の監査ノードも GC root_revision も変更せず、試行行に受信事実を保持する。保存した本文・完了item・raw responseは/receivedから参照でき、採用pathや次のモデル入力へ混入しない。失敗した途中のtool callは実行せず、正常な最終responseの採用成功後だけ実行する。
 
 記録は再試行を予定した事実で、HTTP送信済みの証明ではない。上流での生成料金の重複は防げない。各追加要求は新attemptとして通常の受付/CAS/容量/添付/選択境界を再確認する。Thread境界lockを待機中に保持せず、停止・owner終了が優先する。回数上限ではautomatic_retry_exhaustedに連続回数/上限を保存して復旧する。設定無効、永久失敗、Retry-After超過を回数上限と誤表示しない。
 

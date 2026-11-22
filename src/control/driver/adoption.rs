@@ -7,9 +7,9 @@ pub(super) async fn adopt_response(
     response: &model::ModelResponse,
     prepared: Arc<crate::attachments::PreparedAttachments>,
     group: Option<String>,
+    partial_attempts: Vec<String>,
 ) -> Result<bool, ApiError> {
     let current = snapshot.clone();
-    let raw = response.raw.clone();
     let stream_observation = response.stream_observation.as_ref().map(|observation| {
         json!({
             "classification":"stream_difference",
@@ -23,13 +23,6 @@ pub(super) async fn adopt_response(
             "raw_response":response.raw,
         })
     });
-    let http_observation = response
-        .http_observation
-        .map(|value| serde_json::to_string(&value).expect("HTTP observation"));
-    let mut rate_metadata = response.response_facts.rate_metadata();
-    rate_metadata["applied_wait_ms"] =
-        json!(response.response_facts.admission_wait_ms.unwrap_or(0));
-    let rate_metadata = rate_metadata.to_string();
     let output = response.output.clone();
     let group_id = group;
     let attempt_id = attempt.to_owned();
@@ -38,15 +31,16 @@ pub(super) async fn adopt_response(
     let may_execute=control.store.database.call(move|db|{
             let tx=db.transaction()?;
             let live:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM turn u JOIN run r ON r.id=u.run_id WHERE u.id=?1 AND u.generation=?2 AND r.state='live' AND u.state='running')",params![current.turn,current.generation],|r|r.get(0))?;
-            if !live{return Ok(false);}
-            if crate::control::state::complete_attempt(&tx, &attempt_id, &raw, &now())?
+            if !live {
+                reject_adoption(&tx,&current,&attempt_id)?;
+                tx.commit()?;
+                return Ok(false);
+            }
+            if crate::control::state::adopt_attempt(&tx, &attempt_id)?
                 != crate::control::state::AttemptTransition::Applied {
                 return Ok(false);
             }
-            if let Some(observation) = &http_observation {
-                tx.execute("UPDATE model_attempt SET input_manifest_json=json_set(input_manifest_json,'$.http_observation',json(?2)) WHERE id=?1",params![attempt_id,observation])?;
-            }
-            tx.execute("UPDATE model_attempt SET input_manifest_json=json_set(input_manifest_json,'$.rate_observation',json(?2)) WHERE id=?1",params![attempt_id,rate_metadata])?;
+            save_partial_attempts(&tx,&current,&partial_attempts)?;
             let node=id();
             let payload = json!({"output":output,"reasoning_epoch":current.epoch,"group_id":group_id});
             history::append_node(&tx,&current.thread,&node,Some(&current.turn),"assistant_response",&payload,&now())?;

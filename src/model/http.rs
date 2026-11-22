@@ -443,8 +443,12 @@ impl HttpModelClient {
         let started = std::time::Instant::now();
         let rate_generation = self.rate_gate.generation();
         let mut connection_failed = false;
+        let mut network_started = false;
         let outcome = deadline
-            .wait_headers(cancel, outgoing.send())
+            .wait_headers(cancel, async {
+                network_started = true;
+                outgoing.send().await
+            })
             .await
             .and_then(|result| {
                 result.map_err(|error| {
@@ -454,6 +458,7 @@ impl HttpModelClient {
             });
         let consumed_bytes = consumed.load(Ordering::Relaxed);
         let mut observation = HttpObservation {
+            network_started,
             phase: if connection_failed || (body_len > 0 && consumed_bytes == 0) {
                 HttpPhase::BeforeBodySource
             } else if consumed_bytes < body_len {

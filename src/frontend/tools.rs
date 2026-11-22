@@ -740,7 +740,7 @@ mod identity_tests {
             for group in ["g","other"] {
                 let attempt=format!("attempt-{group}");
                 let call_node=format!("call-{group}");
-                db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES(?1,'u',0,0,'p','m',0,'completed','{}','now')",[&attempt])?;
+                db.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='u'),?1,'u',0,0,'p','m',0,'completed','{}','now')",[&attempt])?;
                 db.execute("INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES(?1,?2,'u','completed','now')",rusqlite::params![group,attempt])?;
                 db.execute("INSERT INTO node(id,turn_id,kind,created_at,payload_json)VALUES(?1,'u','assistant_response','now',?2)",rusqlite::params![call_node,json!({"group_id":group}).to_string()])?;
                 db.execute("INSERT INTO output_item(attempt_id,ordinal,item_type,status,payload_json,node_id)VALUES(?1,0,'function_call','completed',?2,?3)",rusqlite::params![attempt,json!({"call_id":"same"}).to_string(),call_node])?;

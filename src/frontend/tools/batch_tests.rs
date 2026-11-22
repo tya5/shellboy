@@ -8,7 +8,7 @@ fn fixture() -> Connection {
     db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','','p','m','now');
       INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','completed','now');
       INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','t','r','completed','now'),('foreign','t','r','completed','now');
-      INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('a','u',0,0,'p','m',0,'completed','{}','now'),('other-a','u',0,0,'p','m',0,'completed','{}','now');
+      INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='u'),'a','u',0,0,'p','m',0,'completed','{}','now'),('conversation',(SELECT thread_id FROM turn WHERE id='u'),'other-a','u',0,0,'p','m',0,'completed','{}','now');
       INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES('g','a','u','completed','now'),('other','other-a','u','completed','now');").unwrap();
     for n in 0..150 {
         let call = format!("call-{n}");

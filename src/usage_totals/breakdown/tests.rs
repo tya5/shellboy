@@ -27,7 +27,7 @@ fn insert_model(
     usage: Option<&str>,
     model: &str,
 ) {
-    db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at,ended_at)VALUES(?1,?2,0,0,'p',?6,0,?3,'{}',?4,?5,?5)",params![id,thread,state,usage,DateTime::parse_from_rfc3339(at).map(|v|v.with_timezone(&Utc).to_rfc3339()).unwrap_or_else(|_|at.into()),model]).unwrap();
+    db.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at,ended_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id=?2),?1,?2,0,0,'p',?6,0,?3,'{}',?4,?5,?5)",params![id,thread,state,usage,DateTime::parse_from_rfc3339(at).map(|v|v.with_timezone(&Utc).to_rfc3339()).unwrap_or_else(|_|at.into()),model]).unwrap();
 }
 fn args(group: &str) -> UsageGetArgs {
     UsageGetArgs {
@@ -374,7 +374,10 @@ fn existing_rowid_query_plan_and_bounded_scan_counts() {
         .unwrap()
         .join("\n");
     assert!(
-        plan.contains("SEARCH model_attempt USING INTEGER PRIMARY KEY"),
+        plan.lines()
+            .any(|line| line.starts_with("SEARCH model_attempt ")
+                && line.contains("rowid>?")
+                && line.contains("rowid<?")),
         "{plan}"
     );
     assert!(!plan.contains("SCAN model_attempt"), "{plan}");
@@ -542,26 +545,29 @@ fn insert_summary(
     started_at: &str,
     usage: serde_json::Value,
 ) {
-    let record = serde_json::json!({
-        "id": id, "thread_id": thread, "turn_id": thread, "run_id": thread,
-        "profile_id": "p", "model_id": "m", "started_at": started_at,
-        "updated_at": started_at, "requests": usage["requests"],
-        "input_tokens": usage["input_tokens"], "cached_tokens": usage["cached_tokens"],
-        "cache_creation_tokens": usage["cache_creation_tokens"], "output_tokens": usage["output_tokens"]
-    });
-    db.execute(
-        "INSERT INTO app_meta(key,value) VALUES(?1,?2)",
-        params![
-            format!(
-                "{}{}.{}",
-                crate::compaction::SUMMARY_USAGE_PREFIX,
-                thread,
-                id
-            ),
-            record.to_string()
-        ],
-    )
-    .unwrap();
+    let requests = usage["requests"].as_u64().unwrap();
+    for ordinal in 0..requests {
+        let token = |field: &str| {
+            let known = requests - usage[field]["unknown_count"].as_u64().unwrap();
+            (ordinal < known).then(|| {
+                if ordinal == 0 {
+                    usage[field]["known_sum"].as_u64().unwrap()
+                } else {
+                    0
+                }
+            })
+        };
+        let saved = usage::StandardUsage {
+            input_tokens: token("input_tokens"),
+            cached_tokens: token("cached_tokens"),
+            cache_creation_tokens: token("cache_creation_tokens"),
+            output_tokens: token("output_tokens"),
+            ..Default::default()
+        }
+        .to_value();
+        let manifest = json!({"summary":{"id":id,"started_at":started_at}});
+        db.execute("INSERT INTO model_attempt(id,kind,thread_id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at) VALUES(?1,'summary',?2,?2,0,0,'p','m',0,'completed',?3,?4,?5)",params![format!("{id}:{ordinal}"),thread,manifest.to_string(),saved.to_string(),started_at]).unwrap();
+    }
 }
 
 #[test]
@@ -595,14 +601,7 @@ fn compaction_usage_uses_first_request_time_half_open_buckets_and_unknowns() {
         "2026-10-31T12:00:00Z",
         serde_json::json!({"requests":1,"input_tokens":{"known_sum":null,"unknown_count":1,"overflow":false},"cached_tokens":{"known_sum":null,"unknown_count":1,"overflow":false},"cache_creation_tokens":{"known_sum":null,"unknown_count":1,"overflow":false},"output_tokens":{"known_sum":null,"unknown_count":1,"overflow":false}}),
     );
-    db.execute(
-        "UPDATE app_meta SET value=json_remove(value,'$.started_at') WHERE key=?1",
-        [format!(
-            "{}t1.missing-time",
-            crate::compaction::SUMMARY_USAGE_PREFIX
-        )],
-    )
-    .unwrap();
+    db.execute("UPDATE model_attempt SET input_manifest_json=json_remove(input_manifest_json,'$.summary.started_at') WHERE id='missing-time:0'", []).unwrap();
     insert_summary(
         &db,
         "t1",
@@ -610,11 +609,6 @@ fn compaction_usage_uses_first_request_time_half_open_buckets_and_unknowns() {
         "not-a-timestamp",
         serde_json::json!({"requests":1,"input_tokens":{"known_sum":null,"unknown_count":1,"overflow":false},"cached_tokens":{"known_sum":null,"unknown_count":1,"overflow":false},"cache_creation_tokens":{"known_sum":null,"unknown_count":1,"overflow":false},"output_tokens":{"known_sum":null,"unknown_count":1,"overflow":false}}),
     );
-    db.execute(
-        "INSERT INTO app_meta(key,value) VALUES('summary.usage.t1.bad','{')",
-        [],
-    )
-    .unwrap();
     db.pragma_update(None, "query_only", true).unwrap();
     let value = read(&db, &args("day"), "fixture").unwrap();
     let item = &value["items"][0];
@@ -631,7 +625,7 @@ fn compaction_usage_uses_first_request_time_half_open_buckets_and_unknowns() {
     assert_eq!(item["total"]["cached_tokens"]["known_sum"], 20);
     assert_eq!(value["coverage"]["summary"], "recorded_first_request_at");
     assert_eq!(value["unknown_time_compaction_records"], 2);
-    assert_eq!(value["malformed_compaction_records"], 1);
+    assert_eq!(value["malformed_compaction_records"], 0);
 }
 
 #[test]
@@ -717,79 +711,6 @@ fn grouped_connection_rates_follow_candidate_window() {
 }
 
 #[test]
-fn large_compaction_records_are_byte_bounded_and_resume_without_loss() {
-    let db = fixture();
-    for i in 0..7 {
-        insert_summary(
-            &db,
-            "t1",
-            &format!("large{i}"),
-            "2026-10-31T00:30:00Z",
-            json!({
-                "requests":1,
-                "input_tokens":{"known_sum":1,"unknown_count":0,"overflow":false},
-                "cached_tokens":{"known_sum":null,"unknown_count":1,"overflow":false},
-                "cache_creation_tokens":{"known_sum":null,"unknown_count":1,"overflow":false},
-                "output_tokens":{"known_sum":1,"unknown_count":0,"overflow":false}
-            }),
-        );
-        let key = format!("{}t1.large{i}", crate::compaction::SUMMARY_USAGE_PREFIX);
-        let original: String = db
-            .query_row("SELECT value FROM app_meta WHERE key=?1", [&key], |r| {
-                r.get(0)
-            })
-            .unwrap();
-        let mut padded = original;
-        padded.push_str(
-            &" ".repeat(crate::compaction::SUMMARY_USAGE_MAX_BYTES as usize - padded.len()),
-        );
-        db.execute(
-            "UPDATE app_meta SET value=?2 WHERE key=?1",
-            params![key, padded],
-        )
-        .unwrap();
-    }
-    let plan = db
-        .prepare(&format!("EXPLAIN QUERY PLAN {}", compaction_query()))
-        .unwrap()
-        .query_map(
-            params![0, i64::MAX, crate::compaction::SUMMARY_USAGE_MAX_BYTES],
-            |row| row.get::<_, String>(3),
-        )
-        .unwrap()
-        .collect::<rusqlite::Result<Vec<_>>>()
-        .unwrap()
-        .join(" ");
-    assert!(
-        !plan.contains("TEMP B-TREE"),
-        "large values must not be materialized for sorting: {plan}"
-    );
-    let mut a = args("thread");
-    let mut total = 0u64;
-    let mut pages = 0;
-    loop {
-        let value = read(&db, &a, "fixture").unwrap();
-        let matched = value["matched_compactions"].as_u64().unwrap();
-        assert!(
-            value["scanned_compaction_bytes"].as_u64().unwrap() <= COMPACTION_PAGE_BYTES as u64
-        );
-        assert!(
-            matched <= 1,
-            "a page must honor the 4 MiB key and body budget"
-        );
-        total += matched;
-        pages += 1;
-        assert!(pages <= 8, "cursor must make progress");
-        if !value["more"].as_bool().unwrap() {
-            break;
-        }
-        a.cursor = value["next_cursor"].as_str().map(Into::into);
-    }
-    assert_eq!(total, 7);
-    assert!(pages >= 4);
-}
-
-#[test]
 fn model_groups_use_existing_bounded_attempt_scan_and_do_not_invent_summary_usage() {
     let db = fixture();
     insert_model(
@@ -867,7 +788,10 @@ fn model_group_by_validates_and_reuses_rowid_query_without_model_scan() {
         .unwrap()
         .join("\n");
     assert!(
-        plan.contains("SEARCH model_attempt USING INTEGER PRIMARY KEY"),
+        plan.lines()
+            .any(|line| line.starts_with("SEARCH model_attempt ")
+                && line.contains("rowid>?")
+                && line.contains("rowid<?")),
         "{plan}"
     );
     assert!(!plan.contains("SCAN model_attempt"), "{plan}");

@@ -26,9 +26,9 @@ async fn active_turn_fixture_seed(
             tx.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('older','t',?1,'completed','now')", [&run_id])?;
         }
         tx.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('last','t',?1,'completed','now'),('current','t',?1,'running','now')", [&run_id])?;
-        tx.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('attempt','current',0,0,'fixture','fixture',0,'completed','{}','now')", [])?;
+        tx.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='current'),'attempt','current',0,0,'fixture','fixture',0,'completed',json_object('adoption',json_object('outcome','adopted')),'now')", [])?;
         if closed_prefix_groups {
-            tx.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at,ended_at)VALUES('older-attempt','older',0,0,'fixture','fixture',0,'completed','{}','older','now')", [])?;
+            tx.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at,ended_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='older'),'older-attempt','older',0,0,'fixture','fixture',0,'completed',json_object('adoption',json_object('outcome','adopted')),'older','now')", [])?;
             history::append_node(&tx,"t","older-user",Some("older"),"message",&json!({"role":"user","content":"older eligible request"}),"now")?;
             history::append_node(&tx,"t","older-answer",Some("older"),"assistant_response",&json!({"reasoning_epoch":0,"output":[{"type":"reasoning","id":"rs-older","summary":[],"encrypted_content":"OLD"},thinking("older"),{"type":"message","role":"assistant","content":[{"type":"output_text","text":"older complete"}]}]}),"now")?;
             for group in ["older-g1", "older-g2"] {
@@ -38,7 +38,7 @@ async fn active_turn_fixture_seed(
         history::append_node(&tx,"t","last-user",Some("last"),"message",&json!({"role":"user","content":"earlier"}),"now")?;
         history::append_node(&tx,"t","last-answer",Some("last"),"assistant_response",&json!({"reasoning_epoch":0,"output":[{"type":"reasoning","id":"rs-last","summary":[],"encrypted_content":"OLD"},thinking("last"),{"type":"message","role":"assistant","content":[{"type":"output_text","text":"done"}]}]}),"now")?;
         if closed_prefix_groups {
-            tx.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at,ended_at) VALUES('closed-first','last',0,0,'fixture','fixture',0,'completed','{}','first','now')", [])?;
+            tx.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at,ended_at) VALUES('conversation',(SELECT thread_id FROM turn WHERE id='last'),'closed-first','last',0,0,'fixture','fixture',0,'completed',json_object('adoption',json_object('outcome','adopted')),'first','now')", [])?;
             for group in ["closed-g1", "closed-g2"] {
                 append_completed_tool_group(&tx, "t", "closed-first", "last", group, 4_000, &"x".repeat(40_000))?;
             }
@@ -139,7 +139,7 @@ pub(crate) async fn stage_fixture(
     db.call(move |db| {
         let tx = db.transaction()?;
         tx.execute("UPDATE model_attempt SET usage_json=?1,ended_at='now' WHERE id='attempt'", [&first_usage])?;
-        tx.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at,ended_at) VALUES('trigger','current',0,0,'fixture','fixture',0,'completed','{}',?1,'later','now')", [&trigger_usage])?;
+        tx.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at,ended_at) VALUES('conversation',(SELECT thread_id FROM turn WHERE id='current'),'trigger','current',0,0,'fixture','fixture',0,'completed',json_object('adoption',json_object('outcome','adopted')),?1,'later','now')", [&trigger_usage])?;
         crate::compaction::a_state::save(&tx, "t", &a_state)?;
         tx.commit()?;
         Ok(())

@@ -40,7 +40,7 @@ const HISTORY_QUERIES: [&str; 10] = [
     "SELECT COALESCE(SUM(octet_length(sender_json)+COALESCE(octet_length(result_json),0)),0) FROM receipt INDEXED BY gc_bytes_receipt",
     "SELECT COALESCE(SUM(octet_length(origin_json)+COALESCE(octet_length(result_ref_json),0)),0) FROM operation_receipt INDEXED BY gc_bytes_operation_receipt",
     "SELECT COALESCE(SUM(octet_length(arguments_json)),0) FROM tool_call INDEXED BY gc_bytes_tool_call",
-    "SELECT COALESCE(SUM(octet_length(value)),0) FROM app_meta INDEXED BY gc_bytes_app_meta_history WHERE key LIKE 'summary.part.%' OR key LIKE 'wait.pending.%' OR key LIKE 'compact.result.%' OR key LIKE 'revisit.%' OR key LIKE 'summary.usage.%'",
+    "SELECT COALESCE(SUM(octet_length(value)),0) FROM app_meta INDEXED BY gc_bytes_app_meta_history WHERE key LIKE 'summary.part.%' OR key LIKE 'wait.pending.%' OR key LIKE 'compact.result.%' OR key LIKE 'revisit.%'",
 ];
 #[cfg(test)]
 const RAW_QUERY: &str =
@@ -150,7 +150,7 @@ mod tests {
         "SELECT COALESCE(SUM(length(CAST(sender_json AS BLOB))+COALESCE(length(CAST(result_json AS BLOB)),0)),0) FROM receipt",
         "SELECT COALESCE(SUM(length(CAST(origin_json AS BLOB))+COALESCE(length(CAST(result_ref_json AS BLOB)),0)),0) FROM operation_receipt",
         "SELECT COALESCE(SUM(length(CAST(arguments_json AS BLOB))),0) FROM tool_call",
-        "SELECT COALESCE(SUM(length(CAST(value AS BLOB))),0) FROM app_meta WHERE key LIKE 'summary.part.%' OR key LIKE 'wait.pending.%' OR key LIKE 'compact.result.%' OR key LIKE 'revisit.%' OR key LIKE 'summary.usage.%'",
+        "SELECT COALESCE(SUM(length(CAST(value AS BLOB))),0) FROM app_meta WHERE key LIKE 'summary.part.%' OR key LIKE 'wait.pending.%' OR key LIKE 'compact.result.%' OR key LIKE 'revisit.%'",
         "SELECT COALESCE(SUM(length(bytes)),0) FROM output_chunk",
         "SELECT COALESCE(SUM(raw_size),0) FROM managed_file WHERE state<>'deleted'",
         "SELECT COALESCE(SUM(s.dimension*(CASE WHEN s.int8_scale IS NULL THEN 4 ELSE 1 END)),0) FROM embedding_chunk c JOIN index_space s ON s.id=c.space_id",
@@ -176,7 +176,7 @@ INSERT INTO node(id,kind,created_at,payload_json,payload_bytes)VALUES('n','messa
 INSERT INTO output_item(attempt_id,ordinal,item_type,status,payload_json,node_id)VALUES('a',0,'message','completed','{"text":"audit 日本語"}','n');
 INSERT INTO instruction_snapshot(id,source_path,content_hash,body,created_at)VALUES('i','/fixture','hash','instructions 日本語'||char(0)||'tail','now');
 INSERT INTO draft(id,revision,body_json,state,updated_at)VALUES('d',0,'{"text":"draft 🌿"}','editing','now');
-INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,error_json,usage_json,started_at)VALUES('a','u',0,0,'p','m',0,'completed','["日本語"]',NULL,'{"tokens":2}','now');
+INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,error_json,usage_json,started_at)VALUES('conversation','t','a','u',0,0,'p','m',0,'completed','["日本語"]',NULL,'{"tokens":2}','now');
 INSERT INTO event(id,kind,source_json,target_thread_id,payload_ref_json,created_at)VALUES('e','fixture','{"source":"日本語"}','t','{"payload":"🌿"}','now');
 INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,result_json)VALUES('r','client','{"sender":"🌿"}','t','n','accepted','now',NULL);
 INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,result_ref_json,created_at,reserved_bytes)VALUES('o','instance','{"origin":"日本語"}','hash','pending','{"result":"🌿"}','now',1048576);

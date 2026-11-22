@@ -77,7 +77,7 @@ impl Fixture {
         }
         let attempt = uuid::Uuid::new_v4().to_string();
         let id = attempt.clone();
-        let prepared=self.db.call(move|db|{let tx=db.transaction()?;tx.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES(?1,'turn',0,?2,'profile','model',0,'inflight','{}',?3)",params![id,prepared.selection_revision,chrono::Utc::now().to_rfc3339()])?;adopt_prepared_tx(&tx,&prepared,&id).unwrap();tx.execute("UPDATE model_attempt SET state=?2 WHERE id=?1",params![id,if success{"completed"}else{"failed"}])?;tx.commit()?;Ok(prepared)}).await.unwrap();
+        let prepared=self.db.call(move|db|{let tx=db.transaction()?;let revision=qualify_prepared_tx(&tx,&prepared).unwrap();tx.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='turn'),?1,'turn',0,?2,'profile','model',0,'inflight','{}',?3)",params![id,revision,chrono::Utc::now().to_rfc3339()])?;record_prepared_tx(&tx,&prepared,&id).unwrap();tx.execute("UPDATE model_attempt SET state=?2 WHERE id=?1",params![id,if success{"completed"}else{"failed"}])?;tx.commit()?;Ok(prepared)}).await.unwrap();
         if success {
             self.service
                 .mark_success(&prepared, &attempt)
@@ -348,7 +348,7 @@ async fn stale_selection_cas_rejects_manifest_and_transaction_rolls_back() {
     let result =
         f.db.call(move |db| {
             let tx = db.transaction()?;
-            let result = adopt_prepared_tx(&tx, &prepared, "missing-attempt");
+            let result = qualify_prepared_tx(&tx, &prepared);
             assert_eq!(result.unwrap_err().code, ErrorCode::OperationConflict);
             drop(tx);
             Ok(

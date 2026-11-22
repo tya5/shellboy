@@ -573,7 +573,7 @@ async fn pre_marker_history_without_admission_evidence_is_not_resurrected_on_new
     owner.db.call(move|db|{
         // A persisted model-attempt manifest proves prior admission even if
         // the selected path no longer contains that node after user editing.
-        db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at) VALUES('historical-attempt',?1,0,0,'fixture','fixture',0,'completed',?2,'2026-10-30T00:00:00Z')",params![turn,json!({"receipts":[receipt]}).to_string()])?;
+        db.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at) VALUES('conversation',(SELECT thread_id FROM turn WHERE id=?1),'historical-attempt',?1,0,0,'fixture','fixture',0,'completed',?2,'2026-10-30T00:00:00Z')",params![turn,json!({"receipts":[receipt]}).to_string()])?;
         Ok(())
     }).await.unwrap();
     control.shutdown().await.unwrap();

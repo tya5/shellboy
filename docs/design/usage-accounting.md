@@ -79,3 +79,22 @@ queries, counter whitelist and scalar readers are unchanged.
 [Request input byte accounting](input-byte-accounting.md) records measured
 UTF-8 bytes of the sent body by source in the attempt manifest. They are not
 token usage, do not alter this normalizer, and are never converted to tokens.
+
+## One Responses Attempt Record (#328)
+
+The shared Responses request path owns admission, the committed pre-send
+attempt, cancellation, transient retries, HTTP facts and persisted usage for
+both Conversation and Summary. Driver and compaction own input and adoption;
+compaction alone decides whether to shrink input after a context refusal.
+`model_attempt` distinguishes the two kinds. Summary can run outside a Turn.
+Analytics reads only attempt rows, grouping Summary attempts by compaction
+identity and original start bucket. Startup expands each former Summary ledger
+into one attempt per admission, preserving token sums and known/unknown counts.
+The first known position carries the sum; the remaining known positions are
+zero. Invalid scope and overflow fail the migration atomically.
+
+The Driver owns Turn/generation retry scope and keeps one budget across both
+unchanged resends and a new request after an adopted input reduction. The
+request path consumes the budget and applies backoff only after the Driver's
+attempt CAS. A no-op trim is not a new input; #182 reasoning removal, recovery,
+selection fences, and adoption remain caller decisions.

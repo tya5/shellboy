@@ -1135,7 +1135,7 @@ mod tests {
     ) {
         let (directory, owner, control) = fixture().await;
         control.store.database.call(|db| {
-            db.execute_batch("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at) VALUES('attempt','ta',0,0,'','','0','completed','{}','now'); INSERT INTO tool_group VALUES('group','attempt','ta','running','now'); INSERT INTO tool_call VALUES('group','call',0,'shell','{}','running','sa');")?;
+            db.execute_batch("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at) VALUES('conversation',(SELECT thread_id FROM turn WHERE id='ta'),'attempt','ta',0,0,'','','0','completed','{}','now'); INSERT INTO tool_group VALUES('group','attempt','ta','running','now'); INSERT INTO tool_call VALUES('group','call',0,'shell','{}','running','sa');")?;
             Ok(())
         }).await.unwrap();
         let foreground = Arc::new(ForegroundSlot::default());

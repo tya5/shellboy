@@ -854,10 +854,9 @@ pub fn remove_tx(
     Ok(changed > 0)
 }
 /// Same transaction as attempt admission, before any API side effect.
-pub fn adopt_prepared_tx(
+pub fn qualify_prepared_tx(
     tx: &Transaction<'_>,
     prepared: &PreparedAttachments,
-    attempt_id: &str,
 ) -> Result<i64, ApiError> {
     let revision: i64 = crate::history::selection_revision(
         tx,
@@ -868,16 +867,21 @@ pub fn adopt_prepared_tx(
     if revision != prepared.selection_revision {
         return Err(stale());
     }
-    let valid: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM model_attempt a JOIN turn u ON u.id=a.turn_id JOIN run r ON r.id=u.run_id WHERE a.id=?1 AND u.thread_id=?2 AND a.generation=u.generation AND a.state IN ('preparing','inflight') AND u.state IN ('preparing','running','waiting') AND r.state='live')", params![attempt_id,prepared.thread_id], |row|row.get(0)).map_err(sql_error)?;
-    if !valid {
-        return Err(stale());
-    }
     for id in &prepared.excluded_ids {
         tx.execute("UPDATE attachment_selection SET state='excluded',reason='request raw-byte limit',revision=revision+1 WHERE thread_id=?1 AND attachment_id=?2 AND state='active' AND protected=0",params![prepared.thread_id,id]).map_err(sql_error)?;
     }
     if !prepared.excluded_ids.is_empty() {
         tx.execute("UPDATE thread SET selection_revision=selection_revision+1,revision=revision+1 WHERE id=?1",[&prepared.thread_id]).map_err(sql_error)?;
     }
+    Ok(revision + i64::from(!prepared.excluded_ids.is_empty()))
+}
+
+/// Write dependent rows after the executor inserts the finalized attempt.
+pub fn record_prepared_tx(
+    tx: &Transaction<'_>,
+    prepared: &PreparedAttachments,
+    attempt_id: &str,
+) -> Result<(), ApiError> {
     for (ordinal, m) in prepared.manifest.iter().enumerate() {
         if m.api_item_index.is_none() || m.api_content_index.is_none() || m.api_content_count == 0 {
             return Err(ApiError::new(
@@ -887,19 +891,9 @@ pub fn adopt_prepared_tx(
         }
         tx.execute("INSERT INTO attachment_send(attempt_id,ordinal,attachment_id,state,raw_size,content_hash,mime_type,error_json)VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",params![attempt_id,ordinal as i64,m.attachment_id,m.state,m.raw_size.map(|v|i64::try_from(v).unwrap_or(i64::MAX)),m.content_hash,m.mime_type,m.error.as_ref().map(|e|json!({"message":e}).to_string())]).map_err(sql_error)?;
     }
-    let adopted = revision
-        + if prepared.excluded_ids.is_empty() {
-            0
-        } else {
-            1
-        };
-    tx.execute(
-        "UPDATE model_attempt SET selection_revision=?2 WHERE id=?1",
-        params![attempt_id, adopted],
-    )
-    .map_err(sql_error)?;
-    Ok(adopted)
+    Ok(())
 }
+
 fn read_encoded(
     path: &Path,
     limit: u64,

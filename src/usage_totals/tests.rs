@@ -16,7 +16,7 @@ fn seed(db: &mut Connection, runs: usize, spread: bool) {
     {
         let mut r=tx.prepare("INSERT INTO run(id,thread_id,state,created_at,ended_at)VALUES(?1,?2,'completed',?3,?4)").unwrap();
         let mut t=tx.prepare("INSERT INTO turn(id,thread_id,run_id,state,created_at,ended_at)VALUES(?1,?2,?3,'completed',?4,?5)").unwrap();
-        let mut a=tx.prepare("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at,ended_at)VALUES(?1,?2,0,0,'fixture','fixture',0,?3,'{}',?4,?5,?6)").unwrap();
+        let mut a=tx.prepare("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at,ended_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id=?2),?1,?2,0,0,'fixture','fixture',0,?3,'{}',?4,?5,?6)").unwrap();
         let mut shell=tx.prepare("INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at,ended_at)VALUES(?1,?2,?3,?1,'exited','.','{\"completion\":{\"elapsed_ms\":5}}','UTF-8','UTF-8','closed',?4,?5)").unwrap();
         for i in 0..runs {
             let owner = format!("t{}", if spread { i % 101 } else { 0 });
@@ -459,8 +459,8 @@ fn active_saved_records_and_cancelled_rows_do_not_pollute_terminal_totals() {
     )
     .unwrap();
     db.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('live','t0','live','waiting',?1)",[START]).unwrap();
-    db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at)VALUES('live','live',0,0,'fixture','fixture',0,'inflight','{}','malformed',?1)",[START]).unwrap();
-    db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at,ended_at)VALUES('cancelled','u0',0,0,'fixture','fixture',0,'cancelled','{}','{\"input_tokens\":999}',?1,?2)",params![START,END]).unwrap();
+    db.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='live'),'live','live',0,0,'fixture','fixture',0,'inflight','{}','malformed',?1)",[START]).unwrap();
+    db.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at,ended_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='u0'),'cancelled','u0',0,0,'fixture','fixture',0,'cancelled','{}','{\"input_tokens\":999}',?1,?2)",params![START,END]).unwrap();
     db.execute("INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at)VALUES('live','live','live','live','running','.','{}','UTF-8','UTF-8','closed',?1)",[START]).unwrap();
     let v = read(
         &db,
@@ -637,19 +637,7 @@ fn requested_periods_use_saved_start_boundaries_and_keep_whole_lifetimes() {
             } else {
                 "t0"
             };
-            let p = if st.parameter_count() == 3 {
-                st.query_map(
-                    params![
-                        parameter,
-                        crate::compaction::SUMMARY_USAGE_PREFIX,
-                        crate::compaction::SUMMARY_USAGE_MAX_BYTES
-                    ],
-                    |r| r.get::<_, String>(3),
-                )
-                .unwrap()
-                .collect::<rusqlite::Result<Vec<_>>>()
-                .unwrap()
-            } else if st.parameter_count() == 2 {
+            let p = if st.parameter_count() == 2 {
                 st.query_map(params![parameter, END], |r| r.get::<_, String>(3))
                     .unwrap()
                     .collect::<rusqlite::Result<Vec<_>>>()
@@ -821,32 +809,14 @@ fn connection_rates_survive_database_reopen_and_group_summary_records() {
             [json!({"rate_observation":{"status":429,"applied_wait_ms":12}}).to_string()],
         )
         .unwrap();
-        let usage = crate::compaction::SummaryUsage {
-            requests: 2,
-            ..Default::default()
-        };
-        let mut record = json!(usage);
-        for (key, value) in [
-            ("id", json!("summary")),
-            ("thread_id", json!("t0")),
-            ("turn_id", json!("u0")),
-            ("run_id", json!("r0")),
-            ("profile_id", json!("fixture")),
-            ("model_id", json!("fixture")),
-            ("started_at", json!(START)),
-            ("updated_at", json!(END)),
-            (
-                "rate_observations",
-                json!([{"status":429,"applied_wait_ms":0}, null, {"status":429,"applied_wait_ms":9}]),
-            ),
+        for (at, rate) in [
+            (0, json!({"status":429,"applied_wait_ms":0})),
+            (1, Value::Null),
         ] {
-            record[key] = value;
+            let manifest =
+                json!({"summary":{"id":"summary","started_at":START},"rate_observation":rate});
+            db.execute("INSERT INTO model_attempt(id,kind,thread_id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at) VALUES(?1,'summary','t0','u0',0,0,'fixture','fixture',0,'completed',?2,?3)", params![format!("summary-{at}"),manifest.to_string(),START]).unwrap();
         }
-        db.execute(
-            "INSERT INTO app_meta(key,value) VALUES('summary.usage.t0.summary',?1)",
-            [record.to_string()],
-        )
-        .unwrap();
     }
     let db = Connection::open(&path).unwrap();
     let result = read_period_logged(

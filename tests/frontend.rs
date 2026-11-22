@@ -1707,7 +1707,7 @@ async fn structured_history_pages_details_url_copy_and_wait_cancel_keep_original
         let stderr=format!("warning on stderr\n{}\nTRUE_STDERR_TAIL","!".repeat(40_000));
         tx.execute("INSERT INTO output_chunk(execution_id,sequence,stream,stream_offset,bytes,received_at)VALUES('recorded-shell',1,'stderr',0,?1,'now')",[stderr.as_bytes()])?;
         history::append_node(&tx,"source","stream-node",None,"tool_result",&tool_for_db,"now")?;
-        tx.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('saved-attempt','recorded-turn',0,0,'fixture','fixture',0,'completed','{}','now')",[])?;
+        tx.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='recorded-turn'),'saved-attempt','recorded-turn',0,0,'fixture','fixture',0,'completed','{}','now')",[])?;
         tx.execute("INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES('saved-group','saved-attempt','recorded-turn','completed','now')",[])?;
         tx.execute("INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state,operation_id)VALUES('saved-group','stream-call',0,'shell','{}','completed','recorded-shell')",[])?;
         tx.execute("INSERT INTO tool_result(group_id,call_id,node_id,status)VALUES('saved-group','stream-call','stream-node','exited')",[])?;
