@@ -32,7 +32,7 @@ what it returns with `--result reply|turn-end|run-end` (default `reply`).
 | D3 | One reply per message; replying clears the pending state; progress uses ordinary messages | [Reply operation](#message-reply) |
 | D4 | The recipient Thread's model replies; a human may also reply from the TUI if that is simpler | [Who may reply](#authority), [Human reply](#human-reply) |
 | D5 | Recipient Thread deleted: release waits and notify the sender | [Outcomes](#outcomes) |
-| D6 | External senders wait with `wait reply_received`; four release reasons; `--timeout-ms` bounds only that call; pending replies have no deadline; `exec` and "thread request" become expect-reply + `reply_received` | [Wait](#wait-condition-reply_received), [exec](#exec) |
+| D6 | External senders wait with `wait reply_received`; four release reasons; `--timeout-ms` bounds only that call; pending replies have no deadline; `exec` and "thread request" become `message ask` + `reply_received` | [Wait](#wait-condition-reply_received), [exec](#exec) |
 | D7 | Delegation is unified onto this mechanism | [Delegation mapping](#delegation-mapping) |
 | D8 | Replace every `answer_node_id` use without compatibility paths | [Implementation plan](#implementation-plan) |
 | D9 | `exec --result reply\|turn-end\|run-end`, default `reply`; `turn-end`/`run-end` send an ordinary message with no reply duty | [exec](#exec) |
