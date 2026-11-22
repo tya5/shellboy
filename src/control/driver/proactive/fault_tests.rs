@@ -239,10 +239,9 @@ async fn context_limit_waits_for_the_same_proactive_job_without_a_second_summary
             terminal_identity,
             ..
         } = prepare_held_summary(Scenario::ClosedSummary).await;
-        let HeldSummaryPhase { summary } = held_phase
+        let HeldSummaryPhase { summary, normal } = held_phase
             .take()
             .expect("proactive summary reached its provider boundary");
-        let normal = incoming(&control, &mut receive).await;
         assert_ne!(normal.body, summary.body);
         normal
             .reply
@@ -300,12 +299,9 @@ async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_b
     let result = crate::test_watchdog::watchdog("proactive summary request barrier", async {
         let mut fx = prepare_held_summary(Scenario::ClosedSummary).await;
         let terminal_identity=fx.terminal_identity.clone();
-        retained_summary = Some(
-            fx.held_phase
-                .take()
-                .expect("summary request is held outside the timed lifecycle wait")
-                .summary,
-        );
+        let HeldSummaryPhase { summary, normal } = fx.held_phase.take()
+            .expect("fixture holds both in-flight requests");
+        retained_summary = Some(summary);
         retained_fx = Some(fx);
         let DriverLifecycleFixture {
             root,
@@ -324,7 +320,6 @@ async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_b
             retained_summary.as_ref().unwrap().body["tools"],
             json!([])
         );
-        let normal = incoming(control, receive).await;
         let before: Vec<String> = control
             .store
             .database
@@ -643,14 +638,12 @@ async fn deleting_a_naturally_idle_thread_cancels_and_joins_its_retained_summary
             target,
             server,
             mut held_phase,
-            mut receive,
             ..
         } = prepare_held_summary(Scenario::ClosedSummary).await;
-        let HeldSummaryPhase { summary } = held_phase
+        let HeldSummaryPhase { summary, normal } = held_phase
             .take()
             .expect("proactive summary reached its provider boundary");
         assert_eq!(summary.body["tools"], json!([]));
-        let normal = incoming(&control, &mut receive).await;
         normal
             .reply
             .send((200, answer_with_usage("finish Run A", 100)))
@@ -2700,6 +2693,7 @@ async fn prepare_driver_lifecycle(
         );
     }
     let mut held_summary = None;
+    let mut held_normal = None;
     let mut terminal_identity = None;
     let held_slot = if hold_summary {
         let drivers = control.live.test_drivers().lock().await;
@@ -2713,7 +2707,6 @@ async fn prepare_driver_lifecycle(
         None
     };
     if scenario.summary() {
-        let mut first_normal_facts_recorded = false;
         let mut observed_heads = Vec::new();
         loop {
             let event = if let Some(slot) = held_slot.as_ref() {
@@ -2789,8 +2782,10 @@ async fn prepare_driver_lifecycle(
             if request.body["tools"] == json!([]) {
                 terminal_identity = Some(capture_terminal_identity(&control, &target, true).await);
                 if hold_summary {
-                    held_summary = Some(request);
-                    break;
+                    assert!(
+                        held_summary.replace(request).is_none(),
+                        "one summary request"
+                    );
                 } else {
                     let summary_request = request;
                     let diagnostic = control
@@ -2893,7 +2888,7 @@ async fn prepare_driver_lifecycle(
             } else if scenario.active() {
                 driver_pump.continue_turn(request);
             } else {
-                if hold_summary && !first_normal_facts_recorded {
+                if hold_summary {
                     let facts = admission_boundary_facts(&control, &target).await;
                     assert!(
                         facts.latest_attempt_id.is_some(),
@@ -2952,12 +2947,21 @@ async fn prepare_driver_lifecycle(
                         "U2 first ordinary request HTTP head/body: head={paired_head:?} body_request_id={} body_bytes={} facts={facts:?} call_ids={call_ids:?} result_ids={result_ids:?} automatic_attempts={automatic_attempts:?} active_witness={active_witness:?}",
                         request.request_id, request.body_bytes
                     );
-                    first_normal_facts_recorded = true;
+                    assert!(
+                        held_normal.replace(request).is_none(),
+                        "one normal continuation"
+                    );
+                } else {
+                    request
+                        .reply
+                        .send((200, answer_with_usage("normal continuation", 100)))
+                        .unwrap();
                 }
-                request
-                    .reply
-                    .send((200, answer_with_usage("normal continuation", 100)))
-                    .unwrap();
+            }
+            // The provider may deliver either body first. The fixture must not
+            // answer either POST before handing both response senders to the test.
+            if held_summary.is_some() && held_normal.is_some() {
+                break;
             }
         }
     }
@@ -3042,6 +3046,7 @@ async fn prepare_driver_lifecycle(
     let held_phase = if hold_summary {
         Some(HeldSummaryPhase {
             summary: held_summary.expect("held-summary phase captured its summary request"),
+            normal: held_normal.expect("held-summary phase captured its ordinary continuation"),
         })
     } else {
         None
@@ -3135,6 +3140,7 @@ struct TerminalAttemptIdentity {
 
 struct HeldSummaryPhase {
     summary: Incoming,
+    normal: Incoming,
 }
 
 /// Minimal normal-driver provider pump retained by lifecycle integration tests.
