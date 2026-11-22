@@ -430,12 +430,13 @@ async fn witness_previous_end(fenced: bool) {
         let before = entry(&baseline, &t).unwrap()["input_through_node_id"].as_str().unwrap().to_owned();
         at = cursor(&baseline);
         if fenced {
-            // Commit the interrupt fence with R0's successful settlement, before
-            // the Driver can attempt adoption. Do not cancel the HTTP response.
-            control.store.database.call(|db| {
-                db.execute_batch("CREATE TEMP TRIGGER fence_received_success AFTER UPDATE OF state ON main.model_attempt
-                    WHEN OLD.state != 'completed' AND NEW.state='completed' AND NEW.response_id='r0-fenced'
-                    BEGIN UPDATE turn SET generation=generation+1, interrupt_requested_at=NEW.ended_at WHERE id=NEW.turn_id; END;")?;
+            // R0 is still held by the provider; fence its Turn without cancelling HTTP.
+            let attempt = r0.clone();
+            control.store.database.call(move |db| {
+                let changed = db.execute("UPDATE turn SET generation=generation+1, interrupt_requested_at=?2
+                    WHERE (id,generation)=(SELECT turn_id,generation FROM model_attempt WHERE id=?1 AND state='inflight')",
+                    rusqlite::params![attempt, chrono::Utc::now().to_rfc3339()])?;
+                assert_eq!(changed, 1, "fence the held R0 generation");
                 Ok(())
             }).await.unwrap();
             let mut response = answer("R0");

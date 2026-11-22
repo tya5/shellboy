@@ -96,7 +96,7 @@ tool start (no condition matches it). Nothing was measured; see §3.
 
 ### 1.5 Versioning and decode strictness (current main)
 
-Protocol 7 is current in this branch (`src/protocol.rs`); protocol 4 was the pre-#262 baseline. It adds independently
+Protocol 8 is current in this branch (`src/protocol.rs`); protocol 4 was the pre-#262 baseline. It adds independently
 opt-in `events.reasoning_activity` to the protocol-3 baseline. Owner and client
 require an exact version match; no protocol-2/3 downgrade or version range is
 supported (`src/ipc.rs`, `src/app.rs`). Request argument records remain strict: unknown
@@ -607,7 +607,7 @@ guard. This is a live-preview bound, not cancellation of the provider request,
 durable assistant result, receipt or model execution. Normal completion and saved
 result handling continue independently. `status(memory=true)` does not fence.
 
-### Protocol 7: selected input boundary and committed attempt ends (#337)
+### Protocol 8: selected input boundary and committed attempt ends (#337)
 
 Each `live_text` entry has a nullable `input_through_node_id`: the last node
 in the qualified selected path, before tool, attachment, or summary projection.
