@@ -282,13 +282,13 @@ async fn history_get_keeps_summary_parts_text_and_cursor_at_exact_frame_boundary
     assert_eq!(result["parts"]["items"][0]["state"], "retained");
     assert_eq!(result["parts"]["items"][1]["state"], "not_retained");
     let more = crate::protocol::MAX_FRAME_BYTES - serde_json::to_vec(&baseline).unwrap().len();
-    let request = Request::new(format!("{short}{}", "x".repeat(more)), command);
-    request.validate().unwrap();
-    assert!(serde_json::to_vec(&request).unwrap().len() <= crate::protocol::MAX_FRAME_BYTES);
-    for _ in 0..2 {
-        let (response, _) = control
-            .evaluate(request.clone(), CancellationToken::new())
-            .await;
+    assert!(!command.requires_receipt());
+    // Distinct, equally sized operation IDs test two fresh observations at the same frame limit.
+    for fill in ["x", "y"] {
+        let request = Request::new(format!("{short}{}", fill.repeat(more)), command.clone());
+        request.validate().unwrap();
+        assert!(serde_json::to_vec(&request).unwrap().len() <= crate::protocol::MAX_FRAME_BYTES);
+        let (response, _) = control.evaluate(request, CancellationToken::new()).await;
         assert!(response.ok, "{:?}", response.error);
         assert_eq!(response.result.as_ref(), Some(result));
         assert_eq!(
