@@ -312,7 +312,7 @@ def require_empty_generated_summary_role_candidates_for_sql_staging(db):
 def require_empty_summary_ledger_for_sql_staging(db):
     record = db.execute("SELECT key FROM app_meta WHERE key >= 'summary.usage.' AND key < 'summary.usage/' ORDER BY key LIMIT 1").fetchone()
     if record:
-        raise AssertionError(f'schema50 Summary usage requires the native startup converter; SQL-only staging refuses before migration for {record[0]!r}')
+        raise AssertionError(f'schema51 Summary usage requires the native startup converter; SQL-only staging refuses before migration for {record[0]!r}')
 
 
 def apply_migration(db, version):
