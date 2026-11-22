@@ -3509,6 +3509,15 @@
       ],
       "type": "string"
     },
+    "KeySource": {
+      "description": "Where a connection's API key comes from (#269). Never the value or its length.",
+      "enum": [
+        "env",
+        "stored",
+        "none"
+      ],
+      "type": "string"
+    },
     "MessageAccepted": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
@@ -10728,7 +10737,7 @@
           "type": "string"
         },
         "key_source": {
-          "type": "string"
+          "$ref": "#/definitions/KeySource"
         }
       },
       "required": [
@@ -10760,7 +10769,7 @@
           "type": "string"
         },
         "key_source": {
-          "type": "string"
+          "$ref": "#/definitions/KeySource"
         },
         "permissions_tightened": {
           "type": "boolean"

@@ -772,10 +772,11 @@ impl Control {
                     "Cannot encode shell EOF result",
                 )
             } else {
-                serde_json::to_value(crate::protocol::ShellStopResult::Accepted(Accepted {
-                    accepted: true,
-                }))
-                .map_err(|_| ApiError::new(ErrorCode::IoFailed, "Cannot encode shell stop result"))
+                encode_result(
+                    crate::protocol::ShellStopResult::Accepted(Accepted { accepted: true }),
+                    ErrorCode::IoFailed,
+                    "Cannot encode shell stop result",
+                )
             }
         } else {
             // Preserve unknown-ID lookup errors, but a known closed stdin
@@ -795,10 +796,11 @@ impl Control {
             )
             .get(&execution_id)
             .await?;
-            serde_json::to_value(crate::protocol::ShellStopResult::Finished(Box::new(
-                details,
-            )))
-            .map_err(|_| ApiError::new(ErrorCode::IoFailed, "Cannot encode shell stop result"))
+            encode_result(
+                crate::protocol::ShellStopResult::Finished(Box::new(details)),
+                ErrorCode::IoFailed,
+                "Cannot encode shell stop result",
+            )
         }
     }
 

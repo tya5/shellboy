@@ -444,7 +444,7 @@ impl Connection {
     }
 }
 /// Where a connection's API key comes from (#269). Never the value or its length.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum KeySource {
     Env,

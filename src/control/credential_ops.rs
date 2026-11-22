@@ -99,7 +99,7 @@ impl Control {
                     connection: args.connection,
                     stored: true,
                     replaced: outcome.existed,
-                    key_source: source_name(source).to_owned(),
+                    key_source: source,
                     credentials_path: path,
                     permissions_tightened: outcome.permissions_tightened,
                     warning: outcome.warning.map(str::to_owned),
@@ -135,7 +135,7 @@ impl Control {
                     crate::protocol::CredentialsClearResult {
                         connection: args.connection,
                         cleared: outcome.written,
-                        key_source: source_name(source).to_owned(),
+                        key_source: source,
                         credentials_path: path,
                         changed_by: None,
                     },

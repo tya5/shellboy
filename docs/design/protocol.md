@@ -777,7 +777,8 @@ All three are `CommandRoute::Runtime`, outside the TUI catalogue (`OperationId::
 require a running owner; there is no standalone path. `credentials.set` and `credentials.clear` are mutations like
 `config.set`: `reserve_runtime` saves the intent, the same ID and arguments return the saved outcome without touching the
 file, other arguments are `operation_conflict`, and a started write is not cancelled. `connection.test` is a read: no
-receipt, cancelled when the caller disconnects. No value is returned by any of them. Design:
+receipt, cancelled when the caller disconnects. None of these operations returns the secret value.
+The stored-key mutations return `CredentialsSetResult` and `CredentialsClearResult`, respectively. Design:
 [config](config.md#stored-api-keys-and-connection-test-269).
 
 ```jsonc
@@ -990,7 +991,9 @@ remains `target_unavailable`. Replaying an operation ID preserves its original
 receipt, not a second side effect. This intentionally changes the earlier
 successful closed-write/EOF behavior without adding a wire alias or version.
 Partial writes, timeouts and in-flight failures retain their typed write result;
-`shell.stop` remains idempotent.
+`shell.stop` remains idempotent. Its `ShellStopResult` is an untagged union: `{ "accepted": true }` when a stop is accepted, or the same `ShellDetails` as `shell.get` when the execution has already finished.
+
+`attachment.remove` returns `AttachmentRemoveResult`, containing `attachment_id` and `removed: true` on success. None of these result declarations changes the existing wire shape or protocol version.
 ### Model Admission Sender Identity (#285)
 
 Admission notices display the owner's saved model sender Thread ID separately

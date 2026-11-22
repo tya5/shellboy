@@ -1735,7 +1735,7 @@ record!(CredentialsSetResult {
     connection: String,
     stored: bool,
     replaced: bool,
-    key_source: String,
+    key_source: crate::config::KeySource,
     credentials_path: std::path::PathBuf,
     permissions_tightened: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")] warning: Option<String>,
@@ -1744,7 +1744,7 @@ record!(CredentialsSetResult {
 record!(CredentialsClearResult {
     connection: String,
     cleared: bool,
-    key_source: String,
+    key_source: crate::config::KeySource,
     credentials_path: std::path::PathBuf,
     changed_by: Option<CredentialChangeOrigin>,
 });

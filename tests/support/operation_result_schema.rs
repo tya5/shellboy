@@ -1,5 +1,6 @@
 use serde_json::{Value, json};
 
+#[track_caller]
 pub(crate) fn assert_result(operation: &str, result: &Value) {
     let mut schema: Value =
         serde_json::from_str(include_str!("../../docs/reference/protocol.schema.json"))

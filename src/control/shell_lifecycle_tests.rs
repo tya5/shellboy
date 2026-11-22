@@ -1,3 +1,6 @@
+#[path = "../../tests/support/operation_result_schema.rs"]
+mod operation_result_schema;
+
 use super::*;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -695,35 +698,40 @@ async fn failed_self_stop_owner_does_not_preempt_another_saved_reply_grace() {
         control.runtime_operations.lock().await.remove(id);
     }
     drop((failed, accepted));
-    let accepted_stop = control
-        .signal_shell(execution.clone(), false, None)
-        .await
-        .unwrap();
-    assert_result_schema("shell.stop", &accepted_stop);
+    let stop = || {
+        Command::ShellStop(ExecutionTarget {
+            execution_id: execution.clone(),
+        })
+    };
+    let accepted = rpc(&control, stop()).await;
+    assert_eq!(accepted, serde_json::json!({"accepted": true}));
+    operation_result_schema::assert_result("shell.stop", &accepted);
     let (_, reply) = incoming(&mut requests).await;
     reply.send(answer()).unwrap();
-    loop {
-        let target = execution.clone();
-        let state = control
-            .store
-            .database
-            .call(move |db| {
-                db.query_row(
-                    "SELECT state FROM shell_execution WHERE id=?1",
-                    [target],
-                    |r| r.get::<_, String>(0),
-                )
-                .map_err(Into::into)
+    let ended = rpc(
+        &control,
+        Command::Wait(WaitArgs {
+            conditions: vec![WaitCondition::ShellEnded {
+                execution_id: execution.clone(),
+            }],
+            timeout_ms: 30_000,
+            after: None,
+        }),
+    )
+    .await;
+    assert_eq!(ended["status"], "satisfied");
+    let completed = rpc(&control, stop()).await;
+    assert_eq!(
+        completed,
+        rpc(
+            &control,
+            Command::ShellGet(ExecutionTarget {
+                execution_id: execution
             })
-            .await
-            .unwrap();
-        if matches!(state.as_str(), "exited" | "failed" | "stopped") {
-            break;
-        }
-        tokio::task::yield_now().await;
-    }
-    let completed_stop = control.signal_shell(execution, false, None).await.unwrap();
-    assert_result_schema("shell.stop", &completed_stop);
+        )
+        .await
+    );
+    operation_result_schema::assert_result("shell.stop", &completed);
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
     server.abort();
@@ -954,20 +962,4 @@ async fn stdin_write_reply_and_eof_reply_observe_committed_owner_facts() {
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
     server.abort();
-}
-
-#[track_caller]
-fn assert_result_schema(operation: &str, result: &Value) {
-    let mut schema: Value =
-        serde_json::from_str(include_str!("../../docs/reference/protocol.schema.json")).unwrap();
-    schema["$ref"] = serde_json::json!(format!("#/operation_results/{operation}"));
-    let validator = jsonschema::validator_for(&schema).unwrap();
-    let errors = validator
-        .iter_errors(result)
-        .map(|error| error.to_string())
-        .collect::<Vec<_>>();
-    assert!(
-        errors.is_empty(),
-        "{operation} result rejected: {errors:?}; {result}"
-    );
 }
