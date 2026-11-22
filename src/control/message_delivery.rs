@@ -775,7 +775,6 @@ mod tests {
                     "next",
                     generation,
                     "stale concurrent retry",
-                    false
                 )
                 .unwrap()
             );
