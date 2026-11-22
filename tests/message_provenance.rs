@@ -279,7 +279,7 @@ async fn ambiguous_or_oversized_direct_receipts_do_not_project_operation_id() {
         .database
         .call(move |db| {
             db.execute(
-                "INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at)VALUES('duplicate','duplicate-op','{\"kind\":\"human\"}','recipient',?1,'accepted','now')",
+                "INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at)VALUES('duplicate','duplicate-op','{\"kind\":\"human\"}','sender',?1,'accepted','now')",
                 [receipt],
             )?;
             Ok(())
@@ -311,6 +311,13 @@ async fn ambiguous_or_oversized_direct_receipts_do_not_project_operation_id() {
     let oversized = store.execute(get(), None).await.unwrap().result;
     assert!(oversized["provenance"].get("client_operation_id").is_none());
     let identity = node.clone();
+    store.database.call(move |db| {
+        assert_eq!(db.execute("UPDATE receipt SET client_operation_id=CAST(X'80' AS TEXT) WHERE message_node_id=?1", [identity])?, 1);
+        Ok(())
+    }).await.unwrap();
+    let malformed = store.execute(get(), None).await.unwrap().result;
+    assert!(malformed["provenance"].get("client_operation_id").is_none());
+    let identity = node.clone();
     store
         .database
         .call(move |db| {
@@ -325,13 +332,6 @@ async fn ambiguous_or_oversized_direct_receipts_do_not_project_operation_id() {
             .get("client_operation_id")
             .is_none()
     );
-    let identity = node.clone();
-    store.database.call(move |db| {
-        db.execute("UPDATE receipt SET client_operation_id=CAST(X'80' AS TEXT) WHERE message_node_id=?1", [identity])?;
-        Ok(())
-    }).await.unwrap();
-    let malformed = store.execute(get(), None).await.unwrap().result;
-    assert!(malformed["provenance"].get("client_operation_id").is_none());
     store.database.shutdown().await.unwrap();
 }
 

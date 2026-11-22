@@ -3835,6 +3835,80 @@ async fn queued_authorization_of_a_now_excluded_kind_is_consumed_without_blockin
 }
 
 #[tokio::test]
+async fn history_search_hit_omits_the_creating_send_operation_id() {
+    use shellboy::{control::db::Store, protocol::*};
+
+    let f = Fixture::new_exact(Config::default()).await;
+    f.db.call(|db| {
+        db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('recipient','/','/a','p','m','now')", [])?;
+        Ok(())
+    }).await.unwrap();
+    let store = Store::new(
+        f.db.clone(),
+        f.config.clone(),
+        f._temp.path().to_owned(),
+        "fixture".into(),
+    );
+    let operation_id = "fixture:send-search-provenance";
+    let sent = store
+        .execute(
+            Request::new(
+                operation_id,
+                Command::MessageSend(
+                    serde_json::from_value(
+                        json!({"thread_id":"recipient","text":"searchable message"}),
+                    )
+                    .unwrap(),
+                ),
+            ),
+            None,
+        )
+        .await
+        .unwrap()
+        .result;
+    let node = sent["message_id"].as_str().unwrap();
+    let get = store
+        .execute(
+            Request::new(
+                "fixture:get-search-provenance",
+                Command::HistoryGet(serde_json::from_value(json!({"node_id":node})).unwrap()),
+            ),
+            None,
+        )
+        .await
+        .unwrap()
+        .result;
+    assert_eq!(get["provenance"]["client_operation_id"], operation_id);
+
+    f.service
+        .backfill(IndexArgs {
+            source_ids: vec![node.into()],
+            ..args()
+        })
+        .await
+        .unwrap();
+    f.drain().await;
+    let report = f
+        .service
+        .search_report(
+            &search_args("searchable message", 5),
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    let hit = report["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|hit| hit["node_id"] == node)
+        .unwrap();
+    assert_eq!(hit["provenance"]["kind"], "user");
+    assert!(hit["provenance"].get("client_operation_id").is_none());
+    drop(store);
+    f.close().await;
+}
+
+#[tokio::test]
 async fn scope_status_names_kinds_that_are_not_indexed_automatically() {
     let f = Fixture::new_exact(Config::default()).await;
     seed_kinds(&f).await;
