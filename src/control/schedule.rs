@@ -933,8 +933,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn oneshot_retires_and_keeps_same_thread_shell_result() {
-        let (root, owner, control, accepted) =
+    async fn scheduled_shell_settlement_preserves_the_execution_and_retires_only_one_shots() {
+        use crate::protocol::{
+            ExecutionTarget, ScheduleAddArgs, ShellListArgs, ShellReadArgs, ThreadTarget,
+        };
+
+        let (_root, owner, control, accepted) =
             super::super::driver::preparation_tests::fixture("http://127.0.0.1:1/v1").await;
         let thread = accepted.thread_id;
         let request = |command| {
@@ -943,82 +947,197 @@ mod tests {
                 command,
             )
         };
-        control.start().await.unwrap();
-        let (sender, requests) = tokio::sync::mpsc::channel(4);
-        let server = crate::ipc::LocalServer::bind(&owner, sender).await.unwrap();
-        let dispatcher = tokio::spawn(control.clone().serve(requests));
-        let add = control
-            .request(request(Command::ScheduleAdd(
-                crate::protocol::ScheduleAddArgs {
+        // Observe the identity at reservation even if settlement beats the first read.
+        owner.db.call(|db| {
+            db.execute_batch("CREATE TEMP TABLE scheduled_witness(schedule_id TEXT PRIMARY KEY,execution_id TEXT NOT NULL);
+                CREATE TEMP TRIGGER capture_scheduled_witness AFTER INSERT ON main.shell_execution
+                WHEN NEW.schedule_id IS NOT NULL
+                BEGIN INSERT INTO scheduled_witness VALUES(NEW.schedule_id,NEW.id); END;")?;
+            Ok(())
+        }).await.unwrap();
+
+        let hold = if cfg!(windows) {
+            "echo schedule-witness; Start-Sleep -Seconds 600"
+        } else {
+            "echo schedule-witness; exec sleep 600"
+        };
+        for (command, expected, timeout, cron, missing_cwd) in [
+            (hold, "stopped", false, false, false),
+            (hold, "stopped", true, false, false),
+            ("echo schedule-witness", "exited", false, false, false),
+            (
+                "echo schedule-witness; exit 7",
+                "exited",
+                false,
+                false,
+                false,
+            ),
+            ("echo schedule-witness", "failed", false, false, true),
+            ("echo schedule-witness", "exited", false, true, false),
+        ] {
+            let add = control
+                .request(request(Command::ScheduleAdd(ScheduleAddArgs {
                     thread_id: Some(thread.clone()),
-                    cron: None,
+                    cron: cron.then(|| "0 0 1 1 *".into()),
                     at: None,
-                    in_seconds: Some(1),
-                    cwd: None,
+                    in_seconds: (!cron).then_some(1),
+                    cwd: missing_cwd.then(|| "missing-working-directory".into()),
                     description: None,
-                    command: "echo schedule-witness".into(),
-                },
-            )))
-            .await;
-        assert!(add.ok, "{:?}", add.error);
-        let execution =
-            crate::test_watchdog::watchdog("one-shot retires and keeps the shell result", async {
+                    command: command.into(),
+                })))
+                .await;
+            assert!(add.ok, "{:?}", add.error);
+            let schedule = add.result.unwrap()["schedule_id"]
+                .as_str()
+                .unwrap()
+                .to_owned();
+            let key = schedule.clone();
+            // Backdate the saved deadline instead of waiting for the clock. The
+            // normal dispatch path still performs claim, launch and registration.
+            owner.db.call(move |db| {
+                db.execute("UPDATE schedule SET next_at=1,once_at=CASE WHEN once_at IS NOT NULL THEN 1 END WHERE id=?1",[key])?;
+                Ok(())
+            }).await.unwrap();
+            dispatch(&control).await.unwrap();
+            let key = schedule.clone();
+            let execution: String = owner
+                .db
+                .call(move |db| {
+                    Ok(db.query_row(
+                        "SELECT execution_id FROM scheduled_witness WHERE schedule_id=?1",
+                        [key],
+                        |r| r.get(0),
+                    )?)
+                })
+                .await
+                .unwrap();
+            let get = || {
+                Command::ShellGet(ExecutionTarget {
+                    execution_id: execution.clone(),
+                })
+            };
+            let list = || {
+                Command::ShellList(
+                    serde_json::from_value::<ShellListArgs>(json!({"thread_id":thread})).unwrap(),
+                )
+            };
+            if command == hold {
+                let active = control.request(request(list())).await.result.unwrap();
+                let active = active["items"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|item| item["execution_id"] == execution)
+                    .unwrap();
+                assert_eq!(active["state"], "running");
+                assert_eq!(active["schedule_id"], schedule);
+                let id = execution.clone();
+                let deadline = owner
+                    .db
+                    .call(move |db| {
+                        let started: i64 = db.query_row(
+                            "SELECT unixepoch(started_at) FROM shell_execution WHERE id=?1",
+                            [id],
+                            |r| r.get(0),
+                        )?;
+                        Ok(DateTime::from_timestamp(started + 3600, 0).unwrap())
+                    })
+                    .await
+                    .unwrap();
+                assert_eq!(next_deadline(&control).await.unwrap(), Some(deadline));
+                if timeout {
+                    let id = execution.clone();
+                    owner.db.call(move |db| {
+                        db.execute("UPDATE shell_execution SET started_at='2020-01-01T00:00:00Z' WHERE id=?1",[id])?;
+                        Ok(())
+                    }).await.unwrap();
+                    dispatch(&control).await.unwrap();
+                } else {
+                    let stop = control
+                        .request(request(Command::ShellStop(ExecutionTarget {
+                            execution_id: execution.clone(),
+                        })))
+                        .await;
+                    assert_eq!(stop.result.unwrap()["accepted"], true);
+                }
+            }
+            let saved = crate::test_watchdog::watchdog("scheduled execution settles", async {
                 loop {
                     let changed = control.changed.notified();
                     tokio::pin!(changed);
                     changed.as_mut().enable();
-                    let list = control
-                        .request(request(Command::ShellList(
-                            serde_json::from_value(json!({"thread_id":thread})).unwrap(),
-                        )))
-                        .await;
-                    assert!(list.ok, "{:?}", list.error);
-                    let item = &list.result.unwrap()["items"][0];
-                    if item["state"] == "exited" {
-                        assert_eq!(item["exit_code"], 0);
-                        break item["execution_id"].as_str().unwrap().to_owned();
+                    let result = control.request(request(get())).await;
+                    assert!(result.ok, "{:?}", result.error);
+                    let body = result.result.unwrap();
+                    if matches!(
+                        body["state"].as_str(),
+                        Some("exited" | "failed" | "stopped")
+                    ) {
+                        break body;
                     }
                     changed.await;
                 }
             })
             .await
             .unwrap();
-        let list = control
-            .request(request(Command::ScheduleList(
-                crate::protocol::ThreadTarget {
+            assert_eq!(saved["execution_id"], execution);
+            assert_eq!(saved["thread_id"], thread);
+            assert_eq!(saved["state"], expected);
+            if expected == "exited" {
+                assert_eq!(
+                    saved["exit_code"],
+                    if command.ends_with("exit 7") { 7 } else { 0 }
+                );
+                let read = control
+                    .request(request(Command::ShellRead(ShellReadArgs {
+                        execution_id: execution.clone(),
+                        cursor: None,
+                        encoding: None,
+                        limit_bytes: 4096,
+                    })))
+                    .await;
+                assert!(
+                    read.result.unwrap()["text"]
+                        .as_str()
+                        .unwrap()
+                        .contains("schedule-witness")
+                );
+            }
+            if timeout {
+                assert_eq!(saved["reason"], "schedule_timeout");
+            }
+            if missing_cwd {
+                assert_eq!(saved["reason"], "spawn_failed");
+            }
+            let history = control.request(request(list())).await.result.unwrap();
+            assert!(
+                history["items"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|item| item["execution_id"] == execution)
+            );
+            let schedules = control
+                .request(request(Command::ScheduleList(ThreadTarget {
                     thread_id: Some(thread.clone()),
-                },
-            )))
-            .await;
-        assert_eq!(list.result.unwrap()["items"], json!([]));
-        let get = control
-            .request(request(Command::ShellGet(
-                crate::protocol::ExecutionTarget {
-                    execution_id: execution.clone(),
-                },
-            )))
-            .await;
-        assert_eq!(get.result.unwrap()["thread_id"], thread);
-        let read = control
-            .request(request(Command::ShellRead(
-                crate::protocol::ShellReadArgs {
-                    execution_id: execution,
-                    cursor: None,
-                    encoding: None,
-                    limit_bytes: 4096,
-                },
-            )))
-            .await;
-        assert!(
-            read.result.unwrap()["text"]
-                .as_str()
+                })))
+                .await
+                .result
+                .unwrap();
+            let retained = schedules["items"]
+                .as_array()
                 .unwrap()
-                .contains("schedule-witness")
-        );
+                .iter()
+                .find(|item| item["schedule_id"] == schedule);
+            if cron {
+                let item = retained.unwrap();
+                assert_eq!(item["latest"]["execution_id"], execution);
+                assert!(item["next_at"].is_string());
+            } else {
+                assert!(retained.is_none());
+            }
+        }
         control.shutdown().await.unwrap();
-        server.shutdown().await.unwrap();
-        dispatcher.await.unwrap();
         owner.shutdown().await.unwrap();
-        drop(root);
     }
 }
