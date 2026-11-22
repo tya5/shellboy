@@ -240,3 +240,62 @@ async fn notification_all_history_handlers_fit_receipt_and_replay_at_exact_frame
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
 }
+
+#[tokio::test]
+async fn history_get_keeps_summary_parts_text_and_cursor_at_exact_frame_boundary() {
+    let root = tempfile::tempdir().unwrap();
+    let config = root.path().join("config.toml");
+    std::fs::write(&config, "").unwrap();
+    let owner = DataOwner::start(
+        Some(config),
+        Some(root.path().join("data")),
+        root.path().into(),
+    )
+    .await
+    .unwrap();
+    let control = Control::new(&owner, root.path().into());
+    owner.db.call(|db| {
+        db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('recipient','/','','fixture','fixture','now');")?;
+        let tx = db.transaction()?;
+        let payload = json!({"summary_part_keys":["fixture-part","missing-part"]});
+        crate::history::append_node(&tx, "recipient", "summary", None, "summary", &payload, "now")?;
+        let part = json!({"text":"retained part body beyond the first page","sources":[],"stage":"map"});
+        tx.execute("INSERT INTO app_meta(key,value) VALUES('fixture-part',?1)", [part.to_string()])?;
+        tx.commit()?;
+        Ok(())
+    }).await.unwrap();
+    let command: Command = serde_json::from_value(
+        json!({"command":"history.get","args":{"node_id":"summary","parts":true,"limit_bytes":32}}),
+    )
+    .unwrap();
+    let short = format!("{}:parts", owner.instance_id);
+    let (baseline, _) = control
+        .evaluate(
+            Request::new(short.clone(), command.clone()),
+            CancellationToken::new(),
+        )
+        .await;
+    assert!(baseline.ok, "{:?}", baseline.error);
+    let result = baseline.result.as_ref().unwrap();
+    assert_eq!(result["text"], "--- part fixture-part ---\nretain");
+    assert!(result["next_cursor"].as_str().is_some());
+    assert_eq!(result["parts"]["items"][0]["state"], "retained");
+    assert_eq!(result["parts"]["items"][1]["state"], "not_retained");
+    let more = crate::protocol::MAX_FRAME_BYTES - serde_json::to_vec(&baseline).unwrap().len();
+    let request = Request::new(format!("{short}{}", "x".repeat(more)), command);
+    request.validate().unwrap();
+    assert!(serde_json::to_vec(&request).unwrap().len() <= crate::protocol::MAX_FRAME_BYTES);
+    for _ in 0..2 {
+        let (response, _) = control
+            .evaluate(request.clone(), CancellationToken::new())
+            .await;
+        assert!(response.ok, "{:?}", response.error);
+        assert_eq!(response.result.as_ref(), Some(result));
+        assert_eq!(
+            serde_json::to_vec(&response).unwrap().len(),
+            crate::protocol::MAX_FRAME_BYTES
+        );
+    }
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+}

@@ -1608,29 +1608,14 @@ impl Store {
                 }
                 Ok(result)
             }
-            Command::HistoryList(args) => budget_history(
-                operation_id,
-                history::list_nodes(tx, args)?,
-                crate::history::message_budget::Slots::Nodes,
-            ),
-            Command::HistoryWindow(args) => budget_history(
-                operation_id,
-                history::window(tx, args)?,
-                crate::history::message_budget::Slots::Nodes,
-            ),
+            Command::HistoryList(args) => {
+                MutationResult::value(history::rpc::list(tx, args, operation_id)?)
+            }
+            Command::HistoryWindow(args) => {
+                MutationResult::value(history::rpc::selected_window(tx, args, operation_id)?)
+            }
             Command::HistoryGet(args) => {
-                let (body, parts) = history::read_node(tx, args)?;
-                let mut value = serde_json::to_value(body).map_err(|_| {
-                    error(ErrorCode::InvalidState, "history body is not serializable")
-                })?;
-                if let (Some(parts), Some(object)) = (parts, value.as_object_mut()) {
-                    object.insert("parts".into(), parts);
-                }
-                budget_history(
-                    operation_id,
-                    value,
-                    crate::history::message_budget::Slots::Body,
-                )
+                MutationResult::value(history::rpc::get(tx, args, operation_id)?)
             }
             Command::HistoryRelations(args) => MutationResult::value(history::relations(tx, args)?),
             _ => Err(error(
@@ -7299,21 +7284,4 @@ mod retry_tracking_diagnosis_287 {
         drop(store);
         database.shutdown().await.unwrap();
     }
-}
-
-fn budget_history<T: serde::Serialize>(
-    operation: &str,
-    result: T,
-    slots: crate::history::message_budget::Slots,
-) -> Result<MutationResult> {
-    let result = serde_json::to_value(result).map_err(|_| {
-        error(
-            ErrorCode::InvalidState,
-            "History result serialization failed",
-        )
-    })?;
-    let mut response = crate::protocol::Response::success(operation, result);
-    crate::history::message_budget::fit(&mut response, slots)
-        .map_err(|_| error(ErrorCode::InvalidState, "History provenance budget failed"))?;
-    MutationResult::value(response.result.expect("success response owns its result"))
 }

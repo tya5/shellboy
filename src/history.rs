@@ -33,10 +33,11 @@ pub mod rewind;
 pub fn reachability_for_tests(db: &Connection, id: &str) -> rusqlite::Result<bool> {
     reachability::searchable(db, id)
 }
-pub(crate) mod message_budget;
+mod message_budget;
 mod message_provenance;
 pub(crate) mod notification;
 mod relations;
+pub(crate) mod rpc;
 mod thread;
 pub(crate) mod thread_overrides;
 pub(crate) use raw_witness::{RawWitness, RetainedExecutionFacts, RetainedExecutionRequest};
@@ -743,7 +744,7 @@ pub fn get_node(connection: &Connection, args: &HistoryGetArgs) -> Result<Histor
 }
 
 /// `get_node`, plus the per-part facts when `args.parts` selects a summary's parts.
-pub fn read_node(
+fn read_node(
     connection: &Connection,
     args: &HistoryGetArgs,
 ) -> Result<(HistoryBody, Option<Value>), ApiError> {
