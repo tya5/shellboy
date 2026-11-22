@@ -255,8 +255,29 @@ pub(crate) fn read_tx(
         );
     }
     let encoded = serde_json::to_string(&selected).expect("bounded Thread IDs serialize");
-    let schedule_count = db.query_row("SELECT count(*) FROM json_each(?1) j CROSS JOIN schedule s INDEXED BY schedule_thread ON s.thread_id=j.value",[&encoded],|row|row.get(0))?;
-    let runs=db.prepare("WITH selected AS (SELECT value AS id FROM json_each(?1)) SELECT r.id,r.thread_id,r.state FROM selected s CROSS JOIN run r INDEXED BY one_live_run ON r.thread_id=s.id WHERE r.state IN ('live','stopping') ORDER BY r.id")?.query_map([&encoded],|row|Ok(Run{id:scalar(row,0)?,thread:scalar(row,1)?,state:scalar(row,2)?}))?.collect::<rusqlite::Result<Vec<_>>>().map_err(boundary_error)?;
+    let mut statement = db.prepare(
+        "WITH selected AS (SELECT value AS id FROM json_each(?1))
+         SELECT 0, NULL, NULL, NULL, count(*)
+         FROM selected s CROSS JOIN schedule q INDEXED BY schedule_thread ON q.thread_id=s.id
+         UNION ALL
+         SELECT 1, r.id, r.thread_id, r.state, NULL
+         FROM selected s CROSS JOIN run r INDEXED BY one_live_run ON r.thread_id=s.id
+         WHERE r.state IN ('live','stopping') ORDER BY 1, 2",
+    )?;
+    let mut rows = statement.query([&encoded])?;
+    // The aggregate yields one row even when no Runs or schedules exist.
+    let schedule_count = rows
+        .next()?
+        .ok_or(rusqlite::Error::QueryReturnedNoRows)?
+        .get(4)?;
+    let mut runs = Vec::new();
+    while let Some(row) = rows.next()? {
+        runs.push(Run {
+            id: scalar(row, 1).map_err(boundary_error)?,
+            thread: scalar(row, 2).map_err(boundary_error)?,
+            state: scalar(row, 3).map_err(boundary_error)?,
+        });
+    }
     let mut witnesses = db
         .prepare(REFERENCES)?
         .query_map([&encoded], |row| {
@@ -532,6 +553,9 @@ mod tests {
         for (id, ownership) in [("external", "external"), ("managed", "managed_clipboard")] {
             db.execute("INSERT INTO attachment_ref(id,source_node_id,absolute_path,input_kind,ownership,created_at)VALUES(?1,'a','/synthetic','file',?2,'now')",params![id,ownership]).unwrap();
         }
+        for id in ["root", "child", "grandchild", "outside"] {
+            db.execute("INSERT INTO schedule(id,thread_id,once_at,next_at,enabled,cwd,command) VALUES(?1,?1,1,1,1,'/','echo fixture')", [id]).unwrap();
+        }
         for descendants in [false, true] {
             let canonical = crate::deletion::preview(&db, &args(descendants)).unwrap();
             let trace = crate::frontend::sql_trace::Statements::new(&db);
@@ -542,6 +566,10 @@ mod tests {
             assert_eq!(value["observation"]["references_complete"], true);
             value.as_object_mut().unwrap().remove("observation");
             assert_eq!(value, canonical);
+            assert_eq!(
+                value["references"]["schedule_count"],
+                if descendants { 2 } else { 1 }
+            );
             assert_eq!(
                 value["selection"]["descendant_thread_count"], 1,
                 "deleted bridge must not reveal its live grandchild"

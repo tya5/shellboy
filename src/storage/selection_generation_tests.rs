@@ -4,10 +4,6 @@ use rusqlite::OptionalExtension;
 fn fresh() -> Connection {
     let db = Connection::open_in_memory().unwrap();
     db.execute_batch(CURRENT_SCHEMA).unwrap();
-    db.execute_batch(include_str!(
-        "../../tests/fixtures/rewind-schedule-schema.sql"
-    ))
-    .unwrap();
     db
 }
 
@@ -22,6 +18,10 @@ fn column_exists(db: &Connection) -> bool {
 
 fn v46_database() -> Connection {
     let db = fresh();
+    db.execute_batch(include_str!(
+        "../../tests/fixtures/rewind-schedule-schema.sql"
+    ))
+    .unwrap();
     db.execute_batch(
         "DROP INDEX IF EXISTS attachment_page_order; DELETE FROM schema_migration WHERE version>46;
          DROP INDEX IF EXISTS attachment_page_order; DELETE FROM schema_migration WHERE version=40;
