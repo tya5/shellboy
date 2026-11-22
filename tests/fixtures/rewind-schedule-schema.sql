@@ -4,7 +4,7 @@ DROP INDEX receipt_pending_by_time;
 DROP INDEX receipt_pending_owed;
 DROP INDEX receipt_pending_asked;
 DROP INDEX receipt_pending_to;
-DELETE FROM schema_migration WHERE version=55;
+DELETE FROM schema_migration WHERE version=56;
 DROP INDEX threads_created;
 ALTER TABLE thread DROP COLUMN created_at;
 DELETE FROM schema_migration WHERE version=54;
