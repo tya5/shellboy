@@ -50,7 +50,6 @@ pub(crate) enum WriterCompletion {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum WriterLifecycle {
-    LaunchPanicked,
     ProducerTerminated,
     ChildPanicked,
 }
@@ -192,41 +191,32 @@ impl WriterGcCoordinator {
         let launch = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             launch(id, captured, cancel.clone())
         }));
-        let (task, phase, lifecycle) = match launch {
-            Ok(future) => {
-                let task = runtime.spawn(async move {
-                    let exit = match std::panic::AssertUnwindSafe(future).catch_unwind().await {
-                        Ok(terminal) => ChildExit::Finished(terminal),
-                        Err(_) => ChildExit::Panicked,
-                    };
-                    let _ = signal_tx.send(exit);
-                    let _ = exit_wake.notify(id).await;
-                });
-                (Some(task), WriterJobPhase::Computing, None)
-            }
-            Err(_) => {
-                cancel.cancel();
-                let _ = signal_tx.send(ChildExit::Panicked);
-                (
-                    None,
-                    WriterJobPhase::Closing,
-                    Some(WriterLifecycle::LaunchPanicked),
-                )
-            }
+        let Ok(future) = launch else {
+            // A synchronous launch panic leaves no producer or join to retire.
+            cancel.cancel();
+            return Ok(id);
         };
+        let task = runtime.spawn(async move {
+            let exit = match std::panic::AssertUnwindSafe(future).catch_unwind().await {
+                Ok(terminal) => ChildExit::Finished(terminal),
+                Err(_) => ChildExit::Panicked,
+            };
+            let _ = signal_tx.send(exit);
+            let _ = exit_wake.notify(id).await;
+        });
         self.active = Some(OwnedGcJob {
             id,
             cancel,
-            task,
+            task: Some(task),
             completion_signal: Some(completion_signal),
             retirement_task: None,
             joined_receiver: None,
             joined: false,
             runtime,
             retirement_wake,
-            phase,
+            phase: WriterJobPhase::Computing,
             terminal: None,
-            lifecycle,
+            lifecycle: None,
             adoption_candidate: None,
             stage,
             rejection: None,
@@ -235,15 +225,42 @@ impl WriterGcCoordinator {
     }
 
     pub(crate) fn process_lifecycle_event(&mut self, id: WriterJobId) -> bool {
-        if !self.active.as_ref().is_some_and(|job| job.id == id) {
+        let Some(job) = self.active.as_mut().filter(|job| job.id == id) else {
+            return false;
+        };
+        if let Some(signal) = job.completion_signal.as_mut() {
+            match signal.try_recv() {
+                Ok(exit) => {
+                    job.completion_signal = None;
+                    record_child_exit(job, exit);
+                }
+                Err(tokio::sync::oneshot::error::TryRecvError::Empty) => {}
+                Err(tokio::sync::oneshot::error::TryRecvError::Closed) => {
+                    job.completion_signal = None;
+                    job.lifecycle
+                        .get_or_insert(WriterLifecycle::ProducerTerminated);
+                    if job.terminal.is_none() {
+                        close_for_lifecycle(job);
+                    }
+                }
+            }
+        }
+        if job.phase != WriterJobPhase::Closing {
             return false;
         }
-        self.process_lifecycle_before_db_reply();
-        if self
-            .active
-            .as_ref()
-            .is_some_and(|job| job.id == id && job.joined)
+        start_join_reaper(job);
+        if let Some(receiver) = job.joined_receiver.as_mut()
+            && let Ok(facts) = receiver.try_recv()
         {
+            if facts.producer_panicked {
+                job.lifecycle.get_or_insert(WriterLifecycle::ChildPanicked);
+            }
+            job.joined = facts.producer_joined;
+            job.joined_receiver = None;
+        }
+        // The receipt proves the producer was joined. The notifier itself can
+        // still be unwinding its send; waiting for it would require another wake.
+        if job.joined {
             self.active = None;
             return true;
         }
@@ -260,7 +277,7 @@ impl WriterGcCoordinator {
         start_join_reaper(job);
         true
     }
-    pub(crate) fn complete_before_db_reply(
+    pub(crate) fn complete_job(
         &mut self,
         id: WriterJobId,
         result: Result<Dispatched, ApiError>,
@@ -283,6 +300,7 @@ impl WriterGcCoordinator {
                 job.terminal = Some(WriterCompletion::Failed);
                 job.cancel.cancel();
                 job.phase = WriterJobPhase::Closing;
+                start_join_reaper(job);
             }
         }
         if job.phase == WriterJobPhase::Ready {
@@ -362,64 +380,9 @@ impl WriterGcCoordinator {
                 Ok(result) => result,
                 Err(_) => Err(crate::storage::StorageError::JobPanicked),
             };
-        match outcome {
-            Ok(value) => {
-                job.adoption_candidate = None;
-                job.phase = WriterJobPhase::Closing;
-                job.cancel.cancel();
-                Ok(value)
-            }
-            Err(error) => {
-                job.adoption_candidate = None;
-                job.phase = WriterJobPhase::Closing;
-                job.cancel.cancel();
-                Err(error)
-            }
-        }
-    }
-
-    pub(crate) fn process_lifecycle_before_db_reply(&mut self) {
-        let retire = self.active.as_ref().is_some_and(|job| {
-            job.phase == WriterJobPhase::Closing
-                && ((job.joined
-                    && job
-                        .retirement_task
-                        .as_ref()
-                        .is_none_or(JoinHandle::is_finished))
-                    || (job.lifecycle == Some(WriterLifecycle::LaunchPanicked)
-                        && job.task.is_none()))
-        });
-        if retire {
-            self.active = None;
-        }
-        let Some(job) = self.active.as_mut() else {
-            return;
-        };
-        if let Some(signal) = job.completion_signal.as_mut() {
-            match signal.try_recv() {
-                Ok(exit) => record_child_exit(job, exit),
-                Err(tokio::sync::oneshot::error::TryRecvError::Empty) => {}
-                Err(tokio::sync::oneshot::error::TryRecvError::Closed) => {
-                    job.lifecycle
-                        .get_or_insert(WriterLifecycle::ProducerTerminated);
-                    if job.terminal.is_none() {
-                        close_for_lifecycle(job);
-                    }
-                }
-            }
-        }
-        if job.phase == WriterJobPhase::Closing {
-            start_join_reaper(job);
-            if let Some(receiver) = job.joined_receiver.as_mut()
-                && let Ok(facts) = receiver.try_recv()
-            {
-                if facts.producer_panicked {
-                    job.lifecycle.get_or_insert(WriterLifecycle::ChildPanicked);
-                }
-                job.joined = facts.producer_joined;
-                job.joined_receiver = None;
-            }
-        }
+        close_for_lifecycle(job);
+        start_join_reaper(job);
+        outcome
     }
 
     pub(crate) fn failure_write_allowed(&self, id: WriterJobId) -> bool {
@@ -428,58 +391,17 @@ impl WriterGcCoordinator {
         })
     }
 
-    pub(crate) fn retire_joined(&mut self, id: WriterJobId) -> bool {
-        if self.active.as_ref().is_some_and(|job| {
-            job.id == id
-                && job.phase == WriterJobPhase::Closing
-                && job.task.is_none()
-                && job.joined
-                && job
-                    .retirement_task
-                    .as_ref()
-                    .is_none_or(JoinHandle::is_finished)
-        }) {
-            self.active = None;
-            true
-        } else {
-            false
-        }
-    }
     pub(crate) async fn shutdown(&mut self) -> bool {
-        let id = self.active.as_ref().map(|job| job.id);
-        if let Some(job) = self.active.as_mut() {
-            job.phase = WriterJobPhase::Closing;
-            job.cancel.cancel();
-            start_join_reaper(job);
-            if let Some(retirement) = job.retirement_task.as_mut() {
-                let _ = retirement.await;
-            }
-            if let Some(receiver) = job.joined_receiver.as_mut()
-                && let Ok(facts) = receiver.try_recv()
-            {
-                if facts.producer_panicked {
-                    job.lifecycle.get_or_insert(WriterLifecycle::ChildPanicked);
-                }
-                job.joined = facts.producer_joined;
-            }
-            if let Some(signal) = job.completion_signal.as_mut()
-                && let Ok(exit) = signal.try_recv()
-            {
-                record_child_exit(job, exit);
-            }
-            job.retirement_task = None;
-            if job.task.is_some() {
-                if let Some(task) = job.task.as_mut() {
-                    let _ = task.await;
-                }
-                job.task = None;
-                job.joined = true;
-            }
+        let Some(job) = self.active.as_mut() else {
+            return true;
+        };
+        let id = job.id;
+        close_for_lifecycle(job);
+        start_join_reaper(job);
+        if let Some(retirement) = job.retirement_task.as_mut() {
+            let _ = retirement.await;
         }
-        match id {
-            None => true,
-            Some(id) => self.retire_joined(id),
-        }
+        self.process_lifecycle_event(id)
     }
 }
 
@@ -594,9 +516,23 @@ mod lifecycle_event_tests {
         };
 
         assert!(!coordinator.process_lifecycle_event(WriterJobId(76)));
-        assert!(coordinator.active.as_ref().unwrap().completion_signal.is_some());
+        assert!(
+            coordinator
+                .active
+                .as_ref()
+                .unwrap()
+                .completion_signal
+                .is_some()
+        );
         assert!(!coordinator.process_lifecycle_event(id));
-        assert!(coordinator.active.as_ref().unwrap().completion_signal.is_none());
+        assert!(
+            coordinator
+                .active
+                .as_ref()
+                .unwrap()
+                .completion_signal
+                .is_none()
+        );
         assert!(!coordinator.process_lifecycle_event(id));
         let job = coordinator
             .active

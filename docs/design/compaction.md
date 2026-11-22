@@ -58,7 +58,9 @@ and joins it. Only a missing handle permits idle-slot pruning. Context-limit
 recovery joins that same handle before existing overflow behavior; it does not
 start a duplicate summary or resend the same POST. Stop/error and owner
 shutdown cancel and join through the same slot. The existing writer coordinator
-continues to own producer completion, terminal facts, FINISH and retirement.
+continues to own producer completion, terminal facts, FINISH and retirement. Matching
+job-ID lifecycle events consume exit and join receipts; ordinary database
+replies neither advance nor retire the producer.
 
 Manual summary and preview retain their strict operation-specific snapshot,
 range, marker, provenance and transaction rules. This current automatic path

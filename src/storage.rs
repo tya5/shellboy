@@ -1345,7 +1345,6 @@ where
                 .map(GcCaptureAdmission::Started)
                 .map_err(|message| StorageError::InvalidInput(message.into())),
         });
-        reconcile_gc_before_reply(db, coordinator);
         let _ = sender.send(result);
         JobOutcome::default()
     });
@@ -1384,9 +1383,8 @@ fn make_gc_completion_job(
         } else {
             None
         };
-        let completion = Ok(coordinator.complete_before_db_reply(id, result));
+        let completion = Ok(coordinator.complete_job(id, result));
         let result = write.unwrap_or(Ok(())).and(completion);
-        reconcile_gc_before_reply(db, coordinator);
         let _ = sender.send(result);
         JobOutcome::default()
     });
@@ -1422,7 +1420,6 @@ where
         }))
         .unwrap_or(Err(StorageError::JobPanicked));
         finish_transaction(db, &mut result);
-        reconcile_gc_before_reply(db, coordinator);
         drop(guard);
         let _ = sender.send(result);
         JobOutcome::default()
@@ -1439,45 +1436,35 @@ where
     )
 }
 
-fn reconcile_gc_before_reply(
-    _connection: &Connection,
-    coordinator: &mut crate::compaction::WriterGcCoordinator,
-) {
-    coordinator.process_lifecycle_before_db_reply();
-}
-
 fn make_job<T, F>(operation: F) -> (Command, DbReply<T>)
 where
     T: Send + 'static,
     F: FnOnce(&mut Connection) -> Result<T, StorageError> + Send + 'static,
 {
     let (sender, receiver) = oneshot::channel();
-    let job: Job = Box::new(
-        move |connection: &mut Connection, _, slow_backtrace, writer_gc| {
-            let installed = connection
-                .progress_handler(
-                    PROGRESS_GRANULARITY as std::ffi::c_int,
-                    Some(move || {
-                        slow_backtrace.observe(Instant::now());
-                        false
-                    }),
-                )
-                .is_ok();
-            let mut result = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                operation(connection)
-            })) {
-                Ok(result) => result,
-                Err(_) => Err(StorageError::JobPanicked),
-            };
-            if installed {
-                let _ = connection.progress_handler(0, None::<fn() -> bool>);
-            }
-            finish_transaction(connection, &mut result);
-            reconcile_gc_before_reply(connection, writer_gc);
-            let _ = sender.send(result);
-            JobOutcome::default()
-        },
-    );
+    let job: Job = Box::new(move |connection: &mut Connection, _, slow_backtrace, _| {
+        let installed = connection
+            .progress_handler(
+                PROGRESS_GRANULARITY as std::ffi::c_int,
+                Some(move || {
+                    slow_backtrace.observe(Instant::now());
+                    false
+                }),
+            )
+            .is_ok();
+        let mut result = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            operation(connection)
+        })) {
+            Ok(result) => result,
+            Err(_) => Err(StorageError::JobPanicked),
+        };
+        if installed {
+            let _ = connection.progress_handler(0, None::<fn() -> bool>);
+        }
+        finish_transaction(connection, &mut result);
+        let _ = sender.send(result);
+        JobOutcome::default()
+    });
     (
         Command::Run {
             job,
@@ -1504,10 +1491,7 @@ where
 {
     let (sender, receiver) = oneshot::channel();
     let job: Job = Box::new(
-        move |connection: &mut Connection,
-              waiting: &Arc<AtomicUsize>,
-              slow_backtrace,
-              writer_gc| {
+        move |connection: &mut Connection, waiting: &Arc<AtomicUsize>, slow_backtrace, _| {
             let budget = Arc::new(StepBudget::default());
             let (handler_budget, hook_budget) = (budget.clone(), budget.clone());
             let waiting = waiting.clone();
@@ -1547,7 +1531,6 @@ where
             let _ = connection.progress_handler(0, None::<fn() -> bool>);
             let _ = connection.commit_hook(None::<fn() -> bool>);
             finish_transaction(connection, &mut result);
-            reconcile_gc_before_reply(connection, writer_gc);
             let deferred = budget.hit.load(Ordering::Acquire);
             let steps = budget.ticks.load(Ordering::Acquire) * PROGRESS_GRANULARITY;
             let reply = if deferred {
@@ -2814,6 +2797,17 @@ mod lane_budget_tests {
             crate::compaction::CompletionDisposition::Stale
         );
         assert!(result.is_none());
+        let wake = db_b.gc_retirement_wake();
+        wake.notify(job_a).await.unwrap();
+        wake.notify(job_a).await.unwrap();
+        let mut matching = Some(Ok(synthetic_gc_summary()));
+        assert_eq!(
+            db_b.complete_gc_job_cancellable(job_b, &mut matching, None, None)
+                .await
+                .unwrap(),
+            crate::compaction::CompletionDisposition::Accepted,
+            "late and duplicate wakes for A cannot close B"
+        );
         assert!(db_a.cancel_gc_job(job_a).await.unwrap());
         assert!(db_b.cancel_gc_job(job_b).await.unwrap());
         cancelled_a.await.unwrap();
