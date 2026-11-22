@@ -846,6 +846,11 @@ impl Command {
             Self::ScheduleEnable(a) | Self::ScheduleDisable(a) | Self::ScheduleRemove(a) => {
                 nonempty(&a.schedule_id, "schedule_id")
             }
+            Self::ArtifactAdd(a) => nonempty(&a.thread_id, "thread_id"),
+            Self::ArtifactUpdate(a) => nonempty(&a.artifact_id, "artifact_id"),
+            Self::ArtifactList(a) => nonempty(&a.thread_id, "thread_id"),
+            Self::ArtifactGet(a) => nonempty(&a.artifact_id, "artifact_id"),
+            Self::ArtifactRemove(a) => nonempty(&a.artifact_id, "artifact_id"),
             Self::ScheduleAdd(a) => optional_nonempty(a.thread_id.as_deref(), "thread_id"),
             Self::ScheduleList(a) => optional_nonempty(a.thread_id.as_deref(), "thread_id"),
             Self::ThreadTags(a) => a.validate(),

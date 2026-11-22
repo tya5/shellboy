@@ -59,6 +59,7 @@ macro_rules! named_jobs {
 named_jobs! {
     OwnerShutdown => owner_shutdown, Status => status, ModelList => model_list,
     ThreadList => thread_list, ThreadGet => thread_get, ThreadBranches => thread_branches, UsageGet => usage_get,
+    ArtifactAdd => artifact_add, ArtifactUpdate => artifact_update, ArtifactList => artifact_list, ArtifactGet => artifact_get, ArtifactRemove => artifact_remove,
     ScheduleAdd => schedule_add, ScheduleSet => schedule_set, ScheduleEnable => schedule_enable, ScheduleDisable => schedule_disable, ScheduleRemove => schedule_remove,  ScheduleList => schedule_list,
     CompactList => compact_list, CompactPreview => compact_preview, ShellList => shell_list,
     ThreadCreate => thread_create, ThreadFork => thread_fork, ThreadDelete => thread_delete,
@@ -110,6 +111,8 @@ impl Kind {
         match self {
             Kind::Status
             | Kind::ThreadList
+            | Kind::ArtifactList
+            | Kind::ArtifactGet
             | Kind::ScheduleList
             | Kind::ThreadTags
             | Kind::ThreadCwds
@@ -134,7 +137,10 @@ impl Kind {
             // Bounded closure (65,536 sources) in one transaction; see history::prune.
             // Rewind refuses paths over history::rewind::PATH_LIMIT nodes.
             // Archive: at most 200 IDs, descendants walk capped at 256 (control::archive).
-            Kind::ScheduleAdd
+            Kind::ArtifactAdd
+            | Kind::ArtifactUpdate
+            | Kind::ArtifactRemove
+            | Kind::ScheduleAdd
             | Kind::ScheduleSet
             | Kind::ScheduleEnable
             | Kind::ScheduleDisable
@@ -217,7 +223,7 @@ mod tests {
         }
         assert_eq!(
             Kind::ALL.len(),
-            72,
+            77,
             "classify new kinds and update this ratchet"
         );
     }
@@ -225,6 +231,9 @@ mod tests {
     #[test]
     fn every_writer_kind_has_a_bound_or_a_ratchet_exemption() {
         let writers = [
+            Kind::ArtifactAdd,
+            Kind::ArtifactUpdate,
+            Kind::ArtifactRemove,
             Kind::MessageReply,
             Kind::ThreadPrune,
             Kind::ThreadRewind,

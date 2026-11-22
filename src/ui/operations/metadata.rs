@@ -612,6 +612,11 @@ fn operation_label_for(id: OperationId, language: crate::config::UiLanguage) -> 
             "Conversation · Unarchive"
         ),
         OperationId::ThreadTag => local!(language, "会話 · タグ", "Conversation · Tags"),
+        OperationId::ArtifactAdd => local!(language, "成果物 · 追加", "Artifact · Add"),
+        OperationId::ArtifactUpdate => local!(language, "成果物 · 更新", "Artifact · Update"),
+        OperationId::ArtifactList => local!(language, "成果物 · 一覧", "Artifact · List"),
+        OperationId::ArtifactGet => local!(language, "成果物 · 参照", "Artifact · Get"),
+        OperationId::ArtifactRemove => local!(language, "成果物 · 削除", "Artifact · Remove"),
         OperationId::ScheduleAdd => local!(language, "予定 · 追加", "Schedule · Add"),
         OperationId::ScheduleSet => local!(language, "予定 · 説明", "Schedule · Set"),
         OperationId::ScheduleEnable => local!(language, "予定 · 有効化", "Schedule · Enable"),
@@ -831,6 +836,25 @@ fn operation_meaning_for(id: OperationId, language: crate::config::UiLanguage) -
             language,
             "指定Threadへタグを付け外しします。置き場所や切り口を表す自由なラベルで、履歴・検索・使用量・受信・一覧の順序は変わりません。",
             "Add or remove tags on the specified Thread: free labels for placement and cross-cutting views. History, search, usage, receiving messages and list order are unchanged."
+        ),
+        OperationId::ArtifactAdd => {
+            local!(language, "成果物の追加。", "Register artifact metadata.")
+        }
+        OperationId::ArtifactUpdate => {
+            local!(language, "成果物の更新。", "Append an artifact version.")
+        }
+        OperationId::ArtifactList => {
+            local!(language, "成果物の一覧。", "List artifacts in a Thread.")
+        }
+        OperationId::ArtifactGet => local!(
+            language,
+            "成果物の参照。",
+            "Read artifact version metadata."
+        ),
+        OperationId::ArtifactRemove => local!(
+            language,
+            "成果物の削除。",
+            "Remove an artifact and its metadata."
         ),
         OperationId::ScheduleAdd => local!(
             language,
@@ -1198,6 +1222,11 @@ fn field_label_for(id: FieldId, language: crate::config::UiLanguage) -> &'static
             )
         }
         FieldId::MaxTokens => local!(language, "出力上限", "Output limit"),
+        FieldId::Artifact => local!(language, "成果物ID", "Artifact ID"),
+        FieldId::ArtifactUri => local!(language, "URI", "Opaque URI"),
+        FieldId::ArtifactTitle => local!(language, "題名", "Artifact title"),
+        FieldId::ArtifactMime => local!(language, "MIME", "Optional MIME"),
+        FieldId::ArtifactVersion => local!(language, "版", "Version number"),
         FieldId::Schedule => local!(language, "予定ID", "Schedule ID"),
         FieldId::Cron => local!(language, "cron式", "Cron expression"),
         FieldId::At => local!(language, "日時", "Run at"),
@@ -1570,6 +1599,13 @@ fn field_help_for(id: FieldId, language: crate::config::UiLanguage) -> &'static 
             "このThreadのモデル要求の出力上限（トークン、正の整数）です。接続のmax_tokensより優先します。CLIの空文字（フォームではnone）で接続の値または既定へ戻します。要約要求には適用しません。",
             "Output limit in tokens (positive integer) for this Thread's model requests; it replaces the connection max_tokens. An empty CLI value (none in the form) returns to the connection or default value. Summary requests do not use it."
         ),
+        FieldId::Artifact => local!(language, "成果物をIDで指定します。", "Artifact ID"),
+        FieldId::ArtifactUri => local!(language, "参照先のURIを指定します。", "Opaque URI"),
+        FieldId::ArtifactTitle => local!(language, "成果物の題名を指定します。", "Artifact title"),
+        FieldId::ArtifactMime => local!(language, "任意のMIMEを指定します。", "Optional MIME"),
+        FieldId::ArtifactVersion => {
+            local!(language, "参照する版の番号を指定します。", "Version number")
+        }
         FieldId::Schedule => local!(
             language,
             "予定をIDで指定します。",

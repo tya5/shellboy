@@ -9,6 +9,55 @@ type Meaning = (
 );
 const MEANINGS: &[Meaning] = &[
     (
+        OperationId::ArtifactAdd,
+        &["artifact", "add"],
+        &[
+            ("thread_id", FieldId::Thread),
+            ("uri", FieldId::ArtifactUri),
+            ("title", FieldId::ArtifactTitle),
+            ("mime", FieldId::ArtifactMime),
+        ],
+        None,
+    ),
+    (
+        OperationId::ArtifactUpdate,
+        &["artifact", "update"],
+        &[
+            ("artifact_id", FieldId::Artifact),
+            ("uri", FieldId::ArtifactUri),
+            ("title", FieldId::ArtifactTitle),
+            ("mime", FieldId::ArtifactMime),
+        ],
+        None,
+    ),
+    (
+        OperationId::ArtifactList,
+        &["artifact", "list"],
+        &[
+            ("thread_id", FieldId::Thread),
+            ("cursor", FieldId::Cursor),
+            ("limit", FieldId::Limit),
+        ],
+        None,
+    ),
+    (
+        OperationId::ArtifactGet,
+        &["artifact", "get"],
+        &[
+            ("artifact_id", FieldId::Artifact),
+            ("artifact_version", FieldId::ArtifactVersion),
+            ("cursor", FieldId::Cursor),
+            ("limit", FieldId::Limit),
+        ],
+        None,
+    ),
+    (
+        OperationId::ArtifactRemove,
+        &["artifact", "remove"],
+        &[("artifact_id", FieldId::Artifact)],
+        None,
+    ),
+    (
         OperationId::ScheduleAdd,
         &["schedule", "add"],
         &[

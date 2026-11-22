@@ -1383,6 +1383,28 @@ impl Store {
                     &crate::readback::Window::new(args.since.as_deref(), args.until.as_deref())?,
                 )?)
             }
+            Command::ArtifactAdd(args) => {
+                let artifact = crate::artifacts::add(tx, args, now)?;
+                let thread = artifact.thread_id.clone();
+                let mut result = MutationResult::value(artifact)?;
+                result.changed_threads.push(thread);
+                Ok(result)
+            }
+            Command::ArtifactUpdate(args) => {
+                let artifact = crate::artifacts::update(tx, args, now)?;
+                let thread = artifact.thread_id.clone();
+                let mut result = MutationResult::value(artifact)?;
+                result.changed_threads.push(thread);
+                Ok(result)
+            }
+            Command::ArtifactRemove(args) => {
+                let thread = crate::artifacts::remove(tx, &args.artifact_id)?;
+                let mut result = MutationResult::value(json!({"accepted":true}))?;
+                result.changed_threads.push(thread);
+                Ok(result)
+            }
+            Command::ArtifactList(args) => MutationResult::value(crate::artifacts::list(tx, args)?),
+            Command::ArtifactGet(args) => MutationResult::value(crate::artifacts::get(tx, args)?),
             Command::ScheduleAdd(args) => {
                 let thread = target(args.thread_id.as_deref(), caller)?;
                 let mut result = MutationResult::value(super::schedule::add(tx, &thread, args)?)?;
@@ -3395,6 +3417,8 @@ pub(super) fn delete_thread(
             ],
         )
         .map_err(sql_error)?;
+        tx.execute("DELETE FROM artifact WHERE thread_id=?1", [id])
+            .map_err(sql_error)?;
         // Tags end with their Thread (#222): a deleted Thread leaves no tag name behind.
         tx.execute("DELETE FROM thread_tag WHERE thread_id=?1", [id])
             .map_err(sql_error)?;

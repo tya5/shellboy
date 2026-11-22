@@ -417,6 +417,34 @@ async fn thread_create_set_fork_rewind_prune_and_delete_advance_the_clock() {
             .unwrap();
         settled(&control, &t).await;
     }
+    use shellboy::protocol::{ArtifactAddArgs, ArtifactListArgs, ArtifactUpdateArgs};
+    let file = _root.path().join("artifact-content");
+    std::fs::write(&file, "untouched").unwrap();
+    let uri = file.to_string_lossy().into_owned();
+    let artifact = command(
+        &control,
+        Command::ArtifactAdd(ArtifactAddArgs {
+            thread_id: t.clone(),
+            uri: uri.clone(),
+            title: "Draft".into(),
+            mime: None,
+        }),
+    )
+    .await
+    .unwrap();
+    let artifact_id = artifact["artifact_id"].as_str().unwrap();
+    let revised = command(
+        &control,
+        Command::ArtifactUpdate(ArtifactUpdateArgs {
+            artifact_id: artifact_id.into(),
+            uri: uri.clone(),
+            title: Some("Revised".into()),
+            mime: None,
+        }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(revised["version"]["version"], 2);
     let nodes: Vec<String> = {
         let t = t.clone();
         control
@@ -492,6 +520,52 @@ async fn thread_create_set_fork_rewind_prune_and_delete_advance_the_clock() {
     all.extend(ids(&rest));
     assert!(all.contains(&t) && all.contains(&branch), "{all:?}");
 
+    let mut copies = std::collections::BTreeSet::from([artifact_id.to_owned()]);
+    for target in [&fork, &branch] {
+        let list = command(
+            &control,
+            Command::ArtifactList(ArtifactListArgs {
+                thread_id: target.clone(),
+                cursor: None,
+                limit: 1,
+            }),
+        )
+        .await
+        .unwrap();
+        let item = &list["items"][0];
+        let id = item["artifact_id"].as_str().unwrap();
+        assert!(copies.insert(id.into()));
+        assert_eq!(item["latest"], revised["version"]);
+        assert_eq!(
+            count(
+                &control,
+                "SELECT count(*) FROM artifact_version WHERE artifact_id=?1",
+                id
+            )
+            .await,
+            2
+        );
+    }
+    command(
+        &control,
+        Command::ThreadArchive(ThreadArchiveArgs {
+            thread_ids: vec![fork.clone()],
+            descendants: false,
+        }),
+    )
+    .await
+    .unwrap();
+    let preview = command(
+        &control,
+        Command::ThreadDeletePreview(ThreadDeleteArgs {
+            thread_id: fork.clone(),
+            descendants: false,
+            preview_marker: None,
+        }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(preview["references"]["artifact_count"], 1);
     let at = quiet(&control).await;
     let pruned = command(
         &control,
@@ -520,6 +594,25 @@ async fn thread_create_set_fork_rewind_prune_and_delete_advance_the_clock() {
     .await
     .unwrap();
     advanced(&control, &at, &fork).await;
+    assert_eq!(
+        count(
+            &control,
+            "SELECT count(*) FROM artifact WHERE thread_id=?1",
+            &fork
+        )
+        .await,
+        0
+    );
+    assert_eq!(
+        count(
+            &control,
+            "SELECT count(*) FROM artifact_version WHERE artifact_id<>?1",
+            "unused"
+        )
+        .await,
+        4
+    );
+    assert_eq!(std::fs::read_to_string(file).unwrap(), "untouched");
     close(control, owner, server).await;
 }
 

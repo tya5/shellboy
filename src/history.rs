@@ -554,6 +554,7 @@ pub fn fork_thread_kind(
         params![new_thread_id,args.thread_id,branch_kind,cwd,agents_path,source.2,source.3,source.4,source.5,source.6,args.node_id,now],
     ).map_err(sql_error)?;
     overrides.apply(tx, new_thread_id).map_err(sql_error)?;
+    crate::artifacts::copy_thread(tx, &args.thread_id, new_thread_id).map_err(sql_error)?;
     tx.execute(
         "INSERT INTO thread_path(thread_id,ordinal,node_id) SELECT ?1,ordinal,node_id FROM thread_path WHERE thread_id=?2 AND ordinal<=?3 ORDER BY ordinal",
         params![new_thread_id,args.thread_id,ordinal],

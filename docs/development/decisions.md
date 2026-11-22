@@ -4631,3 +4631,6 @@ list of URI schemes, deliver to external services, or add product-specific
 adapters. New clients can introduce new names or schemes without changing Core.
 Revisit only if a concrete acceptance requirement or safe bound cannot be met
 without interpreting a value.
+## Thread artifacts and opaque external references (#316)
+
+Core owns the metadata because it is responsible for Thread deletion, archive, fork, and rewind. Store externally defined references and optional MIME as opaque strings. Core does not infer their meaning from their form; the client or convention that supplies them decides how to interpret them. Keeping a version preserves the reference, not the referenced content. Use bounded pages rather than lifetime count caps on long-lived Threads.

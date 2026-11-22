@@ -705,13 +705,16 @@ mod tests {
             ids,
             OperationId::ALL
                 .iter()
-                .filter(|id| !crate::operations::catalogue_tests::CLI_ONLY_OPERATIONS.contains(id))
+                .filter(
+                    |id| !crate::operations::catalogue_tests::CLI_ONLY_OWNER_OPERATIONS
+                        .contains(id)
+                )
                 .copied()
                 .collect()
         );
         assert_eq!(
             crate::operations::CLI_BINDINGS.len(),
-            78,
+            83,
             "attach is a CLI shorthand, not another operation"
         );
         let clients = OpKind::ALL

@@ -118,6 +118,11 @@ pub enum CliCommand {
         #[command(subcommand)]
         command: HistoryCommand,
     },
+    /// Manage versioned artifact metadata owned by a Thread.
+    Artifact {
+        #[command(subcommand)]
+        command: ArtifactCommand,
+    },
     /// Manage scheduled commands owned by a Thread.
     Schedule {
         #[command(subcommand)]
@@ -480,6 +485,57 @@ pub enum HistoryCommand {
     Search(SearchOptions),
     Relations(HistoryRelationsOptions),
 }
+#[derive(clap::Subcommand, Debug, Clone)]
+pub enum ArtifactCommand {
+    /// Add artifact metadata.
+    Add {
+        #[arg(long = "thread")]
+        thread_id: String,
+        #[arg(long)]
+        uri: String,
+        #[arg(long)]
+        title: String,
+        #[arg(long)]
+        mime: Option<String>,
+    },
+    /// Update artifact metadata.
+    Update {
+        #[arg(long = "artifact")]
+        artifact_id: String,
+        #[arg(long)]
+        uri: String,
+        #[arg(long)]
+        title: Option<String>,
+        #[arg(long)]
+        mime: Option<String>,
+    },
+    /// List artifact metadata.
+    List {
+        #[arg(long = "thread")]
+        thread_id: String,
+        #[arg(long)]
+        cursor: Option<String>,
+        #[arg(long, default_value_t=wire::ARTIFACT_PAGE_LIMIT)]
+        limit: u32,
+    },
+    /// Get artifact metadata.
+    Get {
+        #[arg(long = "artifact")]
+        artifact_id: String,
+        #[arg(id="artifact_version", long="version", conflicts_with_all=["limit", "cursor"])]
+        version: Option<i64>,
+        #[arg(long)]
+        cursor: Option<String>,
+        #[arg(long)]
+        limit: Option<u32>,
+    },
+    /// Remove artifact metadata.
+    Remove {
+        #[arg(long = "artifact")]
+        artifact_id: String,
+    },
+}
+
 #[derive(Debug, Clone, Subcommand)]
 pub enum ScheduleCommand {
     /// Add a scheduled shell command.
@@ -1860,6 +1916,53 @@ impl Cli {
                     cursor: a.cursor,
                 }),
             },
+            CliCommand::Artifact { command } => match command {
+                ArtifactCommand::Add {
+                    thread_id,
+                    uri,
+                    title,
+                    mime,
+                } => C::ArtifactAdd(wire::ArtifactAddArgs {
+                    thread_id,
+                    uri: artifact_uri_from_cli(uri, startup_cwd)?,
+                    title,
+                    mime,
+                }),
+                ArtifactCommand::Update {
+                    artifact_id,
+                    uri,
+                    title,
+                    mime,
+                } => C::ArtifactUpdate(wire::ArtifactUpdateArgs {
+                    artifact_id,
+                    uri: artifact_uri_from_cli(uri, startup_cwd)?,
+                    title,
+                    mime,
+                }),
+                ArtifactCommand::List {
+                    thread_id,
+                    cursor,
+                    limit,
+                } => C::ArtifactList(wire::ArtifactListArgs {
+                    thread_id,
+                    cursor,
+                    limit,
+                }),
+                ArtifactCommand::Get {
+                    artifact_id,
+                    version,
+                    cursor,
+                    limit,
+                } => C::ArtifactGet(wire::ArtifactGetArgs {
+                    artifact_id,
+                    version,
+                    cursor,
+                    limit,
+                }),
+                ArtifactCommand::Remove { artifact_id } => {
+                    C::ArtifactRemove(wire::ArtifactRemoveArgs { artifact_id })
+                }
+            },
             CliCommand::Schedule { command } => match command {
                 ScheduleCommand::Add(a) => C::ScheduleAdd(wire::ScheduleAddArgs {
                     thread_id: a.thread_id,
@@ -2117,4 +2220,23 @@ fn absolute_attachment(path: PathBuf, cwd: &Path) -> Result<String, ApiError> {
         ));
     }
     path_string(normalized)
+}
+
+fn artifact_uri_from_cli(uri: String, cwd: &Path) -> Result<String, ApiError> {
+    let path = Path::new(&uri);
+    let has_scheme = uri.split_once(':').is_some_and(|(name, _)| {
+        let mut bytes = name.bytes();
+        bytes.next().is_some_and(|byte| byte.is_ascii_alphabetic())
+            && bytes.all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'-' | b'.'))
+    });
+    // A Windows drive prefix also matches the scheme scan; both stay verbatim.
+    if uri.is_empty() || path.is_absolute() || has_scheme {
+        return Ok(uri);
+    }
+    cwd.join(path).into_os_string().into_string().map_err(|_| {
+        ApiError::new(
+            ErrorCode::InvalidArgument,
+            "The absolute artifact path is not valid UTF-8",
+        )
+    })
 }
