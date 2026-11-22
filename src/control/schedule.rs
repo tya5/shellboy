@@ -677,6 +677,10 @@ mod tests {
                 CREATE TEMP TRIGGER deletion_after_receipt AFTER UPDATE OF deleted_at ON main.thread WHEN NEW.id='target' AND NEW.deleted_at IS NOT NULL BEGIN SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM main.operation_receipt WHERE operation_id LIKE '%:delete' AND state='pending') THEN RAISE(ABORT,'deletion needs pending receipt') END; END;")?;
             Ok(())
         }).await.unwrap();
+        control.start().await.unwrap();
+        let (sender, requests) = tokio::sync::mpsc::channel(4);
+        let server = crate::ipc::LocalServer::bind(&owner, sender).await.unwrap();
+        let dispatcher = tokio::spawn(control.clone().serve(requests));
         let request = |id, command| Request::new(format!("{}:{id}", owner.instance_id), command);
         let add = control
             .request(request(
@@ -733,6 +737,8 @@ mod tests {
             .await
             .unwrap();
         control.shutdown().await.unwrap();
+        server.shutdown().await.unwrap();
+        dispatcher.await.unwrap();
         owner.shutdown().await.unwrap();
     }
 
