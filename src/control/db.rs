@@ -1286,18 +1286,8 @@ impl Store {
                     self.usage_context,
                     self.usage_diagnostics.as_ref(),
                 )?);
-                let compact = crate::readback::compactions(
-                    tx,
-                    &details.thread_id,
-                    &crate::protocol::CompactListArgs {
-                        thread_id: Some(details.thread_id.clone()),
-                        since: None,
-                        until: None,
-                        limit: 1,
-                    },
-                )?;
                 details.last_compaction =
-                    compact["items"].as_array().and_then(|a| a.first()).cloned();
+                    Some(crate::readback::last_compaction(tx, &details.thread_id)?);
                 MutationResult::value(details)
             }
             Command::CompactList(args) => {

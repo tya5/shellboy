@@ -415,7 +415,7 @@ async fn terminal_public_case(case: &str) {
         }
         let status_item = page["items"].as_array().unwrap().iter().find(|v| v["id"] == item["attempt_id"]).unwrap();
         assert_eq!(status_item["compaction_outcome"], *fact);
-        assert_eq!(details["last_compaction"]["compaction_outcome"], *fact);
+        assert_eq!(details["last_compaction"]["bounded_candidate"]["compaction_outcome"], *fact);
         let outcomes: Vec<Value> = log.lines().filter_map(|s| serde_json::from_str::<Value>(s).ok()).filter(|v| v["event"] == "compaction_outcome").collect();
         assert_eq!(outcomes.len(), 1);
         assert_eq!(outcomes[0]["compaction_outcome"], *fact);
@@ -551,7 +551,10 @@ async fn all_canonical_guard_causes_share_one_public_projection_without_requests
             .unwrap();
         assert_eq!(listed["compaction_outcome"], *fact);
         // Equal timestamps are ordered by the fixed attempt IDs, newest first.
-        assert_eq!(details["last_compaction"]["compaction_outcome"], *fact);
+        assert_eq!(
+            details["last_compaction"]["bounded_candidate"]["compaction_outcome"],
+            *fact
+        );
         assert!(fact.to_string().len() <= 1024);
     }
     let scope = target.clone();

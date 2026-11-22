@@ -449,8 +449,13 @@ at that owner boundary, never silently overwritten.
 An owned size/work limit makes only last_compaction unknown with an explicit
 limited-field witness; current Thread lifecycle/configuration still updates.
 It is not evidence that no compaction exists, nor a successful stub. Other SQL
-failures retain their actual error path. CLI full readback does not install this
-display envelope. Tests must prove small-result parity, owned interruption and
+failures retain their actual error path. `thread.get.last_compaction` uses the
+same indexed display prefixes. Its `bounded_candidate` is the latest summary
+or compaction observation found within the bounded recent window;
+`coverage.latest_complete=false` means an older-starting operation may have
+completed later. A null candidate does not certify that no compaction happened.
+Use `compact list` for exact retained history and post-adoption input linkage;
+it does not use this display envelope. Tests must prove small-result parity, owned interruption and
 oversize behavior, unchanged stored source, restored limits/callback and a usable
 same transaction after either limit. Explain/index and broader G9 checks remain
 separate from this envelope. No table, worker, queue, timer or public API is added.

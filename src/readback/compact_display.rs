@@ -15,6 +15,15 @@ pub(crate) fn read(
     }
 }
 
+pub(crate) fn last_compaction(db: &Connection, thread: &str) -> Result<Value, ApiError> {
+    let Some(raw) = read(db, thread)? else {
+        return Ok(json!({"bounded_candidate":null,"coverage":{"latest_complete":false}}));
+    };
+    let page = compact::prepare(raw)?;
+    let candidate = page["items"].as_array().and_then(|items| items.first());
+    Ok(json!({"bounded_candidate":candidate,"coverage":page["coverage"]}))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

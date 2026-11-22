@@ -427,6 +427,9 @@ After a failure, inspect Run/Turn context in F8. `/compact-max` reduces safe
 context without a summary API; `/retry` separately resends and may charge again.
 `/restore` can recover omitted text. Core no longer estimates tokens or uses a
 75k threshold. Last successful measured usage and its time are in thread get.
+`thread get` reports the latest compaction found within its bounded recent
+window. `last_compaction.coverage.latest_complete=false` means an older-starting
+operation may have completed later. Use `compact list` for exact retained history.
 
 Before changing a valuable range, use `shellboy compact --dry-run --thread THREAD`
 (or add `--dry-run` to summary/spill/trim/omit/maximal). This current-main feature

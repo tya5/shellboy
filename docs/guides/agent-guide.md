@@ -278,7 +278,10 @@ Summary groups are assigned by the first summary-request timestamp; unavailable
 values remain unknown, and summary records may require following `next_cursor`.
 This reports provider usage, not cost.
 Use `compact list --thread THREAD_ID --limit 20` for retained compaction facts
-and `thread get` for the latest observation. Failed/no-target records do not prove
+and `thread get` for the latest observation found in the bounded recent window.
+`last_compaction.coverage.latest_complete=false` means an older-starting
+operation may have completed later; the bounded candidate is not certified.
+Failed/no-target records do not prove
 input changed; missing legacy metrics/collected history stay unknown.
 To tune compaction cost, observe -> change a setting -> re-measure: each adopted
 summary in `compact list` carries `post_compaction_input_tokens` (provider-

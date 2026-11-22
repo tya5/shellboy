@@ -138,7 +138,7 @@ pub(in crate::readback) fn read_display(
     // Keep bounded display records separate rather than inventing associations.
     // Expired receipts can hide a later restore even when every prefix fits.
     let display_latest_complete = Some(false);
-    let post_input = post_inputs(db, thread, &replacements, 1)?;
+    // Exact post-adoption linkage can scan older Turns and attempts.
     Ok(RawCompactions {
         thread: thread.into(),
         limit: 1,
@@ -149,7 +149,7 @@ pub(in crate::readback) fn read_display(
         automatic,
         replacements,
         covered_spills: Default::default(),
-        post_input,
+        post_input: Default::default(),
         display_latest_complete,
     })
 }
@@ -189,6 +189,38 @@ mod tests {
         }
         db.execute_batch("COMMIT").unwrap();
     }
+    #[test]
+    fn bounded_compaction_prefix_seeks_use_native_order() {
+        let db = fixture();
+        let sql = format!(
+            "EXPLAIN QUERY PLAN {} SELECT * FROM operation_receipt CROSS JOIN model_attempt CROSS JOIN thread_replacement",
+            prefix()
+        );
+        let plan = db
+            .prepare(&sql)
+            .unwrap()
+            .query_map(["t"], |row| row.get::<_, String>(3))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        for index in [
+            "compact_operation_thread",
+            "turns_by_thread",
+            "automatic_compaction_turn",
+            "sqlite_autoindex_thread_replacement_1",
+        ] {
+            assert!(
+                plan.iter()
+                    .any(|step| step.starts_with("SEARCH") && step.contains(index)),
+                "missing seek through {index}: {plan:?}"
+            );
+        }
+        assert!(
+            !plan.iter().any(|step| step.contains("TEMP B-TREE")),
+            "prefix must not sort an unbounded input: {plan:?}"
+        );
+    }
+
     fn costs(db: &Connection) -> Vec<(i32, i32)> {
         [receipt_sql(), automatic_sql(), replacement_sql()]
             .iter()
@@ -233,8 +265,7 @@ mod tests {
                 "{a:?}->{b:?}"
             );
         }
-        let raw = read_display(&db, "t").unwrap();
-        let v = prepare(raw).unwrap();
+        let v = crate::readback::last_compaction(&db, "t").unwrap();
         assert_eq!(v["coverage"]["latest_complete"], false);
         let exact = crate::readback::compactions(
             &db,
@@ -248,7 +279,11 @@ mod tests {
         )
         .unwrap();
         assert_eq!(exact["items"][0]["event_id"], "operation:op000000");
-        assert_ne!(v["items"][0]["event_id"], exact["items"][0]["event_id"]);
+        assert!(v["bounded_candidate"]["event_id"].is_string());
+        assert_ne!(
+            v["bounded_candidate"]["event_id"],
+            exact["items"][0]["event_id"]
+        );
         eprintln!("bounded compaction actual per-query VM/fullscan256->2560: {a:?}->{b:?}");
     }
 }
