@@ -181,7 +181,7 @@ async fn cli_wait_retries_only_definite_admission_refusals_until_deadline() {
             attempts += 1;
             std::future::ready(Ok(Response::failure(
                 "fixture:wait",
-                ApiError::new(code.clone(), "not a definite admission refusal")
+                ApiError::new(code, "not a definite admission refusal")
                     .details(json!({"phase": "admission", "request_may_have_been_applied": true})),
             )))
         })
