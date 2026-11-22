@@ -62,7 +62,7 @@ Shellboy · 調査メモ                            接続 / モデル
 | Reasoning | 推論テキストの存在と分量、折りたたみ | 返却された可視テキストだけ展開してMarkdown。元の位置へ対応 |
 | Tool call | tool名、コマンド、foreground/background、受付/実行状態。call単位 | 引数をfieldとして表示、callとresultの対応、executionへの参照。引数JSONを回答文へ混ぜない |
 | Tool result / shell | 成否/終了理由、exit code、不完全出力、経過、短いplain抜粋 | stdout/stderr原文page、raw量/保存状態/encoding、stdin/write量/EOF、継続cursor。全出力への入口を表示 |
-| 子Run・途中報告 | 子の目的、Turn回答とRun寿命、必要な進捗/失敗 | 親子/所有参照、回答原文、実行一覧、retry/stop、報告の送受信先 |
+| 委譲の返事・途中報告 | 返事を求めた依頼への明示的な返事、または通常の進捗メッセージ | 対応する依頼と返事の原文、送受信先 |
 | 通常のcontext event | 「接続変更」「指示更新」「Turn開始」等の人間向けラベルと重要差分 | 変更前後、発生時刻/操作者、対象、元event/node。hash・全UUID・timezoneを毎行に出さない |
 | 失敗・復旧待ち | 段階・理由・対象、保留中であること、次に取れる操作 | provider/HTTP/code/hint、元operationと対象、再試行の影響。正本DB障害は一般API失敗と分ける |
 | Summary | 要約ラベル、基本Markdown本文、対象範囲/出典件数 | 原文出典、前後、置換経路、圧縮の受付/採用/失敗 |

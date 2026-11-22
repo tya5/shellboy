@@ -30,13 +30,13 @@ Immutable historical delivery and current Run/Turn activity remain separate.
 | ツール処理中 | 現Turnの保存済みtool groupがrunning、モデル要求のinflightではない | 同上 |
 | 処理中 | 非終端Turnで、上の内訳を確定できない | 同上 |
 | 待機中 | Turnのwaiting | `●`の低速pulse。待機対象は推測しない |
-| 回答済み背景処理中 | Turn completed・Run live・所有shell又は子Runが非終端 | `◌`の低速pulse |
+| 回答済み背景処理中 | Turn completed・Run live・そのRunが所有するshellが非終端 | `◌`の低速pulse |
 | 実行継続中 | Run liveだがTurnは終端、上の背景資源を確認できない | `◌`の低速pulse |
 | 停止処理中 | Run stopping | `◌`の低速pulse |
 | 復旧待ち／異常終了／中断済み／完了 | 保存済みの対応状態 | 静止。注意状態は色と文言でも区別 |
 | 入力できます | 実行中のRun/Turnがない | 静止 |
 
-Run停止・異常・Turn復旧待ちを受信表示より優先する。モデル要求とbackground shellが並行する場合、Turnの主段階はモデル側、背景作業の詳細は`/status`で確認する。「思考中」「添付を解析中」「子の完了待ち」「圧縮中」等の細分化は今回行わない。Streamのreasoning flagから内部の思考内容や進捗を推定せず、受信した事実だけを表す。受信していないことは、providerがまだ生成していない証明ではない。
+Run停止・異常・Turn復旧待ちを受信表示より優先する。モデル要求とbackground shellが並行する場合、Turnの主段階はモデル側、背景作業の詳細は`/status`で確認する。「思考中」「添付を解析中」「委譲先からの返事待ち」「圧縮中」等の細分化は今回行わない。Streamのreasoning flagから内部の思考内容や進捗を推定せず、受信した事実だけを表す。受信していないことは、providerがまだ生成していない証明ではない。
 
 ## リアクティブな更新
 

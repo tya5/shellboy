@@ -6,7 +6,7 @@ waitは観測operationで、解除・timeout・接続切断で対象を止めな
 
 `shell_output` の再観測通知はraw chunkとsaved_sequenceのcommit成功後に発行する。shell終了や他のCLI操作の完了を待たず、保存済みbyteへ到達できる。待機用の既存Notifyだけを使い、chunk単位のUI Changed eventや新しいpollerは増やさない。保存失敗時は成功通知を出さず、既存の保存障害処理へ進む。
 
-循環判定はRunだけを頂点にしない。同Runの別shell待機を正しく扱うため、Run/Turn/shellを別resource nodeとし、所有辺Run→子Run、Run→Turn、Turn→shell、Run→shell、待機辺caller shell→対象resourceを合成する。自己Run/Turn/shellは明示拒否し、祖先・兄弟の合成循環を到達性で拒否する。複数any条件の未成立対象へ全て辺を置く保守的な規則を採用する。実行中の所有親を付替える操作はなく、新規所有は新Runだけなので、登録間の所有辺追加から新しい循環は生まれない。
+通常の `wait` は観測であり、Run間の所有関係や待機グラフによる循環判定は行わない。実行中のforeground shellから、そのshellを待っている自身のTurnやRunの終了を要求する場合は、既存の自己待機保護が働く。別Threadへの委譲では、返事を求めるメッセージを送り、受理後にTurnを終える。
 
 人間追加指示・途中報告のreceiptだけをinterruptedの原因にし、stdoutや指定外の完了eventは単に再観測のきっかけにする。通常完了通知はforeground shellをbackgroundへ変えない。待機辺はRAIIで一度だけ除去し、observer futureの取消しでも残さない。
 
@@ -18,9 +18,9 @@ runtime操作は先にoperation_receiptのpending意図をcommitする。OS側st
 
 次回起動は旧Run/Turn/shellを終端化する前に中断snapshotを保存し、wait条件全文を各影響Threadの `interrupted_wait` 履歴nodeへ移す。これはRun/Turnを開始しないmetadataで、role/item/outputを持たずモデルへの通常履歴replayへ入れない。`history get` で元条件をページ取得でき、選択経路の通常履歴として明示Thread削除まで保持する。再開contextには各種件数と最大64件、waitは最大4条件のpreviewと元node参照を入れる。64件を超すwaitも全件履歴nodeに残り、history list/getで到達できる。旧版のpending操作から要求種別やwait条件を復元できない場合はunknownと明示し、推測した条件を作らない。
 
-中断contextイベント自体では自動Run/Turnを作らず、人間の明示再開が新Run/Turnを作った安全境界で取り込む。旧receiptのRun/Turn割当は変更せず、未反映参照、旧直属子の終了状態・回答参照、シェルの結果未確認状態を渡す。古いPIDの検査・再停止、副作用の再実行はしない。
+中断contextイベント自体では自動Run/Turnを作らず、人間の明示再開が新Run/Turnを作った安全境界で取り込む。旧receiptのRun/Turn割当は変更せず、未反映参照、シェルの結果未確認状態を渡す。古いPIDの検査・再停止、副作用の再実行はしない。
 
-中断context自体も `interruption_context` nodeとして保持し、まだ再開していない子Threadの情報へ親からhistory list/getで到達できる。Run/Turn/shell/子/未反映/旧版不明操作の全snapshot refsは `interruption_details` nodeへ32件または約64KiBごとのchunkで保持する。inline一覧を64件に制限しても原文を破棄しない。detailの参照一覧も最初64chunk＋総数に制限し、残りはThread履歴からkindとsectionで取得する。単一recordがchunk目安を超える場合は単独nodeに保存し、公開HistoryGetの64KiB pagingで読む。waitの全条件は個別 `interrupted_wait` nodeが正本である。
+中断context自体も `interruption_context` nodeとして保持し、対象Threadのhistory list/getで参照できる。Run/Turn/shell/未反映/旧版不明操作の全snapshot refsは `interruption_details` nodeへ32件または約64KiBごとのchunkで保持する。inline一覧を64件に制限しても原文を破棄しない。detailの参照一覧も最初64chunk＋総数に制限し、残りはThread履歴からkindとsectionで取得する。単一recordがchunk目安を超える場合は単独nodeに保存し、公開HistoryGetの64KiB pagingで読む。waitの全条件は個別 `interrupted_wait` nodeが正本である。
 
 ## C6: モデルを止めている明示waitの保存
 

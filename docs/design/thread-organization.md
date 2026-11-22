@@ -1,6 +1,8 @@
 # Thread Organization: Re-parenting, Archive, Tags, Pin (Study)
 
-The Run-to-Run ownership analysis below is historical. The [independent Runs revision](control.md#adopted-revision-independent-runs-276-post-v0110) supersedes it; Thread ancestry is organizational only.
+This study records the design at issue #222. All discussion of Run-to-Run
+ownership, inherited execution authority, lifecycle notices, and cascading Run
+stops describes the pre-#276 model, not current behavior. The [independent Runs revision](control.md#adopted-revision-independent-runs-276-post-v0110) supersedes it; Thread ancestry is organizational only.
 
 Status: **study; stage 1 (archive, migration 32), stage 2 (re-parent, no schema
 change) adopted and implemented; stage 3 (tags, a cwd filter and a cwd listing, migration 34) implemented**
@@ -45,7 +47,7 @@ Completed); no surveyed product offers arbitrary re-parenting.
 - Order (user decision): **Stage 1 archive**, Stage 2 re-parent, Stage 3 tags and cwd grouping.
   **User decision 2026-11-07: no pin.** Ownership transfer is not recommended.
 
-## 1. What `parent_id` does today
+## 1. What `parent_id` did at the time of the study
 
 | Use | Where | Read when | Effect if parent becomes mutable |
 |---|---|---|---|
@@ -77,18 +79,10 @@ Uses of **`owner_run_id`** (not `parent_id`), unchanged by re-parenting:
 - model wait cycle check walks the owner chain (`src/control/wait.rs:375`);
 - ownership cycles are rejected by triggers (`migrations/0001_initial.sql:57-70`).
 
-**Answer to issue point 2.** Re-parenting can and should leave live Run ownership
-untouched. Ownership decides notices and cascade, not permission: the Run that owns a live subordinate Run keeps
-recovery and child-end notices (and its stop cascade) until that Run ends; the new parent gains
-ownership only of Runs it starts afterwards. "Moving a delegation mid-flight" is
-then: re-parent, let the current Run finish (or stop it as its owner/human), and
-the new parent's next send owns the next Run. Transferring `owner_run_id` of a
-live Run is not recommended: it would have to move owned shells' supervision,
-re-evaluate the old owner's completion and pending waits, and re-check the
-owner-cycle triggers, for a case the sequence above already covers.
-
-Documentation follow-up (any stage 2): the delegation guide no longer restricts retry or stop (#256); it says that
-notices follow the *owning Run*, not `parent_id`.
+**Historical answer to issue point 2 (superseded by #276).** The proposal kept
+existing execution ownership when moving a Thread. The current model has no
+Run-to-Run ownership to preserve or transfer. Re-parenting alters organizational
+ancestry only; explicit replies use the sender on the original receipt.
 
 ## 2. Restrictions: needed for safety vs removable (issue point 6)
 
@@ -417,12 +411,9 @@ Follows §3 with these concrete choices (decision D-222-2).
 - Effects: `parent_thread_id` and `revision` change; `updated_at` does not. A
   `thread_parent` context entry records `{before:{parent_id}, after:{parent_id}}` and is shown
   like a settings change (same glyph, no new one). Inherited settings are not copied.
-- Live work: nothing is touched. `run.owner_run_id`, shells, waits and pending replies are
-  unchanged; replies follow the receipt's recorded sender, and wait cycles follow the owner
-  chain, neither reads `parent_id`. The result's `parent_change` reports the previous parent
-  and the Thread's live Run with its owner so the caller sees who still controls it. The new
-  parent may send to the existing Run while its recorded owner remains unchanged;
-  its later send then owns the next Run. The old owner keeps the notices and the stop cascade (any caller may stop or retry a Run).
+- Live work (current, #276): re-parenting does not change Runs, shells, waits,
+  or pending replies. A later send does not create execution ownership; replies
+  follow the sender on the original receipt. Stopping a Run stops its own shells.
 - Change hints: `changed_threads` is the moved Thread, the old parent and the new parent, in
   that order (deduplicated), so lineage caches and `events.wait` clients refresh both sides.
 - Bounds: the walk (1,024 steps) is the only loop; one UPDATE and one context row per call;
@@ -479,7 +470,7 @@ belongs to #253, so this is `0034_thread_tags`.
 
 - **Hidden work**: an archived Thread with a live Run is hidden from the list;
   mitigated by bulk skip, `status`/`watch`, and auto-unarchive on new Runs.
-- **Misread authority** after a move: callers may mistake a send to the existing Run for an ownership transfer. Mitigated by returning `owner_run_id` from `thread set` and by the guide wording.
+- **Misread authority** after a move: a send does not acquire ownership of the recipient Thread or Run. Use the exact Run ID when inspecting or stopping work.
 - **Lineage cache staleness** in the TUI if the old parent is not reported as
   changed; covered by reporting both parents.
 - **Deep trees** from moves exceed reader depth bounds (8) more often; readers

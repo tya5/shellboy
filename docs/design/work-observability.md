@@ -28,7 +28,7 @@ TUIでも同じstatus結果を構造化して表示し、対象IDから既存get
 
 管理結果の参照・再取得は発行世代を持ち、新しい要求の後で古い応答が画面を置き換えない。statusには対応receiptがないので、観測要求のoperation IDを受付参照先として表示しない。shell内部operation IDもexecution UUIDであり、owner receiptへのリンクに流用しない。
 
-匿名fixtureで親子RunとThreadの違い、background shell、未割当message、attemptモデル、終端/失敗、時刻・状態・所属filter、ページ継続と失効、依頼から回答・shellへの実IDリンクを検証する。status照会がDBを変更しないこと、秘密情報を返さないことも確認する。CLI helpの例と次操作を解析・実行検証し、TUI表示と詳細導線をテストする。標準チェック、release実行での操作確認を完了してからローカル実体へ反映する。既定データと稼働中ownerには変更を加えない。
+匿名fixtureでThreadの親子関係と独立したRunの違い、background shell、未割当message、attemptモデル、終端/失敗、時刻・状態・所属filter、ページ継続と失効、依頼から回答・shellへの実IDリンクを検証する。status照会がDBを変更しないこと、秘密情報を返さないことも確認する。CLI helpの例と次操作を解析・実行検証し、TUI表示と詳細導線をテストする。標準チェック、release実行での操作確認を完了してからローカル実体へ反映する。既定データと稼働中ownerには変更を加えない。
 
 ## P10 / R3-7: 作業一覧の弱ページングと投影責務
 

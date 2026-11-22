@@ -97,9 +97,9 @@ Use encoding_rs and the existing encoding resolver. Keep separate stream decoder
 
 ## D: owned live work and accurate output activity
 
-Follow-up #172 bounds the physical candidate work before sorting: at most 128
-owned shells and 128 owned subordinate Runs enter the merge, and activity counts use
-capped indexed reads. At the cap, counts and overflow are lower bounds, displayed
+The live-work view samples at most 128 active shells owned by the selected Run
+before sorting, and merges them with saved pending waits. It does not include
+executions from delegated Threads (#276). Shell counts use capped indexed reads. At the cap, counts and overflow are lower bounds, displayed
 as "at least N" or "N件以上". Rows remain sorted within the sampled candidates,
 but are not promised to be globally oldest and the footer omits its oldest-time
 claim. Below the cap, existing exact counts and oldest-row behavior are retained.
@@ -153,7 +153,7 @@ Validate B+C stable identities across duplicate call IDs in different groups, no
 
 D tests count output DB reads0 while closed, <=2/sec and<=4KiB while open, cancellation/stale reply on close/end/switch, correct notification attribution among hidden/displayed shells, elapsed persistence across Turn completion and switching, child/wait/overflow rows. Run sustained output and compare render/input latency with baseline; do not claim source-byte/queue limits alone prove responsiveness.
 
-E/F tests assert one changed row queries only its IDs, bounded batch coalescing, additions/deletions/filter changes, reordered replies, stable tree/selection/page overlays, state-category ordering, session unread retention, confirmed action target CAS, narrow row reduction, queue/Revisit hints, unowned descendant Runs, stopped/deleted/depth/cycle/overflow cases, and update on newly introduced descendants. Local clock ticks cause no queries/reorders.
+E/F tests assert one changed row queries only its IDs, bounded batch coalescing, additions/deletions/filter changes, reordered replies, stable tree/selection/page overlays, state-category ordering, session unread retention, confirmed action target CAS, narrow row reduction, queue/Revisit hints, independent Runs in descendant Threads, stopped/deleted/depth/cycle/overflow cases, and update on newly introduced descendants. Local clock ticks cause no queries/reorders.
 
 Before each main admission: meaningful focused tests, standard check, secrecy scan as appropriate, updated status/acceptance/decisions/guides, then all3OS main CI. Actual PTY captures80/wide, palettes/fallback/NO_COLOR, long conversation and sustained output accompany applicable stages. Physical Windows terminal UX is separate from native Windows CI and must be recorded unverified unless observed. Update English TUI/Agent guides and Japanese User Guide for each delivered stage, plus help/quoted-label tests. Do not migrate all product language under this issue.
 
@@ -1626,8 +1626,9 @@ the selected command remains reachable through those bounded source pages.
 Extend #83's minimum without changing Core events, protocol, schema or canonical
 history. The existing admitted frontend reader resolves at most 128 event-node
 IDs in one indexed metadata statement. It follows node.event_id to the saved
-event, execution to the unique tool_call.operation_id and matching shell/group
-Turn, and subordinate Run to its saved Thread. Duplicate call IDs or similar commands
+event and an execution to the unique tool_call.operation_id and matching
+shell/group Turn. Any saved Run reference identifies its own Thread, not an
+ownership edge. Duplicate call IDs or similar commands
 are never identity evidence. Select bounded command/title/identity fields only;
 never return provider bodies or shell output for display. Missing, deleted and
 expired sources remain explicit. Current Thread titles say "current name";
