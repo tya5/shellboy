@@ -2166,7 +2166,7 @@ Record the later exact source and full standard result separately.
 
 ## D2: 親への停止通知をDriverなしの経路にも揃える
 
-復旧待ちの子RunはliveのままDriverが終了できるため、後続の停止は通常のowner nudgeを通らない。表示中3件の依存追跡だけでは、範囲外の子を停止した際に親の件数が更新されない。既存stop target取得にlive/stoppingの親Threadを含め、Driverなしのdrainがcommitした後だけChangedを送る。親モデルは起動せず、失敗時は既存の子Errorを維持する。新しい照会・状態・通知型は増やさない。再確認条件は停止処理の所有境界またはDriver終了時の親通知責任が変わった場合。
+（旧実装の記録。Run間の所有・停止通知は #276 で廃止。）復旧待ちの子RunはliveのままDriverが終了できるため、後続の停止は通常のowner nudgeを通らない。表示中3件の依存追跡だけでは、範囲外の子を停止した際に親の件数が更新されない。既存stop target取得にlive/stoppingの親Threadを含め、Driverなしのdrainがcommitした後だけChangedを送る。親モデルは起動せず、失敗時は既存の子Errorを維持する。新しい照会・状態・通知型は増やさない。再確認条件は停止処理の所有境界またはDriver終了時の親通知責任が変わった場合。
 
 D2's third standard run passed888 library tests but stopped at one integration
 assertion expecting answered-background progress to request periodic polling.
