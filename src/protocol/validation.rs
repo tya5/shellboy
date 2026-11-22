@@ -846,6 +846,11 @@ impl Command {
             Self::ScheduleEnable(a) | Self::ScheduleDisable(a) | Self::ScheduleRemove(a) => {
                 nonempty(&a.schedule_id, "schedule_id")
             }
+            Self::ServiceAdd(a) => optional_nonempty(a.thread_id.as_deref(), "thread_id"),
+            Self::ServiceList(a) => optional_nonempty(a.thread_id.as_deref(), "thread_id"),
+            Self::ServiceStart(a) | Self::ServiceStop(a) | Self::ServiceRemove(a) => {
+                nonempty(&a.service_id, "service_id")
+            }
             Self::ScheduleAdd(a) => optional_nonempty(a.thread_id.as_deref(), "thread_id"),
             Self::ScheduleList(a) => optional_nonempty(a.thread_id.as_deref(), "thread_id"),
             Self::ThreadTags(a) => a.validate(),

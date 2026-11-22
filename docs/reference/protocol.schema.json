@@ -538,6 +538,86 @@
         {
           "properties": {
             "args": {
+              "$ref": "#/definitions/ServiceAddArgs"
+            },
+            "command": {
+              "const": "service.add",
+              "type": "string"
+            }
+          },
+          "required": [
+            "command",
+            "args"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "args": {
+              "$ref": "#/definitions/ThreadTarget"
+            },
+            "command": {
+              "const": "service.list",
+              "type": "string"
+            }
+          },
+          "required": [
+            "command",
+            "args"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "args": {
+              "$ref": "#/definitions/ServiceTarget"
+            },
+            "command": {
+              "const": "service.start",
+              "type": "string"
+            }
+          },
+          "required": [
+            "command",
+            "args"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "args": {
+              "$ref": "#/definitions/ServiceTarget"
+            },
+            "command": {
+              "const": "service.stop",
+              "type": "string"
+            }
+          },
+          "required": [
+            "command",
+            "args"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "args": {
+              "$ref": "#/definitions/ServiceTarget"
+            },
+            "command": {
+              "const": "service.remove",
+              "type": "string"
+            }
+          },
+          "required": [
+            "command",
+            "args"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "args": {
               "$ref": "#/definitions/ScheduleAddArgs"
             },
             "command": {
@@ -5692,6 +5772,151 @@
           "additionalProperties": false,
           "properties": {
             "args": {
+              "$ref": "#/definitions/ServiceAddArgs"
+            },
+            "command": {
+              "const": "service.add",
+              "type": "string"
+            },
+            "operation_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "origin": true,
+            "protocol_version": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "args",
+            "command",
+            "operation_id",
+            "protocol_version"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "args": {
+              "$ref": "#/definitions/ThreadTarget"
+            },
+            "command": {
+              "const": "service.list",
+              "type": "string"
+            },
+            "operation_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "origin": true,
+            "protocol_version": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "args",
+            "command",
+            "operation_id",
+            "protocol_version"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "args": {
+              "$ref": "#/definitions/ServiceTarget"
+            },
+            "command": {
+              "const": "service.start",
+              "type": "string"
+            },
+            "operation_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "origin": true,
+            "protocol_version": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "args",
+            "command",
+            "operation_id",
+            "protocol_version"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "args": {
+              "$ref": "#/definitions/ServiceTarget"
+            },
+            "command": {
+              "const": "service.stop",
+              "type": "string"
+            },
+            "operation_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "origin": true,
+            "protocol_version": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "args",
+            "command",
+            "operation_id",
+            "protocol_version"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "args": {
+              "$ref": "#/definitions/ServiceTarget"
+            },
+            "command": {
+              "const": "service.remove",
+              "type": "string"
+            },
+            "operation_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "origin": true,
+            "protocol_version": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "args",
+            "command",
+            "operation_id",
+            "protocol_version"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "args": {
               "$ref": "#/definitions/ScheduleAddArgs"
             },
             "command": {
@@ -7574,6 +7799,48 @@
       ],
       "type": "string"
     },
+    "ServiceAddArgs": {
+      "additionalProperties": false,
+      "properties": {
+        "command": {
+          "type": "string"
+        },
+        "cwd": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "thread_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "command"
+      ],
+      "type": "object"
+    },
+    "ServiceTarget": {
+      "additionalProperties": false,
+      "properties": {
+        "service_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "service_id"
+      ],
+      "type": "object"
+    },
     "ShellDetails": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
@@ -7922,6 +8189,14 @@
         "execution_id": {
           "type": "string"
         },
+        "oldest_sequence": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "output_complete": {
           "type": "boolean"
         },
@@ -7929,6 +8204,22 @@
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
+        },
+        "stderr_start_offset": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "stdout_start_offset": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "text": {
           "type": "string"
@@ -11958,6 +12249,14 @@
         "execution_id": {
           "type": "string"
         },
+        "oldest_sequence": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "output_complete": {
           "type": "boolean"
         },
@@ -11965,6 +12264,22 @@
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
+        },
+        "stderr_start_offset": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "stdout_start_offset": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "text": {
           "type": "string"

@@ -12,6 +12,7 @@ pub(super) fn encode_result<T: serde::Serialize>(
 #[derive(Clone, Copy)]
 pub(super) enum ShellStopIntent {
     Explicit,
+    OwnerShutdown,
     ScheduleTimeout,
     ScheduleDeletion,
     ThreadDeletion,
@@ -23,12 +24,23 @@ pub(super) fn record_shell_stop(
     intent: ShellStopIntent,
 ) -> rusqlite::Result<bool> {
     let reason = match intent {
+        ShellStopIntent::OwnerShutdown => "owner_shutdown",
         ShellStopIntent::Explicit => "explicit_stop",
         ShellStopIntent::ScheduleTimeout => "schedule_timeout",
         ShellStopIntent::ScheduleDeletion => "schedule_deleted",
         ShellStopIntent::ThreadDeletion => "thread_deleted",
     };
     let saved = tx.execute("UPDATE shell_execution SET state='stopping',end_reason=?2 WHERE id=?1 AND state IN ('starting','running')",rusqlite::params![execution,reason])?;
+    if saved != 0 && matches!(intent, ShellStopIntent::Explicit) {
+        let definition: Option<String> = tx.query_row(
+            "SELECT schedule_id FROM shell_execution WHERE id=?1",
+            [execution],
+            |r| r.get(0),
+        )?;
+        if let Some(id) = definition {
+            super::schedule::disable_services(tx, &id, false)?;
+        }
+    }
     Ok(saved != 0
         || tx.query_row(
             "SELECT EXISTS(SELECT 1 FROM shell_execution WHERE id=?1 AND state='stopping')",
@@ -154,7 +166,10 @@ impl Control {
                         }
                         if matches!(
                             request.command,
-                            Command::ThreadDelete(_) | Command::ScheduleRemove(_)
+                            Command::ThreadDelete(_)
+                                | Command::ScheduleRemove(_)
+                                | Command::ServiceRemove(_)
+                                | Command::ServiceStop(_)
                         ) {
                             super::schedule::delete(&control, request).await
                         } else {

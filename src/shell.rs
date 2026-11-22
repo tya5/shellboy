@@ -266,6 +266,21 @@ pub struct ShellExecution {
     pub completion: watch::Receiver<Option<ShellCompletion>>,
 }
 
+#[derive(Clone, Copy)]
+enum SpawnOwner {
+    Run(u64),
+    Thread,
+}
+
+impl SpawnOwner {
+    fn raw_limit(self) -> Option<u64> {
+        match self {
+            Self::Run(limit) => Some(limit),
+            Self::Thread => None,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct ShellSupervisor {
     config: Config,
@@ -343,7 +358,25 @@ impl ShellSupervisor {
         args: ShellToolArgs,
         env: BTreeMap<String, String>,
     ) -> Result<ShellExecution, ApiError> {
-        self.spawn_inner(execution_id, cwd, args, env, None).await
+        self.spawn_inner(
+            execution_id,
+            cwd,
+            args,
+            env,
+            None,
+            SpawnOwner::Run(self.config.limits.shell_raw_bytes),
+        )
+        .await
+    }
+    pub(crate) async fn spawn_thread_owned(
+        &self,
+        execution_id: String,
+        cwd: PathBuf,
+        args: ShellToolArgs,
+        env: BTreeMap<String, String>,
+    ) -> Result<ShellExecution, ApiError> {
+        self.spawn_inner(execution_id, cwd, args, env, None, SpawnOwner::Thread)
+            .await
     }
     pub(crate) async fn spawn_guarded(
         &self,
@@ -353,8 +386,15 @@ impl ShellSupervisor {
         env: BTreeMap<String, String>,
         gate: Arc<tokio::sync::Mutex<bool>>,
     ) -> Result<ShellExecution, ApiError> {
-        self.spawn_inner(execution_id, cwd, args, env, Some(gate))
-            .await
+        self.spawn_inner(
+            execution_id,
+            cwd,
+            args,
+            env,
+            Some(gate),
+            SpawnOwner::Run(self.config.limits.shell_raw_bytes),
+        )
+        .await
     }
     async fn spawn_inner(
         &self,
@@ -363,6 +403,7 @@ impl ShellSupervisor {
         args: ShellToolArgs,
         env: BTreeMap<String, String>,
         gate: Option<Arc<tokio::sync::Mutex<bool>>>,
+        owner: SpawnOwner,
     ) -> Result<ShellExecution, ApiError> {
         args.validate()?;
         if execution_id.trim().is_empty() {
@@ -396,12 +437,21 @@ impl ShellSupervisor {
             })?;
         #[cfg(windows)]
         {
-            self.spawn_windows(execution_id, cwd, args, env, initial, budget_size, gate)
-                .await
+            self.spawn_windows(
+                execution_id,
+                cwd,
+                args,
+                env,
+                initial,
+                budget_size,
+                gate,
+                owner,
+            )
+            .await
         }
         #[cfg(not(any(unix, windows)))]
         {
-            let _ = (cwd, env, initial, budget_size);
+            let _ = (cwd, env, initial, budget_size, gate, owner);
             Err(ApiError::new(
                 ErrorCode::InvalidState,
                 "shell executions are unsupported on this platform",
@@ -409,8 +459,17 @@ impl ShellSupervisor {
         }
         #[cfg(unix)]
         {
-            self.spawn_unix(execution_id, cwd, args, env, initial, budget_size, gate)
-                .await
+            self.spawn_unix(
+                execution_id,
+                cwd,
+                args,
+                env,
+                initial,
+                budget_size,
+                gate,
+                owner,
+            )
+            .await
         }
     }
 
@@ -425,6 +484,7 @@ impl ShellSupervisor {
         initial: Option<Vec<u8>>,
         budget_size: usize,
         gate: Option<Arc<tokio::sync::Mutex<bool>>>,
+        owner: SpawnOwner,
     ) -> Result<ShellExecution, ApiError> {
         use std::process::Stdio;
         let mut command = launch_command(&self.config, &args.command);
@@ -458,7 +518,9 @@ impl ShellSupervisor {
         // Serialize native publication with emergency force cleanup. No await
         // or DB/file work occurs while this short native ownership lock is held.
         let mut groups = self.native_groups.lock().unwrap_or_else(|e| e.into_inner());
-        self.admit_start()?;
+        if matches!(owner, SpawnOwner::Run(_)) {
+            self.admit_start()?;
+        }
         let child = command.spawn();
         // Release the parent's copies of guardian/exec-error endpoints before
         // observing EOF on the private launch acknowledgment.
@@ -502,6 +564,7 @@ impl ShellSupervisor {
             args.stdin_open,
             gate.is_some(),
             budget_size,
+            owner.raw_limit(),
             &self.config,
         );
         let (done_tx, done_rx) = watch::channel(None);
@@ -676,7 +739,7 @@ struct Publisher {
     tx: mpsc::Sender<ShellEvent>,
     sequence: u64,
     total: u64,
-    raw_limit: u64,
+    raw_limit: Option<u64>,
 }
 struct OutputSink {
     publisher: Mutex<Publisher>,
@@ -718,8 +781,10 @@ async fn pump<R: AsyncRead + Unpin>(
             Err(_) => return false,
         };
         let mut publisher = sink.publisher.lock().await;
-        let remaining = publisher.raw_limit.saturating_sub(publisher.total);
-        if n as u64 > remaining {
+        if let Some(limit) = publisher.raw_limit
+            && n as u64 > limit.saturating_sub(publisher.total)
+        {
+            let remaining = limit.saturating_sub(publisher.total);
             bytes.truncate(remaining as usize);
             record_failure(
                 &sink.failure,
@@ -728,7 +793,9 @@ async fn pump<R: AsyncRead + Unpin>(
             );
             sink.stop.cancel();
         }
-        publisher.total += bytes.len() as u64;
+        if publisher.raw_limit.is_some() {
+            publisher.total += bytes.len() as u64;
+        }
         if bytes.is_empty() {
             waiting_for_sink.store(false, std::sync::atomic::Ordering::Relaxed);
             continue;
@@ -987,6 +1054,7 @@ mod output_failure_tests {
                 false,
                 false,
                 8192,
+                None,
                 &Config::default(),
             );
             let completion = finish_unix_shell(
@@ -1047,6 +1115,7 @@ mod output_failure_tests {
             false,
             false,
             8192,
+            None,
             &Config::default(),
         );
         let completion = finish_unix_shell(
@@ -1138,7 +1207,7 @@ mod output_failure_tests {
                 tx,
                 sequence: 0,
                 total: 0,
-                raw_limit: 4,
+                raw_limit: Some(4),
             }),
             budget: Arc::new(Semaphore::new(32)),
             chunk_size: 16,

@@ -59,6 +59,7 @@ macro_rules! named_jobs {
 named_jobs! {
     OwnerShutdown => owner_shutdown, Status => status, ModelList => model_list,
     ThreadList => thread_list, ThreadGet => thread_get, ThreadBranches => thread_branches, UsageGet => usage_get,
+    ServiceAdd => service_add, ServiceList => service_list, ServiceStart => service_start, ServiceStop => service_stop, ServiceRemove => service_remove,
     ScheduleAdd => schedule_add, ScheduleSet => schedule_set, ScheduleEnable => schedule_enable, ScheduleDisable => schedule_disable, ScheduleRemove => schedule_remove,  ScheduleList => schedule_list,
     CompactList => compact_list, CompactPreview => compact_preview, ShellList => shell_list,
     ThreadCreate => thread_create, ThreadFork => thread_fork, ThreadDelete => thread_delete,
@@ -111,6 +112,7 @@ impl Kind {
             Kind::Status
             | Kind::ThreadList
             | Kind::ScheduleList
+            | Kind::ServiceList
             | Kind::ThreadTags
             | Kind::ThreadCwds
             | Kind::ThreadGet
@@ -134,7 +136,9 @@ impl Kind {
             // Bounded closure (65,536 sources) in one transaction; see history::prune.
             // Rewind refuses paths over history::rewind::PATH_LIMIT nodes.
             // Archive: at most 200 IDs, descendants walk capped at 256 (control::archive).
-            Kind::ScheduleAdd
+            Kind::ServiceAdd
+            | Kind::ServiceStart
+            | Kind::ScheduleAdd
             | Kind::ScheduleSet
             | Kind::ScheduleEnable
             | Kind::ScheduleDisable
@@ -158,7 +162,9 @@ impl Kind {
             | Kind::AttachmentRemove
             | Kind::Compact
             | Kind::ContextEdit => MutationExempt,
-            Kind::ScheduleRemove
+            Kind::ServiceStop
+            | Kind::ServiceRemove
+            | Kind::ScheduleRemove
             | Kind::ModelList
             | Kind::Wait
             | Kind::EventsWait
@@ -215,9 +221,21 @@ mod tests {
                 "duplicate exemption"
             );
         }
+        use Classification::{MutationDeclaredBound, PureRead, Runtime};
+        let service_kinds = [
+            (Kind::ServiceAdd, MutationDeclaredBound),
+            (Kind::ServiceList, PureRead),
+            (Kind::ServiceStart, MutationDeclaredBound),
+            (Kind::ServiceStop, Runtime),
+            (Kind::ServiceRemove, Runtime),
+        ];
+        for (kind, expected) in service_kinds {
+            assert_eq!(kind.classification(), expected, "{kind:?}");
+            assert!(!UNDECLARED_WRITER_BOUNDS.contains(&kind));
+        }
         assert_eq!(
             Kind::ALL.len(),
-            72,
+            72 + service_kinds.len(),
             "classify new kinds and update this ratchet"
         );
     }

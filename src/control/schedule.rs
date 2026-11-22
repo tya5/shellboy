@@ -86,7 +86,7 @@ fn advance_due(
 
 fn read_deadline(db: &rusqlite::Connection) -> rusqlite::Result<Option<DateTime<Utc>>> {
     db.query_row(
-        "SELECT min(deadline) FROM (SELECT min(next_at) AS deadline FROM schedule WHERE enabled=1 AND next_at IS NOT NULL UNION ALL SELECT min(unixepoch(started_at)+3600) FROM shell_execution WHERE schedule_id IS NOT NULL AND state IN ('starting','running'))",
+        "SELECT min(deadline) FROM (SELECT min(next_at) AS deadline FROM schedule WHERE enabled=1 AND next_at IS NOT NULL UNION ALL SELECT min(unixepoch(s.started_at)+3600) FROM shell_execution s JOIN schedule q ON q.id=s.schedule_id WHERE q.kind='time' AND s.state IN ('starting','running'))",
         [], |r| r.get::<_, Option<i64>>(0),
     ).map(|next|next.and_then(|at|DateTime::from_timestamp(at,0)))
 }
@@ -103,13 +103,17 @@ pub(super) async fn next_deadline(
 
 pub(super) async fn dispatch(control: &Arc<Control>) -> Result<Option<DateTime<Utc>>, ApiError> {
     let kind = serde_json::to_value(control.store.config.shell.kind).unwrap();
+    let owner = control.clone();
     let (shell, next, expired) = control
         .store
         .database
         .call(move |db| {
             let tx = db.transaction()?;
+            if owner.admission_closed.load(std::sync::atomic::Ordering::SeqCst) {
+                return Ok((None, None, None));
+            }
             let now = Utc::now();
-            let expired: Option<String> = tx.query_row("SELECT id FROM shell_execution WHERE schedule_id IS NOT NULL AND state IN ('starting','running') AND unixepoch(started_at)<=?1 ORDER BY started_at,id LIMIT 1",[now.timestamp()-3600],|r|r.get(0)).optional()?;
+            let expired: Option<String> = tx.query_row("SELECT s.id FROM shell_execution s JOIN schedule q ON q.id=s.schedule_id WHERE q.kind='time' AND s.state IN ('starting','running') AND unixepoch(s.started_at)<=?1 ORDER BY s.started_at,s.id LIMIT 1",[now.timestamp()-3600],|r|r.get(0)).optional()?;
             if let Some(id) = &expired {
                 record_shell_stop(&tx,id,ShellStopIntent::ScheduleTimeout)?;
             }
@@ -130,70 +134,80 @@ pub(super) async fn dispatch(control: &Arc<Control>) -> Result<Option<DateTime<U
         handle.stop();
     }
     if let Some(shell) = shell {
-        if control.shell_start_intent(&shell.id, false).await?.0 {
-            control.changed(&shell.thread);
-            return Ok(next);
-        }
-        let args = ShellToolArgs {
-            command: shell.command,
-            description: None,
-            background: true,
-            stdin_open: false,
-            initial_stdin: None,
-            input_encoding: "utf-8".into(),
-            output_encoding: "utf-8".into(),
-        };
-        let env = shell_output::cli_environment(control, &shell.thread);
-        match control
-            .shell
-            .spawn(shell.id.clone(), shell.cwd, args, env)
-            .await
-        {
-            Ok(spawned) => {
-                shell_output::install_shell(
-                    control,
-                    shell_output::ShellOwner::Schedule {
-                        thread: shell.thread,
-                    },
-                    None,
-                    &shell.id,
-                    spawned,
-                )
-                .await?;
-            }
-            Err(_) => {
-                let wakes = control.waits.keyed.clone();
-                control
-                    .store
-                    .database
-                    .call(move |db| {
-                        let tx = db.transaction()?;
-                        let changed =
-                            super::state::fail_shell_spawn(&tx, &shell.id, &super::state::now())?
-                                != 0;
-                        if changed {
-                            retire_oneshot(&tx, &shell.id)?;
-                        }
-                        tx.commit()?;
-                        if changed {
-                            wakes.publish(super::wait::wakes::Key::shell_terminal(shell.id));
-                        }
-                        Ok(())
-                    })
-                    .await
-                    .map_err(super::storage_error)?;
-                control.changed(&shell.thread);
-            }
-        }
+        spawn_reserved(control, shell).await?;
     }
     Ok(next)
+}
+
+async fn spawn_reserved(control: &Arc<Control>, shell: DueShell) -> Result<(), ApiError> {
+    if control.shell_start_intent(&shell.id, false).await?.0 {
+        control.changed(&shell.thread);
+        return Ok(());
+    }
+    let args = ShellToolArgs {
+        command: shell.command,
+        description: None,
+        background: true,
+        stdin_open: false,
+        initial_stdin: None,
+        input_encoding: "utf-8".into(),
+        output_encoding: "utf-8".into(),
+    };
+    let env = shell_output::cli_environment(control, &shell.thread);
+    match control
+        .shell
+        .spawn_thread_owned(shell.id.clone(), shell.cwd, args, env)
+        .await
+    {
+        Ok(spawned) => {
+            shell_output::install_shell(
+                control,
+                shell_output::ShellOwner::Schedule {
+                    thread: shell.thread,
+                },
+                None,
+                &shell.id,
+                spawned,
+            )
+            .await?;
+        }
+        Err(_) => {
+            let store = control.store.clone();
+            let wakes = control.waits.keyed.clone();
+            let effects = control
+                .store
+                .database
+                .call(move |db| {
+                    let tx = db.transaction()?;
+                    let service = service_settlement(&tx, &shell.id)?;
+                    let mut effects = None;
+                    let changed = super::state::fail_shell_spawn(&tx, &shell.id, &super::state::now())? != 0;
+                    if changed {
+                        retire_oneshot(&tx, &shell.id)?;
+                        if let Some(service) = service {
+                            effects = service.finish(&store, &tx, &shell.id)?;
+                        }
+                    }
+                    tx.commit()?;
+                    if changed {
+                        wakes.publish(super::wait::wakes::Key::shell_terminal(shell.id).into_iter().chain(effects.iter_mut().flat_map(|effects| std::mem::take(&mut effects.wait_keys))));
+                    }
+                    Ok(effects)
+                })
+                .await
+                .map_err(super::storage_error)?;
+            control.apply_effects(effects).await;
+            control.changed(&shell.thread);
+        }
+    }
+    Ok(())
 }
 
 // Called only for an execution just settled in this transaction. A preexisting
 // spent one-shot is not a retirement candidate on startup or migration.
 pub(super) fn retire_oneshot(tx: &Transaction<'_>, execution: &str) -> rusqlite::Result<()> {
     let owner: Option<(String, String)> = tx.query_row(
-        "SELECT q.id,q.thread_id FROM shell_execution s JOIN schedule q ON q.id=s.schedule_id WHERE s.id=?1 AND s.state IN ('exited','failed','stopped') AND q.once_at IS NOT NULL AND q.next_at IS NULL",
+        "SELECT q.id,q.thread_id FROM shell_execution s JOIN schedule q ON q.id=s.schedule_id WHERE s.id=?1 AND s.state IN ('exited','failed','stopped') AND q.kind='time' AND q.once_at IS NOT NULL AND q.next_at IS NULL",
         [execution], |r| Ok((r.get(0)?,r.get(1)?)),
     ).optional()?;
     if let Some((schedule, thread)) = owner {
@@ -215,6 +229,47 @@ pub(super) fn add(
     thread: &str,
     a: &crate::protocol::ScheduleAddArgs,
 ) -> Result<serde_json::Value, ApiError> {
+    add_definition(
+        tx,
+        thread,
+        DefinitionInput {
+            command: &a.command,
+            cwd: a.cwd.as_deref(),
+            description: a.description.as_deref(),
+            timing: Some(a),
+        },
+    )
+}
+
+pub(super) fn add_service(
+    tx: &Transaction<'_>,
+    thread: &str,
+    a: &crate::protocol::ServiceAddArgs,
+) -> Result<serde_json::Value, ApiError> {
+    add_definition(
+        tx,
+        thread,
+        DefinitionInput {
+            command: &a.command,
+            cwd: a.cwd.as_deref(),
+            description: a.description.as_deref(),
+            timing: None,
+        },
+    )
+}
+
+struct DefinitionInput<'a> {
+    command: &'a str,
+    cwd: Option<&'a str>,
+    description: Option<&'a str>,
+    timing: Option<&'a crate::protocol::ScheduleAddArgs>,
+}
+
+fn add_definition(
+    tx: &Transaction<'_>,
+    thread: &str,
+    input: DefinitionInput<'_>,
+) -> Result<serde_json::Value, ApiError> {
     let sql = |e| super::storage_error(StorageError::from(e));
     let cwd: String = tx
         .query_row(
@@ -230,18 +285,17 @@ pub(super) fn add(
                 "Thread not found",
             )
         })?;
-    if a.command.is_empty() || a.command.len() > 32 * 1024 || a.command.contains('\0') {
+    if input.command.is_empty() || input.command.len() > 32 * 1024 || input.command.contains('\0') {
         return Err(invalid(
-            "Schedule command must be 1 to 32768 bytes without NUL",
+            "Shell command must be 1 to 32768 bytes without NUL",
         ));
     }
-    if a.description
+    if input
+        .description
         .as_ref()
         .is_some_and(|s| s.chars().count() > crate::tool_description::MAX_CHARS)
     {
-        return Err(invalid(
-            "Schedule description exceeds the description limit",
-        ));
+        return Err(invalid("Shell description exceeds the description limit"));
     }
     let count: i64 = tx
         .query_row(
@@ -251,39 +305,59 @@ pub(super) fn add(
         )
         .map_err(sql)?;
     if count >= 64 {
-        return Err(invalid("A Thread may have at most 64 schedules"));
+        return Err(invalid(
+            "A Thread may have at most 64 schedules and services combined",
+        ));
     }
     let now = Utc::now();
-    let (once, next) = match (&a.cron, &a.at, a.in_seconds) {
-        (Some(cron), None, None) => (None, next_cron(cron, now, &Local)),
-        (None, Some(at), None) => {
-            let at = DateTime::parse_from_rfc3339(at).ok().map(|v| v.timestamp());
-            (at, at)
-        }
-        (None, None, Some(seconds)) => {
-            let at = i64::try_from(seconds)
-                .ok()
-                .filter(|s| *s > 0)
-                .and_then(chrono::TimeDelta::try_seconds)
-                .and_then(|delta| now.checked_add_signed(delta))
-                .map(|at| at.timestamp());
-            (at, at)
-        }
-        _ => return Err(invalid("Specify exactly one schedule time")),
+    let (kind, cron, once, next) = if let Some(a) = input.timing {
+        let (once, next) = match (&a.cron, &a.at, a.in_seconds) {
+            (Some(cron), None, None) => (None, next_cron(cron, now, &Local)),
+            (None, Some(at), None) => {
+                let at = DateTime::parse_from_rfc3339(at).ok().map(|v| v.timestamp());
+                (at, at)
+            }
+            (None, None, Some(seconds)) => {
+                let at = i64::try_from(seconds)
+                    .ok()
+                    .filter(|s| *s > 0)
+                    .and_then(chrono::TimeDelta::try_seconds)
+                    .and_then(|delta| now.checked_add_signed(delta))
+                    .map(|at| at.timestamp());
+                (at, at)
+            }
+            _ => return Err(invalid("Specify exactly one schedule time")),
+        };
+        (
+            "time",
+            a.cron.as_deref(),
+            once,
+            next.ok_or_else(|| invalid("Cannot calculate the schedule time"))?,
+        )
+    } else {
+        ("service", None, None, now.timestamp())
     };
-    let next = next.ok_or_else(|| invalid("Cannot calculate the schedule time"))?;
-    let cwd = PathBuf::from(cwd).join(a.cwd.as_deref().unwrap_or(""));
+    let cwd = PathBuf::from(cwd).join(input.cwd.unwrap_or(""));
     let id = uuid::Uuid::new_v4().to_string();
-    tx.execute("INSERT INTO schedule(id,thread_id,cron,once_at,next_at,enabled,cwd,command,description) VALUES(?1,?2,?3,?4,?5,1,?6,?7,?8)",params![id,thread,a.cron,once,next,cwd.to_string_lossy(),a.command,a.description]).map_err(sql)?;
+    tx.execute("INSERT INTO schedule(id,thread_id,kind,cron,once_at,next_at,enabled,cwd,command,description) VALUES(?1,?2,?3,?4,?5,?6,1,?7,?8,?9)",params![id,thread,kind,cron,once,next,cwd.to_string_lossy(),input.command,input.description]).map_err(sql)?;
+    let key = if kind == "service" {
+        "service_id"
+    } else {
+        "schedule_id"
+    };
     Ok(
-        serde_json::json!({"schedule_id":id,"thread_id":thread,"next_at":DateTime::from_timestamp(next,0).map(|at|at.to_rfc3339())}),
+        serde_json::json!({(key):id,"thread_id":thread,"next_at":DateTime::from_timestamp(next,0).map(|at|at.to_rfc3339())}),
     )
 }
 
-pub(super) fn list(tx: &Transaction<'_>, thread: &str) -> Result<serde_json::Value, ApiError> {
+pub(super) fn list(
+    tx: &Transaction<'_>,
+    thread: &str,
+    services: bool,
+) -> Result<serde_json::Value, ApiError> {
     let sql = |e| super::storage_error(StorageError::from(e));
-    let mut query=tx.prepare("SELECT q.id,q.enabled,q.next_at,q.cron,q.once_at,q.cwd,q.command,q.description,q.last_skipped_at,s.id,s.state,s.exit_code,s.end_reason,s.started_at,s.ended_at FROM schedule q JOIN thread t ON t.id=q.thread_id AND t.deleted_at IS NULL LEFT JOIN shell_execution s ON s.id=(SELECT id FROM shell_execution WHERE schedule_id=q.id ORDER BY started_at DESC,id DESC LIMIT 1) WHERE q.thread_id=?1 ORDER BY q.id LIMIT 64").map_err(sql)?;
-    let items=query.query_map([thread],|r| {
+    let mut query=tx.prepare("SELECT q.id,q.enabled,q.next_at,q.cron,q.once_at,q.cwd,q.command,q.description,q.last_skipped_at,s.id,s.state,s.exit_code,s.end_reason,s.started_at,s.ended_at FROM schedule q JOIN thread t ON t.id=q.thread_id AND t.deleted_at IS NULL LEFT JOIN shell_execution s ON s.id=(SELECT id FROM shell_execution WHERE schedule_id=q.id ORDER BY started_at DESC,id DESC LIMIT 1) WHERE q.thread_id=?1 AND q.kind=?2 ORDER BY q.id LIMIT 64").map_err(sql)?;
+    let items=query.query_map(params![thread, if services { "service" } else { "time" }],|r| {
         let id:Option<String>=r.get(9)?;
         let latest=if let Some(id)=id {
             let mut remaining=4096;
@@ -295,9 +369,31 @@ pub(super) fn list(tx: &Transaction<'_>, thread: &str) -> Result<serde_json::Val
             serde_json::json!({"execution_id":id,"state":r.get::<_,String>(10)?,"exit_code":r.get::<_,Option<i64>>(11)?,"end_reason":r.get::<_,Option<String>>(12)?,"started_at":r.get::<_,String>(13)?,"ended_at":r.get::<_,Option<String>>(14)?,"output_tail":String::from_utf8_lossy(&tail)})
         }else{serde_json::Value::Null};
         let timestamp=|i| r.get::<_,Option<i64>>(i).map(|v|v.and_then(|at|DateTime::from_timestamp(at,0)).map(|at|at.to_rfc3339()));
+        if services {
+            return Ok(serde_json::json!({"service_id":r.get::<_,String>(0)?,"enabled":r.get::<_,bool>(1)?,"cwd":r.get::<_,String>(5)?,"command":r.get::<_,String>(6)?,"description":r.get::<_,Option<String>>(7)?,"latest":latest}));
+        }
         Ok(serde_json::json!({"schedule_id":r.get::<_,String>(0)?,"enabled":r.get::<_,bool>(1)?,"next_at":timestamp(2)?,"cron":r.get::<_,Option<String>>(3)?,"at":timestamp(4)?,"cwd":r.get::<_,String>(5)?,"command":r.get::<_,String>(6)?,"description":r.get::<_,Option<String>>(7)?,"last_skipped_at":timestamp(8)?,"latest":latest}))
     }).map_err(sql)?.collect::<rusqlite::Result<Vec<_>>>().map_err(sql)?;
     Ok(serde_json::json!({"thread_id":thread,"items":items}))
+}
+
+pub(super) fn start_service(
+    tx: &Transaction<'_>,
+    id: &str,
+) -> Result<super::MutationResult, ApiError> {
+    let thread: Option<String> = tx.query_row(
+        "UPDATE schedule SET next_at=CASE WHEN enabled=0 THEN ?2 ELSE next_at END,enabled=1 WHERE id=?1 AND kind='service' AND NOT EXISTS(SELECT 1 FROM shell_execution WHERE schedule_id=?1 AND state='stopping') RETURNING thread_id",
+        params![id,Utc::now().timestamp()], |r| r.get(0),
+    ).optional().map_err(StorageError::from).map_err(super::storage_error)?;
+    let thread = thread.ok_or_else(|| {
+        ApiError::new(
+            crate::protocol::ErrorCode::TargetUnavailable,
+            "Service not found",
+        )
+    })?;
+    let mut result = super::MutationResult::value(serde_json::json!({"service_id":id}))?;
+    result.changed_threads.push(thread);
+    Ok(result)
 }
 
 pub(super) enum Change<'a> {
@@ -313,7 +409,7 @@ pub(super) fn change(
     let sql = |e| super::storage_error(StorageError::from(e));
     let (thread, cron, once, enabled): (String, Option<String>, Option<i64>, bool) = tx
         .query_row(
-            "SELECT thread_id,cron,once_at,enabled FROM schedule WHERE id=?1",
+            "SELECT thread_id,cron,once_at,enabled FROM schedule WHERE id=?1 AND kind='time'",
             [id],
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
         )
@@ -364,19 +460,105 @@ pub(super) fn change(
     Ok(result)
 }
 
+pub(super) fn prepare_owner_shutdown(tx: &Transaction<'_>) -> rusqlite::Result<()> {
+    let ids = tx.prepare("SELECT s.id FROM shell_execution s JOIN schedule q ON q.id=s.schedule_id WHERE q.kind='service' AND s.state IN ('starting','running')")?
+        .query_map([], |r| r.get::<_, String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
+    for id in ids {
+        record_shell_stop(tx, &id, ShellStopIntent::OwnerShutdown)?;
+    }
+    Ok(())
+}
+
+pub(super) fn disable_services(
+    tx: &Transaction<'_>,
+    key: &str,
+    by_thread: bool,
+) -> rusqlite::Result<()> {
+    let column = if by_thread { "thread_id" } else { "id" };
+    tx.execute(
+        &format!("UPDATE schedule SET enabled=0,next_at=NULL WHERE kind='service' AND {column}=?1"),
+        [key],
+    )?;
+    Ok(())
+}
+
+pub(super) struct ServiceSettlement {
+    id: String,
+    thread: String,
+    prior_state: String,
+    prior_reason: Option<String>,
+}
+
+pub(super) fn service_settlement(
+    tx: &Transaction<'_>,
+    execution: &str,
+) -> rusqlite::Result<Option<ServiceSettlement>> {
+    tx.query_row("SELECT q.id,q.thread_id,s.state,s.end_reason FROM shell_execution s JOIN schedule q ON q.id=s.schedule_id WHERE s.id=?1 AND q.kind='service'", [execution], |r| Ok(ServiceSettlement {id:r.get(0)?,thread:r.get(1)?,prior_state:r.get(2)?,prior_reason:r.get(3)?})).optional()
+}
+
+impl ServiceSettlement {
+    pub(super) fn finish(
+        self,
+        store: &super::Store,
+        tx: &Transaction<'_>,
+        execution: &str,
+    ) -> Result<Option<super::MutationResult>, StorageError> {
+        if self.prior_reason.as_deref() == Some("owner_shutdown") {
+            return Ok(None);
+        }
+        disable_services(tx, &self.id, false)?;
+        if !matches!(self.prior_state.as_str(), "starting" | "running") {
+            return Ok(None);
+        }
+        let (state, code, reason, signal): (String,Option<i32>,Option<String>,Option<i32>) = tx.query_row("SELECT state,exit_code,end_reason,json_extract(shell_json,'$.completion.exit_signal') FROM shell_execution WHERE id=?1",[execution],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)))?;
+        let id = self.id;
+        let details = [
+            code.map(|value| format!("exit code {value}")),
+            signal.map(|value| format!("signal {value}")),
+            reason.map(|value| format!("reason {value}")),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(", ");
+        let args = crate::protocol::MessageSendArgs {
+            human: false,
+            resume_recovery: false,
+
+
+            sender_label: Some(format!("service:{id}")),
+            thread_id: Some(self.thread),
+            deliver: crate::protocol::Deliver::Next,
+            text: format!(
+                "Service {id} ended: execution {execution}, {state} ({details}). It will not restart automatically. Restart: shellboy service start --service {id}. Output: shellboy shell read --execution {execution}"
+            ),
+        };
+        Ok(Some(store.send_service_notice(
+            tx,
+            &args,
+            &format!("service-ended:{execution}"),
+            &super::state::now(),
+        )?))
+    }
+}
+
 fn disable_and_stop(
     tx: &Transaction<'_>,
     key: &str,
     by_thread: bool,
+    removing: bool,
 ) -> Result<Vec<String>, StorageError> {
     let column = if by_thread { "thread_id" } else { "id" };
     tx.execute(
-        &format!("UPDATE schedule SET enabled=0 WHERE {column}=?1"),
+        &format!("UPDATE schedule SET enabled=0 WHERE kind='time' AND {column}=?1"),
         [key],
     )?;
+    disable_services(tx, key, by_thread)?;
     let ids=tx.prepare(&format!("SELECT s.id FROM schedule q JOIN shell_execution s ON s.schedule_id=q.id WHERE q.{column}=?1 AND s.state IN ('starting','running','stopping')"))?.query_map([key],|r|r.get::<_,String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
     let intent = if by_thread {
         ShellStopIntent::ThreadDeletion
+    } else if !removing {
+        ShellStopIntent::Explicit
     } else {
         ShellStopIntent::ScheduleDeletion
     };
@@ -406,6 +588,16 @@ pub(super) fn ensure_inactive(
     Ok(())
 }
 
+fn shell_definition_command(command: &crate::protocol::Command) -> Option<(&str, &str, bool)> {
+    use crate::protocol::Command;
+    match command {
+        Command::ScheduleRemove(args) => Some((&args.schedule_id, "time", true)),
+        Command::ServiceRemove(args) => Some((&args.service_id, "service", true)),
+        Command::ServiceStop(args) => Some((&args.service_id, "service", false)),
+        _ => None,
+    }
+}
+
 pub(super) async fn delete(
     control: &Arc<Control>,
     request: crate::protocol::Request,
@@ -419,29 +611,32 @@ pub(super) async fn delete(
             .database
             .call(move |db| {
                 let tx = db.transaction()?;
-                let (mut targets, by_thread) = match prepare {
-                    Command::ThreadDelete(args) => (super::db::delete_targets(&tx, &args)?, true),
-                    Command::ScheduleRemove(args) => {
+                let (mut targets, by_thread, removing) = match &prepare {
+                    Command::ThreadDelete(args) => {
+                        (super::db::delete_targets(&tx, args)?, true, true)
+                    }
+                    _ => {
+                        let (id, kind, removing) =
+                            shell_definition_command(&prepare).expect("definition operation");
                         let exists = tx.query_row(
-                            "SELECT EXISTS(SELECT 1 FROM schedule WHERE id=?1)",
-                            [&args.schedule_id],
+                            "SELECT EXISTS(SELECT 1 FROM schedule WHERE id=?1 AND kind=?2)",
+                            params![id, kind],
                             |r| r.get::<_, bool>(0),
                         )?;
                         if !exists {
                             return Err(ApiError::new(
                                 ErrorCode::TargetUnavailable,
-                                "Schedule not found",
+                                "Shell definition not found",
                             )
                             .into());
                         }
-                        (vec![args.schedule_id], false)
+                        (vec![id.to_owned()], false, removing)
                     }
-                    _ => unreachable!("only deletion commands have this route"),
                 };
                 targets.sort_unstable();
                 let mut executions = Vec::new();
                 for target in &targets {
-                    executions.extend(disable_and_stop(&tx, target, by_thread)?);
+                    executions.extend(disable_and_stop(&tx, target, by_thread, removing)?);
                 }
                 tx.commit()?;
                 Ok((targets, executions))
@@ -471,26 +666,29 @@ pub(super) async fn delete(
                     }
                     super::db::delete_thread(tx, &args, &super::state::now())
                 }
-                Command::ScheduleRemove(args) => {
-                    let id = args.schedule_id;
-                    ensure_inactive(tx, &id, false)?;
-                    let thread = tx.query_row(
-                        "DELETE FROM schedule WHERE id=?1 RETURNING thread_id", [&id], |r| r.get::<_, String>(0),
-                    ).optional().map_err(StorageError::from).map_err(super::storage_error)?;
+                definition => {
+                    let (id, kind, removing) = shell_definition_command(&definition).expect("definition operation");
+                    ensure_inactive(tx, id, false)?;
+                    let sql = if removing {
+                        "DELETE FROM schedule WHERE id=?1 AND kind=?2 RETURNING thread_id"
+                    } else {
+                        "SELECT thread_id FROM schedule WHERE id=?1 AND kind=?2"
+                    };
+                    let thread = tx.query_row(sql, params![id,kind], |r| r.get::<_, String>(0))
+                        .optional().map_err(StorageError::from).map_err(super::storage_error)?;
                     let thread = match thread {
                         Some(thread) => thread,
-                        None => tx.query_row(
+                        None if kind == "time" => tx.query_row(
                             "SELECT s.detached_thread_id FROM json_each(?1) j CROSS JOIN shell_execution s ON s.id=j.value WHERE s.detached_thread_id IS NOT NULL LIMIT 1",
                             [serde_json::json!(executions).to_string()], |r| r.get::<_,String>(0),
                         ).optional().map_err(StorageError::from).map_err(super::storage_error)?.ok_or_else(|| ApiError::new(ErrorCode::TargetUnavailable,"Schedule not found"))?,
+                        None => return Err(ApiError::new(ErrorCode::TargetUnavailable,"Service not found")),
                     };
-                    let mut result = super::MutationResult::value(
-                        serde_json::json!({"accepted":true,"schedule_id":id}),
-                    )?;
+                    let key = if kind == "time" { "schedule_id" } else { "service_id" };
+                    let mut result = super::MutationResult::value(serde_json::json!({"accepted":true,(key):id}))?;
                     result.changed_threads.push(thread);
                     Ok(result)
                 }
-                _ => unreachable!("only deletion commands have this route"),
             }
         })
         .await?;
@@ -645,7 +843,7 @@ mod tests {
                     .database
                     .call(|db| {
                         let tx = db.transaction()?;
-                        assert_eq!(disable_and_stop(&tx, "target", true)?, ["x"]);
+                        assert_eq!(disable_and_stop(&tx, "target", true, true)?, ["x"]);
                         tx.commit()?;
                         Ok(())
                     })
@@ -750,7 +948,7 @@ mod tests {
             .db
             .call(|db| {
                 let tx = db.transaction()?;
-                let mut ids = disable_and_stop(&tx, "target", true)?;
+                let mut ids = disable_and_stop(&tx, "target", true, true)?;
                 ids.sort();
                 tx.commit()?;
                 Ok(ids)
@@ -933,6 +1131,262 @@ mod tests {
                 .await
                 .ok
         );
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn service_exit_records_one_message_and_disables_the_service() {
+        check_service_failure(false).await;
+    }
+
+    #[tokio::test]
+    async fn service_spawn_failure_records_one_message_and_disables_the_service() {
+        check_service_failure(true).await;
+    }
+
+    async fn check_service_failure(spawn_failure: bool) {
+        use crate::{
+            app::DataOwner,
+            protocol::{ExecutionTarget, MessageSendArgs, ServiceAddArgs, ThreadTarget},
+        };
+
+        let root = tempfile::tempdir().unwrap();
+        let config = root.path().join("config.toml");
+        std::fs::write(&config, "default_connection='fixture'\ndefault_model='fixture'\n[connections.fixture]\nbase_url='http://127.0.0.1:1/v1'\n[limits]\ndraft_bytes=1\n").unwrap();
+        let owner = DataOwner::start(
+            Some(config),
+            Some(root.path().join("data")),
+            root.path().into(),
+        )
+        .await
+        .unwrap();
+        let control = Control::new(&owner, root.path().into());
+        let request = |command| {
+            Request::new(
+                format!("{}:{}", owner.instance_id, uuid::Uuid::new_v4()),
+                command,
+            )
+        };
+        let create = control
+            .request(request(Command::ThreadCreate(
+                crate::protocol::ThreadCreateArgs {
+                    agents: None,
+                    connection: None,
+                    cwd: None,
+                    model: None,
+                    effort: None,
+                    parent_id: None,
+                },
+            )))
+            .await;
+        assert!(create.ok, "{:?}", create.error);
+        let thread = create.result.unwrap()["thread_id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let external = control
+            .request(request(Command::MessageSend(MessageSendArgs {
+                human: false,
+                resume_recovery: false,
+
+
+                sender_label: None,
+                thread_id: Some(thread.clone()),
+                deliver: crate::protocol::Deliver::Next,
+                text: "too long".into(),
+            })))
+            .await;
+        assert_eq!(
+            external.error.unwrap().code,
+            crate::protocol::ErrorCode::InputLimit
+        );
+        let added = control
+            .request(request(Command::ServiceAdd(ServiceAddArgs {
+                thread_id: Some(thread.clone()),
+                cwd: spawn_failure.then(|| "missing-directory".into()),
+                description: None,
+                command: "exit 3".into(),
+            })))
+            .await;
+        assert!(added.ok, "{:?}", added.error);
+        dispatch(&control).await.unwrap();
+        let service = added.result.unwrap()["service_id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let execution = crate::test_watchdog::watchdog("service exits", async {
+            loop {
+                let changed = control.changed.notified();
+                tokio::pin!(changed);
+                changed.as_mut().enable();
+                let listed = control
+                    .request(request(Command::ServiceList(ThreadTarget {
+                        thread_id: Some(thread.clone()),
+                    })))
+                    .await;
+                assert!(listed.ok, "{:?}", listed.error);
+                let body = listed.result.unwrap();
+                let items = body["items"].as_array().unwrap();
+                assert_eq!(items.len(), 1);
+                if items[0]["enabled"] == false {
+                    break items[0]["latest"]["execution_id"]
+                        .as_str()
+                        .unwrap()
+                        .to_owned();
+                }
+                changed.await;
+            }
+        })
+        .await
+        .unwrap();
+        let saved = control
+            .request(request(Command::ShellGet(ExecutionTarget {
+                execution_id: execution.clone(),
+            })))
+            .await
+            .result
+            .unwrap();
+        if spawn_failure {
+            assert_eq!(saved["state"], "failed");
+            assert_eq!(saved["reason"], "spawn_failed");
+        } else {
+            assert_eq!(saved["state"], "exited");
+            assert_eq!(saved["exit_code"], 3);
+        }
+        let operation = format!("service-ended:{execution}");
+        dispatch(&control).await.unwrap();
+        let (executions, messages, assigned_turns) = owner.db.call(move |db| {
+            let executions: i64 = db.query_row(
+                "SELECT count(*) FROM shell_execution WHERE schedule_id=?1", [&service], |row| row.get(0),
+            )?;
+            let (messages, assigned_turns): (i64, i64) = db.query_row(
+                "SELECT count(*),count(turn_id) FROM receipt WHERE client_operation_id=?1 AND target_thread_id=?2",
+                [operation, thread], |row| Ok((row.get(0)?, row.get(1)?)),
+            )?;
+            Ok((executions, messages, assigned_turns))
+        }).await.unwrap();
+        assert_eq!((executions, messages, assigned_turns), (1, 1, 1));
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn service_restarts_after_owner_shutdown_but_not_after_stop() {
+        use crate::{
+            app::DataOwner,
+            protocol::{ServiceAddArgs, ServiceTarget, ThreadTarget},
+        };
+        async fn call(control: &Arc<Control>, command: Command) -> serde_json::Value {
+            let result = control
+                .request(Request::new(
+                    format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
+                    command,
+                ))
+                .await;
+            assert!(result.ok, "{:?}", result.error);
+            result.result.unwrap()
+        }
+        async fn row(control: &Arc<Control>, thread: &str) -> serde_json::Value {
+            call(
+                control,
+                Command::ServiceList(ThreadTarget {
+                    thread_id: Some(thread.into()),
+                }),
+            )
+            .await["items"][0]
+                .clone()
+        }
+        let (root, owner, control, accepted) =
+            super::super::driver::preparation_tests::fixture("http://127.0.0.1:1/v1").await;
+        let thread = accepted.thread_id;
+        let command = if cfg!(windows) {
+            "Start-Sleep -Seconds 600"
+        } else {
+            "exec sleep 600"
+        };
+        let service = call(
+            &control,
+            Command::ServiceAdd(ServiceAddArgs {
+                thread_id: Some(thread.clone()),
+                cwd: None,
+                description: None,
+                command: command.into(),
+            }),
+        )
+        .await["service_id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let reserved = owner
+            .db
+            .call(|db| {
+                let tx = db.transaction()?;
+                let reserved = advance_due(&tx, Utc::now(), "native")?.unwrap();
+                tx.commit()?;
+                Ok(reserved)
+            })
+            .await
+            .unwrap();
+        // TUI Quit closes the Run gate before Control begins shutdown.
+        control.close_tool_start_admission();
+        spawn_reserved(&control, reserved).await.unwrap();
+        let first = row(&control, &thread).await;
+        assert_eq!(first["latest"]["state"], "running");
+        assert_eq!(next_deadline(&control).await.unwrap(), None);
+        let first_id = first["latest"]["execution_id"].as_str().unwrap().to_owned();
+        control.shutdown().await.unwrap();
+        drop(control);
+        owner.shutdown().await.unwrap();
+        let owner = DataOwner::start(
+            Some(root.path().join("config.toml")),
+            Some(root.path().join("data")),
+            root.path().into(),
+        )
+        .await
+        .unwrap();
+        let control = Control::new(&owner, root.path().into());
+        dispatch(&control).await.unwrap();
+        let restarted = row(&control, &thread).await;
+        assert_eq!(restarted["enabled"], true);
+        assert_eq!(restarted["latest"]["state"], "running");
+        assert_ne!(restarted["latest"]["execution_id"], first_id);
+        assert!(control.live.clone_shell_handle(&first_id).await.is_none());
+        call(
+            &control,
+            Command::ServiceStop(ServiceTarget {
+                service_id: service.clone(),
+            }),
+        )
+        .await;
+        let stopped = row(&control, &thread).await;
+        assert_eq!(stopped["enabled"], false);
+        assert_eq!(stopped["latest"]["state"], "stopped");
+        dispatch(&control).await.unwrap();
+        assert_eq!(row(&control, &thread).await, stopped);
+        let target = service.clone();
+        owner.db.call(move |db| {
+            let count: i64 = db.query_row("SELECT count(*) FROM receipt WHERE client_operation_id IN (SELECT 'service-ended:'||id FROM shell_execution WHERE schedule_id=?1)", [target], |r| r.get(0))?;
+            assert_eq!(count, 0);
+            Ok(())
+        }).await.unwrap();
+        call(
+            &control,
+            Command::ServiceStart(ServiceTarget {
+                service_id: service.clone(),
+            }),
+        )
+        .await;
+        dispatch(&control).await.unwrap();
+        assert_eq!(row(&control, &thread).await["latest"]["state"], "running");
+        call(
+            &control,
+            Command::ServiceRemove(ServiceTarget {
+                service_id: service,
+            }),
+        )
+        .await;
+        assert!(row(&control, &thread).await.is_null());
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
     }

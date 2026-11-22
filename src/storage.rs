@@ -77,8 +77,13 @@ pub(crate) const MIGRATION_NAMES: &[(i64, &str)] = &[
     (52, "0052_unified_model_attempt"),
     (53, "0053_retired_schedule_shells"),
     (54, "0054_thread_created_at"),
+<<<<<<< HEAD
     (55, "0055_automatic_compaction"),
     (56, "0056_directional_reply_pending"),
+    (57, "0057_schedule_service_kind"),
+=======
+    (55, "0055_schedule_service_kind"),
+>>>>>>> 648c9d969a (Implement Thread-owned services and rotate Thread shell output)
 ];
 pub const SCHEMA_VERSION: i64 = MIGRATION_NAMES.len() as i64;
 pub const DEFAULT_QUEUE_CAPACITY: usize = 128;

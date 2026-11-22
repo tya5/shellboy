@@ -863,6 +863,8 @@ args!(ThreadTagArgs {
     remove: Vec<String>
 });
 // Distinct tag names in byte order, paged; no member counts.
+args!(ServiceTarget { service_id: String });
+args!(ServiceAddArgs { thread_id: Option<String>, cwd: Option<String>, description: Option<String>, command: String });
 args!(ScheduleTarget {
     schedule_id: String
 });
@@ -1385,6 +1387,16 @@ pub enum Command {
     ThreadUnarchive(ThreadArchiveArgs),
     #[serde(rename = "thread.tag")]
     ThreadTag(ThreadTagArgs),
+    #[serde(rename = "service.add")]
+    ServiceAdd(ServiceAddArgs),
+    #[serde(rename = "service.list")]
+    ServiceList(ThreadTarget),
+    #[serde(rename = "service.start")]
+    ServiceStart(ServiceTarget),
+    #[serde(rename = "service.stop")]
+    ServiceStop(ServiceTarget),
+    #[serde(rename = "service.remove")]
+    ServiceRemove(ServiceTarget),
     #[serde(rename = "schedule.add")]
     ScheduleAdd(ScheduleAddArgs),
     #[serde(rename = "schedule.list")]
@@ -1798,6 +1810,12 @@ record!(ShellOutput {
     encoding: String,
     cursor: String,
     raw_bytes: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    oldest_sequence: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    stdout_start_offset: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    stderr_start_offset: Option<u64>,
     output_complete: bool,
     decode_errors: bool
 });

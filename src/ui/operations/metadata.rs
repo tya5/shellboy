@@ -612,6 +612,11 @@ fn operation_label_for(id: OperationId, language: crate::config::UiLanguage) -> 
             "Conversation · Unarchive"
         ),
         OperationId::ThreadTag => local!(language, "会話 · タグ", "Conversation · Tags"),
+        OperationId::ServiceAdd => local!(language, "サービス · 追加", "Service · Add"),
+        OperationId::ServiceList => local!(language, "サービス · 一覧", "Service · List"),
+        OperationId::ServiceStart => local!(language, "サービス · 起動", "Service · Start"),
+        OperationId::ServiceStop => local!(language, "サービス · 停止", "Service · Stop"),
+        OperationId::ServiceRemove => local!(language, "サービス · 削除", "Service · Remove"),
         OperationId::ScheduleAdd => local!(language, "予定 · 追加", "Schedule · Add"),
         OperationId::ScheduleSet => local!(language, "予定 · 説明", "Schedule · Set"),
         OperationId::ScheduleEnable => local!(language, "予定 · 有効化", "Schedule · Enable"),
@@ -831,6 +836,23 @@ fn operation_meaning_for(id: OperationId, language: crate::config::UiLanguage) -
             language,
             "指定Threadへタグを付け外しします。置き場所や切り口を表す自由なラベルで、履歴・検索・使用量・受信・一覧の順序は変わりません。",
             "Add or remove tags on the specified Thread: free labels for placement and cross-cutting views. History, search, usage, receiving messages and list order are unchanged."
+        ),
+        OperationId::ServiceAdd => local!(
+            language,
+            "サービスを保存して起動します。",
+            "Save and start a service."
+        ),
+        OperationId::ServiceList => local!(
+            language,
+            "サービスと実行結果を表示します。",
+            "List services and their latest executions."
+        ),
+        OperationId::ServiceStart => local!(language, "サービスを起動します。", "Start a service."),
+        OperationId::ServiceStop => local!(language, "サービスを停止します。", "Stop a service."),
+        OperationId::ServiceRemove => local!(
+            language,
+            "サービスを停止して削除します。",
+            "Stop and remove a service."
         ),
         OperationId::ScheduleAdd => local!(
             language,
@@ -1198,6 +1220,7 @@ fn field_label_for(id: FieldId, language: crate::config::UiLanguage) -> &'static
             )
         }
         FieldId::MaxTokens => local!(language, "出力上限", "Output limit"),
+        FieldId::Service => local!(language, "サービスID", "Service ID"),
         FieldId::Schedule => local!(language, "予定ID", "Schedule ID"),
         FieldId::Cron => local!(language, "cron式", "Cron expression"),
         FieldId::At => local!(language, "日時", "Run at"),
@@ -1569,6 +1592,11 @@ fn field_help_for(id: FieldId, language: crate::config::UiLanguage) -> &'static 
             language,
             "このThreadのモデル要求の出力上限（トークン、正の整数）です。接続のmax_tokensより優先します。CLIの空文字（フォームではnone）で接続の値または既定へ戻します。要約要求には適用しません。",
             "Output limit in tokens (positive integer) for this Thread's model requests; it replaces the connection max_tokens. An empty CLI value (none in the form) returns to the connection or default value. Summary requests do not use it."
+        ),
+        FieldId::Service => local!(
+            language,
+            "サービスをIDで指定します。",
+            "Select a service by ID."
         ),
         FieldId::Schedule => local!(
             language,

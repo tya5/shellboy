@@ -302,6 +302,11 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         sql: include_str!("../../migrations/0056_directional_reply_pending.sql"),
         foreign_keys: None,
     },
+    Migration {
+        version: 57,
+        sql: include_str!("../../migrations/0057_schedule_service_kind.sql"),
+        foreign_keys: Some(Impact::Tables(&["schedule", "shell_execution"])),
+    },
 ];
 
 pub(super) fn run(

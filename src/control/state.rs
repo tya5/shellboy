@@ -461,6 +461,10 @@ pub(crate) fn interrupt_previous_work(
     for id in scheduled {
         super::schedule::retire_oneshot(tx, &id)?;
     }
+    tx.execute(
+        "UPDATE schedule SET next_at=unixepoch(?1) WHERE kind='service' AND enabled=1",
+        [now],
+    )?;
     let report = repair_interrupted_tool_groups(tx, now)?;
     tx.execute("UPDATE run SET state='stopped',ended_at=?1,stop_reason=COALESCE(stop_reason,'previous_instance_interrupted') WHERE state IN ('live','stopping') AND id NOT IN (SELECT value FROM json_each(?2))",params![now,preserved])?;
     interrupt_previous_attempts(tx, now)?;
@@ -552,7 +556,7 @@ fn finish_shell_spawn(
 ) -> Result<usize, StorageError> {
     // A saved stop intent can still be stopping when OS spawn fails. Settle
     // that admitted execution, but never overwrite an already terminal result.
-    let changed=db.execute("UPDATE shell_execution SET state=?3,end_reason=?4,output_complete=0,ended_at=?2 WHERE id=?1 AND state IN ('starting','stopping')",params![execution,at,if cancelled {"stopped"} else {"failed"},if cancelled {"stopped_before_spawn"} else {"spawn_failed"}])?;
+    let changed=db.execute("UPDATE shell_execution SET state=?3,end_reason=CASE WHEN end_reason='owner_shutdown' THEN end_reason ELSE ?4 END,output_complete=0,ended_at=?2 WHERE id=?1 AND state IN ('starting','stopping')",params![execution,at,if cancelled {"stopped"} else {"failed"},if cancelled {"stopped_before_spawn"} else {"spawn_failed"}])?;
     if changed == 0 {
         let state: Option<String> = db
             .query_row(

@@ -1,5 +1,9 @@
 # Validation record
 
+## Core #348 Thread-owned services
+
+Local macOS witnesses exercised real service exit and graceful owner restart, explicit stop/start/remove, an IPC file trigger that starts a Turn through a loopback model mock, and rotation that expires an evicted cursor without advancing its generation. The schema upgrade fixture preserves existing timed definitions, executions, and output. Native Linux and Windows results require hosted CI. Forced owner death for a service has not been verified separately from the shared process supervision path.
+
 ## #315 Retry after partial output (source only)
 
 The previous candidate `6d4e7b970203dbff3ccf71a2bf8fb5266566f72a` and CI runs

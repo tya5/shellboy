@@ -451,6 +451,7 @@ impl ShellSupervisor {
         initial: Option<Vec<u8>>,
         budget_size: usize,
         gate: Option<Arc<tokio::sync::Mutex<bool>>>,
+        owner: SpawnOwner,
     ) -> Result<ShellExecution, ApiError> {
         let entries = environment(&self.config, env)?;
         let executable = resolve_program(&self.config, &cwd, &entries)?;
@@ -502,7 +503,9 @@ impl ShellSupervisor {
         // Attributes and their backing handle slices stay alive through this call.
         // Job assignment is part of creation, before the first instruction runs.
         let spawned_at = Instant::now();
-        self.admit_start()?;
+        if matches!(owner, SpawnOwner::Run(_)) {
+            self.admit_start()?;
+        }
         if unsafe {
             CreateProcessW(
                 exe.as_ptr(),
@@ -541,6 +544,7 @@ impl ShellSupervisor {
             args.stdin_open,
             gate.is_some(),
             budget_size,
+            owner.raw_limit(),
             &self.config,
         );
         let (done_tx, done_rx) = watch::channel(None);
