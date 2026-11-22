@@ -483,20 +483,28 @@ pub(super) async fn delete(
 }
 
 async fn drain(control: &Control, executions: Vec<String>) -> Result<(), ApiError> {
-    for id in executions {
-        if let Some(handle) = control.live.clone_shell_handle(&id).await {
+    if executions.is_empty() {
+        return Ok(());
+    }
+    for id in &executions {
+        if let Some(handle) = control.live.clone_shell_handle(id).await {
             handle.stop();
         }
-        loop {
-            let changed = control.changed.notified();
-            tokio::pin!(changed);
-            changed.as_mut().enable();
-            let target = id.clone();
-            if !control.store.database.call(move |db|Ok(db.query_row("SELECT EXISTS(SELECT 1 FROM shell_execution WHERE id=?1 AND state IN ('starting','running','stopping'))",[target],|r|r.get::<_,bool>(0))?)).await.map_err(super::storage_error)? { break; }
-            changed.await;
-        }
     }
-    Ok(())
+    let targets = Arc::new(serde_json::json!(executions).to_string());
+    loop {
+        let changed = control.changed.notified();
+        tokio::pin!(changed);
+        changed.as_mut().enable();
+        let targets = targets.clone();
+        let active = control.store.database.call(move |db| {
+            Ok(db.query_row("SELECT EXISTS(SELECT 1 FROM json_each(?1) j CROSS JOIN shell_execution s ON s.id=j.value WHERE s.state IN ('starting','running','stopping'))",[targets.as_str()],|r|r.get::<_,bool>(0))?)
+        }).await.map_err(super::storage_error)?;
+        if !active {
+            return Ok(());
+        }
+        changed.await;
+    }
 }
 
 #[cfg(test)]
@@ -656,6 +664,94 @@ mod tests {
             control.shutdown().await.unwrap();
             owner.shutdown().await.unwrap();
         }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn schedule_drain_signals_both_handles_before_first_terminal_write() {
+        let root = tempfile::tempdir().unwrap();
+        let owner =
+            crate::app::DataOwner::start(None, Some(root.path().join("data")), root.path().into())
+                .await
+                .unwrap();
+        let control = Control::new(&owner, root.path().into());
+        let cwd = root.path().to_str().unwrap().to_owned();
+        owner.db.call(move |db| {
+            db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('target',?1,'','fixture','fixture','now')",[&cwd])?;
+            for (schedule, id) in [("q1","first"),("q2","second")] {
+                db.execute("INSERT INTO schedule(id,thread_id,once_at,enabled,cwd,command) VALUES(?1,'target',1,1,?2,'sleep 600')",params![schedule,cwd])?;
+                db.execute("INSERT INTO shell_execution(id,schedule_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at) VALUES(?1,?2,?1,'running',?3,'{}','utf-8','utf-8','closed','2020-01-01T00:00:00Z')",params![id,schedule,cwd])?;
+            }
+            Ok(())
+        }).await.unwrap();
+        let mut shells = Vec::new();
+        for id in ["first", "second"] {
+            let shell = control
+                .shell
+                .spawn(
+                    id.into(),
+                    root.path().into(),
+                    ShellToolArgs {
+                        command: "exec sleep 600".into(),
+                        description: None,
+                        background: true,
+                        stdin_open: false,
+                        initial_stdin: None,
+                        input_encoding: "utf-8".into(),
+                        output_encoding: "utf-8".into(),
+                    },
+                    Default::default(),
+                )
+                .await
+                .unwrap();
+            control
+                .live
+                .register_shell(
+                    id.into(),
+                    super::super::LiveShell {
+                        run_id: None,
+                        handle: shell.handle.clone(),
+                        last_committed_output: None,
+                    },
+                )
+                .await;
+            shells.push(shell);
+        }
+        let targets = owner
+            .db
+            .call(|db| {
+                let tx = db.transaction()?;
+                let mut ids = disable_and_stop(&tx, "target", true)?;
+                ids.sort();
+                tx.commit()?;
+                Ok(ids)
+            })
+            .await
+            .unwrap();
+        let worker = control.clone();
+        let draining = tokio::spawn(async move { drain(&worker, targets).await });
+        crate::test_watchdog::watchdog("both scheduled children stop before first terminal write",async {
+            for shell in &mut shells {
+                let completion=shell.completion.wait_for(Option::is_some).await.unwrap();
+                assert_eq!(completion.as_ref().unwrap().state, crate::protocol::ShellState::Stopped);
+            }
+            // Deliver the second terminal write while the first collector stays held.
+            owner.db.call(|db| {
+                assert_eq!(db.execute("UPDATE shell_execution SET state='stopped' WHERE id='second' AND state='stopping'",[])?,1);
+                assert_eq!(db.query_row("SELECT state FROM shell_execution WHERE id='first'",[],|r|r.get::<_,String>(0))?,"stopping");
+                Ok(())
+            }).await.unwrap();
+            control.changed("target");
+            assert!(!draining.is_finished());
+            owner.db.call(|db| { db.execute("UPDATE shell_execution SET state='stopped' WHERE id='first'",[])?; Ok(()) }).await.unwrap();
+            control.changed("target");
+            draining.await.unwrap().unwrap();
+        }).await.unwrap();
+        for id in ["first", "second"] {
+            control.live.remove_shell(id).await;
+        }
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
     }
 
     #[cfg(unix)]
