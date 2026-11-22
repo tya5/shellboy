@@ -350,95 +350,34 @@ pub(crate) fn decode(text: &str) -> Option<CompactionOutcomeFact> {
 }
 pub(crate) fn status_sql(alias: &str) -> String {
     format!(
-        "CASE WHEN length(CAST({alias}.error_json AS BLOB))<=262144 THEN CASE WHEN json_valid({alias}.error_json) THEN CASE WHEN json_type({alias}.error_json,'$.automatic_trim_attempt.compaction_outcome')='object' AND length(CAST(json_extract({alias}.error_json,'$.automatic_trim_attempt.compaction_outcome') AS BLOB))<=1024 THEN json_extract({alias}.error_json,'$.automatic_trim_attempt.compaction_outcome') END END END"
+        "(SELECT CASE WHEN octet_length(c.failure_json)<=1024 THEN c.failure_json END FROM automatic_compaction c WHERE c.attempt_id={alias}.id)"
     )
 }
 
-// Both observations and finalization qualify the original token; absence is not
-// permission to recreate an observation after interruption/recovery.
-pub(crate) const STAGE_SQL: &str = "UPDATE model_attempt SET error_json=json_set(error_json,'$.automatic_trim_attempt.active_stage',?3) WHERE id=?1 AND state IN ('preparing','inflight','failed','completed') AND json_valid(error_json) AND json_extract(error_json,'$.automatic_trim_attempt.token')=?2";
-pub(crate) const SAVE_SQL: &str = "UPDATE model_attempt SET error_json=json_set(error_json,'$.automatic_trim_attempt.compaction_outcome',json(?3)) WHERE id=?1 AND state IN ('preparing','inflight','failed','completed') AND json_valid(error_json) AND json_extract(error_json,'$.automatic_trim_attempt.token')=?2 AND json_extract(error_json,'$.automatic_trim_attempt.active_stage')=?4";
+pub(crate) const SAVE_SQL: &str =
+    "UPDATE automatic_compaction SET failure_json=?3 WHERE attempt_id=?1 AND token=?2";
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn completed_discard_requires_original_token_and_stage_and_preserves_success() {
-        use rusqlite::params;
+    fn observed_discard_requires_original_token_and_preserves_committed_stage() {
         let db = rusqlite::Connection::open_in_memory().unwrap();
-        db.execute_batch("CREATE TABLE model_attempt(id TEXT,state TEXT,error_json TEXT,response_id TEXT,usage_json TEXT); INSERT INTO model_attempt VALUES('a','completed','{}','success','{}');").unwrap();
-        let read = || {
-            db.query_row("SELECT error_json FROM model_attempt", [], |r| {
-                r.get::<_, String>(0)
-            })
-            .unwrap()
-        };
+        db.execute_batch("CREATE TABLE automatic_compaction(attempt_id TEXT,token TEXT,failure_json TEXT,closed_spill TEXT);
+            INSERT INTO automatic_compaction VALUES('a','token',NULL,'{}');").unwrap();
         let fact = r#"{"outcome":{"kind":"rejected","reason":"run_started"},"phase":"closed_summary","elapsed_ms":3}"#;
-        assert_eq!(
-            db.execute(STAGE_SQL, params!["a", "token", "closed_summary"])
-                .unwrap(),
-            0
-        );
-        let original = serde_json::json!({"existing_counter":7,"automatic_trim_attempt":{"token":"token","committed_stages":{"closed_spill":{"groups":1}}}});
-        db.execute(
-            "UPDATE model_attempt SET error_json=?1",
-            [original.to_string()],
-        )
-        .unwrap();
-        assert_eq!(
-            db.execute(STAGE_SQL, params!["a", "token", "closed_summary"])
-                .unwrap(),
-            1
-        );
-        for (token, phase) in [("old", "closed_summary"), ("token", "active_summary")] {
-            assert_eq!(
-                db.execute(SAVE_SQL, params!["a", token, fact, phase])
-                    .unwrap(),
-                0
-            );
-        }
-        assert_eq!(
-            db.execute(SAVE_SQL, params!["a", "token", fact, "closed_summary"])
-                .unwrap(),
-            1
-        );
-        let saved: serde_json::Value = serde_json::from_str(&read()).unwrap();
-        assert_eq!(saved["existing_counter"], 7);
-        assert_eq!(
-            saved["automatic_trim_attempt"]["committed_stages"],
-            original["automatic_trim_attempt"]["committed_stages"]
-        );
-        assert_eq!(
-            saved["automatic_trim_attempt"]["compaction_outcome"]["outcome"]["reason"],
-            "run_started"
-        );
-        assert_eq!(
-            db.query_row(
-                "SELECT state,response_id,usage_json FROM model_attempt",
+        assert_eq!(db.execute(SAVE_SQL, ["a", "old", fact]).unwrap(), 0);
+        assert_eq!(db.execute(SAVE_SQL, ["a", "token", fact]).unwrap(), 1);
+        let saved: (String, String) = db
+            .query_row(
+                "SELECT failure_json,closed_spill FROM automatic_compaction",
                 [],
-                |r| Ok((
-                    r.get::<_, String>(0)?,
-                    r.get::<_, String>(1)?,
-                    r.get::<_, String>(2)?
-                ))
+                |r| Ok((r.get(0)?, r.get(1)?)),
             )
-            .unwrap(),
-            ("completed".into(), "success".into(), "{}".into())
-        );
-        db.execute("UPDATE model_attempt SET error_json='{}'", [])
             .unwrap();
-        assert_eq!(
-            db.execute(SAVE_SQL, params!["a", "token", fact, "closed_summary"])
-                .unwrap(),
-            0
-        );
-        assert_eq!(
-            db.execute(STAGE_SQL, params!["a", "token", "closed_summary"])
-                .unwrap(),
-            0
-        );
-        assert_eq!(read(), "{}");
+        assert_eq!(saved, (fact.into(), "{}".into()));
+        assert_eq!(db.execute(SAVE_SQL, ["missing", "token", fact]).unwrap(), 0);
     }
     #[test]
     fn discard_decoder_is_closed_bounded_and_content_free() {
@@ -721,81 +660,6 @@ mod outcome_contract_tests {
 #[cfg(test)]
 mod retention_contract_tests {
     use super::*;
-    use rusqlite::params;
-    use serde_json::json;
-
-    #[test]
-    fn same_token_finish_retains_terminal_fact_and_committed_stages_not_foreign_body() {
-        let db = rusqlite::Connection::open_in_memory().unwrap();
-        db.execute_batch("CREATE TABLE model_attempt(id TEXT,state TEXT,error_json TEXT,response_id TEXT,usage_json TEXT); INSERT INTO model_attempt VALUES('a','completed','{}','response-kept','{\"input_tokens\":3}');").unwrap();
-        let fact = json!({"phase":"closed_summary","elapsed_ms":12,"outcome":{"kind":"failed","reason":"provider_error","origin":"provider_response","http_status":401}});
-        let committed = json!({"closed_spill":{"groups":1,"source_nodes":2}});
-        let raw=json!({"independent":7,"automatic_trim_attempt":{"token":"token","active_stage":"closed_summary","compaction_outcome":fact,"committed_stages":committed}}).to_string();
-        db.execute("UPDATE model_attempt SET error_json=?1", [&raw])
-            .unwrap();
-        let final_body=json!({"outcome":"failed","compaction_outcome":{"forged":true},"committed_stages":{"forged":true}}).to_string();
-        for token in ["old", ""] {
-            assert_eq!(
-                db.execute(
-                    super::super::attempt::FINISH_SQL,
-                    params![final_body, "a", token]
-                )
-                .unwrap(),
-                0
-            );
-            assert_eq!(
-                db.query_row("SELECT error_json FROM model_attempt", [], |r| r
-                    .get::<_, String>(0))
-                    .unwrap(),
-                raw
-            );
-        }
-        assert_eq!(
-            db.execute(
-                super::super::attempt::FINISH_SQL,
-                params![final_body, "a", "token"]
-            )
-            .unwrap(),
-            1
-        );
-        let saved: String = db
-            .query_row("SELECT error_json FROM model_attempt", [], |r| r.get(0))
-            .unwrap();
-        let saved: serde_json::Value = serde_json::from_str(&saved).unwrap();
-        assert_eq!(saved["automatic_trim_attempt"]["compaction_outcome"], fact);
-        assert_eq!(
-            saved["automatic_trim_attempt"]["committed_stages"],
-            committed
-        );
-        assert_eq!(saved["independent"], 7);
-        assert_eq!(
-            db.query_row(
-                "SELECT state,response_id,usage_json FROM model_attempt",
-                [],
-                |r| Ok((
-                    r.get::<_, String>(0)?,
-                    r.get::<_, String>(1)?,
-                    r.get::<_, String>(2)?
-                ))
-            )
-            .unwrap(),
-            (
-                "completed".into(),
-                "response-kept".into(),
-                "{\"input_tokens\":3}".into()
-            )
-        );
-        db.execute("UPDATE model_attempt SET error_json='{}'", [])
-            .unwrap();
-        assert_eq!(
-            db.execute(
-                super::super::attempt::FINISH_SQL,
-                params![final_body, "a", "token"]
-            )
-            .unwrap(),
-            0
-        );
-    }
 
     #[test]
     fn canonical_guards_have_one_closed_public_meaning_and_no_deterministic_failure() {

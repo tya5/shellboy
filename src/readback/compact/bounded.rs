@@ -2,7 +2,7 @@
 use super::*;
 
 fn prefix() -> String {
-    format!("WITH operation_receipt AS MATERIALIZED (
+    String::from("WITH operation_receipt AS MATERIALIZED (
  SELECT operation_id,created_at,CASE WHEN octet_length(result_ref_json)<=131072 THEN result_ref_json END result_ref_json,octet_length(result_ref_json)>131072 source_oversized FROM main.operation_receipt INDEXED BY compact_operation_thread
  WHERE CASE WHEN json_valid(result_ref_json) THEN json_extract(result_ref_json,'$.result.status')='queued' ELSE 0 END
  AND json_extract(result_ref_json,'$.result.thread_id')=?1
@@ -11,10 +11,10 @@ fn prefix() -> String {
  SELECT id,thread_id FROM main.turn INDEXED BY turns_by_thread WHERE thread_id=?1 ORDER BY created_at DESC LIMIT 33
 ), auto_ids AS MATERIALIZED (
  SELECT (SELECT json_group_array(native_rowid) FROM
- (SELECT a.rowid native_rowid FROM main.model_attempt a INDEXED BY automatic_compaction_turn
- WHERE a.turn_id=u.id AND {AUTO} ORDER BY a.started_at DESC,a.id DESC LIMIT 33)) ids FROM turn u
-), model_attempt AS MATERIALIZED (
- SELECT a.rowid rowid,a.id,a.turn_id,a.started_at,a.ended_at,CASE WHEN octet_length(a.error_json)<=131072 THEN a.error_json END error_json,octet_length(a.error_json)>131072 source_oversized FROM auto_ids u CROSS JOIN json_each(u.ids) j CROSS JOIN main.model_attempt a ON a.rowid=j.value
+ (SELECT c.rowid native_rowid FROM main.automatic_compaction c INDEXED BY automatic_compaction_turn
+ WHERE c.turn_id=u.id ORDER BY c.attempt_started_at DESC,c.attempt_id DESC LIMIT 33)) ids FROM turn u
+), automatic_compaction AS MATERIALIZED (
+ SELECT c.* FROM auto_ids u CROSS JOIN json_each(u.ids) j CROSS JOIN main.automatic_compaction c ON c.rowid=j.value
 ), thread_replacement AS MATERIALIZED (
  SELECT * FROM main.thread_replacement WHERE thread_id=?1 ORDER BY replacement_id DESC LIMIT 201
 ) ")
@@ -61,7 +61,7 @@ pub(in crate::readback) fn read_display(
  OR EXISTS(SELECT 1 FROM auto_ids WHERE json_array_length(ids)=33)
  OR (SELECT count(*) FROM thread_replacement)=201,
  EXISTS(SELECT 1 FROM operation_receipt WHERE source_oversized) OR EXISTS(SELECT 1 FROM operation_receipt o CROSS JOIN app_meta m ON m.key='compact.result.'||o.operation_id WHERE octet_length(m.value)>131072 OR octet_length(o.operation_id)>512)
- OR EXISTS(SELECT 1 FROM model_attempt WHERE source_oversized OR octet_length(id)>512)", prefix());
+ OR EXISTS(SELECT 1 FROM automatic_compaction c JOIN main.model_attempt a ON a.id=c.attempt_id WHERE octet_length(c.attempt_id)>512 OR octet_length(c.result_json)>131072 OR octet_length(c.trigger_json)>131072 OR octet_length(a.error_json)>131072)", prefix());
     let (saturated, oversized): (bool, bool) =
         db.query_row(&flags, [thread], |r| Ok((r.get(0)?, r.get(1)?)))?;
     if oversized {
@@ -75,12 +75,12 @@ pub(in crate::readback) fn read_display(
     let receipt_root = format!(
         "COALESCE(json_extract({meta},'$.outcome.result'),json_extract({meta},'$.outcome.error.details'),'{{}}')"
     );
-    let auto_root = "COALESCE(json_extract(a.error_json,'$.automatic_trim'),json_extract(a.error_json,'$.automatic_trim_attempt.result'),json_extract(a.error_json,'$.automatic_trim_attempt.summary'),json_extract(a.error_json,'$.automatic_trim_attempt.error.details'),'{}')";
+
     let nodes=format!("{} , node_ids AS MATERIALIZED (
       SELECT {} id FROM operation_receipt o CROSS JOIN app_meta m ON m.key='compact.result.'||o.operation_id WHERE COALESCE(json_extract(o.result_ref_json,'$.result.context_edit.action'),'compact')<>'restore'
-      UNION ALL SELECT {} FROM model_attempt a
+      UNION ALL SELECT {} FROM automatic_compaction c
       UNION ALL SELECT r.output_node_id FROM thread_replacement tr CROSS JOIN replacement r ON r.id=tr.replacement_id
-    ) SELECT EXISTS(SELECT 1 FROM node_ids i CROSS JOIN node n ON n.id=i.id WHERE n.kind='summary' AND octet_length(n.payload_json)>131072)",prefix(),output_node(&receipt_root),output_node(auto_root));
+    ) SELECT EXISTS(SELECT 1 FROM node_ids i CROSS JOIN node n ON n.id=i.id WHERE n.kind='summary' AND octet_length(n.payload_json)>131072)",prefix(),output_node(&receipt_root),output_node(AUTOMATIC_METRICS));
     let oversized_node: bool = db.query_row(&nodes, [thread], |r| r.get(0))?;
     if oversized_node {
         return Err(ApiError::new(
@@ -177,7 +177,8 @@ mod tests {
             db.execute("INSERT INTO app_meta(key,value)VALUES(?1,?2)",params![format!("compact.result.{id}"),json!({"state":"completed","ended_at":at,"outcome":{"result":{"omitted_nodes":0}}}).to_string()]).unwrap();
             let turn = format!("turn{i:06}");
             db.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES(?1,'t','r','completed','2026-01-01T00:00:00Z')",[&turn]).unwrap();
-            db.execute(r#"INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,error_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id=?2),?1,?2,0,0,'p','m',0,'failed','{}','{"automatic_trim_attempt":{"outcome":"failed"}}','2026-01-01T00:00:00Z')"#,params![format!("attempt{i:06}"),turn]).unwrap();
+            db.execute(r#"INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id=?2),?1,?2,0,0,'p','m',0,'failed','{}','2026-01-01T00:00:00Z')"#,params![format!("attempt{i:06}"),turn]).unwrap();
+            db.execute("INSERT INTO automatic_compaction(attempt_id,turn_id,attempt_started_at,outcome) VALUES(?1,?2,'2026-01-01T00:00:00Z','failed')",params![format!("attempt{i:06}"),turn]).unwrap();
             let replacement = format!("replacement{i:06}");
             db.execute("INSERT INTO replacement(id,output_node_id,input_key,format_version,prompt_version,state,created_at)VALUES(?1,'marker',?1,'summary-v1','test','completed','2026-01-01T00:00:00Z')",[&replacement]).unwrap();
             db.execute(
@@ -193,7 +194,7 @@ mod tests {
     fn bounded_compaction_prefix_seeks_use_native_order() {
         let db = fixture();
         let sql = format!(
-            "EXPLAIN QUERY PLAN {} SELECT * FROM operation_receipt CROSS JOIN model_attempt CROSS JOIN thread_replacement",
+            "EXPLAIN QUERY PLAN {} SELECT * FROM operation_receipt CROSS JOIN automatic_compaction CROSS JOIN thread_replacement",
             prefix()
         );
         let plan = db

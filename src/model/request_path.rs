@@ -787,7 +787,7 @@ fn write_outcome(
     let patch = json!({"http_observation":http,"rate_observation":rate});
     let error = (state != "completed").then(|| body.to_string());
     let changed = db.execute("UPDATE model_attempt SET state=?2,ended_at=?3,response_id=?8,usage_json=COALESCE(?4,usage_json),
-         error_json=CASE WHEN ?5 IS NULL THEN error_json WHEN json_valid(error_json) AND json_type(error_json,'$.automatic_trim_attempt')='object' THEN json_set(json_remove(?5,'$.automatic_trim_attempt'),'$.automatic_trim_attempt',json_extract(error_json,'$.automatic_trim_attempt')) ELSE json_remove(?5,'$.automatic_trim_attempt') END,
+         error_json=?5,
          input_manifest_json=json_set(json_patch(input_manifest_json,?6),'$.prompt_cache_diagnostics',json(CASE WHEN json_extract(input_manifest_json,'$.prompt_cache.diagnostics_enabled')=1 THEN ?7 ELSE 'null' END)) WHERE id=?1",
          params![attempt,state,at,usage.map(|usage| usage.to_value().to_string()),error,patch.to_string(),diagnostic,body.pointer("/raw_response/id").and_then(Value::as_str)])?;
     if changed != 1 {

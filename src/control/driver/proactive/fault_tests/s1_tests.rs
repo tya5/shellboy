@@ -492,7 +492,7 @@ async fn all_canonical_guard_causes_share_one_public_projection_without_requests
                 REASON,
                 crate::compaction::ABoundaryObservation::Observe,
                 &json!({}),
-                &Value::Null,
+
             )?;
             tx.commit()?;
             Ok(())

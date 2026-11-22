@@ -827,8 +827,8 @@ impl Compactor {
         let token = automatic.token.clone();
         let stage_name = automatic.stage;
         self.database.call(move|db|{
-            let row:(String,String,String,Option<String>,i64)=db.query_row("SELECT t.thread_id,a.profile_id,a.model_id,a.effort,a.reasoning_epoch FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE a.id=?1 AND a.state='completed'",[attempt],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?)))?;
-            Ok(GcStage{attempt_id,token,thread_id:row.0,profile_id:row.1,model_id:row.2,effort:row.3,reasoning_epoch:row.4,stage:stage_name})
+            let thread_id: String=db.query_row("SELECT t.thread_id FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE a.id=?1 AND a.state='completed'",[attempt],|r|r.get(0))?;
+            Ok(GcStage{attempt_id,token,thread_id,stage:stage_name})
         }).await.map_err(storage_error)
     }
 
@@ -903,13 +903,9 @@ impl Compactor {
     ) -> Result<CompactResult, ApiError> {
         let stage = self.resolve_gc_stage(&automatic).await?;
         let trigger = json!({"scope":if active{"active_turn"}else{"prefix"},"turn_id":turn_id});
-        let target_plan = Value::Null;
-        let reason = "proactive_threshold".to_owned();
         let config = self.config.current();
         let thread = stage.thread_id.clone();
         let capture_trigger = trigger.clone();
-        let capture_target = target_plan.clone();
-        let capture_reason = reason.clone();
         let capture_stop = run_stop.clone();
         let db = self.database.clone();
         let compactor = self.clone();
@@ -918,7 +914,7 @@ impl Compactor {
         let boundary_for_job = thread_boundary.clone();
         let stop_for_job = run_stop.clone();
         let admission=self.database.call_with_gc_capture_cancellable(stage.clone(),move|connection,stage|{
-            gc_capture::capture_ordinary_gc_prefix_with_receipt_tx(connection,&thread,stage,&capture_reason,&capture_trigger,&capture_target,&capture_stop)
+            gc_capture::capture_ordinary_gc_prefix_with_receipt_tx(connection,&thread,stage,&capture_trigger,&capture_stop)
         },move|job_id,captured,cancel|async move{
             let captured=Arc::new(captured);
             let material_groups=gc_request_groups(&captured);
@@ -2628,7 +2624,6 @@ mod tests {
                 "proactive_threshold",
                 ABoundaryObservation::Unobserved,
                 &json!({"input_tokens":200}),
-                &Value::Null,
             )?;
             tx.commit()?;
             Ok(())
@@ -2666,10 +2661,6 @@ mod tests {
                     attempt_id: "attempt".into(),
                     token: "gc-plan-token".into(),
                     thread_id: "t".into(),
-                    profile_id: "fixture".into(),
-                    model_id: "fixture".into(),
-                    effort: None,
-                    reasoning_epoch: 0,
                     stage: "active_summary",
                 };
                 let plan = gc_capture::plan_gc_active_turn_tx(&tx, "t", &stage, "current")?;
@@ -2701,13 +2692,13 @@ mod tests {
                 attempt_id: "attempt".into(),
                 token: "gc-plan-token".into(),
                 thread_id: "t".into(),
-                profile_id: "fixture".into(),
-                model_id: "fixture".into(),
-                effort: None,
-                reasoning_epoch: 0,
                 stage: "active_summary",
             };
-            let origin_epoch = stage.reasoning_epoch;
+            let origin_epoch: i64 = tx.query_row(
+                "SELECT reasoning_epoch FROM model_attempt WHERE id=?1",
+                [&stage.attempt_id],
+                |row| row.get(0),
+            )?;
             assert_eq!(
                 origin_epoch, 0,
                 "the saved receipt retains its original epoch"
@@ -2729,7 +2720,7 @@ mod tests {
             let mut wrong_receipt = stage.clone();
             wrong_receipt.token = "other-token".into();
             assert!(
-                !attempt::provisional_gc_matches(&tx, &wrong_receipt)?,
+                !attempt::gc_matches(&tx, &wrong_receipt)?,
                 "the original Thread/attempt/token receipt remains authoritative"
             );
             Ok(())

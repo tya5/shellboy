@@ -13,7 +13,7 @@ use crate::{
 use rusqlite::Connection;
 
 const MAX_NODES: usize = 128;
-const AUTOMATIC_ATTEMPTS: &str = "SELECT oi.node_id,oi.attempt_id FROM output_item oi INDEXED BY output_item_node JOIN model_attempt a ON a.id=oi.attempt_id WHERE oi.node_id IN (SELECT value FROM json_each(?1)) AND CASE WHEN json_valid(a.error_json) THEN json_type(a.error_json,'$.automatic_trim_attempt')='object' ELSE 0 END";
+const AUTOMATIC_ATTEMPTS: &str = "SELECT oi.node_id,oi.attempt_id FROM output_item oi INDEXED BY output_item_node JOIN automatic_compaction c ON c.attempt_id=oi.attempt_id WHERE oi.node_id IN (SELECT value FROM json_each(?1))";
 
 pub(super) struct Raw {
     attempts: Vec<(String, String)>,
@@ -198,8 +198,9 @@ mod tests {
             json!({}),
         );
         let attempt = |id: &str, at: &str, record: Value| {
-            db.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,error_json,usage_json,started_at,ended_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='u'),?1,'u',0,0,'p','m',0,'completed','{}',?2,?3,?4,?4)",
-                params![id, json!({"automatic_trim_attempt":record}).to_string(), json!({"input_tokens":32000}).to_string(), at]).unwrap();
+            db.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at,ended_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='u'),?1,'u',0,0,'p','m',0,'completed','{}',?2,?3,?3)",
+                params![id, json!({"input_tokens":32000}).to_string(), at]).unwrap();
+            db.execute("INSERT INTO automatic_compaction(attempt_id,turn_id,attempt_started_at,reason,outcome,trigger_json,result_json) VALUES(?1,'u',?2,?3,?4,?5,?6)", params![id,at,record["reason"].as_str(),record["outcome"].as_str(),record.get("trigger").map(Value::to_string),json!({"metrics":record.get("summary")}).to_string()]).unwrap();
         };
         attempt(
             "a1",

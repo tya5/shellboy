@@ -260,9 +260,12 @@ attempt per boundary in `driver/proactive.rs`:
 1. spill as today;
 2. if the B candidate exists, run B **instead
    of** the ordinary summary in this attempt (decided); otherwise run the ordinary
-   summary as today. One summary operation per attempt; record
-   `midturn: {"scope":"active_turn"}` or `{"skipped":"no_target"}`
-   inside the existing `automatic_trim_attempt` JSON.
+   summary as today. One summary operation per attempt.
+
+   `automatic_compaction` owns one bounded record per triggering Conversation
+   attempt. Spill and GC save their own stage facts with adoption; only proactive
+   finish saves the aggregate and terminal outcome. If the owner exits before
+   finish, committed stages remain and the outcome stays unknown.
 
 Outcomes map to the existing `adopted`/`rejected`/`no_safe_reduction` and the
 same `ProactiveBudget`, so the #153 growth gate (`ceil(auto_at_tokens/10)`) and
@@ -404,3 +407,7 @@ This does not permit edits between a tool call and its result. Anthropic tool-us
 thinking degradation is documented but has not been live-validated. Summary
 material may include readable old-epoch reasoning, never encrypted or opaque
 content; replay remains epoch-filtered.
+
+The saved automatic compaction result uses one `result_json` envelope: `metrics`
+plus any recorded `error`, `midturn`, and `maximum_outcome`. Display readers
+project only metrics; the stage observer owns `failure_json` separately.

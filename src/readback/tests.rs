@@ -268,7 +268,8 @@ fn compaction_sources_merge_without_merging_restore_into_its_omission() {
             json!({"item":{"role":"developer","content":[]},"context_trim":{"reason":"failure","history_characters":1000,"omitted_nodes":1,"after_current_request_nodes":1}}),
         );
         let trimmed = json!({"marker_node_id":"marker","before_characters":1000,"after_characters":200,"omitted_nodes":1,"compact":{"source_nodes":1,"original_node_ids":["original"]}});
-        c.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,error_json,started_at,ended_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='t'),'auto','t',0,0,'p','m',0,'failed','{}',?1,'2026-10-31T00:01:59Z','2026-10-31T00:02:01Z')",[json!({"error":{"kind":"provider"},"automatic_retry":{"number":2},"automatic_trim":trimmed}).to_string()]).unwrap();
+        c.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,error_json,started_at,ended_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='t'),'auto','t',0,0,'p','m',0,'failed','{}',?1,'2026-10-31T00:01:59Z','2026-10-31T00:02:01Z')",[json!({"error":{"kind":"provider"},"automatic_retry":{"number":2}}).to_string()]).unwrap();
+        c.execute("INSERT INTO automatic_compaction(attempt_id,turn_id,attempt_started_at,result_json) SELECT id,turn_id,started_at,?1 FROM model_attempt WHERE id='auto'", [json!({"metrics":trimmed}).to_string()]).unwrap();
         operation(
             &c,
             "restore-op",
@@ -432,7 +433,8 @@ fn readback_plans_seek_shared_tables_and_indexes_have_measured_sizes() {
         for i in 0..5000 {
             let t = if i % 2 == 0 { "t" } else { "other" };
             tx.execute("INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,result_ref_json,created_at)VALUES(?1,'test','{}','hash','completed',?2,'2026-10-31T00:00:00Z')",params![format!("op{i}"),json!({"result":{"thread_id":t,"status":"queued"}}).to_string()]).unwrap();
-            tx.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,error_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id=?2),?1,?2,0,0,'p','m',0,'failed','{}','{\"automatic_trim\":{}}','2026-10-31T00:00:00Z')",params![format!("a{i}"),t]).unwrap();
+            tx.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id=?2),?1,?2,0,0,'p','m',0,'failed','{}','2026-10-31T00:00:00Z')",params![format!("a{i}"),t]).unwrap();
+            tx.execute("INSERT INTO automatic_compaction(attempt_id,turn_id,attempt_started_at,result_json) VALUES(?1,?2,'2026-10-31T00:00:00Z','{\"metrics\":{}}')",params![format!("a{i}"),t]).unwrap();
         }
         tx.commit().unwrap();
         for thread in [false, true] {
@@ -561,14 +563,12 @@ fn shell_list_common_description_is_bounded_sanitized_and_does_not_replace_comma
 #[test]
 fn automatic_metrics_reason_falls_back_to_failure_without_a_replacement() {
     let c = db();
-    for (id, record) in [
-        ("legacy", json!({"automatic_trim":{"no_target":true}})),
-        (
-            "attempt",
-            json!({"automatic_trim_attempt":{"outcome":"no_safe_reduction"}}),
-        ),
+    for (id, outcome, result) in [
+        ("legacy", None, Some(r#"{"metrics":{"no_target":true}}"#)),
+        ("attempt", Some("no_safe_reduction"), None),
     ] {
-        c.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,error_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='t'),?1,'t',0,0,'p','m',0,'failed','{}',?2,'2026-10-31T00:00:00Z')",params![id,record.to_string()]).unwrap();
+        c.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='t'),?1,'t',0,0,'p','m',0,'failed','{}','2026-10-31T00:00:00Z')",[id]).unwrap();
+        c.execute("INSERT INTO automatic_compaction(attempt_id,turn_id,attempt_started_at,outcome,result_json) SELECT id,turn_id,started_at,?2,?3 FROM model_attempt WHERE id=?1", params![id,outcome,result]).unwrap();
     }
     let page = compactions(&c, "t", &comp_args()).unwrap();
     let rows = page["items"].as_array().unwrap();
@@ -1046,44 +1046,4 @@ fn active_shell_filtered_windows_remain_bounded_and_resumable() {
     assert_eq!(next["scanned"], 1);
     assert_eq!(next["items"][0]["execution_id"], "active-00000");
     assert!(next["next_cursor"].is_null());
-}
-
-#[test]
-fn proactive_attempt_metrics_do_not_fall_back_to_stale_automatic_trim() {
-    let db = Connection::open_in_memory().unwrap();
-    let root = super::compact::automatic_metrics_root("a");
-    let current=json!({"automatic_trim":{"summary_node_id":"stale"},"automatic_trim_attempt":{"outcome":"adopted","summary":{"summary_node_id":"current","source_nodes":8}}}).to_string();
-    let selected: String = db
-        .query_row(
-            &format!("SELECT {root} FROM (SELECT ?1 AS error_json) a"),
-            [&current],
-            |row| row.get(0),
-        )
-        .unwrap();
-    let selected: Value = serde_json::from_str(&selected).unwrap();
-    assert_eq!(selected["summary_node_id"], "current");
-    let incomplete=json!({"automatic_trim":{"summary_node_id":"stale"},"automatic_trim_attempt":{"outcome":"unknown","provisional":true}}).to_string();
-    let selected: String = db
-        .query_row(
-            &format!("SELECT {root} FROM (SELECT ?1 AS error_json) a"),
-            [&incomplete],
-            |row| row.get(0),
-        )
-        .unwrap();
-    let selected: Value = serde_json::from_str(&selected).unwrap();
-    assert_eq!(
-        selected,
-        json!({}),
-        "current token exists but lacks summary; do not expose stale legacy metrics"
-    );
-    let legacy = json!({"automatic_trim":{"summary_node_id":"historic"}}).to_string();
-    let selected: String = db
-        .query_row(
-            &format!("SELECT {root} FROM (SELECT ?1 AS error_json) a"),
-            [&legacy],
-            |row| row.get(0),
-        )
-        .unwrap();
-    let selected: Value = serde_json::from_str(&selected).unwrap();
-    assert_eq!(selected["summary_node_id"], "historic");
 }

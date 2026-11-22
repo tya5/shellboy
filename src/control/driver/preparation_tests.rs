@@ -2133,7 +2133,7 @@ async fn ordinary_admission_and_completion_preserve_long_model_names_with_gc_ena
                 assert_eq!(crate::compaction::a_state::read(db,&thread)?.unwrap().reading(),crate::compaction::a_state::Reading::Known(123));
                 assert_eq!(db.query_row("SELECT count(*) FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND n.kind='assistant_response'",[&thread],|r|r.get::<_,i64>(0))?,1);
                 assert_eq!(db.query_row("SELECT count(*) FROM receipt WHERE state='applied'",[],|r|r.get::<_,i64>(0))?,1);
-                assert_eq!(db.query_row("SELECT count(*) FROM model_attempt WHERE json_type(error_json,'$.automatic_trim_attempt') IS NOT NULL",[],|r|r.get::<_,i64>(0))?,0,"ordinary admission/completion must not create a GC attempt");
+                assert_eq!(db.query_row("SELECT count(*) FROM automatic_compaction",[],|r|r.get::<_,i64>(0))?,0,"ordinary admission/completion must not create a GC attempt");
                 Ok(())
             }).await.unwrap();
             drop(snapshot);

@@ -2948,9 +2948,10 @@ count. Spec change (user): no character estimate; unknown usage never triggers.
 Choices: the trigger reads the same latest-completed-attempt usage as
 `context_usage` and ignores usage older than an adopted replacement, which bounds
 repeats without new state. Failure cap: one non-adopted proactive attempt per Run
-(in-memory per Driver; restart creates a new Run anyway). The record reuses
-`automatic_trim_attempt` on the triggering completed attempt rather than a new
-table/event. Measured motivation: workers averaging 440–570k input tokens per
+(in-memory per Driver; restart creates a new Run anyway). The original record reused `automatic_trim_attempt`. #331 replaces it with
+`automatic_compaction`, keyed by the triggering attempt. The executor owns
+provider `error_json`; the compaction record owns admission, committed stages,
+observed failure, and the final aggregate. Measured motivation: workers averaging 440–570k input tokens per
 request and $100 in about two hours via LiteLLM. Revisit if Runs are long enough
 that one failed attempt per Run leaves them large, if a provider omits usage
 (feature then inert), or if recording on completed attempts confuses consumers

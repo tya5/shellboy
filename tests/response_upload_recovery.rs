@@ -186,15 +186,14 @@ async fn upload_recovery(auto_trim: bool) {
         upload_facts(&control, &turn).await,
     );
     control.store.database.call(move |db| {
-        let attempts = db.prepare("SELECT state,error_json,json_extract(input_manifest_json,'$.http_observation') FROM model_attempt WHERE turn_id=?1 ORDER BY rowid")?
-            .query_map([turn], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?)))?
+        let attempts = db.prepare("SELECT state,error_json,json_extract(input_manifest_json,'$.http_observation'),EXISTS(SELECT 1 FROM automatic_compaction c WHERE c.attempt_id=a.id AND c.outcome='adopted') FROM model_attempt a WHERE turn_id=?1 ORDER BY rowid")?
+            .query_map([turn], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, bool>(3)?)))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         assert_eq!(attempts.len(), 3);
         assert_eq!(attempts[0].0, "failed");
         assert_eq!(attempts[1].0, "failed");
         assert_eq!(attempts[2].0, "incomplete");
-        for (index, (_, body, http)) in attempts.iter().enumerate() {
-            let saved: Value = serde_json::from_str(body).unwrap();
+        for (index, (_, _, http, reduced)) in attempts.iter().enumerate() {
             let observation: Value = serde_json::from_str(http).unwrap();
             if index < 2 || !auto_trim {
                 assert_eq!(observation["phase"], "upload_source_incomplete");
@@ -208,7 +207,7 @@ async fn upload_recovery(auto_trim: bool) {
                     "the resumed upload must actually be reduced");
                 assert_eq!(observation["body_source_bytes_consumed"], observation["request_body_bytes"]);
             }
-            assert_eq!(saved.get("automatic_trim").is_some(), auto_trim && index == 1);
+            assert_eq!(*reduced, auto_trim && index == 1);
         }
         let first: Value = serde_json::from_str(&attempts[0].1).unwrap();
         let last: Value = serde_json::from_str(&attempts[2].1).unwrap();
@@ -347,16 +346,16 @@ async fn refused_proxy_connections_exhaust_the_finite_retry_budget() {
         .call(move |db| {
             let rows = db
                 .prepare(
-                    "SELECT state,error_json,round((julianday(ended_at)-julianday(started_at))*86400000),json_extract(input_manifest_json,'$.http_observation') FROM model_attempt WHERE turn_id=?1 ORDER BY rowid",
+                    "SELECT state,error_json,round((julianday(ended_at)-julianday(started_at))*86400000),json_extract(input_manifest_json,'$.http_observation'),EXISTS(SELECT 1 FROM automatic_compaction c WHERE c.attempt_id=a.id) FROM model_attempt a WHERE turn_id=?1 ORDER BY rowid",
                 )?
                 .query_map([turn], |r| {
-                    Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?, r.get::<_, Option<f64>>(2)?, r.get::<_, String>(3)?))
+                    Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?, r.get::<_, Option<f64>>(2)?, r.get::<_, String>(3)?, r.get::<_, bool>(4)?))
                 })?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             assert_eq!(rows.len(), (RETRY_LIMIT + 1) as usize);
             assert_eq!(rows.last().unwrap().0, "incomplete");
             let mut observations = Vec::new();
-            for (index, (state, body, wall_ms, http)) in rows.iter().enumerate() {
+            for (index, (state, body, wall_ms, http, compacted)) in rows.iter().enumerate() {
                 assert_eq!(
                     state,
                     if index < RETRY_LIMIT as usize { "failed" } else { "incomplete" }
@@ -371,7 +370,7 @@ async fn refused_proxy_connections_exhaust_the_finite_retry_budget() {
                 } else {
                     assert_eq!(saved["automatic_retry_exhausted"], json!({"retries":RETRY_LIMIT,"limit":RETRY_LIMIT}));
                 }
-                assert!(saved.get("automatic_trim").is_none());
+                assert!(!*compacted);
                 observations.push(json!({"kind":saved["error"]["kind"],"phase":observation["phase"],"source_bytes":observation["body_source_bytes_consumed"],"attempt_wall_ms":wall_ms}));
             }
             assert_eq!(observations.len(), (RETRY_LIMIT + 1) as usize);

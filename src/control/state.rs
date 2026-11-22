@@ -582,18 +582,17 @@ mod tests {
         .unwrap()
     }
     #[test]
-    fn provider_automatic_key_is_not_a_driver_observation_and_current_fact_wins() {
-        for current in [
-            None,
-            Some(
-                json!({"token":"owned","discard":{"reason":"run_started","phase":"closed_summary","elapsed_ms":2}}),
-            ),
-        ] {
+    fn executor_preserves_provider_body_without_writing_compaction_facts() {
+        for current in [None, Some("owned")] {
             let db = fixture("inflight");
-            if let Some(fact) = &current {
+            db.execute_batch(
+                "CREATE TABLE automatic_compaction(attempt_id TEXT PRIMARY KEY,token TEXT)",
+            )
+            .unwrap();
+            if let Some(token) = current {
                 db.execute(
-                    "UPDATE model_attempt SET error_json=?1",
-                    [json!({"automatic_trim_attempt":fact}).to_string()],
+                    "INSERT INTO automatic_compaction VALUES('attempt',?1)",
+                    [token],
                 )
                 .unwrap();
             }
@@ -603,8 +602,16 @@ mod tests {
                 AttemptTransition::Applied
             );
             let body: Value = serde_json::from_str(&saved(&db).1).unwrap();
-            assert_eq!(body.get("automatic_trim_attempt"), current.as_ref());
-            assert_eq!(body["error"], forged["error"]);
+            assert_eq!(body, forged);
+            let token: Option<String> = db
+                .query_row(
+                    "SELECT token FROM automatic_compaction WHERE attempt_id='attempt'",
+                    [],
+                    |row| row.get(0),
+                )
+                .optional()
+                .unwrap();
+            assert_eq!(token.as_deref(), current);
         }
     }
     #[test]

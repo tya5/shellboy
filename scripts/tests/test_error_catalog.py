@@ -197,7 +197,7 @@ class CatalogueTests(unittest.TestCase):
         self.assertEqual(self.rows()[0]['error'], 'error: safe complete')
         self.assertTrue(self.rows()[0]['stderr_limited'])
 
-    def test_supported_schema39_through53_and_unknown_versions_fail_closed(self):
+    def test_supported_schema39_through54_and_unknown_versions_fail_closed(self):
         add(self.db, 'schema-compat')
         for version in range(39, 55):
             with self.subTest(version=version):

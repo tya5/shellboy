@@ -494,9 +494,7 @@ pub(crate) fn capture_ordinary_gc_prefix_with_receipt_tx(
     db: &mut Connection,
     thread: &str,
     stage: &super::attempt::GcStage,
-    reason: &str,
     trigger: &Value,
-    target_plan: &Value,
     cancel: &tokio_util::sync::CancellationToken,
 ) -> Result<GcCaptureOutcome, StorageError> {
     if stage.thread_id != thread {
@@ -504,16 +502,14 @@ pub(crate) fn capture_ordinary_gc_prefix_with_receipt_tx(
             "GC receipt belongs to another Thread".into(),
         ));
     }
-    capture_gc_plan_and_sources(db, thread, stage, reason, trigger, target_plan, cancel)
+    capture_gc_plan_and_sources(db, thread, stage, trigger, cancel)
 }
 
 fn capture_gc_plan_and_sources(
     db: &mut Connection,
     thread: &str,
     stage: &super::attempt::GcStage,
-    reason: &str,
     trigger: &Value,
-    target_plan: &Value,
     cancel: &tokio_util::sync::CancellationToken,
 ) -> Result<GcCaptureOutcome, StorageError> {
     let tx = db.transaction()?;
@@ -686,7 +682,11 @@ fn capture_gc_plan_and_sources(
                 "GC parent receipt belongs to a different Thread".into(),
             ));
         }
-        super::attempt::begin_gc_tx(&tx, stage, reason, trigger, target_plan)?;
+        if !super::attempt::gc_matches(&tx, stage)? {
+            return Err(StorageError::InvalidInput(
+                "GC parent compaction identity changed".into(),
+            ));
+        }
     }
     tx.commit()?;
     Ok(GcCaptureOutcome::Captured(Box::new(CapturedSummaryInput {

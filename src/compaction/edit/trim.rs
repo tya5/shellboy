@@ -260,7 +260,7 @@ impl Compactor {
                 ..Default::default()
             });
         }
-        self.adopt_trim(snapshot, plan, before, cancel, true).await
+        self.adopt_trim(snapshot, plan, before, cancel).await
     }
     pub(super) async fn trim_before(
         &self,
@@ -301,7 +301,7 @@ impl Compactor {
             provenance_limited: false,
         };
         plan.after = history_characters(&projected(&snapshot, &plan));
-        self.adopt_trim(snapshot, plan, before, cancel, false).await
+        self.adopt_trim(snapshot, plan, before, cancel).await
     }
     async fn adopt_trim(
         &self,
@@ -309,7 +309,6 @@ impl Compactor {
         plan: TrimPlan,
         before: u64,
         cancel: CancellationToken,
-        automatic: bool,
     ) -> Result<ContextEditResult, ApiError> {
         let ranges = omission_ranges(&plan.omitted, snapshot.groups.len());
         range::validate(&snapshot, &ranges, range::RangeMode::Trim)?;
@@ -390,11 +389,6 @@ impl Compactor {
             }
             let result = ContextEditResult { compact: CompactResult { spilled_groups: spilled, source_nodes: original_ids.len(), original_node_ids: original_ids, ..Default::default() }, before_characters: before, after_characters: plan.after,  omitted_nodes: sources.len(), marker_node_id: marker, changed_suffix_characters: cache_invalidated, warnings };
             history::select_path(&tx, &snapshot.thread, snapshot.revision, &path, &timestamp())?;
-            if automatic && let Some((turn, generation)) = &snapshot.turn_fence {
-                // Make the reason durable with the path change, even if owner
-                // exits before Driver records the failed transport attempt.
-                tx.execute("UPDATE model_attempt SET error_json=json_set(COALESCE(error_json,'{}'),'$.automatic_trim',json(?1)) WHERE turn_id=?2 AND generation=?3 AND state='inflight'", params![serde_json::to_string(&result).expect("context result"),turn,generation])?;
-            }
             tx.commit()?;
             Ok(result)
         }).await.map_err(storage_error)

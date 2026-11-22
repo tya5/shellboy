@@ -201,7 +201,7 @@ async fn record_boundary(fault: Fault, scenario: Scenario) -> Value {
         "normal shutdown/reopen preserves the per-fault terminal state"
     );
     assert_eq!(
-        receipt.terminal["provisional"].as_bool().unwrap_or(false),
+        receipt.terminal["unfinished"].as_bool().unwrap_or(false),
         receipt.terminal["outcome"] == "unknown",
         "unknown remains provisional; successful FINISH is terminal"
     );
@@ -487,11 +487,6 @@ async fn uncalibrated_site(fault: Fault, active: bool) {
                 REASON,
                 crate::compaction::ABoundaryObservation::Observe,
                 &json!({}),
-                &Value::Null,
-            )?;
-            tx.execute(
-                crate::compaction::discard::STAGE_SQL,
-                rusqlite::params![&begin.0, &begin.1, "active_summary"],
             )?;
             tx.commit()?;
             Ok(())
@@ -570,15 +565,29 @@ async fn uncalibrated_site(fault: Fault, active: bool) {
     );
     assert!(reached.load(Ordering::SeqCst));
     drop(boundary);
-    let facts: Value = control.store.database.call({
-        let attempt = attempt.clone();
-        move |db| Ok(serde_json::from_str(&db.query_row("SELECT json_extract(error_json,'$.automatic_trim_attempt') FROM model_attempt WHERE id=?1", [attempt], |r| r.get::<_, String>(0))?).unwrap())
-    }).await.unwrap();
+    let facts: Value = control
+        .store
+        .database
+        .call({
+            let attempt = attempt.clone();
+            move |db| {
+                Ok(serde_json::from_str(&db.query_row(
+                    &format!(
+                        "SELECT {SAVED_RECORD} FROM automatic_compaction c WHERE attempt_id=?1"
+                    ),
+                    [attempt],
+                    |r| r.get::<_, String>(0),
+                )?)
+                .unwrap())
+            }
+        })
+        .await
+        .unwrap();
     assert_eq!(
-        facts["outcome"], "adopted",
-        "strict summary FINISH committed before the postcommit fault hook"
+        facts["outcome"], "unknown",
+        "only the GC stage committed; proactive FINISH has not run"
     );
-    assert_eq!(facts["provisional"], false);
+    assert_eq!(facts["unfinished"], true);
     let recorded = facts["committed_stages"].as_object().unwrap();
     assert_eq!(
         recorded.keys().map(String::as_str).collect::<Vec<_>>(),

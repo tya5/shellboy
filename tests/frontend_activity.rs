@@ -18,10 +18,10 @@ async fn automatic_reduction_summary_survives_later_failures_without_crossing_ge
     let root = tempfile::tempdir().unwrap();
     let db = DbWorker::open(root.path().join("db")).await.unwrap();
     change(&db,"INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','/AGENTS.md','p','m','now'); INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','live','now'); INSERT INTO turn(id,thread_id,run_id,state,generation,created_at)VALUES('u','t','r','recovery_wait',2,'now');").await;
-    let original=json!({
-        "raw_response":{"opaque":"x".repeat(1024*1024)},
-        "automatic_trim":{"before_characters":90000,"after_characters":40000,"omitted_nodes":7,"compact":{"spilled_groups":3,"no_target":false}},
-    }).to_string();
+    let original = json!({"raw_response":{"opaque":"x".repeat(1024*1024)}}).to_string();
+    let reduction = json!({"before_characters":90000,"after_characters":40000,"omitted_nodes":7,"compact":{"spilled_groups":3,"no_target":false}}).to_string();
+    let saved_reduction =
+        json!({"metrics":serde_json::from_str::<Value>(&reduction).unwrap()}).to_string();
     let saved = original.clone();
     let reason = serde_json::to_string(&ApiError::new(
         ErrorCode::IoFailed,
@@ -31,6 +31,7 @@ async fn automatic_reduction_summary_survives_later_failures_without_crossing_ge
     db.call(move|db| {
         db.execute("UPDATE turn SET recovery_reason_json=?1 WHERE id='u'",[reason])?;
         db.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,error_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='u'),'trimmed','u',2,0,'p','m',0,'failed','{}',?1,'now')",[saved])?;
+        db.execute("INSERT INTO automatic_compaction(attempt_id,turn_id,attempt_started_at,outcome,result_json) VALUES('trimmed','u','now','adopted',?1)", [saved_reduction])?;
         db.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,error_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='u'),'latest','u',2,0,'p','m',0,'incomplete','{}','{}','now')",[])?;
         Ok(())
     }).await.unwrap();
@@ -107,7 +108,7 @@ async fn automatic_reduction_summary_survives_later_failures_without_crossing_ge
         "display projection never edits paid source evidence"
     );
     change(&db, "UPDATE turn SET generation=2;").await;
-    let base: Value = serde_json::from_str(&original).unwrap();
+    let base: Value = serde_json::from_str(&reduction).unwrap();
     for invalid in [
         json!(-1),
         json!(true),
@@ -116,11 +117,11 @@ async fn automatic_reduction_summary_survives_later_failures_without_crossing_ge
         json!(u64::MAX),
     ] {
         let mut body = base.clone();
-        body["automatic_trim"]["omitted_nodes"] = invalid;
-        let body = body.to_string();
+        body["omitted_nodes"] = invalid;
+        let body = json!({"metrics":body}).to_string();
         db.call(move |db| {
             db.execute(
-                "UPDATE model_attempt SET error_json=?1 WHERE id='trimmed'",
+                "UPDATE automatic_compaction SET result_json=?1 WHERE attempt_id='trimmed'",
                 [body],
             )?;
             Ok(())

@@ -103,7 +103,7 @@ pub(crate) fn compact_point_sql(source: &Source) -> String {
             "LEFT JOIN operation_receipt o ON o.operation_id=json_extract(j.value,'$[1]') LEFT JOIN app_meta m ON m.key='compact.result.'||o.operation_id",
         ),
         Source::Attempt => (
-            "'available',a.id IS NOT NULL,'source_state',a.state,'turn_id',a.turn_id,'started_at',a.started_at,'ended_at',a.ended_at,'automatic_recorded',CASE WHEN json_valid(a.error_json) THEN json_type(a.error_json,'$.automatic_trim')='object' OR json_type(a.error_json,'$.automatic_trim_attempt')='object' ELSE 0 END",
+            "'available',a.id IS NOT NULL,'source_state',a.state,'turn_id',a.turn_id,'started_at',a.started_at,'ended_at',a.ended_at,'automatic_recorded',EXISTS(SELECT 1 FROM automatic_compaction c WHERE c.attempt_id=a.id)",
             "LEFT JOIN model_attempt a ON a.id=json_extract(j.value,'$[1]')",
         ),
         // Existing replacement rows expose output-node IDs, not replacement PKs.
@@ -162,7 +162,6 @@ pub(crate) fn read_compactions_tx(
     Ok(result)
 }
 
-pub(crate) const AUTO: &str = "CASE WHEN json_valid(a.error_json) THEN json_type(a.error_json,'$.automatic_trim')='object' OR json_type(a.error_json,'$.automatic_trim_attempt')='object' ELSE 0 END";
 pub(crate) fn compact_prefix_sql(source: &Source, limit: usize) -> String {
     assert!((1..=201).contains(&limit));
     let native = match source {
@@ -170,7 +169,7 @@ pub(crate) fn compact_prefix_sql(source: &Source, limit: usize) -> String {
             "SELECT operation_id id FROM operation_receipt INDEXED BY compact_operation_thread WHERE CASE WHEN json_valid(result_ref_json) THEN json_extract(result_ref_json,'$.result.status')='queued' ELSE 0 END AND json_extract(result_ref_json,'$.result.thread_id')=t.value ORDER BY created_at DESC,operation_id DESC LIMIT {limit}"
         ),
         Source::Attempt => format!(
-            "SELECT a.id FROM model_attempt a INDEXED BY automatic_compaction_turn WHERE a.turn_id=(SELECT id FROM turn INDEXED BY one_open_turn WHERE thread_id=t.value AND state IN ('preparing','running','waiting','recovery_wait')) AND {AUTO} ORDER BY a.started_at DESC,a.id DESC LIMIT {limit}"
+            "SELECT a.attempt_id id FROM automatic_compaction a INDEXED BY automatic_compaction_turn WHERE a.turn_id=(SELECT id FROM turn INDEXED BY one_open_turn WHERE thread_id=t.value AND state IN ('preparing','running','waiting','recovery_wait')) ORDER BY a.attempt_started_at DESC,a.attempt_id DESC LIMIT {limit}"
         ),
         Source::Node => format!(
             "SELECT r.output_node_id id FROM (SELECT replacement_id FROM thread_replacement WHERE thread_id=t.value ORDER BY replacement_id LIMIT {limit}) p CROSS JOIN replacement r ON r.id=p.replacement_id"

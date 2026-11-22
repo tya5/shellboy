@@ -442,7 +442,7 @@ async fn core_retries_tools_context_reduction_and_saved_cache_usage_are_shared()
         assert_eq!(results.len(),2);assert!(results.iter().any(|item|item["content"].as_str().unwrap().contains("one")));
         assert!(requests[4]["messages"].as_array().unwrap().iter().any(|item|item["role"]=="tool"));
         assert_ne!(requests[4]["messages"], requests[5]["messages"]);
-        let reduced = owner.db.call(|db| Ok(db.query_row("SELECT COUNT(*) FROM model_attempt WHERE json_valid(error_json) AND json_extract(error_json,'$.automatic_trim_attempt.outcome')='adopted'", [], |row|row.get::<_,i64>(0))?)).await.unwrap();
+        let reduced = owner.db.call(|db| Ok(db.query_row("SELECT COUNT(*) FROM automatic_compaction WHERE outcome='adopted'", [], |row|row.get::<_,i64>(0))?)).await.unwrap();
         assert_eq!(reduced,1,"explicit overflow must use the shared reduction path");
         let kept = owner.db.call(|db| Ok(db.query_row("SELECT COUNT(*) FROM node WHERE kind='assistant_response' AND json_valid(payload_json) AND json_extract(payload_json,'$.output[0].chat_completions.finish_reason')='stop' AND json_extract(payload_json,'$.output[0].chat_completions.stop_with_complete_tool_calls')=1", [], |row|row.get::<_,i64>(0))?)).await.unwrap();
         assert_eq!(kept,1,"accepted stop/tool-call facts must survive Core storage");

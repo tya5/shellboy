@@ -256,20 +256,25 @@ pub(super) async fn retry_or_recover(
     }
     if can_rebuild {
         let current = snapshot.clone();
-        control.store.database.call(move |db| {
-            let tx = db.transaction()?;
-            if !live_outcome_generation(&tx,&current)? { return Ok(()); }
-            save_partial_attempts(&tx,&current,&partial_attempts)?;
-            if let Some(observation) = trim_not_applied {
-                let trusted = super::trim_observation::DriverTrimObservation::from_reduction(observation.clone());
-                trusted.persist_trim(&tx, &attempt)?;
-                if observation["outcome"] == "adopted" && observation.get("result").is_some() {
-                    tx.execute("UPDATE model_attempt SET error_json=json_set(error_json,'$.automatic_trim',json(?2)) WHERE id=?1 AND state IN ('failed','incomplete')",params![attempt,observation["result"].to_string()])?;
+        control
+            .store
+            .database
+            .call(move |db| {
+                let tx = db.transaction()?;
+                if !live_outcome_generation(&tx, &current)? {
+                    return Ok(());
                 }
-            }
-            tx.commit()?;
-            Ok(())
-        }).await.map_err(storage_error)?;
+                save_partial_attempts(&tx, &current, &partial_attempts)?;
+                if let Some(observation) = trim_not_applied {
+                    let trusted =
+                        super::trim_observation::DriverTrimObservation::from_reduction(observation);
+                    trusted.persist_trim(&tx, &attempt)?;
+                }
+                tx.commit()?;
+                Ok(())
+            })
+            .await
+            .map_err(storage_error)?;
         control.changed(&snapshot.thread);
         return Ok(());
     }

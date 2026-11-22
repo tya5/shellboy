@@ -124,32 +124,14 @@ fn expected_outcome(fault: Fault, scenario: Scenario, phase: ObservationPhase) -
         // terminal writer. Native GC summary stages include strict FINISH in the
         // same adoption transaction, so their committed checkpoint is already
         // terminally adopted before any later shutdown fault is injected.
-        ObservationPhase::AtCommittedCheckpoint if scenario.summary() => "adopted",
         ObservationPhase::AtCommittedCheckpoint => "unknown",
         ObservationPhase::AfterRejectedStageTransaction => "failed",
         ObservationPhase::AfterShutdownAndRestart => match fault {
-            // Native summary strict FINISH is part of the same transaction as
-            // stage/path adoption. Post-stage faults cannot rewrite that final
-            // fact to unknown/failed; RejectFact remains a precommit rollback.
-            Fault::Persistent
-            | Fault::RejectFinal
-            | Fault::Storage
-            | Fault::RetiredWritesAbsent
-            | Fault::Remeasurement
-                if scenario.summary() =>
-            {
-                "adopted"
-            }
-            // Remeasurement runs after a successful following summary FINISH
-            // when this fault is armed at a spill checkpoint.
-            Fault::Remeasurement if scenario == Scenario::ActiveSpill => "adopted",
             Fault::RejectFact => "failed",
             // Cancellation after active spill is observed by the closed-summary
             // entry. Pre-cancel returns before planning, so there is no active
             // fallback stage; the committed spill remains and outcome is cancelled.
             Fault::Cancellation if scenario == Scenario::ActiveSpill => "cancelled",
-            // Other summary boundaries already completed atomic FINISH before
-            // the post-stage cancellation hook runs.
             Fault::Cancellation => "adopted",
             Fault::Persistent | Fault::RejectFinal => "unknown",
             Fault::Storage | Fault::RetiredWritesAbsent | Fault::Remeasurement => "failed",
@@ -556,14 +538,12 @@ async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_b
         settled(control, target).await;
         let run_b=run_id.clone(); let turn_b=turn_id.clone();
         control.store.database.call(move|db|{
-            let (turn_state,attempt_state,observation,provisional,token,stages):(String,String,String,Option<i64>,Option<String>,Option<String>)=db.query_row(
-                "SELECT u.state,a.state,json_extract(a.error_json,'$.automatic_trim_attempt'),json_extract(a.error_json,'$.automatic_trim_attempt.provisional'),json_extract(a.error_json,'$.automatic_trim_attempt.token'),json_type(a.error_json,'$.automatic_trim_attempt.committed_stages') FROM turn u JOIN model_attempt a ON a.turn_id=u.id WHERE u.id=?1 AND u.run_id=?2 ORDER BY a.rowid DESC LIMIT 1",
-                rusqlite::params![turn_b,run_b],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?,row.get(5)?)),
+            let (turn_state,attempt_state,outcome,reason,no_stage):(String,String,String,String,bool)=db.query_row(
+                "SELECT u.state,a.state,c.outcome,c.reason,c.token IS NULL AND c.closed_spill IS NULL AND c.active_spill IS NULL AND c.closed_summary IS NULL AND c.active_summary IS NULL FROM turn u JOIN model_attempt a ON a.turn_id=u.id JOIN automatic_compaction c ON c.attempt_id=a.id WHERE u.id=?1 AND u.run_id=?2 ORDER BY a.rowid DESC LIMIT 1",
+                rusqlite::params![turn_b,run_b],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?)),
             )?;
             assert_eq!(turn_state,"recovery_wait"); assert_eq!(attempt_state,"incomplete");
-            let observation:Value=serde_json::from_str(&observation).unwrap();
-            assert_eq!(observation["outcome"],"adopted"); assert_eq!(observation["reason"],"same_proactive_job");
-            assert_eq!(provisional,None); assert_eq!(token,None); assert_eq!(stages,None);
+            assert_eq!(outcome,"adopted"); assert_eq!(reason,"same_proactive_job"); assert!(no_stage);
             Ok(())
         }).await.unwrap();
         assert!(
@@ -1291,6 +1271,8 @@ async fn committed_selection_witness(control: &Control, thread: &str) -> StageWi
     }).await.unwrap()
 }
 
+const SAVED_RECORD: &str = "json_object('token',c.token,'outcome',COALESCE(c.outcome,'unknown'),'reason',c.reason,'unfinished',json(iif(c.outcome IS NULL,'true','false')),'trigger',json(c.trigger_json),'summary',json(c.result_json->'$.metrics'),'error',json(c.result_json->'$.error'),'compaction_outcome',json(c.failure_json),'committed_stages',json((SELECT json_group_object(key,json(value)) FROM json_each(json_object('closed_spill',c.closed_spill,'active_spill',c.active_spill,'closed_summary',c.closed_summary,'active_summary',c.active_summary)) WHERE value IS NOT NULL)))";
+
 async fn automatic_attempt_record(
     control: &Control,
     fixture: &crate::control::compaction_test_fixture::StageFixture,
@@ -1298,7 +1280,7 @@ async fn automatic_attempt_record(
     let (thread, attempt) = (fixture.thread_id.to_owned(), fixture.attempt_id.to_owned());
     let record = control.store.database.call(move |db| {
         db.query_row(
-            "SELECT json_extract(error_json,'$.automatic_trim_attempt') FROM model_attempt WHERE id=?1 AND turn_id IN (SELECT id FROM turn WHERE thread_id=?2)",
+            &format!("SELECT {SAVED_RECORD} FROM automatic_compaction c WHERE attempt_id=?1 AND turn_id IN (SELECT id FROM turn WHERE thread_id=?2)"),
             rusqlite::params![attempt, thread],
             |row| row.get::<_, String>(0),
         ).map_err(Into::into)
@@ -1408,8 +1390,8 @@ async fn direct_boundary_case(
                 hit.store(true, Ordering::SeqCst);
                 Ok(1i64)
             })?;
-            db.execute_batch(&format!("CREATE TEMP TRIGGER direct_fault_fact BEFORE UPDATE OF error_json ON model_attempt
-                WHEN json_type(NEW.error_json,'$.automatic_trim_attempt.committed_stages.{stage_name}')='object'
+            db.execute_batch(&format!("CREATE TEMP TRIGGER direct_fault_fact BEFORE UPDATE OF {stage_name} ON automatic_compaction
+                WHEN NEW.{stage_name} IS NOT NULL
                 BEGIN SELECT direct_fault_fact_hit(); SELECT RAISE(ABORT,'injected direct stage-fact rejection'); END;"))?;
             Ok(())
         }).await.unwrap();
@@ -1518,17 +1500,17 @@ async fn direct_boundary_case(
             | Fault::RejectFact
             | Fault::RetiredWritesAbsent
     ) || fault == Fault::Cancellation && scenario == Scenario::ActiveSpill
-        || fault == Fault::RejectFinal && !scenario.summary();
+        || fault == Fault::RejectFinal;
     assert_eq!(
         result.is_err(),
         expects_error,
         "direct proactive result: {result:?}"
     );
-    let reject_final_write_expected = fault == Fault::RejectFinal && !scenario.summary();
+    let reject_final_write_expected = fault == Fault::RejectFinal;
     assert_eq!(
         reached.load(Ordering::SeqCst),
         fault != Fault::RejectFinal || reject_final_write_expected,
-        "RejectFinal reaches the terminal-writer hook only for spill stages; summary FINISH is already committed"
+        "RejectFinal reaches the sole terminal writer"
     );
     if fault == Fault::Cancellation {
         assert!(
@@ -1544,7 +1526,6 @@ async fn direct_boundary_case(
         "active_spill",
         "active_summary",
     ];
-    // automatic_attempt_record already returns the `automatic_trim_attempt` object.
     let checkpoint_stages = &checkpoint_record["committed_stages"];
     let after_stages = &after_fault_record["committed_stages"];
     if let Some(checkpoint_stage) = stage_names
@@ -1935,7 +1916,7 @@ async fn direct_boundary_case(
             "SELECT count(*) FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND n.kind='spill'",
             [&query_thread], |row| row.get(0),
         )?;
-        let record: String = db.query_row("SELECT error_json FROM model_attempt WHERE id=?1", [&query_attempt], |row| row.get(0))?;
+        let record: String = db.query_row(&format!("SELECT {SAVED_RECORD} FROM automatic_compaction c WHERE attempt_id=?1"), [&query_attempt], |row| row.get(0))?;
         let protected: bool = db.query_row(
             "SELECT EXISTS(SELECT 1 FROM thread_path WHERE thread_id=?1 AND node_id='current-user')",
             [&query_thread], |row| row.get(0),
@@ -1974,24 +1955,12 @@ async fn direct_boundary_case(
         state.4, 2,
         "the latest whole active tool group remains selected"
     );
+    assert_eq!(record["unfinished"], terminal_outcome == "unknown");
+    assert_eq!(record["outcome"], terminal_outcome);
+    assert_eq!(record["trigger"]["input_tokens"], fixture.input_tokens);
+    assert_eq!(record["trigger"]["a_input_tokens"], fixture.a_input_tokens);
     assert_eq!(
-        record["automatic_trim_attempt"]["provisional"],
-        terminal_outcome == "unknown"
-    );
-    assert_eq!(
-        record["automatic_trim_attempt"]["outcome"],
-        terminal_outcome
-    );
-    assert_eq!(
-        record["automatic_trim_attempt"]["trigger"]["input_tokens"],
-        fixture.input_tokens
-    );
-    assert_eq!(
-        record["automatic_trim_attempt"]["trigger"]["a_input_tokens"],
-        fixture.a_input_tokens
-    );
-    assert_eq!(
-        record["automatic_trim_attempt"]["committed_stages"][scenario.stage()].is_object(),
+        record["committed_stages"][scenario.stage()].is_object(),
         fault != Fault::RejectFact,
         "precommit fact rejection rolls back its stage while other injected cells commit it",
     );
@@ -2001,11 +1970,9 @@ async fn direct_boundary_case(
         } else {
             "active_summary"
         };
-        assert!(
-            record["automatic_trim_attempt"]["committed_stages"][final_summary_stage].is_object()
-        );
+        assert!(record["committed_stages"][final_summary_stage].is_object());
     } else if scenario == Scenario::ActiveSpill {
-        assert!(record["automatic_trim_attempt"]["committed_stages"]["active_summary"].is_null());
+        assert!(record["committed_stages"]["active_summary"].is_null());
     }
     if fault == Fault::RetiredWritesAbsent {
         let retired_hits: i64 = control
@@ -2044,7 +2011,7 @@ async fn direct_boundary_case(
     assert_eq!(reopened_record["token"], identity.token);
     assert_eq!(reopened_record["outcome"], terminal_outcome);
     assert_eq!(
-        reopened_record["provisional"],
+        reopened_record["unfinished"],
         terminal_outcome == "unknown",
         "unknown receipts remain provisional; terminal outcomes are finalized"
     );
@@ -2467,7 +2434,8 @@ async fn proactive_growing_active_range_permits_one_summary_per_new_report() {
                 assert_eq!(identity.attempt, attempt);
                 let record = automatic_attempt_record(&control, &fixture).await;
                 assert_eq!(record["token"], identity.token);
-                assert_eq!(record["active_stage"], "active_summary");
+                assert_eq!(record["unfinished"], true);
+                assert!(record["committed_stages"]["active_summary"].is_null());
                 assert_eq!(record["trigger"]["run_id"], fixture.run_id);
                 assert_eq!(record["trigger"]["input_tokens"], usage);
                 post.reply.send((200, answer(" "))).unwrap();
@@ -2911,7 +2879,7 @@ async fn prepare_driver_lifecycle(
                         .database
                         .call(move |db| {
                             let attempts = db.prepare(
-                                "SELECT a.id,a.state,COALESCE(json_extract(a.error_json,'$.automatic_trim_attempt'),'null') FROM model_attempt a JOIN turn u ON u.id=a.turn_id WHERE u.thread_id=?1 AND json_type(a.error_json,'$.automatic_trim_attempt')='object' ORDER BY a.rowid DESC LIMIT 4",
+                                &format!("SELECT a.id,a.state,{SAVED_RECORD} FROM model_attempt a JOIN automatic_compaction c ON c.attempt_id=a.id JOIN turn u ON u.id=a.turn_id WHERE u.thread_id=?1 ORDER BY a.rowid DESC LIMIT 4"),
                             )?.query_map([&thread_for_progress], |row| {
                                 Ok((row.get(0)?,row.get(1)?,row.get(2)?))
                             })?.collect::<rusqlite::Result<Vec<_>>>()?;
@@ -3077,9 +3045,16 @@ async fn prepare_driver_lifecycle(
         terminal_identity = Some(capture_terminal_identity(&control, &target, false).await);
     }
     let terminal_identity = terminal_identity.expect("fixture captured original attempt/token");
-    let saved = control.store.database.call(|db| Ok(db.query_row(
-        "SELECT json_extract(error_json,'$.automatic_trim_attempt') FROM model_attempt WHERE json_type(error_json,'$.automatic_trim_attempt')='object' ORDER BY rowid DESC LIMIT 1",
-        [], |row| row.get::<_, String>(0))?)).await.unwrap();
+    let saved = control
+        .store
+        .database
+        .call(|db| {
+            Ok(db.query_row(
+        &format!("SELECT {SAVED_RECORD} FROM automatic_compaction c ORDER BY c.rowid DESC LIMIT 1"),
+        [], |row| row.get::<_, String>(0))?)
+        })
+        .await
+        .unwrap();
     let saved: Value = serde_json::from_str(&saved).unwrap();
     if spill_off {
         assert!(saved["trigger"]["a_input_tokens"].is_null());
@@ -3191,7 +3166,7 @@ async fn capture_terminal_identity(
     let thread_id = thread.to_owned();
     let (attempt, token) = control.store.database.call(move |db| {
         Ok(db.query_row(
-            "SELECT a.id,json_extract(a.error_json,'$.automatic_trim_attempt.token') FROM model_attempt a JOIN turn u ON u.id=a.turn_id WHERE u.thread_id=?1 AND json_type(a.error_json,'$.automatic_trim_attempt')='object' AND json_type(a.error_json,'$.automatic_trim_attempt.token')='text' AND (?2=0 OR json_extract(a.error_json,'$.automatic_trim_attempt.provisional')=1) ORDER BY a.rowid DESC LIMIT 1",
+            "SELECT a.id,c.token FROM model_attempt a JOIN automatic_compaction c ON c.attempt_id=a.id JOIN turn u ON u.id=a.turn_id WHERE u.thread_id=?1 AND c.token IS NOT NULL AND (?2=0 OR (c.outcome IS NULL)=1) ORDER BY a.rowid DESC LIMIT 1",
             rusqlite::params![thread_id, require_provisional],
             |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
         )?)
@@ -3215,7 +3190,7 @@ async fn terminal_attempt_finished(control: &Control, identity: &TerminalAttempt
     let identity = identity.clone();
     control.store.database.call(move |db| {
         let row: Option<(Option<i64>, Option<String>)> = db.query_row(
-            "SELECT json_extract(a.error_json,'$.automatic_trim_attempt.provisional'),json_extract(a.error_json,'$.automatic_trim_attempt.token') FROM model_attempt a JOIN turn u ON u.id=a.turn_id WHERE a.id=?1 AND u.thread_id=?2",
+            "SELECT (c.outcome IS NULL),c.token FROM model_attempt a JOIN automatic_compaction c ON c.attempt_id=a.id JOIN turn u ON u.id=a.turn_id WHERE a.id=?1 AND u.thread_id=?2",
             rusqlite::params![identity.attempt, identity.thread],
             |row| Ok((row.get(0)?, row.get(1)?)),
         ).optional()?;
@@ -3237,7 +3212,7 @@ async fn terminal_record_written(
     let committed_stage = committed_stage.map(str::to_owned);
     control.store.database.call(move |db| {
         let row: Option<TerminalRecord> = db.query_row(
-            "SELECT json_extract(a.error_json,'$.automatic_trim_attempt.provisional'),json_extract(a.error_json,'$.automatic_trim_attempt.token'),json_extract(a.error_json,'$.automatic_trim_attempt.outcome'),CASE WHEN ?4 IS NULL THEN 1 ELSE json_type(a.error_json,'$.automatic_trim_attempt.committed_stages.'||?4)='object' END FROM model_attempt a JOIN turn u ON u.id=a.turn_id WHERE a.id=?1 AND u.thread_id=?2 AND json_extract(a.error_json,'$.automatic_trim_attempt.token')=?3",
+            "SELECT (c.outcome IS NULL),c.token,c.outcome,CASE WHEN ?4 IS NULL THEN 1 ELSE CASE ?4 WHEN 'closed_spill' THEN c.closed_spill WHEN 'active_spill' THEN c.active_spill WHEN 'closed_summary' THEN c.closed_summary WHEN 'active_summary' THEN c.active_summary END IS NOT NULL END FROM model_attempt a JOIN automatic_compaction c ON c.attempt_id=a.id JOIN turn u ON u.id=a.turn_id WHERE a.id=?1 AND u.thread_id=?2 AND c.token=?3",
             rusqlite::params![identity.attempt,identity.thread,identity.token,committed_stage],
             |row| Ok(TerminalRecord {
                 provisional: row.get(0)?,
@@ -3301,8 +3276,7 @@ pub(super) async fn checkpoint(
             Ok(())
         }
         4 => control.store.database.call(|db| {
-            db.execute_batch("CREATE TEMP TRIGGER persistent_attempt BEFORE UPDATE OF error_json ON model_attempt
-                WHEN json_type(NEW.error_json,'$.automatic_trim_attempt')='object'
+            db.execute_batch("CREATE TEMP TRIGGER persistent_attempt BEFORE UPDATE ON automatic_compaction
                 BEGIN SELECT RAISE(ABORT,'injected persistent attempt write failure'); END;
                 CREATE TEMP TRIGGER persistent_insert BEFORE INSERT ON app_meta WHEN NEW.key GLOB 'compact.automatic_*'
                 BEGIN SELECT RAISE(ABORT,'injected persistent meta write failure'); END;
@@ -3324,8 +3298,8 @@ pub(super) async fn checkpoint(
                     hit.store(true, Ordering::SeqCst);
                     Ok(1i64)
                 })?;
-                db.execute_batch("CREATE TEMP TRIGGER retired_exception_write BEFORE UPDATE OF error_json ON model_attempt
-                    WHEN json_extract(NEW.error_json,'$.automatic_trim_attempt.outcome')='exception'
+                db.execute_batch("CREATE TEMP TRIGGER retired_exception_write BEFORE UPDATE OF outcome ON automatic_compaction
+                    WHEN NEW.outcome='exception'
                     BEGIN INSERT INTO retired_write_hits VALUES('W2_exception'); SELECT retired_write_hit(1); END;
                     CREATE TEMP TRIGGER retired_guard_insert BEFORE INSERT ON app_meta WHEN NEW.key GLOB 'compact.automatic_guard.*' OR NEW.key GLOB 'compact.automatic_status.*'
                     BEGIN INSERT INTO retired_write_hits VALUES('W3_insert'); SELECT retired_write_hit(1); END;
@@ -3350,8 +3324,8 @@ pub(super) async fn checkpoint(
                     hit.store(true, Ordering::SeqCst);
                     Ok(1i64)
                 })?;
-                db.execute_batch("CREATE TEMP TRIGGER reject_final_attempt BEFORE UPDATE OF error_json ON model_attempt
-                    WHEN json_extract(NEW.error_json,'$.automatic_trim_attempt.outcome') NOT IN ('unknown','exception')
+                db.execute_batch("CREATE TEMP TRIGGER reject_final_attempt BEFORE UPDATE OF outcome ON automatic_compaction
+                    WHEN NEW.outcome IS NOT NULL
                     BEGIN SELECT fault_final_hit(); SELECT RAISE(ABORT,'injected final attempt record rejection'); END;")?;
                 Ok(())
             }).await.map_err(storage_error)
@@ -3950,7 +3924,7 @@ async fn completed_trigger_outside_context_change(change: &'static str) {
                     let thread = identity.thread.clone();
                     let (run_id, turn_id, generation): (String, String, i64) = control.store.database.call(move |db| {
                         db.query_row(
-                            "SELECT u.run_id,u.id,u.generation FROM model_attempt a JOIN turn u ON u.id=a.turn_id WHERE a.id=?1 AND u.thread_id=?2 AND json_extract(a.error_json,'$.automatic_trim_attempt.token')=?3",
+                            "SELECT u.run_id,u.id,u.generation FROM model_attempt a JOIN turn u ON u.id=a.turn_id WHERE a.id=?1 AND u.thread_id=?2 AND (SELECT token FROM automatic_compaction WHERE attempt_id=a.id)=?3",
                             rusqlite::params![attempt,thread,token],
                             |row|Ok((row.get(0)?,row.get(1)?,row.get(2)?)),
                         ).map_err(Into::into)
@@ -3998,7 +3972,7 @@ async fn completed_trigger_outside_context_change(change: &'static str) {
                 String,
                 String,
             ) = db.query_row(
-                "SELECT u.run_id,u.id,u.generation,r.state,u.state FROM model_attempt a JOIN turn u ON u.id=a.turn_id JOIN run r ON r.id=u.run_id WHERE a.id=?1 AND u.thread_id=?2 AND json_extract(a.error_json,'$.automatic_trim_attempt.token')=?3",
+                "SELECT u.run_id,u.id,u.generation,r.state,u.state FROM model_attempt a JOIN turn u ON u.id=a.turn_id JOIN run r ON r.id=u.run_id WHERE a.id=?1 AND u.thread_id=?2 AND (SELECT token FROM automatic_compaction WHERE attempt_id=a.id)=?3",
                 rusqlite::params![query_attempt, query_thread, query_token],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
             )?;
@@ -4068,22 +4042,24 @@ async fn completed_trigger_outside_context_change(change: &'static str) {
             .store
             .database
             .call(move |db| {
-                let record: String = db.query_row(
-                    "SELECT error_json FROM model_attempt WHERE id=?1",
-                    [&attempt_id],
-                    |row| row.get(0),
+                let (stage, outcome, provider_error): (String, String, Option<String>) = db.query_row(
+                    "SELECT c.closed_summary,c.outcome,a.error_json FROM automatic_compaction c JOIN model_attempt a ON a.id=c.attempt_id WHERE c.attempt_id=?1",
+                    [&attempt_id], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?)),
                 )?;
-                let record: Value = serde_json::from_str(&record).unwrap();
-                let automatic = &record["automatic_trim_attempt"];
-                assert_eq!(automatic["outcome"], "adopted", "{change}: {automatic}");
-                assert_eq!(automatic["provisional"], false);
-                assert!(
-                    automatic["committed_stages"]
-                        .as_object()
-                        .is_some_and(|stages| stages.values().any(Value::is_object)),
-                    "the R still committed after the outside-R change: {automatic}"
-                );
-                assert!(automatic["compaction_outcome"].is_null());
+                assert_eq!(outcome,"adopted");
+                assert!(provider_error.is_none());
+                let stage: Value = serde_json::from_str(&stage).unwrap();
+                let args = crate::protocol::CompactListArgs {thread_id:Some(target.clone()), since:None, until:None,limit:20};
+                let exact = crate::readback::compactions(db,&target,&args)?;
+                let exact = exact["items"].as_array().unwrap().iter().find(|item|item["attempt_id"]==attempt_id).expect("automatic row in compact.list");
+                let display = crate::readback::last_compaction(db,&target)?;
+                let candidate = &display["bounded_candidate"];
+                for item in [exact,candidate] {
+                    assert_eq!(item["attempt_id"],attempt_id);
+                    assert_eq!(item["state"],"adopted");
+                    assert_eq!(item["metrics"]["summary_node_id"],stage["summary_node_id"]);
+                    assert_eq!(item["metrics"]["source_nodes"],stage["source_nodes"]);
+                }
                 let path = db
                     .prepare("SELECT p.node_id FROM thread_path p WHERE p.thread_id=?1 ORDER BY p.ordinal")?
                     .query_map([&target], |row| row.get::<_, String>(0))?
@@ -4091,7 +4067,7 @@ async fn completed_trigger_outside_context_change(change: &'static str) {
                 assert!(path.iter().any(|id| {
                     db.query_row("SELECT kind='summary' FROM node WHERE id=?1", [id], |row| row.get::<_, bool>(0)).unwrap_or(false)
                 }), "summary node adopted for {change}: {path:?}");
-                assert!(!record.to_string().contains("PRIVATE_SENTINEL"));
+                assert!(!stage.to_string().contains("PRIVATE_SENTINEL"));
                 Ok(())
             })
             .await

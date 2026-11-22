@@ -319,6 +319,15 @@ impl Fixture {
         }).await.unwrap()
     }
 
+    async fn reduction_outcomes(&self) -> Vec<Option<String>> {
+        let turn = self.accepted.turn_id.clone().unwrap();
+        self.control.store.database.call(move |db| {
+            db.prepare("SELECT c.outcome FROM model_attempt a LEFT JOIN automatic_compaction c ON c.attempt_id=a.id WHERE a.turn_id=?1 ORDER BY a.rowid")?
+                .query_map([turn], |row| row.get(0))?
+                .collect::<rusqlite::Result<_>>().map_err(Into::into)
+        }).await.unwrap()
+    }
+
     #[track_caller]
     fn settled(&self) -> impl std::future::Future<Output = String> + '_ {
         let caller = std::panic::Location::caller();
@@ -1163,21 +1172,13 @@ async fn second_eligible_failure_reduces_but_first_retry_is_unchanged() {
         assert_eq!(f.settled().await, "completed");
         let attempts = f.attempts().await;
         assert_eq!(attempts.len(), 3);
-        assert!(
-            attempts[0]
-                .1
-                .as_ref()
-                .unwrap()
-                .get("automatic_trim_attempt")
-                .is_none()
-        );
         assert_eq!(
             attempts[1].1.as_ref().unwrap()["automatic_retry"]["number"],
             2
         );
         assert_eq!(
-            attempts[1].1.as_ref().unwrap()["automatic_trim_attempt"]["outcome"],
-            "adopted"
+            f.reduction_outcomes().await,
+            [None, Some("adopted".into()), None]
         );
         f.close().await;
     }
@@ -1435,7 +1436,7 @@ async fn a_long_turn_defers_the_large_input_trim_while_its_tool_loop_is_open() {
             );
             assert!(
                 db.query_row(
-                    "SELECT count(*) FROM model_attempt WHERE json_extract(error_json,'$.automatic_trim_attempt.outcome')='deferred'",
+                    "SELECT count(*) FROM automatic_compaction WHERE outcome='deferred'",
                     [],
                     |r| r.get::<_, i64>(0)
                 )? >= 1
@@ -1676,8 +1677,8 @@ async fn unreducible_explicit_overflow_recovers_without_any_resend() {
         "no retry is admitted for unchanged explicitly rejected input"
     );
     assert_eq!(
-        attempts[0].1.as_ref().unwrap()["automatic_trim_attempt"]["outcome"],
-        "no_safe_reduction"
+        f.reduction_outcomes().await,
+        [Some("no_safe_reduction".into())]
     );
     let detail = f
         .control

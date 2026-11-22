@@ -630,7 +630,7 @@ async fn legal_new_run_reopens_provider_failure_memory() {
     let attempt_id = second_attempt.clone();
     let second_record_raw: String = control.store.database.call(move |db| {
         db.query_row(
-            "SELECT json_extract(error_json,'$.automatic_trim_attempt') FROM model_attempt WHERE id=?1",
+            "SELECT json_object('trigger',json(trigger_json)) FROM automatic_compaction WHERE attempt_id=?1",
             [attempt_id],
             |row| row.get(0),
         ).map_err(Into::into)

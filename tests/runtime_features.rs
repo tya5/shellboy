@@ -776,14 +776,14 @@ async fn overflow_without_any_target_in_an_open_tool_loop_recovers_without_resen
                     .get::<_, i64>(0))?,
                 2
             );
-            let saved: String = db.query_row(
-                "SELECT error_json FROM model_attempt WHERE json_extract(error_json,'$.automatic_trim_attempt') IS NOT NULL",
+            let (outcome, saved): (String, String) = db.query_row(
+                "SELECT outcome,result_json FROM automatic_compaction",
                 [],
-                |r| r.get(0),
+                |r| Ok((r.get(0)?, r.get(1)?)),
             )?;
             let saved: Value = serde_json::from_str(&saved).unwrap();
-            assert_eq!(saved["automatic_trim_attempt"]["outcome"], "no_safe_reduction");
-            assert_eq!(saved["automatic_trim_attempt"]["midturn"]["reason"], "open_tool_loop");
+            assert_eq!(outcome, "no_safe_reduction");
+            assert_eq!(saved["midturn"]["reason"], "open_tool_loop");
             Ok(())
         })
         .await
@@ -2922,13 +2922,12 @@ async fn automatic_nonshrinking_summary_enters_recovery_without_adoption_or_rese
         control.store.database.call(|db| {
             assert_eq!(db.query_row("SELECT count(*) FROM node WHERE kind='summary'",[],|r|r.get::<_,i64>(0))?,0);
             assert_eq!(db.query_row("SELECT count(*) FROM model_attempt WHERE kind='conversation'",[],|r|r.get::<_,i64>(0))?,3);
-            let raw:String=db.query_row("SELECT error_json FROM model_attempt WHERE state='incomplete'",[],|r|r.get(0))?;
-            let value:Value=serde_json::from_str(&raw).unwrap();let facts=&value["automatic_trim_attempt"]["error"]["details"];
-            // Overflow has no Automatic::observed stage/token. S1 must not
-            // synthesize a terminal stage fact for this unchanged recovery path.
-            assert!(value["automatic_trim_attempt"].get("compaction_outcome").is_none(),"{value:#}");
-            assert_eq!(value["automatic_trim_attempt"]["error"]["code"],"invalid_state","{value:#}");
-            assert_eq!(value["automatic_trim_attempt"]["error"]["message"],"Summary does not shrink its original source projection; original path retained","{value:#}");
+            let (raw, no_observed_fact): (String, bool)=db.query_row("SELECT c.result_json,c.failure_json IS NULL FROM automatic_compaction c JOIN model_attempt a ON a.id=c.attempt_id WHERE a.state='incomplete'",[],|r|Ok((r.get(0)?,r.get(1)?)))?;
+            let value:Value=serde_json::from_str(&raw).unwrap();let facts=&value["metrics"];
+            // Overflow has no Automatic::observed stage/token.
+            assert!(no_observed_fact,"{value:#}");
+            assert_eq!(value["error"]["code"],"invalid_state","{value:#}");
+            assert_eq!(value["error"]["message"],"Summary does not shrink its original source projection; original path retained","{value:#}");
             assert_eq!(facts["summary_usage"]["requests"],1,"{value:#}");Ok(())
         }).await.unwrap();
         assert_eq!(std::fs::read_to_string(&log).unwrap().lines().count(),1);
@@ -3742,7 +3741,7 @@ async fn automatic_attempt_record(control: &Control, attempt: String) -> Value {
         .database
         .call(move |db| {
             Ok(db.query_row(
-        "SELECT json_extract(error_json,'$.automatic_trim_attempt') FROM model_attempt WHERE id=?1",
+        "SELECT (SELECT json_object('token',c.token,'outcome',c.outcome,'reason',c.reason,'unfinished',json(iif(c.outcome IS NULL,'true','false')),'trigger',json(c.trigger_json),'summary',json(c.result_json->'$.metrics'),'error',json(c.result_json->'$.error'),'compaction_outcome',json(c.failure_json),'committed_stages',json((SELECT json_group_object(key,json(value)) FROM json_each(json_object('closed_spill',c.closed_spill,'active_spill',c.active_spill,'closed_summary',c.closed_summary,'active_summary',c.active_summary)) WHERE value IS NOT NULL))) FROM automatic_compaction c WHERE c.attempt_id=model_attempt.id) FROM model_attempt WHERE id=?1",
         [attempt], |row| row.get(0)
     )?)
         })
@@ -3987,13 +3986,13 @@ async fn admitted_summary_boundary(
         let attempt_id = report.attempt_id.clone();
         let saved: Option<String> = control.store.database.call(move |db| {
             db.query_row(
-                "SELECT json_extract(error_json,'$.automatic_trim_attempt') FROM model_attempt WHERE id=?1 AND json_type(error_json,'$.automatic_trim_attempt')='object'",
+                "SELECT (SELECT json_object('token',c.token,'outcome',c.outcome,'reason',c.reason,'unfinished',json(iif(c.outcome IS NULL,'true','false')),'trigger',json(c.trigger_json),'summary',json(c.result_json->'$.metrics'),'error',json(c.result_json->'$.error'),'compaction_outcome',json(c.failure_json),'committed_stages',json((SELECT json_group_object(key,json(value)) FROM json_each(json_object('closed_spill',c.closed_spill,'active_spill',c.active_spill,'closed_summary',c.closed_summary,'active_summary',c.active_summary)) WHERE value IS NOT NULL))) FROM automatic_compaction c WHERE c.attempt_id=model_attempt.id) FROM model_attempt WHERE id=?1 AND EXISTS(SELECT 1 FROM automatic_compaction c WHERE c.attempt_id=model_attempt.id)",
                 [attempt_id], |row| row.get(0),
             ).optional().map_err(Into::into)
         }).await.unwrap();
         let Some(saved) = saved else { continue };
         let record: Value = serde_json::from_str(&saved).unwrap();
-        if record["provisional"] != true {
+        if record["unfinished"] != true {
             continue;
         }
         let attempt_id = report.attempt_id.clone();
@@ -4171,7 +4170,7 @@ async fn automatic_attempts_finished_for_turns(
         let attempts = loop {
             let turns = turns.clone();
             let rows = control.store.database.call(move |db| {
-                let mut statement = db.prepare("SELECT a.id,json_extract(a.error_json,'$.automatic_trim_attempt.token') FROM model_attempt a WHERE a.turn_id=?1 AND json_type(a.error_json,'$.automatic_trim_attempt')='object' ORDER BY a.rowid")?;
+                let mut statement = db.prepare("SELECT a.id,(SELECT c.token FROM automatic_compaction c WHERE c.attempt_id=a.id) FROM model_attempt a WHERE a.turn_id=?1 AND EXISTS(SELECT 1 FROM automatic_compaction c WHERE c.attempt_id=a.id) ORDER BY a.rowid")?;
                 statement.query_map([&turns[0]], |row| {
                     let token: Option<String> = row.get(1)?;
                     Ok((row.get::<_, String>(0)?, token))
@@ -4193,7 +4192,7 @@ async fn automatic_attempts_finished_for_turns(
             let ids = attempts.iter().map(|attempt| attempt.id.clone()).collect::<Vec<_>>();
             let tokens = attempts.iter().map(|attempt| attempt.token.clone()).collect::<Vec<_>>();
             let pending = control.store.database.call(move |db| {
-                let mut statement = db.prepare("SELECT id,json_extract(error_json,'$.automatic_trim_attempt.token'),json_extract(error_json,'$.automatic_trim_attempt.provisional'),json_extract(error_json,'$.automatic_trim_attempt.outcome') FROM model_attempt WHERE id=?1")?;
+                let mut statement = db.prepare("SELECT id,(SELECT c.token FROM automatic_compaction c WHERE c.attempt_id=model_attempt.id),(SELECT c.outcome IS NULL FROM automatic_compaction c WHERE c.attempt_id=model_attempt.id),(SELECT COALESCE(c.outcome,'unknown') FROM automatic_compaction c WHERE c.attempt_id=model_attempt.id) FROM model_attempt WHERE id=?1")?;
                 for (id, token) in ids.iter().zip(tokens.iter()) {
                     let row = statement.query_row([id], |row| Ok((
                         row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?,
@@ -4460,7 +4459,7 @@ if let Some(active) = cancel_active {
     let pending_id=boundary.report.attempt_id.clone();
     let pending_record=automatic_attempt_record(&control,pending_id.clone()).await;
     assert_eq!(pending_record["outcome"],"unknown","RunStop targets an actually pending Thread-owned Summary");
-    assert_eq!(pending_record["provisional"],true);
+    assert_eq!(pending_record["unfinished"],true);
     assert_eq!(pending_record["token"],boundary.gc_token);
     assert_eq!(boundary.trigger.run_id,trigger_accept.run_id.as_deref().unwrap());
     assert_eq!(boundary.trigger.turn_id,trigger_accept.turn_id.as_deref().unwrap());
@@ -4501,7 +4500,7 @@ if let Some(active) = cancel_active {
             let diagnostic_attempt=boundary.report.attempt_id.clone();
             let diagnostic_token=boundary.gc_token.clone();
             let row=control.store.database.call(move|db|db.query_row(
-                "SELECT state,json_extract(error_json,'$.automatic_trim_attempt.provisional'),json_extract(error_json,'$.automatic_trim_attempt.token'),json_extract(error_json,'$.automatic_trim_attempt.outcome'),usage_json FROM model_attempt WHERE id=?1",
+                "SELECT state,(SELECT c.outcome IS NULL FROM automatic_compaction c WHERE c.attempt_id=model_attempt.id),(SELECT c.token FROM automatic_compaction c WHERE c.attempt_id=model_attempt.id),(SELECT COALESCE(c.outcome,'unknown') FROM automatic_compaction c WHERE c.attempt_id=model_attempt.id),usage_json FROM model_attempt WHERE id=?1",
                 [diagnostic_attempt],|row|Ok((row.get::<_,String>(0)?,row.get::<_,Option<bool>>(1)?,row.get::<_,Option<String>>(2)?,row.get::<_,Option<String>>(3)?,row.get::<_,Option<String>>(4)?))
             ).map_err(Into::into)).await.unwrap();
             let stopped_run=request(&control,Command::RunGet(RunTarget{run_id:boundary.trigger.run_id.clone()})).await;
@@ -4613,13 +4612,10 @@ if let Some(active) = cancel_active {
             let retry = events.iter().find(|event| event["state"] == "adopted").expect("adopted retry");
             let inspect_id=retry["attempt_id"].as_str().unwrap().to_owned();
             let db=control.store.database.clone();
-            let facts=db.call(move|db|{
-                let facts=db.query_row("SELECT json_valid(a.error_json),json_group_array(j.key),json_type(a.error_json,'$.automatic_trim'),json_type(a.error_json,'$.automatic_trim_attempt'),json_type(a.error_json,'$.automatic_trim_attempt.summary'),json_type(a.error_json,'$.automatic_trim_attempt.result'),json_extract(a.error_json,'$.automatic_trim_attempt.summary.summary_node_id'),json_extract(a.error_json,'$.automatic_trim_attempt.result.summary_node_id') FROM model_attempt a,json_each(CASE WHEN json_valid(a.error_json) THEN json_extract(a.error_json,'$.automatic_trim_attempt') ELSE '{}' END) j WHERE a.id=?1 GROUP BY a.id",[inspect_id],|r|Ok((r.get::<_,bool>(0)?,r.get::<_,String>(1)?,r.get::<_,Option<String>>(2)?,r.get::<_,Option<String>>(3)?,r.get::<_,Option<String>>(4)?,r.get::<_,Option<String>>(5)?,r.get::<_,Option<String>>(6)?,r.get::<_,Option<String>>(7)?)))?;
-                Ok(facts)
-            }).await.unwrap();
-            assert!(facts.0, "current attempt JSON must be valid");
-            assert!(facts.1.contains("summary"), "committed GC FINISH stores its summary facts: {facts:?}");
-            assert_eq!(facts.6.as_deref(),retry["metrics"]["summary_node_id"].as_str(),"readback exposes the committed summary node from the current attempt record");
+            let facts = db.call(move |db| Ok(db.query_row("SELECT a.error_json IS NULL,json_extract(c.result_json,'$.metrics.summary_node_id'),json_extract(c.closed_summary,'$.summary_node_id') FROM model_attempt a JOIN automatic_compaction c ON c.attempt_id=a.id WHERE a.id=?1",[inspect_id],|r|Ok((r.get::<_,bool>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?)))?)).await.unwrap();
+            assert!(facts.0, "executor saved no provider error for the successful attempt");
+            assert_eq!(facts.1, facts.2);
+            assert_eq!(Some(facts.1.as_str()),retry["metrics"]["summary_node_id"].as_str());
             assert!(retry["metrics"]["summary_node_id"].is_string(), "{retry:#?}");
             assert_eq!(retry["attempt_id"],retry_finished.boundary.report.attempt_id);
             let retry_record = automatic_attempt_record(&control, retry_finished.boundary.report.attempt_id.clone()).await;
@@ -4942,7 +4938,7 @@ async fn ax_growing_turn_summary_requests(
             let attempt_id = first_report.attempt_id.clone();
             let saved: Option<String> = control.store.database.call(move |db| {
                 db.query_row(
-                    "SELECT json_extract(error_json,'$.automatic_trim_attempt') FROM model_attempt WHERE id=?1 AND json_type(error_json,'$.automatic_trim_attempt')='object'",
+                    "SELECT (SELECT json_object('token',c.token,'outcome',c.outcome,'reason',c.reason,'unfinished',json(iif(c.outcome IS NULL,'true','false')),'trigger',json(c.trigger_json),'summary',json(c.result_json->'$.metrics'),'error',json(c.result_json->'$.error'),'compaction_outcome',json(c.failure_json),'committed_stages',json((SELECT json_group_object(key,json(value)) FROM json_each(json_object('closed_spill',c.closed_spill,'active_spill',c.active_spill,'closed_summary',c.closed_summary,'active_summary',c.active_summary)) WHERE value IS NOT NULL))) FROM automatic_compaction c WHERE c.attempt_id=model_attempt.id) FROM model_attempt WHERE id=?1 AND EXISTS(SELECT 1 FROM automatic_compaction c WHERE c.attempt_id=model_attempt.id)",
                     [attempt_id],
                     |row| row.get(0),
                 )
@@ -4952,7 +4948,7 @@ async fn ax_growing_turn_summary_requests(
             if let Some(saved) = saved {
                 set_phase("waiting for report-202 durable FINISH after attempt_begin");
                 let record = serde_json::from_str::<Value>(&saved).unwrap();
-                if record["provisional"] == false {
+                if record["unfinished"] == false {
                     break record;
                 }
             }
@@ -4975,7 +4971,7 @@ async fn ax_growing_turn_summary_requests(
             "report 202 must be an accepted actual duty");
         let first_gc_token = first_record["token"].as_str().expect("terminal report-202 GC token");
         assert_ne!(first_gc_token, first_report.request_token, "report and GC tokens are distinct");
-        assert_eq!(first_record["provisional"], false);
+        assert_eq!(first_record["unfinished"], false);
         set_phase("reading report-202 CompactList event");
         let initial_failure_event = proactive_events(&control, &target)
             .await
@@ -5028,7 +5024,7 @@ async fn ax_growing_turn_summary_requests(
             let attempt_id = owner.attempt_id.clone();
             let facts: RawReportReadback = control.store.database.call(move |db| {
                 Ok(db.query_row(
-                    "SELECT json_extract(a.usage_json,'$.input_tokens'),json_extract(a.input_manifest_json,'$.compaction_report_token'),CASE WHEN json_type(a.error_json,'$.automatic_trim_attempt')='object' THEN json_extract(a.error_json,'$.automatic_trim_attempt') END,r.id,t.id,t.generation FROM model_attempt a JOIN turn t ON t.id=a.turn_id JOIN run r ON r.id=t.run_id WHERE a.id=?1",
+                    "SELECT json_extract(a.usage_json,'$.input_tokens'),json_extract(a.input_manifest_json,'$.compaction_report_token'),CASE WHEN EXISTS(SELECT 1 FROM automatic_compaction c WHERE c.attempt_id=a.id) THEN (SELECT json_object('token',c.token,'outcome',c.outcome,'reason',c.reason,'unfinished',json(iif(c.outcome IS NULL,'true','false')),'trigger',json(c.trigger_json),'summary',json(c.result_json->'$.metrics'),'error',json(c.result_json->'$.error'),'compaction_outcome',json(c.failure_json),'committed_stages',json((SELECT json_group_object(key,json(value)) FROM json_each(json_object('closed_spill',c.closed_spill,'active_spill',c.active_spill,'closed_summary',c.closed_summary,'active_summary',c.active_summary)) WHERE value IS NOT NULL))) FROM automatic_compaction c WHERE c.attempt_id=a.id) END,r.id,t.id,t.generation FROM model_attempt a JOIN turn t ON t.id=a.turn_id JOIN run r ON r.id=t.run_id WHERE a.id=?1",
                     [attempt_id],
                     |row| Ok(RawReportReadback {
                         input_tokens: row.get(0)?,
@@ -5044,7 +5040,7 @@ async fn ax_growing_turn_summary_requests(
             if let Some(automatic) = facts.automatic_record {
                 let record = serde_json::from_str::<Value>(&automatic).unwrap();
                 assert_eq!(record["trigger"]["input_tokens"], owner.input_tokens);
-                assert_eq!(record["provisional"], false, "producer drain leaves every admitted duty terminal");
+                assert_eq!(record["unfinished"], false, "producer drain leaves every admitted duty terminal");
                 report_attempt_ids.push(owner.attempt_id.clone());
                 records.push(record);
             } else {
@@ -5084,10 +5080,10 @@ async fn ax_growing_turn_summary_requests(
                 .expect("FINISH for admitted source attempt");
             assert_eq!(records[index]["token"], finished.token,
                 "FINISH GC token remains on original source attempt");
-            assert_eq!(records[index]["provisional"], false, "all accepted duties are terminal after drain");
+            assert_eq!(records[index]["unfinished"], false, "all accepted duties are terminal after drain");
         }
         let durable_attempt_ids = control.store.database.call(move |db| {
-            Ok(db.prepare("SELECT id FROM model_attempt WHERE turn_id=?1 AND json_type(error_json,'$.automatic_trim_attempt')='object' ORDER BY rowid")?
+            Ok(db.prepare("SELECT id FROM model_attempt WHERE turn_id=?1 AND EXISTS(SELECT 1 FROM automatic_compaction c WHERE c.attempt_id=model_attempt.id) ORDER BY rowid")?
                 .query_map([&expected_turn], |row| row.get::<_, String>(0))?
                 .collect::<rusqlite::Result<Vec<_>>>()?)
         }).await.unwrap();
@@ -5227,7 +5223,7 @@ async fn proactive_third_turn_after_run(
         let expected_run = task_accepts[1].0.clone();
         trace.admission_report = Some(control.store.database.call(move |db| {
             let result: (String,String,String,Option<i64>,bool,bool) = db.query_row(
-                "SELECT u.run_id,a.turn_id,a.state,json_extract(a.usage_json,'$.input_tokens'),json_type(a.error_json,'$.automatic_trim_attempt') IS NOT NULL,
+                "SELECT u.run_id,a.turn_id,a.state,json_extract(a.usage_json,'$.input_tokens'),EXISTS(SELECT 1 FROM automatic_compaction c WHERE c.attempt_id=a.id),
                  ((EXISTS(SELECT 1 FROM thread_replacement tr JOIN replacement r ON r.id=tr.replacement_id WHERE tr.thread_id=u.thread_id AND r.created_at>a.started_at))
                    OR (EXISTS(SELECT 1 FROM output_item o WHERE o.attempt_id=a.id) AND NOT EXISTS(SELECT 1 FROM output_item o JOIN thread_path p ON p.thread_id=u.thread_id AND p.node_id=o.node_id WHERE o.attempt_id=a.id)))
                  FROM model_attempt a JOIN turn u ON u.id=a.turn_id WHERE a.id=?1",
@@ -5462,7 +5458,7 @@ async fn proactive_threshold_does_not_fire_below_threshold_or_when_disabled() {
         let records: i64 = control
             .store
             .database
-            .call(|db| Ok(db.query_row("SELECT count(*) FROM model_attempt WHERE json_type(error_json,'$.automatic_trim_attempt') IS NOT NULL", [], |r| r.get(0))?))
+            .call(|db| Ok(db.query_row("SELECT count(*) FROM model_attempt WHERE EXISTS(SELECT 1 FROM automatic_compaction c WHERE c.attempt_id=model_attempt.id)", [], |r| r.get(0))?))
             .await
             .unwrap();
         assert_eq!(records, 0, "{extra}");
@@ -5765,10 +5761,10 @@ async fn bx_token_growth(
         );
         let target=thread.clone();
         let (report_token,a_boundary):(String,String)=control.store.database.call(move|db|{
-            assert_eq!(db.query_row("SELECT count(*) FROM model_attempt a WHERE thread_id=?1 AND kind='conversation' AND json_extract(a.usage_json,'$.input_tokens')=9999 AND json_type(a.error_json,'$.automatic_trim_attempt')='object'",[&target],|r|r.get::<_,i64>(0))?,1,
+            assert_eq!(db.query_row("SELECT count(*) FROM model_attempt a WHERE thread_id=?1 AND kind='conversation' AND json_extract(a.usage_json,'$.input_tokens')=9999 AND EXISTS(SELECT 1 FROM automatic_compaction c WHERE c.attempt_id=a.id)",[&target],|r|r.get::<_,i64>(0))?,1,
                 "the exact 9999-token report content identifies one model_attempt row");
             db.query_row(
-                "SELECT json_extract(a.input_manifest_json,'$.compaction_report_token'),json_extract(a.error_json,'$.automatic_trim_attempt.trigger.a_boundary') FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE t.thread_id=?1 AND json_extract(a.usage_json,'$.input_tokens')=9999 AND json_type(a.error_json,'$.automatic_trim_attempt')='object'",
+                "SELECT json_extract(a.input_manifest_json,'$.compaction_report_token'),(SELECT json_extract(c.trigger_json,'$.a_boundary') FROM automatic_compaction c WHERE c.attempt_id=a.id) FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE t.thread_id=?1 AND json_extract(a.usage_json,'$.input_tokens')=9999 AND EXISTS(SELECT 1 FROM automatic_compaction c WHERE c.attempt_id=a.id)",
                 [target],
                 |row|Ok((row.get(0)?,row.get(1)?)),
             ).map_err(Into::into)
@@ -5823,10 +5819,10 @@ async fn bx_token_growth(
         let slots = bx_failure_slots(&control, &thread).await;
         let target=thread.clone();
         let stale_a_tokens:(String,String)=control.store.database.call(move|db|{
-            assert_eq!(db.query_row("SELECT count(*) FROM model_attempt a WHERE thread_id=?1 AND kind='conversation' AND json_extract(a.usage_json,'$.input_tokens')=9999 AND json_type(a.error_json,'$.automatic_trim_attempt')='object'",[&target],|r|r.get::<_,i64>(0))?,1,
+            assert_eq!(db.query_row("SELECT count(*) FROM model_attempt a WHERE thread_id=?1 AND kind='conversation' AND json_extract(a.usage_json,'$.input_tokens')=9999 AND EXISTS(SELECT 1 FROM automatic_compaction c WHERE c.attempt_id=a.id)",[&target],|r|r.get::<_,i64>(0))?,1,
                 "the exact 9999-token report content identifies one model_attempt row");
             db.query_row(
-                "SELECT json_extract(a.input_manifest_json,'$.compaction_report_token'),json_extract(a.error_json,'$.automatic_trim_attempt.trigger.a_boundary') FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE t.thread_id=?1 AND json_extract(a.usage_json,'$.input_tokens')=9999 AND json_type(a.error_json,'$.automatic_trim_attempt')='object'",
+                "SELECT json_extract(a.input_manifest_json,'$.compaction_report_token'),(SELECT json_extract(c.trigger_json,'$.a_boundary') FROM automatic_compaction c WHERE c.attempt_id=a.id) FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE t.thread_id=?1 AND json_extract(a.usage_json,'$.input_tokens')=9999 AND EXISTS(SELECT 1 FROM automatic_compaction c WHERE c.attempt_id=a.id)",
                 [target],
                 |row|Ok((row.get(0)?,row.get(1)?)),
             ).map_err(Into::into)
@@ -5850,7 +5846,7 @@ async fn bx_attempts(control: &Arc<Control>, thread: &str) -> Vec<Value> {
         .store
         .database
         .call(move |db| {
-            let mut statement = db.prepare("SELECT json_extract(a.error_json,'$.automatic_trim_attempt') FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE t.thread_id=?1 AND json_type(a.error_json,'$.automatic_trim_attempt')='object' ORDER BY a.rowid")?;
+            let mut statement = db.prepare("SELECT (SELECT json_object('token',c.token,'outcome',c.outcome,'reason',c.reason,'unfinished',json(iif(c.outcome IS NULL,'true','false')),'trigger',json(c.trigger_json),'summary',json(c.result_json->'$.metrics'),'error',json(c.result_json->'$.error'),'compaction_outcome',json(c.failure_json),'committed_stages',json((SELECT json_group_object(key,json(value)) FROM json_each(json_object('closed_spill',c.closed_spill,'active_spill',c.active_spill,'closed_summary',c.closed_summary,'active_summary',c.active_summary)) WHERE value IS NOT NULL))) FROM automatic_compaction c WHERE c.attempt_id=a.id) FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE t.thread_id=?1 AND EXISTS(SELECT 1 FROM automatic_compaction c WHERE c.attempt_id=a.id) ORDER BY a.rowid")?;
             let rows = statement
                 .query_map([thread], |row| row.get::<_, String>(0))?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -5926,7 +5922,7 @@ fn fresh_growth_attempts(reports: &[Value]) -> Vec<&Value> {
             "the automatic trigger belongs to this exact captured report row: {report:#?}"
         );
         assert!(
-            !attempt["provisional"].as_bool().unwrap_or(true),
+            !attempt["unfinished"].as_bool().unwrap_or(true),
             "the automatic record is compared only after its original terminal receipt: {report:#?}"
         );
         assert!(
@@ -7477,10 +7473,10 @@ async fn proactive_next_closed_summary_resummarizes_prior_summary_with_new_older
             let stale:String=db.query_row(
                 "SELECT json_extract(input_manifest_json,'$.compaction_report_token') FROM model_attempt WHERE turn_id IN (SELECT id FROM turn WHERE thread_id=?1) AND json_extract(usage_json,'$.input_tokens')=184622",
                 [&target],|row|row.get(0))?;
-            assert_eq!(db.query_row("SELECT count(*) FROM model_attempt WHERE turn_id IN (SELECT id FROM turn WHERE thread_id=?1) AND json_extract(usage_json,'$.input_tokens')=200500 AND json_type(error_json,'$.automatic_trim_attempt')='object'", [&target], |row| row.get::<_,i64>(0))?, 1,
+            assert_eq!(db.query_row("SELECT count(*) FROM model_attempt WHERE turn_id IN (SELECT id FROM turn WHERE thread_id=?1) AND json_extract(usage_json,'$.input_tokens')=200500 AND EXISTS(SELECT 1 FROM automatic_compaction c WHERE c.attempt_id=model_attempt.id)", [&target], |row| row.get::<_,i64>(0))?, 1,
                 "the response's exact 200500 usage identifies one terminal report attempt");
             let current:(String,String)=db.query_row(
-                "SELECT json_extract(input_manifest_json,'$.compaction_report_token'),json_extract(error_json,'$.automatic_trim_attempt.trigger.a_boundary') FROM model_attempt WHERE turn_id IN (SELECT id FROM turn WHERE thread_id=?1) AND json_extract(usage_json,'$.input_tokens')=200500 AND json_type(error_json,'$.automatic_trim_attempt')='object'",
+                "SELECT json_extract(input_manifest_json,'$.compaction_report_token'),(SELECT json_extract(c.trigger_json,'$.a_boundary') FROM automatic_compaction c WHERE c.attempt_id=model_attempt.id) FROM model_attempt WHERE turn_id IN (SELECT id FROM turn WHERE thread_id=?1) AND json_extract(usage_json,'$.input_tokens')=200500 AND EXISTS(SELECT 1 FROM automatic_compaction c WHERE c.attempt_id=model_attempt.id)",
                 [&target],|row|Ok((row.get(0)?,row.get(1)?)))?;
             Ok((stale,current.0,current.1))
         }).await.unwrap();
@@ -8023,7 +8019,7 @@ final_request.reply.send((200, answer("finished"))).unwrap();
             let mut ledger = Vec::new();
             for ((id, input_tokens), request_token) in ledger_ids.into_iter().zip(expected_tokens).zip(request_tokens) {
                 let (usage, automatic): (Option<i64>, Option<String>) = db.query_row(
-                    "SELECT json_extract(usage_json,'$.input_tokens'),json_extract(error_json,'$.automatic_trim_attempt') FROM model_attempt WHERE id=?1",
+                    "SELECT json_extract(usage_json,'$.input_tokens'),(SELECT json_object('token',c.token,'outcome',c.outcome,'reason',c.reason,'unfinished',json(iif(c.outcome IS NULL,'true','false')),'trigger',json(c.trigger_json),'summary',json(c.result_json->'$.metrics'),'error',json(c.result_json->'$.error'),'compaction_outcome',json(c.failure_json),'committed_stages',json((SELECT json_group_object(key,json(value)) FROM json_each(json_object('closed_spill',c.closed_spill,'active_spill',c.active_spill,'closed_summary',c.closed_summary,'active_summary',c.active_summary)) WHERE value IS NOT NULL))) FROM automatic_compaction c WHERE c.attempt_id=model_attempt.id) FROM model_attempt WHERE id=?1",
                     [&id], |row| Ok((row.get(0)?,row.get(1)?)))?;
                 assert_eq!(usage, Some(input_tokens as i64), "source report usage remains independently declared for {id}");
                 let manifest: Value = serde_json::from_str(&request_token).expect("saved source report token");
@@ -8067,7 +8063,7 @@ final_request.reply.send((200, answer("finished"))).unwrap();
             let mut values = Vec::new();
             for id in refresh_ids {
                 let automatic: Option<String> = db.query_row(
-                    "SELECT json_extract(error_json,'$.automatic_trim_attempt') FROM model_attempt WHERE id=?1",
+                    "SELECT (SELECT json_object('token',c.token,'outcome',c.outcome,'reason',c.reason,'unfinished',json(iif(c.outcome IS NULL,'true','false')),'trigger',json(c.trigger_json),'summary',json(c.result_json->'$.metrics'),'error',json(c.result_json->'$.error'),'compaction_outcome',json(c.failure_json),'committed_stages',json((SELECT json_group_object(key,json(value)) FROM json_each(json_object('closed_spill',c.closed_spill,'active_spill',c.active_spill,'closed_summary',c.closed_summary,'active_summary',c.active_summary)) WHERE value IS NOT NULL))) FROM automatic_compaction c WHERE c.attempt_id=model_attempt.id) FROM model_attempt WHERE id=?1",
                     [&id], |row| row.get(0))?;
                 values.push(automatic);
             }
@@ -8089,7 +8085,7 @@ final_request.reply.send((200, answer("finished"))).unwrap();
         assert_eq!(linked_attempts, attempts,
             "automatic records link to the exact captured model-attempt IDs in request order");
         let scope_thread=target.clone();
-        let scopes=control.store.database.call(move|db|Ok(db.prepare("SELECT r.id,t.id,t.generation FROM model_attempt a JOIN turn t ON t.id=a.turn_id JOIN run r ON r.id=t.run_id WHERE t.thread_id=?1 AND json_extract(a.error_json,'$.automatic_trim_attempt') IS NOT NULL ORDER BY a.rowid")?.query_map([scope_thread],|row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,i64>(2)?)))?.collect::<rusqlite::Result<Vec<_>>>()?)).await.unwrap();
+        let scopes=control.store.database.call(move|db|Ok(db.prepare("SELECT r.id,t.id,t.generation FROM model_attempt a JOIN turn t ON t.id=a.turn_id JOIN run r ON r.id=t.run_id WHERE t.thread_id=?1 AND (SELECT json_object('token',c.token,'outcome',c.outcome,'reason',c.reason,'unfinished',json(iif(c.outcome IS NULL,'true','false')),'trigger',json(c.trigger_json),'summary',json(c.result_json->'$.metrics'),'error',json(c.result_json->'$.error'),'compaction_outcome',json(c.failure_json),'committed_stages',json((SELECT json_group_object(key,json(value)) FROM json_each(json_object('closed_spill',c.closed_spill,'active_spill',c.active_spill,'closed_summary',c.closed_summary,'active_summary',c.active_summary)) WHERE value IS NOT NULL))) FROM automatic_compaction c WHERE c.attempt_id=a.id) IS NOT NULL ORDER BY a.rowid")?.query_map([scope_thread],|row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,i64>(2)?)))?.collect::<rusqlite::Result<Vec<_>>>()?)).await.unwrap();
         let id = target.clone();
         let spills = control.store.database.call(move |db| proactive_wait_witness(db, &id)).await.unwrap().0.len();
         if !spilling {

@@ -63,7 +63,7 @@ pub(super) async fn preflight(
             );
             let attempt_consumed = match usage["last_successful_attempt"]["attempt_id"].as_str() {
                 Some(attempt_id) => db.query_row(
-                    "SELECT json_type(error_json,'$.automatic_trim_attempt') IS NOT NULL FROM model_attempt WHERE id=?1",
+                    "SELECT EXISTS(SELECT 1 FROM automatic_compaction WHERE attempt_id=?1)",
                     [attempt_id],
                     |row| row.get::<_, bool>(0),
                 )?,
@@ -294,20 +294,6 @@ impl Automatic {
     ) -> Result<T, ApiError> {
         use crate::compaction::discard::{CompactionOutcomeFact, CompactionPhase};
         let started = std::time::Instant::now();
-        let (attempt, token, phase_key) =
-            (self.attempt.clone(), self.token.clone(), phase.to_owned());
-        control
-            .store
-            .database
-            .call(move |db| {
-                db.execute(
-                    crate::compaction::discard::STAGE_SQL,
-                    params![attempt, token, phase_key],
-                )?;
-                Ok(())
-            })
-            .await
-            .map_err(storage_error)?;
         let result = operation.await;
         if let Err(error) = &result {
             let fact = CompactionOutcomeFact {
@@ -316,15 +302,14 @@ impl Automatic {
                 elapsed_ms: started.elapsed().as_millis().min(u64::MAX as u128) as u64,
             };
             let body = serde_json::to_string(&fact).expect("bounded fact");
-            let (attempt, token, phase_key) =
-                (self.attempt.clone(), self.token.clone(), phase.to_owned());
+            let (attempt, token) = (self.attempt.clone(), self.token.clone());
             let saved = control
                 .store
                 .database
                 .call(move |db| {
                     Ok(db.execute(
                         crate::compaction::discard::SAVE_SQL,
-                        params![attempt, token, body, phase_key],
+                        params![attempt, token, body],
                     )? == 1)
                 })
                 .await;
@@ -570,10 +555,8 @@ pub(super) async fn maybe_compact_with_run_stop(
     let can_run=control.store.database.call(move |db| {
         let tx=db.transaction()?;
         let current: Option<(String, i64)> = tx.query_row("SELECT profile_id,revision FROM thread WHERE id=?1",[&guard_thread],|r|Ok((r.get(0)?,r.get(1)?))).optional()?;
-        if current != Some((sampled_profile, sampled_revision)) { return Ok(None); }
-        let consumed:bool=tx.query_row("SELECT json_type(error_json,'$.automatic_trim_attempt') IS NOT NULL FROM model_attempt WHERE id=?1",[&id],|r|r.get(0))?;
-        if consumed {return Ok(None);}
-        let captured_trigger = crate::compaction::attempt_begin_tx(
+        if current != Some((sampled_profile, sampled_revision)) { return Ok(false); }
+        if ! crate::compaction::attempt_begin_tx(
             &tx,
             &id,
             &token,
@@ -584,16 +567,15 @@ pub(super) async fn maybe_compact_with_run_stop(
                 crate::compaction::ABoundaryObservation::Unobserved
             },
             &trigger,
-            &Value::Null,
-        )?;
+        )? { return Ok(false); }
         tx.execute("INSERT INTO app_meta(key,value) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value", params![saved_key, saved_witness])?;
         // Retire old target/guard metadata, never the historical attempt record.
         for key in [crate::compaction::CompactionKeys::new(&thread).automatic_target(),crate::compaction::CompactionKeys::new(&thread).automatic_guard(),crate::compaction::CompactionKeys::new(&thread).automatic_status()] {tx.execute("DELETE FROM app_meta WHERE key=?1",[key])?;}
-        tx.commit()?;Ok(Some(captured_trigger))
+        tx.commit()?;Ok(true)
     }).await.map_err(storage_error)?;
-    let Some(captured_trigger) = can_run else {
+    if !can_run {
         return Ok(ProactiveOutcome::NotStarted);
-    };
+    }
     control.diagnostics.record(
         crate::diagnostics::DiagnosticEvent::AutomaticCompactionStarted,
         ids.clone(),
@@ -768,12 +750,17 @@ pub(super) async fn maybe_compact_with_run_stop(
     let no_target = summary
         .as_ref()
         .is_some_and(|summary| summary["no_target"] == true);
-    let mut record = json!({"outcome":terminal_attempt_outcome(&result,no_target),"provisional":false,"reason":REASON,"trigger":captured_trigger,"target_plan":null});
-    if let Some(summary) = summary {
-        record["summary"] = summary;
-    }
+    let outcome = terminal_attempt_outcome(&result, no_target);
+    let summary = summary.or_else(|| {
+        result
+            .as_ref()
+            .err()
+            .and_then(|error| error.details.clone())
+    });
+    let mut terminal = json!({"metrics":summary});
     if let Err(error) = &result {
-        record["error"] = serde_json::to_value(error).unwrap_or(Value::Null);
+        terminal["error"] = serde_json::to_value(error)
+            .map_err(|error| ApiError::new(ErrorCode::SaveFailed, error.to_string()))?;
     }
     let (attempt, token) = (automatic.attempt.clone(), automatic.token.clone());
     control
@@ -781,7 +768,7 @@ pub(super) async fn maybe_compact_with_run_stop(
         .database
         .call(move |db| {
             let tx = db.transaction()?;
-            crate::compaction::attempt_finish_tx(&tx, &record.to_string(), &attempt, &token)?;
+            crate::compaction::attempt_finish_tx(&tx, &attempt, &token, outcome, Some(&terminal))?;
             tx.commit()?;
             Ok(())
         })

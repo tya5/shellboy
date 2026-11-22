@@ -3,7 +3,6 @@ use rusqlite::OptionalExtension;
 use std::collections::BTreeMap;
 mod bounded;
 pub(super) use bounded::read_display;
-const AUTO: &str = "CASE WHEN json_valid(a.error_json) THEN json_type(a.error_json,'$.automatic_trim')='object' OR json_type(a.error_json,'$.automatic_trim_attempt')='object' ELSE 0 END";
 pub(super) const SPILL_COVERAGE_SQL: &str = "SELECT r.output_node_id FROM thread_replacement tr JOIN replacement r ON r.id=tr.replacement_id WHERE tr.thread_id=?1 AND r.format_version='spill-v1' AND usage_saved_start(r.created_at)>=usage_saved_start(?2) AND usage_saved_start(r.created_at)<=usage_saved_start(?3) AND NOT EXISTS(SELECT 1 FROM replacement_source q WHERE q.replacement_id=r.id AND NOT EXISTS(SELECT 1 FROM app_meta m,json_each(json_extract(m.value,'$.outcome.result.compact.original_node_ids')) j WHERE m.key=?4 AND j.value=q.source_node_id)) ORDER BY usage_saved_start(r.created_at) DESC,r.id DESC LIMIT ?5";
 fn metrics(root: &str) -> String {
     let paths = [
@@ -77,31 +76,28 @@ fn receipt_source_query(w: &Window, display: bool) -> String {
         w.sql(&at)
     )
 }
-pub(super) fn automatic_metrics_root(alias: &str) -> String {
-    format!(
-        "CASE WHEN json_valid({alias}.error_json) AND json_type({alias}.error_json,'$.automatic_trim_attempt')='object' THEN COALESCE(json_extract({alias}.error_json,'$.automatic_trim_attempt.summary'),json_extract({alias}.error_json,'$.automatic_trim_attempt.result'),json_extract({alias}.error_json,'$.automatic_trim_attempt.error.details'),'{{}}') ELSE COALESCE(json_extract({alias}.error_json,'$.automatic_trim'),'{{}}') END"
-    )
-}
+pub(super) const AUTOMATIC_METRICS: &str = "COALESCE(json_extract(c.result_json,'$.metrics'),'{}')";
+
 pub(super) fn automatic_query(w: &Window) -> String {
     automatic_source_query(w, false)
 }
 fn automatic_source_query(w: &Window, display: bool) -> String {
     let source = if display {
-        "turn u JOIN model_attempt a"
+        "turn u JOIN automatic_compaction c ON c.turn_id=u.id"
     } else {
-        "turn u INDEXED BY turns_by_thread JOIN model_attempt a INDEXED BY automatic_compaction_turn"
+        "turn u INDEXED BY turns_by_thread JOIN automatic_compaction c INDEXED BY automatic_compaction_turn ON c.turn_id=u.id"
     };
     let failures = if display {
-        "(SELECT CASE WHEN count(*)<201 THEN sum(state IN ('failed','incomplete') AND native_rowid<=a.rowid) END FROM (SELECT rowid native_rowid,state FROM main.model_attempt INDEXED BY attempts_by_turn WHERE turn_id=a.turn_id ORDER BY started_at DESC LIMIT 201))"
+        "(SELECT CASE WHEN count(*)<201 THEN sum(state IN ('failed','incomplete') AND native_rowid<=a.rowid) END FROM (SELECT rowid native_rowid,state FROM main.model_attempt INDEXED BY attempts_by_turn WHERE turn_id=c.turn_id ORDER BY started_at DESC LIMIT 201))"
     } else {
-        "(SELECT count(*) FROM model_attempt earlier INDEXED BY attempts_by_turn WHERE earlier.turn_id=a.turn_id AND earlier.rowid<=a.rowid AND earlier.state IN ('failed','incomplete'))"
+        "(SELECT count(*) FROM model_attempt earlier INDEXED BY attempts_by_turn WHERE earlier.turn_id=c.turn_id AND earlier.rowid<=a.rowid AND earlier.state IN ('failed','incomplete'))"
     };
-    let root = automatic_metrics_root("a");
-    let node = output_node(&root);
-    let at = "COALESCE(n.created_at,a.ended_at,a.started_at)";
+    let node = output_node(AUTOMATIC_METRICS);
+    let at = "COALESCE(n.created_at,a.ended_at,c.attempt_started_at)";
+    let failure = "CASE WHEN json_valid(a.error_json) THEN a.error_json END";
     format!(
-        "SELECT a.id,{at},{},json_extract(a.error_json,'$.error.kind'),json_extract(a.error_json,'$.automatic_retry.number'),a.turn_id,COALESCE(json_extract(a.error_json,'$.automatic_trim_attempt.outcome'),'recorded'),{failures},CASE WHEN json_type(a.error_json,'$.automatic_trim_attempt.reason')='text' THEN json_extract(a.error_json,'$.automatic_trim_attempt.reason') END,CASE WHEN json_type(a.error_json,'$.automatic_trim_attempt.trigger')='object' THEN json_extract(a.error_json,'$.automatic_trim_attempt.trigger') END,{} FROM {source} ON a.turn_id=u.id LEFT JOIN node n ON n.id={node} WHERE u.thread_id=?1 AND {AUTO} AND {} ORDER BY usage_saved_start({at}) DESC,a.id DESC LIMIT ?2",
-        enriched(&root),
+        "SELECT c.attempt_id,{at},{},json_extract({failure},'$.error.kind'),json_extract({failure},'$.automatic_retry.number'),c.turn_id,COALESCE(c.outcome,CASE WHEN c.token IS NOT NULL THEN 'unknown' ELSE 'recorded' END),{failures},c.reason,c.trigger_json,{} FROM {source} JOIN main.model_attempt a ON a.id=c.attempt_id LEFT JOIN node n ON n.id={node} WHERE u.thread_id=?1 AND {} ORDER BY usage_saved_start({at}) DESC,c.attempt_id DESC LIMIT ?2",
+        enriched(AUTOMATIC_METRICS),
         crate::compaction::discard::status_sql("a"),
         w.sql(at)
     )

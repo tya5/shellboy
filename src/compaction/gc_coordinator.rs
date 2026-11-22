@@ -180,7 +180,7 @@ impl WriterGcCoordinator {
             return Err("a writer-owned GC job is already active");
         }
         if stage.thread_id != captured.thread
-            || !super::attempt::provisional_gc_matches(db, &stage)
+            || !super::attempt::gc_matches(db, &stage)
                 .map_err(|_| "GC provisional receipt verification failed")?
         {
             return Err("GC capture requires the matching committed strict provisional receipt");
@@ -348,7 +348,6 @@ impl WriterGcCoordinator {
                     ));
                 }
                 super::attempt::record_gc_stage_tx(&tx, stage, &fact)?;
-                super::attempt::finish_gc_tx(&tx, stage)?;
                 if cancel.is_cancelled() {
                     return Err(crate::storage::StorageError::from(
                         super::discard::rejected(
@@ -512,10 +511,6 @@ mod lifecycle_event_tests {
             attempt_id: "stop-attempt".into(),
             token: "stop-token".into(),
             thread_id: "stop-thread".into(),
-            profile_id: "p".into(),
-            model_id: "m".into(),
-            effort: None,
-            reasoning_epoch: 0,
             stage: "closed_summary",
         };
         let mut coordinator = WriterGcCoordinator {
@@ -575,10 +570,6 @@ mod lifecycle_event_tests {
             attempt_id: "a".into(),
             token: "tok".into(),
             thread_id: "t".into(),
-            profile_id: "p".into(),
-            model_id: "m".into(),
-            effort: None,
-            reasoning_epoch: 0,
             stage: "closed_summary",
         };
         let cancel = CancellationToken::new();

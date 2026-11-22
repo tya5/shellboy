@@ -1995,13 +1995,19 @@ async fn issue_160_auto_compaction_detached_attachment_and_retry() {
             "actual automatic summary: {mode}"
         );
         let attempt = trigger_attempt.clone();
-        let (automatic_attempt, automatic_token): (String, String) = control.store.database.call(move |db| {
-            db.query_row(
-                "SELECT id,json_extract(error_json,'$.automatic_trim_attempt.token') FROM model_attempt WHERE id=?1 AND json_type(error_json,'$.automatic_trim_attempt')='object'",
-                [attempt],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            ).map_err(Into::into)
-        }).await.unwrap();
+        let (automatic_attempt, automatic_token): (String, String) = control
+            .store
+            .database
+            .call(move |db| {
+                db.query_row(
+                    "SELECT attempt_id,token FROM automatic_compaction WHERE attempt_id=?1",
+                    [attempt],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .map_err(Into::into)
+            })
+            .await
+            .unwrap();
         // Subscribe before replying so the exact terminal FINISH notification cannot be missed.
         let mut changes = control.subscribe();
         summary
@@ -2017,13 +2023,13 @@ async fn issue_160_auto_compaction_detached_attachment_and_retry() {
                     let token = automatic_token.clone();
                     let record = control.store.database.call(move |db| {
                         let value: String = db.query_row(
-                            "SELECT json_extract(error_json,'$.automatic_trim_attempt') FROM model_attempt WHERE id=?1 AND json_extract(error_json,'$.automatic_trim_attempt.token')=?2",
+                            "SELECT json_object('outcome',outcome) FROM automatic_compaction WHERE attempt_id=?1 AND token=?2",
                             rusqlite::params![attempt, token],
                             |row| row.get(0),
                         )?;
                         Ok(serde_json::from_str::<Value>(&value).unwrap())
                     }).await.unwrap();
-                    if record["provisional"] == false {
+                    if !record["outcome"].is_null() {
                         break record;
                     }
                     tokio::select! {

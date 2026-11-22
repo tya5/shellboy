@@ -77,6 +77,7 @@ pub(crate) const MIGRATION_NAMES: &[(i64, &str)] = &[
     (52, "0052_unified_model_attempt"),
     (53, "0053_retired_schedule_shells"),
     (54, "0054_thread_created_at"),
+    (55, "0055_automatic_compaction"),
 ];
 pub const SCHEMA_VERSION: i64 = MIGRATION_NAMES.len() as i64;
 pub const DEFAULT_QUEUE_CAPACITY: usize = 128;
@@ -2710,7 +2711,8 @@ mod lane_budget_tests {
             db.execute_batch("INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','completed','now');INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','t','r','completed','now');")?;
             db.execute("INSERT INTO node(id,turn_id,kind,created_at,payload_revision,payload_json,payload_bytes,body_hash)VALUES('source','u','message','now',1,'{}',2,'hash')",[])?;
             db.execute("INSERT INTO thread_path(thread_id,ordinal,node_id)VALUES('t',0,'source')",[])?;
-            db.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at,error_json)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='u'),'a','u',0,0,'fixture','fixture',0,'completed','{}','now',?1)",[r#"{"automatic_trim_attempt":{"token":"tok","provisional":true}}"#])?;
+            db.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='u'),'a','u',0,0,'fixture','fixture',0,'completed','{}','now')", [])?;
+            db.execute("INSERT INTO automatic_compaction(attempt_id,turn_id,attempt_started_at,token) VALUES('a','u','now','tok')", [])?;
             Ok(())
         }).await.unwrap();
         let attachments = Vec::new();
@@ -2755,10 +2757,6 @@ mod lane_budget_tests {
             attempt_id: "a".into(),
             token: "tok".into(),
             thread_id: "t".into(),
-            profile_id: "fixture".into(),
-            model_id: "fixture".into(),
-            effort: None,
-            reasoning_epoch: 0,
             stage: "closed_summary",
         };
         let (tx, rx) = oneshot::channel();
@@ -2827,10 +2825,6 @@ mod lane_budget_tests {
             attempt_id: "unused".into(),
             token: "unused".into(),
             thread_id: "t".into(),
-            profile_id: "p".into(),
-            model_id: "m".into(),
-            effort: None,
-            reasoning_epoch: 0,
             stage: "closed_summary",
         };
         let no_target = db
@@ -2928,10 +2922,6 @@ mod lane_budget_tests {
                     attempt_id: "a".into(),
                     token: "tok".into(),
                     thread_id: "t".into(),
-                    profile_id: "fixture".into(),
-                    model_id: "fixture".into(),
-                    effort: None,
-                    reasoning_epoch: 0,
                     stage: "closed_summary",
                 };
                 loop {
@@ -2965,10 +2955,11 @@ mod lane_budget_tests {
                 db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','/AGENTS.md','fixture','fixture','now')",[])?;
                 db.execute_batch("INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','completed','now');
                     INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','t','r','completed','now');")?;
-                db.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at,error_json) VALUES('conversation',(SELECT thread_id FROM turn WHERE id='u'),'a','u',0,0,'fixture','fixture',0,'completed','{}','now',?1)", [r#"{"automatic_trim_attempt":{"token":"tok","provisional":true}}"#])?;
+                db.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at) VALUES('conversation',(SELECT thread_id FROM turn WHERE id='u'),'a','u',0,0,'fixture','fixture',0,'completed','{}','now')", [])?;
+            db.execute("INSERT INTO automatic_compaction(attempt_id,turn_id,attempt_started_at,token) VALUES('a','u','now','tok')", [])?;
                 Ok(())
             }).await.unwrap();
-            let stage=crate::compaction::GcStage{attempt_id:"a".into(),token:"tok".into(),thread_id:"t".into(),profile_id:"fixture".into(),model_id:"fixture".into(),effort:None,reasoning_epoch:0,stage:"active_summary"};
+            let stage=crate::compaction::GcStage{attempt_id:"a".into(),token:"tok".into(),thread_id:"t".into(),stage:"active_summary"};
             let captured=crate::compaction::CapturedSummaryInput{thread:"t".into(),epoch:0,profile:"fixture".into(),model:"fixture".into(),thread_summary_max_chars:None,effort:None,origin_turn:None,origin_run:None,origin_generation:None,groups:Vec::new(),active_turn:false,active_user_messages:Vec::new()};
             let (producer_ready_tx,producer_ready_rx)=oneshot::channel();
             let (complete_tx,complete_rx)=oneshot::channel();

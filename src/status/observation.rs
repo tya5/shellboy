@@ -788,14 +788,19 @@ mod tests {
             ..Default::default()
         };
         let fact = serde_json::json!({"outcome":{"kind":"rejected","reason":"run_started"},"phase":"closed_summary","elapsed_ms":45});
+        db.execute(
+            "UPDATE model_attempt SET error_json=?1 WHERE id='a'",
+            [r#"{"kind":"original_failure","private":"PRIVATE_SENTINEL"}"#],
+        )
+        .unwrap();
+        db.execute("INSERT INTO automatic_compaction(attempt_id,turn_id,attempt_started_at) SELECT id,turn_id,started_at FROM model_attempt WHERE id='a'", []).unwrap();
         for extra in [false, true] {
-            let mut body = serde_json::json!({"kind":"original_failure","private":"PRIVATE_SENTINEL","automatic_trim_attempt":{"compaction_outcome":fact}});
+            let mut body = fact.clone();
             if extra {
-                body["automatic_trim_attempt"]["compaction_outcome"]["secret"] =
-                    serde_json::json!("PRIVATE_SENTINEL");
+                body["secret"] = serde_json::json!("PRIVATE_SENTINEL");
             }
             db.execute(
-                "UPDATE model_attempt SET error_json=?1 WHERE id='a'",
+                "UPDATE automatic_compaction SET failure_json=?1 WHERE attempt_id='a'",
                 [body.to_string()],
             )
             .unwrap();
@@ -827,10 +832,9 @@ mod tests {
             serde_json::Value::Null,
             serde_json::json!({"reason":"future","phase":"closed_summary","elapsed_ms":1}),
         ] {
-            let body = serde_json::json!({"automatic_trim_attempt":{"compaction_outcome":value}});
             db.execute(
-                "UPDATE model_attempt SET error_json=?1 WHERE id='a'",
-                [body.to_string()],
+                "UPDATE automatic_compaction SET failure_json=?1 WHERE attempt_id='a'",
+                [value.to_string()],
             )
             .unwrap();
             let page = super::super::snapshot(&db, &args, "fixture").unwrap();

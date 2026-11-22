@@ -92,7 +92,7 @@ class PublicUpgradeArguments(unittest.TestCase):
         db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('old','/','','p','m','now')")
         upgrade.prepare_schema(db, upgrade.CURRENT_SCHEMA_VERSION)
         self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], upgrade.CURRENT_SCHEMA_VERSION)
-        self.assertEqual(db.execute("SELECT version,name FROM schema_migration ORDER BY version DESC LIMIT 1").fetchone(), (54, '0054_thread_created_at'))
+        self.assertEqual(db.execute("SELECT version,name FROM schema_migration ORDER BY version DESC LIMIT 1").fetchone(), (upgrade.CURRENT_SCHEMA_VERSION, '0055_automatic_compaction'))
         self.assertIsNone(db.execute("SELECT spill_override FROM thread WHERE id='old'").fetchone()[0])
         # The spill constraint remains pinned to 45 through the current schema.
         upgrade.check_migration(db, before_45, 44, upgrade.CURRENT_SCHEMA_VERSION)

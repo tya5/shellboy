@@ -194,15 +194,21 @@ mod outcome_tests {
             until: None,
             limit: 1,
         };
+        let body = json!({"independent":"SECRET"}).to_string();
+        db.execute(
+            "UPDATE model_attempt SET error_json=?1 WHERE id='a'",
+            [&body],
+        )
+        .unwrap();
+        db.execute("INSERT INTO automatic_compaction(attempt_id,turn_id,attempt_started_at,reason,outcome,result_json) SELECT id,turn_id,started_at,'proactive_threshold','failed',?1 FROM model_attempt WHERE id='a'", [json!({"metrics":{"summary_usage":usage,"provider_code":"SECRET"}}).to_string()]).unwrap();
         for malformed in [false, true] {
             let mut saved = fact.clone();
             if malformed {
                 saved["outcome"]["provider_code"] = json!("SECRET");
             }
-            let body=json!({"independent":"SECRET","automatic_trim_attempt":{"outcome":"failed","reason":"proactive_threshold","compaction_outcome":saved,"discard":{"reason":"other","phase":"closed_summary","elapsed_ms":1},"error":{"details":{"summary_usage":usage,"provider_code":"SECRET"}}}}).to_string();
             db.execute(
-                "UPDATE model_attempt SET error_json=?1 WHERE id='a'",
-                [&body],
+                "UPDATE automatic_compaction SET failure_json=?1 WHERE attempt_id='a'",
+                [saved.to_string()],
             )
             .unwrap();
             let canonical = compact::list(&db, "t", &args).unwrap();
@@ -230,16 +236,12 @@ mod outcome_tests {
                 body
             );
         }
-        let historical=json!({"automatic_trim_attempt":{"outcome":"failed","discard":{"reason":"other","phase":"closed_summary","elapsed_ms":3}}}).to_string();
-        db.execute("UPDATE model_attempt SET error_json=?1", [&historical])
-            .unwrap();
+        db.execute(
+            "UPDATE automatic_compaction SET failure_json=NULL WHERE attempt_id='a'",
+            [],
+        )
+        .unwrap();
         let item = compact::list(&db, "t", &args).unwrap();
         assert!(item["items"][0].get("compaction_outcome").is_none());
-        assert_eq!(
-            db.query_row("SELECT error_json FROM model_attempt", [], |r| r
-                .get::<_, String>(0))
-                .unwrap(),
-            historical
-        );
     }
 }

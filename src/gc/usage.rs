@@ -30,7 +30,8 @@ fn sum(db: &Connection, sql: &str) -> Result<u64> {
 // Test oracle only: the O(rows) indexed sums that the schema22 counters
 // replace (#171). Runtime reads the trigger-maintained counters.
 #[cfg(test)]
-const HISTORY_QUERIES: [&str; 10] = [
+const HISTORY_QUERIES: [&str; 11] = [
+    "SELECT COALESCE(SUM(COALESCE(octet_length(token),0)+COALESCE(octet_length(reason),0)+COALESCE(octet_length(trigger_json),0)+COALESCE(octet_length(closed_spill),0)+COALESCE(octet_length(active_spill),0)+COALESCE(octet_length(closed_summary),0)+COALESCE(octet_length(active_summary),0)+COALESCE(octet_length(failure_json),0)+COALESCE(octet_length(outcome),0)+COALESCE(octet_length(result_json),0)+COALESCE(octet_length(ended_at),0)),0) FROM automatic_compaction",
     "SELECT COALESCE(SUM(octet_length(payload_json)),0) FROM node INDEXED BY gc_bytes_node",
     "SELECT COALESCE(SUM(octet_length(payload_json)),0) FROM output_item INDEXED BY gc_bytes_output_item",
     "SELECT COALESCE(SUM(octet_length(body)),0) FROM instruction_snapshot INDEXED BY gc_bytes_instruction_snapshot",
@@ -140,7 +141,8 @@ pub(super) fn physical_usage(directory: &Path) -> Result<(u64, u64, u64, u64, Op
 mod tests {
     use super::*;
 
-    const LEGACY_QUERIES: [&str; 14] = [
+    const LEGACY_QUERIES: [&str; 15] = [
+        "SELECT COALESCE(SUM(COALESCE(octet_length(token),0)+COALESCE(octet_length(reason),0)+COALESCE(octet_length(trigger_json),0)+COALESCE(octet_length(closed_spill),0)+COALESCE(octet_length(active_spill),0)+COALESCE(octet_length(closed_summary),0)+COALESCE(octet_length(active_summary),0)+COALESCE(octet_length(failure_json),0)+COALESCE(octet_length(outcome),0)+COALESCE(octet_length(result_json),0)+COALESCE(octet_length(ended_at),0)),0) FROM automatic_compaction",
         "SELECT COALESCE(SUM(length(CAST(payload_json AS BLOB))),0) FROM node",
         "SELECT COALESCE(SUM(length(CAST(payload_json AS BLOB))),0) FROM output_item",
         "SELECT COALESCE(SUM(length(CAST(body AS BLOB))),0) FROM instruction_snapshot",
@@ -192,10 +194,10 @@ INSERT INTO app_meta(key,value)VALUES('summary.part.fixture','summary 日本語'
     fn assert_reference(db: &Connection) {
         let actual = logical_usage(db).unwrap();
         let expected: Vec<_> = LEGACY_QUERIES.iter().map(|q| sum(db, q).unwrap()).collect();
-        assert_eq!(actual.history, expected[..10].iter().sum::<u64>());
-        assert_eq!(actual.raw, expected[10]);
-        assert_eq!(actual.managed, expected[11]);
-        assert_eq!(actual.index, expected[12] + expected[13]);
+        assert_eq!(actual.history, expected[..11].iter().sum::<u64>());
+        assert_eq!(actual.raw, expected[11]);
+        assert_eq!(actual.managed, expected[12]);
+        assert_eq!(actual.index, expected[13] + expected[14]);
     }
 
     #[test]

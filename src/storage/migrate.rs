@@ -281,6 +281,11 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         sql: include_str!("../../migrations/0054_thread_created_at.sql"),
         foreign_keys: Some(Impact::Tables(&["thread"])),
     },
+    Migration {
+        version: 55,
+        sql: include_str!("../../migrations/0055_automatic_compaction.sql"),
+        foreign_keys: None,
+    },
 ];
 
 pub(super) fn run(
@@ -2414,7 +2419,9 @@ mod thread_creation_migration_tests {
     fn schema54_backfills_earliest_owned_activity_without_inherited_path_or_updates() {
         let mut db = Connection::open_in_memory().unwrap();
         db.execute_batch(super::super::CURRENT_SCHEMA).unwrap();
-        db.execute_batch("DROP INDEX threads_created; ALTER TABLE thread DROP COLUMN created_at;
+        db.execute_batch("DROP TABLE automatic_compaction; CREATE INDEX automatic_compaction_turn ON model_attempt(turn_id,started_at,id) WHERE CASE WHEN json_valid(error_json) THEN json_type(error_json,'$.automatic_trim')='object' OR json_type(error_json,'$.automatic_trim_attempt')='object' ELSE 0 END;
+            DELETE FROM schema_migration WHERE version=55;
+            DROP INDEX threads_created; ALTER TABLE thread DROP COLUMN created_at;
             DELETE FROM schema_migration WHERE version=54; PRAGMA user_version=53;
             INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES
                 ('t','/','','p','m','99'),('fork','/','','p','m','00'),('held','/','','p','m','99');
@@ -2433,5 +2440,88 @@ mod thread_creation_migration_tests {
                 .unwrap();
             assert_eq!(actual.as_deref(), expected, "{id}");
         }
+    }
+}
+
+#[cfg(test)]
+mod automatic_compaction_migration_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn automatic_compaction_migration_preserves_known_list_facts() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        db.execute_batch("DROP TABLE automatic_compaction;
+            CREATE INDEX automatic_compaction_turn ON model_attempt(turn_id,started_at,id) WHERE CASE WHEN json_valid(error_json) THEN json_type(error_json,'$.automatic_trim')='object' OR json_type(error_json,'$.automatic_trim_attempt')='object' ELSE 0 END;
+            DELETE FROM schema_migration WHERE version=55;
+            PRAGMA user_version=54;
+            INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('t','/','','p','m','now');
+            INSERT INTO run(id,thread_id,state,created_at) VALUES('r','t','completed','now');
+            INSERT INTO turn(id,thread_id,run_id,state,created_at) VALUES('u','t','r','completed','now');").unwrap();
+        let discard = json!({"phase":"closed_summary","elapsed_ms":3,"outcome":{"kind":"rejected","reason":"run_started"}});
+        let provider = json!({"error":{"kind":"provider","message":"provider text containing automatic_trim_attempt"}});
+        let typed = json!({"code":"invalid_state","message":"original path retained","details":{"source_nodes":2}});
+        let midturn = json!({"scope":"active_turn","reason":"open_tool_loop"});
+        for (id, body) in [
+            ("adopted",json!({"automatic_trim_attempt":{"token":"tok","outcome":"adopted","summary":{"source_nodes":8},"committed_stages":{"closed_summary":{"source_nodes":8}}},"automatic_trim":{"source_nodes":99}}).to_string()),
+            ("unknown",json!({"automatic_trim_attempt":{"token":"tok","outcome":"unknown","compaction_outcome":discard},"automatic_trim":{"source_nodes":99}}).to_string()),
+            ("recorded",json!({"automatic_trim":{"source_nodes":4}}).to_string()),
+            ("overflow",json!({"automatic_trim_attempt":{"outcome":"rejected","error":typed,"midturn":midturn,"maximum_outcome":"no_safe_reduction"}}).to_string()),
+            ("broken","{broken".into()),
+            ("provider",provider.to_string()),
+        ] {
+            db.execute("INSERT INTO model_attempt(id,kind,thread_id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,error_json,started_at) VALUES(?1,'conversation','t','u',0,0,'p','m',0,'completed','{}',?2,'2026-01-01T00:00:00Z')", rusqlite::params![id,body]).unwrap();
+        }
+        run(&mut db, 54, &|_, _| {}, &|| {}).unwrap();
+        let args = crate::protocol::CompactListArgs {
+            thread_id: Some("t".into()),
+            since: None,
+            until: None,
+            limit: 20,
+        };
+        let page = crate::readback::compactions(&db, "t", &args).unwrap();
+        let items = page["items"].as_array().unwrap();
+        assert_eq!(items.len(), 4);
+        let envelope = |id| {
+            let text: String = db
+                .query_row(
+                    "SELECT result_json FROM automatic_compaction WHERE attempt_id=?1",
+                    [id],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            serde_json::from_str::<serde_json::Value>(&text).unwrap()
+        };
+        assert_eq!(
+            envelope("overflow"),
+            json!({"metrics":{"source_nodes":2},"error":typed,"midturn":midturn,"maximum_outcome":"no_safe_reduction"})
+        );
+        assert_eq!(envelope("recorded"), json!({"metrics":{"source_nodes":4}}));
+        assert_eq!(envelope("unknown"), json!({"metrics":null}));
+        for (id, count) in [
+            ("adopted", json!(8)),
+            ("unknown", json!(null)),
+            ("recorded", json!(4)),
+        ] {
+            let item = items.iter().find(|item| item["attempt_id"] == id).unwrap();
+            assert_eq!(item["state"], id);
+            assert_eq!(item["metrics"]["source_nodes"], count);
+            if id == "unknown" {
+                assert_eq!(item["compaction_outcome"], discard);
+            }
+        }
+        let error = |id| {
+            db.query_row(
+                "SELECT error_json FROM model_attempt WHERE id=?1",
+                [id],
+                |r| r.get::<_, Option<String>>(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(error("adopted"), None);
+        assert_eq!(error("broken").as_deref(), Some("{broken"));
+        assert_eq!(error("provider"), Some(provider.to_string()));
+        assert!(db.query_row("SELECT json_extract(closed_summary,'$.source_nodes')=8 AND active_summary IS NULL FROM automatic_compaction WHERE attempt_id='adopted'",[],|r|r.get::<_,bool>(0)).unwrap());
     }
 }
