@@ -1129,26 +1129,10 @@ fn field_label_for(id: FieldId, language: crate::config::UiLanguage) -> &'static
             "実行中の変換をやめる",
             "Stop the running conversion"
         ),
-        FieldId::PendingReplies => local!(
-            language,
-            "返信待ち",
-            "Pending replies"
-        ),
-        FieldId::OwedBy => local!(
-            language,
-            "答えるThread",
-            "Owed by"
-        ),
-        FieldId::AskedBy => local!(
-            language,
-            "依頼したThread",
-            "Asked by"
-        ),
-        FieldId::RecipientName => local!(
-            language,
-            "宛先名",
-            "Recipient name"
-        ),
+        FieldId::PendingReplies => local!(language, "返信待ち", "Pending replies"),
+        FieldId::OwedBy => local!(language, "答えるThread", "Owed by"),
+        FieldId::AskedBy => local!(language, "依頼したThread", "Asked by"),
+        FieldId::RecipientName => local!(language, "宛先名", "Recipient name"),
         FieldId::Awaiting => local!(language, "人への返信待ち", "Awaiting a human reply"),
         FieldId::SettlementStates => local!(
             language,
