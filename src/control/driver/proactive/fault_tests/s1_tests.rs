@@ -318,12 +318,25 @@ async fn terminal_public_case(case: &str) {
             let rows = statement.query_map(params![format!("compact.deterministic_range_failure.closed.{scope}"),format!("compact.deterministic_range_failure.active.{scope}")], |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(rows)
         }).await.unwrap();
+        let mismatch = if summary_posts != expected_summary_posts {
+            let identity = terminal_identity.as_ref().expect("original automatic attempt");
+            let (attempt, thread) = (identity.attempt.clone(), identity.thread.clone());
+            Some(control.store.database.call(move |db| {
+                let mut stmt = db.prepare("SELECT json_object('id',id,'state',state,'error_kind',json_extract(error_json,'$.error.kind'),'http_phase',json_extract(input_manifest_json,'$.http_observation.phase')) FROM model_attempt WHERE thread_id=?1 AND kind='summary' ORDER BY rowid")?;
+                let rows = stmt.query_map([thread], |row| row.get::<_, String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
+                let final_record: Option<String> = db.query_row("SELECT json_extract(error_json,'$.automatic_trim_attempt') FROM model_attempt WHERE id=?1", [attempt], |row| row.get(0))?;
+                Ok((rows, final_record))
+            }).await.unwrap())
+        } else { None };
         control.shutdown().await.unwrap();
         drop(control);
         owner.shutdown().await.unwrap();
         server.abort();
         let log = std::fs::read_to_string(root.path().join("data/logs/shellboy.log")).unwrap();
-        assert_eq!(summary_posts, expected_summary_posts, "fixed original-source admission vector");
+        if let Some((rows, final_record)) = mismatch {
+            assert_eq!(summary_posts, expected_summary_posts,
+                "fixed original-source admission vector; Summary model_attempt rows ({}): {rows:#?}; final automatic record: {final_record:?}", rows.len());
+        }
         eprintln!("paired pre-S1 vector case={case}: summary_posts={summary_posts}");
         let expected = match case { "context" => "context_limit_terminal", "sse_terminal_responses" | "sse_terminal_chat" | "s2_minimum_http400" | "s2_minimum_http400_body500" | "s2_minimum_http413" | "s2_minimum_http422" | "s2_minimum_sse400" => "rejected_at_minimum", "protocol" | "sse_eof_responses" | "sse_eof_chat" | "sse_eof_r0_responses" | "sse_eof_r0_chat" => "unclassified", _ => "provider_error" };
         let items = list["items"].as_array().unwrap();

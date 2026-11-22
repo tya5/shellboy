@@ -4042,15 +4042,32 @@ async fn admitted_summary_boundary(
 pub(super) async fn finish_proactive_trace(
     control: &Arc<Control>,
     receive: &mut ProxyInbox,
-    _thread: &str,
     trace: &mut ProactiveTrace,
     summary_reply: &(u16, Value),
 ) -> Vec<FinishedReportBoundary> {
-    let mut finished = Vec::new();
-    let mut index = 0;
-    while index < trace.admitted_summaries.len() {
-        let boundary = trace.admitted_summaries[index].clone();
-        let report_turns = [boundary.report.row_turn_id.clone()];
+    // Seed the wait from the second warmup report, even when its Summary
+    // request has not reached the provider inbox yet.
+    let original = trace
+        .report_owners
+        .last()
+        .expect("second warmup report")
+        .clone();
+    let mut finished: Vec<FinishedReportBoundary> = Vec::new();
+    while let Some(report) = std::iter::once(&original)
+        .chain(
+            trace
+                .admitted_summaries
+                .iter()
+                .map(|boundary| &boundary.report),
+        )
+        .find(|report| {
+            !finished
+                .iter()
+                .any(|saved| saved.boundary.report.attempt_id == report.attempt_id)
+        })
+        .cloned()
+    {
+        let report_turns = [report.row_turn_id.clone()];
         let mut finish = Box::pin(automatic_attempts_finished_for_turns(
             control,
             &report_turns,
@@ -4074,7 +4091,9 @@ pub(super) async fn finish_proactive_trace(
                                 trace.admitted_summaries.push(admitted);
                             }
                             trace.summary_requests += 1;
-                            trace.summary_scopes.push(summary_scope);
+                            if !trace.summary_scopes.contains(&summary_scope) {
+                                trace.summary_scopes.push(summary_scope);
+                            }
                             trace.summary_bodies.push(incoming.body.clone());
                             incoming.reply.send(summary_reply.clone()).unwrap();
                         }
@@ -4093,11 +4112,15 @@ pub(super) async fn finish_proactive_trace(
             1,
             "each observed Summary maps to its exact accepted duty"
         );
-        assert_eq!(terminal[0].id, boundary.report.attempt_id);
-        assert_eq!(terminal[0].token, boundary.gc_token);
+        assert_eq!(terminal[0].id, report.attempt_id);
+        let boundary = trace
+            .admitted_summaries
+            .iter()
+            .find(|boundary| boundary.report.attempt_id == report.attempt_id)
+            .expect("saved FINISH belongs to a serviced Summary request")
+            .clone();
         let record = automatic_attempt_record(control, boundary.report.attempt_id.clone()).await;
         finished.push(boundary.finish(&terminal[0], &record));
-        index += 1;
     }
     finished
 }
@@ -5478,27 +5501,23 @@ async fn compact_list_records_the_summary_parameters_in_effect() {
         ))),
     )
     .await;
-    let summaries = proactive_third_turn(
+    let summary_reply = (200, answer("## 目的\nSummarized earlier turns"));
+    let mut trace = proactive_third_turn_after_run(
         &control,
         &mut receive,
         &thread,
         150,
-        (200, answer("## 目的\nSummarized earlier turns")),
+        summary_reply.clone(),
+        None,
     )
     .await;
-    assert_eq!(summaries, 1);
-    let provisional = proactive_events(&control, &thread).await;
-    assert_eq!(provisional.len(), 1, "{provisional:?}");
-    let expected_attempt = provisional[0]["attempt_id"].as_str().unwrap().to_owned();
-    let trigger_turn = provisional[0]["turn_id"].as_str().unwrap().to_owned();
-    let attempts = automatic_attempts_finished_for_turns(&control, &[trigger_turn], 1).await;
-    assert_eq!(
-        attempts[0].id, expected_attempt,
-        "FINISH is bound to the exact readback attempt"
-    );
+    let attempts = finish_proactive_trace(&control, &mut receive, &mut trace, &summary_reply).await;
+    assert_eq!(trace.summary_requests, 1);
+    assert_eq!(attempts.len(), 1);
+    let expected_attempt = &attempts[0].boundary.report.attempt_id;
     let events = proactive_events(&control, &thread).await;
     assert_eq!(events.len(), 1, "{events:?}");
-    assert_eq!(events[0]["attempt_id"], attempts[0].id);
+    assert_eq!(events[0]["attempt_id"], expected_attempt.as_str());
     assert_eq!(events[0]["state"], "adopted", "{:?}", events[0]);
     assert_eq!(events[0]["trigger"]["auto_at_tokens"], 100);
     let metrics = &events[0]["metrics"];
