@@ -1195,6 +1195,16 @@ fn usage_since_node_conflicts_with_since_and_shell_exit_grouping() {
 #[test]
 fn exported_schema_matches_committed_protocol_schema() {
     let generated = shellboy::protocol::schema_json();
+    let document: Value = serde_json::from_str(&generated).unwrap();
+    let version = document["protocol_version"].as_u64().unwrap();
+    assert_eq!(
+        document["title"],
+        format!("Shellboy local RPC protocol v{version}")
+    );
+    assert_eq!(
+        document["$id"],
+        format!("https://shellboy.dev/schema/protocol-v{version}.json")
+    );
     let committed = include_str!("../docs/reference/protocol.schema.json");
     assert_eq!(
         generated.replace("\r\n", "\n").trim(),

@@ -280,8 +280,8 @@ pub fn schema_json() -> String {
     remove_nested_definitions(&mut operation_results);
     let document = serde_json::json!({
         "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "$id": "https://shellboy.dev/schema/protocol-v6.json",
-        "title": "Shellboy local RPC protocol v6",
+        "$id": format!("https://shellboy.dev/schema/protocol-v{PROTOCOL_VERSION}.json"),
+        "title": format!("Shellboy local RPC protocol v{PROTOCOL_VERSION}"),
         "protocol_version": PROTOCOL_VERSION,
         "capabilities": PROTOCOL_CAPABILITIES,
         "operation_results": operation_results,
