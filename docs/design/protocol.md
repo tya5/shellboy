@@ -404,7 +404,9 @@ readback: up to 33 recent Turns, 201 replacement candidates and 201 output
 candidates for the selected attempt. Incomplete evidence is explicit; an unknown
 `next_request_pending` is not false. `thread.get` does not include whole-Thread
 `usage_totals`; use `usage.get` for the exact aggregate. The #346 wire change is
-qualified with the Protocol 9 Studio pairing, after Protocols 7 and 8.
+qualified with the Protocol 9 Studio pairing, after Protocols 7 and 8. Studio's
+Information view pulls `usage.get` when shown and displays unknown until that
+read succeeds. Conversation and sidebar reads do not fetch exact totals.
 
 ## Message sender inspection (#59)
 

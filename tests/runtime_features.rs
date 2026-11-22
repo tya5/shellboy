@@ -2308,6 +2308,33 @@ async fn actual_unicode_request_input_characters_are_saved_before_http_and_retai
 }
 
 #[tokio::test]
+async fn thread_get_reports_uncertain_context_for_a_large_saved_thread() {
+    let root = tempfile::tempdir().unwrap();
+    let owner = owner(root.path(), "http://127.0.0.1:1/v1").await;
+    let control = Control::new(&owner, root.path().into());
+    let target = thread(&control).await;
+    let id = target.clone();
+    control.store.database.call(move |db| {
+        let tx = db.transaction()?;
+        tx.execute("INSERT INTO run(id,thread_id,state,created_at) VALUES('bounded',?1,'completed','2026-01-01T00:00:00Z')",[&id])?;
+        tx.execute("WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<2000) INSERT INTO turn(id,thread_id,run_id,state,created_at) SELECT printf('bound-%04d',i),?1,'bounded','completed','2026-01-01T00:00:00Z' FROM n",[&id])?;
+        tx.execute("INSERT INTO model_attempt(kind,id,thread_id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at) SELECT 'conversation',u.id,u.thread_id,u.id,0,0,t.profile_id,t.model_id,0,'completed',json_object('adoption',json_object('outcome','adopted')),json_object('input_tokens',3),u.created_at FROM turn u JOIN thread t ON t.id=u.thread_id WHERE u.run_id='bounded' ORDER BY u.id",[])?;
+        tx.execute("WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<2500) INSERT INTO output_item(attempt_id,ordinal,item_type,status,payload_json) SELECT 'bound-2000',i,'message','completed','{}' FROM n",[])?;
+        tx.commit()?;
+        Ok(())
+    }).await.unwrap();
+    let details = request(&control, Command::ThreadGet(ThreadTarget {thread_id:Some(target)})).await;
+    assert!(details.get("usage_totals").is_none());
+    let usage = &details["context_usage"];
+    assert_eq!(usage["last_successful_attempt"]["attempt_id"],"bound-2000");
+    assert_eq!(usage["last_successful_attempt"]["input_tokens"],3);
+    assert_eq!(usage["last_successful_attempt"]["next_request_pending"],Value::Null);
+    assert_eq!(usage["bounded_observation"]["output_coverage_complete"],false);
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+}
+
+#[tokio::test]
 async fn explicit_agents_changes_wait_for_new_turn_and_retry_keeps_snapshot() {
     #[derive(Debug, PartialEq, Eq)]
     struct SavedWork {

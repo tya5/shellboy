@@ -258,6 +258,10 @@ wait is in memory and is cleared at owner restart; it is not an automatic retry.
 Separate profiles remain independent even when they use the same upstream quota.
 See [Recovery](recovery-and-storage.md#automatic-retries-for-temporary-model-communication-failures).
 
+Get exact whole-Thread totals with `shellboy usage get --thread THREAD_ID`, not
+`thread get`. The latter shows bounded recent context evidence; unknown usage or
+pending edits must not be read as zero or false.
+
 To inspect your own saved usage, run `shellboy usage get`; add
 `--thread THREAD_ID --include-children` for a bounded conversation-family total.
 Use `--since-node NODE_ID` to start inclusively at a saved point on the selected
