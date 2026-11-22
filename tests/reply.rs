@@ -33,6 +33,71 @@ fn send(expected: bool) -> Command {
     })
 }
 #[tokio::test]
+async fn named_ask_leaves_only_its_recipient_list_after_reply() {
+    let (_root, store) = fixture().await;
+    let origin = Origin {
+        instance_id: "fixture".into(),
+        thread_id: "sender".into(),
+        run_id: "run".into(),
+        turn_id: "turn".into(),
+        execution_id: "shell".into(),
+        token: "synthetic".into(),
+    };
+    let ask = |to: Option<&str>| {
+        Command::MessageAsk(MessageAskArgs {
+            thread_id: None,
+            to: to.map(str::to_owned),
+            deliver: Deliver::Next,
+            text: "Choose A or B".into(),
+        })
+    };
+    let list = |name: &str| {
+        request(Command::ThreadList(ThreadListArgs {
+            awaiting: Some(name.into()),
+            ..Default::default()
+        }))
+    };
+    let named = store
+        .execute(request(ask(Some("claude"))), Some(origin.clone()))
+        .await
+        .unwrap();
+    assert!(
+        named
+            .changed_threads
+            .iter()
+            .any(|thread| thread == "sender")
+    );
+    let pending = store.execute(list("claude"), None).await.unwrap().result;
+    assert_eq!(pending["items"].as_array().unwrap().len(), 1);
+    assert_eq!(pending["items"][0]["thread_id"], "sender");
+    assert_eq!(
+        store.execute(list("human"), None).await.unwrap().result["items"],
+        serde_json::json!([])
+    );
+    store
+        .execute(request(ask(None)), Some(origin))
+        .await
+        .unwrap();
+    let reply = request(Command::MessageReply(MessageReplyArgs {
+        message_id: named.result["message_id"].as_str().unwrap().into(),
+        text: "Choose A".into(),
+        sender_label: None,
+    }));
+    let answer = store.execute(reply.clone(), None).await.unwrap().result;
+    assert_eq!(answer["reply_to"], named.result["message_id"]);
+    assert_eq!(store.execute(reply, None).await.unwrap().result, answer);
+    assert_eq!(
+        store.execute(list("claude"), None).await.unwrap().result["items"],
+        serde_json::json!([])
+    );
+    assert_eq!(
+        store.execute(list("human"), None).await.unwrap().result["items"][0]["thread_id"],
+        "sender"
+    );
+    store.database.shutdown().await.unwrap();
+}
+
+#[tokio::test]
 async fn expected_reply_cap_is_16_and_replay_is_not_a_new_duty() {
     let (_root, store) = fixture().await;
     let first = request(send(true));
@@ -323,6 +388,8 @@ async fn models_can_request_and_reply_across_threads_including_their_own() {
         .execute(
             request(Command::MessageAsk(MessageAskArgs {
                 thread_id: None,
+                to: None,
+                deliver: Deliver::Next,
                 text: "Choose A or B".into(),
             })),
             Some(origin.clone()),

@@ -79,6 +79,7 @@ fn operation_result_schemas(
     result!("message.reply", MessageAccepted);
     result!("message.send", MessageAccepted);
     result!("message.get", MessageDetails);
+    opaque!("message.list");
     result!("message.cancel", MessageCancelResult);
     opaque!("operation.get");
     result!("run.get", RunDetails);
@@ -909,7 +910,8 @@ impl ThreadSetArgs {
         }
     }
 }
-args!(MessageAskArgs { #[serde(default, skip_serializing_if = "Option::is_none")] thread_id: Option<String>, text: String });
+args!(MessageListArgs { #[serde(default)] owed_by: Option<String>, #[serde(default)] asked_by: Option<String>, #[serde(default)] to: Option<String>, #[serde(default = "list_limit")] limit: u32, #[serde(default)] cursor: Option<String> });
+args!(MessageAskArgs { #[serde(default, skip_serializing_if = "Option::is_none")] thread_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] to: Option<String>, #[serde(default, skip_serializing_if = "Deliver::is_next")] deliver: Deliver, text: String });
 args!(MessageSendArgs { #[serde(default, skip_serializing_if = "is_false")] human: bool, #[serde(default, skip_serializing_if = "is_false")] resume_recovery: bool, #[serde(default, skip_serializing_if = "is_false")] to_human: bool, #[serde(default, skip_serializing_if = "is_false")] expect_reply: bool, #[serde(default, skip_serializing_if = "Option::is_none")] sender_label: Option<String>, #[serde(default)] thread_id: Option<String>, text: String, #[serde(default, skip_serializing_if = "Deliver::is_next")] deliver: Deliver });
 /// Message delivery timing; `Complete` is Revisit.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -1397,6 +1399,8 @@ pub enum Command {
     MessageSend(MessageSendArgs),
     #[serde(rename = "message.get")]
     MessageGet(MessageTarget),
+    #[serde(rename = "message.list")]
+    MessageList(MessageListArgs),
     #[serde(rename = "message.cancel")]
     MessageCancel(MessageCancelArgs),
     #[serde(rename = "operation.get")]
@@ -2554,6 +2558,8 @@ mod message_acknowledgement_tests {
     fn human_ask_and_acknowledgement_use_backward_compatible_wire_fields() {
         let ask = Command::MessageAsk(MessageAskArgs {
             thread_id: None,
+            to: None,
+            deliver: Deliver::Next,
             text: "Choose A or B".into(),
         });
         let wire = serde_json::to_value(&ask).unwrap();

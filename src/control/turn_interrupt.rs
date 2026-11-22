@@ -440,6 +440,8 @@ mod tests {
                     format!("{}:held-frontier-question", owner.instance_id),
                     Command::MessageAsk(MessageAskArgs {
                         thread_id: None,
+                        to: None,
+                        deliver: Deliver::Next,
                         text: "Q behind held H".into(),
                     }),
                 ),

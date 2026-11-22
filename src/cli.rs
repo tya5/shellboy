@@ -426,8 +426,10 @@ pub enum MessageCommand {
         after_help = "Submit and follow the returned assignment:\n  shellboy message send --thread THREAD_ID --text 'Summarize the findings'\n  shellboy message get --message MESSAGE_ID\n  shellboy turn get --turn TURN_ID\n  shellboy history get --node END_MESSAGE_NODE_ID\n\nUse only IDs returned for this request. pending has no assigned Turn yet; inspect the same message instead of sending it again. Guide: shellboy docs get --id shellboy/delegation"
     )]
     Send(MessageSendOptions),
-    /// Ask the human a question; the answer arrives in this Thread.
+    /// Request a reply from a named recipient or another Thread.
     Ask(MessageAskOptions),
+    /// List pending replies without marking them read.
+    List(MessageListOptions),
     /// Reply once to a received reply-expected message.
     Reply(MessageReplyOptions),
     /// Inspect saved delivery facts; read the original body separately with history get.
@@ -618,8 +620,8 @@ pub struct ListOptions {
     pub cursor: Option<String>,
     #[arg(long)]
     pub query: Option<String>,
-    /// Only Threads with at least one unanswered human question.
-    #[arg(long, value_parser = ["human"])]
+    /// Only Threads with an unanswered question for this recipient name.
+    #[arg(long)]
     pub awaiting: Option<String>,
     /// Archived Threads: exclude (default, hidden), include, or only.
     #[arg(long, value_enum, default_value_t = wire::ArchivedFilter::Exclude)]
@@ -918,7 +920,29 @@ pub struct MessageSendOptions {
     pub text: TextOptions,
 }
 #[derive(Debug, Clone, Args)]
+pub struct MessageListOptions {
+    #[arg(long, required = true)]
+    pub awaiting: bool,
+    #[arg(long, conflicts_with_all = ["asked_by", "to"])]
+    pub owed_by: Option<String>,
+    #[arg(long, conflicts_with = "to")]
+    pub asked_by: Option<String>,
+    #[arg(long)]
+    pub to: Option<String>,
+    #[arg(long, default_value_t = wire::DEFAULT_LIST_LIMIT)]
+    pub limit: u32,
+    #[arg(long)]
+    pub cursor: Option<String>,
+}
+#[derive(Debug, Clone, Args)]
 pub struct MessageAskOptions {
+    /// Named recipient; defaults to human when no Thread is given.
+    #[arg(long, conflicts_with = "thread_id")]
+    pub to: Option<String>,
+    #[arg(long = "thread")]
+    pub thread_id: Option<String>,
+    #[arg(long, value_enum, requires = "thread_id")]
+    pub deliver: Option<wire::Deliver>,
     #[command(flatten)]
     pub text: TextOptions,
 }
@@ -1741,8 +1765,17 @@ impl Cli {
                     text: read_text(a.text, stdin).await?,
                     deliver: a.deliver.unwrap_or_default(),
                 }),
+                MessageCommand::List(a) => C::MessageList(wire::MessageListArgs {
+                    owed_by: a.owed_by,
+                    asked_by: a.asked_by,
+                    to: a.to,
+                    limit: a.limit,
+                    cursor: a.cursor,
+                }),
                 MessageCommand::Ask(a) => C::MessageAsk(wire::MessageAskArgs {
-                    thread_id: None,
+                    thread_id: a.thread_id,
+                    to: a.to,
+                    deliver: a.deliver.unwrap_or_default(),
                     text: read_text(a.text, stdin).await?,
                 }),
                 MessageCommand::Reply(a) => C::MessageReply(wire::MessageReplyArgs {

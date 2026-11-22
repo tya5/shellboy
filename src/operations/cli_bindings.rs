@@ -308,6 +308,19 @@ const MEANINGS: &[Meaning] = &[
         None,
     ),
     (
+        OperationId::MessageList,
+        &["message", "list"],
+        &[
+            ("awaiting", FieldId::PendingReplies),
+            ("owed_by", FieldId::OwedBy),
+            ("asked_by", FieldId::AskedBy),
+            ("to", FieldId::RecipientName),
+            ("limit", FieldId::Limit),
+            ("cursor", FieldId::Cursor),
+        ],
+        None,
+    ),
+    (
         OperationId::MessageGet,
         &["message", "get"],
         &[("message_id", FieldId::Message)],

@@ -53,6 +53,14 @@ impl ModelListArgs {
     }
 }
 
+fn validate_recipient_name(name: &str) -> Result<(), ApiError> {
+    nonempty(name, "recipient name")?;
+    if name.len() > 256 {
+        return Err(invalid("recipient name exceeds 256 bytes"));
+    }
+    Ok(())
+}
+
 impl ThreadListArgs {
     fn validate(&self) -> Result<(), ApiError> {
         limit(self.limit, MAX_LIST_LIMIT)?;
@@ -68,18 +76,14 @@ impl ThreadListArgs {
                 "order=created cannot be combined with query, tags, cwd, or awaiting",
             ));
         }
-        if self
-            .awaiting
-            .as_deref()
-            .is_some_and(|value| value != "human")
-        {
-            return Err(invalid("awaiting must be human"));
+        if let Some(name) = self.awaiting.as_deref() {
+            validate_recipient_name(name)?;
         }
         if self.awaiting.is_some()
             && (self.query.is_some() || !self.tags.is_empty() || self.cwd.is_some())
         {
             return Err(invalid(
-                "awaiting=human cannot be combined with query, tags, or cwd",
+                "awaiting cannot be combined with query, tags, or cwd",
             ));
         }
         if self.tags.len() > MAX_THREAD_TAGS {
@@ -870,6 +874,15 @@ impl Command {
             }
             Self::MessageAsk(a) => {
                 optional_nonempty(a.thread_id.as_deref(), "thread_id")?;
+                if a.thread_id.is_some() && a.to.is_some() {
+                    return Err(invalid("message.ask takes a name or a Thread, not both"));
+                }
+                if a.thread_id.is_none() && a.deliver != super::Deliver::Next {
+                    return Err(invalid("message.ask delivery timing requires a Thread"));
+                }
+                if let Some(name) = &a.to {
+                    validate_recipient_name(name)?;
+                }
                 nonempty(&a.text, "text")
             }
             Self::IdResolve(a) => {
@@ -882,6 +895,24 @@ impl Command {
             Self::MessageReply(a) => {
                 nonempty(&a.message_id, "message_id")?;
                 validate_sender_label(a.sender_label.as_deref())
+            }
+            Self::MessageList(a) => {
+                limit(a.limit, MAX_LIST_LIMIT)?;
+                optional_nonempty(a.cursor.as_deref(), "cursor")?;
+                optional_nonempty(a.asked_by.as_deref(), "asked_by")?;
+                optional_nonempty(a.owed_by.as_deref(), "owed_by")?;
+                if [a.asked_by.is_some(), a.owed_by.is_some(), a.to.is_some()]
+                    .into_iter()
+                    .filter(|set| *set)
+                    .count()
+                    > 1
+                {
+                    return Err(invalid("message.list accepts at most one direction filter"));
+                }
+                if let Some(name) = a.to.as_deref() {
+                    validate_recipient_name(name)?;
+                }
+                Ok(())
             }
             Self::MessageGet(a) => nonempty(&a.message_id, "message_id"),
             Self::MessageCancel(a) => {

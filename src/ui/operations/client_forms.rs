@@ -705,7 +705,7 @@ mod tests {
             ids,
             OperationId::ALL
                 .iter()
-                .filter(|id| !crate::operations::catalogue_tests::CLI_ONLY_SCHEDULES.contains(id))
+                .filter(|id| !crate::operations::catalogue_tests::CLI_ONLY_OPERATIONS.contains(id))
                 .copied()
                 .collect()
         );

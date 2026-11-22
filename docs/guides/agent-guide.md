@@ -118,17 +118,18 @@ IDs have distinct roles even within the same task. `operation_id` identifies an 
 
 1. Read instructions, current state, and necessary original text.
 2. Perform bounded work through shell. Use background execution for long tasks and track the returned execution.
-3. If dividing work, create/select a child Thread and send its request with `--expect-reply`; retain the accepted message ID.
+3. If dividing work, create/select a child Thread and request a reply with `message ask --thread`; retain the accepted message ID.
 4. End your Turn when only a child result remains. Its explicit reply is normally delivered back to your Thread; read the original reply node.
 5. Report results, verification, failures, and remaining work to the user.
 
 Give children their purpose, scope, permitted files, completion criteria and expected return information in the
-request. They do not inherit the entire parent conversation. Use `message send --thread CHILD_THREAD_ID
---expect-reply --text ...`, retain `message_id`, and end the Turn when only the reply remains.
+request. They do not inherit the entire parent conversation. Use `message ask --thread CHILD_THREAD_ID
+--text ...`, retain `message_id`, and end the Turn when only the reply remains.
 The child uses `message reply --message MESSAGE_ID --text ...` once the request is applied. A normal delivered reply
 continues the sender's conversation. Inspect `message get` and its `reply.node_id` when evidence is needed; do not
 mistake the child's final Turn text for the requested reply. Progress is an ordinary message. Parent Run completion
 or stop neither adopts nor stops another Thread's Run. Only its own live shells can retain a background Run.
+Use `message ask --thread` in place of `message send --expect-reply`. A reply closes one message ID and does not open a new request; send the next assignment as a separate ask. If work depends on an external wait, ask after the wait clears.
 Unanswered-request reminders at Run completion remain. See [Delegation](delegation.md).
 
 
@@ -190,7 +191,7 @@ shellboy events wait --after 'CURSOR' --thread CHILD_A --thread CHILD_B --timeou
 
 Models: pass `--thread` with other Threads' IDs and never your own. Your own adoption of input,
 tool start and finish all change your Thread and would wake you every round at a token cost. To
-delegate to children, use `--expect-reply` and end the Turn; use `events wait` mainly
+delegate to children, use `message ask --thread` and end the Turn; use `events wait` mainly
 for tools and clients outside a model Turn.
 
 `status:"changed"` lists the Threads that changed (`changes[].thread_id`); then read
@@ -205,7 +206,7 @@ must not miss a transition, use `wait` with `thread_settled` (see below). Detail
 ### Explicit inspection of Thread completion
 
 For external inspection, use one bounded wait instead of repeated ThreadList comparisons. This is not the child
-request lifecycle: models send `--expect-reply` and finish their Turn to receive the reply normally.
+request lifecycle: models use `message ask --thread` and finish their Turn to receive the reply normally.
 
 ```sh
 shellboy wait --conditions-json '[{"type":"thread_settled","thread_ids":["CHILD_A","CHILD_B"],"states":["completed","recovery_wait","failed","stopped"]}]'
@@ -634,7 +635,7 @@ input that an explicit retry sends. After a human Esc interruption the Run still
 completes, so the message is delivered then; check the latest human direction
 first.
 
-There are no automatic child Turn/Run lifecycle notices. Request a specific reply with `--expect-reply`, end the
+There are no automatic child Turn/Run lifecycle notices. Request a specific reply with `message ask --thread`, end the
 sender Turn, and inspect the saved reply/message when it is delivered. Progress is an ordinary message.
 
 ## Inspect a delegation sender

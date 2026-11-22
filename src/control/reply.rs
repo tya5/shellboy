@@ -147,6 +147,82 @@ fn append_admission_notice_tx(
     Ok(())
 }
 
+pub(super) fn list_pending(
+    db: &Connection,
+    args: &crate::protocol::MessageListArgs,
+) -> Result<crate::protocol::Page<Value>, crate::protocol::ApiError> {
+    use crate::protocol::{ApiError, ErrorCode, Page, PageCursor};
+    let (index, predicate, key) = if let Some(thread) = args.owed_by.as_deref() {
+        (
+            "receipt_pending_owed",
+            "r.target_thread_id=?1 AND json_extract(r.result_json,'$.ask_name') IS NULL",
+            thread,
+        )
+    } else if let Some(thread) = args.asked_by.as_deref() {
+        (
+            "receipt_pending_asked",
+            "json_extract(r.sender_json,'$.thread_id')=?1 AND json_extract(r.sender_json,'$.kind')='model'",
+            thread,
+        )
+    } else if let Some(name) = args.to.as_deref() {
+        (
+            "receipt_pending_to",
+            "json_extract(r.result_json,'$.ask_name')=?1",
+            name,
+        )
+    } else {
+        ("receipt_pending_by_time", "?1=''", "")
+    };
+    let scope = "message.list.pending";
+    let filter = json!([index, key]).to_string();
+    let (time, id): (String, String) = if let Some(token) = &args.cursor {
+        let cursor = PageCursor::decode_live(token, scope, &filter, 0, None)?;
+        serde_json::from_str(&cursor.last_sort_key)
+            .map_err(|_| ApiError::new(ErrorCode::CursorExpired, "invalid pending reply cursor"))?
+    } else {
+        (String::new(), String::new())
+    };
+    let sql = format!(
+        "SELECT r.created_at,r.id,r.message_node_id,r.target_thread_id,json_extract(r.result_json,'$.ask_name'),r.sender_json,n.payload_json FROM receipt r INDEXED BY {index} LEFT JOIN node n ON n.id=r.message_node_id WHERE json_extract(r.result_json,'$.reply.state')='pending' AND {predicate} AND (r.created_at,r.id)>(?2,?3) ORDER BY r.created_at,r.id LIMIT ?4"
+    );
+    let read = || -> rusqlite::Result<Vec<_>> {
+        db.prepare(&sql)?.query_map(params![key,time,id,i64::from(args.limit)+1], |row| {
+            let time: String = row.get(0)?;
+            let id: String = row.get(1)?;
+            let thread: String = row.get(3)?;
+            let name: Option<String> = row.get(4)?;
+            let sender = crate::protocol::MessageSender::from_saved(Some(&row.get::<_,String>(5)?));
+            let payload: Option<String> = row.get(6)?;
+            let excerpt = payload.and_then(|v|serde_json::from_str::<Value>(&v).ok()).map(|v|crate::history::conversation_excerpt(&v,512)).unwrap_or_default();
+            let item = json!({"message_id":row.get::<_,String>(2)?,"created_at":time,"asked_by":model_thread_identity(&sender),"recipient":match name {Some(name)=>json!({"kind":"name","name":name}),None=>json!({"kind":"thread","thread_id":thread})},"excerpt":crate::presentation::sanitize_plain(excerpt.lines().next().unwrap_or(""),0).0});
+            Ok((time,id,item))
+        })?.collect()
+    };
+    let mut rows = read().map_err(|error| crate::app::storage_error(error.into()))?;
+    let next_cursor = if rows.len() > args.limit as usize {
+        rows.pop();
+        let (time, id, _) = rows.last().expect("nonempty page");
+        Some(
+            PageCursor {
+                version: 2,
+                scope: scope.into(),
+                filter,
+                last_sort_key: json!([time, id]).to_string(),
+                watermark: 0,
+                revision: 0,
+                encoding: None,
+            }
+            .encode()?,
+        )
+    } else {
+        None
+    };
+    Ok(Page {
+        items: rows.into_iter().map(|(_, _, item)| item).collect(),
+        next_cursor,
+    })
+}
+
 pub(crate) fn awaiting_replies_tx(
     db: &Connection,
     thread: &str,
@@ -293,9 +369,14 @@ impl super::db::Store {
             ));
         }
         if saved["reply"]["state"] != "pending" {
+            let mut details = json!({"reply_state":saved["reply"]["state"]});
+            if saved["reply"]["state"] == "cancelled" && saved["reply"]["cancel_reason"] == "sender"
+            {
+                details["reason"] = json!("withdrawn");
+            }
             return Err(
                 ApiError::new(ErrorCode::InvalidState, "reply is already terminal")
-                    .details(json!({"reply_state":saved["reply"]["state"]})),
+                    .details(details),
             );
         }
         if row.1 != "applied" {

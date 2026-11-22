@@ -51,6 +51,7 @@ impl Command {
             Self::MessageAsk(_) => ("message.ask", CommandRoute::Database),
             Self::MessageCancel(_) => ("message.cancel", CommandRoute::Database),
             Self::MessageGet(_) => ("message.get", CommandRoute::Database),
+            Self::MessageList(_) => ("message.list", CommandRoute::Database),
             Self::IdResolve(_) => ("id.resolve", CommandRoute::Database),
             Self::OperationGet(_) => ("operation.get", CommandRoute::Database),
             Self::RunGet(_) => ("run.get", CommandRoute::Database),
@@ -154,6 +155,7 @@ impl Command {
             | Self::MessageAsk(_)
             | Self::MessageCancel(_)
             | Self::MessageGet(_)
+            | Self::MessageList(_)
             | Self::IdResolve(_)
             | Self::OperationGet(_)
             | Self::RunGet(_)
@@ -216,6 +218,7 @@ impl Command {
             | Self::MessageAsk(_)
             | Self::MessageCancel(_)
             | Self::MessageGet(_)
+            | Self::MessageList(_)
             | Self::IdResolve(_)
             | Self::OperationGet(_)
             | Self::RunGet(_)
@@ -296,6 +299,7 @@ impl Command {
             | Self::ThreadDeletePreview(_)
             | Self::ThreadPrune(_)
             | Self::MessageGet(_)
+            | Self::MessageList(_)
             | Self::IdResolve(_)
             | Self::OperationGet(_)
             | Self::RunGet(_)
@@ -352,6 +356,7 @@ impl Command {
             | Self::UsageGet(_)
             | Self::ThreadDeletePreview(_)
             | Self::MessageGet(_)
+            | Self::MessageList(_)
             | Self::IdResolve(_)
             | Self::OperationGet(_)
             | Self::RunGet(_)

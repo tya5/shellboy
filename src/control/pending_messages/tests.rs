@@ -104,6 +104,8 @@ async fn human_question_reply_cancel_and_attachment_frontier_preserve_fifo() {
             format!("fixture:{operation}"),
             Command::MessageAsk(MessageAskArgs {
                 thread_id: None,
+                to: None,
+                deliver: Deliver::Next,
                 text: text.into(),
             }),
         )
@@ -461,6 +463,8 @@ async fn held_frontier_defers_the_replied_question_and_later_attachment() {
                 "fixture:held-frontier-question",
                 Command::MessageAsk(MessageAskArgs {
                     thread_id: None,
+                    to: None,
+                    deliver: Deliver::Next,
                     text: "Q behind H".into(),
                 }),
             ),
@@ -579,6 +583,8 @@ async fn bounded_admission_prefix_keeps_the_129th_question_before_its_reply() {
                     format!("fixture:question-{index}"),
                     Command::MessageAsk(MessageAskArgs {
                         thread_id: None,
+                        to: None,
+                        deliver: Deliver::Next,
                         text: format!("Q{index}"),
                     }),
                 ),

@@ -286,6 +286,11 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         sql: include_str!("../../migrations/0055_automatic_compaction.sql"),
         foreign_keys: None,
     },
+    Migration {
+        version: 56,
+        sql: include_str!("../../migrations/0056_directional_reply_pending.sql"),
+        foreign_keys: None,
+    },
 ];
 
 pub(super) fn run(

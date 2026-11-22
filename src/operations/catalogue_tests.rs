@@ -1,11 +1,13 @@
 // Schedules (#281): CLI/protocol and Studio; no generated TUI form.
-pub(crate) const CLI_ONLY_SCHEDULES: &[OperationId] = &[
+pub(crate) const CLI_ONLY_OPERATIONS: &[OperationId] = &[
     OperationId::ScheduleAdd,
     OperationId::ScheduleList,
     OperationId::ScheduleSet,
     OperationId::ScheduleEnable,
     OperationId::ScheduleDisable,
     OperationId::ScheduleRemove,
+    // Pending replies (#317): CLI/protocol and Studio, no generated TUI form.
+    OperationId::MessageList,
 ];
 
 use super::*;
@@ -79,7 +81,7 @@ fn fresh_clap_executable_paths_and_every_option_match_the_catalogue_bindings() {
     parser.build();
     let mut leaves = BTreeMap::new();
     executable_commands(&parser, &mut vec![], &mut leaves);
-    assert_eq!(leaves.len(), 92, "track new CLI lifecycle paths explicitly");
+    assert_eq!(leaves.len(), 93, "track new CLI lifecycle paths explicitly");
     for name in ["serve", "shutdown", "storage check"] {
         let lifecycle = leaves
             .remove(name)

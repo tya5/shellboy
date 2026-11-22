@@ -42,7 +42,7 @@ pub(crate) fn cancel_tx(
         let Some((
             receipt,
             thread,
-            _sender,
+            sender,
             state,
             admission,
             operation,
@@ -58,9 +58,18 @@ pub(crate) fn cancel_tx(
             continue;
         };
         item.thread_id = Some(thread.clone());
+        let sender = crate::protocol::MessageSender::from_saved(Some(&sender));
+        let sender_thread = super::reply::model_thread_identity(&sender);
+        if reply_state.is_some()
+            && caller.is_some_and(|origin| sender_thread != Some(origin.thread_id.as_str()))
+        {
+            item.outcome = Forbidden;
+            items.push(item);
+            continue;
+        }
         let archive = archive_id(message);
         if state == "cancelled" {
-            if caller.is_some_and(|origin| {
+            if reply_state.is_none() && caller.is_some_and(|origin| {
                 tx.query_row(
                     "SELECT json_extract(result_json,'$.cancellation.cancelled_by') FROM receipt WHERE message_node_id=?1",
                     [message],
@@ -84,8 +93,10 @@ pub(crate) fn cancel_tx(
         if admission == "admitted" || selected || (state == "applied" && !to_human) {
             if super::reply::cancel_reply_tx(tx, &thread, message, at, &actor, !to_human)? {
                 item.outcome = ReplyCancelled;
-                if !changed.contains(&thread) {
-                    changed.push(thread);
+                for id in std::iter::once(thread.as_str()).chain(sender_thread) {
+                    if !changed.iter().any(|changed| changed == id) {
+                        changed.push(id.to_owned());
+                    }
                 }
                 items.push(item);
                 continue;
@@ -138,8 +149,12 @@ pub(crate) fn cancel_tx(
         super::submission_retention::collect_operation(tx, &operation)?;
         item.outcome = Cancelled;
         item.archive_draft_id = Some(archive);
-        if !changed.contains(&thread) {
-            changed.push(thread);
+        for id in
+            std::iter::once(thread.as_str()).chain(sender_thread.filter(|_| reply_state.is_some()))
+        {
+            if !changed.iter().any(|changed| changed == id) {
+                changed.push(id.to_owned());
+            }
         }
         items.push(item);
     }
