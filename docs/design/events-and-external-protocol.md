@@ -507,6 +507,10 @@ A2 and D landed before external clients depend on the RPC. #275 later advanced t
   incomplete. Mitigation: the per-family test in B.
 - Global `Notify` wakes every `wait` and long-poll on any change; cheap
   (memory only for `events.wait`) but measure with several clients.
+- Plain `status` retains its two admission permits. `status --memory` has
+  one separate permit so background durable status reads cannot consume the
+  memory card's admission capacity. Saturation in either lane still refuses
+  without queuing, and stop and shutdown keep their existing reserve.
 - Long-polls share the 24 ordinary permits with `wait` and mutations; many
   chats plus a bridge reduce capacity. A dedicated small class would change the
   documented 28-permit budget; decide after measurement (Q6, answered for now: shared slots).

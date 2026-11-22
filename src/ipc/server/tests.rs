@@ -288,6 +288,71 @@ async fn each_reserved_class_is_bounded_and_releases_only_its_own_capacity() {
 }
 
 #[tokio::test]
+async fn memory_status_is_served_when_both_plain_status_permits_are_held() {
+    use crate::protocol::StatusArgs;
+
+    crate::test_watchdog::watchdog("isolated memory status admission", async {
+        let (_root, owner, control, server) = crate::frontend::control_tests::fixture().await;
+        let mut fixture = Fixture::for_instance(&owner.instance_id);
+        let plain = || Command::Status(StatusArgs::default());
+        let memory = || {
+            Command::Status(StatusArgs {
+                memory: true,
+                ..Default::default()
+            })
+        };
+
+        let mut clients = Vec::new();
+        let mut held = Vec::new();
+        // Hold dispatched requests at the owner boundary, not by timing a DB read.
+        for number in 0..2 {
+            clients.push(fixture.connect_command(number, plain()).await);
+            held.push(fixture.accepted().await);
+        }
+        let rejected = fixture
+            .connect_command(2, plain())
+            .await
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(rejected.error.unwrap().code, ErrorCode::InvalidState);
+
+        let client = fixture.connect_command(3, memory()).await;
+        let invocation = fixture.accepted().await;
+        let rejected = fixture
+            .connect_command(4, memory())
+            .await
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(rejected.error.unwrap().code, ErrorCode::InvalidState);
+        assert!(fixture.incoming.try_recv().is_err());
+
+        let (send, receive) = mpsc::channel(1);
+        let dispatch = tokio::spawn(control.clone().serve(receive));
+        assert!(send.send(invocation).await.is_ok());
+        let response = client.await.unwrap().unwrap();
+        assert!(response.ok, "{response:?}");
+        assert_eq!(
+            response.result.unwrap()["process"]["pid"],
+            std::process::id()
+        );
+        drop(send);
+        dispatch.await.unwrap();
+        drop(held);
+        for client in clients {
+            assert!(!client.await.unwrap().unwrap().ok);
+        }
+        fixture.server.shutdown().await.unwrap();
+        control.shutdown().await.unwrap();
+        server.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
 async fn resource_accept_error_recovers_without_losing_the_listener() {
     let mut fixture = Fixture::new();
     let failure = fixture.server.failures();

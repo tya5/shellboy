@@ -19,6 +19,7 @@ const MAX_CONNECTIONS: usize = 32;
 const MAX_IPC_WORK: usize = 24;
 const MAX_CONTROL_WORK: usize = 2;
 const MAX_OBSERVATION_WORK: usize = 2;
+const MAX_MEMORY_OBSERVATION_WORK: usize = 1;
 
 /// Transport budgets; accepted effects retain their permit after disconnection.
 #[derive(Clone)]
@@ -26,6 +27,7 @@ pub(super) struct WorkAdmission {
     ordinary: Arc<Semaphore>,
     control: Arc<Semaphore>,
     observation: Arc<Semaphore>,
+    memory_observation: Arc<Semaphore>,
 }
 impl WorkAdmission {
     pub(super) fn new() -> Self {
@@ -33,6 +35,7 @@ impl WorkAdmission {
             ordinary: Arc::new(Semaphore::new(MAX_IPC_WORK)),
             control: Arc::new(Semaphore::new(MAX_CONTROL_WORK)),
             observation: Arc::new(Semaphore::new(MAX_OBSERVATION_WORK)),
+            memory_observation: Arc::new(Semaphore::new(MAX_MEMORY_OBSERVATION_WORK)),
         }
     }
     pub(super) fn try_acquire(&self, command: &Command) -> Result<OwnedSemaphorePermit, ApiError> {
@@ -40,6 +43,7 @@ impl WorkAdmission {
             Command::RunStop(_) | Command::ShellStop(_) | Command::OwnerShutdown(_) => {
                 &self.control
             }
+            Command::Status(args) if args.memory => &self.memory_observation,
             Command::Status(_) => &self.observation,
             _ => &self.ordinary,
         };
