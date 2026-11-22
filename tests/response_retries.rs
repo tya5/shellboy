@@ -3449,6 +3449,13 @@ async fn human_usage_limit_resume(held: usize) {
             shellboy::protocol::DeliveryStatus::Held
         );
     }
+    if held <= 128 {
+        // Expire the connection's monotonic cooldown without moving the saved
+        // UTC reset, so the resumed attempt can receive the same reset from HTTP.
+        tokio::time::pause();
+        tokio::time::advance(std::time::Duration::from_secs(13)).await;
+        tokio::time::resume();
+    }
     request(&f.control, send(true, "Resume before reset".into())).await;
     assert!(
         chrono::Utc::now() < reset,
