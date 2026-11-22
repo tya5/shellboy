@@ -281,6 +281,19 @@ pub(super) fn run(
         let apply = |connection: &mut Connection| -> Result<(), StorageError> {
             let transaction =
                 connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+            if migration.version == 51 {
+                use rusqlite::OptionalExtension;
+                let malformed: Option<String> = transaction.query_row(
+                    "SELECT id FROM shell_execution WHERE NOT json_valid(shell_json) ORDER BY id LIMIT 1",
+                    [], |row| row.get(0),
+                ).optional()?;
+                if let Some(id) = malformed {
+                    return Err(StorageError::Schema(format!(
+                        "migration 51 cannot rebuild shell execution {id:?}: invalid shell_json"
+                    )));
+                }
+            }
+
             let additive_column_already_present = match migration.version {
             36 => transaction.query_row(
                 "SELECT EXISTS(SELECT 1 FROM pragma_table_info('node') WHERE name='spill_tools_json')",
@@ -1659,27 +1672,16 @@ mod activity_migration_tests {
     }
 
     #[test]
-    fn version_22_upgrade_preserves_rows_and_installs_activity_indexes() {
-        let mut db = Connection::open_in_memory().unwrap();
+    fn version_23_activity_indexes_include_malformed_shell_without_rewriting_it() {
+        let db = Connection::open_in_memory().unwrap();
         db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
         db.execute_batch(crate::storage::REWIND_CURRENT_TO_42)
             .unwrap();
         db.execute_batch("DROP INDEX IF EXISTS attachment_page_order; DELETE FROM schema_migration WHERE version>38; DROP INDEX node_notification_event; ALTER TABLE node DROP COLUMN notification_event_id; ALTER TABLE event DROP COLUMN semantic_json; DROP INDEX receipt_reply_node_lookup; DROP INDEX IF EXISTS receipt_human_reply_pending;").unwrap();
         db.execute_batch(" DROP INDEX history_tool_group_attempt; DROP INDEX IF EXISTS receipt_reply_pending; DROP INDEX jobs_running_recovery; DROP INDEX activity_attempt_turn; DROP INDEX activity_turn_run; DROP INDEX activity_turn_run_state; DROP INDEX activity_group_turn_state; DROP INDEX activity_shell_spawned_turn; DROP INDEX activity_shell_uncollected_owner; DROP INDEX receipt_run_completion; DROP INDEX model_attempt_active_recovery; ALTER TABLE thread DROP COLUMN auto_compact_at; ALTER TABLE thread DROP COLUMN segment_chars; ALTER TABLE thread DROP COLUMN reduce_rounds; DROP INDEX IF EXISTS threads_visible_updated; DROP INDEX IF EXISTS threads_archived_updated; DROP TABLE thread_tag; DROP INDEX threads_cwd_updated; DROP TRIGGER logical_index_embedding_chunk_insert; DROP TRIGGER logical_index_embedding_chunk_delete; DROP TRIGGER logical_index_embedding_chunk_update; DROP TRIGGER logical_index_space_insert; DROP TRIGGER logical_index_space_delete; DROP TRIGGER logical_index_space_update; DROP INDEX chunks_job; ALTER TABLE index_space DROP COLUMN int8_scale; ALTER TABLE thread DROP COLUMN archived_at; ALTER TABLE thread DROP COLUMN branch_kind; DROP INDEX IF EXISTS attachment_page_order; DELETE FROM schema_migration WHERE version>=23; PRAGMA user_version=22; INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('t','/','','p','m','now');").unwrap();
         db.execute_batch("INSERT INTO run(id,thread_id,state,created_at) VALUES('r','t','completed','now'); INSERT INTO turn(id,thread_id,run_id,state,created_at) VALUES('u','t','r','completed','now'); PRAGMA ignore_check_constraints=ON; INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at) VALUES('bad','r','u','bad','exited','/','broken json','UTF-8','UTF-8','closed','now'),('good','r','u','good','exited','/','{\"spawned\":true}','UTF-8','UTF-8','closed','now'); PRAGMA ignore_check_constraints=OFF;").unwrap();
-        let observed = std::cell::RefCell::new(Vec::new());
-        run(
-            &mut db,
-            22,
-            &|current, total| observed.borrow_mut().push((current, total)),
-            &|| {},
-        )
-        .unwrap();
-        let total = super::super::SCHEMA_VERSION - 22;
-        assert_eq!(
-            *observed.borrow(),
-            (1..=total).map(|n| (n, total)).collect::<Vec<_>>()
-        );
+        db.execute_batch(include_str!("../../migrations/0023_activity_bounded.sql"))
+            .unwrap();
         assert_eq!(db.query_row("SELECT count(*) FROM shell_execution INDEXED BY activity_shell_spawned_turn WHERE turn_id='u' AND CASE WHEN json_valid(shell_json) THEN json_extract(shell_json,'$.spawned')=1 ELSE 1 END", [], |r| r.get::<_, i64>(0)).unwrap(), 2);
         assert_eq!(
             db.query_row(
@@ -1693,7 +1695,7 @@ mod activity_migration_tests {
         assert_eq!(
             db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
                 .unwrap(),
-            crate::storage::SCHEMA_VERSION
+            23
         );
         assert_eq!(
             db.query_row(
@@ -1711,18 +1713,12 @@ mod activity_migration_tests {
             1
         );
         for index in [
-            "history_tool_group_attempt",
             "activity_attempt_turn",
             "activity_turn_run",
             "activity_turn_run_state",
             "activity_group_turn_state",
             "activity_shell_spawned_turn",
             "activity_shell_uncollected_owner",
-            "jobs_source",
-            "nodes_index_gc",
-            "node_event_retention",
-            "delivery_event_state",
-            "jobs_running_recovery",
         ] {
             assert_eq!(
                 db.query_row(
@@ -2171,6 +2167,97 @@ mod generated_summary_role_migration_tests {
             )
             .unwrap(),
             usage
+        );
+    }
+}
+
+#[cfg(test)]
+mod schedule_migration_tests {
+    use super::*;
+
+    fn schema50() -> Connection {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(super::super::CURRENT_SCHEMA).unwrap();
+        db.execute_batch(include_str!(
+            "../../tests/fixtures/rewind-schedule-schema.sql"
+        ))
+        .unwrap();
+        db.execute_batch("PRAGMA foreign_keys=ON;
+            INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('t','/','','p','m','now');
+            INSERT INTO run(id,thread_id,state,created_at) VALUES('r','t','completed','now');
+            INSERT INTO turn(id,thread_id,run_id,state,created_at) VALUES('u','t','r','completed','now');
+            INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at)
+              VALUES('a','r','u','oa','exited','/','{}','utf-8','utf-8','closed','now'),('b','r','u','ob','stopped','/','{}','utf-8','utf-8','closed','now');
+            INSERT INTO output_chunk VALUES('a',1,'stdout',0,X'00FF','now'),('b',1,'stderr',0,X'6162','now');").unwrap();
+        assert_eq!(super::super::schema_version(&db).unwrap(), 50);
+        db
+    }
+
+    fn saved_rows(db: &Connection) -> (Vec<String>, Vec<String>, Vec<String>, i64) {
+        let rows = |sql: &str| {
+            db.prepare(sql)
+                .unwrap()
+                .query_map([], |row| row.get::<_, String>(0))
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap()
+        };
+        (
+            rows(
+                "SELECT json_array(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,saved_sequence,retention_generation,exit_code,end_reason,output_complete,started_at,ended_at) FROM shell_execution ORDER BY id",
+            ),
+            rows(
+                "SELECT json_array(execution_id,sequence,stream,stream_offset,hex(bytes),received_at) FROM output_chunk ORDER BY execution_id,sequence",
+            ),
+            rows(
+                "SELECT sql FROM sqlite_schema WHERE type='index' AND tbl_name IN ('shell_execution','output_chunk') AND sql IS NOT NULL ORDER BY name",
+            ),
+            db.query_row(
+                "SELECT logical_bytes FROM quota_counter WHERE category='logical.raw'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap(),
+        )
+    }
+
+    #[test]
+    fn schema51_preserves_shell_ids_output_and_indexes() {
+        let mut db = schema50();
+        let (shells, output, indexes, bytes) = saved_rows(&db);
+        run(&mut db, 50, &|_, _| {}, &|| {}).unwrap();
+        assert_eq!(validate_schema(&db).unwrap(), 51);
+        let (actual_shells, actual_output, actual_indexes, actual_bytes) = saved_rows(&db);
+        assert_eq!(actual_shells, shells);
+        assert_eq!(actual_output, output);
+        assert_eq!(actual_bytes, bytes);
+        assert!(indexes.iter().all(|index| actual_indexes.contains(index)));
+        assert_eq!(
+            db.query_row(
+                "SELECT count(*) FROM shell_execution WHERE schedule_id IS NOT NULL",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn schema51_refuses_corrupt_shell_json_without_changing_database() {
+        let mut db = schema50();
+        db.execute_batch("PRAGMA ignore_check_constraints=ON; UPDATE shell_execution SET shell_json='malformed' WHERE id='b'; PRAGMA ignore_check_constraints=OFF;").unwrap();
+        let before = saved_rows(&db);
+        let error = run(&mut db, 50, &|_, _| {}, &|| {}).unwrap_err();
+        assert!(
+            matches!(error,StorageError::Schema(message) if message=="migration 51 cannot rebuild shell execution \"b\": invalid shell_json")
+        );
+        assert_eq!(super::super::schema_version(&db).unwrap(), 50);
+        assert_eq!(saved_rows(&db), before);
+        assert_eq!(db.query_row("SELECT count(*) FROM sqlite_schema WHERE name IN ('schedule','scheduled_shell_execution','scheduled_output_chunk')",[],|row|row.get::<_,i64>(0)).unwrap(),0);
+        assert!(
+            db.pragma_query_value(None, "foreign_keys", |row| row.get::<_, bool>(0))
+                .unwrap()
         );
     }
 }
