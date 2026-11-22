@@ -1512,7 +1512,9 @@ async fn history_gc_skips_and_reports_a_single_over_budget_receipt_cleanup() {
     let f = Fixture::new(Config::default()).await;
     install_budget_demand(&f).await;
     f.db.call(|db| {
-        db.execute("WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<500) INSERT INTO node(id,turn_id,kind,created_at,payload_json,payload_bytes) SELECT 'fixture-'||i,'turn','user','now','{}',2 FROM n", [])?;
+        // Keep these bodies off live roots so the receipt DELETE reaches the budget trigger.
+        db.execute_batch("INSERT INTO run(id,thread_id,state,created_at) VALUES('deleted-run','deleted','completed','now'); INSERT INTO turn(id,thread_id,run_id,state,created_at) VALUES('deleted-turn','deleted','deleted-run','completed','now');")?;
+        db.execute("WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<500) INSERT INTO node(id,turn_id,kind,created_at,payload_json,payload_bytes) SELECT 'fixture-'||i,'deleted-turn','user','now','{}',2 FROM n", [])?;
         for i in 1..=200 {
             let (id, node) = (format!("rcpt-{i}"), format!("fixture-{i}"));
             db.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,result_json)VALUES(?1,?1,'null','deleted',?2,'cancelled','now','{}')",params![id,node])?;
