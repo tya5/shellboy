@@ -1027,11 +1027,19 @@ async fn drain_and_stop(
     current_thread: Option<&str>,
 ) -> Result<(), ApiError> {
     let run_id = run_id.to_owned();
+    let preserve_usage_waits = control.store.config.recovery.auto_retry_usage_limit;
+    let stop = control.stop.clone();
     let owned = control
         .store
         .database
         .call(move |db| {
             let tx = db.transaction()?;
+            if preserve_usage_waits
+                && stop.is_cancelled()
+                && super::usage_limit_retry::preserve_run(&tx, &run_id)?
+            {
+                return Ok(Vec::new());
+            }
             let owned: Vec<(String, String)> = tx
                 .prepare("SELECT id,thread_id FROM run WHERE id=?1")?
                 .query_map([run_id], |row| Ok((row.get(0)?, row.get(1)?)))?
@@ -1048,6 +1056,9 @@ async fn drain_and_stop(
         })
         .await
         .map_err(storage_error)?;
+    if owned.is_empty() {
+        return Ok(());
+    }
     let runs: std::collections::HashSet<String> =
         owned.iter().map(|(run, _)| run.clone()).collect();
     control.live.cancel_owned(&runs, current_thread).await;

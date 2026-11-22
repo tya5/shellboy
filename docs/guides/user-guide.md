@@ -421,6 +421,12 @@ Before deleting, use F8's “会話 | 削除影響” (deletion impact) to inspe
 
 ### Recovery without token guesses
 
+For a saved `usage_limit_reached` reset, the owner retries once at the reset,
+or when it next starts if the reset passed while it was offline. It does not
+resend early. If more than 128 held messages need admission, the one retry
+still leaves the Run parked for another manual retry. To keep recovery manual,
+set `auto_retry_usage_limit = false` under `[recovery]` and restart the owner.
+
 For an attachment rejected during recovery, inspect `/attachments`, use `/detach ATTACHMENT_ID`, then `/retry`. Exclusion does not delete the file. See [Recovery and storage](recovery-and-storage.md) for the CLI and file-move alternative.
 
 After a failure, inspect Run/Turn context in F8. `/compact-max` reduces safe

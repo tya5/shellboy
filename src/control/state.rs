@@ -64,7 +64,9 @@ pub(super) fn resume_recovery_turn_tx(
         return Ok(true);
     }
     let changed = tx.execute(
-        "UPDATE turn SET state='preparing',generation=generation+1,recovery_reason_json=NULL
+        "UPDATE turn SET state='preparing',generation=generation+1,recovery_reason_json=
+             CASE WHEN json_type(recovery_reason_json,'$.consumed_usage_limit_reset')='integer'
+             THEN json_object('consumed_usage_limit_reset',json_extract(recovery_reason_json,'$.consumed_usage_limit_reset')) END
          WHERE id=?1 AND thread_id=?2 AND run_id=?3 AND generation=?4 AND state='recovery_wait'
          AND EXISTS(SELECT 1 FROM run r WHERE r.id=turn.run_id AND r.state='live')",
         params![turn, thread, run, generation],
@@ -186,7 +188,11 @@ pub(super) fn recover_turn_tx(
     };
     details.insert("last_failure_at".into(), Value::String(now()));
     reason.details = Some(Value::Object(details));
-    let changed=tx.execute("UPDATE turn SET state='recovery_wait',recovery_reason_json=?2 WHERE id=?1 AND generation=?3 AND state IN ('preparing','running','waiting')",params![turn,serde_json::to_string(&reason).unwrap_or_default(),generation])?;
+    let mut reason = serde_json::to_value(&reason).expect("recovery reason serializes");
+    if let Some(at) = super::usage_limit_retry::retained_reset(tx, turn)? {
+        super::usage_limit_retry::mark_consumed(&mut reason, at);
+    }
+    let changed=tx.execute("UPDATE turn SET state='recovery_wait',recovery_reason_json=?2 WHERE id=?1 AND generation=?3 AND state IN ('preparing','running','waiting')",params![turn,reason.to_string(),generation])?;
     if changed > 0 {
         tx.execute(
             "UPDATE attachment_delivery SET status='held' WHERE thread_id=?1 AND status='accepted'",
@@ -389,12 +395,14 @@ fn stop_drained_runs_inner(
 pub(crate) fn interrupt_previous_work(
     tx: &rusqlite::Transaction<'_>,
     now: &str,
+    preserve_usage_waits: bool,
 ) -> Result<RepairReport, StorageError> {
+    let preserved = super::usage_limit_retry::preserved_runs(tx, preserve_usage_waits)?;
     tx.execute(
         "DELETE FROM app_meta WHERE key GLOB 'compact.automatic_active.*'",
         [],
     )?;
-    tx.execute("UPDATE turn SET state='stopped',ended_at=?1,recovery_reason_json=?2 WHERE state IN ('preparing','running','waiting','recovery_wait')",rusqlite::params![now,r#"{"reason":"previous_instance_interrupted","result_uncertain":true}"#])?;
+    tx.execute("UPDATE turn SET state='stopped',ended_at=?1,recovery_reason_json=?2 WHERE state IN ('preparing','running','waiting','recovery_wait') AND run_id NOT IN (SELECT value FROM json_each(?3))",rusqlite::params![now,r#"{"reason":"previous_instance_interrupted","result_uncertain":true}"#,preserved])?;
     #[cfg(unix)]
     let settle = "UPDATE shell_execution SET state='failed',ended_at=?1,end_reason='previous_instance_interrupted_os_state_unverified',output_complete=0,shell_json=json_set(shell_json,'$.recovery',json('{\"os_state\":\"unverified\",\"result_uncertain\":true}')) WHERE state IN ('starting','running','stopping') RETURNING id,schedule_id";
     #[cfg(not(unix))]
@@ -414,7 +422,7 @@ pub(crate) fn interrupt_previous_work(
         super::schedule::retire_oneshot(tx, &id)?;
     }
     let report = repair_interrupted_tool_groups(tx, now)?;
-    tx.execute("UPDATE run SET state='stopped',ended_at=?1,stop_reason=COALESCE(stop_reason,'previous_instance_interrupted') WHERE state IN ('live','stopping')",[&now])?;
+    tx.execute("UPDATE run SET state='stopped',ended_at=?1,stop_reason=COALESCE(stop_reason,'previous_instance_interrupted') WHERE state IN ('live','stopping') AND id NOT IN (SELECT value FROM json_each(?2))",params![now,preserved])?;
     interrupt_previous_attempts(tx, now)?;
     tx.execute("UPDATE attachment_delivery SET status='held' WHERE status='accepted' AND (target_run_id IS NOT NULL OR json_extract(origin_json,'$.kind')='shell')",[])?;
     tx.execute("UPDATE receipt SET state='held',hold_reason='previous_instance_interrupted',updated_at=?1 WHERE state='accepted'",[&now])?;
@@ -425,10 +433,14 @@ pub(crate) fn interrupt_previous_work(
 
 /// Final fallback after all Control workers and accepted requests have drained.
 /// Individual run stops above have already handled attempts/shells/receipts.
-pub(super) fn finish_drained_shutdown(tx: &rusqlite::Transaction<'_>) -> Result<(), StorageError> {
+pub(super) fn finish_drained_shutdown(
+    tx: &rusqlite::Transaction<'_>,
+    preserve_usage_waits: bool,
+) -> Result<(), StorageError> {
+    let preserved = super::usage_limit_retry::preserved_runs(tx, preserve_usage_waits)?;
     tx.execute("UPDATE attachment_delivery SET status='held' WHERE status='accepted' AND (target_run_id IS NOT NULL OR json_extract(origin_json,'$.kind')='shell')",[])?;
-    tx.execute("UPDATE run SET state='stopped',ended_at=?1,stop_reason=COALESCE(stop_reason,'app_shutdown') WHERE state IN ('live','stopping')",[chrono::Utc::now().to_rfc3339()])?;
-    tx.execute("UPDATE turn SET state='stopped',ended_at=?1 WHERE state IN ('preparing','running','waiting','recovery_wait')",[chrono::Utc::now().to_rfc3339()])?;
+    tx.execute("UPDATE run SET state='stopped',ended_at=?1,stop_reason=COALESCE(stop_reason,'app_shutdown') WHERE state IN ('live','stopping') AND id NOT IN (SELECT value FROM json_each(?2))",params![now(),preserved])?;
+    tx.execute("UPDATE turn SET state='stopped',ended_at=?1 WHERE state IN ('preparing','running','waiting','recovery_wait') AND run_id NOT IN (SELECT value FROM json_each(?2))",params![now(),preserved])?;
     super::message_delivery::repair_terminal_tx(tx, &now())?;
     Ok(())
 }
@@ -745,7 +757,7 @@ mod exit_reason_tests {
         db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
         db.execute_batch("INSERT INTO app_meta(key,value) VALUES('compact.automatic_active.thread','{}'),('compact.automaticXactive.thread','unrelated');").unwrap();
         let tx = db.transaction().unwrap();
-        interrupt_previous_work(&tx, "now").unwrap();
+        interrupt_previous_work(&tx, "now", false).unwrap();
         assert_eq!(
             tx.query_row(
                 "SELECT count(*) FROM app_meta WHERE key='compact.automatic_active.thread'",
@@ -774,7 +786,7 @@ mod exit_reason_tests {
             let tx = db.transaction().unwrap();
             match boundary {
                 "startup" => {
-                    interrupt_previous_work(&tx, "now").unwrap();
+                    interrupt_previous_work(&tx, "now", false).unwrap();
                 }
                 "drained" => stop_drained_runs(
                     &tx,
@@ -785,7 +797,7 @@ mod exit_reason_tests {
                     true,
                 )
                 .unwrap(),
-                _ => finish_drained_shutdown(&tx).unwrap(),
+                _ => finish_drained_shutdown(&tx, false).unwrap(),
             }
             assert_eq!(
                 tx.query_row("SELECT stop_reason FROM run WHERE id='explicit'", [], |r| r

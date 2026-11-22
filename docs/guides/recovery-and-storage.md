@@ -211,8 +211,9 @@ one probe after a cooldown; cancellation releases its place. At most 1,024
 waiters per profile are retained, and excess or over-ten-minute waits are
 reported as deferred. Separate configured profiles wait independently even if
 they share an upstream quota and can each receive 429s. The owner forgets this
-state on restart; it does not automatically resume recovery or reconstruct a
-provider deadline from old records.
+in-memory gate on restart. The separate default-on `[recovery]`
+`auto_retry_usage_limit` policy uses a still-eligible Run's durable reset to admit
+one `run retry`; it does not reconstruct the connection gate.
 
 Partial output includes not only visible body text but reasoning items received via `response.output_item.added`, including encrypted reasoning (`encrypted_content`). Such an item is still recorded as partial output when an eligible failure retries.
 

@@ -17,6 +17,7 @@ mod schedule;
 pub(crate) mod submission_retention;
 mod turn_interrupt;
 mod ui_events;
+mod usage_limit_retry;
 pub use foreground::ForegroundRelease;
 use foreground::ForegroundSlot;
 use live::LiveRegistry;
@@ -220,6 +221,8 @@ async fn maintenance_loop(
 ) {
     use crate::maintenance::Work;
     let mut schedule_due = None;
+    let mut usage_due = None;
+    let mut refresh_usage_due = true;
     let mut refresh_schedule_due = false;
     let mut deadlines: HashMap<u32, tokio::time::Instant> = HashMap::new();
     let mut reply_cursor = None;
@@ -230,6 +233,24 @@ async fn maintenance_loop(
     loop {
         if stop.is_cancelled() {
             return;
+        }
+        if refresh_usage_due || usage_due.is_some_and(|at| at <= chrono::Utc::now()) {
+            let Some(owner) = control.upgrade() else {
+                return;
+            };
+            refresh_usage_due = false;
+            match usage_limit_retry::drive(&owner).await {
+                Ok(usage_limit_retry::Step::Waiting(next)) => usage_due = next,
+                Ok(usage_limit_retry::Step::Admitted(thread)) => {
+                    owner.changed(&thread);
+                    owner.kick_quiet(thread).await;
+                    usage_due = Some(chrono::Utc::now());
+                }
+                Err(_) => {
+                    owner.fail_storage().await;
+                    return;
+                }
+            }
         }
         if refresh_schedule_due {
             let Some(owner) = control.upgrade() else {
@@ -281,6 +302,9 @@ async fn maintenance_loop(
             return;
         }
         let set = signals.take();
+        if set.contains(Work::UsageLimitRetry) {
+            refresh_usage_due = true;
+        }
         if set.contains(Work::Schedule) {
             refresh_schedule_due = true;
         }
@@ -350,8 +374,10 @@ async fn maintenance_loop(
             }
             drop(strong);
             if Work::ALL.iter().any(|w| {
-                !matches!(w, Work::Receipts | Work::ReplyOutcomes | Work::Schedule)
-                    && set.contains(*w)
+                !matches!(
+                    w,
+                    Work::Receipts | Work::ReplyOutcomes | Work::Schedule | Work::UsageLimitRetry
+                ) && set.contains(*w)
             }) {
                 tokio::select! {biased;_=stop.cancelled()=>return,result=gc.collect_kinds(set,chrono::Utc::now())=>{
                     match result {
@@ -386,11 +412,11 @@ async fn maintenance_loop(
             }
             continue;
         }
-        let schedule_wake = schedule_due.map(|at| {
+        let timed_wake = schedule_due.into_iter().chain(usage_due).min().map(|at| {
             tokio::time::Instant::now()
                 + crate::maintenance::until(at).min(std::time::Duration::from_secs(60))
         });
-        let next = deadlines.values().copied().chain(schedule_wake).min();
+        let next = deadlines.values().copied().chain(timed_wake).min();
         tokio::select! {
             biased;
             _=stop.cancelled()=>return,
@@ -560,6 +586,12 @@ impl Control {
         self.changed_with_recovery(thread_id, false);
     }
     fn changed_with_recovery(&self, thread_id: &str, recovery: bool) {
+        if recovery && self.store.config.recovery.auto_retry_usage_limit {
+            self.store
+                .database
+                .signals()
+                .mark(crate::maintenance::Work::UsageLimitRetry);
+        }
         // Record before waking so a woken long-poll always finds the entry.
         self.change_clock.record(thread_id);
         self.publish_event(EngineEvent::Changed {
@@ -1588,11 +1620,12 @@ impl Control {
                 .map_err(storage_error)?;
         }
         // Owner releases the lock only after this and DbWorker::shutdown.
+        let preserve_usage_waits = self.store.config.recovery.auto_retry_usage_limit;
         self.store
             .database
-            .call(|db| {
+            .call(move |db| {
                 let tx = db.transaction()?;
-                state::finish_drained_shutdown(&tx)?;
+                state::finish_drained_shutdown(&tx, preserve_usage_waits)?;
                 tx.commit()?;
                 Ok(())
             })

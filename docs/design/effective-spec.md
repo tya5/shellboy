@@ -508,8 +508,21 @@ For an explicit provider `usage_limit_reached` reset, compare the reported reset
 time with the complete remaining automatic retry schedule. If reset is later, go
 directly to existing recovery wait; if shorter, keep ordinary retries.
 Missing/invalid facts do not change current retry behavior. Recovery uses the
-existing reason/message and symbols. No guessed reset, new setting, or automatic
-provider switch. See [model HTTP](model-http.md).
+existing reason/message and symbols. No guessed reset or automatic provider switch. See [model HTTP](model-http.md).
+
+## One retry at the saved usage-limit reset (#321)
+
+The existing owner maintenance deadline includes the earliest eligible saved
+`usage_limit_reached` reset. The shared `run.retry` writer rechecks the saved
+live Run and parked Turn at admission, consumes that reset in the saved reason
+and records `recovery_resumed` with actor `owner` for an automatic admission.
+Manual admission also consumes the reset. A second limit can arm only a newer
+future reset. An unknown reset, explicit stop, or superseded wait does not arm.
+There is no pre-reset resend, probe, automatic provider switch, second timer, or
+continuation for remaining held messages beyond the existing one-batch limit.
+Startup and graceful shutdown preserve eligible parked waits, not in-flight
+attempts; a preserved overdue wait is eligible once at startup. Turning off
+`recovery.auto_retry_usage_limit` retains the old manual-only lifecycle.
 
 ## Configuration read and write (#266, 2026-11-07)
 

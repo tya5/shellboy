@@ -4605,3 +4605,15 @@ already past, the owner runs at most one and schedules the next future occurrenc
 host timezone or adding a production clock abstraction. Control caches the next
 UTC wall deadline and checks it on maintenance wakes; a capped sleep alone does
 not trigger a database dispatch.
+
+### One retry at the saved usage-limit reset (#321)
+
+`[recovery] auto_retry_usage_limit` defaults to `true`: an explicit provider
+reset makes the timing predictable, and the owner can resume a parked team
+without needing an unaffected operator. Set it to `false` to retain manual-only
+recovery and the previous shutdown/startup behavior. The owner maintenance
+loop owns the deadline; manual and automatic admissions consume the exact
+saved reset in the same `run.retry` transaction. Preserve eligible parked waits
+across owner lifetimes but do not replay admitted/in-flight work. Do not create
+an automatic held-message continuation: one admission has the same 128-message
+bound as manual retry. Revisit that limit separately only if real queues hit it.

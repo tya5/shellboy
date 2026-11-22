@@ -38,10 +38,11 @@ pub enum Work {
     /// Durable pending replies are rechecked after terminal commits and startup.
     ReplyOutcomes = 1 << 10,
     Schedule = 1 << 11,
+    UsageLimitRetry = 1 << 12,
 }
 
 impl Work {
-    pub const ALL: [Work; 12] = [
+    pub const ALL: [Work; 13] = [
         Work::Receipts,
         Work::Raw,
         Work::History,
@@ -54,6 +55,7 @@ impl Work {
         Work::EventBacklog,
         Work::ReplyOutcomes,
         Work::Schedule,
+        Work::UsageLimitRetry,
     ];
     /// Source deletion makes derived data eligible as well.
     pub const DELETION: [Work; 3] = [Work::History, Work::SummaryCache, Work::IndexSources];

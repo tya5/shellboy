@@ -66,6 +66,21 @@ pub struct Config {
     pub ui: Ui,
     pub logging: Logging,
     pub compaction: Compaction,
+    pub recovery: Recovery,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Recovery {
+    pub auto_retry_usage_limit: bool,
+}
+
+impl Default for Recovery {
+    fn default() -> Self {
+        Self {
+            auto_retry_usage_limit: true,
+        }
+    }
 }
 
 #[derive(

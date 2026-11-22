@@ -74,7 +74,14 @@ pub(crate) fn prepare_reason(raw: Option<&str>) -> Result<Option<Value>> {
                 .map_err(|_| ApiError::new(ErrorCode::InvalidState, "invalid saved context reason"))
         })
         .transpose()?;
-    Ok(parsed.filter(|value| !value.is_null()))
+    Ok(parsed.filter(|value| !value.is_null() && !is_consumed_reset_only(value)))
+}
+
+// An admitted reset is retained across attempts, but is not a recovery reason.
+pub(crate) fn is_consumed_reset_only(value: &Value) -> bool {
+    value.as_object().is_some_and(|object| {
+        object.len() == 1 && object.contains_key("consumed_usage_limit_reset")
+    })
 }
 
 pub fn for_thread(db: &Connection, id: &str) -> Result<ExecutionContext> {

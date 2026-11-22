@@ -871,7 +871,7 @@ mod tests {
             let tx = db.transaction().unwrap();
             match boundary {
                 "startup" => {
-                    crate::control::state::interrupt_previous_work(&tx, "end").unwrap();
+                    crate::control::state::interrupt_previous_work(&tx, "end", false).unwrap();
                 }
                 "stop" => crate::control::state::stop_drained_runs(
                     &tx,
@@ -879,7 +879,7 @@ mod tests {
                     false,
                 )
                 .unwrap(),
-                _ => crate::control::state::finish_drained_shutdown(&tx).unwrap(),
+                _ => crate::control::state::finish_drained_shutdown(&tx, false).unwrap(),
             }
             assert_eq!(state(&tx, "pending").0, "held", "{boundary}");
             assert_eq!(

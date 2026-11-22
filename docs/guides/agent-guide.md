@@ -689,14 +689,16 @@ or saved child Thread. Missing names are not inferred from similar commands.
 
 ### Known connection cooldowns
 
-If recovery_reason includes `details.usage_limit`, read its `resets_at_utc` and
-optional limit window before retrying. The owner will not automatically resend
-a known usage-limit failure. Other conversations sharing the connection are
-blocked locally until reset; changing only the model on that connection does
-not evade the cooldown. Wait or ask the user to select another connection/model
-with `/model`; do not automatically switch cost or behavior. Expiry permits a
-new explicit request, not automatic resumption. Memory is discarded on owner
-restart. See the CLI reference for the exact supported provider error shapes.
+If `recovery_reason` includes `details.usage_limit`, read its `resets_at_utc`
+and optional limit window. For a saved `usage_limit_reached` reset the owner
+admits one `run retry` at reset (or on startup if it is already due and the Run
+is still eligible), not before. If over 128 held messages need admission, that
+one retry leaves the Run parked for another manual retry. Set
+`[recovery] auto_retry_usage_limit = false` to keep recovery manual. Other
+conversations sharing the connection may be blocked locally until reset;
+changing only the model on that connection does not evade its cooldown. Do
+not automatically switch provider or model. The in-memory cooldown gate is
+separate and is discarded at owner restart.
 
 ## Startup timing
 

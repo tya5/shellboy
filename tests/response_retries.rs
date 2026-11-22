@@ -3268,3 +3268,34 @@ async fn conversation_and_summary_commit_each_transient_retry_before_dispatch() 
     fixture.no_more_requests().await;
     fixture.close().await;
 }
+
+#[tokio::test]
+async fn owner_maintenance_resends_usage_limit_once_at_saved_reset() {
+    let mut f = Fixture::new(0, 100, 120_000).await;
+    f.control.start().await.unwrap();
+    let first = f.incoming().await;
+    let reset = chrono::DateTime::from_timestamp(chrono::Utc::now().timestamp() + 6, 0).unwrap();
+    let body =
+        json!({"error":{"type":"usage_limit_reached","resets_at":reset.timestamp()}}).to_string();
+    first
+        .reply
+        .send(Reply::http(429, "application/json", &body, ""))
+        .ok()
+        .unwrap();
+    assert_eq!(f.settled().await, "recovery_wait");
+    assert_eq!(fixture_request_log_lines(&f), 1);
+    let resumed = f.incoming().await;
+    assert!(
+        chrono::Utc::now() >= reset,
+        "owner resent before saved reset"
+    );
+    resumed.reply.send(Reply::success()).ok().unwrap();
+    assert_eq!(f.settled().await, "completed");
+    assert_eq!(fixture_request_log_lines(&f), 2);
+    f.owner.db.call(|db| {
+        let count: i64 = db.query_row("SELECT count(*) FROM event WHERE json_extract(payload_ref_json,'$.kind')='recovery_resumed' AND json_extract(source_json,'$.kind')='owner'", [], |row| row.get(0))?;
+        assert_eq!(count, 1);
+        Ok(())
+    }).await.unwrap();
+    f.close().await;
+}

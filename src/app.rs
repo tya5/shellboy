@@ -262,10 +262,11 @@ impl DataOwner {
         let now = chrono::Utc::now().to_rfc3339();
         let recovery_started = std::time::Instant::now();
         progress(StartupStage::InterruptedWork, language, motion);
+        let preserve_usage_waits = loaded.config.recovery.auto_retry_usage_limit;
         let recovery = db.call(move |connection| {
             let tx=connection.transaction()?;
             let capture_failures = crate::control::interruption::capture_startup_interrupted_context(&tx,&now)?;
-            let mut report = crate::control::state::interrupt_previous_work(&tx, &now)?;
+            let mut report = crate::control::state::interrupt_previous_work(&tx, &now, preserve_usage_waits)?;
             let bad_cursor_captures: std::collections::HashSet<String> = tx.prepare(
                 "SELECT e.target_thread_id FROM event e JOIN thread t ON t.id=e.target_thread_id WHERE e.kind='context_changed' AND json_extract(e.payload_ref_json,'$.kind')='interruption_capture_header' AND t.cursor_node_id IS NOT (SELECT node_id FROM thread_path WHERE thread_id=t.id ORDER BY ordinal DESC LIMIT 1)"
             )?.query_map([],|row|row.get(0))?.collect::<Result<_,_>>()?;

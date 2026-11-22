@@ -1561,7 +1561,13 @@ impl Store {
                 MutationResult::value(details)
             }
             Command::RunStop(args) => stop_run(tx, &args.run_id, now),
-            Command::RunRetry(args) => retry_run(tx, &args.run_id, caller, now),
+            Command::RunRetry(args) => retry_run(
+                tx,
+                &args.run_id,
+                caller,
+                now,
+                self.config.recovery.auto_retry_usage_limit,
+            ),
             Command::CompactPreview(_) => Err(error(
                 ErrorCode::InvalidState,
                 "Compact preview uses its dedicated read-only projection",
@@ -3151,7 +3157,7 @@ fn recovery_status(
         )
         .map_err(sql_error)?;
     if !recovering {
-        return Ok(reason);
+        return Ok(super::usage_limit_retry::public_reason(reason));
     }
     let remaining: i64 = connection.query_row("SELECT count(*) FROM receipt INDEXED BY receipt_target WHERE target_thread_id=?1 AND state='held'", [thread], |r| r.get(0)).map_err(sql_error)?;
     if remaining == 0 {
@@ -3167,7 +3173,7 @@ fn recovery_status(
 }
 
 pub fn turn_details(connection: &Connection, id: &str) -> Result<TurnDetails> {
-    connection.query_row("SELECT run_id,thread_id,state,answer_node_id,recovery_reason_json FROM turn WHERE id=?1",[id],|row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,String>(2)?,row.get::<_,Option<String>>(3)?,row.get::<_,Option<String>>(4)?))).optional().map_err(sql_error)?.ok_or_else(||error(ErrorCode::TargetUnavailable,"Turn not found")).and_then(|row|Ok(TurnDetails{usage_totals:None,context:crate::context::for_turn(connection,id)?,turn_id:id.into(),run_id:row.0,thread_id:row.1,state:serde_json::from_value(json!(row.2)).map_err(|_|error(ErrorCode::InvalidState,"unknown saved Turn state"))?,end_message_node_id:row.3,recovery_hint:row.4}))
+    connection.query_row("SELECT run_id,thread_id,state,answer_node_id,recovery_reason_json FROM turn WHERE id=?1",[id],|row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,String>(2)?,row.get::<_,Option<String>>(3)?,row.get::<_,Option<String>>(4)?))).optional().map_err(sql_error)?.ok_or_else(||error(ErrorCode::TargetUnavailable,"Turn not found")).and_then(|row|Ok(TurnDetails{usage_totals:None,context:crate::context::for_turn(connection,id)?,turn_id:id.into(),run_id:row.0,thread_id:row.1,state:serde_json::from_value(json!(row.2)).map_err(|_|error(ErrorCode::InvalidState,"unknown saved Turn state"))?,end_message_node_id:row.3,recovery_hint:super::usage_limit_retry::public_reason(row.4)}))
 }
 
 fn stop_run(tx: &Transaction<'_>, id: &str, now: &str) -> Result<MutationResult> {
@@ -3193,6 +3199,7 @@ fn retry_run(
     id: &str,
     caller: Option<&Origin>,
     now: &str,
+    consume_reset: bool,
 ) -> Result<MutationResult> {
     let details = run_details(tx, id)?;
     if details.state != RunState::Live {
@@ -3201,38 +3208,28 @@ fn retry_run(
             "only a live Run in recovery_wait can retry",
         ));
     }
-    let recovery: Option<(String, i64)> = tx
+    let recovery: Option<(String, i64, Option<String>)> = tx
         .query_row(
-            "SELECT id,generation FROM turn WHERE run_id=?1 AND state='recovery_wait'",
+            "SELECT id,generation,recovery_reason_json FROM turn WHERE run_id=?1 AND state='recovery_wait'",
             [id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .optional()
         .map_err(sql_error)?;
-    let Some((turn, generation)) = recovery else {
+    let Some((turn, generation, reason)) = recovery else {
         return Err(error(
             ErrorCode::InvalidState,
             "Run has no recoverable Turn",
         ));
     };
-    if !super::state::resume_recovery_turn_tx(tx, &details.thread_id, id, &turn, generation, now)
-        .map_err(storage_error)?
-    {
-        return Err(error(
-            ErrorCode::InvalidState,
-            "Run has no recoverable Turn",
-        ));
-    }
-    super::context::record_fact(
+    resume_run_tx(
         tx,
-        &details.thread_id,
-        "recovery_resumed",
+        (&details.thread_id, id, &turn, generation),
+        reason.as_deref().filter(|_| consume_reset),
         actor(caller),
-        json!({"run_id":id}),
         now,
-        super::notification::Fact::RecoveryResumed,
     )
-    .map_err(sql_error)?;
+    .map_err(storage_error)?;
     Ok(MutationResult {
         committed_error: None,
         owner_shutdown: false,
@@ -3244,6 +3241,44 @@ fn retry_run(
         deleted_threads: vec![],
         compact_threads: vec![],
     })
+}
+
+/// Manual and owner retry admission share the same transaction, receipt batch and event.
+pub(super) fn resume_run_tx(
+    tx: &Transaction<'_>,
+    (thread, run, turn, generation): (&str, &str, &str, i64),
+    reason: Option<&str>,
+    actor: Value,
+    now: &str,
+) -> std::result::Result<(), StorageError> {
+    use super::usage_limit_retry as usage;
+    if let Some((original, mut reason, reset)) = reason.and_then(|original| {
+        let reason: Value = serde_json::from_str(original).ok()?;
+        let reset = usage::reset(&reason)?;
+        Some((original, reason, reset))
+    }) {
+        usage::mark_consumed(&mut reason, reset.timestamp());
+        let changed = tx.execute(
+            "UPDATE turn SET recovery_reason_json=?1 WHERE id=?2 AND generation=?3 AND state='recovery_wait' AND recovery_reason_json=?4",
+            params![reason.to_string(), turn, generation, original],
+        )?;
+        if changed != 1 {
+            return Err(error(ErrorCode::InvalidState, "Run has no recoverable Turn").into());
+        }
+    }
+    if !super::state::resume_recovery_turn_tx(tx, thread, run, turn, generation, now)? {
+        return Err(error(ErrorCode::InvalidState, "Run has no recoverable Turn").into());
+    }
+    super::context::record_fact(
+        tx,
+        thread,
+        "recovery_resumed",
+        actor,
+        json!({"run_id":run}),
+        now,
+        super::notification::Fact::RecoveryResumed,
+    )?;
+    Ok(())
 }
 
 fn save_runtime_outcome(
@@ -7191,7 +7226,9 @@ mod retry_tracking_diagnosis_287 {
                 .unwrap();
             assert_eq!(baseline.changes.len(), 1);
             let tx = db.transaction().unwrap();
-            let accepted = retry_run(&tx, "run", None, "accepted").unwrap().result;
+            let accepted = retry_run(&tx, "run", None, "accepted", true)
+                .unwrap()
+                .result;
             tx.commit().unwrap();
             assert_eq!(accepted["run_id"], "run");
             assert_eq!(accepted["turn_id"], "turn");

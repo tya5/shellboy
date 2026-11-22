@@ -94,7 +94,13 @@ pub(super) async fn retry_or_recover(
         .details(json!({"recovery":facts,"automatic_retries":automatic_retries,"retry_limit":retry_limit,
             "automatic_reduction_unavailable":reduction_unavailable,"last_failure_at":now(),"failure_kind":failure.error.kind,"http":failure.facts.http_observation}));
     if let Some(fact) = usage_limit {
-        error.hint = Some("Wait until the reported reset or select another connection/model with /model. No automatic switch or resume.".into());
+        error.hint = Some(if control.store.config.recovery.auto_retry_usage_limit
+            && fact.kind == crate::model::usage_limit::LimitKind::UsageLimitReached
+        {
+            "An eligible wait retries once at the reported reset. To change the selection, use /model."
+        } else {
+            "Wait until the reported reset or select another connection/model with /model. No automatic switch or resume."
+        }.into());
         if let Some(details) = &mut error.details {
             details["usage_limit"] = fact.details();
         }
