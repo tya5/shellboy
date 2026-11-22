@@ -998,14 +998,22 @@ mod tests {
             dispatch(&control).await.unwrap();
             let after = control.request(request(list())).await.result.unwrap();
             let mut added = after["items"].as_array().unwrap().iter().filter(|item| {
-                !before["items"].as_array().unwrap().iter().any(|prior| {
-                    prior["execution_id"] == item["execution_id"]
-                })
+                !before["items"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|prior| prior["execution_id"] == item["execution_id"])
             });
             let execution = added.next().expect("dispatch adds an execution")["execution_id"]
-                .as_str().unwrap().to_owned();
+                .as_str()
+                .unwrap()
+                .to_owned();
             assert!(added.next().is_none(), "dispatch adds only one execution");
-            let get = || Command::ShellGet(ExecutionTarget { execution_id: execution.clone() });
+            let get = || {
+                Command::ShellGet(ExecutionTarget {
+                    execution_id: execution.clone(),
+                })
+            };
             if command == hold {
                 let active = control.request(request(list())).await.result.unwrap();
                 let active = active["items"]
