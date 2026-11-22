@@ -1724,8 +1724,14 @@ record!(AttachmentRemoveResult {
     attachment_id: String,
     removed: bool
 });
+// `changed_by` is serialized even without a caller; null is not omission.
+fn nullable_origin_identity(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    <Option<OriginIdentity> as schemars::JsonSchema>::json_schema(generator)
+}
+
 // Config edit details are open; authenticated change provenance is not.
 record!(ConfigSetResult {
+    #[schemars(schema_with = "nullable_origin_identity")]
     changed_by: Option<OriginIdentity>,
     #[serde(flatten)] fields: std::collections::BTreeMap<String, Value>,
 });
@@ -1737,6 +1743,7 @@ record!(CredentialsSetResult {
     credentials_path: std::path::PathBuf,
     permissions_tightened: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")] warning: Option<String>,
+    #[schemars(schema_with = "nullable_origin_identity")]
     changed_by: Option<OriginIdentity>,
 });
 record!(CredentialsClearResult {
@@ -1744,6 +1751,7 @@ record!(CredentialsClearResult {
     cleared: bool,
     key_source: crate::config::KeySource,
     credentials_path: std::path::PathBuf,
+    #[schemars(schema_with = "nullable_origin_identity")]
     changed_by: Option<OriginIdentity>,
 });
 record!(ShellOutput {

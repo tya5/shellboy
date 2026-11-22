@@ -10727,6 +10727,9 @@
           ]
         }
       },
+      "required": [
+        "changed_by"
+      ],
       "title": "ConfigSetResult",
       "type": "object"
     },
@@ -10762,7 +10765,8 @@
         "connection",
         "cleared",
         "key_source",
-        "credentials_path"
+        "credentials_path",
+        "changed_by"
       ],
       "title": "CredentialsClearResult",
       "type": "object"
@@ -10811,7 +10815,8 @@
         "replaced",
         "key_source",
         "credentials_path",
-        "permissions_tightened"
+        "permissions_tightened",
+        "changed_by"
       ],
       "title": "CredentialsSetResult",
       "type": "object"

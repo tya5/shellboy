@@ -1230,7 +1230,24 @@ fn exported_schema_shares_changed_by_identity() {
         assert_eq!(fields[field]["type"], "string");
     }
     for operation in ["config.set", "credentials.set", "credentials.clear"] {
-        let changed_by = &schema["operation_results"][operation]["properties"]["changed_by"];
+        let result = &schema["operation_results"][operation];
+        assert!(
+            result["required"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|name| name == "changed_by"),
+            "{operation}"
+        );
+        let changed_by = &result["properties"]["changed_by"];
+        assert!(
+            changed_by["anyOf"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|schema| schema["type"] == "null"),
+            "{operation}"
+        );
         assert_eq!(
             changed_by,
             &schema["operation_results"]["credentials.set"]["properties"]["changed_by"]
