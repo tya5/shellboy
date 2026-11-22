@@ -70,12 +70,16 @@ async fn real_ipc_waiters_leave_status_and_run_stop_available() {
         &owner.loaded.data_dir,
         Command::Wait(WaitArgs {
             after: None,
-            conditions: vec![WaitCondition::RunEnded { run_id: "run".into() }],
+            conditions: vec![WaitCondition::RunEnded {
+                run_id: "run".into(),
+            }],
             timeout_ms: 600000,
         }),
         None,
         None,
-    ).await.unwrap();
+    )
+    .await
+    .unwrap();
     assert_eq!(refused.error.unwrap().code, ErrorCode::InvalidState);
     let status = crate::test_watchdog::watchdog(
         "src/control/ipc_admission_tests.rs: real_ipc_waiters_leave_status_and_run_stop_available",
@@ -91,14 +95,17 @@ async fn real_ipc_waiters_leave_status_and_run_stop_available() {
     .unwrap();
     assert!(status.ok, "{status:?}");
     let result = status.result.unwrap();
-    assert_eq!(result["ipc_admission"], serde_json::json!({
-        "max_connections": 69,
-        "wait": {"limit": 32, "refused": 1},
-        "ordinary": {"limit": 24, "refused": 0},
-        "stop": {"limit": 2, "refused": 0},
-        "status": {"limit": 2, "refused": 0},
-        "memory": {"limit": 1, "refused": 0}
-    }));
+    assert_eq!(
+        result["ipc_admission"],
+        serde_json::json!({
+            "max_connections": 69,
+            "wait": {"limit": 32, "refused": 1},
+            "ordinary": {"limit": 24, "refused": 0},
+            "stop": {"limit": 2, "refused": 0},
+            "status": {"limit": 2, "refused": 0},
+            "memory": {"limit": 1, "refused": 0}
+        })
+    );
     let still_pending = owner
         .db
         .call(|db| {

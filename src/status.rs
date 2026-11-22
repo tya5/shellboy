@@ -84,6 +84,21 @@ pub struct StatusFilters {
     #[serde(default, flatten)]
     pub additional_properties: std::collections::BTreeMap<String, Value>,
 }
+/// Cumulative transport refusals and the corresponding owner budget.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct IpcAdmissionStatus {
+    pub max_connections: usize,
+    pub wait: IpcAdmissionClass,
+    pub ordinary: IpcAdmissionClass,
+    pub stop: IpcAdmissionClass,
+    pub status: IpcAdmissionClass,
+    pub memory: IpcAdmissionClass,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct IpcAdmissionClass {
+    pub limit: usize,
+    pub refused: u64,
+}
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct StatusSnapshot {
     pub instance_id: String,
@@ -96,6 +111,8 @@ pub struct StatusSnapshot {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_cursor: Option<String>,
     pub receipt_budget: crate::protocol::ReceiptBudget,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ipc_admission: Option<IpcAdmissionStatus>,
     #[serde(default, flatten)]
     pub additional_properties: std::collections::BTreeMap<String, Value>,
 }
@@ -655,6 +672,7 @@ pub fn snapshot(db: &Connection, args: &StatusArgs, instance: &str) -> Result<St
         }
     }
     Ok(StatusSnapshot {
+        ipc_admission: None,
         receipt_budget: serde_json::from_value(crate::control::receipt::summary(db, instance)?)
             .map_err(|_| ApiError::new(ErrorCode::InvalidState, "invalid receipt summary"))?,
         filters,

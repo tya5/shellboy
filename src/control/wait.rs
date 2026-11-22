@@ -389,10 +389,7 @@ fn outcome(
         })
     });
     let reason = match status {
-        WaitStatus::Timeout => Some(format!(
-            "wait reached its {} ms deadline; targets continue",
-            args.timeout_ms
-        )),
+        WaitStatus::Timeout => Some(crate::protocol::wait_timeout_reason(args.timeout_ms)),
         WaitStatus::Interrupted => Some("observation interrupted; targets continue".into()),
         WaitStatus::RecoveryWait => Some("target requires an explicit recovery decision".into()),
         WaitStatus::Unavailable => Some("target Thread was deleted or became unavailable".into()),
@@ -405,6 +402,8 @@ fn outcome(
         cursor,
         reason,
         hint: None,
+        admission_wait_ms: None,
+        admission_refusals: None,
     })
     .map(Some)
     .map_err(|_| invalid("cannot encode wait snapshot"))

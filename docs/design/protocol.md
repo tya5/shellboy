@@ -216,6 +216,13 @@ Unix ownerは起動時、soft `RLIMIT_NOFILE` が1,024未満ならhard limitの�
 接続69とlistener 1、SQLite（writerと2 inspection）に最大9、owner lockとlogに各1を見込み、
 ほかにshellごとに定常時最大5 fdと起動時の付加分が必要なため、soft 256を前提にしない。
 無制限のshell等の負荷に対して受付を保証するものではない。
+owner全体の通常 `status` は `ipc_admission` に接続上限 `max_connections` と各分類の `limit` /
+`refused` を返す。`refused` はowner起動以降のpermit拒否の累計で、handshake失敗や受付後の
+拒否は数えない。永続化・拒否ごとのlog・頻度制御は行わない。
+CLIの `wait` だけは、未適用と明示されたadmission拒否を同じ操作IDで再試行する。接続を閉じ、
+50 msから倍増し最大1秒を待つ。待機の期限に達したら通常のtimeoutを返し、未観測の条件は
+空のsnapshotとなる。受付後の待機には残り時間を渡す。結果は `admission_wait_ms` と
+`admission_refusals` を含む。他のエラーや `events.wait` は自動再試行しない。
 
 要求の構文/instance検証後に対応permitをtry取得し、満杯ならControlへ渡さず `invalid_state` と
 `request_may_have_been_applied=false` を返す。待機queueや満杯待ちtaskを追加せず、同じIDでの

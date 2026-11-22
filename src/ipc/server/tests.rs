@@ -85,6 +85,7 @@ impl Fixture {
                 #[cfg(unix)]
                 socket,
             },
+            Arc::default(),
         );
         Self {
             root,

@@ -182,6 +182,7 @@ pub struct DataOwner {
     pub db: DbWorker,
     pub diagnostics: crate::diagnostics::Diagnostics,
     pub(crate) endpoint: Arc<RwLock<Option<Endpoint>>>,
+    pub(crate) ipc_refusals: Arc<crate::ipc::AdmissionRefusals>,
     _lock: Arc<OwnerLock>,
 }
 #[cfg(unix)]
@@ -356,6 +357,7 @@ impl DataOwner {
             db,
             diagnostics,
             endpoint: Arc::new(RwLock::new(None)),
+            ipc_refusals: Arc::default(),
             _lock: lock,
         })
     }

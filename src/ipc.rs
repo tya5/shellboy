@@ -18,6 +18,7 @@ use tokio_util::sync::CancellationToken;
 #[cfg(unix)]
 mod peer;
 mod server;
+pub(crate) use server::AdmissionRefusals;
 pub use server::LocalServer;
 #[cfg(test)]
 pub(crate) use server::tests::Fixture as TestServer;
@@ -347,6 +348,93 @@ pub async fn call(
         None => read_endpoint(data_dir).await?,
     };
     connect(endpoint, command, operation_id, origin).await
+}
+
+/// The CLI retries only a definite wait admission refusal, on the same owner.
+pub async fn call_cli_wait(
+    data_dir: &Path,
+    args: crate::protocol::WaitArgs,
+    operation_id: Option<String>,
+    origin: Option<Origin>,
+) -> Result<Response<Value>, ApiError> {
+    let endpoint = match environment_endpoint(data_dir)? {
+        Some(endpoint) => endpoint,
+        None => read_endpoint(data_dir).await?,
+    };
+    let operation = operation_id
+        .unwrap_or_else(|| format!("{}:{}", endpoint.instance_id, uuid::Uuid::new_v4()));
+    retry_cli_wait(args, &operation, |args| {
+        connect(
+            endpoint.clone(),
+            Command::Wait(args),
+            Some(operation.clone()),
+            origin.clone(),
+        )
+    })
+    .await
+}
+
+async fn retry_cli_wait<F, Fut>(
+    mut args: crate::protocol::WaitArgs,
+    operation: &str,
+    mut attempt: F,
+) -> Result<Response<Value>, ApiError>
+where
+    F: FnMut(crate::protocol::WaitArgs) -> Fut,
+    Fut: std::future::Future<Output = Result<Response<Value>, ApiError>>,
+{
+    use std::time::Duration;
+    use tokio::time::{Instant, sleep};
+
+    let budget = Duration::from_millis(args.timeout_ms);
+    let started = Instant::now();
+    let mut backoff = server::ACCEPT_BACKOFF;
+    let mut refusals = 0_u64;
+    loop {
+        let elapsed = started.elapsed();
+        let remaining = budget.saturating_sub(elapsed);
+        if refusals != 0 && remaining.is_zero() {
+            let result = crate::protocol::WaitResult {
+                status: crate::protocol::WaitStatus::Timeout,
+                matched: Vec::new(),
+                snapshot: serde_json::json!({"conditions": []}),
+                cursor: None,
+                reason: Some(crate::protocol::wait_timeout_reason(
+                    budget.as_millis() as u64
+                )),
+                hint: None,
+                admission_wait_ms: Some(budget.as_millis() as u64),
+                admission_refusals: Some(refusals),
+            };
+            return Ok(Response::success(operation, serde_json::json!(result)));
+        }
+        let admission_wait_ms = if refusals == 0 {
+            0
+        } else {
+            elapsed.as_millis() as u64
+        };
+        if refusals != 0 {
+            args.timeout_ms = remaining.as_millis() as u64;
+        }
+        let mut response = attempt(args.clone()).await?;
+        let refused = response.error.as_ref().is_some_and(|error| {
+            error.code == ErrorCode::InvalidState
+                && error.details.as_ref().is_some_and(|details| {
+                    details["phase"] == "admission"
+                        && details["request_may_have_been_applied"] == false
+                })
+        });
+        if !refused {
+            if let Some(Value::Object(result)) = response.result.as_mut() {
+                result.insert("admission_wait_ms".into(), admission_wait_ms.into());
+                result.insert("admission_refusals".into(), refusals.into());
+            }
+            return Ok(response);
+        }
+        refusals += 1;
+        sleep(backoff.min(budget.saturating_sub(started.elapsed()))).await;
+        backoff = (backoff * 2).min(server::MAX_ACCEPT_BACKOFF);
+    }
 }
 
 /// Send a command only when the owner advertised the required capability in Welcome.

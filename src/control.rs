@@ -166,6 +166,7 @@ pub struct Control {
     data_dir: PathBuf,
     endpoint: Arc<std::sync::RwLock<Option<crate::app::Endpoint>>>,
     live: Arc<LiveRegistry>,
+    ipc_refusals: Arc<crate::ipc::AdmissionRefusals>,
     origins: Mutex<HashMap<String, Origin>>,
     events: broadcast::Sender<EngineEvent>,
     ui_events: ui_events::UiEvents,
@@ -479,6 +480,7 @@ impl Control {
             data_dir: owner.loaded.data_dir.clone(),
             endpoint: owner.endpoint.clone(),
             live: Arc::new(LiveRegistry::default()),
+            ipc_refusals: owner.ipc_refusals.clone(),
             origins: Mutex::new(HashMap::new()),
             events,
             ui_events: ui_events::UiEvents::new(),
@@ -1183,6 +1185,16 @@ impl Control {
                                     Err(error) => json!({"available":false,"error":error}),
                                 };
                         }
+                        Ok(effects)
+                    }
+                    Command::Status(args)
+                        if !args.memory
+                            && origin.is_none()
+                            && args.thread_id.is_none()
+                            && args.run_id.is_none() =>
+                    {
+                        let mut effects = self.store.execute(request, origin).await?;
+                        effects.result["ipc_admission"] = json!(self.ipc_refusals.snapshot());
                         Ok(effects)
                     }
                     _ => self.store.execute(request, origin).await,

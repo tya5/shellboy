@@ -4,7 +4,15 @@ use crate::{
     app::DataOwner,
     protocol::{ApiError, Command, ErrorCode},
 };
-use std::{future::Future, io, sync::Arc, time::Duration};
+use std::{
+    future::Future,
+    io,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+    time::Duration,
+};
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     sync::{OwnedSemaphorePermit, Semaphore, mpsc, watch},
@@ -28,9 +36,36 @@ const MAX_CONTROL_WORK: usize = 2;
 const MAX_OBSERVATION_WORK: usize = 2;
 const MAX_MEMORY_OBSERVATION_WORK: usize = 1;
 
+#[derive(Default)]
+pub(crate) struct AdmissionRefusals {
+    waits: AtomicU64,
+    ordinary: AtomicU64,
+    stop: AtomicU64,
+    status: AtomicU64,
+    memory: AtomicU64,
+}
+impl AdmissionRefusals {
+    pub(crate) fn snapshot(&self) -> crate::status::IpcAdmissionStatus {
+        use crate::status::{IpcAdmissionClass, IpcAdmissionStatus};
+        let class = |limit, count: &AtomicU64| IpcAdmissionClass {
+            limit,
+            refused: count.load(Ordering::Relaxed),
+        };
+        IpcAdmissionStatus {
+            max_connections: MAX_CONNECTIONS,
+            wait: class(MAX_WAIT_WORK, &self.waits),
+            ordinary: class(MAX_IPC_WORK, &self.ordinary),
+            stop: class(MAX_CONTROL_WORK, &self.stop),
+            status: class(MAX_OBSERVATION_WORK, &self.status),
+            memory: class(MAX_MEMORY_OBSERVATION_WORK, &self.memory),
+        }
+    }
+}
+
 /// Transport budgets; accepted effects retain their permit after disconnection.
 #[derive(Clone)]
 pub(super) struct WorkAdmission {
+    refused: Arc<AdmissionRefusals>,
     waits: Arc<Semaphore>,
     ordinary: Arc<Semaphore>,
     control: Arc<Semaphore>,
@@ -38,8 +73,13 @@ pub(super) struct WorkAdmission {
     memory_observation: Arc<Semaphore>,
 }
 impl WorkAdmission {
+    #[cfg(test)]
     pub(super) fn new() -> Self {
+        Self::with_refusals(Arc::default())
+    }
+    fn with_refusals(refused: Arc<AdmissionRefusals>) -> Self {
         Self {
+            refused,
             waits: Arc::new(Semaphore::new(MAX_WAIT_WORK)),
             ordinary: Arc::new(Semaphore::new(MAX_IPC_WORK)),
             control: Arc::new(Semaphore::new(MAX_CONTROL_WORK)),
@@ -51,24 +91,27 @@ impl WorkAdmission {
         matches!(command, Command::Wait(_) | Command::EventsWait(_))
     }
     pub(super) fn try_acquire(&self, command: &Command) -> Result<OwnedSemaphorePermit, ApiError> {
-        let slots = match command {
+        let (slots, refused) = match command {
             Command::RunStop(_) | Command::ShellStop(_) | Command::OwnerShutdown(_) => {
-                &self.control
+                (&self.control, &self.refused.stop)
             }
-            Command::Status(args) if args.memory => &self.memory_observation,
-            Command::Status(_) => &self.observation,
-            command if Self::is_wait(command) => &self.waits,
-            _ => &self.ordinary,
+            Command::Status(args) if args.memory => {
+                (&self.memory_observation, &self.refused.memory)
+            }
+            Command::Status(_) => (&self.observation, &self.refused.status),
+            command if Self::is_wait(command) => (&self.waits, &self.refused.waits),
+            _ => (&self.ordinary, &self.refused.ordinary),
         };
         slots.clone().try_acquire_owned().map_err(|_| {
+            let _ = refused.try_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_add(1));
             ApiError::new(ErrorCode::InvalidState,"Local IPC work capacity is busy; this request was not accepted")
                 .hint("Wait for pending work to complete, then retry with the same operation ID. Use shellboy status to observe work or stop the intended Run")
                 .details(serde_json::json!({"phase":"admission","request_may_have_been_applied":false}))
         })
     }
 }
-const ACCEPT_BACKOFF: Duration = Duration::from_millis(50);
-const MAX_ACCEPT_BACKOFF: Duration = Duration::from_secs(1);
+pub(super) const ACCEPT_BACKOFF: Duration = Duration::from_millis(50);
+pub(super) const MAX_ACCEPT_BACKOFF: Duration = Duration::from_secs(1);
 
 trait Acceptor: Send + 'static {
     type Stream: AsyncRead + AsyncWrite + Unpin + Send + 'static;
@@ -241,10 +284,10 @@ async fn accept_connections<A: Acceptor>(
     stop: TransportStop,
     files: EndpointFiles,
     failure: watch::Sender<Option<ApiError>>,
+    work: WorkAdmission,
 ) -> Result<(), ApiError> {
     let listener_closed = stop.listener_closed.clone().drop_guard();
     let mut clients = JoinSet::new();
-    let work = WorkAdmission::new();
     let mut backoff = ACCEPT_BACKOFF;
     let result = loop {
         tokio::select! {
@@ -330,7 +373,13 @@ impl LocalServer {
             let _ = files.cleanup().await;
             return Err(startup_context(error));
         }
-        Ok(Self::start(listener, instance, requests, files))
+        Ok(Self::start(
+            listener,
+            instance,
+            requests,
+            files,
+            owner.ipc_refusals.clone(),
+        ))
     }
 
     fn start<A: Acceptor>(
@@ -338,6 +387,7 @@ impl LocalServer {
         instance: String,
         requests: mpsc::Sender<Invocation>,
         files: EndpointFiles,
+        refused: Arc<AdmissionRefusals>,
     ) -> Self {
         let stop = TransportStop::default();
         let token = stop.clone();
@@ -349,6 +399,7 @@ impl LocalServer {
             token,
             files,
             failure_send,
+            WorkAdmission::with_refusals(refused),
         ));
         Self {
             stop,
