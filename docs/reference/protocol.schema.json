@@ -10540,6 +10540,22 @@
     "WaitResult": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
+        "admission_refusals": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "admission_wait_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "cursor": {
           "type": [
             "string",
@@ -12739,6 +12755,22 @@
     "wait": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
+        "admission_refusals": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "admission_wait_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "cursor": {
           "type": [
             "string",

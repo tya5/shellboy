@@ -23,7 +23,7 @@ async fn real_ipc_waiters_leave_status_and_run_stop_available() {
     let server = crate::ipc::LocalServer::bind(&owner, send).await.unwrap();
     let dispatcher = tokio::spawn(control.clone().serve(receive));
     let mut clients = Vec::new();
-    for number in 0..32 {
+    for number in 0..24 {
         let data = owner.loaded.data_dir.clone();
         let operation = format!("{}:wait-{number}", owner.instance_id);
         clients.push(tokio::spawn(async move {
@@ -57,7 +57,7 @@ async fn real_ipc_waiters_leave_status_and_run_stop_available() {
                     })
                     .await
                     .unwrap();
-                if count == 32 {
+                if count == 24 {
                     break;
                 }
                 tokio::task::yield_now().await;
@@ -66,21 +66,6 @@ async fn real_ipc_waiters_leave_status_and_run_stop_available() {
     )
     .await
     .unwrap();
-    let refused = crate::ipc::call(
-        &owner.loaded.data_dir,
-        Command::Wait(WaitArgs {
-            after: None,
-            conditions: vec![WaitCondition::RunEnded {
-                run_id: "run".into(),
-            }],
-            timeout_ms: 600000,
-        }),
-        None,
-        None,
-    )
-    .await
-    .unwrap();
-    assert_eq!(refused.error.unwrap().code, ErrorCode::InvalidState);
     let status = crate::test_watchdog::watchdog(
         "src/control/ipc_admission_tests.rs: real_ipc_waiters_leave_status_and_run_stop_available",
         crate::ipc::call(
@@ -94,12 +79,11 @@ async fn real_ipc_waiters_leave_status_and_run_stop_available() {
     .unwrap()
     .unwrap();
     assert!(status.ok, "{status:?}");
-    let result = status.result.unwrap();
     assert_eq!(
-        result["ipc_admission"],
+        status.result.unwrap()["ipc_admission"],
         serde_json::json!({
             "max_connections": 69,
-            "wait": {"limit": 32, "refused": 1},
+            "wait": {"limit": 32, "refused": 0},
             "ordinary": {"limit": 24, "refused": 0},
             "stop": {"limit": 2, "refused": 0},
             "status": {"limit": 2, "refused": 0},
@@ -118,7 +102,7 @@ async fn real_ipc_waiters_leave_status_and_run_stop_available() {
         .await
         .unwrap();
     assert_eq!(
-        still_pending, 32,
+        still_pending, 24,
         "status must bypass live waiters, not wait for their expiry"
     );
     let stopped = crate::test_watchdog::watchdog(

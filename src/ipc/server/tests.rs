@@ -146,6 +146,52 @@ impl Fixture {
     }
 }
 
+#[tokio::test(start_paused = true)]
+async fn cli_wait_retries_only_definite_admission_refusals_until_deadline() {
+    use crate::protocol::{WaitArgs, WaitCondition};
+    use serde_json::json;
+    let args = WaitArgs {
+        conditions: vec![WaitCondition::RunEnded {
+            run_id: "run".into(),
+        }],
+        timeout_ms: 2350,
+        after: None,
+    };
+    let mut attempts = Vec::new();
+    let response = super::super::retry_cli_wait(args.clone(), "fixture:wait", |args| {
+        attempts.push(args.timeout_ms);
+        std::future::ready(Ok(Response::failure(
+            "fixture:wait",
+            ApiError::new(ErrorCode::InvalidState, "busy")
+                .details(json!({"phase": "admission", "request_may_have_been_applied": false})),
+        )))
+    })
+    .await
+    .unwrap();
+    assert_eq!(attempts, [2350, 2300, 2200, 2000, 1600, 800]);
+    assert_eq!(response.operation_id, "fixture:wait");
+    let result = response.result.unwrap();
+    assert_eq!(result["status"], "timeout");
+    assert_eq!(result["admission_wait_ms"], 2350);
+    assert_eq!(result["admission_refusals"], 6);
+
+    for code in [ErrorCode::InvalidState, ErrorCode::IoFailed] {
+        let mut attempts = 0;
+        let response = super::super::retry_cli_wait(args.clone(), "fixture:wait", |_| {
+            attempts += 1;
+            std::future::ready(Ok(Response::failure(
+                "fixture:wait",
+                ApiError::new(code.clone(), "not a definite admission refusal")
+                    .details(json!({"phase": "admission", "request_may_have_been_applied": true})),
+            )))
+        })
+        .await
+        .unwrap();
+        assert_eq!(attempts, 1);
+        assert_eq!(response.error.unwrap().code, code);
+    }
+}
+
 #[tokio::test]
 async fn parked_waits_leave_ordinary_and_stop_admission_available() {
     use crate::protocol::{
@@ -256,6 +302,7 @@ async fn refused_wait_frame_survives_native_pipe_close() {
         include_reasoning_activity: false,
     });
     let work = WorkAdmission::new();
+    let refusals = work.refused.clone();
     let _held: Vec<_> = (0..MAX_WAIT_WORK)
         .map(|_| work.try_acquire(&command).unwrap())
         .collect();
@@ -282,6 +329,8 @@ async fn refused_wait_frame_survives_native_pipe_close() {
     .unwrap();
     let error = response.error.unwrap();
     assert_eq!(error.code, ErrorCode::InvalidState);
+    assert_eq!(refusals.snapshot().wait.refused, 1);
+    assert_eq!(refusals.snapshot().ordinary.refused, 0);
     let details = error.details.unwrap();
     assert_eq!(details["phase"], "admission");
     assert_eq!(details["request_may_have_been_applied"], false);
