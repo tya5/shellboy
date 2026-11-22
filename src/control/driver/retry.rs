@@ -124,7 +124,7 @@ pub(super) async fn retry_or_recover(
     decision: model::request_path::FailureDecision,
     budget: &mut RetryBudget,
     overflow: &mut OverflowBudget,
-    proactive_job: &mut Option<super::proactive::BackgroundJob>,
+    proactive_job: &mut super::proactive::ThreadJob,
     boundary_guard: &mut crate::compaction::boundary::Boundary<'_>,
     partial_attempts: Vec<String>,
 ) -> Result<(), ApiError> {
@@ -158,19 +158,16 @@ pub(super) async fn retry_or_recover(
     let mut trim_not_applied = None;
     let mut proactive_adopted = false;
     // Join already-admitted compaction even when there is no slot to rebuild.
-    if failure.error.is_context_limit() && proactive_job.is_some() {
-        let waited = {
-            let job = proactive_job
-                .as_mut()
-                .expect("context-limit path observed a proactive job");
-            boundary_guard.pause(&slot.stop, job.join()).await
-        };
+    if failure.error.is_context_limit()
+        && let super::proactive::ThreadJob::Retained(job) = proactive_job
+    {
+        let waited = boundary_guard.pause(&slot.stop, job.join()).await;
         let joined = match waited {
             Ok(joined) => joined,
             Err(_) if slot.stop.is_cancelled() => return Ok(()),
             Err(_) => return Err(invalid("proactive summary boundary wait cancelled")),
         };
-        proactive_job.take();
+        *proactive_job = super::proactive::ThreadJob::Idle;
         match joined {
             Ok(Ok(super::proactive::ProactiveOutcome::Finished { path_changed: true })) => {
                 proactive_adopted = true;

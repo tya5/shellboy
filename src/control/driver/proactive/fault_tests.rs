@@ -72,7 +72,7 @@ async fn wait_for_run_b_provider_request(wait: &mut RunBWaitContext<'_>) -> Inco
                 _=>{},
             },
             _=&mut notified=>{
-                let finished={let job=slot.proactive_job.lock().await;job.as_ref().is_some_and(crate::control::driver::proactive::BackgroundJob::is_finished)};
+                let finished={let job=slot.proactive_job.lock().await;job.retained().is_some_and(crate::control::driver::proactive::BackgroundJob::is_finished)};
                 if finished { panic!("retained proactive job finished before Run B provider body; Thread={thread} Run={run}"); }
             }
         }
@@ -443,8 +443,8 @@ async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_b
             Some((
                 slot.run_id.clone(),
                 slot.driver_active.load(Ordering::Acquire),
-                job.is_some(),
-                job.as_ref().is_some_and(crate::control::driver::proactive::BackgroundJob::is_finished),
+                job.retained().is_some(),
+                job.retained().is_some_and(crate::control::driver::proactive::BackgroundJob::is_finished),
             ))
         } else {
             None
@@ -642,7 +642,7 @@ async fn deleting_a_naturally_idle_thread_cancels_and_joins_its_retained_summary
         let job_arc = slot.proactive_job.clone();
         let cancel = {
             let job = job_arc.lock().await;
-            job.as_ref()
+            job.retained()
                 .expect("the retained summary has one job handle")
                 .cancel
                 .clone()
@@ -686,7 +686,10 @@ async fn deleting_a_naturally_idle_thread_cancels_and_joins_its_retained_summary
             "committed delete cancels the Thread-owned provider job"
         );
         assert!(
-            job_arc.lock().await.is_none(),
+            matches!(
+                *job_arc.lock().await,
+                crate::control::driver::proactive::ThreadJob::Idle
+            ),
             "delete effect joins and takes the job exactly once"
         );
         assert!(
@@ -750,7 +753,7 @@ async fn committed_thread_delete_cancels_and_joins_idle_thread_job_once() {
             Ok(crate::control::driver::proactive::ProactiveOutcome::NotStarted)
         });
         let job_arc = slot.proactive_job.clone();
-        *job_arc.lock().await = Some(
+        *job_arc.lock().await = crate::control::driver::proactive::ThreadJob::Retained(
             crate::control::driver::proactive::BackgroundJob::test_started(cancel.clone(), task),
         );
         assert!(
@@ -782,7 +785,10 @@ async fn committed_thread_delete_cancels_and_joins_idle_thread_job_once() {
             "delete effect joins the job before returning"
         );
         assert!(
-            job_arc.lock().await.is_none(),
+            matches!(
+                *job_arc.lock().await,
+                crate::control::driver::proactive::ThreadJob::Idle
+            ),
             "job handle is taken exactly once"
         );
         assert!(
@@ -3425,8 +3431,8 @@ async fn admission_boundary_facts(control: &Control, thread: &str) -> AdmissionB
     let (job_exists, job_finished) = if let Some(slot) = slot.as_ref() {
         let job = slot.proactive_job.lock().await;
         (
-            job.is_some(),
-            job.as_ref()
+            job.retained().is_some(),
+            job.retained()
                 .is_some_and(crate::control::driver::proactive::BackgroundJob::is_finished),
         )
     } else {
@@ -3491,7 +3497,7 @@ async fn next_held_fixture_event_with_completion(
         tokio::pin!(notified);
         let finished = {
             let job = slot.proactive_job.lock().await;
-            job.as_ref()
+            job.retained()
                 .is_some_and(crate::control::driver::proactive::BackgroundJob::is_finished)
         };
         if finished {
@@ -3524,7 +3530,7 @@ async fn next_held_fixture_event_with_completion(
             _ = &mut notified => {
                 let finished = {
                     let job = slot.proactive_job.lock().await;
-                    job.as_ref().is_some_and(crate::control::driver::proactive::BackgroundJob::is_finished)
+                    job.retained().is_some_and(crate::control::driver::proactive::BackgroundJob::is_finished)
                 };
                 if finished {
                     if let Some(identity) = identity {

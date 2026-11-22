@@ -195,6 +195,50 @@ impl BackgroundJob {
     }
 }
 
+/// The per-Thread DriverSlot's one record of its automatic-compaction job.
+/// `Joining`: a canceller took the handle and awaits it outside the slot lock;
+/// it alone returns the slot to `Idle`, then wakes `proactive_join_done`.
+#[derive(Default)]
+pub(in crate::control) enum ThreadJob {
+    #[default]
+    Idle,
+    Retained(BackgroundJob),
+    Joining,
+}
+impl ThreadJob {
+    pub(in crate::control) fn retained(&self) -> Option<&BackgroundJob> {
+        match self {
+            Self::Retained(job) => Some(job),
+            _ => None,
+        }
+    }
+
+    /// Take a retained handle and publish that the caller owns its join.
+    pub(in crate::control) fn claim_join(&mut self) -> Option<BackgroundJob> {
+        match std::mem::take(self) {
+            Self::Retained(job) => {
+                *self = Self::Joining;
+                Some(job)
+            }
+            other => {
+                *self = other;
+                None
+            }
+        }
+    }
+
+    /// A finished handle joins without waiting, so it leaves `Idle` directly.
+    pub(in crate::control) fn take_finished(&mut self) -> Option<BackgroundJob> {
+        if !self.retained().is_some_and(BackgroundJob::is_finished) {
+            return None;
+        }
+        match std::mem::take(self) {
+            Self::Retained(job) => Some(job),
+            _ => None,
+        }
+    }
+}
+
 fn terminal_attempt_outcome(
     result: &Result<crate::compaction::CompactResult, ApiError>,
     no_target: bool,

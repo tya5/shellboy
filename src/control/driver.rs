@@ -177,7 +177,7 @@ async fn drive_inner(
             tokio::pin!(join_notified);
             join_notified.as_mut().enable();
             let mut job = slot.proactive_job.lock().await;
-            if slot.proactive_joining.load(Ordering::Acquire) {
+            if matches!(*job, proactive::ThreadJob::Joining) {
                 drop(job);
                 drop(boundary_guard);
                 tokio::select! {
@@ -186,14 +186,7 @@ async fn drive_inner(
                 }
                 continue;
             }
-            if job
-                .as_ref()
-                .is_some_and(proactive::BackgroundJob::is_finished)
-            {
-                job.take()
-            } else {
-                None
-            }
+            job.take_finished()
         };
         if let Some(mut job) = completed_job {
             let joined = job.join().await;
@@ -248,7 +241,7 @@ async fn drive_inner(
         tokio::pin!(join_notified);
         join_notified.as_mut().enable();
         let mut jobs = slot.proactive_job.lock().await;
-        if slot.proactive_joining.load(Ordering::Acquire) {
+        if matches!(*jobs, proactive::ThreadJob::Joining) {
             drop(jobs);
             drop(boundary_guard);
             tokio::select! {
@@ -258,7 +251,7 @@ async fn drive_inner(
             }
             continue;
         }
-        if jobs.is_none()
+        if matches!(*jobs, proactive::ThreadJob::Idle)
             && let Some(plan) = proactive::preflight(&control, &snapshot).await?
         {
             drop(boundary_guard);
@@ -270,11 +263,10 @@ async fn drive_inner(
                 slot.stop.clone(),
                 plan,
             );
-            *jobs = Some(job);
-            jobs.as_mut()
-                .expect("published Thread job")
-                .wait_started()
-                .await?;
+            *jobs = proactive::ThreadJob::Retained(job);
+            if let proactive::ThreadJob::Retained(job) = &mut *jobs {
+                job.wait_started().await?;
+            }
             drop(jobs);
             boundary_guard = tokio::select! {biased;
                 _=slot.stop.cancelled()=>return drain_and_stop(&control,&slot.run_id,Some(&thread)).await,

@@ -439,8 +439,7 @@ async fn terminal_provider_failure_through_retry_persists_one_transition_time() 
         turn: Arc::new(tokio::sync::Mutex::new(None)),
 
         driver_active: Arc::new(AtomicBool::new(true)),
-        proactive_job: Arc::new(tokio::sync::Mutex::new(None)),
-        proactive_joining: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        proactive_job: Arc::default(),
         proactive_join_done: Arc::new(tokio::sync::Notify::new()),
     };
     let mut failure: model::http::AttemptFailure =
@@ -474,7 +473,7 @@ async fn terminal_provider_failure_through_retry_persists_one_transition_time() 
         },
         &mut retry::RetryBudget::default(),
         &mut OverflowBudget::default(),
-        &mut None,
+        &mut Default::default(),
         &mut crate::compaction::boundary::Boundary::new(&mutex, mutex.lock().await),
         Vec::new(),
     )
@@ -522,8 +521,7 @@ async fn capacity_failure_through_drive_persists_one_transition_time() {
         turn: Arc::new(tokio::sync::Mutex::new(None)),
 
         driver_active: Arc::new(AtomicBool::new(true)),
-        proactive_job: Arc::new(tokio::sync::Mutex::new(None)),
-        proactive_joining: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        proactive_job: Arc::default(),
         proactive_join_done: Arc::new(tokio::sync::Notify::new()),
     };
     let error = drive(control.clone(), accepted.thread_id, slot)
@@ -563,8 +561,7 @@ async fn low_disk_holds_the_turn_and_explicit_retry_resumes_after_space_returns(
         turn: Arc::new(tokio::sync::Mutex::new(None)),
 
         driver_active: Arc::new(AtomicBool::new(true)),
-        proactive_job: Arc::new(tokio::sync::Mutex::new(None)),
-        proactive_joining: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        proactive_job: Arc::default(),
         proactive_join_done: Arc::new(tokio::sync::Notify::new()),
     };
     let error = drive(control.clone(), accepted.thread_id.clone(), slot)

@@ -108,8 +108,7 @@ struct DriverSlot {
     foreground: Arc<ForegroundSlot>,
     turn: Arc<Mutex<Option<turn_interrupt::TurnBinding>>>,
     driver_active: Arc<AtomicBool>,
-    proactive_job: Arc<Mutex<Option<driver::proactive::BackgroundJob>>>,
-    proactive_joining: Arc<AtomicBool>,
+    proactive_job: Arc<Mutex<driver::proactive::ThreadJob>>,
     proactive_join_done: Arc<Notify>,
 }
 #[cfg(test)]
@@ -123,8 +122,7 @@ impl Default for DriverSlot {
             foreground: Arc::new(ForegroundSlot::default()),
             turn: Arc::new(Mutex::new(None)),
             driver_active: Arc::new(AtomicBool::new(true)),
-            proactive_job: Arc::new(Mutex::new(None)),
-            proactive_joining: Arc::new(AtomicBool::new(false)),
+            proactive_job: Arc::default(),
             proactive_join_done: Arc::new(Notify::new()),
         }
     }
