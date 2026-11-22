@@ -95,7 +95,8 @@ async fn list(
 ) -> Result<Page<Value>, ApiError> {
     run(
         store,
-        Command::ThreadList(ThreadListArgs { order: Default::default(),
+        Command::ThreadList(ThreadListArgs {
+            order: Default::default(),
             limit,
             cursor,
             query: None,
@@ -416,7 +417,8 @@ async fn archived_threads_stay_readable_countable_and_can_receive_messages() {
     // The filter still finds it when archived Threads are included.
     let found = run(
         &store,
-        Command::ThreadList(ThreadListArgs { order: Default::default(),
+        Command::ThreadList(ThreadListArgs {
+            order: Default::default(),
             limit: 10,
             cursor: None,
             query: Some(child.clone()),

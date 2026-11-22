@@ -476,7 +476,8 @@ async fn receipt_capacity_rejection_does_not_stop_owner_or_block_internal_gc_and
     let list = control
         .request(request(
             &control.store.instance_id,
-            Command::ThreadList(ThreadListArgs { order: Default::default(),
+            Command::ThreadList(ThreadListArgs {
+                order: Default::default(),
                 limit: 50,
                 cursor: None,
                 query: None,
@@ -531,7 +532,8 @@ async fn measure_current_instance_receipt_sizes() {
         ),
         (
             "thread.list (one thread)",
-            Command::ThreadList(ThreadListArgs { order: Default::default(),
+            Command::ThreadList(ThreadListArgs {
+                order: Default::default(),
                 limit: 50,
                 cursor: None,
                 query: None,
@@ -783,7 +785,8 @@ async fn full_receipt_budget_keeps_replay_status_gc_and_explicit_owner_restart_a
         control
             .request(request(
                 &control.store.instance_id,
-                Command::ThreadList(ThreadListArgs { order: Default::default(),
+                Command::ThreadList(ThreadListArgs {
+                    order: Default::default(),
                     limit: 50,
                     cursor: None,
                     query: None,

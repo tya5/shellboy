@@ -60,7 +60,8 @@ async fn list(
     serde_json::from_value(
         execute(
             store,
-            Command::ThreadList(ThreadListArgs { order: Default::default(),
+            Command::ThreadList(ThreadListArgs {
+                order: Default::default(),
                 limit,
                 cursor,
                 query: query.map(Into::into),
@@ -357,7 +358,8 @@ async fn displayed_title_search_paginates_matches_and_retains_query_watermark() 
     }));
     let changed = store
         .execute(
-            request(Command::ThreadList(ThreadListArgs { order: Default::default(),
+            request(Command::ThreadList(ThreadListArgs {
+                order: Default::default(),
                 limit: 2,
                 cursor: first.next_cursor,
                 query: Some("changed".into()),

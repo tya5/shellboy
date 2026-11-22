@@ -157,7 +157,8 @@ impl Session {
             self.deadline,
             ipc::call(
                 &self.data,
-                Command::ThreadList(ThreadListArgs { order: Default::default(),
+                Command::ThreadList(ThreadListArgs {
+                    order: Default::default(),
                     limit: 1,
                     cursor: None,
                     query: None,

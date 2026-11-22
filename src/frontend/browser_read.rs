@@ -283,7 +283,8 @@ mod tests {
         );
         let page = crate::control::db::thread_list(
             &db,
-            &crate::protocol::ThreadListArgs { order: Default::default(),
+            &crate::protocol::ThreadListArgs {
+                order: Default::default(),
                 query: None,
                 cursor: None,
                 limit: 50,

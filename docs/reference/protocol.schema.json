@@ -8764,6 +8764,9 @@
           "minimum": 0,
           "type": "integer"
         },
+        "order": {
+          "$ref": "#/definitions/ThreadListOrder"
+        },
         "query": {
           "default": null,
           "type": [
@@ -8779,6 +8782,14 @@
         }
       },
       "type": "object"
+    },
+    "ThreadListOrder": {
+      "description": "Ordering of the Thread list's unfiltered or archive-filtered rows.",
+      "enum": [
+        "updated",
+        "created"
+      ],
+      "type": "string"
     },
     "ThreadPruneArgs": {
       "additionalProperties": false,
@@ -8973,6 +8984,12 @@
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
+        },
+        "created_at": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "cwd": {
           "type": "string"

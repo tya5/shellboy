@@ -59,9 +59,14 @@ impl ThreadListArgs {
         optional_nonempty(self.cursor.as_deref(), "cursor")?;
         optional_nonempty(self.cwd.as_deref(), "cwd")?;
         if self.order == ThreadListOrder::Created
-            && (self.query.is_some() || !self.tags.is_empty() || self.cwd.is_some() || self.awaiting.is_some())
+            && (self.query.is_some()
+                || !self.tags.is_empty()
+                || self.cwd.is_some()
+                || self.awaiting.is_some())
         {
-            return Err(invalid("order=created cannot be combined with query, tags, cwd, or awaiting"));
+            return Err(invalid(
+                "order=created cannot be combined with query, tags, cwd, or awaiting",
+            ));
         }
         if self
             .awaiting

@@ -694,7 +694,8 @@ mod tests {
         loop {
             let page = crate::control::db::thread_list(
                 &db,
-                &crate::protocol::ThreadListArgs { order: Default::default(),
+                &crate::protocol::ThreadListArgs {
+                    order: Default::default(),
                     limit: 50,
                     cursor: cursor.clone(),
                     query: None,

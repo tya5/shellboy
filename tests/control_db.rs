@@ -653,7 +653,8 @@ async fn list_watermark_and_query_cursor_are_bounded_and_filter_bound() {
     }
     let first = execute(
         &store,
-        Command::ThreadList(ThreadListArgs { order: Default::default(),
+        Command::ThreadList(ThreadListArgs {
+            order: Default::default(),
             limit: 1,
             cursor: None,
             query: None,
@@ -669,7 +670,8 @@ async fn list_watermark_and_query_cursor_are_bounded_and_filter_bound() {
     create(&store, None).await;
     let second = execute(
         &store,
-        Command::ThreadList(ThreadListArgs { order: Default::default(),
+        Command::ThreadList(ThreadListArgs {
+            order: Default::default(),
             limit: 200,
             cursor: first.next_cursor.clone(),
             query: None,
@@ -688,7 +690,8 @@ async fn list_watermark_and_query_cursor_are_bounded_and_filter_bound() {
     );
     let wrong = store
         .execute(
-            request(Command::ThreadList(ThreadListArgs { order: Default::default(),
+            request(Command::ThreadList(ThreadListArgs {
+                order: Default::default(),
                 limit: 1,
                 cursor: first.next_cursor,
                 query: Some("changed".into()),
@@ -771,7 +774,8 @@ async fn thread_list_awaiting_human_pages_only_human_waits_with_oldest_timestamp
         .unwrap();
     let first = execute(
         &store,
-        Command::ThreadList(ThreadListArgs { order: Default::default(),
+        Command::ThreadList(ThreadListArgs {
+            order: Default::default(),
             limit: 1,
             cursor: None,
             query: None,
@@ -804,7 +808,8 @@ async fn thread_list_awaiting_human_pages_only_human_waits_with_oldest_timestamp
     assert!(first.next_cursor.is_none());
     let all = execute(
         &store,
-        Command::ThreadList(ThreadListArgs { order: Default::default(),
+        Command::ThreadList(ThreadListArgs {
+            order: Default::default(),
             limit: 20,
             cursor: None,
             query: None,

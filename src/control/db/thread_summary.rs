@@ -206,13 +206,18 @@ pub(super) fn created_page_sql(mode: ArchivedFilter, after: Option<&Option<Strin
         Some(Some(_)) => &["AND (created_at,id) < (?2,?3)", "AND created_at IS NULL"],
         Some(None) => &["AND created_at IS NULL AND id < ?3"],
     };
-    let legs: Vec<_> = partitions.iter().flat_map(|archived| {
-        ranges.iter().map(move |range| format!(
-            "SELECT * FROM (SELECT id,created_at FROM thread INDEXED BY threads_created
+    let legs: Vec<_> = partitions
+        .iter()
+        .flat_map(|archived| {
+            ranges.iter().map(move |range| {
+                format!(
+                    "SELECT * FROM (SELECT id,created_at FROM thread INDEXED BY threads_created
              WHERE deleted_at IS NULL AND (archived_at IS NOT NULL)={archived} AND rowid<=?1 {range}
              ORDER BY created_at DESC,id DESC LIMIT ?4)"
-        ))
-    }).collect();
+                )
+            })
+        })
+        .collect();
     let summaries = columns_from().replacen(
         "FROM thread t ",
         "FROM page CROSS JOIN thread t ON t.id=page.id ",
