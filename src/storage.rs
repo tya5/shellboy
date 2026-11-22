@@ -2227,7 +2227,9 @@ mod schema_validation_tests {
         db.execute_batch(CURRENT_SCHEMA).unwrap();
         assert_eq!(validate_schema(&db).unwrap(), SCHEMA_VERSION);
         db.execute_batch(
-            "DROP INDEX IF EXISTS attachment_page_order; DELETE FROM schema_migration WHERE version=46;
+            "DROP INDEX threads_created;
+             ALTER TABLE thread DROP COLUMN created_at;
+             DROP INDEX IF EXISTS attachment_page_order; DELETE FROM schema_migration WHERE version=46;
              ALTER TABLE thread DROP COLUMN spill_override;
              DROP INDEX IF EXISTS attachment_page_order; DELETE FROM schema_migration WHERE version=45;
              ALTER TABLE thread DROP COLUMN max_tokens;
