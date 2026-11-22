@@ -773,9 +773,8 @@ mod tests {
             ("event-reply-admission-request", "event"),
             ("event-reply-admission-other", "message"),
         ] {
-            let body = json!({"role":"developer","content":[{"type":"input_text","text":"old duplicate"}]}).to_string();
-            tx.execute("INSERT INTO node(id,kind,turn_id,created_at,payload_json,payload_bytes) VALUES(?1,?2,'u','0',?3,length(?3))",params![id,kind,body]).unwrap();
-            tx.execute("INSERT INTO thread_path(thread_id,ordinal,node_id) SELECT 't',max(ordinal)+1,?1 FROM thread_path",[id]).unwrap();
+            let body = json!({"role":"developer","content":[{"type":"input_text","text":"old duplicate"}]});
+            crate::history::append_node(&tx, "t", id, Some("u"), kind, &body, "now").unwrap();
         }
         let notification = json!({"kind":"shell_ended","execution_id":"fixture-shell","state":"exited","exit_code":0});
         tx.execute("INSERT INTO event(id,kind,source_json,target_thread_id,payload_ref_json,created_at,semantic_json) VALUES('shell-finished','context_changed','{}','t','{}','now',?1)", [notification.to_string()]).unwrap();
