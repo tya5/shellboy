@@ -1,5 +1,6 @@
 //! Finite history mark/provenance/sweep steps in the caller transaction.
 use super::*;
+use crate::control::wait::wakes::{Key, Wakes};
 
 pub(super) fn history_step(
     db: &mut Connection,
@@ -7,6 +8,7 @@ pub(super) fn history_step(
     batch: usize,
     candidate: &std::sync::Mutex<Option<String>>,
     keep: Option<&str>,
+    wakes: &Wakes,
 ) -> Result<HistoryStep> {
     work_tables(db)?;
     let tx = db.transaction().map_err(sql_error)?;
@@ -63,9 +65,18 @@ pub(super) fn history_step(
     }
     // Keep the last candidate identified until this unit commits: a budget
     // interrupt may arrive while writing the cursor, after its work finished.
+    let mut keys = Vec::new();
     match progress.stage {
         Stage::Reset => clean_marks(&tx, job, &mut progress, &mut report, batch, candidate, keep)?,
-        Stage::Receipts => receipts_step(&tx, &mut progress, &mut report, batch, candidate, keep)?,
+        Stage::Receipts => receipts_step(
+            &tx,
+            &mut progress,
+            &mut report,
+            batch,
+            candidate,
+            keep,
+            &mut keys,
+        )?,
         Stage::Roots => roots_step(&tx, job, &mut progress, &mut report, batch, candidate, keep)?,
 
         Stage::Provenance => {
@@ -90,6 +101,7 @@ pub(super) fn history_step(
         .map_err(sql_error)?;
     }
     tx.commit().map_err(sql_error)?;
+    wakes.publish(keys);
     Ok(report)
 }
 
@@ -103,10 +115,12 @@ fn receipts_step(
     batch: usize,
     candidate: &std::sync::Mutex<Option<String>>,
     keep: Option<&str>,
+    keys: &mut Vec<Key>,
 ) -> Result<()> {
     let rows=tx.prepare("SELECT rowid,id,octet_length(sender_json)+COALESCE(octet_length(result_json),0) FROM receipt WHERE rowid>?1 AND rowid<=?2 ORDER BY rowid LIMIT ?3").map_err(sql_error)?
         .query_map(params![progress.last_rowid,progress.receipt_horizon,batch as i64],|r|Ok((r.get::<_,i64>(0)?,r.get::<_,String>(1)?,r.get::<_,i64>(2)?))) .map_err(sql_error)?.collect::<rusqlite::Result<Vec<_>>>().map_err(sql_error)?;
-    let sql = format!("DELETE FROM receipt WHERE id=?1 AND {RECEIPT_ELIGIBLE}");
+    let sql =
+        format!("DELETE FROM receipt WHERE id=?1 AND {RECEIPT_ELIGIBLE} RETURNING message_node_id");
     let at = Utc::now().to_rfc3339();
     report.candidates = rows.len() as u64;
     let mut wake_threads = std::collections::BTreeSet::new();
@@ -114,8 +128,8 @@ fn receipts_step(
         *candidate.lock().expect("history candidate") = Some(id.clone());
         // Persist recipient-deleted outcome before any payload/receipt sweep.
         // The reply state guard makes restart/replay idempotent.
-        if let Some(thread) =
-            crate::control::reply::deleted_recipient_receipt_tx(tx, id, &at).map_err(sql_error)?
+        if let Some(thread) = crate::control::reply::deleted_recipient_receipt_tx(tx, id, &at, keys)
+            .map_err(sql_error)?
         {
             wake_threads.insert(thread);
         }
@@ -124,8 +138,13 @@ fn receipts_step(
             progress.last_rowid = *rowid;
             continue;
         }
-        crate::control::reply::deleted_sender_receipt_tx(tx, id, &at).map_err(sql_error)?;
-        if tx.execute(&sql, [id]).map_err(sql_error)? == 1 {
+        crate::control::reply::deleted_sender_receipt_tx(tx, id, &at, keys).map_err(sql_error)?;
+        if let Some(message) = tx
+            .query_row(&sql, [id], |r| r.get::<_, Option<String>>(0))
+            .optional()
+            .map_err(sql_error)?
+        {
+            keys.extend(message.map(Key::Reply));
             report.bytes_collected += (*bytes).max(0) as u64;
         }
         progress.last_rowid = *rowid;

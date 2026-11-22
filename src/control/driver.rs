@@ -9,6 +9,7 @@ pub(super) mod shell_output;
 mod tools;
 mod trim;
 mod trim_observation;
+use super::wait::wakes::Key;
 use adoption::adopt_response;
 use model::request_path::{
     AttemptKind, Execution, PreparedInput, RequestCaller, RequestScope, execute_request,
@@ -665,8 +666,10 @@ async fn next_with_clients(
     let shutting_down = control.shell.start_gate();
     let wakes = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let committed_wakes = wakes.clone();
+    let wait_wakes = control.waits.keyed.clone();
     let result = control.store.database.call(move|db|{
         let tx=db.transaction()?;
+        let mut keys = Vec::new();
         let run:Option<String>=tx.query_row("SELECT id FROM run WHERE thread_id=?1 AND id=?2 AND state='live'",params![thread,run_id],|r|r.get(0)).optional()?;
         let Some(run)=run else{return Ok(Next::Done);};
         let interrupted:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM turn WHERE run_id=?1 AND state IN ('preparing','running','waiting','recovery_wait') AND interrupt_requested_at IS NOT NULL)",[&run],|r|r.get(0))?;
@@ -694,8 +697,9 @@ async fn next_with_clients(
             // During shutdown, waiting Revisit messages are handed off at the next start.
             if shutting_down.load(std::sync::atomic::Ordering::SeqCst) && super::revisit::has_pending(&tx,&thread)? { return Ok(Next::Done); }
             turn=super::revisit::release_tx(&tx,&thread,&run,&now())?;
+            if turn.is_some() { keys.push(Key::CallerInput(thread.clone())); }
             if turn.is_none() && !shutting_down.load(std::sync::atomic::Ordering::SeqCst)
-                && let Some(event)=super::reply::complete_tx(&tx,&thread,&run,&now(),&mut wakes.lock().unwrap())? {
+                && let Some(event)=super::reply::complete_tx(&tx,&thread,&run,&now(),&mut wakes.lock().unwrap(), &mut keys)? {
                 turn=Some(super::state::create_turn_tx(&tx,&thread,&run,&now(),&now())?);
                 events.push(tx.query_row("SELECT id,json_object('event_id',id,'kind',kind,'payload',json(payload_ref_json)) FROM event WHERE id=?1",[event],|r|Ok((r.get(0)?,r.get(1)?)))?);
             }
@@ -703,7 +707,10 @@ async fn next_with_clients(
                 let revision = history::selection_revision(&tx, &thread, history::ThreadScope::Live)?;
                 super::message_delivery::append_admitted_tx(&tx,&thread,revision as u64,&[],&now())?;
                 super::state::complete_idle_run(&tx, &run)?;
-                tx.commit()?;return Ok(Next::Done);
+                tx.commit()?;
+                keys.extend([super::wait::wakes::Key::Run(run), super::wait::wakes::Key::ThreadSettled(thread)]);
+                wait_wakes.publish(keys);
+                return Ok(Next::Done);
             }
         }
         let turn=turn.expect("an active or Revisit Turn was established");
@@ -733,7 +740,8 @@ async fn next_with_clients(
         if instructions_fixed { snapshot.ensure_context_tx(&tx,&now())?; }
         snapshot.selection=history::selection_revision(&tx, &thread, history::ThreadScope::Any)?;
         snapshot.input=Some(replay.load(&tx,&thread)?);
-        tx.commit()?;Ok(Next::Ready(Box::new(snapshot)))
+        tx.commit()?;
+        wait_wakes.publish(keys);Ok(Next::Ready(Box::new(snapshot)))
     }).await.map_err(storage_error);
     if result.is_ok() {
         let wakes = std::mem::take(&mut *committed_wakes.lock().unwrap());
@@ -768,6 +776,7 @@ async fn recover_preparation(
 ) -> Result<(), ApiError> {
     let target_thread = thread.clone();
     let target_run = run.clone();
+    let wait_wakes = control.waits.keyed.clone();
     let target = control.store.database.call(move |db| {
         let tx = db.transaction()?;
         let live: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM run WHERE id=?1 AND thread_id=?2 AND state='live')",params![run,thread],|row|row.get(0))?;
@@ -784,6 +793,7 @@ async fn recover_preparation(
         };
         let recovered = recover_turn_tx(&tx,&thread,&run,&turn,generation,&error)?;
         tx.commit()?;
+        if recovered { wait_wakes.publish(Key::recovery(thread, run, turn.clone())); }
         Ok(recovered.then_some(turn))
     }).await.map_err(storage_error)?;
     if let Some(turn) = target {
@@ -906,6 +916,7 @@ async fn recover_with_observation(
     }
     let thread_id = snapshot.thread.clone();
     let snapshot = snapshot.clone();
+    let wait_wakes = control.waits.keyed.clone();
     let recovered = control
         .store
         .database
@@ -932,6 +943,7 @@ async fn recover_with_observation(
                 save_received_failure(&tx, &snapshot.turn, &body)?;
             }
             tx.commit()?;
+            wait_wakes.publish(Key::recovery(snapshot.thread, snapshot.run, snapshot.turn));
             Ok(recovered)
         })
         .await
@@ -1072,17 +1084,20 @@ async fn drain_and_stop(
         notified.await;
     }
     let stopping_for_shutdown = control.stop.is_cancelled();
+    let wait_wakes = control.waits.keyed.clone();
     let wakes = control
         .store
         .database
         .call(move |db| {
             let tx = db.transaction()?;
-            super::state::stop_drained_runs(&tx, &owned, stopping_for_shutdown)?;
+            let mut keys = Vec::new();
+            super::state::stop_drained_runs(&tx, &owned, stopping_for_shutdown, &mut keys)?;
             let mut wakes = Vec::new();
             for (run, _) in &owned {
-                wakes.extend(super::reply::terminal_tx(&tx, run, &now())?);
+                wakes.extend(super::reply::terminal_tx(&tx, run, &now(), &mut keys)?);
             }
             tx.commit()?;
+            wait_wakes.publish(keys);
             Ok(wakes)
         })
         .await
@@ -1244,11 +1259,14 @@ async fn run_shell(
             {
                 control.origins.lock().await.remove(&origin.token);
                 let execution_copy = execution.clone();
+                let wait_wakes = control.waits.keyed.clone();
                 control
                     .store
                     .database
                     .call(move |db| {
-                        super::state::cancel_shell_spawn(db, &execution_copy, &now())?;
+                        if super::state::cancel_shell_spawn(db, &execution_copy, &now())? != 0 {
+                            wait_wakes.publish(Key::shell_terminal(execution_copy));
+                        }
                         Ok(())
                     })
                     .await
@@ -1268,11 +1286,14 @@ async fn run_shell(
             }
             let execution = execution.clone();
             control.origins.lock().await.remove(&origin.token);
+            let wait_wakes = control.waits.keyed.clone();
             control
                 .store
                 .database
                 .call(move |db| {
-                    super::state::fail_shell_spawn(db, &execution, &now())?;
+                    if super::state::fail_shell_spawn(db, &execution, &now())? != 0 {
+                        wait_wakes.publish(Key::shell_terminal(execution));
+                    }
                     Ok(())
                 })
                 .await
@@ -1348,11 +1369,14 @@ async fn cancel_unstarted_shell(
     execution: &str,
 ) -> Result<(Value, bool), ApiError> {
     let id = execution.to_owned();
+    let wait_wakes = control.waits.keyed.clone();
     control
         .store
         .database
         .call(move |db| {
-            super::state::cancel_shell_spawn(db, &id, &now())?;
+            if super::state::cancel_shell_spawn(db, &id, &now())? != 0 {
+                wait_wakes.publish(Key::shell_terminal(id));
+            }
             Ok(())
         })
         .await

@@ -692,7 +692,7 @@ async fn usage_limit_retry_admission_uses_one_saved_reset() {
         owner.db.call(move |db| {
             let tx = db.transaction()?;
             if case == "owner" {
-                assert!(matches!(step(&tx, at)?, Step::Admitted(id) if id == thread));
+                assert!(matches!(step(&tx, at)?, Step::Admitted(id, _) if id == thread));
             } else {
                 assert!(matches!(step(&tx, at)?, Step::Waiting(None)));
             }
@@ -705,7 +705,7 @@ async fn usage_limit_retry_admission_uses_one_saved_reset() {
                 super::super::db::resume_run_tx(&tx, (&thread, &run, &turn, generation), json!({"kind":"human"}), &at.to_rfc3339())?;
                 assert!(recover_turn_tx(&tx, &thread, &run, &turn, generation + 1, &newer)?);
                 assert!(matches!(step(&tx, at)?, Step::Waiting(Some(saved)) if saved == newer_at));
-                assert!(matches!(step(&tx, newer_at)?, Step::Admitted(id) if id == thread));
+                assert!(matches!(step(&tx, newer_at)?, Step::Admitted(id, _) if id == thread));
             }
             assert!(matches!(step(&tx, newer_at)?, Step::Waiting(None)));
             let owner_events: i64 = tx.query_row("SELECT count(*) FROM event WHERE json_extract(payload_ref_json,'$.kind')='recovery_resumed' AND json_extract(source_json,'$.kind')='owner'", [], |r| r.get(0))?;

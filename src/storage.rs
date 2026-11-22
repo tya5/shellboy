@@ -418,6 +418,7 @@ type StepLog = Arc<Mutex<Vec<(&'static str, u64, bool)>>>;
 pub(crate) const NO_PROGRESS_DEFERRALS: u32 = 2;
 
 struct Shared {
+    wait_wakes: crate::control::wait::wakes::Wakes,
     path: PathBuf,
     diagnostics: Arc<Mutex<Option<crate::diagnostics::Diagnostics>>>,
     /// Taking these senders closes admission across every clone before shutdown.
@@ -526,6 +527,10 @@ pub(crate) enum GcCompletionSubmitError {
 }
 
 impl DbWorker {
+    pub(crate) fn wait_wakes(&self) -> crate::control::wait::wakes::Wakes {
+        self.shared.wait_wakes.clone()
+    }
+
     pub(crate) fn gc_retirement_wake(&self) -> GcRetirementWake {
         GcRetirementWake {
             shared: Arc::downgrade(&self.shared),
@@ -812,6 +817,7 @@ impl DbWorker {
         }
         Ok(Self {
             shared: Arc::new(Shared {
+                wait_wakes: Default::default(),
                 path: stored_path,
                 diagnostics,
                 sender: Mutex::new(Some(Lanes {

@@ -24,6 +24,7 @@ pub(crate) fn cancel_tx(
     args: &MessageCancelArgs,
     caller: Option<&Origin>,
     at: &str,
+    keys: &mut Vec<super::wait::wakes::Key>,
 ) -> Result<(MessageCancelResult, Vec<String>), StorageError> {
     use MessageCancelOutcome::*;
     let actor = caller
@@ -92,6 +93,7 @@ pub(crate) fn cancel_tx(
         }
         if admission == "admitted" || selected || (state == "applied" && !to_human) {
             if super::reply::cancel_reply_tx(tx, &thread, message, at, &actor, !to_human)? {
+                keys.push(super::wait::wakes::Key::Reply(message.clone()));
                 item.outcome = ReplyCancelled;
                 for id in std::iter::once(thread.as_str()).chain(sender_thread) {
                     if !changed.iter().any(|changed| changed == id) {
@@ -143,8 +145,13 @@ pub(crate) fn cancel_tx(
         }
         tx.execute("INSERT INTO draft(id,thread_id,revision,body_json,state,updated_at)VALUES(?1,?2,0,?3,'archived',?4)",params![archive,thread,archived,at])?;
         tx.execute("UPDATE receipt SET state='cancelled',hold_reason=?2,updated_at=?3,result_json=json_set(COALESCE(result_json,'{}'),'$.cancellation',json(?4)) WHERE id=?1",params![receipt,if caller.is_none(){"cancelled_by_human"}else{"cancelled_by_sender"},at,json!({"actor":actor,"at":at,"archive_draft_id":archive}).to_string()])?;
-        if !reply_cancelled_before_archive {
-            super::reply::cancel_reply_tx(tx, &thread, message, at, &actor, false)?;
+        if reply_cancelled_before_archive
+            || super::reply::cancel_reply_tx(tx, &thread, message, at, &actor, false)?
+        {
+            keys.push(super::wait::wakes::Key::Reply(message.clone()));
+        }
+        if state == "accepted" {
+            keys.push(super::wait::wakes::Key::CallerInput(thread.clone()));
         }
         super::submission_retention::collect_operation(tx, &operation)?;
         item.outcome = Cancelled;

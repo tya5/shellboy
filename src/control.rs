@@ -43,7 +43,7 @@ pub(crate) mod run_action;
 pub(crate) mod state;
 #[cfg(test)]
 pub(crate) mod test_support;
-mod wait;
+pub(crate) mod wait;
 
 use crate::{
     app::{DataOwner, storage_error},
@@ -174,8 +174,6 @@ pub struct Control {
     changed: Arc<Notify>,
     change_clock: Arc<change_clock::ChangeClock>,
     /// Wakes only `events.wait` calls that asked for text; everything else sleeps through deltas.
-    text_changed: Notify,
-    shell_output_changed: Notify,
     stop: CancellationToken,
     diagnostics: crate::diagnostics::Diagnostics,
     storage_failed: AtomicBool,
@@ -190,9 +188,6 @@ pub struct Control {
 struct RequestGuard {
     control: Arc<Control>,
     changes_context: bool,
-    /// False for `events.wait`: it saves nothing, so its completion has no news for a `wait`,
-    /// and a client looping it would otherwise re-observe every parked `wait` per reply.
-    completion_wakes_waits: bool,
 }
 impl Drop for RequestGuard {
     fn drop(&mut self) {
@@ -205,7 +200,7 @@ impl Drop for RequestGuard {
         if self.changes_context {
             self.control.context_requests.fetch_sub(1, Ordering::SeqCst);
         }
-        if self.completion_wakes_waits || self.control.admission_closed.load(Ordering::SeqCst) {
+        if self.control.admission_closed.load(Ordering::SeqCst) {
             self.control.changed.notify_waiters();
         }
     }
@@ -241,7 +236,7 @@ async fn maintenance_loop(
             refresh_usage_due = false;
             match usage_limit_retry::drive(&owner).await {
                 Ok(usage_limit_retry::Step::Waiting(next)) => usage_due = next,
-                Ok(usage_limit_retry::Step::Admitted(thread)) => {
+                Ok(usage_limit_retry::Step::Admitted(thread, _)) => {
                     owner.changed(&thread);
                     owner.kick_quiet(thread).await;
                     usage_due = Some(chrono::Utc::now());
@@ -324,12 +319,14 @@ async fn maintenance_loop(
                     crate::storage::BackgroundRequester::new(strong.store.database.clone())
                 });
                 let after = reply_cursor.clone();
+                let wait_wakes = strong.waits.keyed.clone();
                 match requester
                     .unit(std::num::NonZeroU32::new(128).unwrap(), move |db, _| {
                         let tx = db.transaction()?;
-                        let batch =
+                        let mut batch =
                             reply::terminal_batch_tx(&tx, after, &chrono::Utc::now().to_rfc3339())?;
                         tx.commit()?;
+                        wait_wakes.publish(std::mem::take(&mut batch.keys));
                         Ok(batch)
                     })
                     .await
@@ -461,6 +458,7 @@ impl Control {
             attachments.clone(),
         ));
         let instructions = store.instructions.clone();
+        let waits = wait::WaitRegistry::new(store.database.wait_wakes());
         Arc::new(Self {
             #[cfg(test)]
             memory_samples: AtomicUsize::new(0),
@@ -487,24 +485,20 @@ impl Control {
             events,
             ui_events: ui_events::UiEvents::new(),
             changed: Arc::new(Notify::new()),
-            change_clock: Arc::new(change_clock::ChangeClock::new()),
-            text_changed: Notify::new(),
-            shell_output_changed: Notify::new(),
+            change_clock: Arc::new(change_clock::ChangeClock::new(waits.keyed.clone())),
             stop: owner_lifetime,
             diagnostics: owner.diagnostics.clone(),
             storage_failed: AtomicBool::new(false),
             active_requests: AtomicUsize::new(0),
             context_requests: AtomicUsize::new(0),
             admission_closed: AtomicBool::new(false),
-            waits: wait::WaitRegistry::default(),
+            waits,
             runtime_operations: Mutex::new(HashMap::new()),
             config_write: Arc::new(Mutex::new(())),
         })
     }
     fn admit_request(self: &Arc<Self>, command: &Command) -> Result<RequestGuard, ApiError> {
-        let mut guard = self.admit(command.changes_context())?;
-        guard.completion_wakes_waits = !matches!(command, Command::EventsWait(_));
-        Ok(guard)
+        self.admit(command.changes_context())
     }
     fn admit(self: &Arc<Self>, changes_context: bool) -> Result<RequestGuard, ApiError> {
         // Close and the context count share a SeqCst order: either this guard is
@@ -523,7 +517,6 @@ impl Control {
         let guard = RequestGuard {
             control: self.clone(),
             changes_context,
-            completion_wakes_waits: true,
         };
         if self.stop.is_cancelled() || self.admission_closed.load(Ordering::SeqCst) {
             drop(guard);
@@ -619,7 +612,6 @@ impl Control {
             reasoning,
             stream_char_offset,
         });
-        self.text_changed.notify_waiters();
     }
 
     /// This task never waits for a model or owned shell to finish. Individual
@@ -2157,8 +2149,10 @@ impl Control {
     pub(crate) fn saved_observation_hint(&self) -> &Notify {
         &self.changed
     }
-    pub(crate) fn shell_output_notification(&self) -> &Notify {
-        &self.shell_output_changed
+    pub(crate) fn display_output_subscription(&self) -> wait::wakes::Subscription {
+        self.waits
+            .keyed
+            .subscribe([wait::wakes::Key::DisplayOutput])
     }
     pub(crate) async fn committed_watch_output_markers(
         &self,

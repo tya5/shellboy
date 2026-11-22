@@ -571,15 +571,28 @@ impl Control {
         }
         let deadline = tokio::time::Instant::now()
             .checked_add(std::time::Duration::from_millis(args.timeout_ms));
+        use super::wait::wakes::Key;
+        let threads: Vec<_> = if args.thread_ids.is_empty() {
+            vec![None]
+        } else {
+            args.thread_ids.iter().cloned().map(Some).collect()
+        };
+        let mut keys = vec![Key::Config];
+        for thread in threads {
+            keys.push(Key::Changed(thread.clone()));
+            if include_text {
+                keys.extend([Key::Live(thread.clone()), Key::AttemptEnd(thread.clone())]);
+            }
+            if include_reasoning_activity {
+                keys.push(Key::Reasoning(thread));
+            }
+        }
+        let subscription = self.waits.keyed.subscribe(keys);
+        subscription.cursor(after.seq, include_text);
         loop {
-            let notified = self.changed.notified();
+            let notified = subscription.notify.notified();
             tokio::pin!(notified);
             notified.as_mut().enable();
-            let text_notified = self.text_changed.notified();
-            tokio::pin!(text_notified);
-            if include_text || include_reasoning_activity {
-                text_notified.as_mut().enable();
-            }
             match self.change_clock.poll(
                 after.seq,
                 &args.thread_ids,
@@ -670,7 +683,6 @@ impl Control {
             }
             tokio::select! {
                 _ = &mut notified => {}
-                _ = &mut text_notified, if include_text || include_reasoning_activity => {}
                 _ = async { match deadline { Some(at) => tokio::time::sleep_until(at).await, None => std::future::pending().await } } => {}
             }
         }
@@ -830,16 +842,20 @@ impl Control {
         spawned: bool,
     ) -> Result<(bool, bool), ApiError> {
         let execution = execution.to_owned();
+        let wait_wakes = self.waits.keyed.clone();
         let (stop,eof,thread) = self.store.database.call(move |db| {
             let tx = db.transaction()?;
             let (state,stdin,run,thread):(String,String,Option<String>,String) = tx.query_row("SELECT s.state,s.stdin_state,r.state,COALESCE(r.thread_id,q.thread_id,s.detached_thread_id) FROM shell_execution s LEFT JOIN run r ON r.id=s.owner_run_id LEFT JOIN schedule q ON q.id=s.schedule_id WHERE s.id=?1",[&execution],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)))?;
             let stop = !matches!(state.as_str(),"starting"|"running") || run.as_deref().is_some_and(|state| state!="live");
+            let mut terminal = false;
             if spawned {
-                tx.execute("UPDATE shell_execution SET shell_json=json_set(shell_json,'$.spawned',json('true')),state=CASE WHEN state='starting' THEN 'running' ELSE state END WHERE id=?1",[execution])?;
+                tx.execute("UPDATE shell_execution SET shell_json=json_set(shell_json,'$.spawned',json('true')),state=CASE WHEN state='starting' THEN 'running' ELSE state END WHERE id=?1",[&execution])?;
             } else if stop && tx.execute("UPDATE shell_execution SET state='stopped',end_reason=COALESCE(end_reason,'stopped_before_spawn'),output_complete=0,ended_at=?2 WHERE id=?1 AND state IN ('starting','stopping')",rusqlite::params![&execution,chrono::Utc::now().to_rfc3339()])? != 0 {
                 super::schedule::retire_oneshot(&tx,&execution)?;
+                terminal = true;
             }
             tx.commit()?;
+            if terminal { wait_wakes.publish(super::wait::wakes::Key::shell_terminal(execution)); }
             Ok((stop,stdin=="closed",thread))
         }).await.map_err(storage_error)?;
         if spawned || stop {

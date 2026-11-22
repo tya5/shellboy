@@ -1,5 +1,6 @@
 //! Raw shell output batching, persistence, and completion publication.
 use super::{invalid, now};
+use crate::control::wait::wakes::Key;
 use crate::control::{DriverSlot, EngineEvent, LiveShell, foreground::ForegroundReceiver};
 #[cfg(all(test, unix))]
 use crate::shell::OutputChunk;
@@ -244,11 +245,17 @@ pub(in crate::control) async fn install_shell(
         }
         return Err(error);
     }
+    if release.is_some() {
+        control
+            .waits
+            .keyed
+            .publish([Key::Foreground(execution.into())]);
+    }
     control.changed(owner.thread());
     Ok((done_receive, release))
 }
 
-pub(super) async fn collect_shell(
+pub(in crate::control) async fn collect_shell(
     control: &Control,
     owner: &ShellOwner,
     execution: &str,
@@ -274,6 +281,7 @@ pub(super) async fn collect_shell(
         // DB closure until the entire ordered batch commits or rolls back.
         #[cfg(test)]
         let save_started = std::time::Instant::now();
+        let wakes = control.waits.keyed.clone();
         let saved = control.store.database.call(move |db| {
             let tx = db.transaction()?;
             let mut chunks=Vec::new();
@@ -299,6 +307,7 @@ pub(super) async fn collect_shell(
             }
             if let Some(sequence)=saved_sequence {tx.execute("UPDATE shell_execution SET saved_sequence=?2 WHERE id=?1",params![execution,sequence])?;}
             tx.commit()?;
+            if had_output { wakes.publish([Key::ShellOutput(execution)]); }
             for saved in acknowledgements {let _=saved.send(Ok(()));}
             drop(chunks);
             Ok((next_stdout, next_stderr,had_output))
@@ -322,8 +331,8 @@ pub(super) async fn collect_shell(
                         .live
                         .record_output_commit(&marker_execution, std::time::Instant::now())
                         .await;
+                    control.waits.keyed.publish([Key::DisplayOutput]);
                 }
-                control.shell_output_changed.notify_waiters();
             }
             Err(error) => {
                 shell.handle.stop();
@@ -373,6 +382,7 @@ async fn save_completion(
     let execution = execution.to_owned();
     let completed = completion.clone();
     let index = control.index.clone();
+    let wakes = control.waits.keyed.clone();
     control.store.database.call(move|db|{let tx=db.transaction()?;let state=serde_json::to_value(completed.state).unwrap_or(Value::Null);
         if tx.execute("UPDATE shell_execution SET state=CASE WHEN end_reason='schedule_timeout' THEN 'stopped' ELSE ?2 END,exit_code=CASE WHEN end_reason='schedule_timeout' THEN NULL ELSE ?3 END,end_reason=CASE WHEN end_reason='schedule_timeout' THEN end_reason ELSE ?4 END,output_complete=?5,ended_at=?6,shell_json=json_set(shell_json,'$.completion',json(?7)) WHERE id=?1 AND state IN ('starting','running','stopping')",params![execution,state.as_str().unwrap_or("failed"),completed.exit_code,completed.reason,completed.output_complete,now(),json!({"forced":completed.forced,"exit_signal":completed.exit_signal,"group_cleanup_confirmed":completed.group_cleanup_confirmed,"elapsed_ms":completed.elapsed_ms}).to_string()])? == 0 {
             let saved:Option<String> = tx.query_row("SELECT state FROM shell_execution WHERE id=?1",[&execution],|r|r.get(0)).optional()?;
@@ -395,7 +405,9 @@ async fn save_completion(
         } else {
             super::super::schedule::retire_oneshot(&tx,&execution)?;
         }
-        tx.commit()?;Ok(())}).await.map_err(storage_error)?;
+        tx.commit()?;
+        wakes.publish([Key::ShellTerminal(execution.clone()), Key::ShellOutput(execution)]);
+        Ok(())}).await.map_err(storage_error)?;
     control.index.wake();
     // A terminal execution's output becomes eligible for raw retention.
     control

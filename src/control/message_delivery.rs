@@ -877,6 +877,7 @@ mod tests {
                     &tx,
                     &[("old".into(), "t".into())],
                     false,
+                    &mut Vec::new(),
                 )
                 .unwrap(),
                 _ => crate::control::state::finish_drained_shutdown(&tx, false).unwrap(),

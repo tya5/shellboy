@@ -785,9 +785,10 @@ impl GcService {
                 };
                 let (execution, at, reason) =
                     (candidate.id.clone(), at.to_rfc3339(), reason.to_owned());
+                let wakes = self.database.wait_wakes();
                 let started = requester
                     .unit(ONE_ROW, move |db, _| {
-                        Ok(begin_raw(db, &execution, &reason, &at))
+                        Ok(begin_raw(db, &execution, &reason, &at, &wakes))
                     })
                     .await
                     .map_err(crate::app::storage_error)?;
@@ -808,8 +809,9 @@ impl GcService {
                 }
                 loop {
                     let execution = candidate.id.clone();
+                    let wakes = self.database.wait_wakes();
                     let step = requester
-                        .unit(UNIT, move |db, _| Ok(raw_step(db, &execution)))
+                        .unit(UNIT, move |db, _| Ok(raw_step(db, &execution, &wakes)))
                         .await
                         .map_err(crate::app::storage_error)?;
                     let step = match step {
@@ -955,9 +957,17 @@ impl GcService {
         *candidate.lock().expect("history candidate") = None;
         let keep = self.history_keep.lock().expect("history keep").clone();
         let job = job_id.to_owned();
+        let wakes = self.database.wait_wakes();
         let step = match requester
             .unit(UNIT, move |db, _| {
-                Ok(history_step(db, &job, batch, &candidate, keep.as_deref()))
+                Ok(history_step(
+                    db,
+                    &job,
+                    batch,
+                    &candidate,
+                    keep.as_deref(),
+                    &wakes,
+                ))
             })
             .await
             .map_err(crate::app::storage_error)?
@@ -1149,7 +1159,13 @@ fn cutoff(at: DateTime<Utc>, days: u64) -> Option<DateTime<Utc>> {
         .and_then(chrono::Duration::try_days)
         .and_then(|duration| at.checked_sub_signed(duration))
 }
-fn begin_raw(db: &mut Connection, execution: &str, reason: &str, at: &str) -> Result<bool> {
+fn begin_raw(
+    db: &mut Connection,
+    execution: &str,
+    reason: &str,
+    at: &str,
+    wakes: &crate::control::wait::wakes::Wakes,
+) -> Result<bool> {
     let tx = db.transaction().map_err(sql_error)?;
     let row=tx.query_row("SELECT state,retention_generation,EXISTS(SELECT 1 FROM runtime_pin WHERE resource_kind='shell_output' AND resource_id=?1) FROM shell_execution WHERE id=?1",[execution],|row|Ok((row.get::<_,String>(0)?,row.get::<_,i64>(1)?,row.get::<_,bool>(2)?))).optional().map_err(sql_error)?;
     let Some((state, generation, pinned)) = row else {
@@ -1179,10 +1195,19 @@ fn begin_raw(db: &mut Connection, execution: &str, reason: &str, at: &str) -> Re
         tx.execute("INSERT INTO app_meta(key,value)VALUES(?1,?2)",params![marker,json!({"reason":reason,"state":"deleting","collected_at":at,"generation":generation+1}).to_string()]).map_err(sql_error)?;
     }
     tx.commit().map_err(sql_error)?;
+    if !marked {
+        wakes.publish([crate::control::wait::wakes::Key::ShellOutput(
+            execution.into(),
+        )]);
+    }
     Ok(true)
 }
 /// Returns (deleted bytes, complete, deferred by a newly observed pin).
-fn raw_step(db: &mut Connection, execution: &str) -> Result<(u64, bool, bool)> {
+fn raw_step(
+    db: &mut Connection,
+    execution: &str,
+    wakes: &crate::control::wait::wakes::Wakes,
+) -> Result<(u64, bool, bool)> {
     let tx = db.transaction().map_err(sql_error)?;
     let pinned:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM runtime_pin WHERE resource_kind='shell_output' AND resource_id=?1)",[execution],|row|row.get(0)).map_err(sql_error)?;
     if pinned {
@@ -1216,6 +1241,11 @@ fn raw_step(db: &mut Connection, execution: &str) -> Result<(u64, bool, bool)> {
         .map_err(sql_error)?;
     }
     tx.commit().map_err(sql_error)?;
+    if bytes != 0 {
+        wakes.publish([crate::control::wait::wakes::Key::ShellOutput(
+            execution.into(),
+        )]);
+    }
     Ok((bytes, !remaining, false))
 }
 
@@ -1560,7 +1590,7 @@ mod tests {
             // Deletion's first transaction cancels at most 16, while the durable
             // existing history job remains discoverable for the normal worker.
             tx.execute("UPDATE thread SET deleted_at='now' WHERE id='deleted-target'", [])?;
-            let wakes = crate::control::reply::deleted_threads_tx(&tx, &["deleted-target".into()], "now")?;
+            let wakes = crate::control::reply::deleted_threads_tx(&tx, &["deleted-target".into()], "now", &mut Vec::new())?;
             assert_eq!(wakes.len(), 2, "duplicate sender IDs are coalesced within the fixed sync cap");
             tx.commit()?;
             Ok(wakes)

@@ -288,7 +288,7 @@ pub(super) fn complete_answer_turn(
     tx: &rusqlite::Transaction<'_>,
     turn: &str,
     node: &str,
-) -> Result<(), StorageError> {
+) -> Result<bool, StorageError> {
     let pending: bool = tx.query_row(
         "SELECT EXISTS(SELECT 1 FROM receipt WHERE turn_id=?1 AND state='accepted')",
         [&turn],
@@ -307,7 +307,7 @@ pub(super) fn complete_answer_turn(
                 .map_err(|_| ApiError::new(ErrorCode::InvalidState, "Unknown saved Run state"))?;
             if state == TurnState::Completed {
                 return if saved.1.as_deref() == Some(node) {
-                    Ok(())
+                    Ok(false)
                 } else {
                     Err(ApiError::new(
                         ErrorCode::OperationConflict,
@@ -317,7 +317,7 @@ pub(super) fn complete_answer_turn(
                 };
             }
             if matches!(state, TurnState::Stopped | TurnState::Failed) || owner != RunState::Live {
-                return Ok(()); // Obsolete completion cannot revive a settled Turn.
+                return Ok(false); // Obsolete completion cannot revive a settled Turn.
             }
             let code = if state == TurnState::Running {
                 ErrorCode::OperationConflict
@@ -328,8 +328,9 @@ pub(super) fn complete_answer_turn(
                 ApiError::new(code, "Turn did not complete at its expected boundary").into(),
             );
         }
+        return Ok(true);
     }
-    Ok(())
+    Ok(false)
 }
 
 /// Ownership has already been frozen, and every live handle has drained.
@@ -363,8 +364,9 @@ pub(super) fn stop_drained_runs(
     tx: &rusqlite::Transaction<'_>,
     owned: &[(String, String)],
     stopping_for_shutdown: bool,
+    keys: &mut Vec<super::wait::wakes::Key>,
 ) -> Result<(), StorageError> {
-    stop_drained_runs_inner(tx, owned, stopping_for_shutdown, None)
+    stop_drained_runs_inner(tx, owned, stopping_for_shutdown, None, keys)
 }
 
 /// Exact Run stop settlement; unlike startup/owner shutdown this repairs only
@@ -373,12 +375,14 @@ pub(super) fn stop_drained_run_tx(
     tx: &rusqlite::Transaction<'_>,
     run: &str,
     thread: &str,
+    keys: &mut Vec<super::wait::wakes::Key>,
 ) -> Result<(), StorageError> {
     stop_drained_runs_inner(
         tx,
         &[(run.to_owned(), thread.to_owned())],
         false,
         Some(thread),
+        keys,
     )
 }
 
@@ -387,7 +391,9 @@ fn stop_drained_runs_inner(
     owned: &[(String, String)],
     stopping_for_shutdown: bool,
     repair_thread: Option<&str>,
+    keys: &mut Vec<super::wait::wakes::Key>,
 ) -> Result<(), StorageError> {
+    use super::wait::wakes::Key;
     for (run, thread) in owned {
         // The same held input a send to this stopping Run would have produced.
         super::revisit::hand_off_tx(
@@ -401,12 +407,21 @@ fn stop_drained_runs_inner(
             None,
             &now(),
         )?;
-        tx.execute("UPDATE turn SET state='stopped',ended_at=?2 WHERE run_id=?1 AND state IN ('preparing','running','waiting','recovery_wait')",params![run,now()])?;
+        let mut statement = tx.prepare("UPDATE turn SET state='stopped',ended_at=?2 WHERE run_id=?1 AND state IN ('preparing','running','waiting','recovery_wait') RETURNING id")?;
+        for id in statement.query_map(params![run, now()], |row| row.get(0))? {
+            keys.push(Key::Turn(id?));
+        }
         cancel_run_attempts(tx, run, &now())?;
-        tx.execute("UPDATE shell_execution SET state='stopped',output_complete=0,ended_at=?2,end_reason='run_stopped_before_spawn_or_collection' WHERE owner_run_id=?1 AND state IN ('starting','running','stopping')",params![run,now()])?;
-        tx.execute("UPDATE run SET state='stopped',ended_at=?2,stop_reason=COALESCE(stop_reason,?3) WHERE id=?1 AND state IN ('live','stopping')",params![run,now(),if stopping_for_shutdown {Some("app_shutdown")} else {None}])?;
-
-        tx.execute("UPDATE receipt SET state='held',hold_reason='stopped',updated_at=?2 WHERE run_id=?1 AND state='accepted'",params![run,now()])?;
+        let mut statement = tx.prepare("UPDATE shell_execution SET state='stopped',output_complete=0,ended_at=?2,end_reason='run_stopped_before_spawn_or_collection' WHERE owner_run_id=?1 AND state IN ('starting','running','stopping') RETURNING id")?;
+        for id in statement.query_map(params![run, now()], |row| row.get(0))? {
+            keys.extend(Key::shell_terminal(id?));
+        }
+        if tx.execute("UPDATE run SET state='stopped',ended_at=?2,stop_reason=COALESCE(stop_reason,?3) WHERE id=?1 AND state IN ('live','stopping')",params![run,now(),if stopping_for_shutdown {Some("app_shutdown")} else {None}])? != 0 {
+            keys.extend([Key::Run(run.clone()), Key::ThreadSettled(thread.clone())]);
+        }
+        if tx.execute("UPDATE receipt SET state='held',hold_reason='stopped',updated_at=?2 WHERE run_id=?1 AND state='accepted'",params![run,now()])? != 0 {
+            keys.push(Key::CallerInput(thread.clone()));
+        }
     }
     if let Some(thread) = repair_thread {
         super::message_delivery::repair_terminal_thread_tx(tx, thread, &now())?;
@@ -827,6 +842,7 @@ mod exit_reason_tests {
                         ("unclassified".into(), "u".into()),
                     ],
                     true,
+                    &mut Vec::new(),
                 )
                 .unwrap(),
                 _ => finish_drained_shutdown(&tx, false).unwrap(),

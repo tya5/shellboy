@@ -954,7 +954,8 @@ async fn run_with_delivery(
     let mut selection = selection::Selection::default();
     let mut live_output = live_output::Observation::default();
     let observed_control = control.clone();
-    let mut output_signal = Box::pin(observed_control.shell_output_notification().notified());
+    let output_subscription = observed_control.display_output_subscription();
+    let mut output_signal = Box::pin(output_subscription.notify.notified());
     output_signal.as_mut().enable();
     let mut owner_signal = Box::pin(observed_control.saved_observation_hint().notified());
     owner_signal.as_mut().enable();
@@ -1330,7 +1331,7 @@ async fn run_with_delivery(
                 }
             },
             _=output_signal.as_mut()=>{
-                output_signal.set(observed_control.shell_output_notification().notified());
+                output_signal.set(output_subscription.notify.notified());
                 output_signal.as_mut().enable();
                 browser.output_notified();
                 management.inspection.output_notified();

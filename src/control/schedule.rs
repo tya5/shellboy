@@ -162,17 +162,22 @@ pub(super) async fn dispatch(control: &Arc<Control>) -> Result<Option<DateTime<U
                 .await?;
             }
             Err(_) => {
+                let wakes = control.waits.keyed.clone();
                 control
                     .store
                     .database
                     .call(move |db| {
                         let tx = db.transaction()?;
-                        if super::state::fail_shell_spawn(&tx, &shell.id, &super::state::now())?
-                            != 0
-                        {
+                        let changed =
+                            super::state::fail_shell_spawn(&tx, &shell.id, &super::state::now())?
+                                != 0;
+                        if changed {
                             retire_oneshot(&tx, &shell.id)?;
                         }
                         tx.commit()?;
+                        if changed {
+                            wakes.publish(super::wait::wakes::Key::shell_terminal(shell.id));
+                        }
                         Ok(())
                     })
                     .await

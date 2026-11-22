@@ -335,11 +335,13 @@ impl ShellOutputReader {
         let instance = pin.instance.clone();
         let expected = old.clone();
         let requested = canonical.clone();
+        let wakes = self.database.wait_wakes();
         let prepared=self.db(move|db|{
             let tx=db.transaction().map_err(sql_error)?;
             let mut state=snapshot(&tx,&execution)?;
             if let Some(cursor)=&expected{validate_cursor(&tx,&state,&execution,cursor,requested.as_deref(),Some(streams))?;}
             ensure_raw_start(&tx,&state,&execution)?;
+            let mut encoding_changed = false;
             if let Some(requested)=requested
                 && canonical_encoding(&state.encoding)?.name()!=requested
             {
@@ -351,9 +353,12 @@ impl ShellOutputReader {
                 for node in nodes {crate::index::delete_raw_vectors_tx(&tx,&node)?;}
                 tx.execute("UPDATE shell_execution SET output_encoding=?2 WHERE id=?1",params![execution,requested]).map_err(sql_error)?;
                 state.encoding=requested;
+                encoding_changed = true;
             }
             ReadPin::insert_tx(&tx, &pin_id, &instance, &execution, state.generation)?;
-            tx.commit().map_err(sql_error)?;Ok(state)
+            tx.commit().map_err(sql_error)?;
+            if encoding_changed { wakes.publish([super::wait::wakes::Key::ShellOutput(execution)]); }
+            Ok(state)
         }).await;
         let result = match prepared {
             Ok(state) => {

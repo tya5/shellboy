@@ -1,4 +1,5 @@
 //! Durable reply facts and model-visible notices, inside the caller's transaction.
+use super::wait::wakes::Key;
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::{Value, json};
 
@@ -447,13 +448,15 @@ impl super::db::Store {
                     |r| r.get(0),
                 )
                 .map_err(sql)?;
-            deleted_sender_receipt_tx(tx, &receipt, at).map_err(sql)?;
+            let mut keys = Vec::new();
+            deleted_sender_receipt_tx(tx, &receipt, at, &mut keys).map_err(sql)?;
             tx.execute(
                 "UPDATE app_meta SET value=CAST(value AS INTEGER)+1 WHERE key='root_revision'",
                 [],
             )
             .map_err(sql)?;
             return Ok(super::db::MutationResult {
+                wait_keys: keys,
                 committed_error: Some(
                     ApiError::new(ErrorCode::InvalidState, "reply sender Thread was deleted")
                         .details(json!({"reason":"sender_deleted","reply_state":"cancelled"})),
@@ -527,6 +530,9 @@ impl super::db::Store {
         if !result.changed_threads.contains(&row.0) {
             result.changed_threads.push(row.0);
         }
+        result
+            .wait_keys
+            .push(super::wait::wakes::Key::Reply(args.message_id.clone()));
         result.result = json!({"reply_to":args.message_id,"message_id":node});
         if let Some(delivery) = delivery {
             result.result["delivery"] = delivery;
@@ -542,6 +548,7 @@ pub(crate) fn complete_tx(
     run: &str,
     at: &str,
     wakes: &mut Vec<String>,
+    keys: &mut Vec<Key>,
 ) -> rusqlite::Result<Option<String>> {
     let rows = db.prepare("SELECT message_node_id,sender_json,result_json FROM receipt INDEXED BY receipt_reply_run_pending WHERE run_id=?1 AND state='applied' AND json_extract(result_json,'$.reply.state')='pending' AND json_extract(result_json,'$.to_human') IS NOT 1 ORDER BY rowid LIMIT 128")?
         .query_map([run], |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
@@ -558,7 +565,7 @@ pub(crate) fn complete_tx(
             .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
         if value["reply"].get("reminded_at").is_some() {
             if db.execute("UPDATE receipt SET result_json=json_set(result_json,'$.reply.state','ignored','$.reply.at',?2),updated_at=?2 WHERE message_node_id=?1 AND json_extract(result_json,'$.reply.state')='pending'",params![message,at])? == 1
-                && let Some(thread) = outcome_tx(db, &message, &sender, "ignored", at)? { wakes.push(thread); }
+                { keys.push(Key::Reply(message.clone())); if let Some(thread) = outcome_tx(db, &message, &sender, "ignored", at)? { wakes.push(thread); } }
         } else {
             db.execute("UPDATE receipt SET result_json=json_set(result_json,'$.reply.reminded_at',?2,'$.reply.reminded_run_id',?3),updated_at=?2 WHERE message_node_id=?1 AND json_extract(result_json,'$.reply.state')='pending'",params![message,at,run])?;
             pending.push(json!({"message_id":message,"sender":crate::protocol::MessageSender::from_saved(Some(&sender))}));
@@ -578,12 +585,17 @@ pub(crate) fn complete_tx(
 }
 
 /// Terminal recipient Runs cannot fulfill their applied requests; settle each once.
-pub(crate) fn terminal_tx(db: &Connection, run: &str, at: &str) -> rusqlite::Result<Vec<String>> {
+pub(crate) fn terminal_tx(
+    db: &Connection,
+    run: &str,
+    at: &str,
+    keys: &mut Vec<Key>,
+) -> rusqlite::Result<Vec<String>> {
     let mut wakes = Vec::new();
     let rows=db.prepare("SELECT message_node_id,sender_json FROM receipt INDEXED BY receipt_reply_run_pending WHERE run_id=?1 AND state='applied' AND json_extract(result_json,'$.reply.state')='pending' AND json_extract(result_json,'$.to_human') IS NOT 1 AND EXISTS(SELECT 1 FROM run WHERE id=?1 AND state IN ('completed','stopped','failed')) ORDER BY rowid LIMIT 128")?.query_map([run],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
     for (message, sender) in rows {
         if db.execute("UPDATE receipt SET result_json=json_set(result_json,'$.reply.state','ignored','$.reply.at',?2),updated_at=?2 WHERE message_node_id=?1 AND json_extract(result_json,'$.reply.state')='pending'",params![message,at])?==1
-            && let Some(thread)=outcome_tx(db,&message,&sender,"ignored",at)? {wakes.push(thread);}
+            { keys.push(Key::Reply(message.clone())); if let Some(thread)=outcome_tx(db,&message,&sender,"ignored",at)? {wakes.push(thread);} }
     }
     Ok(wakes)
 }
@@ -595,6 +607,7 @@ pub(crate) struct OutcomeBatch {
     pub cursor: Option<PendingCursor>,
     pub wakes: Vec<String>,
     pub examined: usize,
+    pub keys: Vec<Key>,
 }
 pub(crate) fn terminal_batch_tx(
     db: &Connection,
@@ -629,18 +642,20 @@ pub(crate) fn terminal_batch_tx(
         None
     };
     let mut wakes = Vec::new();
+    let mut keys = Vec::new();
     for (_, _, message, sender, run, state, human) in rows {
         if state != "applied" || human == Some(1) {
             continue;
         }
         let terminal:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM run WHERE id=?1 AND state IN ('completed','stopped','failed'))",[run],|r|r.get(0))?;
         if terminal && db.execute("UPDATE receipt SET result_json=json_set(result_json,'$.reply.state','ignored','$.reply.at',?2),updated_at=?2 WHERE message_node_id=?1 AND json_extract(result_json,'$.reply.state')='pending'",params![message,at])?==1
-            && let Some(thread)=outcome_tx(db,&message,&sender,"ignored",at)? {wakes.push(thread);}
+            { keys.push(Key::Reply(message.clone())); if let Some(thread)=outcome_tx(db,&message,&sender,"ignored",at)? {wakes.push(thread);} }
     }
     Ok(OutcomeBatch {
         cursor,
         wakes,
         examined,
+        keys,
     })
 }
 type PendingRow = (
@@ -756,6 +771,7 @@ pub(crate) fn deleted_threads_tx(
     db: &Connection,
     targets: &[String],
     at: &str,
+    keys: &mut Vec<Key>,
 ) -> rusqlite::Result<Vec<String>> {
     let mut wakes = std::collections::BTreeSet::new();
     let mut budget = crate::protocol::MAX_SYNC_DELETION_REPLY_DUTIES as usize;
@@ -776,6 +792,7 @@ pub(crate) fn deleted_threads_tx(
         budget = budget.saturating_sub(rows.len());
         for (message, sender, saved) in rows {
             if db.execute("UPDATE receipt SET result_json=json_set(result_json,'$.reply.state','recipient_deleted','$.reply.at',?2),updated_at=?2 WHERE message_node_id=?1 AND json_extract(result_json,'$.reply.state')='pending'",params![message,at])? == 1 {
+                keys.push(Key::Reply(message.clone()));
                 let saved: Value = serde_json::from_str(&saved)
                     .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
                 if saved["to_human"] != true
@@ -795,6 +812,7 @@ pub(crate) fn deleted_recipient_receipt_tx(
     db: &Connection,
     receipt: &str,
     at: &str,
+    keys: &mut Vec<Key>,
 ) -> rusqlite::Result<Option<String>> {
     let row: Option<(String, String, String, String, String)> = db.query_row(
         "SELECT r.message_node_id,r.sender_json,r.target_thread_id,COALESCE(r.result_json,'{}'),r.path_admission FROM receipt r JOIN thread t ON t.id=r.target_thread_id WHERE r.id=?1 AND json_extract(r.result_json,'$.reply.state')='pending' AND t.deleted_at IS NOT NULL",
@@ -806,6 +824,7 @@ pub(crate) fn deleted_recipient_receipt_tx(
     };
     let mut wake = None;
     if db.execute("UPDATE receipt SET result_json=json_set(result_json,'$.reply.state','recipient_deleted','$.reply.at',?2),updated_at=?2 WHERE id=?1 AND json_extract(result_json,'$.reply.state')='pending'", params![receipt, at])? == 1 {
+        keys.push(Key::Reply(message.clone()));
         let saved: Value = serde_json::from_str(&saved)
             .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
         if saved["to_human"] != true {
@@ -825,6 +844,7 @@ pub(crate) fn deleted_sender_receipt_tx(
     db: &Connection,
     receipt: &str,
     at: &str,
+    keys: &mut Vec<Key>,
 ) -> rusqlite::Result<()> {
     let row: Option<(String,String,String,String)> = db.query_row(
         "SELECT r.message_node_id,r.target_thread_id,r.sender_json,r.path_admission FROM receipt r WHERE r.id=?1 AND json_extract(r.result_json,'$.reply.state')='pending' AND json_extract(r.sender_json,'$.kind')='model' AND EXISTS(SELECT 1 FROM thread s WHERE s.id=json_extract(r.sender_json,'$.thread_id') AND s.deleted_at IS NOT NULL) AND EXISTS(SELECT 1 FROM thread t WHERE t.id=r.target_thread_id AND t.deleted_at IS NULL)",
@@ -835,6 +855,7 @@ pub(crate) fn deleted_sender_receipt_tx(
     };
     let actor = json!({"kind":"thread_deletion","thread_id":crate::protocol::MessageSender::from_saved(Some(&sender)).thread_id});
     if db.execute("UPDATE receipt SET result_json=json_set(result_json,'$.reply',json(?2)),updated_at=?3 WHERE id=?1 AND json_extract(result_json,'$.reply.state')='pending'",params![receipt,json!({"state":"cancelled","at":at,"cancelled_by":actor,"cancel_reason":"sender_deleted"}).to_string(),at])? == 1 {
+        keys.push(Key::Reply(message.clone()));
         if admission == "admitted" { cancelled_notice_tx(db,&target,&message,at)?; }
         db.execute("UPDATE thread SET revision=revision+1 WHERE id=?1", [target])?;
     }
@@ -1202,7 +1223,7 @@ mod tests {
                     stmt.get_status(rusqlite::StatementStatus::VmStep)
                 );
             }
-            let immediate = terminal_tx(&db, "r", "1").unwrap();
+            let immediate = terminal_tx(&db, "r", "1", &mut Vec::new()).unwrap();
             assert_eq!(immediate.len(), 128);
             // A failed transaction cannot advance the in-memory cursor or settle facts.
             let tx = db.transaction().unwrap();
@@ -1243,7 +1264,11 @@ mod tests {
             );
             assert_eq!(db.query_row("SELECT count(*) FROM delivery d JOIN event e ON e.id=d.event_id WHERE e.kind='reply_outcome'",[],|r|r.get::<_,i64>(0)).unwrap(),261);
             assert_eq!(db.query_row("SELECT count(*) FROM receipt WHERE state='held' AND json_extract(result_json,'$.reply.state')='pending'",[],|r|r.get::<_,i64>(0)).unwrap(),4096);
-            assert!(terminal_tx(&db, "r", "4").unwrap().is_empty());
+            assert!(
+                terminal_tx(&db, "r", "4", &mut Vec::new())
+                    .unwrap()
+                    .is_empty()
+            );
             let plans=db.prepare("EXPLAIN QUERY PLAN SELECT message_node_id FROM receipt INDEXED BY receipt_reply_run_pending WHERE run_id='r' AND state='applied' AND json_extract(result_json,'$.reply.state')='pending' AND json_extract(result_json,'$.to_human') IS NOT 1 ORDER BY rowid LIMIT 128").unwrap().query_map([],|r|r.get::<_,String>(3)).unwrap().collect::<rusqlite::Result<Vec<_>>>().unwrap();
             assert!(
                 plans
@@ -1301,7 +1326,7 @@ mod tests {
                 );
                 cancellation_wakes_tx(&tx, &["request".into()]).unwrap()
             } else {
-                terminal_tx(&tx, "recipient", "1").unwrap()
+                terminal_tx(&tx, "recipient", "1", &mut Vec::new()).unwrap()
             };
             let expected = if state == "recovery_wait" {
                 "pending"
@@ -1322,7 +1347,11 @@ mod tests {
             );
             if state != "recovery_wait" {
                 assert_eq!(tx.query_row("SELECT count(*) FROM delivery d JOIN event e ON e.id=d.event_id JOIN run r ON r.id=d.recipient_id JOIN turn u ON u.run_id=r.id WHERE e.target_thread_id='s' AND d.state='pending' AND r.state='live' AND u.state='preparing'",[],|r|r.get::<_,i64>(0)).unwrap(),1);
-                assert!(terminal_tx(&tx, "recipient", "2").unwrap().is_empty());
+                assert!(
+                    terminal_tx(&tx, "recipient", "2", &mut Vec::new())
+                        .unwrap()
+                        .is_empty()
+                );
                 assert!(
                     !cancel_reply_tx(&tx, "t", "request", "2", &json!({"kind":"human"}), true)
                         .unwrap()
@@ -1381,7 +1410,7 @@ mod tests {
             [],
         )
         .unwrap();
-        deleted_threads_tx(&tx, &["target-0".into()], "now").unwrap();
+        deleted_threads_tx(&tx, &["target-0".into()], "now", &mut Vec::new()).unwrap();
         tx.commit().unwrap();
         assert_eq!(
             db.query_row("SELECT count(*) FROM receipt_updates", [], |r| r
@@ -1409,7 +1438,8 @@ mod tests {
                 db.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,result_json)VALUES(?1,?1,'{\"kind\":\"human\"}','target',?1,'applied','now','{\"reply\":{\"state\":\"pending\"},\"to_human\":false}')", [&message]).unwrap();
             }
             let tx = db.transaction().unwrap();
-            let wakes = deleted_threads_tx(&tx, &["target".into()], "now").unwrap();
+            let wakes =
+                deleted_threads_tx(&tx, &["target".into()], "now", &mut Vec::new()).unwrap();
             assert!(wakes.is_empty());
             tx.commit().unwrap();
             assert_eq!(db.query_row("SELECT count(*) FROM receipt WHERE json_extract(result_json,'$.reply.state')='recipient_deleted'", [], |r| r.get::<_, i64>(0)).unwrap(), 16);
@@ -1443,9 +1473,9 @@ mod tests {
         );
         add("cancel-question", "live-target", r#"{"kind":"human"}"#);
         let tx = db.transaction().unwrap();
-        deleted_threads_tx(&tx, &["bulk-target".into()], "now").unwrap();
-        deleted_recipient_receipt_tx(&tx, "gc-question", "now").unwrap();
-        deleted_sender_receipt_tx(&tx, "sender-question", "now").unwrap();
+        deleted_threads_tx(&tx, &["bulk-target".into()], "now", &mut Vec::new()).unwrap();
+        deleted_recipient_receipt_tx(&tx, "gc-question", "now", &mut Vec::new()).unwrap();
+        deleted_sender_receipt_tx(&tx, "sender-question", "now", &mut Vec::new()).unwrap();
         assert!(
             cancel_reply_tx(
                 &tx,
@@ -1491,7 +1521,7 @@ mod tests {
         db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','/a','p','m','0'); INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','live','0'); INSERT INTO node(id,kind,created_at,payload_json)VALUES('m','user','0','{}'); INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,run_id,state,path_admission,created_at,result_json)VALUES('m','m','{\"kind\":\"human\"}','t','m','r','applied','admitted','0','{\"reply\":{\"state\":\"pending\"}}');").unwrap();
         let tx = db.transaction().unwrap();
         assert!(
-            complete_tx(&tx, "t", "r", "one", &mut Vec::new())
+            complete_tx(&tx, "t", "r", "one", &mut Vec::new(), &mut Vec::new())
                 .unwrap()
                 .is_some()
         );
@@ -1503,7 +1533,7 @@ mod tests {
         );
         let tx = db.transaction().unwrap();
         assert!(
-            complete_tx(&tx, "t", "r", "two", &mut Vec::new())
+            complete_tx(&tx, "t", "r", "two", &mut Vec::new(), &mut Vec::new())
                 .unwrap()
                 .is_some()
         );
@@ -1514,9 +1544,16 @@ mod tests {
         let tx = db.transaction().unwrap();
         terminal_batch_tx(&tx, None, "restart").unwrap();
         assert!(
-            complete_tx(&tx, "t", "new-run", "three", &mut Vec::new())
-                .unwrap()
-                .is_none()
+            complete_tx(
+                &tx,
+                "t",
+                "new-run",
+                "three",
+                &mut Vec::new(),
+                &mut Vec::new()
+            )
+            .unwrap()
+            .is_none()
         );
         tx.commit().unwrap();
         assert_eq!(

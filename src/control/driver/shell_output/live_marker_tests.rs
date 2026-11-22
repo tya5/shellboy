@@ -107,7 +107,8 @@ async fn marker_case(rollback: bool) {
         control.committed_output_markers(&ids).await.unwrap(),
         vec![("s2".into(), hidden_marker)]
     );
-    let notified = control.shell_output_notification().notified();
+    let subscription = control.display_output_subscription();
+    let notified = subscription.notify.notified();
     tokio::pin!(notified);
     notified.as_mut().enable();
     let output_started = Instant::now();

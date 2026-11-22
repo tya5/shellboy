@@ -22,8 +22,8 @@ re-read saved facts.
 | Mechanism | Where | Shape | Consumers |
 |---|---|---|---|
 | `EngineEvent::Changed{thread_id, recovery}` | `Control::changed_with_recovery` (`src/control.rs:393-402`), via `publish_event` (`src/control/ui_events.rs:84-89`) | `tokio::broadcast`, capacity 256 (`control.rs:254`), plus a separate 256-slot UI broadcast | TUI frontend; tests |
-| `changed: Notify` | same call, `notify_waiters()` | wake-only, no payload | every `wait` loop; also woken by request completion (`RequestGuard::drop`), shutdown |
-| `shell_output_changed: Notify` | after raw chunk + `saved_sequence` commit (`wait.rs:1508`) | wake-only | `shell_output` waits; TUI live output |
+| Typed wait registry | DB writers publish changed identities after commit; ChangeClock publishes after updating its sequence | One coalesced wake per matching subscription, no saved values | IPC `wait`, `events.wait`; output display observes its own post-marker key |
+| `changed: Notify` | Existing owner lifecycle and saved display hints | Wake-only; separate from predicate subscriptions | Shutdown drain, stop coordination, TUI owner inspection |
 | `EngineEvent::Stream{thread_id, node_id(attempt), text, reasoning, stream_char_offset}` | `Control::stream_delta`, called from `src/control/driver/request.rs` | text and reasoning deltas, never saved | TUI (selected Thread); the same call feeds `events.wait` text (2.5) |
 | `EngineEvent::ModelReceive / Notice / Error` | driver | ephemeral | TUI |
 
@@ -32,7 +32,8 @@ reports `changed_threads` and `apply_effects` emits them (`control.rs:995-1025`)
 thread create (`control/db.rs:1263`), delete (`db.rs:2708` – all deleted
 targets), rewind, message cancel/reply, compaction (`compact.rs:173,206`),
 driver transitions (≈40 call sites in `src/control/driver*`). The adopted wait
-design already relies on "commit, then Changed" (wait.md C6).
+design registers before inspecting a predicate; buffered wakeups cause the
+reader to recheck saved facts. Admission and permit ownership are unchanged.
 
 The TUI treats `Changed` as an invalidation hint: it marks the Thread dirty
 and reads from the DB worker (`src/frontend.rs:3732-3756`). On

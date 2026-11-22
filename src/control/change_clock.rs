@@ -11,6 +11,7 @@
 //! Writers never wait
 //! for a reader: the lock is held only for memory updates and copies, never across
 //! `.await` or I/O, and a reader that stops reading holds nothing here.
+use super::wait::wakes::{Key, Wakes};
 use crate::protocol::{
     EventAttemptEnd, EventAttemptOutcome, EventLiveText, EventReasoningActivity, EventTextDelta,
     MAX_EVENT_CHANGES, MAX_FRAME_BYTES,
@@ -19,7 +20,6 @@ use std::{
     collections::{BTreeMap, HashMap, VecDeque},
     sync::Mutex,
 };
-use tokio::sync::Notify;
 
 pub(crate) const MAX_CHANGE_THREADS: usize = 4096;
 // A hard count bound. Eviction advances the live cursor floor so clients resync
@@ -82,6 +82,7 @@ struct AttemptActivity {
 }
 
 pub(crate) struct ChangeClock {
+    wakes: Wakes,
     inner: Mutex<Inner>,
     cap: usize,
 }
@@ -112,7 +113,6 @@ pub(crate) struct LiveTextGuard<'a> {
     clock: &'a ChangeClock,
     thread: &'a str,
     attempt: &'a str,
-    changed: &'a Notify,
     token: String,
     alive: std::sync::Arc<Mutex<bool>>,
 }
@@ -137,16 +137,20 @@ impl Drop for LiveTextGuard<'_> {
         *alive = false;
         self.clock
             .revoke_live(self.thread, self.attempt, Some(&self.token));
-        self.changed.notify_waiters();
     }
 }
 
 impl ChangeClock {
-    pub(crate) fn new() -> Self {
-        Self::with_capacity(MAX_CHANGE_THREADS)
+    pub(super) fn new(wakes: Wakes) -> Self {
+        Self::with_registry(MAX_CHANGE_THREADS, wakes)
     }
-    pub(crate) fn with_capacity(cap: usize) -> Self {
+    #[cfg(test)]
+    fn with_capacity(cap: usize) -> Self {
+        Self::with_registry(cap, Wakes::default())
+    }
+    fn with_registry(cap: usize, wakes: Wakes) -> Self {
         Self {
+            wakes,
             inner: Mutex::new(Inner::default()),
             cap: cap.max(1),
         }
@@ -160,6 +164,8 @@ impl ChangeClock {
         let mut inner = self.lock();
         inner.seq += 1;
         inner.config_changed_seq = Some(inner.seq);
+        drop(inner);
+        self.wakes.publish([Key::Config]);
     }
     pub(crate) fn record(&self, thread_id: &str) {
         let mut inner = self.lock();
@@ -169,6 +175,7 @@ impl ChangeClock {
             inner.by_seq.remove(&old);
         }
         inner.by_seq.insert(seq, thread_id.to_owned());
+        let old_floor = inner.floor;
         while inner.by_thread.len() > self.cap {
             let Some((evicted, thread)) = inner.by_seq.pop_first() else {
                 break;
@@ -176,18 +183,27 @@ impl ChangeClock {
             inner.by_thread.remove(&thread);
             inner.floor = evicted;
         }
+        let floor = if inner.floor != old_floor {
+            inner.floor
+        } else {
+            0
+        };
+        drop(inner);
+        self.wakes.publish_clock(
+            [Key::Changed(Some(thread_id.into())), Key::Changed(None)],
+            floor,
+            0,
+        );
     }
     pub(crate) fn reserve_live<'a>(
         &'a self,
         thread: &'a str,
         attempt: &'a str,
-        changed: &'a Notify,
     ) -> LiveTextGuard<'a> {
         LiveTextGuard {
             clock: self,
             thread,
             attempt,
-            changed,
             token: uuid::Uuid::new_v4().to_string(),
             alive: std::sync::Arc::new(Mutex::new(true)),
         }
@@ -234,6 +250,9 @@ impl ChangeClock {
                 floor: 0,
             },
         );
+        drop(inner);
+        self.wakes
+            .publish([Key::Reasoning(Some(thread.into())), Key::Reasoning(None)]);
     }
     pub(crate) fn record_attempt_end(
         &self,
@@ -259,6 +278,7 @@ impl ChangeClock {
             outcome,
             seq,
         });
+        let old_floor = inner.attempt_end_floor;
         if inner.attempt_ends.len() > MAX_ATTEMPT_ENDS {
             inner.attempt_end_floor = inner
                 .attempt_ends
@@ -266,6 +286,22 @@ impl ChangeClock {
                 .expect("end queue exceeds bound")
                 .seq;
         }
+        let floor = if inner.attempt_end_floor != old_floor {
+            inner.attempt_end_floor
+        } else {
+            0
+        };
+        drop(inner);
+        self.wakes.publish_clock(
+            [
+                Key::AttemptEnd(Some(thread.into())),
+                Key::AttemptEnd(None),
+                Key::Reasoning(Some(thread.into())),
+                Key::Reasoning(None),
+            ],
+            0,
+            floor,
+        );
     }
     pub(crate) fn revoke_live(&self, thread: &str, attempt: &str, token: Option<&str>) {
         let mut inner = self.lock();
@@ -286,11 +322,9 @@ impl ChangeClock {
         &'a self,
         thread: &'a str,
         attempt: &'a str,
-        changed: &'a Notify,
     ) -> LiveTextGuard<'a> {
-        let guard = self.reserve_live(thread, attempt, changed);
+        let guard = self.reserve_live(thread, attempt);
         self.admit_live(thread, attempt, &guard.token, &guard.alive, None);
-        changed.notify_waiters();
         guard
     }
     pub(crate) fn record_admitted_text(
@@ -395,6 +429,12 @@ impl ChangeClock {
             entry.charged -= DELTA_RECORD_BYTES + oldest.text.len();
             entry.floor = entry.floor.max(oldest.seq);
         }
+        drop(inner);
+        let mut keys = vec![Key::Live(Some(thread.into())), Key::Live(None)];
+        if reasoning {
+            keys.extend([Key::Reasoning(Some(thread.into())), Key::Reasoning(None)]);
+        }
+        self.wakes.publish(keys);
         true
     }
     /// The head and, when asked for, everything retained: for a client with no position.
@@ -602,7 +642,7 @@ mod tests {
 
     #[test]
     fn attempt_ends_page_in_clock_order_and_overflow_requires_resync() {
-        let clock = ChangeClock::new();
+        let clock = ChangeClock::new(Wakes::default());
         for n in 0..MAX_EVENT_CHANGES {
             clock.record(&format!("hint-{n}"));
         }
@@ -646,7 +686,7 @@ mod tests {
 
     #[test]
     fn orders_by_sequence_and_merges_repeated_changes() {
-        let clock = ChangeClock::new();
+        let clock = ChangeClock::new(Wakes::default());
         for id in ["a", "b", "a", "a", "c"] {
             clock.record(id);
         }
@@ -666,7 +706,7 @@ mod tests {
 
     #[test]
     fn config_change_hint_is_coalesced_and_visible_to_each_independent_cursor() {
-        let clock = ChangeClock::new();
+        let clock = ChangeClock::new(Wakes::default());
         clock.record("thread");
         let older = 0;
         let newer = 1;
@@ -691,7 +731,7 @@ mod tests {
 
     #[test]
     fn filter_limits_changes_but_cursor_still_reaches_head() {
-        let clock = ChangeClock::new();
+        let clock = ChangeClock::new(Wakes::default());
         clock.record("a");
         clock.record("b");
         let (changes, _, cursor) = ready(clock.poll(0, &["b".into()], false, false));
@@ -704,7 +744,7 @@ mod tests {
 
     #[test]
     fn page_of_sixty_four_reports_more_and_resumes_without_a_gap() {
-        let clock = ChangeClock::new();
+        let clock = ChangeClock::new(Wakes::default());
         for i in 0..100 {
             clock.record(&format!("t{i}"));
         }
@@ -759,7 +799,7 @@ mod tests {
 
     #[test]
     fn text_shares_the_sequence_without_becoming_a_change() {
-        let clock = ChangeClock::new();
+        let clock = ChangeClock::new(Wakes::default());
         clock.record("t");
         clock.record_text("t", "a1", 0, "he", false);
         clock.record_text("t", "a1", 2, "llo", false);
@@ -798,9 +838,8 @@ mod tests {
 
     #[test]
     fn reasoning_activity_reports_attempt_start_elapsed_and_observed_bytes_only() {
-        let clock = ChangeClock::new();
-        let changed = Notify::new();
-        let guard = clock.live_text_guard("thread", "attempt", &changed);
+        let clock = ChangeClock::new(Wakes::default());
+        let guard = clock.live_text_guard("thread", "attempt");
         let Some(Poll::Ready {
             cursor: start_cursor,
             reasoning_activity,
@@ -860,7 +899,7 @@ mod tests {
     #[test]
     fn eviction_holds_the_bound_for_any_delta_size_and_reports_the_gap() {
         for size in [1, 7, 1024, MAX_ATTEMPT_TEXT_BYTES / 2] {
-            let clock = ChangeClock::new();
+            let clock = ChangeClock::new(Wakes::default());
             let piece = "x".repeat(size);
             let mut offset = 0;
             for _ in 0..(4 * MAX_ATTEMPT_TEXT_BYTES / size.max(64)).max(4) {
@@ -880,7 +919,7 @@ mod tests {
 
     #[test]
     fn an_oversized_delta_keeps_a_whole_character_tail_and_exact_offset() {
-        let clock = ChangeClock::new();
+        let clock = ChangeClock::new(Wakes::default());
         // Four-byte characters: any cut that is not on a boundary would panic.
         let text = "😀".repeat(MAX_ATTEMPT_TEXT_BYTES);
         clock.record_text("t", "a", 10, &text, false);
@@ -897,11 +936,10 @@ mod tests {
 
     #[test]
     fn a_new_attempt_replaces_the_old_and_a_stale_guard_frees_nothing_new() {
-        let clock = ChangeClock::new();
-        let changed = Notify::new();
-        let old = clock.live_text_guard("t", "old", &changed);
+        let clock = ChangeClock::new(Wakes::default());
+        let old = clock.live_text_guard("t", "old");
         assert!(old.record(0, "abc", false));
-        let current = clock.live_text_guard("t", "new", &changed);
+        let current = clock.live_text_guard("t", "new");
         assert!(current.record(0, "z", false));
         drop(old);
         let (attempts, _) = text_poll(&clock, 0, &[]);
@@ -916,8 +954,7 @@ mod tests {
 
     #[test]
     fn past_the_attempt_cap_newcomers_wait_and_incumbents_keep_their_previews() {
-        let clock = ChangeClock::new();
-        let changed = Notify::new();
+        let clock = ChangeClock::new(Wakes::default());
         let threads = MAX_LIVE_TEXT_ATTEMPTS + 1;
         let mut at = 0;
         for round in 0..200u64 {
@@ -937,7 +974,7 @@ mod tests {
             );
         }
         // An ending attempt makes room: the refused one enters with an explicit gap.
-        drop(clock.live_text_guard("t00", "a", &changed));
+        drop(clock.live_text_guard("t00", "a"));
         let late = format!("t{MAX_LIVE_TEXT_ATTEMPTS:02}");
         clock.record_text(&late, "a", 200, "y", false);
         let (attempts, _) = text_poll(&clock, at, &[]);
@@ -949,7 +986,7 @@ mod tests {
 
     #[test]
     fn filter_limits_text_but_the_cursor_moves_past_it() {
-        let clock = ChangeClock::new();
+        let clock = ChangeClock::new(Wakes::default());
         clock.record_text("a", "1", 0, "aa", false);
         clock.record_text("b", "2", 0, "bb", false);
         let (attempts, cursor) = text_poll(&clock, 0, &["b".into()]);
@@ -960,14 +997,13 @@ mod tests {
 
     #[test]
     fn a_paged_change_reply_only_returns_text_up_to_its_cursor() {
-        let clock = ChangeClock::new();
-        let changed = Notify::new();
+        let clock = ChangeClock::new(Wakes::default());
         for i in 0..MAX_EVENT_CHANGES {
             clock.record(&format!("t{i}"));
         }
         clock.record_text("attempt-thread", "attempt", 0, "x", false);
         let text_start_seq = clock.lock().text["attempt-thread"].deltas[0].seq;
-        let guard = clock.live_text_guard("attempt-thread", "attempt", &changed);
+        let guard = clock.live_text_guard("attempt-thread", "attempt");
         let start_seq = clock.lock().reasoning_activity["attempt-thread"].sequence;
         clock.record_text("attempt-thread", "attempt", 1, "x", true);
         for i in 0..MAX_EVENT_CHANGES {
@@ -1035,7 +1071,7 @@ mod tests {
 
     #[test]
     fn the_largest_possible_reply_fits_one_frame() {
-        let clock = ChangeClock::new();
+        let clock = ChangeClock::new(Wakes::default());
         // Control characters take six JSON bytes each: the worst retained text.
         let piece = "\u{1}".repeat(MAX_ATTEMPT_TEXT_BYTES);
         let id = "i".repeat(128);
@@ -1085,7 +1121,8 @@ mod tests {
         let changed = control.changed.notified();
         tokio::pin!(changed);
         changed.as_mut().enable();
-        let text = control.text_changed.notified();
+        let subscription = control.waits.keyed.subscribe([Key::Live(None)]);
+        let text = subscription.notify.notified();
         tokio::pin!(text);
         text.as_mut().enable();
         control.stream_delta("t", "a", "x", false, 0);
@@ -1177,9 +1214,7 @@ mod tests {
         assert!(baseline_response.ok, "{:?}", baseline_response.error);
         let baseline = baseline_response.result.unwrap();
         let cursor = baseline["cursor"].as_str().unwrap().to_owned();
-        let guard = control
-            .change_clock
-            .live_text_guard("t", "attempt", &control.text_changed);
+        let guard = control.change_clock.live_text_guard("t", "attempt");
         let started_response = control.request(wait(Some(cursor.clone()))).await;
         assert!(started_response.ok, "{:?}", started_response.error);
         let started = started_response.result.unwrap();
@@ -1331,7 +1366,7 @@ mod tests {
 
     #[test]
     fn cursor_ahead_of_the_clock_is_rejected() {
-        let clock = ChangeClock::new();
+        let clock = ChangeClock::new(Wakes::default());
         clock.record("a");
         assert!(clock.poll(2, &[], false, false).is_none());
     }
@@ -1342,9 +1377,8 @@ mod admission_fence_tests {
     use super::*;
     #[test]
     fn admission_without_text_keeps_text_baseline_empty_but_reasoning_active() {
-        let clock = ChangeClock::new();
-        let notify = Notify::new();
-        let guard = clock.live_text_guard("t", "a", &notify);
+        let clock = ChangeClock::new(Wakes::default());
+        let guard = clock.live_text_guard("t", "a");
         let before = clock.snapshot(&[], true, true);
         assert!(before.1.is_empty());
         assert_eq!(before.2.len(), 1);
@@ -1353,12 +1387,11 @@ mod admission_fence_tests {
     }
     #[test]
     fn admitted_newcomer_at_capacity_has_no_live_publication_authority() {
-        let clock = ChangeClock::new();
-        let notify = Notify::new();
+        let clock = ChangeClock::new(Wakes::default());
         let ids = (0..17).map(|i| format!("t{i}")).collect::<Vec<_>>();
         let guards = ids
             .iter()
-            .map(|id| clock.live_text_guard(id, id, &notify))
+            .map(|id| clock.live_text_guard(id, id))
             .collect::<Vec<_>>();
         for guard in guards.iter().take(16) {
             assert!(guard.record(0, "received", false));
@@ -1372,9 +1405,8 @@ mod admission_fence_tests {
     }
     #[test]
     fn terminal_revoke_is_update_only_for_text_and_reasoning() {
-        let clock = ChangeClock::new();
-        let notify = Notify::new();
-        let guard = clock.live_text_guard("t", "a", &notify);
+        let clock = ChangeClock::new(Wakes::default());
+        let guard = clock.live_text_guard("t", "a");
         assert!(guard.record(0, "text", false));
         assert!(guard.record(4, "thinking", true));
         let old_poll = clock.snapshot(&[], true, true);
@@ -1387,10 +1419,9 @@ mod admission_fence_tests {
     }
     #[test]
     fn duplicate_guard_old_drop_and_old_write_cannot_touch_new_token() {
-        let clock = ChangeClock::new();
-        let notify = Notify::new();
-        let old = clock.live_text_guard("t", "a", &notify);
-        let current = clock.live_text_guard("t", "a", &notify);
+        let clock = ChangeClock::new(Wakes::default());
+        let old = clock.live_text_guard("t", "a");
+        let current = clock.live_text_guard("t", "a");
         assert!(!old.record(0, "old", false));
         drop(old);
         assert!(current.record(0, "current", false));
@@ -1398,20 +1429,19 @@ mod admission_fence_tests {
             clock.snapshot(&[], true, true).1[0].deltas[0].text,
             "current"
         );
-        let next = clock.live_text_guard("t", "b", &notify);
+        let next = clock.live_text_guard("t", "b");
         drop(current);
         assert!(next.record(0, "next", false));
     }
     #[test]
     fn abandoned_admission_and_evicted_guard_cannot_recreate_preview() {
-        let clock = ChangeClock::new();
-        let notify = Notify::new();
-        let guard = clock.reserve_live("t", "a", &notify);
+        let clock = ChangeClock::new(Wakes::default());
+        let guard = clock.reserve_live("t", "a");
         let (token, alive) = guard.reservation();
         drop(guard);
         clock.admit_live("t", "a", &token, &alive, None);
         assert!(clock.snapshot(&[], true, true).1.is_empty());
-        let guard = clock.live_text_guard("t", "a", &notify);
+        let guard = clock.live_text_guard("t", "a");
         {
             clock.lock().text.remove("t");
         }
@@ -1419,12 +1449,11 @@ mod admission_fence_tests {
     }
     #[test]
     fn bounded_admission_and_other_thread_survive_exact_revoke() {
-        let clock = ChangeClock::new();
-        let notify = Notify::new();
+        let clock = ChangeClock::new(Wakes::default());
         let ids = (0..17).map(|i| format!("t{i}")).collect::<Vec<_>>();
         let guards = ids
             .iter()
-            .map(|id| clock.live_text_guard(id, id, &notify))
+            .map(|id| clock.live_text_guard(id, id))
             .collect::<Vec<_>>();
         assert_eq!(clock.snapshot(&[], true, true).2.len(), 16);
         assert!(!guards[16].record(0, "over cap", true));

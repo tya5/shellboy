@@ -170,6 +170,7 @@ pub(super) async fn acknowledge(
     let target_thread = thread.to_owned();
     let thread = thread.to_owned();
     let run = run.to_owned();
+    let wait_wakes = control.waits.keyed.clone();
     let changed=control.store.database.call(move|db|{
         let tx=db.transaction()?;
         let interrupted:Option<(String,String)>=tx.query_row("SELECT u.id,u.interrupt_requested_at FROM turn u JOIN run r ON r.id=u.run_id WHERE u.thread_id=?1 AND u.run_id=?2 AND r.state='live' AND u.state IN ('preparing','running','waiting','recovery_wait') AND u.interrupt_requested_at IS NOT NULL",params![thread,run],|r|Ok((r.get(0)?,r.get(1)?))).optional()?;
@@ -251,7 +252,9 @@ pub(super) async fn acknowledge(
             ));
         }
         tx.execute("UPDATE thread SET revision=revision+1,updated_at=?2 WHERE id=?1",params![thread,at])?;
-        tx.commit()?;Ok(true)
+        tx.commit()?;
+        wait_wakes.publish(super::wait::wakes::Key::recovery(thread, run, turn));
+        Ok(true)
     }).await.map_err(storage_error)?;
     if changed {
         control.changed(&target_thread);

@@ -1,4 +1,5 @@
 //! Bounded-duration explicit observations without resource dependency policy.
+pub(crate) mod wakes;
 use super::{Control, foreground::ForegroundSlot};
 use crate::protocol::*;
 use rusqlite::{Connection, OptionalExtension};
@@ -36,13 +37,24 @@ type Result<T> = std::result::Result<T, ApiError>;
 const WAIT_BINDING_BYTES: usize = r#","turn_wait_generation":9223372036854775807"#.len();
 #[derive(Default)]
 pub(super) struct WaitRegistry {
+    pub(super) keyed: wakes::Wakes,
     #[cfg(test)]
     pub(super) observations: std::sync::atomic::AtomicUsize,
     #[cfg(test)]
     pub(super) output_commits: std::sync::atomic::AtomicUsize,
     #[cfg(test)]
     pub(super) output_save_micros: StdMutex<Vec<u128>>,
+    #[cfg(test)]
+    parked: tokio::sync::Notify,
     entries: Arc<StdMutex<HashMap<String, Registration>>>,
+}
+impl WaitRegistry {
+    pub(super) fn new(keyed: wakes::Wakes) -> Self {
+        Self {
+            keyed,
+            ..Self::default()
+        }
+    }
 }
 #[derive(Clone)]
 struct Registration {
@@ -170,24 +182,48 @@ async fn observe_inner(
             ));
         }
     }
+    use wakes::Key;
+    let mut keys = Vec::new();
+    for condition in &args.conditions {
+        match condition {
+            WaitCondition::ReplyReceived { message_id } => {
+                keys.push(Key::Reply(message_id.clone()))
+            }
+            WaitCondition::ThreadSettled { thread_ids, .. } => {
+                for thread in thread_ids {
+                    keys.extend([
+                        Key::ThreadSettled(thread.clone()),
+                        Key::ThreadUnavailable(thread.clone()),
+                    ]);
+                }
+            }
+            WaitCondition::TurnCompleted { turn_id } => keys.push(Key::Turn(turn_id.clone())),
+            WaitCondition::RunEnded { run_id } => keys.push(Key::Run(run_id.clone())),
+            WaitCondition::ShellEnded { execution_id } => {
+                keys.push(Key::ShellTerminal(execution_id.clone()))
+            }
+            WaitCondition::ShellOutput { execution_id, .. } => {
+                keys.push(Key::ShellOutput(execution_id.clone()))
+            }
+        }
+    }
+    if let Some(caller) = &caller {
+        keys.extend([
+            Key::CallerInput(caller.thread_id.clone()),
+            Key::Foreground(caller.execution_id.clone()),
+        ]);
+    }
+    let subscription = Arc::new(control.waits.keyed.subscribe(keys));
     let mut thread_after = args.after.clone();
     let duration = Duration::from_millis(args.timeout_ms);
     let started = tokio::time::Instant::now();
     let mut guard = None;
     let mut initial = true;
-    let observes_output = args
-        .conditions
-        .iter()
-        .any(|condition| matches!(condition, WaitCondition::ShellOutput { .. }));
     loop {
-        let output_changed = control.shell_output_changed.notified();
-        tokio::pin!(output_changed);
-        if observes_output {
-            output_changed.as_mut().enable();
-        }
-        let notified = control.changed.notified();
-        tokio::pin!(notified);
-        notified.as_mut().enable();
+        let keyed = subscription.notify.notified();
+        tokio::pin!(keyed);
+        keyed.as_mut().enable();
+        let registration = subscription.clone();
         let mut query = args.clone();
         query.after = thread_after.clone();
         let origin = caller.clone();
@@ -201,6 +237,20 @@ async fn observe_inner(
             .store
             .database
             .call(move |db| {
+                if initial {
+                    // Install the parent dependency before taking the predicate snapshot.
+                    for condition in &query.conditions {
+                        let (sql, id) = match condition {
+                            WaitCondition::TurnCompleted { turn_id } => ("SELECT thread_id FROM turn WHERE id=?1", turn_id),
+                            WaitCondition::RunEnded { run_id } => ("SELECT thread_id FROM run WHERE id=?1", run_id),
+                            WaitCondition::ShellEnded { execution_id } | WaitCondition::ShellOutput { execution_id, .. } =>
+                                ("SELECT r.thread_id FROM shell_execution s JOIN run r ON r.id=s.owner_run_id WHERE s.id=?1", execution_id),
+                            _ => continue,
+                        };
+                        let thread = db.query_row(sql, [id], |row| row.get::<_, String>(0)).optional()?;
+                        registration.add(thread.map(Key::ThreadUnavailable));
+                    }
+                }
                 let tx=db.transaction()?;
                 let observation=inspect(&tx,&query,origin.as_ref(),initial);
 
@@ -287,9 +337,10 @@ async fn observe_inner(
                 control.changed(&thread);
             }
         }
+        #[cfg(test)]
+        control.waits.parked.notify_one();
         tokio::select! {
-            _=notified=>{},
-            _=output_changed, if observes_output=>{},
+            _=keyed=>{},
             _=disconnected.cancelled()=>{},
             _=tokio::time::sleep(duration.saturating_sub(started.elapsed()).min(Duration::from_secs(86_400)))=>{},
             _=control.stop.cancelled()=>return outcome(&args,&observation,Some(WaitStatus::Interrupted))?.ok_or_else(||invalid("shutdown wait result missing")),
@@ -533,6 +584,7 @@ fn sql_error(error: rusqlite::Error) -> ApiError {
 
 #[cfg(test)]
 mod tests {
+    use super::wakes::Key;
     use super::*;
     use crate::app::DataOwner;
 
@@ -578,6 +630,65 @@ mod tests {
             timeout_ms,
         }
     }
+    #[tokio::test]
+    async fn ipc_shell_completion_reobserves_only_its_wait() {
+        crate::test_watchdog::watchdog("keyed IPC shell waits", async {
+            let (directory, owner, control) = fixture().await;
+            let mut ipc = crate::ipc::TestServer::for_instance(&owner.instance_id);
+            let (_unused, receive) = tokio::sync::mpsc::channel(1);
+            let incoming = std::mem::replace(&mut ipc.incoming, receive);
+            let dispatch = tokio::spawn(control.clone().serve(incoming));
+            let mut clients = Vec::new();
+            let mut collectors = Vec::new();
+            for (n, (id, thread, run, turn)) in [("sa", "a", "ra", "ta"), ("sb", "b", "rb", "tb")].into_iter().enumerate() {
+                let shell = crate::shell::ShellSupervisor::new(&crate::config::Config::default())
+                    .spawn(id.into(), directory.path().into(), serde_json::from_value(json!({
+                        "command": if cfg!(windows) { "set /p hold= & exit /b 7" } else { "read hold; exit 7" },
+                        "stdin_open": true
+                    })).unwrap(), Default::default()).await.unwrap();
+                let handle = shell.handle.clone();
+                let collector = control.clone();
+                let task = tokio::spawn(async move {
+                    super::super::driver::shell_output::collect_shell(&collector,
+                        &super::super::driver::shell_output::ShellOwner::Run {
+                            thread: thread.into(), run: run.into(), turn: turn.into(),
+                        }, id, shell).await.unwrap()
+                });
+                collectors.push((handle, task));
+                clients.push(ipc.connect_command(n, Command::Wait(args(WaitCondition::ShellEnded { execution_id: id.into() }, 30_000))).await);
+                control.waits.parked.notified().await;
+            }
+            let observations = || control.waits.observations.load(std::sync::atomic::Ordering::Relaxed);
+            let before = observations();
+            let read = |id: &str| Command::ShellGet(ExecutionTarget { execution_id: id.into() });
+            let unrelated = Command::ThreadSet(Box::new(ThreadSetArgs {
+                thread_id: Some("parent".into()), title: Some("unrelated change".into()),
+                ..Default::default()
+            }));
+            assert!(ipc.connect_command(3, unrelated).await.await.unwrap().unwrap().ok);
+            let (a, done_a) = collectors.remove(0);
+            a.write("go\n", "utf-8").await.unwrap();
+            done_a.await.unwrap();
+            let saved = clients.remove(0).await.unwrap().unwrap().result.unwrap();
+            assert_eq!(saved["status"], "satisfied");
+            let shell = ipc.connect_command(4, read("sa")).await.await.unwrap().unwrap().result.unwrap();
+            for key in ["state", "exit_code", "output_complete"] {
+                assert_eq!(saved["snapshot"]["conditions"][0][key], shell[key]);
+            }
+            let count = observations();
+            clients.remove(0).abort();
+            let (b, done_b) = collectors.remove(0);
+            b.stop();
+            done_b.await.unwrap();
+            control.shutdown().await.unwrap();
+            ipc.server.shutdown().await.unwrap();
+            dispatch.await.unwrap();
+            assert!(control.waits.keyed.is_empty());
+            owner.shutdown().await.unwrap();
+            assert_eq!(count, before + 1, "only A may inspect again");
+        }).await.unwrap();
+    }
+
     async fn registered(control: &Control) {
         tokio::time::timeout(Duration::from_secs(2), async {
             while control.waits.entries.lock().unwrap().is_empty() {
@@ -935,7 +1046,10 @@ mod tests {
             })
             .await
             .unwrap();
-        control.changed("b");
+        control
+            .waits
+            .keyed
+            .publish([Key::Turn("tb".into()), Key::Run("rb".into())]);
         assert_eq!(waiting.await.unwrap().unwrap()["status"], "satisfied");
         let any = observe(
             control.clone(),
@@ -1385,7 +1499,7 @@ mod tests {
         pending_count(&control, 1).await;
         waiting_state(&control, "running").await;
         let _current = foreground.register("sa");
-        control.changed.notify_waiters();
+        control.waits.keyed.publish([Key::Foreground("sa".into())]);
         waiting_state(&control, "waiting").await;
         cancel.cancel();
         task.await.unwrap().unwrap();
@@ -1490,7 +1604,7 @@ mod tests {
             })
             .await
             .unwrap();
-        control.changed("a");
+        control.waits.keyed.publish([Key::Turn("ta".into())]);
         let value = crate::test_watchdog::watchdog("parked wait", observer)
             .await
             .unwrap()
@@ -1532,7 +1646,7 @@ mod tests {
                 .observations
                 .load(std::sync::atomic::Ordering::Relaxed);
             for _ in 0..100 {
-                control.shell_output_changed.notify_waiters();
+                control.waits.keyed.publish([Key::ShellOutput("sa".into())]);
             }
             assert!(
                 tokio::time::timeout(Duration::from_millis(20), &mut observer)
@@ -1555,7 +1669,11 @@ mod tests {
                     _ => "UPDATE turn SET state='recovery_wait' WHERE id='ta'",
                 })?; Ok(())
             }).await.unwrap();
-            control.changed("a");
+            control.waits.keyed.publish([match case {
+                0 => Key::ShellTerminal("sa".into()),
+                2 => Key::Run("ra".into()),
+                _ => Key::Turn("ta".into()),
+            }]);
             let value = tokio::time::timeout(Duration::from_secs(1), observer)
                 .await
                 .unwrap()
@@ -1620,7 +1738,7 @@ mod tests {
             tx.execute("UPDATE shell_execution SET saved_sequence=1 WHERE id='sa'",[])?;
             tx.commit()?; Ok(())
         }).await.unwrap();
-        control.shell_output_changed.notify_waiters();
+        control.waits.keyed.publish([Key::ShellOutput("sa".into())]);
         let value = tokio::time::timeout(Duration::from_secs(1), observer)
             .await
             .unwrap()

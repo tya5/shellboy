@@ -75,7 +75,6 @@ impl Control {
         let config = self.store.config.clone();
         let clients = self.store.clients.clone();
         let change_clock = self.change_clock.clone();
-        let changed = self.changed.clone();
         let applied = self
             .attachments
             .control_files()
@@ -87,7 +86,6 @@ impl Control {
                 // Publish under the write guard even if the caller has stopped waiting.
                 if applied.written {
                     change_clock.record_config_changed();
-                    changed.notify_waiters();
                 }
                 Ok(applied)
             })

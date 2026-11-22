@@ -122,7 +122,7 @@ pub(super) fn public_reason(reason: Option<String>) -> Option<String> {
 
 pub(super) enum Step {
     Waiting(Option<DateTime<Utc>>),
-    Admitted(String),
+    Admitted(String, [super::wait::wakes::Key; 3]),
 }
 
 pub(super) fn step(
@@ -148,7 +148,10 @@ pub(super) fn step(
         serde_json::json!({"kind":"owner"}),
         &now.to_rfc3339(),
     )?;
-    Ok(Step::Admitted(candidate.thread))
+    Ok(Step::Admitted(
+        candidate.thread.clone(),
+        super::wait::wakes::Key::recovery(candidate.thread, candidate.run, candidate.turn),
+    ))
 }
 
 pub(super) async fn drive(owner: &super::Control) -> Result<Step, crate::storage::StorageError> {
@@ -156,6 +159,7 @@ pub(super) async fn drive(owner: &super::Control) -> Result<Step, crate::storage
         return Ok(Step::Waiting(None));
     }
     let stop = owner.stop.clone();
+    let wakes = owner.waits.keyed.clone();
     owner
         .store
         .database
@@ -166,6 +170,13 @@ pub(super) async fn drive(owner: &super::Control) -> Result<Step, crate::storage
             let tx = db.transaction()?;
             let result = step(&tx, Utc::now())?;
             tx.commit()?;
+            if let Step::Admitted(thread, keys) = &result {
+                wakes.publish(
+                    keys.iter()
+                        .cloned()
+                        .chain([super::wait::wakes::Key::CallerInput(thread.clone())]),
+                );
+            }
             Ok(result)
         })
         .await

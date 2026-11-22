@@ -93,6 +93,7 @@ pub(crate) fn draft_send_fingerprint(
 
 #[derive(Debug, Clone, Default)]
 pub struct MutationResult {
+    pub(super) wait_keys: Vec<super::wait::wakes::Key>,
     /// A committed lifecycle transition that rejects the requested action.
     pub(super) committed_error: Option<ApiError>,
     pub owner_shutdown: bool,
@@ -1240,6 +1241,11 @@ impl Store {
         };
         tx.execute("UPDATE operation_receipt SET state=?2,result_ref_json=?3,reserved_bytes=0 WHERE operation_id=?1",params![operation_id,if saved.error.is_none(){"completed"}else{"failed"},serde_json::to_string(&saved).unwrap()]).map_err(sql_error)?;
         tx.commit().map_err(sql_error)?;
+        if let Ok(result) = &mut outcome {
+            self.database
+                .wait_wakes()
+                .publish(std::mem::take(&mut result.wait_keys));
+        }
         outcome.and_then(|result| match result.committed_error.clone() {
             Some(error) => Err(error),
             None => Ok(result),
@@ -1524,10 +1530,12 @@ impl Store {
                 MutationResult::value(message_details(tx, &args.message_id)?)
             }
             Command::MessageCancel(args) => {
+                let mut keys = Vec::new();
                 let (cancelled, changed) =
-                    super::pending_messages::cancel_tx(tx, args, caller, now)
+                    super::pending_messages::cancel_tx(tx, args, caller, now, &mut keys)
                         .map_err(storage_error)?;
                 let mut result = MutationResult::value(cancelled)?;
+                result.wait_keys = keys;
                 result.changed_threads = changed;
                 result.quiet_wake_threads =
                     super::reply::cancellation_wakes_tx(tx, &args.message_ids)
@@ -2128,6 +2136,7 @@ impl Store {
             status,
             reason,
             wake,
+            recovery_changed,
         } = if named {
             MessageAssignment {
                 run: None,
@@ -2136,6 +2145,7 @@ impl Store {
                 status: DeliveryStatus::Accepted,
                 reason: None,
                 wake: false,
+                recovery_changed: false,
             }
         } else {
             assign_message(
@@ -2197,7 +2207,22 @@ impl Store {
         .map_err(sql_error)?;
         bump_roots(tx)?;
         let accepted_thread = accepted.thread_id.clone();
-        let mut result = MutationResult::value(accepted)?;
+        let mut result = MutationResult::value(&accepted)?;
+        use super::wait::wakes::Key;
+        if state == "accepted" {
+            result.wait_keys.push(Key::CallerInput(id.clone()));
+        }
+        if matches!(
+            accepted.assignment,
+            Assignment::NewRun | Assignment::NewTurn
+        ) {
+            result.wait_keys.push(Key::ThreadSettled(id.clone()));
+        }
+        if recovery_changed && let (Some(run), Some(turn)) = (accepted.run_id, accepted.turn_id) {
+            result
+                .wait_keys
+                .extend(Key::recovery(id.clone(), run, turn));
+        }
         if wake {
             if args.deliver == Deliver::Now {
                 result.wake_threads.push(id);
@@ -2226,6 +2251,7 @@ struct MessageAssignment {
     status: DeliveryStatus,
     reason: Option<&'static str>,
     wake: bool,
+    recovery_changed: bool,
 }
 
 fn assign_message(
@@ -2260,6 +2286,7 @@ fn assign_message(
     let mut status = DeliveryStatus::Accepted;
     let mut reason = None;
     let mut wake = false;
+    let mut recovery_changed = false;
     if let Some((run_id, state)) = run {
         // A Run already in recovery wait gets ordinary input, as at entry.
         let recovering: bool = tx
@@ -2296,6 +2323,7 @@ fn assign_message(
                                 "Turn changed before explicit recovery resume",
                             ));
                         }
+                        recovery_changed = true;
                         super::context::record_fact(
                             tx,
                             id,
@@ -2348,6 +2376,7 @@ fn assign_message(
                 tx.execute("UPDATE turn SET state='recovery_wait',recovery_reason_json='{\"reason\":\"held_messages_remaining\"}' WHERE id=?1", [&turn_id]).map_err(sql_error)?;
                 status = DeliveryStatus::Held;
                 reason = Some("recovery_wait");
+                recovery_changed = true;
             }
         }
         assigned_run = Some(run_id);
@@ -2362,6 +2391,7 @@ fn assign_message(
         status,
         reason,
         wake,
+        recovery_changed,
     })
 }
 
@@ -2648,7 +2678,8 @@ pub(crate) fn recovery_rewind_tx(
             "Recovery Run changed before Stop",
         ));
     }
-    super::state::stop_drained_run_tx(tx, run, thread).map_err(storage_error)?;
+    super::state::stop_drained_run_tx(tx, run, thread, &mut result.wait_keys)
+        .map_err(storage_error)?;
     let terminal: (String, i64) = tx
         .query_row(
             "SELECT state,generation FROM turn WHERE id=?1 AND run_id=?2",
@@ -2682,7 +2713,8 @@ pub(crate) fn recovery_rewind_tx(
     {
         result.changed_threads.push(branch.to_owned());
     }
-    result.wake_threads = super::reply::terminal_tx(tx, run, now).map_err(sql_error)?;
+    result.wake_threads =
+        super::reply::terminal_tx(tx, run, now, &mut result.wait_keys).map_err(sql_error)?;
     Ok(result)
 }
 
@@ -3256,6 +3288,12 @@ fn retry_run(
     )
     .map_err(storage_error)?;
     Ok(MutationResult {
+        wait_keys: vec![
+            super::wait::wakes::Key::CallerInput(details.thread_id.clone()),
+            super::wait::wakes::Key::ThreadSettled(details.thread_id.clone()),
+            super::wait::wakes::Key::Run(id.into()),
+            super::wait::wakes::Key::Turn(turn),
+        ],
         committed_error: None,
         owner_shutdown: false,
         result: serde_json::to_value(run_details(tx, id)?).unwrap(),
@@ -3401,7 +3439,9 @@ pub(super) fn delete_thread(
         tx.execute("UPDATE attachment_delivery SET status='cancelled' WHERE thread_id=?1 AND status IN ('accepted','held')",[id]).map_err(sql_error)?;
         tx.execute("UPDATE receipt SET state='cancelled',hold_reason='target_unavailable',updated_at=?2 WHERE target_thread_id=?1 AND state IN ('accepted','held')",params![id,now]).map_err(sql_error)?;
     }
-    let reply_wakes = super::reply::deleted_threads_tx(tx, &targets, now).map_err(sql_error)?;
+    let mut keys = Vec::new();
+    let reply_wakes =
+        super::reply::deleted_threads_tx(tx, &targets, now, &mut keys).map_err(sql_error)?;
     bump_roots(tx)?;
     let revision: i64 = tx
         .query_row(
@@ -3414,6 +3454,13 @@ pub(super) fn delete_thread(
     let mut result = MutationResult::value(Accepted { accepted: true })?;
     // The caller publishes these existing notifications only after commit.
     // A receipt replay returns its saved value without repeating the effects.
+    result.wait_keys = keys;
+    result.wait_keys.extend(
+        targets
+            .iter()
+            .cloned()
+            .map(super::wait::wakes::Key::ThreadUnavailable),
+    );
     result.changed_threads = targets.clone();
     result.deleted_threads = targets;
     result.quiet_wake_threads = reply_wakes;

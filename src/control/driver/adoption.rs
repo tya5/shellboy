@@ -29,6 +29,7 @@ pub(super) async fn adopt_response(
     let index = control.index.clone();
     let successful_attachments = prepared;
     use crate::protocol::EventAttemptOutcome;
+    let wait_wakes = control.waits.keyed.clone();
     let adoption=control.store.database.call(move|db|{
             let tx=db.transaction()?;
             let live:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM turn u JOIN run r ON r.id=u.run_id WHERE u.id=?1 AND u.generation=?2 AND r.state='live' AND u.state='running')",params![current.turn,current.generation],|r|r.get(0))?;
@@ -55,14 +56,19 @@ pub(super) async fn adopt_response(
             for (ordinal,item)in output.iter().enumerate(){tx.execute("INSERT INTO output_item(attempt_id,ordinal,item_id,item_type,phase,status,payload_json,node_id)VALUES(?1,?2,?3,?4,?5,'completed',?6,?7)",params![attempt_id,ordinal as i64,item.get("id").and_then(Value::as_str),item.get("type").and_then(Value::as_str).unwrap_or("unknown"),item.get("phase").and_then(Value::as_str),item.to_string(),node])?;}
             for receipt in &current.receipts{tx.execute("UPDATE receipt SET state='applied',updated_at=?2 WHERE id=?1 AND state='accepted'",params![receipt,now()])?;}
             for event in &current.events{tx.execute("UPDATE delivery SET state='processed',processed_attempt_id=?2 WHERE event_id=?1 AND recipient_id=?3",params![event,attempt_id,current.run])?;tx.execute("UPDATE event SET target_run_id=?2 WHERE id=?1 AND kind='context_changed' AND target_run_id IS NULL",params![event,current.run])?;}
-            if let Some(group)=&group_id{
+            let completed = if let Some(group)=&group_id{
                 tx.execute("INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES(?1,?2,?3,'running',?4)",params![group,attempt_id,current.turn,now()])?;
                 for (ordinal,item)in output.iter().filter(|v|v.get("type").and_then(Value::as_str)==Some("function_call")).enumerate(){tx.execute("INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state)VALUES(?1,?2,?3,'shell',?4,'pending')",params![group,item["call_id"].as_str().unwrap_or(""),ordinal as i64,item["arguments"].as_str().unwrap_or("{}")])?;}
+                false
             }else{
-                crate::control::state::complete_answer_turn(&tx, &current.turn, &node)?;
-            }
+                crate::control::state::complete_answer_turn(&tx, &current.turn, &node)?
+            };
             crate::attachments::mark_success_tx(&tx,&successful_attachments,&attempt_id).map_err(crate::storage::StorageError::from)?;
-            tx.commit()?;Ok(Some(EventAttemptOutcome::Adopted))
+            tx.commit()?;
+            use crate::control::wait::wakes::Key;
+            if completed { wait_wakes.publish([Key::Turn(current.turn)]); }
+            if !current.receipts.is_empty() { wait_wakes.publish([Key::CallerInput(current.thread)]); }
+            Ok(Some(EventAttemptOutcome::Adopted))
         }).await.map_err(storage_error)?;
     if let Some(outcome) = adoption {
         control.record_attempt_end(&snapshot.thread, attempt, outcome);

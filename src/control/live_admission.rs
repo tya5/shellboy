@@ -9,9 +9,7 @@ impl Control {
         attempt: &'a str,
         input_through_node_id: Option<&str>,
     ) -> change_clock::LiveTextGuard<'a> {
-        let guard = self
-            .change_clock
-            .reserve_live(thread, attempt, &self.text_changed);
+        let guard = self.change_clock.reserve_live(thread, attempt);
         let (token, alive) = guard.reservation();
         let clock = self.change_clock.clone();
         let t = thread.to_owned();
@@ -29,7 +27,6 @@ impl Control {
                 Ok(())
             })
             .await;
-        self.text_changed.notify_waiters();
         guard
     }
     pub(super) fn record_attempt_end(
@@ -40,7 +37,6 @@ impl Control {
     ) {
         self.change_clock
             .record_attempt_end(thread, attempt, outcome);
-        self.text_changed.notify_waiters();
     }
     pub(super) fn stream_admitted_delta(
         &self,
@@ -61,7 +57,6 @@ impl Control {
             reasoning,
             stream_char_offset: offset,
         });
-        self.text_changed.notify_waiters();
     }
     pub(super) async fn fence_terminal_status(&self, result: &Value) -> Result<(), ApiError> {
         let attempts = result
@@ -106,7 +101,6 @@ impl Control {
             })
             .await
             .map_err(crate::storage::StorageError::into_api_error)?;
-        self.text_changed.notify_waiters();
         Ok(())
     }
 }
@@ -127,9 +121,7 @@ mod tests {
         .await
         .unwrap();
         let control = Control::new(&owner, root.path().into());
-        let guard = control
-            .change_clock
-            .reserve_live("t", "a", &control.text_changed);
+        let guard = control.change_clock.reserve_live("t", "a");
         let (token, alive) = guard.reservation();
         let clock = control.change_clock.clone();
         let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
