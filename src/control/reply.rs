@@ -732,14 +732,22 @@ mod tests {
         let mut db = Connection::open_in_memory().unwrap();
         db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
         db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('t','/','','p','m','0'); INSERT INTO run(id,thread_id,state,created_at) VALUES('r','t','live','0'); INSERT INTO turn(id,thread_id,run_id,state,created_at) VALUES('u','t','r','running','0');").unwrap();
-        for (id, facts) in [
+        let senders = [
+            json!({"kind":"model","instance_id":"fixture-instance","thread_id":"fixture-origin","run_id":"fixture-run","turn_id":"fixture-turn","execution_id":"fixture-execution","label":"fixture-request"}),
+            json!({"kind":"external_cli","label":"fixture-other"}),
+            json!({"kind":"external_cli","label":"fixture-answer"}),
+        ];
+        for ((id, facts), sender) in [
             ("request", json!({"expect_reply":true})),
             ("other", json!({})),
             ("answer", json!({"reply_to":"request"})),
-        ] {
+        ]
+        .into_iter()
+        .zip(&senders)
+        {
             let body =
                 json!({"role":"user","content":[{"type":"input_text","text":id}]}).to_string();
-            let sender = json!({"kind":"external_cli","label":format!("fixture-{id}")}).to_string();
+            let sender = sender.to_string();
             db.execute("INSERT INTO node(id,kind,turn_id,created_at,payload_json,payload_bytes) VALUES(?1,'user','u','0',?2,length(?2))",params![id,body]).unwrap();
             let mut facts = facts;
             facts["message_id"] = json!(id);
@@ -769,6 +777,20 @@ mod tests {
             tx.execute("INSERT INTO node(id,kind,turn_id,created_at,payload_json,payload_bytes) VALUES(?1,?2,'u','0',?3,length(?3))",params![id,kind,body]).unwrap();
             tx.execute("INSERT INTO thread_path(thread_id,ordinal,node_id) SELECT 't',max(ordinal)+1,?1 FROM thread_path",[id]).unwrap();
         }
+        let notification = json!({"kind":"shell_ended","execution_id":"fixture-shell","state":"exited","exit_code":0});
+        tx.execute("INSERT INTO event(id,kind,source_json,target_thread_id,payload_ref_json,created_at,semantic_json) VALUES('shell-finished','context_changed','{}','t','{}','now',?1)", [notification.to_string()]).unwrap();
+        let notice = json!({"event_id":"shell-finished","role":"developer","content":[{"type":"input_text","text":"fixture shell finished"}]});
+        crate::history::append_node(
+            &tx,
+            "t",
+            "event-shell-finished",
+            Some("u"),
+            "event",
+            &notice,
+            "now",
+        )
+        .unwrap();
+        tx.execute("UPDATE node SET notification_event_id='shell-finished' WHERE id='event-shell-finished'", []).unwrap();
         let cache = super::super::replay::ReplayCache::new(1024 * 1024);
         let wire = cache.load(&tx, "t").unwrap().materialize();
         assert_eq!(wire, cache.load(&tx, "t").unwrap().materialize());
@@ -782,13 +804,14 @@ mod tests {
             .iter()
             .map(|item| item["content"][0]["text"].as_str().unwrap())
             .collect();
-        assert_eq!(text.len(), 6);
+        assert_eq!(text.len(), 7);
         assert!(text[0].contains("shellboy message reply --message request"));
         assert_eq!(text[1], "request");
         assert!(text[2].contains("fixture-other"));
         assert_eq!(text[3], "other");
         assert!(text[4].contains("request"));
         assert_eq!(text[5], "answer");
+        assert_eq!(text[6], "fixture shell finished");
         let args = |items| crate::protocol::HistoryWindowArgs {
             thread_id: "t".into(),
             items,
@@ -796,7 +819,7 @@ mod tests {
             node_id: None,
             expect_node_id: None,
             before: 0,
-            after: 4,
+            after: 5,
             excerpt_chars: 32,
         };
         assert_eq!(
@@ -804,7 +827,7 @@ mod tests {
                 .unwrap()
                 .items
                 .len(),
-            5
+            6
         );
         let out = serde_json::to_value(crate::history::window(&tx, &args(true)).unwrap()).unwrap();
         assert_eq!(
@@ -815,6 +838,20 @@ mod tests {
             out["items"][2]["provenance"]["message"]["reply_to"],
             "request"
         );
+        for (i, (id, sender)) in ["request", "other", "answer"]
+            .into_iter()
+            .zip(senders)
+            .enumerate()
+        {
+            let row = &out["items"][i];
+            assert_eq!(row["node_id"], id);
+            assert_eq!(row["provenance"]["sender"], sender, "sender for {id}");
+        }
+        let real = &out["items"][5];
+        assert_eq!(real["node_id"], "event-shell-finished");
+        assert_eq!(real["kind"], "event");
+        assert_eq!(real["provenance"]["notification"], notification);
+        assert_eq!(real["items"][0]["text"], "fixture shell finished");
         for i in [3, 4] {
             assert_eq!(out["items"][i]["items"], json!([]));
         }
