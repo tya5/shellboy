@@ -179,7 +179,7 @@ async fn parked_waits_leave_ordinary_and_stop_admission_available() {
     }
 
     let mut rejected = fixture.pending_connection().await;
-    write_frame(&mut rejected, &Request::new("fixture:32".into(), wait()))
+    write_frame(&mut rejected, &Request::new("fixture:32", wait()))
         .await
         .unwrap();
     let response = crate::test_watchdog::watchdog(
