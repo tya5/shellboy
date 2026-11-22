@@ -210,7 +210,7 @@ UIは既存のイベント・世代付き応答へリアクティブに追従し
 | origin | 発行元の誤識別防止。OSユーザー隔離やpermission engineではない | [control](control.md)、[operation](operation-observability.md)。tokenを表示/モデル入力/保存結果へ複製しない |
 | receipt | 観測はreceipt不要で再観測。変更/waitの同ID/同要求は保全中結果、異要求はconflict。24時間経過保守/圧迫で結果だけを回収し同IDを期限切れにする。pending/参照保護を維持 | [operation](operation-observability.md)。保存outcome8MiB/operation receipt256MiB、事前予約・旧terminal回収・receipt不要status照会 |
 | AGENTS読込 | 新Turnごとに有限file workerで本文を読み直す。同Turn retryは保存済みsnapshotを維持。送信時だけ実snapshot pathを安全に示す1行を本文先頭へ付け、本文/hash保存・優先順位は変えない | [control](control.md)。mtime/size一致の内容変更も反映する。ファイルの原子的snapshotは保証しない |
-| shell stdin EOF | 既知の閉鎖済みstdinへのEOF再送は冪等成功。未知IDやwriteの閉鎖済み入力への送信は別に検証 | [shell設計](shell.md)。acceptedは新規閉鎖・送信・shell終了の証拠ではない |
+| shell stdin EOF | 既知の閉鎖済みstdinへのEOF再送は`invalid_state`で拒否される。未知IDやwriteの閉鎖済み入力への送信は別に検証 | [shell設計](shell.md)。acceptedは新規閉鎖・送信・shell終了の証拠ではない |
 
 接続ごとの `ssl_verify` は既定true。明示falseだけHTTPS証明書検証を無効化し、会話・要約・embedding・モデル一覧へ一貫して適用する。
 
@@ -423,8 +423,7 @@ newer terminal history cannot hide old active work. Other history/filter and
 cursor/redaction bounds remain unchanged. Heavy reads use the shared finite
 presentation pool and read-only WAL snapshots. Schema 15 adds four justified
 indexes, not tables/workers/queues; see storage and CLI designs for costs, boundary
-semantics and explicit retention/unknown coverage. Unreleased main functionality
-requires a matching new owner/CLI, not merely the published v0.4.0 executable.
+semantics and explicit retention/unknown coverage. Use a matching owner and CLI.
 
 ## On-demand owner memory (#80)
 
@@ -453,9 +452,8 @@ processing. Conversation data is read-only; derived data has independent bounds.
 ## Guarded Thread Deletion (#122)
 
 Adopt the optional bounded target marker and transaction-local comparison in
-[deletion impact](deletion-impact.md#guarded-target-set-deletion-122). Protocol 4 is current;
-`thread.delete` adds no mandatory request field. Protocol 3 was the earlier #244
-baseline; #275 advanced the handshake to protocol 4. Marked execution never falls
+[deletion impact](deletion-impact.md#guarded-target-set-deletion-122). The current protocol (see the CLI reference) is in force;
+`thread.delete` adds no mandatory request field. #244 and #275 advanced the handshake earlier. Marked execution never falls
 back to unbounded selection; incomplete or different targets return typed preview_stale before
 mutation. Legacy unmarked behavior and existing Run-state checks remain. The UI
 uses a fresh preview and new confirmation after stale rejection, never an
@@ -533,7 +531,7 @@ attempts; a preserved overdue wait is eligible once at startup. Turning off
 ## Configuration read and write (#266, 2026-11-07)
 
 `config.get` and `config.set` are adopted owner operations; `config init` and `config check` stay standalone.
-Credential values never leave the owner, every field needs a restart and there is no standalone edit path. See
+Credential values never leave the owner, connections and defaults apply live (only the embedding connection waits for a restart) and there is no standalone edit path. See
 [config](config.md#reading-and-changing-through-the-owner-266) and
 [protocol](protocol.md#reading-and-changing-the-configuration-file-configget-configset-266).
 
@@ -543,7 +541,7 @@ Stages A and B of the owner-side connection setup are adopted: `credentials.set`
 per connection in `credentials.toml` beside `config.toml` (plain text, `0600` on Unix, never returned or logged), the
 environment variable wins over the stored key, and `connection.test` sends one model-catalog GET and reports facts.
 `config.get` states each connection's key source (`env` / `stored` / `none`). No table, worker, event, queue or
-dependency is added; no migration. Stage C (applying `connections` changes without a restart) is not adopted yet; see
+dependency is added; no migration. Stage C (applying `connections` changes without a restart) is implemented; see
 [decisions](../development/decisions.md#d-269-connection-setup-stages-a-and-b-2026-11-07). See
 [config](config.md#stored-api-keys-and-connection-test-269) and
 [protocol](protocol.md#stored-keys-and-connection-test-credentialsset-credentialsclear-connectiontest-269).

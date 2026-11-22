@@ -69,7 +69,7 @@ protocol の状態、モデルに送る指示も変わりません。そのた�
 | 会話 | 履歴・作業フォルダー・モデルをまとめた保存先 | Thread。親子の会話は履歴の系譜で、実行の所有関係とは別 |
 | 依頼 | 送った本文。受付済みなら保存されている | message。accepted/held/appliedは回答の成否ではない |
 | 処理中 | 準備、モデル応答、ツール実行や明示待機を進めている | Runは作業の寿命、Turnは次の回答までの処理単位。attemptは個々の通信 |
-| 背景処理 | 回答後もshellや所有する子の処理が続いている | 完了したTurnとliveなRunは両立する。会話切替でも処理は継続 |
+| 背景処理 | 回答後もshellの処理が続いている | 完了したTurnとliveなRunは両立する。会話切替でも処理は継続 |
 | 復旧待ち | 理由を保存し、再試行・新指示・停止の判断を待っている | Turnのrecovery_wait。Runはliveのまま、時間経過だけでは再開しない |
 
 会話を選ぶ操作、現在の作業を止める操作、過去の結果を詳しく読む操作を区別します。
@@ -316,7 +316,7 @@ F1で説明を確認できます。Enterは操作に応じて表示・実行・�
 
 Claudeではネイティブの`api = "anthropic_messages"`を推奨します。既存の出力上限
 32768を維持します。ResponsesやChat Completions経由でClaudeを使う場合は、接続の
-TOML項目か`shellboy config connection set --connection NAME --max-tokens N`で
+TOML項目か`shellboy config set --expected-hash HASH --set connections.NAME.max_tokens=N`（HASHは`config get`から）で
 `max_tokens`を明示設定してください。接続先とモデルが対応する値を指定します。
 自動判別やプロキシ互換性を保証する案内ではありません。
 
@@ -351,8 +351,7 @@ rewindは作成時の生の値をコピーするため、後から親を変更�
 伝播しません。
 
 offはコンパクション全体を止めません。意図された動作ではautomatic summaryを
-続け、automatic spill段階だけをskipします。runtimeのoff経路は別途S2b統合の
-reviewが必要で、S6aの保存/readbackだけではoffが実行時に有効とは確認できません。
+続け、automatic spill段階だけをskipします。実効値がautomaticの経路を決めます。
 
 ## 5. 子へ委譲する
 
@@ -361,8 +360,8 @@ reviewが必要で、S6aの保存/readbackだけではoffが実行時に有効�
 ```text
 まず shellboy docs get --id shellboy/agent-guide と
 shellboy docs get --id shellboy/delegation をshellで読んでください。
-その手順で所有する子Threadを作り、調査だけを委譲してください。
-子への依頼は `message ask --thread` を使い、`reply_received` で待ち、返信状態と原文を確認して結果をまとめてください。
+その手順で子Threadを作り、調査だけを委譲してください。
+子への依頼は `message ask --thread` を使ってTurnを終え、返信が届いたら返信状態と原文を確認して結果をまとめてください。
 ```
 
 親子の停止範囲、途中報告、recovery待ちの判断は[委譲ガイド](delegation.md)にあります。

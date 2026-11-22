@@ -81,7 +81,7 @@ The same saved states and operations apply in either UI language.
 | 会話 (conversation) | A saved container for history, working directory, and model | Thread. Parent/child conversations describe history lineage, separately from execution ownership |
 | 依頼 (request) | The message you sent; once accepted, it is persisted | message. accepted/held/applied do not indicate whether an answer succeeded |
 | 処理中 (working) | Preparation, model response, tool execution, or explicit waiting is in progress | Run is the work lifetime; Turn is the processing unit up to the next answer; attempt is one communication attempt |
-| 背景処理 (background work) | Shell work or owned children continue after the answer | A completed Turn can coexist with a live Run. Work continues across conversation switches |
+| 背景処理 (background work) | Shell work continues after the answer | A completed Turn can coexist with a live Run. Work continues across conversation switches |
 | 復旧待ち (recovery wait) | The reason is saved, awaiting a retry, new instruction, or stop decision | The Turn is in recovery_wait. The Run remains live; elapsed time alone does not resume it |
 
 Selecting a conversation, stopping current work, and inspecting past results are different operations. “Accepted” means persistence succeeded; “answer complete” means the Turn completed, which need not mean that all work, including background work, has finished. IDs and receipts are diagnostic details. Usually you can read the state and reason, then open details when you need them.
@@ -345,7 +345,8 @@ Changes apply to subsequent requests, without rewriting communication already se
 For Claude, prefer the native `api = "anthropic_messages"` mode, which keeps the
 existing 32768 output-token default. If using Claude through Responses or Chat
 Completions, explicitly configure the connection's `max_tokens` in its TOML
-entry or with `shellboy config connection set --connection NAME --max-tokens N`.
+entry or with `shellboy config set --expected-hash HASH --set connections.NAME.max_tokens=N`
+(hash from `config get`).
 Use a value the endpoint/model supports: no automatic detection or proxy
 compatibility is promised.
 
@@ -382,9 +383,7 @@ settings; children, forks and rewinds copy the raw setting at creation, so later
 changes to the parent do not change an existing child.
 
 Off is not a complete compaction disable: the intended policy keeps automatic
-summary work and skips automatic spill stages. Its runtime-off routing still
-requires the separately reviewed S2b integration; S6a persistence alone does not
-prove that automatic off is active.
+summary work and skips automatic spill stages. The effective setting drives the automatic route.
 
 ## 5. Delegate to a child
 
@@ -393,9 +392,9 @@ Simply saying "use subagents" does not guarantee that the model understands Shel
 ```text
 First read shellboy docs get --id shellboy/agent-guide and
 shellboy docs get --id shellboy/delegation using shell.
-Follow those procedures to create an owned child Thread and delegate research only.
-Send each request with `message ask --thread`, wait for `reply_received`,
-check the reply state, retrieve the original reply, and summarize the results.
+Follow those procedures to create a child Thread and delegate research only.
+Send each request with `message ask --thread`, end the Turn, and when the
+reply arrives check its state, retrieve the original reply, and summarize the results.
 ```
 
 Use `message ask --thread` instead of `message send --expect-reply`. `message send` does not request a reply. `message cancel --message MESSAGE_ID` withdraws a pending reply request without removing delivered history. A model can withdraw only its own requests; the owner can withdraw any pending request.
@@ -631,6 +630,8 @@ unless you specify `--cwd`. `schedule list --thread THREAD` reports the next
 occurrence and latest saved result; `schedule disable --schedule ID` prevents
 future runs without stopping the current one. `schedule enable --schedule ID`
 resumes future occurrences, and `schedule remove --schedule ID` stops and deletes it.
+`schedule add --description TEXT` and `schedule set --schedule ID --description TEXT`
+attach a description.
 
 Cron uses the owner's local time. At a daylight-saving gap, a fixed-time entry
 runs at the first valid time after the gap; interval entries skip nonexistent
