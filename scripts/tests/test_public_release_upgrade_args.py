@@ -45,7 +45,7 @@ class PublicUpgradeArguments(unittest.TestCase):
         self.assertIn('(45, "0045_thread_spill_override")', names)
         self.assertIn('(46, "0046_scope_identity_v2")', names)
         self.assertIn('(47, "0047_drop_selection_nonappend_generation")', names)
-        self.assertEqual(upgrade.CURRENT_SCHEMA_VERSION, 53)
+        self.assertEqual(upgrade.CURRENT_SCHEMA_VERSION, 54)
         self.assertTrue((ROOT / 'migrations/0046_scope_identity_v2.sql').is_file())
         self.assertTrue((ROOT / 'migrations/0047_drop_selection_nonappend_generation.sql').is_file())
         self.assertTrue((ROOT / 'migrations/0048_human_question_path_admission.sql').is_file())
@@ -92,7 +92,7 @@ class PublicUpgradeArguments(unittest.TestCase):
         db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('old','/','','p','m','now')")
         upgrade.prepare_schema(db, upgrade.CURRENT_SCHEMA_VERSION)
         self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], upgrade.CURRENT_SCHEMA_VERSION)
-        self.assertEqual(db.execute("SELECT version,name FROM schema_migration ORDER BY version DESC LIMIT 1").fetchone(), (upgrade.CURRENT_SCHEMA_VERSION, '0053_retired_schedule_shells'))
+        self.assertEqual(db.execute("SELECT version,name FROM schema_migration ORDER BY version DESC LIMIT 1").fetchone(), (54, '0054_thread_created_at'))
         self.assertIsNone(db.execute("SELECT spill_override FROM thread WHERE id='old'").fetchone()[0])
         # The spill constraint remains pinned to 45 through the current schema.
         upgrade.check_migration(db, before_45, 44, upgrade.CURRENT_SCHEMA_VERSION)
@@ -102,6 +102,9 @@ class PublicUpgradeArguments(unittest.TestCase):
         fresh.executescript(current_sql)
         self.assertEqual(fresh.execute('PRAGMA user_version').fetchone()[0], upgrade.CURRENT_SCHEMA_VERSION)
         self.assertEqual(columns, [tuple(row) for row in fresh.execute('PRAGMA table_info(thread)')])
+        self.assertIsNone(db.execute("SELECT created_at FROM thread WHERE id='old'").fetchone()[0])
+        index = "SELECT sql FROM sqlite_master WHERE type='index' AND name='threads_created'"
+        self.assertEqual(db.execute(index).fetchone(), fresh.execute(index).fetchone())
         for value in (0, 1):
             db.execute("UPDATE thread SET spill_override=? WHERE id='old'", (value,))
             self.assertEqual(db.execute("SELECT spill_override FROM thread WHERE id='old'").fetchone()[0], value)
