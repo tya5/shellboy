@@ -536,7 +536,7 @@ case-sensitive `*` and `?` wildcards; invalid patterns fail config validation.
 `connection.test` also filters its returned model IDs using the tested saved
 configuration; HTTP status and the catalog success fact are unchanged. The
 filter does not change direct model selection or routing. No list cache is
-added; edits retain `restart_required` for the running owner.
+added; edits retain the existing live/restart rules for the running owner.
 
 ## Configuration read and write (#266, 2026-11-07)
 

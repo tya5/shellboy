@@ -310,7 +310,7 @@ F1で説明を確認できます。Enterは操作に応じて表示・実行・�
 
 `CONNECTION`と`MODEL_ID`は実際の設定値へ置き換えます。一覧は接続先から取得し、モデルや対応effortをShellboyが内蔵しているわけではありません。接続先がembedding等も列挙した場合は一覧に含まれ、会話APIで使える保証ではありません。取得未対応の接続先では `/model CONNECTION MODEL_ID` で直接指定できます。`/effort none`はeffort指定を解除し、モデルへ`none`を必ず送る指示ではありません。モデル変更でも既存effortは保持するので、必要なら明示的に変更・解除します。
 
-同じ LiteLLM proxy を Responses と Anthropic Messages で使い分ける場合は、接続ごとに `models.include = ["gpt-*"]` または `models.include = ["claude-*"]` を設定して一覧を絞れます。`models.exclude = ["*-preview"]` で一致するIDを除外できます。CLI・TUI・Studioで同じ一覧を表示しますが、一覧にないIDも直接指定できます。設定変更後は owner を再起動してください。[設定ガイド](configuration.md)も参照してください。
+同じ LiteLLM proxy を Responses と Anthropic Messages で使い分ける場合は、接続ごとに `models.include = ["gpt-*"]` または `models.include = ["claude-*"]` を設定して一覧を絞れます。`models.exclude = ["*-preview"]` で一致するIDを除外できます。CLI・TUI・Studioで同じ一覧を表示しますが、一覧にないIDも直接指定できます。設定変更の結果に owner の再起動が必要かどうかが表示されます。[設定ガイド](configuration.md)も参照してください。
 
 変更は以後の要求に反映され、既に送信済みの通信を書き換えません。接続・モデル変更では推論の送信epochも変わり、元モデルへ戻しても古いopaque reasoningを自動復活しません。会話原文は残ります。
 

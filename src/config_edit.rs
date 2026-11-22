@@ -756,12 +756,14 @@ fn live_field(name: &str, embedding: Option<&str>) -> bool {
 
 /// Compare every classified definition field, including secrets, without emitting it.
 pub(crate) fn same_connection(a: &Connection, b: &Connection) -> bool {
-    // Spill is consumed from the config snapshot by Control; changing it does
-    // not alter provider request construction or the HTTP client.
+    // Spill and catalog filters are read from the snapshot by Control,
+    // not by the HTTP client.
     let mut left_connection = a.clone();
     let mut right_connection = b.clone();
     left_connection.spill = None;
     right_connection.spill = None;
+    left_connection.models = Default::default();
+    right_connection.models = Default::default();
     let mut left = Fields::default();
     let mut right = Fields::default();
     connection_fields(&mut left, "connection", &left_connection);

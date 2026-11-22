@@ -357,7 +357,7 @@ base_url = "https://proxy.example/v1"
 models.include = ["claude-*"]
 ```
 
-The CLI, TUI, and Studio receive the same filtered list. An unlisted model can still be named directly on its connection. Restart the owner to apply changes. See [configuration](configuration.md) for pattern limits and syntax.
+The CLI, TUI, and Studio receive the same filtered list. An unlisted model can still be named directly on its connection. The configuration response reports whether an owner restart is required. See [configuration](configuration.md) for pattern limits and syntax.
 
 ### Output limits
 

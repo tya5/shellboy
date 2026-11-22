@@ -3558,6 +3558,9 @@ async fn model_filter_changes_catalog_not_direct_model_execution() {
             r#"
         default_connection = 'gpt'
         default_model = 'gpt-4'
+        [embedding]
+        connection = 'gpt'
+        model = 'embed-test'
         [connections.gpt]
         base_url = {url:?}
         models.include = ['gpt-*']
@@ -3627,44 +3630,68 @@ async fn model_filter_changes_catalog_not_direct_model_execution() {
         &control,
         Command::ConfigSet(ConfigSetArgs {
             expected_hash: config["file"]["content_hash"].as_str().unwrap().into(),
-            changes: vec![ConfigChange {
-                field: "connections.gpt.models.exclude".into(),
-                value: Some(json!([])),
-            }],
+            changes: vec![
+                ConfigChange {
+                    field: "connections.gpt.models.exclude".into(),
+                    value: Some(json!([])),
+                },
+                ConfigChange {
+                    field: "connections.raw.models.include".into(),
+                    value: Some(json!(["gpt-*"])),
+                },
+            ],
         }),
     )
     .await;
     assert_eq!(changed["written"], true);
     assert_eq!(changed["restart_required"], true);
-    let respond = async {
-        let incoming = requests.recv().await.unwrap();
-        assert!(incoming.body.is_null());
-        incoming
-            .reply
-            .send(Reply::http(
-                200,
-                "application/json",
-                r#"{"data":[{"id":"gpt-5"},{"id":"gpt-4-preview"}]}"#,
-                "",
-            ))
-            .ok()
-            .unwrap();
-    };
-    let (listed, ()) = tokio::join!(
-        request(
-            &control,
-            Command::ModelList(ModelListArgs {
-                connection: Some("gpt".into()),
-                thread_id: None
-            })
-        ),
-        respond
+    let changes = changed["changes"].as_array().unwrap();
+    assert!(
+        changes
+            .iter()
+            .any(|entry| entry["field"] == "connections.gpt.models.exclude"
+                && entry["restart_required"] == true)
     );
-    assert_eq!(
-        listed["models"],
-        json!(["gpt-5"]),
-        "fresh provider list with the loaded settings, not the saved edit"
+    assert!(
+        changes
+            .iter()
+            .any(|entry| entry["field"] == "connections.raw.models.include"
+                && entry["restart_required"] == false)
     );
+    for (connection, expected) in [
+        ("gpt", vec!["gpt-5"]),
+        ("raw", vec!["gpt-4-preview", "gpt-5"]),
+    ] {
+        let respond = async {
+            let incoming = requests.recv().await.unwrap();
+            assert!(incoming.body.is_null());
+            incoming
+                .reply
+                .send(Reply::http(
+                    200,
+                    "application/json",
+                    r#"{"data":[{"id":"gpt-5"},{"id":"gpt-4-preview"},{"id":"claude-z"}]}"#,
+                    "",
+                ))
+                .ok()
+                .unwrap();
+        };
+        let (listed, ()) = tokio::join!(
+            request(
+                &control,
+                Command::ModelList(ModelListArgs {
+                    connection: Some(connection.into()),
+                    thread_id: None
+                })
+            ),
+            respond
+        );
+        assert_eq!(
+            listed["models"],
+            json!(expected),
+            "fresh provider list with the effective connection settings"
+        );
+    }
     let thread = request(
         &control,
         Command::ThreadCreate(ThreadCreateArgs {
