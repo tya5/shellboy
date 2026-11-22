@@ -79,7 +79,7 @@ async fn registered_thread_wait_retains_its_baseline_when_completion_is_followed
             tx.execute_batch("INSERT INTO run(id,thread_id,state,created_at,ended_at)VALUES('finished','child','completed','2001','2002');INSERT INTO run(id,thread_id,state,created_at)VALUES('new-live','child','live','2003');")?;
             tx.commit()?;Ok(())
         }).await.unwrap();
-        control.changed("child");
+        control.waits.keyed.publish([wakes::Key::ThreadSettled("child".into())]);
         let result=waiting.await.unwrap().unwrap();
         assert_eq!(result["status"],"satisfied");assert_eq!(result["snapshot"]["changes"][0]["run_id"],"finished");
         owner.db.call(|db|{assert_eq!(db.query_row("SELECT state FROM run WHERE id='new-live'",[],|r|r.get::<_,String>(0))?,"live");Ok(())}).await.unwrap();
@@ -143,7 +143,7 @@ async fn reply_waiters_share_one_terminal_fact_and_leave_no_pending_records() {
             db.execute("UPDATE receipt SET result_json=json_set(result_json,'$.reply',json('{\"state\":\"cancelled\",\"at\":\"1\"}')) WHERE message_node_id='reply-request'", [])?;
             Ok(())
         }).await.unwrap();
-        control.changed("recipient");
+        control.waits.keyed.publish([wakes::Key::Reply("reply-request".into())]);
         for waiter in [first, second] {
             let result = waiter.await.unwrap().unwrap();
             assert_eq!(result["status"], "satisfied");
