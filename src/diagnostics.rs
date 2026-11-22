@@ -21,6 +21,7 @@ use std::{
 pub enum DiagnosticEvent {
     Startup,
     StartupStage,
+    OwnerFdLimitConstrained,
     Shutdown,
     DatabaseFailure,
     ModelFailure,

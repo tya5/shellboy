@@ -220,7 +220,7 @@ async fn parked_waits_leave_ordinary_and_stop_admission_available() {
             .reply
             .send(Response::success(
                 invocation.request.operation_id,
-                serde_json::Value::Null,
+                serde_json::json!({"observed": true}),
             ))
             .unwrap();
     }
@@ -234,27 +234,68 @@ async fn parked_waits_leave_ordinary_and_stop_admission_available() {
     fixture.server.shutdown().await.unwrap();
 }
 
+#[cfg(windows)]
+#[tokio::test]
+async fn refused_wait_frame_survives_native_pipe_close() {
+    use crate::protocol::EventsWaitArgs;
+    use tokio::net::windows::named_pipe::{ClientOptions, ServerOptions};
+
+    let address = format!(r"\\.\pipe\shellboy-wait-test-{}", uuid::Uuid::new_v4());
+    let server = ServerOptions::new()
+        .first_pipe_instance(true)
+        .create(&address)
+        .unwrap();
+    let client = ClientOptions::new().open(&address).unwrap();
+    server.connect().await.unwrap();
+    let command = Command::EventsWait(EventsWaitArgs {
+        after: None,
+        thread_ids: Vec::new(),
+        timeout_ms: 60000,
+        include_text: false,
+        include_reasoning_activity: false,
+    });
+    let work = WorkAdmission::new();
+    let _held: Vec<_> = (0..MAX_WAIT_WORK)
+        .map(|_| work.try_acquire(&command).unwrap())
+        .collect();
+    let (requests, mut incoming) = mpsc::channel(1);
+    let served = tokio::spawn(serve_connection(
+        server,
+        "fixture".into(),
+        requests,
+        CancellationToken::new(),
+        work,
+    ));
+    let endpoint = Endpoint {
+        protocol_version: PROTOCOL_VERSION,
+        instance_id: "fixture".into(),
+        transport: "pipe".into(),
+        address,
+    };
+    let response = crate::test_watchdog::watchdog(
+        "native pipe wait refusal",
+        super::super::call_stream(client, endpoint, command, Some("fixture:pipe".into()), None),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let error = response.error.unwrap();
+    assert_eq!(error.code, ErrorCode::InvalidState);
+    let details = error.details.unwrap();
+    assert_eq!(details["phase"], "admission");
+    assert_eq!(details["request_may_have_been_applied"], false);
+    served.await.unwrap().unwrap();
+    assert!(incoming.try_recv().is_err());
+}
+
 #[tokio::test]
 async fn full_work_admission_does_not_block_status_or_stop_and_remains_bounded() {
-    use crate::protocol::{RunTarget, StatusArgs, WaitArgs, WaitCondition};
+    use crate::protocol::{RunTarget, StatusArgs};
     let mut fixture = Fixture::new();
     let mut clients = Vec::new();
     let mut accepted = Vec::new();
     for number in 0..MAX_IPC_WORK {
-        clients.push(
-            fixture
-                .connect_command(
-                    number,
-                    Command::Wait(WaitArgs {
-                        after: None,
-                        conditions: vec![WaitCondition::RunEnded {
-                            run_id: "run".into(),
-                        }],
-                        timeout_ms: 60000,
-                    }),
-                )
-                .await,
-        );
+        clients.push(fixture.connect(number).await);
         accepted.push(fixture.accepted().await);
     }
     for (number, command) in [

@@ -222,6 +222,7 @@ async fn serve_connection<S: AsyncRead + AsyncWrite + Unpin>(
         .ok()
         .map(|request| (request.command.name(), request.command.requires_receipt()));
     let mut dispatched = false;
+    let mut refused_wait = false;
     let mut byte = [0];
     let outcome = 'request: {
         let request = match request {
@@ -233,7 +234,10 @@ async fn serve_connection<S: AsyncRead + AsyncWrite + Unpin>(
         }
         let admission = match work.try_acquire(&request.command) {
             Ok(permit) => permit,
-            Err(error) => break 'request failure(error, "work_admission", "work_rejected", true),
+            Err(error) => {
+                refused_wait = server::WorkAdmission::is_wait(&request.command);
+                break 'request failure(error, "work_admission", "work_rejected", true);
+            }
         };
         let (reply, receiver) = oneshot::channel();
         let invocation = Invocation {
@@ -306,6 +310,10 @@ async fn serve_connection<S: AsyncRead + AsyncWrite + Unpin>(
                 }
             }
         }
+    }
+    if refused_wait {
+        // No invocation owns this connection: release it after the refusal frame.
+        return Ok(());
     }
     // A successful write/flush does not prove the peer consumed the reply,
     // especially on a Windows named pipe. The client closes after reading it.

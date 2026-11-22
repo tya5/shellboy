@@ -184,6 +184,34 @@ pub struct DataOwner {
     pub(crate) endpoint: Arc<RwLock<Option<Endpoint>>>,
     _lock: Arc<OwnerLock>,
 }
+#[cfg(unix)]
+const OWNER_FD_FLOOR: libc::rlim_t = 1024;
+
+#[cfg(unix)]
+fn owner_fd_soft_target(soft: libc::rlim_t, hard: libc::rlim_t) -> libc::rlim_t {
+    soft.max(hard.min(OWNER_FD_FLOOR))
+}
+
+#[cfg(unix)]
+fn ensure_owner_fd_floor() -> bool {
+    let mut limits = libc::rlimit {
+        rlim_cur: 0,
+        rlim_max: 0,
+    };
+    // SAFETY: limits is initialized, writable, and valid for both calls.
+    unsafe {
+        if libc::getrlimit(libc::RLIMIT_NOFILE, &mut limits) != 0 {
+            return false;
+        }
+        let target = owner_fd_soft_target(limits.rlim_cur, limits.rlim_max);
+        if target != limits.rlim_cur {
+            limits.rlim_cur = target;
+            let _ = libc::setrlimit(libc::RLIMIT_NOFILE, &limits);
+        }
+        libc::getrlimit(libc::RLIMIT_NOFILE, &mut limits) == 0 && limits.rlim_cur >= OWNER_FD_FLOOR
+    }
+}
+
 impl DataOwner {
     /// Keep owner exclusion alive during a background width-cache update.
     pub fn width_cache_guard(&self) -> Arc<OwnerLock> {
@@ -249,6 +277,13 @@ impl DataOwner {
             loaded.data_dir.join("logs"),
             loaded.config.logging.clone(),
         );
+        #[cfg(unix)]
+        if !ensure_owner_fd_floor() {
+            diagnostics.record(
+                crate::diagnostics::DiagnosticEvent::OwnerFdLimitConstrained,
+                Default::default(),
+            );
+        }
         diagnostics.record_startup_stage(StartupStage::Configuration, configuration_elapsed, None);
         diagnostics.record_startup_stage(StartupStage::OwnerLock, lock_started.elapsed(), None);
         progress(StartupStage::Database, language, motion);
@@ -432,6 +467,15 @@ const STARTUP_WAIT_DELETE: &str =
 
 #[cfg(test)]
 mod startup_range_tests {
+    #[cfg(unix)]
+    #[test]
+    fn owner_fd_floor_raises_only_within_the_hard_limit() {
+        assert_eq!(super::owner_fd_soft_target(256, libc::RLIM_INFINITY), 1024);
+        assert_eq!(super::owner_fd_soft_target(256, 512), 512);
+        assert_eq!(super::owner_fd_soft_target(256, 256), 256);
+        assert_eq!(super::owner_fd_soft_target(2048, libc::RLIM_INFINITY), 2048);
+    }
+
     use super::*;
 
     const OLD_SELECT: &str = "SELECT key FROM app_meta WHERE key LIKE 'compact.pending.%' OR key LIKE 'compact.inflight.%' ORDER BY key";

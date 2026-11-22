@@ -15,7 +15,14 @@ use tokio_util::sync::CancellationToken;
 mod endpoint;
 use endpoint::EndpointFiles;
 
-const MAX_CONNECTIONS: usize = 32;
+const MAX_WAIT_WORK: usize = 32;
+const CONNECTION_HEADROOM: usize = 8;
+const MAX_CONNECTIONS: usize = MAX_WAIT_WORK
+    + MAX_IPC_WORK
+    + MAX_CONTROL_WORK
+    + MAX_OBSERVATION_WORK
+    + MAX_MEMORY_OBSERVATION_WORK
+    + CONNECTION_HEADROOM;
 const MAX_IPC_WORK: usize = 24;
 const MAX_CONTROL_WORK: usize = 2;
 const MAX_OBSERVATION_WORK: usize = 2;
@@ -24,6 +31,7 @@ const MAX_MEMORY_OBSERVATION_WORK: usize = 1;
 /// Transport budgets; accepted effects retain their permit after disconnection.
 #[derive(Clone)]
 pub(super) struct WorkAdmission {
+    waits: Arc<Semaphore>,
     ordinary: Arc<Semaphore>,
     control: Arc<Semaphore>,
     observation: Arc<Semaphore>,
@@ -32,11 +40,15 @@ pub(super) struct WorkAdmission {
 impl WorkAdmission {
     pub(super) fn new() -> Self {
         Self {
+            waits: Arc::new(Semaphore::new(MAX_WAIT_WORK)),
             ordinary: Arc::new(Semaphore::new(MAX_IPC_WORK)),
             control: Arc::new(Semaphore::new(MAX_CONTROL_WORK)),
             observation: Arc::new(Semaphore::new(MAX_OBSERVATION_WORK)),
             memory_observation: Arc::new(Semaphore::new(MAX_MEMORY_OBSERVATION_WORK)),
         }
+    }
+    pub(super) fn is_wait(command: &Command) -> bool {
+        matches!(command, Command::Wait(_) | Command::EventsWait(_))
     }
     pub(super) fn try_acquire(&self, command: &Command) -> Result<OwnedSemaphorePermit, ApiError> {
         let slots = match command {
@@ -45,6 +57,7 @@ impl WorkAdmission {
             }
             Command::Status(args) if args.memory => &self.memory_observation,
             Command::Status(_) => &self.observation,
+            command if Self::is_wait(command) => &self.waits,
             _ => &self.ordinary,
         };
         slots.clone().try_acquire_owned().map_err(|_| {
