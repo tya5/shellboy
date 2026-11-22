@@ -49,7 +49,10 @@ fn screen_at(operations: &Operations, width: u16, height: u16) -> String {
 fn owner_forms_cover_every_owner_catalogue_identity_without_client_stubs() {
     let owner = OperationId::ALL
         .iter()
-        .filter(|id| id.spec().route == crate::operations::Route::Owner)
+        .filter(|id| {
+            id.spec().route == crate::operations::Route::Owner
+                && !crate::operations::catalogue_tests::CLI_ONLY_SCHEDULES.contains(id)
+        })
         .copied()
         .collect::<std::collections::HashSet<_>>();
     let implemented = OpKind::OWNER

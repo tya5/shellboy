@@ -906,22 +906,47 @@ impl Store {
         outcome: Result<Value>,
     ) -> Result<()> {
         let instance = self.instance_id.clone();
-        super::receipt::encode(&operation_id, &outcome)?;
-        let saved = match outcome {
-            Ok(result) => SavedOutcome {
-                result: Some(result),
-                error: None,
-            },
-            Err(error) => SavedOutcome {
-                result: None,
-                error: Some(error),
-            },
-        };
-        self.database.call(move|db| {
-            let changed=db.execute("UPDATE operation_receipt SET state=?3,result_ref_json=?4,reserved_bytes=0 WHERE operation_id=?1 AND instance_id=?2 AND state='pending'",params![operation_id,instance,if saved.error.is_some(){"failed"}else{"completed"},serde_json::to_string(&saved).unwrap()])?;
-            if changed!=1 {return Ok(Err(error(ErrorCode::InvalidState,"runtime operation was not reserved or was already finalized")));}
-            Ok(Ok(()))
-        }).await.map_err(storage_error)?
+        self.database
+            .call(move |db| {
+                save_runtime_outcome(db, &instance, &operation_id, &outcome)?;
+                Ok(())
+            })
+            .await
+            .map_err(storage_error)
+    }
+
+    pub(super) async fn finalize_deletion(
+        &self,
+        operation_id: String,
+        delete: impl FnOnce(&Transaction<'_>) -> Result<MutationResult> + Send + 'static,
+    ) -> Result<MutationResult> {
+        let instance = self.instance_id.clone();
+        self.database
+            .call(move |db| {
+                let tx = db.transaction()?;
+                tx.execute_batch("SAVEPOINT deletion")?;
+                let mut outcome = delete(&tx);
+                let response = outcome
+                    .as_ref()
+                    .map(|effects| effects.result.clone())
+                    .map_err(Clone::clone);
+                if let Err(error) = super::receipt::encode(&operation_id, &response) {
+                    outcome = Err(error);
+                }
+                if outcome.is_err() {
+                    tx.execute_batch("ROLLBACK TO deletion")?;
+                }
+                tx.execute_batch("RELEASE deletion")?;
+                let response = outcome
+                    .as_ref()
+                    .map(|effects| effects.result.clone())
+                    .map_err(Clone::clone);
+                save_runtime_outcome(&tx, &instance, &operation_id, &response)?;
+                tx.commit()?;
+                Ok(outcome)
+            })
+            .await
+            .map_err(storage_error)?
     }
 
     /// Trusted human UI control: resolve and stop in one transaction, without
@@ -3196,6 +3221,24 @@ fn retry_run(
     })
 }
 
+fn save_runtime_outcome(
+    db: &rusqlite::Connection,
+    instance: &str,
+    operation: &str,
+    outcome: &Result<Value>,
+) -> std::result::Result<(), StorageError> {
+    let body = super::receipt::encode(operation, outcome)?;
+    let state = if outcome.is_ok() {
+        "completed"
+    } else {
+        "failed"
+    };
+    if db.execute("UPDATE operation_receipt SET state=?3,result_ref_json=?4,reserved_bytes=0 WHERE operation_id=?1 AND instance_id=?2 AND state='pending'",params![operation,instance,state,body])? != 1 {
+        return Err(error(ErrorCode::InvalidState,"runtime operation was not reserved or was already finalized").into());
+    }
+    Ok(())
+}
+
 pub(super) fn delete_targets(tx: &Transaction<'_>, args: &ThreadDeleteArgs) -> Result<Vec<String>> {
     if args.preview_marker.is_none() {
         thread_details(tx, &args.thread_id)?;
@@ -3250,17 +3293,7 @@ pub(super) fn delete_thread(
 ) -> Result<MutationResult> {
     let targets = delete_targets(tx, args)?;
     for id in &targets {
-        if count(
-            tx,
-            "SELECT count(*) FROM shell_execution s JOIN schedule q ON q.id=s.schedule_id WHERE q.thread_id=?1 AND s.state IN ('starting','running','stopping')",
-            id,
-        )? != 0
-        {
-            return Err(error(
-                ErrorCode::OperationConflict,
-                "A scheduled execution started before deletion",
-            ));
-        }
+        super::schedule::ensure_inactive(tx, id, true)?;
         tx.execute("DELETE FROM schedule WHERE thread_id=?1", [id])
             .map_err(sql_error)?;
     }

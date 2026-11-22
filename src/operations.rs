@@ -191,6 +191,13 @@ pub(crate) enum Discovery {
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) enum FieldId {
+    Schedule,
+    Cron,
+    At,
+    Delay,
+    ScheduleDescription,
+    ScheduleCommand,
+
     Attempt,
     Thread,
     Run,
@@ -392,6 +399,54 @@ pub(crate) const RAG_DB_ARGUMENT: GlobalArgument = GlobalArgument {
 
 pub(crate) const DEFAULT_SETTLEMENT_STATES: &str = "completed recovery_wait failed stopped";
 pub(crate) const FIELD_SPECS: &[FieldSpec] = &[
+    FieldSpec {
+        id: FieldId::Schedule,
+        default_origin: DefaultOrigin::None,
+        label: "予定ID",
+        help: "予定をIDで指定します。",
+        kind: FieldType::Text,
+        discovery: Discovery::None,
+    },
+    FieldSpec {
+        id: FieldId::Cron,
+        default_origin: DefaultOrigin::None,
+        label: "cron式",
+        help: "ローカル時刻の5項目の式です。",
+        kind: FieldType::Text,
+        discovery: Discovery::None,
+    },
+    FieldSpec {
+        id: FieldId::At,
+        default_origin: DefaultOrigin::None,
+        label: "日時",
+        help: "一回だけ実行する日時です。",
+        kind: FieldType::Text,
+        discovery: Discovery::None,
+    },
+    FieldSpec {
+        id: FieldId::Delay,
+        default_origin: DefaultOrigin::None,
+        label: "待ち時間",
+        help: "登録からの相対時間です。",
+        kind: FieldType::Text,
+        discovery: Discovery::None,
+    },
+    FieldSpec {
+        id: FieldId::ScheduleDescription,
+        default_origin: DefaultOrigin::None,
+        label: "説明文",
+        help: "予定の説明文を指定します。",
+        kind: FieldType::Text,
+        discovery: Discovery::None,
+    },
+    FieldSpec {
+        id: FieldId::ScheduleCommand,
+        default_origin: DefaultOrigin::None,
+        label: "コマンド",
+        help: "予定で実行するコマンドです。",
+        kind: FieldType::Text,
+        discovery: Discovery::None,
+    },
     FieldSpec {
         id: FieldId::SettlementStates,
         default_origin: DefaultOrigin::Literal,
@@ -1427,53 +1482,61 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::ScheduleAdd,
-        label: "Schedule add",
-        meaning: "Register a Thread-owned scheduled shell command.",
+        label: "予定 · 追加",
+        meaning: "Thread の予定を追加します。",
         effect: Effect::SavedMutation,
         confirmation: Confirmation::None,
         route: Route::Owner,
-        fields: &[FieldId::Thread],
+        fields: &[
+            FieldId::Thread,
+            FieldId::Cron,
+            FieldId::At,
+            FieldId::Delay,
+            FieldId::Cwd,
+            FieldId::ScheduleDescription,
+            FieldId::ScheduleCommand,
+        ],
     },
     OperationSpec {
         id: OperationId::ScheduleSet,
-        label: "Schedule set",
-        meaning: "Set the schedule description.",
+        label: "予定 · 説明",
+        meaning: "予定の説明文を変更します。",
         effect: Effect::SavedMutation,
         confirmation: Confirmation::None,
         route: Route::Owner,
-        fields: &[],
+        fields: &[FieldId::Schedule, FieldId::ScheduleDescription],
     },
     OperationSpec {
         id: OperationId::ScheduleEnable,
-        label: "Schedule enable",
-        meaning: "Enable a schedule.",
+        label: "予定 · 有効化",
+        meaning: "予定を有効にします。",
         effect: Effect::SavedMutation,
         confirmation: Confirmation::None,
         route: Route::Owner,
-        fields: &[],
+        fields: &[FieldId::Schedule],
     },
     OperationSpec {
         id: OperationId::ScheduleDisable,
-        label: "Schedule disable",
-        meaning: "Disable a schedule.",
+        label: "予定 · 無効化",
+        meaning: "予定を無効にします。",
         effect: Effect::SavedMutation,
         confirmation: Confirmation::None,
         route: Route::Owner,
-        fields: &[],
+        fields: &[FieldId::Schedule],
     },
     OperationSpec {
         id: OperationId::ScheduleRemove,
-        label: "Schedule remove",
-        meaning: "Stop and remove a schedule.",
+        label: "予定 · 削除",
+        meaning: "予定を停止して削除します。",
         effect: Effect::SavedMutation,
         confirmation: Confirmation::None,
         route: Route::Owner,
-        fields: &[],
+        fields: &[FieldId::Schedule],
     },
     OperationSpec {
         id: OperationId::ScheduleList,
-        label: "Schedule list",
-        meaning: "Read scheduled commands and their latest saved outcomes.",
+        label: "予定 · 一覧",
+        meaning: "予定と実行結果を表示します。",
         effect: Effect::Inspect,
         confirmation: Confirmation::None,
         route: Route::Owner,
@@ -2519,4 +2582,4 @@ pub(crate) fn rag_index_effect(dry_run: bool) -> Effect {
 
 #[cfg(test)]
 #[path = "operations/catalogue_tests.rs"]
-mod catalogue_tests;
+pub(crate) mod catalogue_tests;

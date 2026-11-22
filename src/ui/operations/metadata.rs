@@ -834,10 +834,22 @@ fn operation_meaning_for(id: OperationId, language: crate::config::UiLanguage) -
             "Thread の予定を追加します。",
             "Register a Thread-owned command."
         ),
-        OperationId::ScheduleSet => local!(language, "説明", "Set the schedule description."),
-        OperationId::ScheduleEnable => local!(language, "有効化", "Enable a schedule."),
-        OperationId::ScheduleDisable => local!(language, "無効化", "Disable a schedule."),
-        OperationId::ScheduleRemove => local!(language, "削除", "Stop and remove a schedule."),
+        OperationId::ScheduleSet => local!(
+            language,
+            "予定の説明文を変更します。",
+            "Set the schedule description."
+        ),
+        OperationId::ScheduleEnable => {
+            local!(language, "予定を有効にします。", "Enable a schedule.")
+        }
+        OperationId::ScheduleDisable => {
+            local!(language, "予定を無効にします。", "Disable a schedule.")
+        }
+        OperationId::ScheduleRemove => local!(
+            language,
+            "予定を停止して削除します。",
+            "Stop and remove a schedule."
+        ),
         OperationId::ScheduleList => local!(
             language,
             "予定と実行結果を表示します。",
@@ -1174,6 +1186,12 @@ fn field_label_for(id: FieldId, language: crate::config::UiLanguage) -> &'static
             )
         }
         FieldId::MaxTokens => local!(language, "出力上限", "Output limit"),
+        FieldId::Schedule => local!(language, "予定ID", "Schedule ID"),
+        FieldId::Cron => local!(language, "cron式", "Cron expression"),
+        FieldId::At => local!(language, "日時", "Run at"),
+        FieldId::Delay => local!(language, "待ち時間", "Delay"),
+        FieldId::ScheduleDescription => local!(language, "説明文", "Description"),
+        FieldId::ScheduleCommand => local!(language, "コマンド", "Command"),
         FieldId::Title => local!(language, "表示タイトル", "Display title"),
         FieldId::Descendants => local!(language, "子孫も対象", "Include descendants"),
         FieldId::Archived => local!(language, "アーカイブの扱い", "Archived conversations"),
@@ -1519,6 +1537,36 @@ fn field_help_for(id: FieldId, language: crate::config::UiLanguage) -> &'static 
             language,
             "このThreadのモデル要求の出力上限（トークン、正の整数）です。接続のmax_tokensより優先します。CLIの空文字（フォームではnone）で接続の値または既定へ戻します。要約要求には適用しません。",
             "Output limit in tokens (positive integer) for this Thread's model requests; it replaces the connection max_tokens. An empty CLI value (none in the form) returns to the connection or default value. Summary requests do not use it."
+        ),
+        FieldId::Schedule => local!(
+            language,
+            "予定をIDで指定します。",
+            "Select a schedule by ID."
+        ),
+        FieldId::Cron => local!(
+            language,
+            "ローカル時刻の5項目の式です。",
+            "Use a five-field expression in local time."
+        ),
+        FieldId::At => local!(
+            language,
+            "一回だけ実行する日時です。",
+            "Set the one-shot time."
+        ),
+        FieldId::Delay => local!(
+            language,
+            "登録からの相対時間です。",
+            "Set a delay from registration."
+        ),
+        FieldId::ScheduleDescription => local!(
+            language,
+            "予定の説明文を指定します。",
+            "Set the schedule description."
+        ),
+        FieldId::ScheduleCommand => local!(
+            language,
+            "予定で実行するコマンドです。",
+            "Set the scheduled command."
         ),
         FieldId::Title => local!(
             language,

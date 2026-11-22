@@ -8,29 +8,45 @@ type Meaning = (
     Option<&'static [&'static str]>,
 );
 const MEANINGS: &[Meaning] = &[
-    (OperationId::ScheduleSet, &["schedule", "set"], &[], None),
+    (
+        OperationId::ScheduleAdd,
+        &["schedule", "add"],
+        &[
+            ("thread_id", FieldId::Thread),
+            ("cron", FieldId::Cron),
+            ("at", FieldId::At),
+            ("delay", FieldId::Delay),
+            ("cwd", FieldId::Cwd),
+            ("description", FieldId::ScheduleDescription),
+            ("command", FieldId::ScheduleCommand),
+        ],
+        None,
+    ),
+    (
+        OperationId::ScheduleSet,
+        &["schedule", "set"],
+        &[
+            ("schedule_id", FieldId::Schedule),
+            ("description", FieldId::ScheduleDescription),
+        ],
+        None,
+    ),
     (
         OperationId::ScheduleEnable,
         &["schedule", "enable"],
-        &[],
+        &[("schedule_id", FieldId::Schedule)],
         None,
     ),
     (
         OperationId::ScheduleDisable,
         &["schedule", "disable"],
-        &[],
+        &[("schedule_id", FieldId::Schedule)],
         None,
     ),
     (
         OperationId::ScheduleRemove,
         &["schedule", "remove"],
-        &[],
-        None,
-    ),
-    (
-        OperationId::ScheduleAdd,
-        &["schedule", "add"],
-        &[("thread_id", FieldId::Thread)],
+        &[("schedule_id", FieldId::Schedule)],
         None,
     ),
     (

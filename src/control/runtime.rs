@@ -124,38 +124,45 @@ impl Control {
                             }
                             owns_stop = true;
                         }
-                        let cancellable = request.command.runtime_cancellable();
-                        let action = control.runtime_action(request, caller, disconnected);
-                        let result = if cancellable {
-                            tokio::select! {biased;_=control.stop.cancelled()=>Err(ApiError::new(ErrorCode::InvalidState,"Owner stopped this operation; inspect saved jobs and retry explicitly")),result=action=>result}
+                        if matches!(
+                            request.command,
+                            Command::ThreadDelete(_) | Command::ScheduleRemove(_)
+                        ) {
+                            super::schedule::delete(&control, request).await
                         } else {
-                            action.await
-                        };
-                        if result
-                            .as_ref()
-                            .err()
-                            .is_some_and(|error| error.is_storage_failure())
-                        {
-                            control.fail_storage().await;
-                        }
-                        // Pure read results can exceed the frame; store an explicit
-                        // bound error rather than an untransportable success. Runtime
-                        // mutation builders have certified bounded acknowledgments.
-                        let result = match receipt::encode(&operation_id, &result) {
-                            Ok(_) => result,
-                            Err(error) => Err(error),
-                        };
-                        match control
-                            .store
-                            .finalize_runtime(operation_id.clone(), result.clone())
-                            .await
-                        {
-                            Ok(()) => result,
-                            Err(error) => {
-                                if error.is_storage_failure() {
-                                    control.fail_storage().await;
+                            let cancellable = request.command.runtime_cancellable();
+                            let action = control.runtime_action(request, caller, disconnected);
+                            let result = if cancellable {
+                                tokio::select! {biased;_=control.stop.cancelled()=>Err(ApiError::new(ErrorCode::InvalidState,"Owner stopped this operation; inspect saved jobs and retry explicitly")),result=action=>result}
+                            } else {
+                                action.await
+                            };
+                            if result
+                                .as_ref()
+                                .err()
+                                .is_some_and(|error| error.is_storage_failure())
+                            {
+                                control.fail_storage().await;
+                            }
+                            // Pure read results can exceed the frame; store an explicit
+                            // bound error rather than an untransportable success. Runtime
+                            // mutation builders have certified bounded acknowledgments.
+                            let result = match receipt::encode(&operation_id, &result) {
+                                Ok(_) => result,
+                                Err(error) => Err(error),
+                            };
+                            match control
+                                .store
+                                .finalize_runtime(operation_id.clone(), result.clone())
+                                .await
+                            {
+                                Ok(()) => result,
+                                Err(error) => {
+                                    if error.is_storage_failure() {
+                                        control.fail_storage().await;
+                                    }
+                                    Err(error)
                                 }
-                                Err(error)
                             }
                         }
                     }
@@ -342,8 +349,6 @@ impl Control {
                     "Cannot encode shell write result",
                 )
             }
-            Command::ThreadDelete(args) => super::schedule::delete_thread(self, args).await,
-            Command::ScheduleRemove(args) => super::schedule::remove(self, args.schedule_id).await,
             Command::ShellEof(args) | Command::ShellStop(args) => {
                 self.signal_shell(args.execution_id, is_eof, caller).await
             }

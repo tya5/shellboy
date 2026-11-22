@@ -306,91 +306,128 @@ fn disable_and_stop(
     Ok(ids)
 }
 
-pub(super) async fn delete_thread(
+pub(super) fn ensure_inactive(
+    tx: &Transaction<'_>,
+    key: &str,
+    thread: bool,
+) -> Result<(), ApiError> {
+    let column = if thread { "thread_id" } else { "id" };
+    let active=tx.query_row(&format!("SELECT s.id,q.id FROM shell_execution s JOIN schedule q ON q.id=s.schedule_id WHERE q.{column}=?1 AND s.state IN ('starting','running','stopping') ORDER BY s.id LIMIT 1"),[key],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?))).optional().map_err(StorageError::from).map_err(super::storage_error)?;
+    if let Some((execution, schedule)) = active {
+        let mut error = ApiError::new(
+            crate::protocol::ErrorCode::InvalidState,
+            "A scheduled execution is active",
+        );
+        error.details = Some(
+            serde_json::json!({"reason":"active_scheduled_execution","target_id":key,"schedule_id":schedule,"execution_id":execution}),
+        );
+        return Err(error);
+    }
+    Ok(())
+}
+
+pub(super) async fn delete(
     control: &Arc<Control>,
-    args: crate::protocol::ThreadDeleteArgs,
+    request: crate::protocol::Request,
 ) -> Result<serde_json::Value, ApiError> {
-    let request = args.clone();
-    let executions = control
-        .store
-        .database
-        .call(move |db| {
-            let tx = db.transaction()?;
-            let mut executions = Vec::new();
-            for thread in super::db::delete_targets(&tx, &request).map_err(StorageError::from)? {
-                executions.extend(disable_and_stop(&tx, &thread, true)?);
-            }
-            tx.commit()?;
-            Ok(executions)
-        })
-        .await
-        .map_err(super::storage_error)?;
-    drain(control, executions).await?;
+    use crate::protocol::{Command, ErrorCode};
+    let command = request.command;
+    let prepare = command.clone();
+    let prepared = async {
+        let (targets, executions) = control
+            .store
+            .database
+            .call(move |db| {
+                let tx = db.transaction()?;
+                let (mut targets, by_thread) = match prepare {
+                    Command::ThreadDelete(args) => (super::db::delete_targets(&tx, &args)?, true),
+                    Command::ScheduleRemove(args) => {
+                        let exists = tx.query_row(
+                            "SELECT EXISTS(SELECT 1 FROM schedule WHERE id=?1)",
+                            [&args.schedule_id],
+                            |r| r.get::<_, bool>(0),
+                        )?;
+                        if !exists {
+                            return Err(ApiError::new(
+                                ErrorCode::TargetUnavailable,
+                                "Schedule not found",
+                            )
+                            .into());
+                        }
+                        (vec![args.schedule_id], false)
+                    }
+                    _ => unreachable!("only deletion commands have this route"),
+                };
+                targets.sort_unstable();
+                let mut executions = Vec::new();
+                for target in &targets {
+                    executions.extend(disable_and_stop(&tx, target, by_thread)?);
+                }
+                tx.commit()?;
+                Ok((targets, executions))
+            })
+            .await
+            .map_err(super::storage_error)?;
+        drain(control, executions).await?;
+        Ok::<_, ApiError>(targets)
+    }
+    .await;
+    if prepared.as_ref().is_err_and(ApiError::is_storage_failure) {
+        return prepared.map(|_| unreachable!());
+    }
     let effects = control
         .store
-        .database
-        .call(move |db| {
-            let tx = db.transaction()?;
-            let result = super::db::delete_thread(&tx, &args, &super::state::now())
-                .map_err(StorageError::from)?;
-            tx.commit()?;
-            Ok(result)
+        .finalize_deletion(request.operation_id, move |tx| {
+            let targets = prepared?;
+            match command {
+                Command::ThreadDelete(args) => {
+                    let mut current = super::db::delete_targets(tx, &args)?;
+                    current.sort_unstable();
+                    if current != targets {
+                        return Err(ApiError::new(
+                            ErrorCode::PreviewStale,
+                            "Deletion target set changed",
+                        ));
+                    }
+                    super::db::delete_thread(tx, &args, &super::state::now())
+                }
+                Command::ScheduleRemove(args) => {
+                    let id = args.schedule_id;
+                    ensure_inactive(tx, &id, false)?;
+                    let thread = tx
+                        .query_row(
+                            "DELETE FROM schedule WHERE id=?1 RETURNING thread_id",
+                            [&id],
+                            |r| r.get::<_, String>(0),
+                        )
+                        .optional()
+                        .map_err(StorageError::from)
+                        .map_err(super::storage_error)?
+                        .ok_or_else(|| {
+                            ApiError::new(ErrorCode::TargetUnavailable, "Schedule not found")
+                        })?;
+                    let mut result = super::MutationResult::value(
+                        serde_json::json!({"accepted":true,"schedule_id":id}),
+                    )?;
+                    result.changed_threads.push(thread);
+                    Ok(result)
+                }
+                _ => unreachable!("only deletion commands have this route"),
+            }
         })
-        .await
-        .map_err(super::storage_error)?;
+        .await?;
     let signals = control.store.database.signals();
-    signals.mark_all(&crate::maintenance::Work::DELETION);
-    signals.mark_all(&[
-        crate::maintenance::Work::Managed,
-        crate::maintenance::Work::Drafts,
-        crate::maintenance::Work::Schedule,
-    ]);
+    if !effects.deleted_threads.is_empty() {
+        signals.mark_all(&crate::maintenance::Work::DELETION);
+        signals.mark_all(&[
+            crate::maintenance::Work::Managed,
+            crate::maintenance::Work::Drafts,
+        ]);
+    }
+    signals.mark(crate::maintenance::Work::Schedule);
     let value = effects.result.clone();
     control.apply_effects(Some(effects)).await;
     Ok(value)
-}
-
-pub(super) async fn remove(control: &Control, id: String) -> Result<serde_json::Value, ApiError> {
-    let target = id.clone();
-    let (thread, executions) = control
-        .store
-        .database
-        .call(move |db| {
-            let tx = db.transaction()?;
-            let thread = tx
-                .query_row(
-                    "SELECT thread_id FROM schedule WHERE id=?1",
-                    [&target],
-                    |r| r.get::<_, String>(0),
-                )
-                .optional()?
-                .ok_or_else(|| {
-                    ApiError::new(
-                        crate::protocol::ErrorCode::TargetUnavailable,
-                        "Schedule not found",
-                    )
-                })?;
-            let executions = disable_and_stop(&tx, &target, false)?;
-            tx.commit()?;
-            Ok((thread, executions))
-        })
-        .await
-        .map_err(super::storage_error)?;
-    drain(control, executions).await?;
-    let target = id.clone();
-    control.store.database.call(move |db| {
-        if db.execute("DELETE FROM schedule WHERE id=?1 AND NOT EXISTS(SELECT 1 FROM shell_execution WHERE schedule_id=?1 AND state IN ('starting','running','stopping'))",[target])?!=1 {
-            return Err(ApiError::new(crate::protocol::ErrorCode::OperationConflict,"Schedule changed before removal").into());
-        }
-        Ok(())
-    }).await.map_err(super::storage_error)?;
-    control
-        .store
-        .database
-        .signals()
-        .mark(crate::maintenance::Work::Schedule);
-    control.changed(&thread);
-    Ok(serde_json::json!({"schedule_id":id,"removed":true}))
 }
 
 async fn drain(control: &Control, executions: Vec<String>) -> Result<(), ApiError> {
@@ -416,6 +453,99 @@ mod tests {
     use crate::protocol::{Command, Request};
     use serde_json::json;
 
+    #[tokio::test]
+    async fn deletion_reopen_observes_only_committed_boundaries() {
+        use crate::protocol::{ErrorCode, ThreadDeleteArgs};
+        for point in 0..4 {
+            let root = tempfile::tempdir().unwrap();
+            let data = root.path().join("data");
+            let open =
+                || crate::app::DataOwner::start(None, Some(data.clone()), root.path().into());
+            let owner = open().await.unwrap();
+            let control = Control::new(&owner, root.path().into());
+            let args = ThreadDeleteArgs {
+                thread_id: "target".into(),
+                descendants: false,
+                preview_marker: None,
+            };
+            let request = Request::new(
+                format!("{}:delete", owner.instance_id),
+                Command::ThreadDelete(args.clone()),
+            );
+            let cwd = root.path().to_string_lossy().into_owned();
+            control.store.database.call(move|db| {
+                db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('target',?1,'','fixture','fixture','now')",[&cwd])?;
+                db.execute("INSERT INTO schedule(id,thread_id,once_at,next_at,enabled,cwd,command) VALUES('q','target',4102444800,4102444800,1,?1,'echo fixture')",[&cwd])?;
+                if point >= 2 {
+                    db.execute("INSERT INTO shell_execution(id,schedule_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at) VALUES('x','q','x','starting',?1,'{}','utf-8','utf-8','closed','2020-01-01T00:00:00Z')",[cwd])?;
+                }
+                Ok(())
+            }).await.unwrap();
+            if point >= 1 {
+                assert!(matches!(
+                    control
+                        .store
+                        .reserve_runtime(request.clone(), None)
+                        .await
+                        .unwrap(),
+                    super::super::db::RuntimeReservation::New
+                ));
+            }
+            if point >= 2 {
+                control
+                    .store
+                    .database
+                    .call(|db| {
+                        let tx = db.transaction()?;
+                        assert_eq!(disable_and_stop(&tx, "target", true)?, ["x"]);
+                        tx.commit()?;
+                        Ok(())
+                    })
+                    .await
+                    .unwrap();
+            }
+            let mut expected = None;
+            if point == 3 {
+                control.shell_start_intent("x", false).await.unwrap();
+                let effects = control
+                    .store
+                    .finalize_deletion(request.operation_id.clone(), move |tx| {
+                        super::super::db::delete_thread(tx, &args, &super::super::state::now())
+                    })
+                    .await
+                    .unwrap();
+                expected = Some(effects.result);
+            }
+            // Close the fixture without starting any workers. Reopen performs real startup repair.
+            drop(control);
+            owner.shutdown().await.unwrap();
+            let owner = open().await.unwrap();
+            let control = Control::new(&owner, root.path().into());
+            let receipt = request.operation_id.clone();
+            control.store.database.call(move|db| {
+                let state=db.query_row("SELECT state FROM operation_receipt WHERE operation_id=?1",[receipt],|r|r.get::<_,String>(0)).optional()?;
+                assert_eq!(state.as_deref(),[None,Some("pending"),Some("pending"),Some("completed")][point]);
+                let enabled=db.query_row("SELECT enabled FROM schedule WHERE id='q'",[],|r|r.get::<_,bool>(0)).optional()?;
+                assert_eq!(enabled,[Some(true),Some(true),Some(false),None][point]);
+                assert_eq!(db.query_row("SELECT deleted_at IS NOT NULL FROM thread WHERE id='target'",[],|r|r.get::<_,bool>(0))?,point==3);
+                if point==2 {
+                    let reason=db.query_row("SELECT end_reason FROM shell_execution WHERE id='x' AND state IN ('failed','stopped')",[],|r|r.get::<_,String>(0))?;
+                    assert!(reason.starts_with("previous_instance_interrupted"));
+                }
+                if point==3 { assert!(!db.query_row("SELECT EXISTS(SELECT 1 FROM shell_execution WHERE id='x')",[],|r|r.get::<_,bool>(0))?); }
+                Ok(())
+            }).await.unwrap();
+            let replay = control.request(request).await;
+            match point {
+                0 => assert_eq!(replay.error.unwrap().code, ErrorCode::OperationExpired),
+                1 | 2 => assert_eq!(replay.error.unwrap().code, ErrorCode::InvalidState),
+                _ => assert_eq!(replay.result, expected),
+            }
+            control.shutdown().await.unwrap();
+            owner.shutdown().await.unwrap();
+        }
+    }
+
     #[cfg(unix)]
     #[tokio::test]
     async fn thread_delete_replays_without_stopping_or_deleting_twice() {
@@ -430,7 +560,9 @@ mod tests {
             db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('target',?1,'','fixture','fixture','now')",[cwd])?;
             db.execute_batch("CREATE TEMP TABLE delete_witness(kind TEXT);
                 CREATE TEMP TRIGGER stop_witness AFTER UPDATE OF state ON main.shell_execution WHEN NEW.state='stopping' AND OLD.state<>'stopping' BEGIN INSERT INTO delete_witness VALUES('stop'); END;
-                CREATE TEMP TRIGGER delete_witness AFTER UPDATE OF deleted_at ON main.thread WHEN OLD.deleted_at IS NULL AND NEW.deleted_at IS NOT NULL BEGIN INSERT INTO delete_witness VALUES('delete'); END;")?;
+                CREATE TEMP TRIGGER delete_witness AFTER UPDATE OF deleted_at ON main.thread WHEN OLD.deleted_at IS NULL AND NEW.deleted_at IS NOT NULL BEGIN INSERT INTO delete_witness VALUES('delete'); END;
+                CREATE TEMP TRIGGER receipt_witness BEFORE UPDATE OF state ON main.operation_receipt WHEN NEW.operation_id LIKE '%:delete' AND NEW.state='completed' BEGIN SELECT CASE WHEN (SELECT deleted_at FROM main.thread WHERE id='target') IS NULL OR EXISTS(SELECT 1 FROM main.schedule WHERE thread_id='target') THEN RAISE(ABORT,'delete receipt must match deletion') END; END;
+                CREATE TEMP TRIGGER deletion_after_receipt AFTER UPDATE OF deleted_at ON main.thread WHEN NEW.id='target' AND NEW.deleted_at IS NOT NULL BEGIN SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM main.operation_receipt WHERE operation_id LIKE '%:delete' AND state='pending') THEN RAISE(ABORT,'deletion needs pending receipt') END; END;")?;
             Ok(())
         }).await.unwrap();
         let request = |id, command| Request::new(format!("{}:{id}", owner.instance_id), command);
