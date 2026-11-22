@@ -2473,6 +2473,37 @@ mod automatic_compaction_migration_tests {
         ] {
             db.execute("INSERT INTO model_attempt(id,kind,thread_id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,error_json,started_at) VALUES(?1,'conversation','t','u',0,0,'p','m',0,'completed','{}',?2,'2026-01-01T00:00:00Z')", rusqlite::params![id,body]).unwrap();
         }
+        // Frozen schema-54 compact.list items for this fixture. Keep the legacy
+        // projection out of the runtime reader.
+        let legacy_item = |id: &str, state: &str, source_nodes| {
+            json!({
+                "event_id": format!("attempt:{id}"), "thread_id": "t",
+                "kind": "automatic_reduction", "reason": "failure",
+                "at": "2026-01-01T00:00:00Z",
+                "timestamp_basis": "replacement_created_at_or_attempt_ended_or_started_at",
+                "attempt_id": id, "turn_id": "u", "state": state,
+                "trigger": {"failure_kind": null, "retry_number": null,
+                    "retained_failures_in_turn_through_attempt": 0},
+                "metrics": {"source_nodes": source_nodes, "reason": "failure",
+                    "before_characters": null, "after_characters": null,
+                    "omitted_nodes": null, "marker_node_id": null,
+                    "summary_characters": null, "summary_limit": null,
+                    "source_characters": null, "model_requests": null,
+                    "spilled_groups": null, "summary_node_id": null,
+                    "summary_rejected": null, "no_target": null,
+                    "summary_usage": null, "first_node_id": null, "last_node_id": null,
+                    "after_current_request_nodes": null},
+                "post_compaction_attempt_id": null, "post_compaction_input_tokens": null
+            })
+        };
+        let mut unknown = legacy_item("unknown", "unknown", json!(null));
+        unknown["compaction_outcome"] = discard.clone();
+        let legacy_items = json!([
+            unknown,
+            legacy_item("recorded", "recorded", json!(4)),
+            legacy_item("overflow", "rejected", json!(2)),
+            legacy_item("adopted", "adopted", json!(8)),
+        ]);
         run(&mut db, 54, &|_, _| {}, &|| {}).unwrap();
         let args = crate::protocol::CompactListArgs {
             thread_id: Some("t".into()),
@@ -2481,8 +2512,8 @@ mod automatic_compaction_migration_tests {
             limit: 20,
         };
         let page = crate::readback::compactions(&db, "t", &args).unwrap();
-        let items = page["items"].as_array().unwrap();
-        assert_eq!(items.len(), 4);
+        assert_eq!(page["items"], legacy_items);
+        assert_eq!(page["more"], false);
         let envelope = |id| {
             let text: String = db
                 .query_row(
@@ -2499,18 +2530,6 @@ mod automatic_compaction_migration_tests {
         );
         assert_eq!(envelope("recorded"), json!({"metrics":{"source_nodes":4}}));
         assert_eq!(envelope("unknown"), json!({"metrics":null}));
-        for (id, count) in [
-            ("adopted", json!(8)),
-            ("unknown", json!(null)),
-            ("recorded", json!(4)),
-        ] {
-            let item = items.iter().find(|item| item["attempt_id"] == id).unwrap();
-            assert_eq!(item["state"], id);
-            assert_eq!(item["metrics"]["source_nodes"], count);
-            if id == "unknown" {
-                assert_eq!(item["compaction_outcome"], discard);
-            }
-        }
         let error = |id| {
             db.query_row(
                 "SELECT error_json FROM model_attempt WHERE id=?1",

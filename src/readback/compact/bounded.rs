@@ -1,8 +1,10 @@
 //! Saved display prefixes. All ordering/aggregation happens after native limits.
 use super::*;
 
+const AUTOMATIC_ROWS: &str = "auto_ids u CROSS JOIN json_each(u.ids) j CROSS JOIN main.automatic_compaction c ON c.rowid=j.value";
+
 fn prefix() -> String {
-    String::from("WITH operation_receipt AS MATERIALIZED (
+    format!("WITH operation_receipt AS MATERIALIZED (
  SELECT operation_id,created_at,CASE WHEN octet_length(result_ref_json)<=131072 THEN result_ref_json END result_ref_json,octet_length(result_ref_json)>131072 source_oversized FROM main.operation_receipt INDEXED BY compact_operation_thread
  WHERE CASE WHEN json_valid(result_ref_json) THEN json_extract(result_ref_json,'$.result.status')='queued' ELSE 0 END
  AND json_extract(result_ref_json,'$.result.thread_id')=?1
@@ -14,7 +16,11 @@ fn prefix() -> String {
  (SELECT c.rowid native_rowid FROM main.automatic_compaction c INDEXED BY automatic_compaction_turn
  WHERE c.turn_id=u.id ORDER BY c.attempt_started_at DESC,c.attempt_id DESC LIMIT 33)) ids FROM turn u
 ), automatic_compaction AS MATERIALIZED (
- SELECT c.* FROM auto_ids u CROSS JOIN json_each(u.ids) j CROSS JOIN main.automatic_compaction c ON c.rowid=j.value
+ SELECT c.attempt_id,c.turn_id,c.attempt_started_at,c.outcome,c.reason,c.token,
+ CASE WHEN octet_length(c.result_json)<=131072 THEN c.result_json END result_json,
+ CASE WHEN octet_length(c.trigger_json)<=131072 THEN c.trigger_json END trigger_json,
+ CASE WHEN octet_length(c.failure_json)<=1024 THEN c.failure_json END failure_json
+ FROM {AUTOMATIC_ROWS}
 ), thread_replacement AS MATERIALIZED (
  SELECT * FROM main.thread_replacement WHERE thread_id=?1 ORDER BY replacement_id DESC LIMIT 201
 ) ")
@@ -61,7 +67,7 @@ pub(in crate::readback) fn read_display(
  OR EXISTS(SELECT 1 FROM auto_ids WHERE json_array_length(ids)=33)
  OR (SELECT count(*) FROM thread_replacement)=201,
  EXISTS(SELECT 1 FROM operation_receipt WHERE source_oversized) OR EXISTS(SELECT 1 FROM operation_receipt o CROSS JOIN app_meta m ON m.key='compact.result.'||o.operation_id WHERE octet_length(m.value)>131072 OR octet_length(o.operation_id)>512)
- OR EXISTS(SELECT 1 FROM automatic_compaction c JOIN main.model_attempt a ON a.id=c.attempt_id WHERE octet_length(c.attempt_id)>512 OR octet_length(c.result_json)>131072 OR octet_length(c.trigger_json)>131072 OR octet_length(a.error_json)>131072)", prefix());
+ OR EXISTS(SELECT 1 FROM {AUTOMATIC_ROWS} JOIN main.model_attempt a ON a.id=c.attempt_id WHERE octet_length(c.attempt_id)>512 OR octet_length(c.result_json)>131072 OR octet_length(c.trigger_json)>131072 OR octet_length(a.error_json)>131072)", prefix());
     let (saturated, oversized): (bool, bool) =
         db.query_row(&flags, [thread], |r| Ok((r.get(0)?, r.get(1)?)))?;
     if oversized {
