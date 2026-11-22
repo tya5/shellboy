@@ -1,8 +1,12 @@
 //! Advance a scheduled occurrence and reserve its ordinary shell in one transaction.
-use super::{Control, ShellToolArgs, driver::shell_output};
+use super::{
+    Control, ShellToolArgs,
+    driver::shell_output,
+    runtime::{ShellStopIntent, record_shell_stop},
+};
 use crate::protocol::ApiError;
 use crate::storage::StorageError;
-use chrono::{DateTime, Local, Utc};
+use chrono::{DateTime, Local, TimeZone, Utc};
 use rusqlite::{OptionalExtension, Transaction, params};
 use std::{path::PathBuf, sync::Arc};
 
@@ -13,16 +17,39 @@ struct DueShell {
     command: String,
 }
 
-fn next_cron(expression: &str, now: DateTime<Utc>) -> Option<i64> {
+fn next_cron(expression: &str, now: DateTime<Utc>, zone: &impl TimeZone) -> Option<i64> {
     if expression.split_whitespace().count() != 5 {
         return None;
     }
     expression
         .parse::<croner::Cron>()
         .ok()?
-        .find_next_occurrence(&now.with_timezone(&Local), false)
+        .find_next_occurrence(&now.with_timezone(zone), false)
         .ok()
         .map(|next| next.timestamp())
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum Occurrence {
+    NotDue,
+    Due { next: Option<i64>, invalid: bool },
+}
+
+fn occurrence(
+    enabled: bool,
+    next_at: Option<i64>,
+    cron: Option<&str>,
+    now: DateTime<Utc>,
+    zone: &impl TimeZone,
+) -> Occurrence {
+    if !enabled || next_at.is_none_or(|at| at > now.timestamp()) {
+        return Occurrence::NotDue;
+    }
+    let next = cron.and_then(|expression| next_cron(expression, now, zone));
+    Occurrence::Due {
+        next,
+        invalid: cron.is_some() && next.is_none(),
+    }
 }
 
 fn advance_due(
@@ -37,8 +64,11 @@ fn advance_due(
     let Some((schedule, thread, cwd, command, cron, scheduled_at)) = due else {
         return Ok(None);
     };
-    let next = cron.as_deref().and_then(|cron| next_cron(cron, now));
-    let invalid = cron.is_some() && next.is_none();
+    let Occurrence::Due { next, invalid } =
+        occurrence(true, Some(scheduled_at), cron.as_deref(), now, &Local)
+    else {
+        return Ok(None);
+    };
     let active: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM shell_execution WHERE schedule_id=?1 AND state IN ('starting','running','stopping'))",[&schedule],|r| r.get(0))?;
     tx.execute("UPDATE schedule SET next_at=?2,last_skipped_at=CASE WHEN ?3 THEN ?4 ELSE last_skipped_at END WHERE id=?1",params![schedule,next,active,scheduled_at])?;
     if active && !invalid {
@@ -56,6 +86,23 @@ fn advance_due(
     }))
 }
 
+fn read_deadline(db: &rusqlite::Connection) -> rusqlite::Result<Option<DateTime<Utc>>> {
+    db.query_row(
+        "SELECT min(deadline) FROM (SELECT min(next_at) AS deadline FROM schedule WHERE enabled=1 AND next_at IS NOT NULL UNION ALL SELECT min(unixepoch(started_at)+3600) FROM shell_execution WHERE schedule_id IS NOT NULL AND state IN ('starting','running'))",
+        [], |r| r.get::<_, Option<i64>>(0),
+    ).map(|next|next.and_then(|at|DateTime::from_timestamp(at,0)))
+}
+
+pub(super) async fn next_deadline(
+    control: &Control,
+) -> Result<Option<DateTime<Utc>>, StorageError> {
+    control
+        .store
+        .database
+        .call(|db| Ok(read_deadline(db)?))
+        .await
+}
+
 pub(super) async fn dispatch(control: &Arc<Control>) -> Result<Option<DateTime<Utc>>, ApiError> {
     let kind = serde_json::to_value(control.store.config.shell.kind).unwrap();
     let (shell, next, expired) = control
@@ -64,17 +111,16 @@ pub(super) async fn dispatch(control: &Arc<Control>) -> Result<Option<DateTime<U
         .call(move |db| {
             let tx = db.transaction()?;
             let now = Utc::now();
-            let expired = tx.query_row("UPDATE shell_execution SET state='stopping', end_reason='schedule_timeout' WHERE id=(SELECT id FROM shell_execution WHERE schedule_id IS NOT NULL AND state IN ('starting','running') AND unixepoch(started_at)<=?1 ORDER BY started_at,id LIMIT 1) RETURNING id",[now.timestamp()-3600],|r|r.get::<_,String>(0)).optional()?;
-            let shell = advance_due(&tx, Utc::now(), kind.as_str().unwrap_or_default())?;
-            let next = tx.query_row(
-                "SELECT min(deadline) FROM (SELECT min(next_at) AS deadline FROM schedule WHERE enabled=1 AND next_at IS NOT NULL UNION ALL SELECT min(unixepoch(started_at)+3600) FROM shell_execution WHERE schedule_id IS NOT NULL AND state IN ('starting','running'))",
-                [],
-                |r| r.get::<_, Option<i64>>(0),
-            )?;
+            let expired: Option<String> = tx.query_row("SELECT id FROM shell_execution WHERE schedule_id IS NOT NULL AND state IN ('starting','running') AND unixepoch(started_at)<=?1 ORDER BY started_at,id LIMIT 1",[now.timestamp()-3600],|r|r.get(0)).optional()?;
+            if let Some(id) = &expired {
+                record_shell_stop(&tx,id,ShellStopIntent::ScheduleTimeout)?;
+            }
+            let shell = advance_due(&tx, now, kind.as_str().unwrap_or_default())?;
+            let next = read_deadline(&tx)?;
             tx.commit()?;
             Ok((
                 shell,
-                next.and_then(|unix| DateTime::from_timestamp(unix, 0)),
+                next,
                 expired,
             ))
         })
@@ -183,7 +229,7 @@ pub(super) fn add(
     }
     let now = Utc::now();
     let (once, next) = match (&a.cron, &a.at, a.in_seconds) {
-        (Some(cron), None, None) => (None, next_cron(cron, now)),
+        (Some(cron), None, None) => (None, next_cron(cron, now, &Local)),
         (None, Some(at), None) => {
             let at = DateTime::parse_from_rfc3339(at).ok().map(|v| v.timestamp());
             (at, at)
@@ -271,7 +317,7 @@ pub(super) fn change(
             let next = if next_enabled {
                 match cron {
                     Some(cron) => Some(
-                        next_cron(&cron, now)
+                        next_cron(&cron, now, &Local)
                             .ok_or_else(|| invalid("Cannot calculate the schedule time"))?,
                     ),
                     None => once.filter(|value| *value > now.timestamp()),
@@ -302,7 +348,15 @@ fn disable_and_stop(
         &format!("UPDATE schedule SET enabled=0 WHERE {column}=?1"),
         [key],
     )?;
-    let ids=tx.prepare(&format!("UPDATE shell_execution SET state='stopping' WHERE schedule_id IN (SELECT id FROM schedule WHERE {column}=?1) AND state IN ('starting','running','stopping') RETURNING id"))?.query_map([key],|r|r.get::<_,String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
+    let ids=tx.prepare(&format!("SELECT s.id FROM schedule q JOIN shell_execution s ON s.schedule_id=q.id WHERE q.{column}=?1 AND s.state IN ('starting','running','stopping')"))?.query_map([key],|r|r.get::<_,String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
+    let intent = if by_thread {
+        ShellStopIntent::ThreadDeletion
+    } else {
+        ShellStopIntent::ScheduleDeletion
+    };
+    for id in &ids {
+        record_shell_stop(tx, id, intent)?;
+    }
     Ok(ids)
 }
 
@@ -452,6 +506,112 @@ mod tests {
     use super::*;
     use crate::protocol::{Command, Request};
     use serde_json::json;
+
+    #[test]
+    fn wall_clock_jumps_coalesce_missed_occurrences_without_replaying() {
+        let at = |hour, minute| Utc.with_ymd_and_hms(2025, 1, 2, hour, minute, 0).unwrap();
+        let stored = Some(at(8, 0).timestamp());
+        let cron = Some("0 * * * *");
+        assert_eq!(
+            occurrence(true, stored, cron, at(7, 59), &Utc),
+            Occurrence::NotDue
+        );
+        let next = Some(at(13, 0).timestamp());
+        assert_eq!(
+            occurrence(true, stored, cron, at(12, 20), &Utc),
+            Occurrence::Due {
+                next,
+                invalid: false
+            }
+        );
+        assert_eq!(
+            occurrence(true, next, cron, at(9, 0), &Utc),
+            Occurrence::NotDue
+        );
+        assert_eq!(
+            occurrence(true, next, cron, at(12, 20), &Utc),
+            Occurrence::NotDue
+        );
+        assert_eq!(
+            occurrence(true, next, cron, at(13, 0), &Utc),
+            Occurrence::Due {
+                next: Some(at(14, 0).timestamp()),
+                invalid: false
+            }
+        );
+    }
+
+    #[test]
+    fn croner_local_time_gap_and_fold() {
+        use chrono_tz::Europe::Stockholm;
+        let spring = Utc.with_ymd_and_hms(2025, 3, 30, 0, 59, 59).unwrap();
+        let gap_end = Utc.with_ymd_and_hms(2025, 3, 30, 1, 0, 0).unwrap();
+        assert_eq!(
+            next_cron("30 2 * * *", spring, &Stockholm),
+            Some(gap_end.timestamp())
+        );
+        assert_eq!(
+            next_cron("*/5 * * * *", spring, &Stockholm),
+            Some(gap_end.timestamp())
+        );
+        let fall = Utc.with_ymd_and_hms(2025, 10, 25, 23, 59, 59).unwrap();
+        let first = Utc.with_ymd_and_hms(2025, 10, 26, 0, 30, 0).unwrap();
+        let next_day = Utc.with_ymd_and_hms(2025, 10, 27, 1, 30, 0).unwrap();
+        assert_eq!(
+            next_cron("30 2 * * *", fall, &Stockholm),
+            Some(first.timestamp())
+        );
+        assert_eq!(
+            next_cron("30 2 * * *", first, &Stockholm),
+            Some(next_day.timestamp())
+        );
+        let fold_edge = Utc.with_ymd_and_hms(2025, 10, 26, 0, 59, 0).unwrap();
+        let second_hour = Utc.with_ymd_and_hms(2025, 10, 26, 1, 0, 0).unwrap();
+        assert_eq!(
+            next_cron("* * * * *", fold_edge, &Stockholm),
+            Some(second_hour.timestamp())
+        );
+    }
+
+    #[tokio::test]
+    async fn owner_restart_runs_one_overdue_occurrence_then_advances() {
+        use chrono::Datelike;
+        let root = tempfile::tempdir().unwrap();
+        let data = root.path().join("data");
+        let open = || crate::app::DataOwner::start(None, Some(data.clone()), root.path().into());
+        let owner = open().await.unwrap();
+        let now = Utc::now();
+        let due = (now - chrono::Duration::days(1000)).timestamp();
+        // Put the next future occurrence well outside this test's runtime.
+        let future = (now + chrono::Duration::days(90)).with_timezone(&Local);
+        let cron = format!("0 12 {} {} *", future.day(), future.month());
+        let expected = next_cron(&cron, now, &Local).unwrap();
+        let cwd = root.path().to_string_lossy().into_owned();
+        owner.db.call(move |db| {
+            db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('target',?1,'','fixture','fixture','now')",[&cwd])?;
+            db.execute("INSERT INTO schedule(id,thread_id,cron,next_at,enabled,cwd,command) VALUES('q','target',?1,?2,1,?3,'echo resumed')",params![cron,due,cwd])?;
+            Ok(())
+        }).await.unwrap();
+        owner.shutdown().await.unwrap();
+        let owner = open().await.unwrap();
+        let control = Control::new(&owner, root.path().into());
+        control.start().await.unwrap();
+        crate::test_watchdog::watchdog("overdue scheduler occurrence after owner restart", async {
+            loop {
+                let changed = control.changed.notified();
+                tokio::pin!(changed);
+                changed.as_mut().enable();
+                let (saved, terminal, next) = owner.db.call(|db| {
+                    Ok(db.query_row("SELECT count(x.id),count(CASE WHEN x.state='exited' AND x.exit_code=0 THEN 1 END),q.next_at FROM schedule q LEFT JOIN shell_execution x ON x.schedule_id=q.id WHERE q.id='q' GROUP BY q.id",[],|r|Ok((r.get::<_,i64>(0)?,r.get::<_,i64>(1)?,r.get::<_,i64>(2)?)))?)
+                }).await.unwrap();
+                assert!(saved <= 1);
+                if terminal == 1 { assert_eq!(saved,1); assert_eq!(next,expected); break; }
+                changed.await;
+            }
+        }).await.unwrap();
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+    }
 
     #[tokio::test]
     async fn deletion_reopen_observes_only_committed_boundaries() {

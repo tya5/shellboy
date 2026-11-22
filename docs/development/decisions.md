@@ -4584,3 +4584,14 @@ The registration limit of 64 per Thread bounds list work; a 32 KiB command
 bounds each saved request. Descriptions use the existing 80-character bound.
 List reads at most 4 KiB of saved output per result to bound response size.
 The latest result is an ordinary shell execution, not a second stored record.
+
+Cron uses the owner's local time. At a daylight-saving gap, a fixed-time entry
+runs at the first valid time after the gap; interval entries skip nonexistent
+times. During a repeated hour, a fixed-time entry uses the first occurrence,
+while interval entries may run in both halves. When several occurrences are
+already past, the owner runs at most one and schedules the next future occurrence.
+
+`chrono-tz` is test-only: it supplies an explicit DST zone without changing the
+host timezone or adding a production clock abstraction. Control caches the next
+UTC wall deadline and checks it on maintenance wakes; a capped sleep alone does
+not trigger a database dispatch.

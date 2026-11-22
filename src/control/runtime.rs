@@ -9,6 +9,34 @@ pub(super) fn encode_result<T: serde::Serialize>(
     serde_json::to_value(result).map_err(|_| ApiError::new(code, message))
 }
 
+#[derive(Clone, Copy)]
+pub(super) enum ShellStopIntent {
+    Explicit,
+    ScheduleTimeout,
+    ScheduleDeletion,
+    ThreadDeletion,
+}
+
+pub(super) fn record_shell_stop(
+    tx: &rusqlite::Transaction<'_>,
+    execution: &str,
+    intent: ShellStopIntent,
+) -> rusqlite::Result<bool> {
+    let reason = match intent {
+        ShellStopIntent::Explicit => "explicit_stop",
+        ShellStopIntent::ScheduleTimeout => "schedule_timeout",
+        ShellStopIntent::ScheduleDeletion => "schedule_deleted",
+        ShellStopIntent::ThreadDeletion => "thread_deleted",
+    };
+    let saved = tx.execute("UPDATE shell_execution SET state='stopping',end_reason=?2 WHERE id=?1 AND state IN ('starting','running')",rusqlite::params![execution,reason])?;
+    Ok(saved != 0
+        || tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM shell_execution WHERE id=?1 AND state='stopping')",
+            [execution],
+            |r| r.get::<_, bool>(0),
+        )?)
+}
+
 type RuntimeObserver = tokio::sync::watch::Receiver<Option<Result<Value, ApiError>>>;
 fn model_list_error(error: crate::model::ModelError) -> ApiError {
     let code = match error.kind.as_str() {
@@ -692,7 +720,7 @@ impl Control {
             let changed = if is_eof {
                 tx.execute("UPDATE shell_execution SET stdin_state='closed' WHERE id=?1 AND stdin_state='open' AND state IN ('starting','running','stopping')",[&execution])?
             } else {
-                tx.execute("UPDATE shell_execution SET state='stopping' WHERE id=?1 AND state IN ('starting','running','stopping')",[&execution])?
+                usize::from(record_shell_stop(&tx,&execution,ShellStopIntent::Explicit)?)
             };
             let target = if changed != 0 {
                 Some(tx.query_row("SELECT COALESCE(r.thread_id,q.thread_id) FROM shell_execution s LEFT JOIN run r ON r.id=s.owner_run_id LEFT JOIN schedule q ON q.id=s.schedule_id WHERE s.id=?1",[execution],|r|r.get::<_,String>(0))?)

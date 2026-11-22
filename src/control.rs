@@ -220,7 +220,8 @@ async fn maintenance_loop(
     stop: CancellationToken,
 ) {
     use crate::maintenance::Work;
-    let mut schedule_due = Some(tokio::time::Instant::now());
+    let mut schedule_due = None;
+    let mut refresh_schedule_due = true;
     let mut deadlines: HashMap<u32, tokio::time::Instant> = HashMap::new();
     let mut reply_cursor = None;
     let mut reply_active = false;
@@ -231,17 +232,25 @@ async fn maintenance_loop(
         if stop.is_cancelled() {
             return;
         }
-        if schedule_due.is_some_and(|at| at <= tokio::time::Instant::now()) {
+        if refresh_schedule_due {
+            let Some(owner) = control.upgrade() else {
+                return;
+            };
+            match schedule::next_deadline(&owner).await {
+                Ok(next) => schedule_due = next,
+                Err(_) => {
+                    owner.fail_storage().await;
+                    return;
+                }
+            }
+            refresh_schedule_due = false;
+        }
+        if schedule_due.is_some_and(|at| at <= chrono::Utc::now()) {
             let Some(owner) = control.upgrade() else {
                 return;
             };
             match schedule::dispatch(&owner).await {
-                Ok(next) => {
-                    schedule_due = next.map(|at| {
-                        tokio::time::Instant::now()
-                            + crate::maintenance::until(at).min(std::time::Duration::from_secs(60))
-                    })
-                }
+                Ok(next) => schedule_due = next,
                 Err(error) if error.is_storage_failure() => {
                     owner.fail_storage().await;
                     return;
@@ -266,7 +275,7 @@ async fn maintenance_loop(
         }
         let set = signals.take();
         if set.contains(Work::Schedule) {
-            schedule_due = Some(tokio::time::Instant::now());
+            refresh_schedule_due = true;
         }
         if set.contains(Work::ReplyOutcomes) {
             if reply_active {
@@ -370,7 +379,11 @@ async fn maintenance_loop(
             }
             continue;
         }
-        let next = deadlines.values().copied().chain(schedule_due).min();
+        let schedule_wake = schedule_due.map(|at| {
+            tokio::time::Instant::now()
+                + crate::maintenance::until(at).min(std::time::Duration::from_secs(60))
+        });
+        let next = deadlines.values().copied().chain(schedule_wake).min();
         tokio::select! {
             biased;
             _=stop.cancelled()=>return,

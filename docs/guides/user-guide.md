@@ -609,3 +609,9 @@ unless you specify `--cwd`. `schedule list --thread THREAD` reports the next
 occurrence and latest saved result; `schedule disable --schedule ID` prevents
 future runs without stopping the current one. `schedule enable --schedule ID`
 resumes future occurrences, and `schedule remove --schedule ID` stops and deletes it.
+
+Cron uses the owner's local time. At a daylight-saving gap, a fixed-time entry
+runs at the first valid time after the gap; interval entries skip nonexistent
+times. During a repeated hour, a fixed-time entry uses the first occurrence,
+while interval entries may run in both halves. When several occurrences are
+already past, the owner runs at most one and schedules the next future occurrence.

@@ -922,3 +922,9 @@ shellboy schedule add --thread THREAD --cron '0 * * * *' -- \
 ```
 
 Scheduled commands receive `SHELLBOY_THREAD_ID`, but no model shell Origin.
+
+Cron uses the owner's local time. At a daylight-saving gap, a fixed-time entry
+runs at the first valid time after the gap; interval entries skip nonexistent
+times. During a repeated hour, a fixed-time entry uses the first occurrence,
+while interval entries may run in both halves. When several occurrences are
+already past, the owner runs at most one and schedules the next future occurrence.
