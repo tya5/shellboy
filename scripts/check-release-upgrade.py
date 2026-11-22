@@ -311,7 +311,7 @@ def apply_migration(db, version):
         require_empty_scope_facts_for_sql_staging(db)
     if version == 49:
         require_empty_generated_summary_role_candidates_for_sql_staging(db)
-    if version != 39:
+    if version not in (39, 50):
         sql=DERIVED[version].read_text() if version in DERIVED else next(MIGRATIONS.glob(f'{version:04d}_*.sql')).read_text()
         db.executescript('BEGIN IMMEDIATE;\n' + sql + '\nCOMMIT;')
         return
@@ -319,8 +319,8 @@ def apply_migration(db, version):
     db.commit()
     db.execute('PRAGMA foreign_keys=OFF')
     try:
-        db.executescript('BEGIN IMMEDIATE;\n' + DERIVED[version].read_text())
-        assert db.execute('PRAGMA foreign_key_check').fetchall() == [], 'migration 39 foreign key violation'
+        db.executescript('BEGIN IMMEDIATE;\n' + next(MIGRATIONS.glob(f'{version:04d}_*.sql')).read_text())
+        assert db.execute('PRAGMA foreign_key_check').fetchall() == [], f'migration {version} foreign key violation'
         db.commit()
     except BaseException:
         db.rollback()

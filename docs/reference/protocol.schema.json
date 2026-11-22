@@ -505,6 +505,102 @@
         {
           "properties": {
             "args": {
+              "$ref": "#/definitions/ScheduleAddArgs"
+            },
+            "command": {
+              "const": "schedule.add",
+              "type": "string"
+            }
+          },
+          "required": [
+            "command",
+            "args"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "args": {
+              "$ref": "#/definitions/ThreadTarget"
+            },
+            "command": {
+              "const": "schedule.list",
+              "type": "string"
+            }
+          },
+          "required": [
+            "command",
+            "args"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "args": {
+              "$ref": "#/definitions/ScheduleSetArgs"
+            },
+            "command": {
+              "const": "schedule.set",
+              "type": "string"
+            }
+          },
+          "required": [
+            "command",
+            "args"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "args": {
+              "$ref": "#/definitions/ScheduleTarget"
+            },
+            "command": {
+              "const": "schedule.enable",
+              "type": "string"
+            }
+          },
+          "required": [
+            "command",
+            "args"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "args": {
+              "$ref": "#/definitions/ScheduleTarget"
+            },
+            "command": {
+              "const": "schedule.disable",
+              "type": "string"
+            }
+          },
+          "required": [
+            "command",
+            "args"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "args": {
+              "$ref": "#/definitions/ScheduleTarget"
+            },
+            "command": {
+              "const": "schedule.remove",
+              "type": "string"
+            }
+          },
+          "required": [
+            "command",
+            "args"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "args": {
               "$ref": "#/definitions/ThreadTagsArgs"
             },
             "command": {
@@ -5342,6 +5438,180 @@
           "additionalProperties": false,
           "properties": {
             "args": {
+              "$ref": "#/definitions/ScheduleAddArgs"
+            },
+            "command": {
+              "const": "schedule.add",
+              "type": "string"
+            },
+            "operation_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "origin": true,
+            "protocol_version": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "args",
+            "command",
+            "operation_id",
+            "protocol_version"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "args": {
+              "$ref": "#/definitions/ThreadTarget"
+            },
+            "command": {
+              "const": "schedule.list",
+              "type": "string"
+            },
+            "operation_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "origin": true,
+            "protocol_version": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "args",
+            "command",
+            "operation_id",
+            "protocol_version"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "args": {
+              "$ref": "#/definitions/ScheduleSetArgs"
+            },
+            "command": {
+              "const": "schedule.set",
+              "type": "string"
+            },
+            "operation_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "origin": true,
+            "protocol_version": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "args",
+            "command",
+            "operation_id",
+            "protocol_version"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "args": {
+              "$ref": "#/definitions/ScheduleTarget"
+            },
+            "command": {
+              "const": "schedule.enable",
+              "type": "string"
+            },
+            "operation_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "origin": true,
+            "protocol_version": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "args",
+            "command",
+            "operation_id",
+            "protocol_version"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "args": {
+              "$ref": "#/definitions/ScheduleTarget"
+            },
+            "command": {
+              "const": "schedule.disable",
+              "type": "string"
+            },
+            "operation_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "origin": true,
+            "protocol_version": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "args",
+            "command",
+            "operation_id",
+            "protocol_version"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "args": {
+              "$ref": "#/definitions/ScheduleTarget"
+            },
+            "command": {
+              "const": "schedule.remove",
+              "type": "string"
+            },
+            "operation_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "origin": true,
+            "protocol_version": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "args",
+            "command",
+            "operation_id",
+            "protocol_version"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "args": {
               "$ref": "#/definitions/ThreadTagsArgs"
             },
             "command": {
@@ -6912,6 +7182,84 @@
       ],
       "type": "object"
     },
+    "ScheduleAddArgs": {
+      "additionalProperties": false,
+      "properties": {
+        "at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "command": {
+          "type": "string"
+        },
+        "cron": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cwd": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "in_seconds": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "thread_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "command"
+      ],
+      "type": "object"
+    },
+    "ScheduleSetArgs": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "schedule_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "schedule_id",
+        "description"
+      ],
+      "type": "object"
+    },
+    "ScheduleTarget": {
+      "additionalProperties": false,
+      "properties": {
+        "schedule_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "schedule_id"
+      ],
+      "type": "object"
+    },
     "SearchMatch": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
@@ -7012,7 +7360,16 @@
           ]
         },
         "run_id": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "schedule_id": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "started_at": {
           "type": [
@@ -7052,7 +7409,6 @@
       },
       "required": [
         "execution_id",
-        "run_id",
         "state",
         "output_complete"
       ],
@@ -10967,6 +11323,12 @@
     },
     "run.retry": true,
     "run.stop": true,
+    "schedule.add": true,
+    "schedule.disable": true,
+    "schedule.enable": true,
+    "schedule.list": true,
+    "schedule.remove": true,
+    "schedule.set": true,
     "shell.eof": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
@@ -11049,7 +11411,16 @@
           ]
         },
         "run_id": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "schedule_id": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "started_at": {
           "type": [
@@ -11089,7 +11460,6 @@
       },
       "required": [
         "execution_id",
-        "run_id",
         "state",
         "output_complete"
       ],

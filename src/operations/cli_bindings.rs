@@ -8,6 +8,25 @@ type Meaning = (
     Option<&'static [&'static str]>,
 );
 const MEANINGS: &[Meaning] = &[
+    (OperationId::ScheduleSet, &["schedule", "set"], &[], None),
+    (
+        OperationId::ScheduleEnable,
+        &["schedule", "enable"],
+        &[],
+        None,
+    ),
+    (
+        OperationId::ScheduleDisable,
+        &["schedule", "disable"],
+        &[],
+        None,
+    ),
+    (
+        OperationId::ScheduleRemove,
+        &["schedule", "remove"],
+        &[],
+        None,
+    ),
     (
         OperationId::ScheduleAdd,
         &["schedule", "add"],

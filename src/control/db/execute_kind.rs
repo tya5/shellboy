@@ -59,7 +59,7 @@ macro_rules! named_jobs {
 named_jobs! {
     OwnerShutdown => owner_shutdown, Status => status, ModelList => model_list,
     ThreadList => thread_list, ThreadGet => thread_get, ThreadBranches => thread_branches, UsageGet => usage_get,
-    ScheduleAdd => schedule_add, ScheduleList => schedule_list,
+    ScheduleAdd => schedule_add, ScheduleSet => schedule_set, ScheduleEnable => schedule_enable, ScheduleDisable => schedule_disable, ScheduleRemove => schedule_remove,  ScheduleList => schedule_list,
     CompactList => compact_list, CompactPreview => compact_preview, ShellList => shell_list,
     ThreadCreate => thread_create, ThreadFork => thread_fork, ThreadDelete => thread_delete,
     ThreadDeletePreview => thread_delete_preview, ThreadPrune => thread_prune, ThreadRewind => thread_rewind, ThreadArchive => thread_archive,
@@ -134,6 +134,9 @@ impl Kind {
             // Rewind refuses paths over history::rewind::PATH_LIMIT nodes.
             // Archive: at most 200 IDs, descendants walk capped at 256 (control::archive).
             Kind::ScheduleAdd
+            | Kind::ScheduleSet
+            | Kind::ScheduleEnable
+            | Kind::ScheduleDisable
             | Kind::MessageReply
             | Kind::ThreadPrune
             | Kind::ThreadRewind
@@ -154,7 +157,8 @@ impl Kind {
             | Kind::AttachmentRemove
             | Kind::Compact
             | Kind::ContextEdit => MutationExempt,
-            Kind::ModelList
+            Kind::ScheduleRemove
+            | Kind::ModelList
             | Kind::Wait
             | Kind::EventsWait
             | Kind::HistorySearch

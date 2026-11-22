@@ -68,6 +68,11 @@ fn operation_result_schemas(
     opaque!("thread.tags");
     opaque!("schedule.add");
     opaque!("schedule.list");
+    opaque!("schedule.set");
+    opaque!("schedule.enable");
+    opaque!("schedule.disable");
+    opaque!("schedule.remove");
+
     opaque!("thread.cwds");
     result!("thread.set", ThreadDetails);
     result!("id.resolve", IdResolveResult);
@@ -857,6 +862,13 @@ args!(ThreadTagArgs {
     remove: Vec<String>
 });
 // Distinct tag names in byte order, paged; no member counts.
+args!(ScheduleTarget {
+    schedule_id: String
+});
+args!(ScheduleSetArgs {
+    schedule_id: String,
+    description: String
+});
 args!(ScheduleAddArgs { thread_id: Option<String>, cron: Option<String>, at: Option<String>, in_seconds: Option<u64>, cwd: Option<String>, description: Option<String>, command: String });
 args!(ThreadTagsArgs {
     #[serde(default = "list_limit")]
@@ -1320,6 +1332,15 @@ pub enum Command {
     ScheduleAdd(ScheduleAddArgs),
     #[serde(rename = "schedule.list")]
     ScheduleList(ThreadTarget),
+    #[serde(rename = "schedule.set")]
+    ScheduleSet(ScheduleSetArgs),
+    #[serde(rename = "schedule.enable")]
+    ScheduleEnable(ScheduleTarget),
+    #[serde(rename = "schedule.disable")]
+    ScheduleDisable(ScheduleTarget),
+    #[serde(rename = "schedule.remove")]
+    ScheduleRemove(ScheduleTarget),
+
     #[serde(rename = "thread.tags")]
     ThreadTags(ThreadTagsArgs),
     #[serde(rename = "thread.cwds")]
@@ -1636,7 +1657,8 @@ record!(TurnDetails { #[serde(default, skip_serializing_if = "Option::is_none")]
 // output-reader snapshot, which deliberately does not load command ownership.
 // They are not an older-owner protocol compatibility contract.
 record!(ShellDetails {
-    execution_id: String, run_id: String, state: ShellState, output_complete: bool,
+    execution_id: String, run_id: Option<String>, state: ShellState, output_complete: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")] schedule_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")] started_at: Option<String>,
     #[serde(default)] last_output_at: Option<String>,
     #[serde(default)] stdin_open: Option<bool>,

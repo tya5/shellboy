@@ -599,3 +599,13 @@ redraw with either value. `shellboy config check` validates the boolean setting.
 Synthetic terminal tests verify emitted clear/erase sequences and modeled cells,
 not font pixels. Windows hardware is unverified; please check your own terminal
 and font and report whether this option helps.
+
+### Schedule a command
+
+Use `shellboy schedule add --thread THREAD --cron '0 * * * *' -- 'echo check'`
+for a recurring command, or replace `--cron` with `--at` (an RFC 3339 time)
+or `--in 10m` for a one-shot. The command uses the Thread's working directory
+unless you specify `--cwd`. `schedule list --thread THREAD` reports the next
+occurrence and latest saved result; `schedule disable --schedule ID` prevents
+future runs without stopping the current one. `schedule enable --schedule ID`
+resumes future occurrences, and `schedule remove --schedule ID` stops and deletes it.

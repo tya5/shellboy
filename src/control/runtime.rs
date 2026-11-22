@@ -342,6 +342,8 @@ impl Control {
                     "Cannot encode shell write result",
                 )
             }
+            Command::ThreadDelete(args) => super::schedule::delete_thread(self, args).await,
+            Command::ScheduleRemove(args) => super::schedule::remove(self, args.schedule_id).await,
             Command::ShellEof(args) | Command::ShellStop(args) => {
                 self.signal_shell(args.execution_id, is_eof, caller).await
             }
@@ -688,7 +690,7 @@ impl Control {
                 tx.execute("UPDATE shell_execution SET state='stopping' WHERE id=?1 AND state IN ('starting','running','stopping')",[&execution])?
             };
             let target = if changed != 0 {
-                Some(tx.query_row("SELECT r.thread_id FROM shell_execution s JOIN run r ON r.id=s.owner_run_id WHERE s.id=?1",[execution],|r|r.get::<_,String>(0))?)
+                Some(tx.query_row("SELECT COALESCE(r.thread_id,q.thread_id) FROM shell_execution s LEFT JOIN run r ON r.id=s.owner_run_id LEFT JOIN schedule q ON q.id=s.schedule_id WHERE s.id=?1",[execution],|r|r.get::<_,String>(0))?)
             } else { None };
             tx.commit()?;
             Ok(target)
@@ -765,7 +767,7 @@ impl Control {
             if spawned {
                 tx.execute("UPDATE shell_execution SET shell_json=json_set(shell_json,'$.spawned',json('true')),state=CASE WHEN state='starting' THEN 'running' ELSE state END WHERE id=?1",[execution])?;
             } else if stop {
-                tx.execute("UPDATE shell_execution SET state='stopped',end_reason='stopped_before_spawn',output_complete=0,ended_at=?2 WHERE id=?1 AND state IN ('starting','stopping')",rusqlite::params![execution,chrono::Utc::now().to_rfc3339()])?;
+                tx.execute("UPDATE shell_execution SET state='stopped',end_reason=COALESCE(end_reason,'stopped_before_spawn'),output_complete=0,ended_at=?2 WHERE id=?1 AND state IN ('starting','stopping')",rusqlite::params![execution,chrono::Utc::now().to_rfc3339()])?;
             }
             tx.commit()?;
             Ok((stop,stdin=="closed",thread))

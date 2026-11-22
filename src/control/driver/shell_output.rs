@@ -117,6 +117,45 @@ impl ShellOwner {
     }
 }
 
+pub(in crate::control) fn shell_environment(
+    control: &Control,
+    thread: &str,
+) -> std::collections::BTreeMap<String, String> {
+    let mut env = std::collections::BTreeMap::from([
+        (
+            "SHELLBOY_DATA_DIR".into(),
+            control.data_dir.to_string_lossy().into_owned(),
+        ),
+        ("SHELLBOY_THREAD_ID".into(), thread.to_owned()),
+    ]);
+    #[cfg(unix)]
+    {
+        let address = control
+            .endpoint
+            .read()
+            .ok()
+            .and_then(|endpoint| endpoint.as_ref().map(|value| value.address.clone()))
+            .unwrap_or_default();
+        // Empty clears a socket inherited from a different owner in standalone
+        // fixtures; production publishes its endpoint before starting drivers.
+        env.insert("SHELLBOY_SOCKET".into(), address);
+    }
+    #[cfg(not(unix))]
+    env.insert("SHELLBOY_SOCKET".into(), String::new());
+    if let Ok(executable) = std::env::current_exe()
+        && let Some(parent) = executable.parent()
+    {
+        let mut paths = vec![parent.to_path_buf()];
+        if let Some(path) = std::env::var_os("PATH") {
+            paths.extend(std::env::split_paths(&path));
+        }
+        if let Ok(path) = std::env::join_paths(paths) {
+            env.insert("PATH".into(), path.to_string_lossy().into_owned());
+        }
+    }
+    env
+}
+
 type CompletionReceiver = tokio::sync::oneshot::Receiver<Result<ShellCompletion, ApiError>>;
 
 pub(in crate::control) async fn install_shell(
@@ -169,6 +208,13 @@ pub(in crate::control) async fn install_shell(
             if done_send.send(result).is_err() {
                 nudge.notify_one();
             }
+        }
+        if current.run().is_none() {
+            collector
+                .store
+                .database
+                .signals()
+                .mark(crate::maintenance::Work::Schedule);
         }
         collector.changed(current.thread());
     });
@@ -320,7 +366,7 @@ async fn save_completion(
     let completed = completion.clone();
     let index = control.index.clone();
     control.store.database.call(move|db|{let tx=db.transaction()?;let state=serde_json::to_value(completed.state).unwrap_or(Value::Null);
-        if tx.execute("UPDATE shell_execution SET state=?2,exit_code=?3,end_reason=?4,output_complete=?5,ended_at=?6,shell_json=json_set(shell_json,'$.completion',json(?7)) WHERE id=?1 AND state IN ('starting','running','stopping')",params![execution,state.as_str().unwrap_or("failed"),completed.exit_code,completed.reason,completed.output_complete,now(),json!({"forced":completed.forced,"exit_signal":completed.exit_signal,"group_cleanup_confirmed":completed.group_cleanup_confirmed,"elapsed_ms":completed.elapsed_ms}).to_string()])? == 0 {
+        if tx.execute("UPDATE shell_execution SET state=CASE WHEN end_reason='schedule_timeout' THEN 'stopped' ELSE ?2 END,exit_code=CASE WHEN end_reason='schedule_timeout' THEN NULL ELSE ?3 END,end_reason=CASE WHEN end_reason='schedule_timeout' THEN end_reason ELSE ?4 END,output_complete=?5,ended_at=?6,shell_json=json_set(shell_json,'$.completion',json(?7)) WHERE id=?1 AND state IN ('starting','running','stopping')",params![execution,state.as_str().unwrap_or("failed"),completed.exit_code,completed.reason,completed.output_complete,now(),json!({"forced":completed.forced,"exit_signal":completed.exit_signal,"group_cleanup_confirmed":completed.group_cleanup_confirmed,"elapsed_ms":completed.elapsed_ms}).to_string()])? == 0 {
             let saved:Option<String> = tx.query_row("SELECT state FROM shell_execution WHERE id=?1",[&execution],|r|r.get(0)).optional()?;
             let saved=saved.ok_or_else(||ApiError::new(ErrorCode::TargetUnavailable,"Shell execution no longer exists"))?;
             let saved:ShellState=serde_json::from_value(Value::String(saved)).map_err(|_|ApiError::new(ErrorCode::InvalidState,"Unknown saved shell state"))?;

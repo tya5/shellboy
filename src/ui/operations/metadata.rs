@@ -613,6 +613,10 @@ fn operation_label_for(id: OperationId, language: crate::config::UiLanguage) -> 
         ),
         OperationId::ThreadTag => local!(language, "会話 · タグ", "Conversation · Tags"),
         OperationId::ScheduleAdd => local!(language, "予定 · 追加", "Schedule · Add"),
+        OperationId::ScheduleSet => local!(language, "予定 · 説明", "Schedule · Set"),
+        OperationId::ScheduleEnable => local!(language, "予定 · 有効化", "Schedule · Enable"),
+        OperationId::ScheduleDisable => local!(language, "予定 · 無効化", "Schedule · Disable"),
+        OperationId::ScheduleRemove => local!(language, "予定 · 削除", "Schedule · Remove"),
         OperationId::ScheduleList => local!(language, "予定 · 一覧", "Schedule · List"),
         OperationId::ThreadTags => {
             local!(language, "会話 · タグ一覧", "Conversations · Tag names")
@@ -830,6 +834,10 @@ fn operation_meaning_for(id: OperationId, language: crate::config::UiLanguage) -
             "Thread の予定を追加します。",
             "Register a Thread-owned command."
         ),
+        OperationId::ScheduleSet => local!(language, "説明", "Set the schedule description."),
+        OperationId::ScheduleEnable => local!(language, "有効化", "Enable a schedule."),
+        OperationId::ScheduleDisable => local!(language, "無効化", "Disable a schedule."),
+        OperationId::ScheduleRemove => local!(language, "削除", "Stop and remove a schedule."),
         OperationId::ScheduleList => local!(
             language,
             "予定と実行結果を表示します。",

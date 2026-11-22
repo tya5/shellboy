@@ -4570,3 +4570,17 @@ A `RunStopped` fact from writer witness validation remains a typed rejection and
 ## CORE301 fb full-native failure disposition (2026-11-15)
 
 The first complete native run on exact candidate `fb056edbc41aecb13cc3b1f43d7d6fbdfe4d521a` exited 101: 2,632 passed, 9 failed, 25 ignored in 482.87 seconds; owned-group cleanup was confirmed. Keep it distinct from `039e495...`'s earlier full RED. `docs/validation/acceptance.md` preserves the nine original failures and exact follow-up control receipts. The stop-witness status timeout and pre-cancel/cross-stage phase oracle have scoped corrections with exact tests; atomic summary FINISH now has actual checkpoint-order rationale and the affected persistent/storage/retired/remeasurement matrix controls pass. The two uncalibrated watchdog fixtures were invalid: they held an in-flight driver response while directly entering internal summary with a different local boundary, blocking the real per-Thread boundary. Rebuilt real-source fixture reaches HTTP but currently returns `InvalidState` at strict adoption before its injector; retain this as unresolved, and do not loosen CAS or claim fixture-only without causal evidence. No whole-current native, normal completion, or three-OS qualification is claimed.
+
+### Thread schedules (#281)
+
+Use `croner` for five-field local-time recurrence rather than maintaining a
+cron parser. Control evaluates the closest stored occurrence or active-shell
+expiry on its existing maintenance loop. Sleeps are capped at 60 seconds so
+suspend or a wall-clock change cannot leave a stale long sleep; the scheduler
+has no deadline when there are no due-capable schedules or active executions.
+Each execution is allowed one hour to bound unattended process lifetime.
+
+The registration limit of 64 per Thread bounds list work; a 32 KiB command
+bounds each saved request. Descriptions use the existing 80-character bound.
+List reads at most 4 KiB of saved output per result to bound response size.
+The latest result is an ordinary shell execution, not a second stored record.

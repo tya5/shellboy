@@ -4,7 +4,7 @@ use crate::protocol::ApiError;
 use crate::storage::StorageError;
 use chrono::{DateTime, Local, Utc};
 use rusqlite::{OptionalExtension, Transaction, params};
-use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
+use std::{path::PathBuf, sync::Arc};
 
 struct DueShell {
     id: String,
@@ -57,15 +57,17 @@ fn advance_due(
 }
 
 pub(super) async fn dispatch(control: &Arc<Control>) -> Result<Option<DateTime<Utc>>, ApiError> {
-    let kind = serde_json::to_value(&control.store.config.shell.kind).unwrap();
-    let (shell, next) = control
+    let kind = serde_json::to_value(control.store.config.shell.kind).unwrap();
+    let (shell, next, expired) = control
         .store
         .database
         .call(move |db| {
             let tx = db.transaction()?;
+            let now = Utc::now();
+            let expired = tx.query_row("UPDATE shell_execution SET state='stopping', end_reason='schedule_timeout' WHERE id=(SELECT id FROM shell_execution WHERE schedule_id IS NOT NULL AND state IN ('starting','running') AND unixepoch(started_at)<=?1 ORDER BY started_at,id LIMIT 1) RETURNING id",[now.timestamp()-3600],|r|r.get::<_,String>(0)).optional()?;
             let shell = advance_due(&tx, Utc::now(), kind.as_str().unwrap_or_default())?;
             let next = tx.query_row(
-                "SELECT min(next_at) FROM schedule WHERE enabled=1 AND next_at IS NOT NULL",
+                "SELECT min(deadline) FROM (SELECT min(next_at) AS deadline FROM schedule WHERE enabled=1 AND next_at IS NOT NULL UNION ALL SELECT min(unixepoch(started_at)+3600) FROM shell_execution WHERE schedule_id IS NOT NULL AND state IN ('starting','running'))",
                 [],
                 |r| r.get::<_, Option<i64>>(0),
             )?;
@@ -73,12 +75,19 @@ pub(super) async fn dispatch(control: &Arc<Control>) -> Result<Option<DateTime<U
             Ok((
                 shell,
                 next.and_then(|unix| DateTime::from_timestamp(unix, 0)),
+                expired,
             ))
         })
         .await
         .map_err(super::storage_error)?;
+    if let Some(id) = expired
+        && let Some(handle) = control.live.clone_shell_handle(&id).await
+    {
+        handle.stop();
+    }
     if let Some(shell) = shell {
         if control.shell_start_intent(&shell.id, false).await?.0 {
+            control.changed(&shell.thread);
             return Ok(next);
         }
         let args = ShellToolArgs {
@@ -90,7 +99,7 @@ pub(super) async fn dispatch(control: &Arc<Control>) -> Result<Option<DateTime<U
             input_encoding: "utf-8".into(),
             output_encoding: "utf-8".into(),
         };
-        let env = BTreeMap::from([("SHELLBOY_THREAD_ID".into(), shell.thread.clone())]);
+        let env = shell_output::shell_environment(control, &shell.thread);
         match control
             .shell
             .spawn(shell.id.clone(), shell.cwd, args, env)
@@ -123,78 +132,6 @@ pub(super) async fn dispatch(control: &Arc<Control>) -> Result<Option<DateTime<U
         }
     }
     Ok(next)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::protocol::{Command, Request};
-    use serde_json::json;
-
-    #[tokio::test]
-    async fn scheduled_shell_runs_once_and_list_reports_saved_result() {
-        let (root, owner, control, accepted) =
-            super::super::driver::preparation_tests::fixture("http://127.0.0.1:1/v1").await;
-        let thread = accepted.thread_id;
-        let request = |command| {
-            Request::new(
-                format!("{}:{}", owner.instance_id, uuid::Uuid::new_v4()),
-                command,
-            )
-        };
-        control.start().await.unwrap();
-        let add = control
-            .request(request(Command::ScheduleAdd(
-                crate::protocol::ScheduleAddArgs {
-                    thread_id: Some(thread.clone()),
-                    cron: None,
-                    at: Some(Utc::now().to_rfc3339()),
-                    in_seconds: None,
-                    cwd: None,
-                    description: None,
-                    command: "echo schedule-witness".into(),
-                },
-            )))
-            .await;
-        assert!(add.ok, "{:?}", add.error);
-        crate::test_watchdog::watchdog("schedule add through saved shell result", async {
-            loop {
-                let changed = control.changed.notified();
-                tokio::pin!(changed);
-                changed.as_mut().enable();
-                let list = control
-                    .request(request(Command::ScheduleList(
-                        crate::protocol::ThreadTarget {
-                            thread_id: Some(thread.clone()),
-                        },
-                    )))
-                    .await;
-                assert!(list.ok, "{:?}", list.error);
-                let body = list.result.unwrap();
-                if body["items"][0]["latest"]["state"] == "exited" {
-                    assert_eq!(body["items"][0]["latest"]["exit_code"], 0);
-                    assert!(
-                        body["items"][0]["latest"]["output_tail"]
-                            .as_str()
-                            .unwrap()
-                            .contains("schedule-witness")
-                    );
-                    assert_eq!(body["items"][0]["next_at"], json!(null));
-                    break;
-                }
-                changed.await;
-            }
-        })
-        .await
-        .unwrap();
-        control.store.database.call(|db| {
-            assert_eq!(db.query_row("SELECT count(*) FROM shell_execution WHERE schedule_id IS NOT NULL AND owner_run_id IS NULL AND turn_id IS NULL",[],|r|r.get::<_,i64>(0))?,1);
-            Ok(())
-        }).await.unwrap();
-        control.shutdown().await.unwrap();
-        owner.shutdown().await.unwrap();
-        drop(root);
-    }
 }
 
 fn invalid(message: &'static str) -> ApiError {
@@ -289,4 +226,334 @@ pub(super) fn list(tx: &Transaction<'_>, thread: &str) -> Result<serde_json::Val
         Ok(serde_json::json!({"schedule_id":r.get::<_,String>(0)?,"enabled":r.get::<_,bool>(1)?,"next_at":timestamp(2)?,"cron":r.get::<_,Option<String>>(3)?,"at":timestamp(4)?,"cwd":r.get::<_,String>(5)?,"command":r.get::<_,String>(6)?,"description":r.get::<_,Option<String>>(7)?,"last_skipped_at":timestamp(8)?,"latest":latest}))
     }).map_err(sql)?.collect::<rusqlite::Result<Vec<_>>>().map_err(sql)?;
     Ok(serde_json::json!({"thread_id":thread,"items":items}))
+}
+
+pub(super) enum Change<'a> {
+    Description(&'a str),
+    Enabled(bool),
+}
+
+pub(super) fn change(
+    tx: &Transaction<'_>,
+    id: &str,
+    change: Change<'_>,
+) -> Result<super::MutationResult, ApiError> {
+    let sql = |e| super::storage_error(StorageError::from(e));
+    let (thread, cron, once, enabled): (String, Option<String>, Option<i64>, bool) = tx
+        .query_row(
+            "SELECT thread_id,cron,once_at,enabled FROM schedule WHERE id=?1",
+            [id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )
+        .optional()
+        .map_err(sql)?
+        .ok_or_else(|| {
+            ApiError::new(
+                crate::protocol::ErrorCode::TargetUnavailable,
+                "Schedule not found",
+            )
+        })?;
+    match change {
+        Change::Description(text) => {
+            if text.chars().count() > crate::tool_description::MAX_CHARS {
+                return Err(invalid(
+                    "Schedule description exceeds the description limit",
+                ));
+            }
+            tx.execute(
+                "UPDATE schedule SET description=NULLIF(?2,'') WHERE id=?1",
+                params![id, text],
+            )
+            .map_err(sql)?;
+        }
+        Change::Enabled(next_enabled) if next_enabled != enabled => {
+            let now = Utc::now();
+            let next = if next_enabled {
+                match cron {
+                    Some(cron) => Some(
+                        next_cron(&cron, now)
+                            .ok_or_else(|| invalid("Cannot calculate the schedule time"))?,
+                    ),
+                    None => once.filter(|value| *value > now.timestamp()),
+                }
+            } else {
+                None
+            };
+            tx.execute(
+                "UPDATE schedule SET enabled=?2,next_at=?3 WHERE id=?1",
+                params![id, next_enabled, next],
+            )
+            .map_err(sql)?;
+        }
+        Change::Enabled(_) => {}
+    }
+    let mut result = super::MutationResult::value(serde_json::json!({"schedule_id":id}))?;
+    result.changed_threads.push(thread);
+    Ok(result)
+}
+
+fn disable_and_stop(
+    tx: &Transaction<'_>,
+    key: &str,
+    by_thread: bool,
+) -> Result<Vec<String>, StorageError> {
+    let column = if by_thread { "thread_id" } else { "id" };
+    tx.execute(
+        &format!("UPDATE schedule SET enabled=0 WHERE {column}=?1"),
+        [key],
+    )?;
+    let ids=tx.prepare(&format!("UPDATE shell_execution SET state='stopping' WHERE schedule_id IN (SELECT id FROM schedule WHERE {column}=?1) AND state IN ('starting','running','stopping') RETURNING id"))?.query_map([key],|r|r.get::<_,String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(ids)
+}
+
+pub(super) async fn delete_thread(
+    control: &Arc<Control>,
+    args: crate::protocol::ThreadDeleteArgs,
+) -> Result<serde_json::Value, ApiError> {
+    let request = args.clone();
+    let executions = control
+        .store
+        .database
+        .call(move |db| {
+            let tx = db.transaction()?;
+            let mut executions = Vec::new();
+            for thread in super::db::delete_targets(&tx, &request).map_err(StorageError::from)? {
+                executions.extend(disable_and_stop(&tx, &thread, true)?);
+            }
+            tx.commit()?;
+            Ok(executions)
+        })
+        .await
+        .map_err(super::storage_error)?;
+    drain(control, executions).await?;
+    let effects = control
+        .store
+        .database
+        .call(move |db| {
+            let tx = db.transaction()?;
+            let result = super::db::delete_thread(&tx, &args, &super::state::now())
+                .map_err(StorageError::from)?;
+            tx.commit()?;
+            Ok(result)
+        })
+        .await
+        .map_err(super::storage_error)?;
+    let signals = control.store.database.signals();
+    signals.mark_all(&crate::maintenance::Work::DELETION);
+    signals.mark_all(&[
+        crate::maintenance::Work::Managed,
+        crate::maintenance::Work::Drafts,
+        crate::maintenance::Work::Schedule,
+    ]);
+    let value = effects.result.clone();
+    control.apply_effects(Some(effects)).await;
+    Ok(value)
+}
+
+pub(super) async fn remove(control: &Control, id: String) -> Result<serde_json::Value, ApiError> {
+    let target = id.clone();
+    let (thread, executions) = control
+        .store
+        .database
+        .call(move |db| {
+            let tx = db.transaction()?;
+            let thread = tx
+                .query_row(
+                    "SELECT thread_id FROM schedule WHERE id=?1",
+                    [&target],
+                    |r| r.get::<_, String>(0),
+                )
+                .optional()?
+                .ok_or_else(|| {
+                    ApiError::new(
+                        crate::protocol::ErrorCode::TargetUnavailable,
+                        "Schedule not found",
+                    )
+                })?;
+            let executions = disable_and_stop(&tx, &target, false)?;
+            tx.commit()?;
+            Ok((thread, executions))
+        })
+        .await
+        .map_err(super::storage_error)?;
+    drain(control, executions).await?;
+    let target = id.clone();
+    control.store.database.call(move |db| {
+        if db.execute("DELETE FROM schedule WHERE id=?1 AND NOT EXISTS(SELECT 1 FROM shell_execution WHERE schedule_id=?1 AND state IN ('starting','running','stopping'))",[target])?!=1 {
+            return Err(ApiError::new(crate::protocol::ErrorCode::OperationConflict,"Schedule changed before removal").into());
+        }
+        Ok(())
+    }).await.map_err(super::storage_error)?;
+    control
+        .store
+        .database
+        .signals()
+        .mark(crate::maintenance::Work::Schedule);
+    control.changed(&thread);
+    Ok(serde_json::json!({"schedule_id":id,"removed":true}))
+}
+
+async fn drain(control: &Control, executions: Vec<String>) -> Result<(), ApiError> {
+    for id in executions {
+        if let Some(handle) = control.live.clone_shell_handle(&id).await {
+            handle.stop();
+        }
+        loop {
+            let changed = control.changed.notified();
+            tokio::pin!(changed);
+            changed.as_mut().enable();
+            let target = id.clone();
+            if !control.store.database.call(move |db|Ok(db.query_row("SELECT EXISTS(SELECT 1 FROM shell_execution WHERE id=?1 AND state IN ('starting','running','stopping'))",[target],|r|r.get::<_,bool>(0))?)).await.map_err(super::storage_error)? { break; }
+            changed.await;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::protocol::{Command, Request};
+    use serde_json::json;
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn thread_delete_replays_without_stopping_or_deleting_twice() {
+        let root = tempfile::tempdir().unwrap();
+        let owner =
+            crate::app::DataOwner::start(None, Some(root.path().join("data")), root.path().into())
+                .await
+                .unwrap();
+        let control = Control::new(&owner, root.path().into());
+        let cwd = root.path().to_string_lossy().into_owned();
+        control.store.database.call(move |db| {
+            db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('target',?1,'','fixture','fixture','now')",[cwd])?;
+            db.execute_batch("CREATE TEMP TABLE delete_witness(kind TEXT);
+                CREATE TEMP TRIGGER stop_witness AFTER UPDATE OF state ON main.shell_execution WHEN NEW.state='stopping' AND OLD.state<>'stopping' BEGIN INSERT INTO delete_witness VALUES('stop'); END;
+                CREATE TEMP TRIGGER delete_witness AFTER UPDATE OF deleted_at ON main.thread WHEN OLD.deleted_at IS NULL AND NEW.deleted_at IS NOT NULL BEGIN INSERT INTO delete_witness VALUES('delete'); END;")?;
+            Ok(())
+        }).await.unwrap();
+        let request = |id, command| Request::new(format!("{}:{id}", owner.instance_id), command);
+        let add = control
+            .request(request(
+                "add",
+                Command::ScheduleAdd(crate::protocol::ScheduleAddArgs {
+                    thread_id: Some("target".into()),
+                    cron: None,
+                    at: Some(Utc::now().to_rfc3339()),
+                    in_seconds: None,
+                    cwd: None,
+                    description: None,
+                    command: "sleep 60".into(),
+                }),
+            ))
+            .await;
+        assert!(add.ok, "{:?}", add.error);
+        crate::test_watchdog::watchdog("scheduled shell registers before Thread deletion",async {
+            loop {
+                let changed=control.changed.notified();
+                tokio::pin!(changed); changed.as_mut().enable();
+                if control.store.database.call(|db|Ok(db.query_row("SELECT EXISTS(SELECT 1 FROM shell_execution WHERE schedule_id IS NOT NULL AND state='running')",[],|r|r.get::<_,bool>(0))?)).await.unwrap(){break;}
+                changed.await;
+            }
+        }).await.unwrap();
+        let command = Command::ThreadDelete(crate::protocol::ThreadDeleteArgs {
+            thread_id: "target".into(),
+            descendants: false,
+            preview_marker: None,
+        });
+        let first = control.request(request("delete", command.clone())).await;
+        let replay = control.request(request("delete", command)).await;
+        assert!(first.ok, "{:?}", first.error);
+        assert!(replay.ok, "{:?}", replay.error);
+        assert_eq!(first.result, replay.result);
+        control
+            .store
+            .database
+            .call(|db| {
+                let facts = db
+                    .prepare("SELECT kind FROM delete_witness ORDER BY rowid")?
+                    .query_map([], |r| r.get::<_, String>(0))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                assert_eq!(facts, ["stop", "delete"]);
+                assert_eq!(
+                    db.query_row(
+                        "SELECT count(*) FROM shell_execution WHERE schedule_id IS NOT NULL",
+                        [],
+                        |r| r.get::<_, i64>(0)
+                    )?,
+                    0
+                );
+                Ok(())
+            })
+            .await
+            .unwrap();
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn scheduled_shell_runs_once_and_list_reports_saved_result() {
+        let (root, owner, control, accepted) =
+            super::super::driver::preparation_tests::fixture("http://127.0.0.1:1/v1").await;
+        let thread = accepted.thread_id;
+        let request = |command| {
+            Request::new(
+                format!("{}:{}", owner.instance_id, uuid::Uuid::new_v4()),
+                command,
+            )
+        };
+        control.start().await.unwrap();
+        let add = control
+            .request(request(Command::ScheduleAdd(
+                crate::protocol::ScheduleAddArgs {
+                    thread_id: Some(thread.clone()),
+                    cron: None,
+                    at: Some(Utc::now().to_rfc3339()),
+                    in_seconds: None,
+                    cwd: None,
+                    description: None,
+                    command: "echo schedule-witness".into(),
+                },
+            )))
+            .await;
+        assert!(add.ok, "{:?}", add.error);
+        crate::test_watchdog::watchdog("schedule add through saved shell result", async {
+            loop {
+                let changed = control.changed.notified();
+                tokio::pin!(changed);
+                changed.as_mut().enable();
+                let list = control
+                    .request(request(Command::ScheduleList(
+                        crate::protocol::ThreadTarget {
+                            thread_id: Some(thread.clone()),
+                        },
+                    )))
+                    .await;
+                assert!(list.ok, "{:?}", list.error);
+                let body = list.result.unwrap();
+                if body["items"][0]["latest"]["state"] == "exited" {
+                    assert_eq!(body["items"][0]["latest"]["exit_code"], 0);
+                    assert!(
+                        body["items"][0]["latest"]["output_tail"]
+                            .as_str()
+                            .unwrap()
+                            .contains("schedule-witness")
+                    );
+                    assert_eq!(body["items"][0]["next_at"], json!(null));
+                    break;
+                }
+                changed.await;
+            }
+        })
+        .await
+        .unwrap();
+        control.store.database.call(|db| {
+            assert_eq!(db.query_row("SELECT count(*) FROM shell_execution WHERE schedule_id IS NOT NULL AND owner_run_id IS NULL AND turn_id IS NULL",[],|r|r.get::<_,i64>(0))?,1);
+            Ok(())
+        }).await.unwrap();
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+        drop(root);
+    }
 }

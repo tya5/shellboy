@@ -828,6 +828,10 @@ impl Command {
             Self::ThreadRewind(a) => a.validate(),
             Self::ThreadArchive(a) | Self::ThreadUnarchive(a) => a.validate(),
             Self::ThreadTag(a) => a.validate(),
+            Self::ScheduleSet(a) => nonempty(&a.schedule_id, "schedule_id"),
+            Self::ScheduleEnable(a) | Self::ScheduleDisable(a) | Self::ScheduleRemove(a) => {
+                nonempty(&a.schedule_id, "schedule_id")
+            }
             Self::ScheduleAdd(a) => optional_nonempty(a.thread_id.as_deref(), "thread_id"),
             Self::ScheduleList(a) => optional_nonempty(a.thread_id.as_deref(), "thread_id"),
             Self::ThreadTags(a) => a.validate(),

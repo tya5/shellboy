@@ -1371,6 +1371,22 @@ impl Store {
                 result.changed_threads.push(thread);
                 Ok(result)
             }
+            Command::ScheduleSet(args) => super::schedule::change(
+                tx,
+                &args.schedule_id,
+                super::schedule::Change::Description(&args.description),
+            ),
+            Command::ScheduleEnable(args) | Command::ScheduleDisable(args) => {
+                let result = super::schedule::change(
+                    tx,
+                    &args.schedule_id,
+                    super::schedule::Change::Enabled(matches!(command, Command::ScheduleEnable(_))),
+                )?;
+                self.database
+                    .signals()
+                    .mark(crate::maintenance::Work::Schedule);
+                Ok(result)
+            }
             Command::ScheduleList(args) => {
                 let thread = target(args.thread_id.as_deref(), caller)?;
                 MutationResult::value(super::schedule::list(tx, &thread)?)
@@ -3180,11 +3196,7 @@ fn retry_run(
     })
 }
 
-fn delete_thread(
-    tx: &Transaction<'_>,
-    args: &ThreadDeleteArgs,
-    now: &str,
-) -> Result<MutationResult> {
+pub(super) fn delete_targets(tx: &Transaction<'_>, args: &ThreadDeleteArgs) -> Result<Vec<String>> {
     if args.preview_marker.is_none() {
         thread_details(tx, &args.thread_id)?;
     }
@@ -3227,6 +3239,30 @@ fn delete_thread(
                 "stop every selected Thread before deleting it",
             ));
         }
+    }
+    Ok(targets)
+}
+
+pub(super) fn delete_thread(
+    tx: &Transaction<'_>,
+    args: &ThreadDeleteArgs,
+    now: &str,
+) -> Result<MutationResult> {
+    let targets = delete_targets(tx, args)?;
+    for id in &targets {
+        if count(
+            tx,
+            "SELECT count(*) FROM shell_execution s JOIN schedule q ON q.id=s.schedule_id WHERE q.thread_id=?1 AND s.state IN ('starting','running','stopping')",
+            id,
+        )? != 0
+        {
+            return Err(error(
+                ErrorCode::OperationConflict,
+                "A scheduled execution started before deletion",
+            ));
+        }
+        tx.execute("DELETE FROM schedule WHERE thread_id=?1", [id])
+            .map_err(sql_error)?;
     }
     for id in &targets {
         tx.execute("UPDATE thread SET deleted_at=?2,revision=revision+1,selection_revision=selection_revision+1,cursor_node_id=NULL,updated_at=?2 WHERE id=?1",params![id,now]).map_err(sql_error)?;

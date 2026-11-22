@@ -24,7 +24,6 @@ use crate::{
 };
 use futures_util::FutureExt;
 use rusqlite::{OptionalExtension, params};
-use std::collections::BTreeMap;
 
 #[derive(Clone)]
 struct Snapshot {
@@ -1127,45 +1126,15 @@ async fn run_shell(
         .lock()
         .await
         .insert(origin.token.clone(), origin.clone());
-    let mut env = BTreeMap::new();
+    let mut env = shell_output::shell_environment(&control, &origin.thread_id);
     for (name, value) in [
-        (
-            "SHELLBOY_DATA_DIR",
-            control.data_dir.to_string_lossy().into_owned(),
-        ),
         ("SHELLBOY_INSTANCE_ID", origin.instance_id.clone()),
-        ("SHELLBOY_THREAD_ID", origin.thread_id.clone()),
         ("SHELLBOY_RUN_ID", origin.run_id.clone()),
         ("SHELLBOY_TURN_ID", origin.turn_id.clone()),
         ("SHELLBOY_EXECUTION_ID", origin.execution_id.clone()),
         ("SHELLBOY_ORIGIN_TOKEN", origin.token.clone()),
     ] {
         env.insert(name.into(), value);
-    }
-    #[cfg(unix)]
-    {
-        let address = control
-            .endpoint
-            .read()
-            .ok()
-            .and_then(|endpoint| endpoint.as_ref().map(|value| value.address.clone()))
-            .unwrap_or_default();
-        // Empty clears a socket inherited from a different owner in standalone
-        // fixtures; production publishes its endpoint before starting drivers.
-        env.insert("SHELLBOY_SOCKET".into(), address);
-    }
-    #[cfg(not(unix))]
-    env.insert("SHELLBOY_SOCKET".into(), String::new());
-    if let Ok(executable) = std::env::current_exe()
-        && let Some(parent) = executable.parent()
-    {
-        let mut paths = vec![parent.to_path_buf()];
-        if let Some(path) = std::env::var_os("PATH") {
-            paths.extend(std::env::split_paths(&path));
-        }
-        if let Ok(path) = std::env::join_paths(paths) {
-            env.insert("PATH".into(), path.to_string_lossy().into_owned());
-        }
     }
     let (stop, _) = match control.shell_start_intent(&execution, false).await {
         Ok(intent) => intent,

@@ -91,6 +91,8 @@ fn inspect(db: &Connection, args: &ThreadDeleteArgs) -> Result<Value, ApiError> 
         .map_err(sql_error)
     };
     let thread_count = count("SELECT count(*) FROM selected")?;
+    let schedule_count =
+        count("SELECT count(*) FROM schedule q JOIN selected s ON s.id=q.thread_id")?;
     let descendant_count = count("SELECT count(*)-1 FROM descendants")?;
     let latest_updated_at: String = db
         .query_row(
@@ -135,7 +137,7 @@ fn inspect(db: &Connection, args: &ThreadDeleteArgs) -> Result<Value, ApiError> 
         "selection":{"thread_count":thread_count,"descendant_thread_count":descendant_count,"surviving_descendant_thread_count":descendant_count-(thread_count-1),"latest_updated_at":latest_updated_at},
         "blockers":{"live_run_count":live,"stopping_run_count":stopping,"runs":runs,"truncated":live+stopping>50},
         "reference_scope":"direct_references_not_gc_reachability",
-        "references":{"selected_path_nodes":selected_path_nodes,"shared_path_nodes":shared_path_nodes,"surviving_path_thread_count":surviving_path_threads,"completed_replacement_source_nodes":sources,"surviving_replacement_source_nodes":surviving_sources,"attachment_reference_count":attachments,"external_attachment_reference_count":external,"managed_attachment_reference_count":attachments-external},
+        "references":{"selected_path_nodes":selected_path_nodes,"shared_path_nodes":shared_path_nodes,"surviving_path_thread_count":surviving_path_threads,"completed_replacement_source_nodes":sources,"surviving_replacement_source_nodes":surviving_sources,"attachment_reference_count":attachments,"schedule_count":schedule_count,"external_attachment_reference_count":external,"managed_attachment_reference_count":attachments-external},
         "reclaimable_bytes":Value::Null,"reclaimable_reason":"requires_gc_reachability_and_storage_accounting"
     }))
 }

@@ -910,3 +910,15 @@ incomplete, retains available partial text and provider details, and does not
 automatically retry it. Do not diagnose context-window limits, filters, other
 incomplete reasons, unknown stop reasons or connection/EOF failures as output
 limits by guesswork.
+
+### Scheduled checks
+
+Schedules belong to a Thread. They run a shell command without starting a model
+Turn. To wake the owning Thread only when there is work, use a command such as:
+
+```sh
+shellboy schedule add --thread THREAD --cron '0 * * * *' -- \
+  'if test -f needs-review; then shellboy message send --thread "$SHELLBOY_THREAD_ID" --text "Review is needed"; fi'
+```
+
+Scheduled commands receive `SHELLBOY_THREAD_ID`, but no model shell Origin.

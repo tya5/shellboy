@@ -482,6 +482,25 @@ pub enum HistoryCommand {
 pub enum ScheduleCommand {
     /// Add a scheduled shell command.
     Add(ScheduleAddOptions),
+    Set {
+        #[arg(long = "schedule")]
+        schedule_id: String,
+        #[arg(long)]
+        description: String,
+    },
+    Enable {
+        #[arg(long = "schedule")]
+        schedule_id: String,
+    },
+    Disable {
+        #[arg(long = "schedule")]
+        schedule_id: String,
+    },
+    Remove {
+        #[arg(long = "schedule")]
+        schedule_id: String,
+    },
+
     /// List schedules and their latest saved results.
     List {
         #[arg(long = "thread")]
@@ -1805,6 +1824,22 @@ impl Cli {
                     description: a.description,
                     command: a.command.join(" "),
                 }),
+                ScheduleCommand::Set {
+                    schedule_id,
+                    description,
+                } => C::ScheduleSet(wire::ScheduleSetArgs {
+                    schedule_id,
+                    description,
+                }),
+                ScheduleCommand::Enable { schedule_id } => {
+                    C::ScheduleEnable(wire::ScheduleTarget { schedule_id })
+                }
+                ScheduleCommand::Disable { schedule_id } => {
+                    C::ScheduleDisable(wire::ScheduleTarget { schedule_id })
+                }
+                ScheduleCommand::Remove { schedule_id } => {
+                    C::ScheduleRemove(wire::ScheduleTarget { schedule_id })
+                }
                 ScheduleCommand::List { thread_id } => {
                     C::ScheduleList(wire::ThreadTarget { thread_id })
                 }

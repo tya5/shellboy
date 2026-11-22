@@ -30,7 +30,7 @@ impl Command {
             Self::ShellList(_) => ("shell.list", CommandRoute::Database),
             Self::ThreadCreate(_) => ("thread.create", CommandRoute::Database),
             Self::ThreadFork(_) => ("thread.fork", CommandRoute::Database),
-            Self::ThreadDelete(_) => ("thread.delete", CommandRoute::Database),
+            Self::ThreadDelete(_) => ("thread.delete", CommandRoute::Runtime),
             Self::ThreadDeletePreview(_) => ("thread.delete_preview", CommandRoute::Database),
             Self::ThreadPrune(_) => ("thread.prune", CommandRoute::Database),
             Self::ThreadRewind(_) => ("thread.rewind", CommandRoute::Database),
@@ -38,6 +38,10 @@ impl Command {
             Self::ThreadUnarchive(_) => ("thread.unarchive", CommandRoute::Database),
             Self::ThreadTag(_) => ("thread.tag", CommandRoute::Database),
             Self::ScheduleAdd(_) => ("schedule.add", CommandRoute::Database),
+            Self::ScheduleSet(_) => ("schedule.set", CommandRoute::Database),
+            Self::ScheduleEnable(_) => ("schedule.enable", CommandRoute::Database),
+            Self::ScheduleDisable(_) => ("schedule.disable", CommandRoute::Database),
+            Self::ScheduleRemove(_) => ("schedule.remove", CommandRoute::Runtime),
             Self::ScheduleList(_) => ("schedule.list", CommandRoute::Database),
             Self::ThreadTags(_) => ("thread.tags", CommandRoute::Database),
             Self::ThreadCwds(_) => ("thread.cwds", CommandRoute::Database),
@@ -102,7 +106,11 @@ impl Command {
     /// May owner shutdown drop the runtime action before receipt finalization?
     pub(crate) fn runtime_cancellable(&self) -> bool {
         match self {
-            Self::ScheduleAdd(_) => false,
+            Self::ScheduleAdd(_)
+            | Self::ScheduleSet(_)
+            | Self::ScheduleEnable(_)
+            | Self::ScheduleDisable(_)
+            | Self::ScheduleRemove(_) => false,
             Self::Status(a) => a.memory,
             Self::ModelList(_)
             | Self::IndexPreview(_)
@@ -174,7 +182,11 @@ impl Command {
     /// Late runtime cleanup allowed after cancellation; not the IPC reserved lane.
     pub(crate) fn runtime_allowed_while_stopping(&self) -> bool {
         match self {
-            Self::ScheduleAdd(_) => false,
+            Self::ScheduleAdd(_)
+            | Self::ScheduleSet(_)
+            | Self::ScheduleEnable(_)
+            | Self::ScheduleDisable(_)
+            | Self::ScheduleRemove(_) => false,
             Self::ShellEof(_) | Self::ShellStop(_) => true,
             Self::OwnerShutdown(_)
             | Self::Status(_)
@@ -245,7 +257,11 @@ impl Command {
     /// Must finish admission before the graceful-shutdown context capture?
     pub(crate) fn changes_context(&self) -> bool {
         match self {
-            Self::ScheduleAdd(_) => false,
+            Self::ScheduleAdd(_)
+            | Self::ScheduleSet(_)
+            | Self::ScheduleEnable(_)
+            | Self::ScheduleDisable(_)
+            | Self::ScheduleRemove(_) => false,
             Self::ThreadCreate(_)
             | Self::ThreadFork(_)
             | Self::ThreadDelete(_)
@@ -317,7 +333,11 @@ impl Command {
     /// Observes targets without changing their state; receipt metadata and API cost are separate.
     pub fn is_read_only(&self) -> bool {
         match self {
-            Self::ScheduleAdd(_) => false,
+            Self::ScheduleAdd(_)
+            | Self::ScheduleSet(_)
+            | Self::ScheduleEnable(_)
+            | Self::ScheduleDisable(_)
+            | Self::ScheduleRemove(_) => false,
             Self::Status(_)
             | Self::ModelList(_)
             | Self::ThreadList(_)

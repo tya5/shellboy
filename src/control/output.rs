@@ -283,9 +283,9 @@ impl ShellOutputReader {
             let tx = db.transaction().map_err(sql_error)?;
             let db = &tx;
             let mut details = snapshot(db, &execution)?.details;
-            let (command, cwd, thread, turn, forced, signal, confirmed) = db.query_row(
-                "SELECT json_extract(s.shell_json,'$.command'),s.cwd,r.thread_id,s.turn_id,CASE json_type(s.shell_json,'$.completion.forced') WHEN 'true' THEN 1 WHEN 'false' THEN 0 END,CASE WHEN json_type(s.shell_json,'$.completion.exit_signal')='integer' AND json_extract(s.shell_json,'$.completion.exit_signal') BETWEEN -2147483648 AND 2147483647 THEN json_extract(s.shell_json,'$.completion.exit_signal') END,CASE json_type(s.shell_json,'$.completion.group_cleanup_confirmed') WHEN 'true' THEN 1 WHEN 'false' THEN 0 END FROM shell_execution s JOIN run r ON r.id=s.owner_run_id WHERE s.id=?1",
-                [&execution], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?)),
+            let (command, cwd, thread, turn, forced, signal, confirmed, schedule) = db.query_row(
+                "SELECT json_extract(s.shell_json,'$.command'),s.cwd,COALESCE(r.thread_id,q.thread_id),s.turn_id,CASE json_type(s.shell_json,'$.completion.forced') WHEN 'true' THEN 1 WHEN 'false' THEN 0 END,CASE WHEN json_type(s.shell_json,'$.completion.exit_signal')='integer' AND json_extract(s.shell_json,'$.completion.exit_signal') BETWEEN -2147483648 AND 2147483647 THEN json_extract(s.shell_json,'$.completion.exit_signal') END,CASE json_type(s.shell_json,'$.completion.group_cleanup_confirmed') WHEN 'true' THEN 1 WHEN 'false' THEN 0 END,s.schedule_id FROM shell_execution s LEFT JOIN run r ON r.id=s.owner_run_id LEFT JOIN schedule q ON q.id=s.schedule_id WHERE s.id=?1",
+                [&execution], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?)),
             ).map_err(sql_error)?;
             (details.stdin_open,details.stdin_last_write_at)=crate::stdin_facts::read(db,&execution).map_err(sql_error)?;
             details.forced = forced;
@@ -298,7 +298,8 @@ impl ShellOutputReader {
             details.command = command;
             details.cwd = Some(cwd);
             details.thread_id = Some(thread);
-            details.turn_id = Some(turn);
+            details.turn_id = turn;
+            details.schedule_id = schedule;
             tx.commit().map_err(sql_error)?;
             Ok(details)
         }).await
@@ -609,7 +610,7 @@ pub fn wait_position(db: &Connection, execution_id: &str, token: &str) -> Result
 }
 fn snapshot(db: &Connection, execution: &str) -> Result<Snapshot> {
     type StoredShell = (
-        String,
+        Option<String>,
         String,
         Option<i32>,
         Option<String>,
@@ -638,6 +639,7 @@ fn snapshot(db: &Connection, execution: &str) -> Result<Snapshot> {
             stdin_last_write_at: None,
             execution_id: execution.into(),
             run_id,
+            schedule_id: None,
             state,
             output_complete: output_complete.unwrap_or(false),
             exit_code,
