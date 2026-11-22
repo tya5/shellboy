@@ -90,7 +90,7 @@ tool start (no condition matches it). Nothing was measured; see §3.
 
 ### 1.5 Versioning and decode strictness (current main)
 
-Protocol 6 is current in this branch (`src/protocol.rs:11`); protocol 4 was the pre-#262 baseline. It adds independently
+Protocol 7 is current in this branch (`src/protocol.rs`); protocol 4 was the pre-#262 baseline. It adds independently
 opt-in `events.reasoning_activity` to the protocol-3 baseline. Owner and client
 require an exact version match; no protocol-2/3 downgrade or version range is
 supported (`src/ipc.rs`, `src/app.rs`). Request argument records remain strict: unknown
@@ -161,7 +161,7 @@ Result `EventsWaitResult` contains `status`, `cursor`, `changes`, and `more`; pr
 | status | when | client action |
 |---|---|---|
 | `baseline` | `after` absent | read current state; keep `cursor` |
-| `changed` | ≥1 matching entry with seq > after | re-read those Threads; continue with `cursor` |
+| `changed` | ≥1 matching Thread entry or `config_changed` after the cursor | re-read those Threads and/or `config.get`; continue with `cursor` |
 | `timeout` | none before deadline | continue with `cursor` |
 | `resync_required` | `after.instance_id` ≠ current instance (owner restart), or `after.seq < floor` | re-read everything the client shows; continue with the new `cursor` |
 
@@ -169,6 +169,20 @@ Result `EventsWaitResult` contains `status`, `cursor`, `changes`, and `more`; pr
 `invalid_argument`. Changes are ascending by seq, at most 64; `more=true`
 means further matching entries already exist and `cursor` is the last
 returned seq; otherwise `cursor` is the head observed in the same lock.
+
+Protocol 7 adds required `config_changed: bool` to `EventsWaitResult`. The same
+`ChangeClock` retains one latest global config-write sequence (coalesced, like
+its latest-per-Thread entries); it is not filtered by `thread_ids` and has no
+Thread ID. For each caller, the flag is true exactly when that retained sequence
+is newer than its `after` cursor and no later than the returned cursor. It is
+not consumed: independent tabs/devices/CLI processes with older cursors all see
+the mark. A `changed` response can therefore have an empty `changes` array.
+Baseline and resync return false; timeout returns false only after the caller's
+cursor has passed the retained mark. `config.set` records the mark after every
+successful file write (`applied.written`), including restart-required changes;
+refused and no-op writes do not mark. Clients reread with `config.get`, which
+reports the file and loaded values; the hint carries neither a diff nor config
+values. This is memory-only and adds no event path, table, cache, or polling.
 
 Algorithm (same lost-wakeup discipline as `wait`): enable
 `control.changed.notified()` → lock clock, compute → if non-empty or
@@ -401,7 +415,7 @@ validation and are documented in prose.
 - The owner keeps accepting exactly one version (current-only, Issue #33);
   supporting a range is open (Q2).
 
-### 4.3 Capability advertisement (historical proposal; protocol 6 is current)
+### 4.3 Capability advertisement (historical proposal; protocol 7 is current)
 
 `Welcome` gained `capabilities: Vec<String>` with protocol 3 (names like `events.wait`,
 `message.send.human`); protocol 4 adds `events.reasoning_activity`. Welcome arrives before the request, so a client can

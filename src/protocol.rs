@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
-pub const PROTOCOL_VERSION: u32 = 6;
+pub const PROTOCOL_VERSION: u32 = 7;
 pub const PROTOCOL_CAPABILITIES: &[&str] = &["events.reasoning_activity", "id.resolve"];
 pub const MAX_FRAME_BYTES: usize = 8 * 1024 * 1024;
 pub const MAX_PENDING_REPLY_DUTIES: u64 = 16;
@@ -1244,7 +1244,7 @@ record!(EventReasoningActivity {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     received_bytes: Option<u64>
 });
-record!(EventsWaitResult { status: EventsWaitStatus, cursor: String, changes: Vec<EventChange>, more: bool, #[serde(default, skip_serializing_if="Option::is_none")] live_text: Option<Vec<EventLiveText>>, #[serde(default)] reasoning_activity: Vec<EventReasoningActivity> });
+record!(EventsWaitResult { status: EventsWaitStatus, cursor: String, changes: Vec<EventChange>, more: bool, config_changed: bool, #[serde(default, skip_serializing_if="Option::is_none")] live_text: Option<Vec<EventLiveText>>, #[serde(default)] reasoning_activity: Vec<EventReasoningActivity> });
 pub const MAX_EVENT_THREAD_FILTER: usize = 64;
 pub const MAX_EVENT_CHANGES: usize = 64;
 /// Opaque cursor: the owner instance that issued it and a position of that instance's change clock.

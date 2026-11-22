@@ -502,30 +502,36 @@ impl Control {
         use super::change_clock::Poll;
         let include_text = args.include_text;
         let include_reasoning_activity = args.include_reasoning_activity;
-        let result =
-            |status, seq: u64, changes: Vec<(String, u64)>, more, text, reasoning_activity| {
-                let cursor = EventCursor {
-                    v: 1,
-                    instance_id: self.store.instance_id.clone(),
-                    seq,
-                }
-                .encode();
-                encode_result(
-                    EventsWaitResult {
-                        status,
-                        cursor,
-                        changes: changes
-                            .into_iter()
-                            .map(|(thread_id, seq)| EventChange { thread_id, seq })
-                            .collect(),
-                        more,
-                        live_text: include_text.then_some(text),
-                        reasoning_activity,
-                    },
-                    ErrorCode::InvalidState,
-                    "Cannot encode events result",
-                )
-            };
+        let result = |status,
+                      seq: u64,
+                      changes: Vec<(String, u64)>,
+                      more,
+                      config_changed,
+                      text,
+                      reasoning_activity| {
+            let cursor = EventCursor {
+                v: 1,
+                instance_id: self.store.instance_id.clone(),
+                seq,
+            }
+            .encode();
+            encode_result(
+                EventsWaitResult {
+                    status,
+                    cursor,
+                    changes: changes
+                        .into_iter()
+                        .map(|(thread_id, seq)| EventChange { thread_id, seq })
+                        .collect(),
+                    more,
+                    config_changed,
+                    live_text: include_text.then_some(text),
+                    reasoning_activity,
+                },
+                ErrorCode::InvalidState,
+                "Cannot encode events result",
+            )
+        };
         let Some(token) = args.after.as_deref() else {
             let (head, text, activity) = self.change_clock.snapshot(
                 &args.thread_ids,
@@ -536,6 +542,7 @@ impl Control {
                 EventsWaitStatus::Baseline,
                 head,
                 vec![],
+                false,
                 false,
                 text,
                 activity,
@@ -552,6 +559,7 @@ impl Control {
                 EventsWaitStatus::ResyncRequired,
                 head,
                 vec![],
+                false,
                 false,
                 text,
                 activity,
@@ -590,6 +598,7 @@ impl Control {
                         head,
                         vec![],
                         false,
+                        false,
                         text,
                         reasoning_activity,
                     );
@@ -601,13 +610,15 @@ impl Control {
                     text,
                     reasoning_activity,
                     reasoning_changed,
+                    config_changed,
                 }) => {
-                    if !changes.is_empty() {
+                    if !changes.is_empty() || config_changed {
                         return result(
                             EventsWaitStatus::Changed,
                             cursor,
                             changes,
                             more,
+                            config_changed,
                             text,
                             reasoning_activity,
                         );
@@ -617,6 +628,7 @@ impl Control {
                             EventsWaitStatus::Text,
                             cursor,
                             vec![],
+                            false,
                             false,
                             text,
                             reasoning_activity,
@@ -628,6 +640,7 @@ impl Control {
                             cursor,
                             vec![],
                             false,
+                            false,
                             text,
                             reasoning_activity,
                         );
@@ -637,6 +650,7 @@ impl Control {
                             EventsWaitStatus::Timeout,
                             cursor,
                             vec![],
+                            false,
                             false,
                             text,
                             reasoning_activity,

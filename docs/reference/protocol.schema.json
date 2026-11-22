@@ -2131,6 +2131,9 @@
           },
           "type": "array"
         },
+        "config_changed": {
+          "type": "boolean"
+        },
         "cursor": {
           "type": "string"
         },
@@ -2161,7 +2164,8 @@
         "status",
         "cursor",
         "changes",
-        "more"
+        "more",
+        "config_changed"
       ],
       "title": "EventsWaitResult",
       "type": "object"
@@ -10635,6 +10639,9 @@
           },
           "type": "array"
         },
+        "config_changed": {
+          "type": "boolean"
+        },
         "cursor": {
           "type": "string"
         },
@@ -10665,7 +10672,8 @@
         "status",
         "cursor",
         "changes",
-        "more"
+        "more",
+        "config_changed"
       ],
       "title": "EventsWaitResult",
       "type": "object"
@@ -12286,6 +12294,6 @@
       "type": "object"
     }
   },
-  "protocol_version": 6,
+  "protocol_version": 7,
   "title": "Shellboy local RPC protocol v6"
 }

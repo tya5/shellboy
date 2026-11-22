@@ -10,8 +10,8 @@ use shellboy::{
     config_setup::TEMPLATE,
     control::Control,
     protocol::{
-        ApiError, Command, ConfigChange, ConfigGetArgs, ConfigSetArgs, ErrorCode, Request,
-        ThreadCreateArgs, ThreadSetArgs, ThreadTarget,
+        ApiError, Command, ConfigChange, ConfigGetArgs, ConfigSetArgs, ErrorCode, EventsWaitArgs,
+        Request, ThreadCreateArgs, ThreadSetArgs, ThreadTarget,
     },
 };
 use std::{
@@ -1045,6 +1045,107 @@ async fn through_the_owner_set_replays_and_get_shows_the_pending_difference() {
         // Reads create no receipt: both rows above are the two set operations.
 
         control.shutdown().await.unwrap();
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn restart_required_config_write_publishes_events_wait_mark() {
+    crate::test_watchdog::watchdog("config event mark", async {
+        let root = tempfile::tempdir().unwrap();
+        let owner = owner(root.path(), "http://127.0.0.1:1/v1").await;
+        let control = Control::new(&owner, root.path().into());
+        let got = request(&control, Command::ConfigGet(ConfigGetArgs {})).await;
+        let hash = got["file"]["content_hash"].as_str().unwrap().to_owned();
+        let baseline = request(
+            &control,
+            Command::EventsWait(EventsWaitArgs {
+                after: None,
+                thread_ids: vec![],
+                timeout_ms: 0,
+                include_text: false,
+                include_reasoning_activity: false,
+            }),
+        )
+        .await;
+
+        let written = set(
+            &control,
+            &format!("{}:restart-required", control.store.instance_id),
+            ConfigSetArgs {
+                expected_hash: hash.clone(),
+                changes: vec![change("shell.env.CONFIG_MARK_TEST", json!("set"))],
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(written["written"], true);
+        assert_eq!(written["restart_required"], true);
+
+        let observed = request(
+            &control,
+            Command::EventsWait(EventsWaitArgs {
+                after: baseline["cursor"].as_str().map(str::to_owned),
+                thread_ids: vec!["unrelated-thread".into()],
+                timeout_ms: 0,
+                include_text: false,
+                include_reasoning_activity: false,
+            }),
+        )
+        .await;
+        assert_eq!(observed["config_changed"], true);
+        assert_eq!(observed["changes"], json!([]));
+        let after_mark = observed["cursor"].as_str().unwrap().to_owned();
+
+        let no_op = set(
+            &control,
+            &format!("{}:no-op", control.store.instance_id),
+            ConfigSetArgs {
+                expected_hash: written["content_hash"].as_str().unwrap().to_owned(),
+                changes: vec![change("default_model", json!("fixture"))],
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(no_op["written"], false);
+        let after_no_op = request(
+            &control,
+            Command::EventsWait(EventsWaitArgs {
+                after: Some(after_mark),
+                thread_ids: vec![],
+                timeout_ms: 0,
+                include_text: false,
+                include_reasoning_activity: false,
+            }),
+        )
+        .await;
+        assert_eq!(after_no_op["config_changed"], false);
+
+        let refused = set(
+            &control,
+            &format!("{}:refused", control.store.instance_id),
+            ConfigSetArgs {
+                expected_hash: hash,
+                changes: vec![change("default_model", json!("stale"))],
+            },
+        )
+        .await;
+        assert!(refused.is_err());
+        let after_refusal = request(
+            &control,
+            Command::EventsWait(EventsWaitArgs {
+                after: after_no_op["cursor"].as_str().map(str::to_owned),
+                thread_ids: vec![],
+                timeout_ms: 0,
+                include_text: false,
+                include_reasoning_activity: false,
+            }),
+        )
+        .await;
+        assert_eq!(after_refusal["config_changed"], false);
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
     })
     .await
     .unwrap();

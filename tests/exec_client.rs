@@ -139,6 +139,7 @@ impl Fixture {
                         cursor,
                         changes: vec![],
                         more: false,
+                        config_changed: false,
                         live_text: None,
                         reasoning_activity: vec![],
                     };
@@ -164,6 +165,7 @@ impl Fixture {
                         .encode(),
                         changes: vec![],
                         more: false,
+                        config_changed: false,
                         live_text: None,
                         reasoning_activity: vec![],
                     };

@@ -57,6 +57,8 @@ struct Inner {
     seq: u64,
     /// Highest sequence ever evicted. A cursor below it may have missed a change.
     floor: u64,
+    /// Latest global config-file write mark; every client compares it to its own cursor.
+    config_changed_seq: Option<u64>,
     by_thread: HashMap<String, u64>,
     by_seq: BTreeMap<u64, String>,
     /// Keyed by Thread: a Thread streams one attempt at a time, and a later attempt replaces it.
@@ -93,6 +95,7 @@ pub(crate) enum Poll {
         text: Vec<EventLiveText>,
         reasoning_activity: Vec<EventReasoningActivity>,
         reasoning_changed: bool,
+        config_changed: bool,
     },
 }
 
@@ -144,6 +147,11 @@ impl ChangeClock {
         self.inner
             .lock()
             .unwrap_or_else(|poison| poison.into_inner())
+    }
+    pub(crate) fn record_config_changed(&self) {
+        let mut inner = self.lock();
+        inner.seq += 1;
+        inner.config_changed_seq = Some(inner.seq);
     }
     pub(crate) fn record(&self, thread_id: &str) {
         let mut inner = self.lock();
@@ -423,6 +431,9 @@ impl ChangeClock {
             text,
             reasoning_activity,
             reasoning_changed,
+            config_changed: inner
+                .config_changed_seq
+                .is_some_and(|seq| seq > after && seq <= cursor),
         })
     }
 }
@@ -542,6 +553,31 @@ mod tests {
         let (none, _, cursor) = ready(clock.poll(5, &[], false, false));
         assert!(none.is_empty());
         assert_eq!(cursor, 5);
+    }
+
+    #[test]
+    fn config_change_hint_is_coalesced_and_visible_to_each_independent_cursor() {
+        let clock = ChangeClock::new();
+        clock.record("thread");
+        let older = 0;
+        let newer = 1;
+        clock.record_config_changed();
+        clock.record_config_changed();
+
+        for after in [older, newer] {
+            let Some(Poll::Ready { config_changed, .. }) = clock.poll(after, &[], false, false)
+            else {
+                panic!("expected ready");
+            };
+            assert!(
+                config_changed,
+                "cursor {after} must independently see the mark"
+            );
+        }
+        let Some(Poll::Ready { config_changed, .. }) = clock.poll(3, &[], false, false) else {
+            panic!("expected ready");
+        };
+        assert!(!config_changed, "a cursor after the mark must not see it");
     }
 
     #[test]
@@ -911,6 +947,7 @@ mod tests {
                 .map(|(thread_id, seq)| crate::protocol::EventChange { thread_id, seq })
                 .collect(),
             more: false,
+            config_changed: false,
             live_text: Some(text),
             reasoning_activity: vec![],
         })

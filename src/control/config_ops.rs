@@ -95,6 +95,8 @@ impl Control {
             })?;
         let mut result = applied.result;
         if applied.written {
+            self.change_clock.record_config_changed();
+            self.changed.notify_waiters();
             let ids = caller.map_or_else(crate::diagnostics::DiagnosticIds::default, |origin| {
                 crate::diagnostics::DiagnosticIds {
                     attempt_id: None,

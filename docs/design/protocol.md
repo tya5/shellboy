@@ -352,13 +352,13 @@ request and never deletes a space. `index.remove` takes `space_id` and optional 
 one inactive space. Index status adds an optional `shrink` (source_space, target_space, phase,
 source_segments, target_segments, started_at, error), an optional `retained_vector_payload_bytes`,
 and per space an optional `int8_scale` and `retained_remove_with`; `vector_payload_bytes` follows
-the element size. At that time the change was additive and left protocol version unchanged; protocol 3 was introduced later by Issue #244 A2; protocol 6 is current after #288. See
+the element size. At that time the change was additive and left protocol version unchanged; protocol 3 was introduced later by Issue #244 A2; protocol 6 was introduced after #288; protocol 7 is current after #340. See
 [search and relations](search-and-relations.md#int8-conversion-253).
 
 ## Instruction references (#51)
 
 thread.create/set/fork accept optional `agents`; thread.get returns required
-`agents_path`. At the time of this change, protocol 2 was retained for this pre-1.0 additive change; protocol 3 was introduced later by Issue #244 A2; protocol 6 is current after #288.
+`agents_path`. At the time of this change, protocol 2 was retained for this pre-1.0 additive change; protocol 3 was introduced later by Issue #244 A2; protocol 6 was introduced after #288; protocol 7 is current after #340.
 See [the reference contract](agents-reference.md) for validation, relative paths,
 atomic mutation and context_changed/agents_reference delivery.
 
@@ -649,6 +649,16 @@ evicted, raising the floor). Memory only; it dies with `Control`, has no task or
 the owner keeps nothing per client. The call is admitted in an ordinary request slot,
 returns on a matching change, timeout, caller disconnect or owner shutdown, and is
 cancellable by the shared runtime-observation wrapper. Models may call it.
+
+Protocol 7 adds required `config_changed: bool` to the strict `EventsWaitResult`.
+`ChangeClock` retains only the newest global config-file write sequence, separately
+from its bounded per-Thread entries. Every caller compares that entry with its own
+cursor; no waiter consumes it. It ignores the Thread filter, has no Thread ID, and
+can yield `status: changed` with an empty `changes` array. Baseline and resync return
+false; a cursor after the mark does not see it. `config.set` records it after any
+successful file write, including a restart-required write; refused and no-op writes
+do not. Readers use `config.get` to reread both on-disk and loaded values. The marker
+contains no config values or diff and adds no event path, persistence, cache, or poller.
 
 The cursor moves past changes to Threads excluded by `thread_ids`; a client that adds a Thread to the
 filter reads it once. A pending call at owner shutdown or caller disconnect ends with an error
@@ -987,3 +997,11 @@ migration or protocol version is added.
 ## Protocol 6 (Issue #288)
 
 The existing `thread.rewind` args gain optional `recovery_run_id` (CLI `--run`). It is valid only with an explicit `thread_id`, selects that exact live Run's `recovery_wait` Turn, and requests one atomic stop-and-rewind. It refuses any retained owner/work or stale recovery target without cancelling it. Plain rewind, plain Run Stop, and protocol-v5 requests without this field are unchanged. The protocol version is bumped because request args are strict; there is no v5 downgrade.
+
+
+## Protocol 7 (Issue #340)
+
+`events.wait` adds required `config_changed` to its strict result and reports the
+coalesced global config-file write mark through the existing change clock. See
+[Change hints](#change-hints-eventswait-243-stage-b) and
+[events-and-external-protocol](events-and-external-protocol.md#23-operation-eventswait-receipt-free-long-poll).
