@@ -129,7 +129,7 @@ The child uses `message reply --message MESSAGE_ID --text ...` once the request 
 continues the sender's conversation. Inspect `message get` and its `reply.node_id` when evidence is needed; do not
 mistake the child's final Turn text for the requested reply. Progress is an ordinary message. Parent Run completion
 or stop neither adopts nor stops another Thread's Run. Only its own live shells can retain a background Run.
-Use `message ask --thread` in place of `message send --expect-reply`. A reply closes one message ID and does not open a new request; send the next assignment as a separate ask. If work depends on an external wait, ask after the wait clears.
+Use `message ask --thread` to request a reply. A reply closes one message ID and does not open a new request; send the next assignment as a separate ask. If work depends on an external wait, ask after the wait clears.
 Unanswered-request reminders at Run completion remain. See [Delegation](delegation.md).
 
 

@@ -397,7 +397,7 @@ Send each request with `message ask --thread`, end the Turn, and when the
 reply arrives check its state, retrieve the original reply, and summarize the results.
 ```
 
-Use `message ask --thread` instead of `message send --expect-reply`. `message send` does not request a reply. `message cancel --message MESSAGE_ID` withdraws a pending reply request without removing delivered history. A model can withdraw only its own requests; the owner can withdraw any pending request.
+Use `message ask --thread` to request a reply. `message send` does not request a reply. `message cancel --message MESSAGE_ID` withdraws a pending reply request without removing delivered history. A model can withdraw only its own requests; the owner can withdraw any pending request.
 
 [Delegation](delegation.md) covers parent/child stopping scope, progress reports, and recovery-wait decisions.
 

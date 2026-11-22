@@ -143,7 +143,7 @@ latest Runs without adding a lifecycle state or automatically resuming work.
 ## Reply-expected messages (#194, adopted 2026-11-03)
 
 Adopt [reply-expected messages](reply-expected-messages.md): a message sent
-with `--expect-reply` carries a per-message reply state on its existing receipt,
+with `message ask` carries a per-message reply state on its existing receipt,
 answered once by `message reply`, awaited with `wait reply_received`, and
 reminded once at Run completion before it becomes `ignored`. The Turn's last
 assistant text is the "end message", not a reply; public `answer_node_id` /
