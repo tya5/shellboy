@@ -4631,3 +4631,13 @@ list of URI schemes, deliver to external services, or add product-specific
 adapters. New clients can introduce new names or schemes without changing Core.
 Revisit only if a concrete acceptance requirement or safe bound cannot be met
 without interpreting a value.
+### Connection model-list wildcard matching (#319)
+
+Match the whole provider ID case-sensitively: Core keeps the spelling returned
+by `/models`, sorts and deduplicates exact IDs, compares configured IDs exactly,
+and sends the selected ID verbatim in model requests. A proxy can advertise
+mixed-case aliases, so case folding could show a different model than intended.
+Only `*` and `?` are special. Allow at most 64 patterns per list and 256 UTF-8
+bytes per pattern; reject empty patterns and ID characters the provider catalog
+already disallows (whitespace and control characters). The loaded connection
+configuration filters the response only, never selecting or rejecting a model.

@@ -138,6 +138,7 @@ fn fields(config: &Config) -> BTreeMap<String, Leaf> {
 }
 fn connection_fields(out: &mut Fields, name: &str, connection: &Connection) {
     let Connection {
+        models,
         api,
         base_url,
         api_key_env,
@@ -169,6 +170,8 @@ fn connection_fields(out: &mut Fields, name: &str, connection: &Connection) {
     } = connection;
     let at = |field| ["connections", name, field];
     out.plain(&at("api"), api);
+    out.plain(&["connections", name, "models", "include"], &models.include);
+    out.plain(&["connections", name, "models", "exclude"], &models.exclude);
     out.add(&at("base_url"), json!(base_url), Class::Url);
     out.add(&at("api_key_env"), json!(api_key_env), Class::Name);
     out.add(&at("api_key_header"), json!(api_key_header), Class::Name);

@@ -340,6 +340,25 @@ Replace `CONNECTION` and `MODEL_ID` with configured values. The list comes from 
 
 Changes apply to subsequent requests, without rewriting communication already sent. Changing connection or model also changes the reasoning-send epoch; returning to the original model does not automatically revive old opaque reasoning. Conversation source text remains saved.
 
+### Filter a shared proxy's model list
+
+When two connections point to one LiteLLM proxy but use different APIs, filter each connection's list so its picker shows the intended model family:
+
+```toml
+[connections.company-gpt]
+api = "responses"
+base_url = "https://proxy.example/v1"
+models.include = ["gpt-*"]
+models.exclude = ["*-preview"]
+
+[connections.company-claude]
+api = "anthropic_messages"
+base_url = "https://proxy.example/v1"
+models.include = ["claude-*"]
+```
+
+The CLI, TUI, and Studio receive the same filtered list. An unlisted model can still be named directly on its connection. Restart the owner to apply changes. See [configuration](configuration.md) for pattern limits and syntax.
+
 ### Output limits
 
 For Claude, prefer the native `api = "anthropic_messages"` mode, which keeps the

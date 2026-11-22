@@ -430,7 +430,7 @@ impl Control {
                     ),
                 )
             })?;
-        clients.connections.get(&connection).ok_or_else(|| {
+        let profile = clients.connections.get(&connection).ok_or_else(|| {
             crate::config_setup::enrich(
                 config,
                 Some(&connection),
@@ -460,29 +460,15 @@ impl Control {
                 })
         };
         // A read-only catalog request has no target work to keep alive on disconnect.
-        let models = tokio::select! { biased;
+        let mut models = tokio::select! { biased;
             _ = disconnected.cancelled() => return Err(ApiError::new(ErrorCode::InvalidState, "Model list caller disconnected")),
             result = fetch => result?,
         };
+        models.retain(|id| profile.models.matches(id));
         encode_result(
             ModelListResult {
-                api: clients
-                    .connections
-                    .get(&connection)
-                    .ok_or_else(|| {
-                        ApiError::new(ErrorCode::ConfigInvalid, "Connection is not configured")
-                    })?
-                    .api
-                    .as_str()
-                    .into(),
-                unavailable_features: clients
-                    .connections
-                    .get(&connection)
-                    .ok_or_else(|| {
-                        ApiError::new(ErrorCode::ConfigInvalid, "Connection is not configured")
-                    })?
-                    .api
-                    .unavailable_features(),
+                api: profile.api.as_str().into(),
+                unavailable_features: profile.api.unavailable_features(),
                 connection,
                 models,
             },

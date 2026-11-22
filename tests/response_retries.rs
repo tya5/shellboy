@@ -83,6 +83,9 @@ async fn read_request(stream: &mut TcpStream) -> Value {
         assert!(bytes.len() < 1024 * 1024, "unexpected fixture request size");
         if let Some(index) = bytes.windows(4).position(|window| window == b"\r\n\r\n") {
             let head = String::from_utf8_lossy(&bytes[..index]);
+            if head.starts_with("GET /v1/models ") {
+                return Value::Null;
+            }
             let length = head
                 .lines()
                 .find_map(|line| {
@@ -3542,4 +3545,166 @@ async fn human_usage_limit_resume_consumes_reset_even_with_held_receipts_remaini
 #[tokio::test]
 async fn human_usage_limit_resume_does_not_rearm_after_same_provider_reset() {
     human_usage_limit_resume(0).await;
+}
+
+#[tokio::test]
+async fn model_filter_changes_catalog_not_direct_model_execution() {
+    let root = tempfile::tempdir().unwrap();
+    let (url, mut requests, server) = proxy(root.path().join("requests.jsonl")).await;
+    let path = root.path().join("config.toml");
+    std::fs::write(
+        &path,
+        format!(
+            r#"
+        default_connection = 'gpt'
+        default_model = 'gpt-4'
+        [connections.gpt]
+        base_url = {url:?}
+        models.include = ['gpt-*']
+        models.exclude = ['*-preview']
+        [connections.claude]
+        base_url = {url:?}
+        models.include = ['claude-?']
+        [connections.raw]
+        base_url = {url:?}
+        [connections.empty]
+        base_url = {url:?}
+        models.include = ['no-match-*']
+    "#
+        ),
+    )
+    .unwrap();
+    let owner = DataOwner::start(
+        Some(path),
+        Some(root.path().join("data")),
+        root.path().into(),
+    )
+    .await
+    .unwrap();
+    let control = Control::new(&owner, root.path().into());
+    for (connection, expected) in [
+        ("gpt", vec!["gpt-4"]),
+        ("claude", vec!["claude-x"]),
+        ("raw", vec!["GPT-4", "claude-x", "gpt-4", "gpt-4-preview"]),
+        ("empty", vec![]),
+    ] {
+        let command = Command::ModelList(ModelListArgs {
+            connection: Some(connection.into()),
+            thread_id: None,
+        });
+        let respond = async {
+            let incoming = requests.recv().await.unwrap();
+            assert!(incoming.body.is_null(), "catalog must be a GET");
+            let catalog = json!({"data":[{"id":"gpt-4-preview"},{"id":"gpt-4"},{"id":"GPT-4"},{"id":"claude-x"}]});
+            incoming
+                .reply
+                .send(Reply::http(
+                    200,
+                    "application/json",
+                    &catalog.to_string(),
+                    "",
+                ))
+                .ok()
+                .unwrap();
+        };
+        let (result, ()) = tokio::join!(request(&control, command), respond);
+        assert_eq!(result["models"], json!(expected), "{connection}");
+    }
+    let config = request(&control, Command::ConfigGet(ConfigGetArgs {})).await;
+    let changed = request(
+        &control,
+        Command::ConfigSet(ConfigSetArgs {
+            expected_hash: config["file"]["content_hash"].as_str().unwrap().into(),
+            changes: vec![ConfigChange {
+                field: "connections.gpt.models.exclude".into(),
+                value: Some(json!([])),
+            }],
+        }),
+    )
+    .await;
+    assert_eq!(changed["written"], true);
+    assert_eq!(changed["restart_required"], true);
+    let respond = async {
+        let incoming = requests.recv().await.unwrap();
+        assert!(incoming.body.is_null());
+        incoming
+            .reply
+            .send(Reply::http(
+                200,
+                "application/json",
+                r#"{"data":[{"id":"gpt-5"},{"id":"gpt-4-preview"}]}"#,
+                "",
+            ))
+            .ok()
+            .unwrap();
+    };
+    let (listed, ()) = tokio::join!(
+        request(
+            &control,
+            Command::ModelList(ModelListArgs {
+                connection: Some("gpt".into()),
+                thread_id: None
+            })
+        ),
+        respond
+    );
+    assert_eq!(
+        listed["models"],
+        json!(["gpt-5"]),
+        "fresh provider list with the loaded settings, not the saved edit"
+    );
+    let thread = request(
+        &control,
+        Command::ThreadCreate(ThreadCreateArgs {
+            agents: None,
+            cwd: None,
+            parent_id: None,
+            connection: Some("gpt".into()),
+            model: None,
+            effort: None,
+        }),
+    )
+    .await["thread_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    request(
+        &control,
+        Command::ThreadSet(Box::new(ThreadSetArgs {
+            thread_id: Some(thread.clone()),
+            model: Some("gpt-4-preview".into()),
+            ..Default::default()
+        })),
+    )
+    .await;
+    let (accepted, ()) = tokio::join!(
+        request(
+            &control,
+            Command::MessageSend(MessageSendArgs {
+                resume_recovery: false,
+                human: false,
+                to_human: false,
+                expect_reply: false,
+                sender_label: None,
+                deliver: Deliver::Next,
+                thread_id: Some(thread),
+                text: "synthetic direct model".into(),
+            })
+        ),
+        async {
+            let incoming = requests.recv().await.unwrap();
+            assert_eq!(incoming.body["model"], "gpt-4-preview");
+            incoming.reply.send(Reply::success()).ok().unwrap();
+        }
+    );
+    let fixture = Fixture {
+        _root: root,
+        owner,
+        control,
+        requests,
+        server,
+        accepted: serde_json::from_value(accepted).unwrap(),
+    };
+    assert_eq!(fixture.settled().await, "completed");
+    fixture.close().await;
 }

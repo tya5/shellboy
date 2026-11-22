@@ -528,6 +528,14 @@ Startup and graceful shutdown preserve eligible parked waits, not in-flight
 attempts; a preserved overdue wait is eligible once at startup. Turning off
 `recovery.auto_retry_usage_limit` retains the old manual-only lifecycle.
 
+## Connection model lists (#319)
+
+Core filters `model.list` at the common response boundary with the selected
+connection's loaded `models.include` then `models.exclude`. Matching uses only
+case-sensitive `*` and `?` wildcards; invalid patterns fail config validation.
+The filter does not change direct model selection, routing, or provider
+catalog diagnostics. No list cache is added; edits retain `restart_required`.
+
 ## Configuration read and write (#266, 2026-11-07)
 
 `config.get` and `config.set` are adopted owner operations; `config init` and `config check` stay standalone.

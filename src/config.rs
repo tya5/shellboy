@@ -198,6 +198,7 @@ impl SpillPolicy {
 #[derive(Clone, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Connection {
+    pub models: ModelFilter,
     pub api: Api,
     pub base_url: String,
     pub api_key_env: Option<String>,
@@ -246,9 +247,13 @@ pub struct Connection {
     #[serde(skip)]
     pub stored_keys: StoredKeys,
 }
+mod model_filter;
+pub use model_filter::ModelFilter;
+
 impl Default for Connection {
     fn default() -> Self {
         Self {
+            models: ModelFilter::default(),
             api: Api::default(),
             base_url: String::new(),
             api_key_env: None,

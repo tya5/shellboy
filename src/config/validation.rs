@@ -117,6 +117,7 @@ impl Connection {
     }
     fn validate(&self, name: &str) -> Result<(), ConfigError> {
         nonempty(&format!("connections.{name}"), name)?;
+        self.models.validate(name)?;
         if self.prompt_cache_diagnostics && (self.api != Api::Responses || !self.prompt_caching) {
             return Err(invalid(
                 format!("connections.{name}.prompt_cache_diagnostics"),

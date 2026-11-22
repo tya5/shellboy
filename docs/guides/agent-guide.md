@@ -409,6 +409,7 @@ shellboy thread get
 ```
 
 Successful `model list` JSON returns the connection name and model-ID array in `result.connection` and `result.models`. Without an explicit connection it uses your Thread's connection. An external terminal uses the owner's default, so add `--thread THREAD` to target a specific Thread. Also supply a target ID when using `thread set` on another Thread.
+A connection can filter this model list for display; a model omitted from it can still be named directly.
 
 Listing does not change settings. Do not infer capabilities from model names; embedding models can appear too. `thread set` updates only the specified Thread, without changing new-Thread defaults or an omitted effort setting. It does not retroactively modify an HTTP request in progress; changes apply from the next safe boundary. Choose models within the work delegated by the user.
 
