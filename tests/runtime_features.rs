@@ -4052,7 +4052,8 @@ pub(super) async fn finish_proactive_trace(
         .last()
         .expect("second warmup report")
         .clone();
-    let mut finished: Vec<FinishedReportBoundary> = Vec::new();
+    let mut finished = Vec::new();
+    let mut joined = std::collections::HashSet::new();
     while let Some(report) = std::iter::once(&original)
         .chain(
             trace
@@ -4060,11 +4061,7 @@ pub(super) async fn finish_proactive_trace(
                 .iter()
                 .map(|boundary| &boundary.report),
         )
-        .find(|report| {
-            !finished
-                .iter()
-                .any(|saved| saved.boundary.report.attempt_id == report.attempt_id)
-        })
+        .find(|report| !joined.contains(&report.attempt_id))
         .cloned()
     {
         let report_turns = [report.row_turn_id.clone()];
@@ -4113,14 +4110,18 @@ pub(super) async fn finish_proactive_trace(
             "each observed Summary maps to its exact accepted duty"
         );
         assert_eq!(terminal[0].id, report.attempt_id);
-        let boundary = trace
+        joined.insert(report.attempt_id.clone());
+        let record = automatic_attempt_record(control, report.attempt_id.clone()).await;
+        assert_eq!(record["token"], terminal[0].token);
+        // A saved automatic attempt can finish without any Summary POST.
+        // Keep that FINISH as the count boundary, not as a serviced request.
+        if let Some(boundary) = trace
             .admitted_summaries
             .iter()
             .find(|boundary| boundary.report.attempt_id == report.attempt_id)
-            .expect("saved FINISH belongs to a serviced Summary request")
-            .clone();
-        let record = automatic_attempt_record(control, boundary.report.attempt_id.clone()).await;
-        finished.push(boundary.finish(&terminal[0], &record));
+        {
+            finished.push(boundary.clone().finish(&terminal[0], &record));
+        }
     }
     finished
 }
