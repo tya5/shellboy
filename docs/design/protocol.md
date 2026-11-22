@@ -1021,3 +1021,22 @@ The existing `thread.rewind` args gain optional `recovery_run_id` (CLI `--run`).
 coalesced global config-file write mark through the existing change clock. See
 [Change hints](#change-hints-eventswait-243-stage-b) and
 [events-and-external-protocol](events-and-external-protocol.md#23-operation-eventswait-receipt-free-long-poll).
+
+## Thread creation order (#338)
+
+`thread.list.order` accepts `updated` (default) and `created`. The created order
+uses `(created_at DESC, id DESC)` within the selected archive scope. Its opaque
+cursor does not cross order or archive scope. Creation pages are live, without
+an insertion watermark. A Thread created after page 1 normally sorts above the
+cursor and appears on the next page-1 refresh. A new Thread below the cursor,
+for example after a clock rollback, can appear once on a later page. Studio
+refreshes page 1 on change hints. Updated order retains its rowid watermark.
+
+`thread list --order created` returns newest Threads first without reordering
+when their activity changes. It works with `--archived`; query, tag, cwd, and
+awaiting filters keep their existing list order and cannot be combined with
+`--order created`. Continue paging with the same order and archive selection.
+Every summary carries `created_at`; for Threads created before schema 54,
+created_at is the earliest recorded activity. If none was recorded, it is null.
+Creation order puts null last and breaks ties by descending Thread ID.
+
