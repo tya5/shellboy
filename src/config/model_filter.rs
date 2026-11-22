@@ -42,7 +42,13 @@ impl ModelFilter {
         Ok(())
     }
 
-    pub(crate) fn matches(&self, model: &str) -> bool {
+    pub(crate) fn retain(&self, models: &mut Vec<String>) {
+        if self.include.is_some() || !self.exclude.is_empty() {
+            models.retain(|id| self.matches(id));
+        }
+    }
+
+    fn matches(&self, model: &str) -> bool {
         self.include
             .as_ref()
             .is_none_or(|include| include.iter().any(|p| wildcard(p, model)))

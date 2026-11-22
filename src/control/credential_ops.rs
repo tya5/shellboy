@@ -178,7 +178,10 @@ impl Control {
         };
         Ok(
             match client.models_with_status(CancellationToken::new()).await {
-                Ok((status, models)) => test.succeeded(status, models),
+                Ok((status, mut models)) => {
+                    test.connection.models.retain(&mut models);
+                    test.succeeded(status, models)
+                }
                 Err(failure) => {
                     let class = classify(&failure.error);
                     let attempted =

@@ -464,7 +464,7 @@ impl Control {
             _ = disconnected.cancelled() => return Err(ApiError::new(ErrorCode::InvalidState, "Model list caller disconnected")),
             result = fetch => result?,
         };
-        models.retain(|id| profile.models.matches(id));
+        profile.models.retain(&mut models);
         encode_result(
             ModelListResult {
                 api: profile.api.as_str().into(),

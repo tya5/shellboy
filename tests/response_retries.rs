@@ -3582,16 +3582,28 @@ async fn model_filter_changes_catalog_not_direct_model_execution() {
     .await
     .unwrap();
     let control = Control::new(&owner, root.path().into());
-    for (connection, expected) in [
-        ("gpt", vec!["gpt-4"]),
-        ("claude", vec!["claude-x"]),
-        ("raw", vec!["GPT-4", "claude-x", "gpt-4", "gpt-4-preview"]),
-        ("empty", vec![]),
+    for (connection, diagnostic, expected) in [
+        ("gpt", false, vec!["gpt-4"]),
+        ("claude", false, vec!["claude-x"]),
+        (
+            "raw",
+            false,
+            vec!["GPT-4", "claude-x", "gpt-4", "gpt-4-preview"],
+        ),
+        ("empty", false, vec![]),
+        ("gpt", true, vec!["gpt-4"]),
     ] {
-        let command = Command::ModelList(ModelListArgs {
-            connection: Some(connection.into()),
-            thread_id: None,
-        });
+        let command = if diagnostic {
+            Command::ConnectionTest(ConnectionTestArgs {
+                connection: Some(connection.into()),
+                ..Default::default()
+            })
+        } else {
+            Command::ModelList(ModelListArgs {
+                connection: Some(connection.into()),
+                thread_id: None,
+            })
+        };
         let respond = async {
             let incoming = requests.recv().await.unwrap();
             assert!(incoming.body.is_null(), "catalog must be a GET");

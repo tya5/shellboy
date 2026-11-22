@@ -533,8 +533,10 @@ attempts; a preserved overdue wait is eligible once at startup. Turning off
 Core filters `model.list` at the common response boundary with the selected
 connection's loaded `models.include` then `models.exclude`. Matching uses only
 case-sensitive `*` and `?` wildcards; invalid patterns fail config validation.
-The filter does not change direct model selection, routing, or provider
-catalog diagnostics. No list cache is added; edits retain `restart_required`.
+`connection.test` also filters its returned model IDs using the tested saved
+configuration; HTTP status and the catalog success fact are unchanged. The
+filter does not change direct model selection or routing. No list cache is
+added; edits retain `restart_required` for the running owner.
 
 ## Configuration read and write (#266, 2026-11-07)
 
