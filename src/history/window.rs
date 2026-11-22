@@ -261,7 +261,13 @@ fn window_with_items(
     for row in rows {
         let mut body: Option<serde_json::Value> = None;
         let mut payload_chars = None;
-        let item_projection = if response_budget_exhausted {
+        let legacy_admission = is_legacy_admission_node(&row.node_id, &row.kind);
+        let item_projection = if legacy_admission {
+            crate::protocol::HistoryNodeItems {
+                items: Some(Vec::new()),
+                items_unavailable_reason: None,
+            }
+        } else if response_budget_exhausted {
             response_budget_projection()
         } else if row.deleted_reason.is_some() {
             unavailable_projection(&row.node_id, Unavailable::Pruned)
@@ -348,7 +354,11 @@ fn window_with_items(
                 thread_id: &args.thread_id,
                 current_cwd: &current_cwd,
                 node_id: row.node_id,
-                kind: row.kind,
+                kind: if legacy_admission {
+                    "model_context".into()
+                } else {
+                    row.kind
+                },
                 deleted_reason: row.deleted_reason,
                 ordinal: row.ordinal,
                 payload_chars,

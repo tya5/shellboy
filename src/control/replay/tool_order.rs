@@ -183,6 +183,7 @@ mod tests {
                 revision: 0,
                 tombstone: false,
                 kind: "fixture".into(),
+                preamble: None,
             },
             group: group.map(str::to_owned),
             items,

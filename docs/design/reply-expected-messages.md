@@ -373,15 +373,14 @@ resuming and the sender may cancel (decision Q2).
 
 ### Model-visible notices
 
-Admission already appends saved `event` nodes in the
-`Shellboy event v1: {…}` developer form. One helper, called from
-`message_delivery::mark_admitted_tx` (the common point where receipt nodes
-enter a Thread's path), appends after each admitted node:
-
-| Admitted message | Notice payload kind | Content |
-|---|---|---|
-| has `expect_reply` | `reply_expected` | `message_id`, sender kind/label, and the command form `shellboy message reply --message ID` |
-| has `reply_to` | `reply` | `reply_to`, and the original's first line, bounded by the existing 512-character excerpt |
+At replay conversion, the selected received body gets a deterministic developer
+preamble derived from its admitted receipt: sender kind and model Thread identity,
+unverified display label, exact reply command for requests, or original message ID
+for replies. No human-only duty is projected into model input. Mutable reply status,
+body excerpts, and neighboring nodes are not inputs. History keeps the original
+body and receipt-derived provenance; no new annotation node is stored. Legacy
+admission nodes keep their raw path positions but do not contribute model input or
+conversation display items.
 
 Other notices:
 
@@ -452,7 +451,7 @@ sender-label rules; repairs are sent in the same mode.
 
 The composed request keeps today's "return ONLY one JSON value matching this
 Schema" contract. In `reply` mode it says to put that value in the reply to
-this message (the admission notice carries the message ID and the command
+this message (the receipt-derived preamble carries the message ID and the command
 form); in `turn-end` / `run-end` mode it says to make it the final message, as
 today. All modes keep today's checks: the send must be assigned (`run_id` and,
 for `turn-end`, `turn_id` present), otherwise exit 4 `held`; the message must be
@@ -719,7 +718,7 @@ the operation fingerprint), `message reply` (`Command::MessageReply`,
 message items `answer_node_id` → `reply_node_id`,
 `wait reply_received` (condition, snapshot, cycle edge, precedence over
 `interrupted`), `message cancel` outcome `reply_cancelled` and its
-`context_changed` notice, `thread get` pending reply counts (now `pending_replies.owed_by` / `.asked_by`, #317); admission notices (`reply_expected`, `reply`) and the 16-duty `reply_limit` admission cap. Model self-targets and cross-thread reply/cancel actors remain allowed per #259.
+`context_changed` notice, `thread get` pending reply counts (now `pending_replies.owed_by` / `.asked_by`, #317); receipt-derived request/reply preambles and the 16-duty `reply_limit` admission cap. Model self-targets and cross-thread reply/cancel actors remain allowed per #259.
 Pending replies have no Run-end effect yet; nothing uses them until step 4/5.
 
 - Schema: `migrations/0026_reply_expected.sql`, `src/storage/current.sql`,

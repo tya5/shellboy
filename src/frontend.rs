@@ -4410,6 +4410,13 @@ impl RawNode {
         render_width: u16,
         language: crate::config::UiLanguage,
     ) -> UiNode {
+        if crate::history::is_legacy_admission_node(&self.id, &self.kind) {
+            return UiNode {
+                node_id: self.id,
+                role: "context".into(),
+                ..UiNode::default()
+            };
+        }
         let (payload, text, mut reasoning_ranges) = self.decode();
         let offset = position.map(|position| match position {
             NodePosition::At(offset) => offset,

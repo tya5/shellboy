@@ -8,6 +8,14 @@ mod append;
 pub use append::append_existing_nodes;
 pub mod items;
 mod list;
+/// Only the generated admission namespace and its two historical node kinds.
+pub(crate) fn is_legacy_admission_node(id: &str, kind: &str) -> bool {
+    matches!(kind, "event" | "message")
+        && id
+            .strip_prefix("event-reply-admission-")
+            .is_some_and(|suffix| !suffix.is_empty())
+}
+
 mod window;
 pub use window::{STATEMENTS_FOR_TESTS as WINDOW_STATEMENTS_FOR_TESTS, window};
 mod node_row;

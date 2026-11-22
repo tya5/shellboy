@@ -13,6 +13,7 @@ use std::{
     },
 };
 
+mod admission;
 mod inspection;
 #[cfg(test)]
 mod metadata_tests;
@@ -50,6 +51,15 @@ struct Stamp {
     revision: i64,
     tombstone: bool,
     kind: String,
+    preamble: Option<String>,
+}
+impl Stamp {
+    fn read_admission(&mut self, db: &Connection, thread: &str) -> rusqlite::Result<()> {
+        if !self.tombstone && self.kind == "user" {
+            self.preamble = admission::preamble(db, &self.id, thread)?;
+        }
+        Ok(())
+    }
 }
 #[derive(Default)]
 struct Ledger {
@@ -468,7 +478,10 @@ impl ReplayCache {
         let context=db.query_row("SELECT selection_revision,profile_revision,profile_id,model_id,reasoning_epoch FROM thread WHERE id=?1 AND deleted_at IS NULL",[thread],|row|Ok(Context{thread:thread.into(),selection:row.get(0)?,profile_revision:row.get(1)?,profile:row.get(2)?,model:row.get(3)?,epoch:row.get(4)?,adapter_version:ADAPTER_VERSION,tool_schema_version:TOOL_SCHEMA_VERSION}))?;
         // Bound to `context.epoch`, so the epoch check below also covers it.
         let keep = crate::history::reasoning_keep(db, thread, context.epoch)?;
-        let stamps=db.prepare("SELECT n.id,n.payload_revision,n.deleted_reason IS NOT NULL OR n.payload_json IS NULL,n.kind FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 ORDER BY p.ordinal")?.query_map([thread],|row|Ok(Stamp{id:row.get(0)?,revision:row.get(1)?,tombstone:row.get(2)?,kind:row.get(3)?}))?.collect::<rusqlite::Result<Vec<_>>>()?;
+        let mut stamps=db.prepare("SELECT n.id,n.payload_revision,n.deleted_reason IS NOT NULL OR n.payload_json IS NULL,n.kind FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 ORDER BY p.ordinal")?.query_map([thread],|row|Ok(Stamp{id:row.get(0)?,revision:row.get(1)?,tombstone:row.get(2)?,kind:row.get(3)?,preamble:None}))?.collect::<rusqlite::Result<Vec<_>>>()?;
+        for stamp in &mut stamps {
+            stamp.read_admission(db, thread)?;
+        }
         let mut state = self.state.lock().expect("replay cache poisoned");
         let previous = state.entries.remove(thread);
         state.order.retain(|id| id != thread);
@@ -705,7 +718,8 @@ fn decode_frame_checked(
 ) -> Result<Frame, FrameError> {
     #[cfg(test)]
     let mut proof = (true, false);
-    let (group, items, spill_marker) = match body {
+    let body = body.filter(|_| !crate::history::is_legacy_admission_node(&stamp.id, &stamp.kind));
+    let (group, mut items, spill_marker) = match body {
         None => (None, Vec::new(), false),
         Some(body) => {
             let value: Value = serde_json::from_str(&body)
@@ -743,12 +757,19 @@ fn decode_frame_checked(
             )
         }
     };
+    if let Some(text) = stamp.preamble.as_deref().filter(|_| !items.is_empty()) {
+        items.insert(
+            0,
+            serde_json::json!({"role":"developer","content":[{"type":"input_text","text":text}]}),
+        );
+    }
     #[cfg(not(test))]
     let _ = ordinal;
     let bytes = size_of::<Frame>()
         + 2 * size_of::<usize>()
         + stamp.id.capacity()
         + stamp.kind.capacity()
+        + stamp.preamble.as_ref().map_or(0, String::capacity)
         + group.as_ref().map_or(0, String::capacity)
         + items.capacity() * size_of::<Value>()
         + items.iter().map(heap_bytes).sum::<usize>();
@@ -828,12 +849,14 @@ fn load_uncached_mode(
     let mut frames = Vec::new();
     let mut decode_fault = false;
     while let Some(row) = rows.next()? {
-        let stamp = Stamp {
+        let mut stamp = Stamp {
             id: row.get(0)?,
             revision: row.get(1)?,
             tombstone: row.get(2)?,
             kind: row.get(4)?,
+            preamble: None,
         };
+        stamp.read_admission(db, thread)?;
         let body: Option<String> = if stamp.tombstone { None } else { row.get(3)? };
         match decode_frame_checked(frames.len(), stamp, body, epoch, &keep, &ledger) {
             Ok(frame) => frames.push(Arc::new(frame)),
@@ -936,6 +959,7 @@ mod tests {
                     revision: 1,
                     tombstone: false,
                     kind: "fixture".into(),
+                    preamble: None,
                 },
                 items: vec![item],
                 group: group.map(str::to_owned),
@@ -1086,6 +1110,7 @@ mod tests {
                                     revision: 0,
                                     tombstone: false,
                                     kind: "fixture".into(),
+                                    preamble: None,
                                 },
                                 Some(payload.to_string()),
                                 0,
@@ -1134,6 +1159,7 @@ mod tests {
                             revision: 0,
                             tombstone: false,
                             kind: "fixture".into(),
+                            preamble: None,
                         },
                         Some(payload.to_string()),
                         0,
