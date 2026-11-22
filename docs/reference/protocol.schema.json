@@ -8602,6 +8602,9 @@
             "null"
           ]
         },
+        "summarizing": {
+          "type": "boolean"
+        },
         "summary_max_chars": {
           "default": null,
           "format": "uint64",
@@ -8632,6 +8635,7 @@
         "usage_totals": true
       },
       "required": [
+        "summarizing",
         "agents_path",
         "thread_id",
         "title",
@@ -11872,6 +11876,9 @@
             "null"
           ]
         },
+        "summarizing": {
+          "type": "boolean"
+        },
         "summary_max_chars": {
           "default": null,
           "format": "uint64",
@@ -11902,6 +11909,7 @@
         "usage_totals": true
       },
       "required": [
+        "summarizing",
         "agents_path",
         "thread_id",
         "title",
@@ -12091,6 +12099,9 @@
             "null"
           ]
         },
+        "summarizing": {
+          "type": "boolean"
+        },
         "summary_max_chars": {
           "default": null,
           "format": "uint64",
@@ -12121,6 +12132,7 @@
         "usage_totals": true
       },
       "required": [
+        "summarizing",
         "agents_path",
         "thread_id",
         "title",
