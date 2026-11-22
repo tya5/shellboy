@@ -3416,8 +3416,6 @@ async fn human_usage_limit_resume(held: usize) {
             text,
             thread_id: Some(thread.clone()),
             resume_recovery: false,
-            to_human: false,
-            expect_reply: false,
             sender_label: None,
             deliver: Deliver::Next,
         })

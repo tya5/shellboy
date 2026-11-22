@@ -2424,7 +2424,13 @@ mod thread_creation_migration_tests {
     fn schema54_backfills_earliest_owned_activity_without_inherited_path_or_updates() {
         let mut db = Connection::open_in_memory().unwrap();
         db.execute_batch(super::super::CURRENT_SCHEMA).unwrap();
-        db.execute_batch("DROP TABLE automatic_compaction; CREATE INDEX automatic_compaction_turn ON model_attempt(turn_id,started_at,id) WHERE CASE WHEN json_valid(error_json) THEN json_type(error_json,'$.automatic_trim')='object' OR json_type(error_json,'$.automatic_trim_attempt')='object' ELSE 0 END;
+        db.execute_batch("DROP INDEX receipt_named_reply_pending;
+            DROP INDEX receipt_pending_by_time;
+            DROP INDEX receipt_pending_owed;
+            DROP INDEX receipt_pending_asked;
+            DROP INDEX receipt_pending_to;
+            DELETE FROM schema_migration WHERE version=56;
+            DROP TABLE automatic_compaction; CREATE INDEX automatic_compaction_turn ON model_attempt(turn_id,started_at,id) WHERE CASE WHEN json_valid(error_json) THEN json_type(error_json,'$.automatic_trim')='object' OR json_type(error_json,'$.automatic_trim_attempt')='object' ELSE 0 END;
             DELETE FROM schema_migration WHERE version=55;
             DROP INDEX threads_created; ALTER TABLE thread DROP COLUMN created_at;
             DELETE FROM schema_migration WHERE version=54; PRAGMA user_version=53;

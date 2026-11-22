@@ -1045,3 +1045,10 @@ awaiting filters keep their existing list order and cannot be combined with
 Every summary carries `created_at`; for Threads created before schema 54,
 created_at is the earliest recorded activity. If none was recorded, it is null.
 Creation order puts null last and breaks ties by descending Thread ID.
+
+## Protocol 11 (#317)
+
+`message.ask` is the only reply-required admission, with a named recipient or
+a Thread target. `message.send` no longer accepts `expect_reply`. Directional
+pending lists use `message.list`; `thread.get` reports bounded `pending_replies`
+counts rather than the mixed list. Schema 55 backfills legacy named asks.
