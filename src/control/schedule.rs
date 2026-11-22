@@ -616,7 +616,9 @@ mod tests {
             let cwd = root.path().to_string_lossy().into_owned();
             control.store.database.call(move|db| {
                 db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('target',?1,'','fixture','fixture','now')",[&cwd])?;
-                db.execute("INSERT INTO schedule(id,thread_id,once_at,next_at,enabled,cwd,command) VALUES('q','target',4102444800,4102444800,1,?1,'echo fixture')",[&cwd])?;
+                // Once claimed, the schedule and starting execution are committed
+                // together, with next_at cleared by advance_due.
+                db.execute("INSERT INTO schedule(id,thread_id,once_at,next_at,enabled,cwd,command) VALUES('q','target',4102444800,?2,1,?1,'echo fixture')",params![cwd,(point < 2).then_some(4102444800_i64)])?;
                 if point >= 2 {
                     db.execute("INSERT INTO shell_execution(id,schedule_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at) VALUES('x','q','x','starting',?1,'{}','utf-8','utf-8','closed','2020-01-01T00:00:00Z')",[cwd])?;
                 }
