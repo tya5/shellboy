@@ -98,7 +98,7 @@ async fn list_with(
 ) -> Result<Page<Value>, ApiError> {
     run(
         store,
-        Command::ThreadList(ThreadListArgs {
+        Command::ThreadList(ThreadListArgs { order: Default::default(),
             limit,
             cursor,
             query: None,
@@ -549,7 +549,7 @@ async fn the_cwd_filter_is_exact_and_combines_with_tags_and_the_text_query() {
     // The text query still narrows inside the SQL filter.
     let page = run(
         &store,
-        Command::ThreadList(ThreadListArgs {
+        Command::ThreadList(ThreadListArgs { order: Default::default(),
             limit: 10,
             cursor: None,
             query: Some(a.clone()),

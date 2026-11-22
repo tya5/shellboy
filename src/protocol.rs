@@ -1019,10 +1019,24 @@ impl ArchivedFilter {
         *self == Self::Exclude
     }
 }
-args!(ThreadListArgs { #[serde(default = "list_limit")] limit: u32, #[serde(default)] cursor: Option<String>, #[serde(default)] query: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] awaiting: Option<String>, #[serde(default, skip_serializing_if = "ArchivedFilter::is_exclude")] archived: ArchivedFilter, #[serde(default, skip_serializing_if = "Vec::is_empty")] tags: Vec<String>, #[serde(default, skip_serializing_if = "Option::is_none")] cwd: Option<String> });
+/// Ordering of the Thread list's unfiltered or archive-filtered rows.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ThreadListOrder {
+    #[default]
+    Updated,
+    Created,
+}
+impl ThreadListOrder {
+    fn is_updated(&self) -> bool {
+        *self == Self::Updated
+    }
+}
+args!(ThreadListArgs { #[serde(default, skip_serializing_if = "ThreadListOrder::is_updated")] order: ThreadListOrder, #[serde(default = "list_limit")] limit: u32, #[serde(default)] cursor: Option<String>, #[serde(default)] query: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] awaiting: Option<String>, #[serde(default, skip_serializing_if = "ArchivedFilter::is_exclude")] archived: ArchivedFilter, #[serde(default, skip_serializing_if = "Vec::is_empty")] tags: Vec<String>, #[serde(default, skip_serializing_if = "Option::is_none")] cwd: Option<String> });
 impl Default for ThreadListArgs {
     fn default() -> Self {
         Self {
+            order: ThreadListOrder::Updated,
             limit: list_limit(),
             cursor: None,
             query: None,
@@ -1661,7 +1675,7 @@ record!(RevisitSummary {
     pending: bool,
     consumed_count: u64
 });
-record!(ThreadSummary { #[serde(default)] awaiting_reply: u64, #[serde(default)] awaiting_thread_replies: u64, #[serde(default)] awaiting_replies: u64, #[serde(default = "default_true", skip_serializing_if = "is_true")] awaiting_human_count_exact: bool, #[serde(default)] #[schemars(description = "Pending human-directed replies: exact through 16; 17 with exact=false means 17 or more.")] awaiting_human_count: u64, #[serde(default, skip_serializing_if = "Option::is_none")] awaiting_human_oldest_at: Option<String>, #[serde(default)] awaiting_thread_count: u64, #[serde(default)] last_end_message: Option<Value>, #[serde(default)] last_input: Option<Value>, activity: crate::activity::ActivityPhase, thread_id: String, title: String, cwd: String, #[serde(default, skip_serializing_if = "Option::is_none")] parent_id: Option<String>, state: String, latest_run_stop_reason: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] revisit: Option<RevisitSummary>, updated_at: String, #[serde(default, skip_serializing_if = "Option::is_none")] archived_at: Option<String>, #[serde(default, skip_serializing_if = "Vec::is_empty")] tags: Vec<String>, excerpt: String });
+record!(ThreadSummary { #[serde(default)] awaiting_reply: u64, #[serde(default)] awaiting_thread_replies: u64, #[serde(default)] awaiting_replies: u64, #[serde(default = "default_true", skip_serializing_if = "is_true")] awaiting_human_count_exact: bool, #[serde(default)] #[schemars(description = "Pending human-directed replies: exact through 16; 17 with exact=false means 17 or more.")] awaiting_human_count: u64, #[serde(default, skip_serializing_if = "Option::is_none")] awaiting_human_oldest_at: Option<String>, #[serde(default)] awaiting_thread_count: u64, #[serde(default)] last_end_message: Option<Value>, #[serde(default)] last_input: Option<Value>, activity: crate::activity::ActivityPhase, thread_id: String, title: String, cwd: String, #[serde(default, skip_serializing_if = "Option::is_none")] parent_id: Option<String>, state: String, latest_run_stop_reason: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] revisit: Option<RevisitSummary>, updated_at: String, created_at: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] archived_at: Option<String>, #[serde(default, skip_serializing_if = "Vec::is_empty")] tags: Vec<String>, excerpt: String });
 record!(ThreadDetails { #[serde(default, skip_serializing_if = "Option::is_none")] instruction_sources: Option<Value>, #[serde(default)] auto_compact_at: Option<u64>, #[serde(default, skip_serializing_if = "Option::is_none")] effective_auto_compact_at: Option<u64>, #[serde(default)] auto_compact_target_percent: Option<u64>, #[serde(default)] summary_max_chars: Option<u64>, #[serde(default,skip_serializing_if="Option::is_none")] effective_auto_compact_target_percent: Option<u64>, #[serde(default,skip_serializing_if="Option::is_none")] effective_summary_max_chars: Option<u64>, #[serde(default)] max_tokens: Option<u64>, #[serde(default)] spill: Option<bool>, #[serde(default = "default_true")] effective_spill: bool, #[serde(default,skip_serializing_if="Option::is_none")] effective_max_tokens: Option<u64>, #[serde(default)] awaiting_replies: Vec<Value>, #[serde(default)] last_end_message: Option<Value>, #[serde(default)] last_input: Option<Value>, #[serde(default,skip_serializing_if="Option::is_none")] last_compaction:Option<Value>, summarizing: bool, agents_path: String, #[serde(default, skip_serializing_if = "Option::is_none")] context_usage: Option<Value>, #[serde(default, skip_serializing_if = "Option::is_none")] context: Option<crate::context::ExecutionContext>, thread_id: String, title: String, cwd: String, connection: String, model: String, #[serde(default, skip_serializing_if = "Option::is_none")] effort: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] parent_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] run_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] turn_id: Option<String>, shells_count: u64, #[serde(default, skip_serializing_if = "Option::is_none")] archived_at: Option<String>, #[serde(default, skip_serializing_if = "Vec::is_empty")] tags: Vec<String>, #[serde(default, skip_serializing_if = "Option::is_none")] recovery_reason: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] parent_change: Option<ParentChange> });
 
 // Present only in the result of a `thread set --parent` that moved the Thread: where it was and which live Run still answers to its previous owner (#222).

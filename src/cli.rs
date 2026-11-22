@@ -608,6 +608,9 @@ pub enum StorageCommand {
 
 #[derive(Debug, Clone, Args)]
 pub struct ListOptions {
+    /// Sort by updated (default) or created (newest first; only with archive selection, not query, tag, cwd, or awaiting filters).
+    #[arg(long, value_enum, default_value = "updated")]
+    pub order: wire::ThreadListOrder,
     #[arg(long,default_value_t=wire::DEFAULT_LIST_LIMIT)]
     pub limit: u32,
     #[arg(long)]
@@ -1034,6 +1037,17 @@ pub struct HistoryGetOptions {
     pub cursor: Option<String>,
     #[arg(long, default_value = wire::DEFAULT_ENCODING)]
     pub encoding: String,
+}
+impl ValueEnum for wire::ThreadListOrder {
+    fn value_variants<'a>() -> &'a [Self] {
+        &[Self::Updated, Self::Created]
+    }
+    fn to_possible_value(&self) -> Option<clap::builder::PossibleValue> {
+        Some(clap::builder::PossibleValue::new(match self {
+            Self::Updated => "updated",
+            Self::Created => "created",
+        }))
+    }
 }
 impl ValueEnum for wire::ArchivedFilter {
     fn value_variants<'a>() -> &'a [Self] {
@@ -1616,6 +1630,7 @@ impl Cli {
             CliCommand::Thread { command } => match command {
                 ThreadCommand::Request(_) => return Ok(None),
                 ThreadCommand::List(a) => C::ThreadList(wire::ThreadListArgs {
+                    order: a.order,
                     limit: a.limit,
                     cursor: a.cursor,
                     query: a.query,

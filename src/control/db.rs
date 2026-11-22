@@ -1802,7 +1802,7 @@ impl Store {
                 .map_err(sql_error)?;
         let id = uuid::Uuid::new_v4().to_string();
         tx.execute(
-            "INSERT INTO thread(id,parent_thread_id,cwd,agents_path,profile_id,model_id,effort,updated_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",
+            "INSERT INTO thread(id,parent_thread_id,cwd,agents_path,profile_id,model_id,effort,updated_at,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?8)",
             params![id,args.parent_id,cwd.to_string_lossy(),agents,profile,model,effort,now],
         ).map_err(sql_error)?;
         overrides.apply(tx, &id).map_err(sql_error)?;
@@ -2761,13 +2761,17 @@ pub(crate) fn thread_list(
     };
     let cwd = cwd_normalized.as_deref();
     let cursor_filter = list_cursor_filter(filter, &tags, cwd);
+    let scope = match args.order {
+        ThreadListOrder::Updated => list_scope(args.archived).to_owned(),
+        ThreadListOrder::Created => format!("thread.list.created.{}", args.archived.as_str()),
+    };
     let watermark: i64 = connection
         .query_row("SELECT COALESCE(MAX(rowid),0) FROM thread", [], |row| {
             row.get(0)
         })
         .map_err(sql_error)?;
     let (key, watermark) = if let Some(token) = &args.cursor {
-        let cursor = PageCursor::decode(token, list_scope(args.archived), &cursor_filter, 0, None)?;
+        let cursor = PageCursor::decode(token, &scope, &cursor_filter, 0, None)?;
         (
             Some(cursor.last_sort_key),
             i64::try_from(cursor.watermark)
@@ -2776,21 +2780,20 @@ pub(crate) fn thread_list(
     } else {
         (None, watermark)
     };
-    let (last_time, last_id) = if let Some(key) = key {
-        serde_json::from_str::<(String, String)>(&key)
-            .map_err(|_| error(ErrorCode::CursorExpired, "invalid thread list position"))?
-    } else {
-        (String::new(), String::new())
-    };
+    let position = key.as_deref().map(serde_json::from_str::<(Option<String>, String)>).transpose()
+        .map_err(|_| error(ErrorCode::CursorExpired, "invalid thread list position"))?;
+    if args.order == ThreadListOrder::Updated && position.as_ref().is_some_and(|(time, _)| time.is_none()) {
+        return Err(error(ErrorCode::CursorExpired, "invalid thread list position"));
+    }
+    let last_time = position.as_ref().and_then(|(time, _)| time.as_deref()).unwrap_or("");
+    let last_id = position.as_ref().map_or("", |(_, id)| id.as_str());
     // Filter against the same derived labels returned by ThreadGet/List. Keep
     // candidates as a cursor: a filtered miss scans without collecting history.
-    let mut statement = connection
-        .prepare(&thread_summary::page_sql(
-            args.archived,
-            tags.len(),
-            cwd.is_some(),
-        ))
-        .map_err(sql_error)?;
+    let sql = match args.order {
+        ThreadListOrder::Updated => thread_summary::page_sql(args.archived, tags.len(), cwd.is_some()),
+        ThreadListOrder::Created => thread_summary::created_page_sql(args.archived, position.as_ref().map(|(time, _)| time)),
+    };
+    let mut statement = connection.prepare(&sql).map_err(sql_error)?;
     let page_limit = if needle.is_empty() {
         i64::from(args.limit) + 1
     } else {
@@ -2824,11 +2827,14 @@ pub(crate) fn thread_list(
         Some(
             PageCursor {
                 version: 1,
-                scope: list_scope(args.archived).into(),
-                filter: cursor_filter.clone(),
+                scope,
+                filter: cursor_filter,
                 last_sort_key: serde_json::to_string(&(
-                    last.updated_at.clone(),
-                    last.thread_id.clone(),
+                    match args.order {
+                        ThreadListOrder::Updated => Some(last.updated_at.as_str()),
+                        ThreadListOrder::Created => last.created_at.as_deref(),
+                    },
+                    &last.thread_id,
                 ))
                 .unwrap(),
                 watermark: watermark as u64,
@@ -3649,7 +3655,7 @@ mod thread_list_plan_tests {
         let mut steps = Vec::new();
         for late in [0, 100, 2_000] {
             let db = setup(late);
-            let args = |cursor| ThreadListArgs {
+            let args = |cursor| ThreadListArgs { order: Default::default(),
                 limit: 1,
                 cursor,
                 query: None,
@@ -3711,7 +3717,7 @@ mod thread_list_plan_tests {
         }
         let page = thread_list_awaiting_human(
             &db,
-            &ThreadListArgs {
+            &ThreadListArgs { order: Default::default(),
                 limit: 1,
                 cursor: None,
                 query: None,
@@ -3767,7 +3773,7 @@ mod thread_list_plan_tests {
             .unwrap();
             db.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,result_json) VALUES(?1,?1,'{}',?2,?3,'applied','now','{\"reply\":{\"state\":\"pending\"},\"to_human\":true}')", params![format!("r{id}"), id, node]).unwrap();
         }
-        let args = |cursor| ThreadListArgs {
+        let args = |cursor| ThreadListArgs { order: Default::default(),
             limit: 1,
             cursor,
             query: None,
@@ -3806,7 +3812,7 @@ mod thread_list_plan_tests {
         let page = |db: &Connection| {
             thread_list_awaiting_human(
                 db,
-                &ThreadListArgs {
+                &ThreadListArgs { order: Default::default(),
                     limit: 1,
                     cursor: None,
                     query: None,
@@ -3841,7 +3847,7 @@ mod thread_list_plan_tests {
         for (id, thread, node) in [("ra", "a", "na"), ("rb", "b", "nb"), ("rc", "c", "nc")] {
             db.execute(insert, params![id, thread, node, id]).unwrap();
         }
-        let args = |cursor, archived| ThreadListArgs {
+        let args = |cursor, archived| ThreadListArgs { order: Default::default(),
             limit: 1,
             cursor,
             query: None,
@@ -3988,6 +3994,48 @@ mod thread_list_plan_tests {
         .unwrap()
         .collect::<rusqlite::Result<_>>()
         .unwrap()
+    }
+
+    #[test]
+    fn creation_pages_cross_ties_and_unknown_times_without_following_updates() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at,created_at,archived_at) VALUES
+            ('a','/','','p','m','9','2',NULL),('b','/','','p','m','1','2',NULL),
+            ('c','/','','p','m','8','1','3'),('x','/','','p','m','7',NULL,NULL),
+            ('y','/','','p','m','0',NULL,NULL)").unwrap();
+        let mut args = ThreadListArgs { order: ThreadListOrder::Created, archived: ArchivedFilter::Include, limit: 1, ..Default::default() };
+        let mut items = Vec::new();
+        loop {
+            let page = thread_list(&db, &args).unwrap();
+            let [item] = &page.items[..] else { panic!("expected one item") };
+            items.push((item.thread_id.clone(), item.created_at.clone()));
+            if items.len() == 1 {
+                let mut updated = args.clone();
+                updated.order = ThreadListOrder::Updated;
+                updated.cursor = page.next_cursor.clone();
+                assert_eq!(thread_list(&db, &updated).unwrap_err().code, ErrorCode::CursorExpired);
+                db.execute_batch("UPDATE thread SET updated_at='999' WHERE id='a';
+                INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at,created_at) VALUES('new','/','','p','m','0','3')").unwrap();
+            }
+            let Some(next) = page.next_cursor else { break };
+            assert!(items.len() < 5, "cursor must terminate");
+            args.cursor = Some(next);
+        }
+        assert_eq!(items, [("b",Some("2")), ("a",Some("2")), ("c",Some("1")), ("y",None), ("x",None)].map(|(id,time)| (id.to_owned(),time.map(str::to_owned))));
+    }
+
+    #[test]
+    fn creation_page_seeks_each_archive_and_timestamp_partition() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        for (after, seeks) in [(None, 2), (Some(Some("2".into())), 4), (Some(None), 2)] {
+            let sql = thread_summary::created_page_sql(ArchivedFilter::Include, after.as_ref());
+            let plan: Vec<String> = db.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap()
+                .query_map(params![100_i64, "2", "b", 2], |r| r.get(3)).unwrap()
+                .collect::<rusqlite::Result<_>>().unwrap();
+            assert_eq!(plan.iter().filter(|line| line.contains("SEARCH thread USING INDEX threads_created")).count(), seeks, "{plan:?}");
+        }
     }
 
     #[test]
@@ -4372,7 +4420,7 @@ mod activity_list_tests {
         loop {
             let page = thread_list(
                 &db,
-                &ThreadListArgs {
+                &ThreadListArgs { order: Default::default(),
                     limit: 50,
                     cursor,
                     query: None,

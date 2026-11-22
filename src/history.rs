@@ -550,7 +550,7 @@ pub fn fork_thread_kind(
     let overrides =
         thread_overrides::ThreadOverrides::inherit(tx, Some(&args.thread_id)).map_err(sql_error)?;
     tx.execute(
-        "INSERT INTO thread(id,parent_thread_id,branch_kind,cwd,agents_path,profile_id,model_id,effort,reasoning_epoch,profile_revision,cursor_node_id,selection_revision,updated_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,1,?12)",
+        "INSERT INTO thread(id,parent_thread_id,branch_kind,cwd,agents_path,profile_id,model_id,effort,reasoning_epoch,profile_revision,cursor_node_id,selection_revision,updated_at,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,1,?12,?12)",
         params![new_thread_id,args.thread_id,branch_kind,cwd,agents_path,source.2,source.3,source.4,source.5,source.6,args.node_id,now],
     ).map_err(sql_error)?;
     overrides.apply(tx, new_thread_id).map_err(sql_error)?;

@@ -23,6 +23,7 @@ fn item(id: &str, parent: Option<&str>) -> ThreadSummary {
         parent_id: parent.map(String::from),
         state: "idle".into(),
         updated_at: "2026-10-25T10:00:00Z".into(),
+        created_at: None,
         excerpt: "# 見出し\n\n本文".into(),
     }
 }

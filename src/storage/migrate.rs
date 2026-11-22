@@ -276,6 +276,11 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         sql: include_str!("../../migrations/0053_retired_schedule_shells.sql"),
         foreign_keys: Some(Impact::Tables(&["shell_execution", "output_chunk"])),
     },
+    Migration {
+        version: 54,
+        sql: include_str!("../../migrations/0054_thread_created_at.sql"),
+        foreign_keys: Some(Impact::Tables(&["thread"])),
+    },
 ];
 
 pub(super) fn run(
@@ -318,6 +323,11 @@ pub(super) fn run(
             )?,
             40 => transaction.query_row(
                 "SELECT EXISTS(SELECT 1 FROM pragma_table_info('thread') WHERE name='selection_nonappend_generation')",
+                [],
+                |r| r.get::<_, bool>(0),
+            )?,
+            53 => transaction.query_row(
+                "SELECT EXISTS(SELECT 1 FROM pragma_table_info('thread') WHERE name='created_at')",
                 [],
                 |r| r.get::<_, bool>(0),
             )?,
@@ -2398,5 +2408,31 @@ mod unified_attempt_purpose_tests {
             .unwrap(),
             3
         );
+    }
+}
+
+#[cfg(test)]
+mod thread_creation_migration_tests {
+    use super::*;
+
+    #[test]
+    fn schema53_backfills_earliest_owned_activity_without_inherited_path_or_updates() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch(super::super::CURRENT_SCHEMA).unwrap();
+        db.execute_batch("DROP INDEX threads_created; ALTER TABLE thread DROP COLUMN created_at;
+            DELETE FROM schema_migration WHERE version=53; PRAGMA user_version=52;
+            INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES
+                ('t','/','','p','m','99'),('fork','/','','p','m','00'),('held','/','','p','m','99');
+            INSERT INTO run(id,thread_id,state,created_at) VALUES('r','t','completed','41');
+            INSERT INTO turn(id,thread_id,run_id,state,created_at) VALUES('u','t','r','completed','40');
+            INSERT INTO node(id,turn_id,kind,created_at) VALUES('known','u','message','20'),('held-node',NULL,'message','10');
+            INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,result_json)
+                VALUES('receipt','op','{}','held','held-node','held','30','{}');
+            INSERT INTO thread_path(thread_id,ordinal,node_id) VALUES('fork',0,'known');").unwrap();
+        run(&mut db, 52, &|_, _| {}, &|| {}).unwrap();
+        for (id, expected) in [("t",Some("20")), ("held",Some("10")), ("fork",None)] {
+            let actual: Option<String> = db.query_row("SELECT created_at FROM thread WHERE id=?1", [id], |r| r.get(0)).unwrap();
+            assert_eq!(actual.as_deref(), expected, "{id}");
+        }
     }
 }

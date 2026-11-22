@@ -4569,6 +4569,7 @@ mod stream_tests {
                 parent_id: None,
                 state: "idle".into(),
                 updated_at: "2026-10-25T09:30:00Z".into(),
+                created_at: None,
                 excerpt: String::new(),
             },
             ThreadSummary {
@@ -4592,6 +4593,7 @@ mod stream_tests {
                 parent_id: None,
                 state: "idle".into(),
                 updated_at: "unknown timezone/date".into(),
+                created_at: None,
                 excerpt: String::new(),
             },
         ];

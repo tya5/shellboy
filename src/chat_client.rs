@@ -173,7 +173,7 @@ impl<W: Write> Chat<'_, W> {
     async fn connect(&mut self) -> Result<(), ChatError> {
         let response = ipc::call(
             &self.data,
-            Command::ThreadList(ThreadListArgs {
+            Command::ThreadList(ThreadListArgs { order: Default::default(),
                 limit: 1,
                 cursor: None,
                 query: None,

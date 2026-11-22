@@ -1178,7 +1178,7 @@ impl Form {
                     v
                 },
                 |form, cwd| {
-                    Ok(Command::ThreadList(ThreadListArgs {
+                    Ok(Command::ThreadList(ThreadListArgs { order: Default::default(),
                         limit: form.number("limit")?,
                         cursor: form.optional("cursor")?,
                         query: form.optional("query")?,

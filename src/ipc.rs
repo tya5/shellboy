@@ -1112,7 +1112,7 @@ mod frame_delivery_tests {
         let error = call_stream(
             client,
             endpoint(),
-            Command::ThreadList(crate::protocol::ThreadListArgs {
+            Command::ThreadList(crate::protocol::ThreadListArgs { order: Default::default(),
                 limit: 1,
                 cursor: None,
                 query: None,

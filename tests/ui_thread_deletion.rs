@@ -47,6 +47,7 @@ fn list(ui: &mut UiState, ids: &[&str]) {
                 state: "completed".into(),
                 // Supplied fixture order represents a newest-first server page.
                 updated_at: chrono::DateTime::<chrono::Utc>::from_timestamp(
+                created_at: None,
                     1_700_000_000 - position as i64,
                     0,
                 )
@@ -216,6 +217,7 @@ fn background_success_updates_the_list_and_invalidates_old_pages_without_switchi
             parent_id: None,
             state: "completed".into(),
             updated_at: "now".into(),
+            created_at: None,
             excerpt: String::new(),
         }],
         display_times: vec![],

@@ -1,4 +1,7 @@
--- Test-only inverse of schema 51 for fixtures made by a current owner.
+-- Test-only inverse through schema 50 for fixtures made by a current owner.
+DROP INDEX threads_created;
+ALTER TABLE thread DROP COLUMN created_at;
+DELETE FROM schema_migration WHERE version=53;
 CREATE TEMP TABLE saved_shells AS SELECT id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,saved_sequence,retention_generation,exit_code,end_reason,output_complete,started_at,ended_at FROM shell_execution;
 CREATE TEMP TABLE saved_chunks AS SELECT * FROM output_chunk;
 DROP TABLE output_chunk;

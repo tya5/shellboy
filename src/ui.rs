@@ -4417,6 +4417,7 @@ impl UiState {
                 parent_id: None,
                 state: i18n::local!(self.config.ui.language, "未保存", "Not saved").into(),
                 updated_at: String::new(),
+                created_at: None,
                 archived_at: None,
                 tags: Vec::new(),
                 excerpt: view.draft.text.chars().take(80).collect(),

@@ -33,7 +33,7 @@ fn columns_from() -> String {
     (SELECT count(*) FROM (SELECT 1 FROM receipt q INDEXED BY receipt_reply_pending WHERE q.target_thread_id=t.id AND json_extract(q.result_json,'$.reply.state')='pending' LIMIT {sample_limit})),
     (SELECT count(*) FROM (SELECT 1 FROM receipt q INDEXED BY receipt_reply_pending WHERE q.target_thread_id=t.id AND json_extract(q.result_json,'$.reply.state')='pending' AND COALESCE(json_extract(q.result_json,'$.to_human'),0)<>1 LIMIT {sample_limit})),
     (SELECT count(*) FROM (SELECT 1 FROM receipt q INDEXED BY receipt_reply_pending WHERE q.target_thread_id=t.id AND json_extract(q.result_json,'$.reply.state')='pending' AND json_extract(q.result_json,'$.to_human')=1 LIMIT {sample_limit})),
-    CASE WHEN (SELECT count(*) FROM (SELECT 1 FROM receipt q INDEXED BY receipt_human_reply_pending WHERE q.target_thread_id=t.id AND json_extract(q.result_json,'$.reply.state')='pending' AND json_extract(q.result_json,'$.to_human')=1 LIMIT {sample_limit}))<={limit} THEN (SELECT min(q.created_at) FROM (SELECT r.created_at FROM receipt r INDEXED BY receipt_human_reply_pending WHERE r.target_thread_id=t.id AND json_extract(r.result_json,'$.reply.state')='pending' AND json_extract(r.result_json,'$.to_human')=1 ORDER BY r.created_at LIMIT {sample_limit}) q) END
+    CASE WHEN (SELECT count(*) FROM (SELECT 1 FROM receipt q INDEXED BY receipt_human_reply_pending WHERE q.target_thread_id=t.id AND json_extract(q.result_json,'$.reply.state')='pending' AND json_extract(q.result_json,'$.to_human')=1 LIMIT {sample_limit}))<={limit} THEN (SELECT min(q.created_at) FROM (SELECT r.created_at FROM receipt r INDEXED BY receipt_human_reply_pending WHERE r.target_thread_id=t.id AND json_extract(r.result_json,'$.reply.state')='pending' AND json_extract(r.result_json,'$.to_human')=1 ORDER BY r.created_at LIMIT {sample_limit}) q) END, t.created_at
 FROM thread t {activity_joins}
 "
     )
@@ -95,6 +95,7 @@ pub(crate) struct RawSummary {
     pub(super) cwd: String,
     pub(crate) parent_id: Option<String>,
     updated_at: String,
+    created_at: Option<String>,
     state: Option<String>,
     stop_reason: Option<String>,
     pub(crate) activity: RawActivity,
@@ -192,6 +193,39 @@ pub(super) fn page_sql(mode: ArchivedFilter, tags: usize, cwd: bool) -> String {
     let columns_from = columns_from.replacen("FROM thread t ", &source, 1);
     format!("{columns_from}WHERE {predicate}t.deleted_at IS NULL{archived} AND {window}")
 }
+/// Each archive partition and nullable-key segment offers at most one page to
+/// the merge. Only those bounded IDs can reach the summary joins.
+pub(super) fn created_page_sql(mode: ArchivedFilter, after: Option<&Option<String>>) -> String {
+    let partitions: &[u8] = match mode {
+        ArchivedFilter::Exclude => &[0],
+        ArchivedFilter::Only => &[1],
+        ArchivedFilter::Include => &[0, 1],
+    };
+    let ranges: &[&str] = match after {
+        None => &[""],
+        Some(Some(_)) => &["AND (created_at,id) < (?2,?3)", "AND created_at IS NULL"],
+        Some(None) => &["AND created_at IS NULL AND id < ?3"],
+    };
+    let legs: Vec<_> = partitions.iter().flat_map(|archived| {
+        ranges.iter().map(move |range| format!(
+            "SELECT * FROM (SELECT id,created_at FROM thread INDEXED BY threads_created
+             WHERE deleted_at IS NULL AND (archived_at IS NOT NULL)={archived} AND rowid<=?1 {range}
+             ORDER BY created_at DESC,id DESC LIMIT ?4)"
+        ))
+    }).collect();
+    let summaries = columns_from().replacen(
+        "FROM thread t ",
+        "FROM page CROSS JOIN thread t ON t.id=page.id ",
+        1,
+    );
+    format!(
+        "WITH candidates AS ({}), page AS MATERIALIZED (
+            SELECT id,created_at FROM candidates ORDER BY created_at DESC,id DESC LIMIT ?4
+         ) {summaries} ORDER BY page.created_at DESC,page.id DESC",
+        legs.join(" UNION ALL ")
+    )
+}
+
 pub(crate) fn decode(row: &Row<'_>) -> rusqlite::Result<RawSummary> {
     Ok(RawSummary {
         thread_id: row.get(0)?,
@@ -199,6 +233,7 @@ pub(crate) fn decode(row: &Row<'_>) -> rusqlite::Result<RawSummary> {
         cwd: row.get(2)?,
         parent_id: row.get(3)?,
         updated_at: row.get(4)?,
+        created_at: row.get(26)?,
         state: row.get(5)?,
         stop_reason: row.get(6)?,
         activity: decode_activity(row, 8)?,
@@ -251,6 +286,7 @@ pub(crate) fn prepare(raw: RawSummary, title: String, excerpt: String) -> Thread
         latest_run_stop_reason: raw.stop_reason,
         revisit: crate::control::revisit::summary(raw.revisit_pending, raw.revisit_delivered),
         updated_at: raw.updated_at,
+        created_at: raw.created_at,
         archived_at: raw.archived_at,
         tags: Vec::new(),
         excerpt,

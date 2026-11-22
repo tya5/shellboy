@@ -3484,6 +3484,7 @@ mod tests {
             cwd: format!("/workspace/{id}"),
             state: "running".into(),
             updated_at: "2026-10-25T09:30:00Z".into(),
+            created_at: None,
             excerpt: "**選択した会話の抜粋**".into(),
         }
     }
@@ -4328,6 +4329,7 @@ mod tests {
             parent_id: None,
             state: "idle".into(),
             updated_at: String::new(),
+            created_at: None,
             excerpt: String::new(),
         };
         let mut tree = japanese_browser();
@@ -4580,6 +4582,7 @@ mod patch_tests {
             latest_run_stop_reason: None,
             revisit: None,
             updated_at: at.into(),
+            created_at: None,
             excerpt: format!("saved excerpt {id}"),
         }
     }
@@ -5315,6 +5318,7 @@ mod archive_tests {
             latest_run_stop_reason: None,
             revisit: None,
             updated_at: "2026-10-01".into(),
+            created_at: None,
             archived_at: archived.then(|| "2026-11-06T00:00:00Z".into()),
             tags: Vec::new(),
             excerpt: String::new(),
@@ -5630,6 +5634,7 @@ mod watch_integration_tests {
             latest_run_stop_reason: None,
             revisit: None,
             updated_at: "saved".into(),
+            created_at: None,
             excerpt: String::new(),
         }
     }
@@ -6358,6 +6363,7 @@ mod language_tests {
             activity: phase,
             latest_run_stop_reason: None,
             updated_at: "saved".into(),
+            created_at: None,
             excerpt: String::new(),
         }
     }
