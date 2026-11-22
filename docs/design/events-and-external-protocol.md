@@ -61,8 +61,9 @@ pass writes a `wait.pending.<id>` row to `app_meta` (`wait.rs:212-217`).
   is unknown. A package version without a SHA carries no revision information.
   Do not substitute the bridge, desktop or installed CLI version, the protocol
   number, binary metadata, or startup logs. No additional owner read is needed.
-- Admission: 32 connections; permits ordinary 24 / stop 2 / status 2
-  (`src/ipc/server.rs:18-21, 38-51`). A long `wait` holds one ordinary permit for
+- Admission: 32 connections; 29 work permits across four classes: ordinary 24,
+  control (stop and shutdown) 2, plain `status` 2, and `status --memory` 1.
+  See `src/ipc/server.rs` (`WorkAdmission`). A long `wait` holds one ordinary permit for
   its whole duration. The 5 s read deadline covers only the request frame, not
   the processing time, so long-held responses are already supported.
 
@@ -513,7 +514,7 @@ A2 and D landed before external clients depend on the RPC. #275 later advanced t
   without queuing, and stop and shutdown keep their existing reserve.
 - Long-polls share the 24 ordinary permits with `wait` and mutations; many
   chats plus a bridge reduce capacity. A dedicated small class would change the
-  documented 28-permit budget; decide after measurement (Q6, answered for now: shared slots).
+  documented 29-permit budget; decide after measurement (Q6, answered for now: shared slots).
 - Coalescing hides intermediate states; documented, durable facts remain.
 - E3's preview is lossy by design (2.5): attempts past the first 16 show no text until one ends, and a reader behind by
   more than 64 KiB counted sees a gap. Polling per delta costs a connection per reply on the current transport.
