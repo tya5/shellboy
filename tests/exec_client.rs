@@ -141,6 +141,7 @@ impl Fixture {
                         more: false,
                         config_changed: false,
                         live_text: None,
+                        attempt_ends: None,
                         reasoning_activity: vec![],
                     };
                     tokio::spawn(async move {
@@ -167,6 +168,7 @@ impl Fixture {
                         more: false,
                         config_changed: false,
                         live_text: None,
+                        attempt_ends: None,
                         reasoning_activity: vec![],
                     };
                     let _ = invocation.reply.send(Response::success(

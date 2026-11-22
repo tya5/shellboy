@@ -28,17 +28,18 @@ pub(super) async fn adopt_response(
     let attempt_id = attempt.to_owned();
     let index = control.index.clone();
     let successful_attachments = prepared;
-    let may_execute=control.store.database.call(move|db|{
+    use crate::protocol::EventAttemptOutcome;
+    let adoption=control.store.database.call(move|db|{
             let tx=db.transaction()?;
             let live:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM turn u JOIN run r ON r.id=u.run_id WHERE u.id=?1 AND u.generation=?2 AND r.state='live' AND u.state='running')",params![current.turn,current.generation],|r|r.get(0))?;
             if !live {
-                reject_adoption(&tx,&current,&attempt_id)?;
+                let rejected = reject_adoption(&tx,&current,&attempt_id)?;
                 tx.commit()?;
-                return Ok(false);
+                return Ok(rejected.then_some(EventAttemptOutcome::NotAdopted));
             }
             if crate::control::state::adopt_attempt(&tx, &attempt_id)?
                 != crate::control::state::AttemptTransition::Applied {
-                return Ok(false);
+                return Ok(None);
             }
             save_partial_attempts(&tx,&current,&partial_attempts)?;
             let node=id();
@@ -61,10 +62,13 @@ pub(super) async fn adopt_response(
                 crate::control::state::complete_answer_turn(&tx, &current.turn, &node)?;
             }
             crate::attachments::mark_success_tx(&tx,&successful_attachments,&attempt_id).map_err(crate::storage::StorageError::from)?;
-            tx.commit()?;Ok(true)
+            tx.commit()?;Ok(Some(EventAttemptOutcome::Adopted))
         }).await.map_err(storage_error)?;
+    if let Some(outcome) = adoption {
+        control.record_attempt_end(&snapshot.thread, attempt, outcome);
+    }
     control.index.wake();
     control.changed(&snapshot.thread);
 
-    Ok(may_execute)
+    Ok(adoption == Some(EventAttemptOutcome::Adopted))
 }

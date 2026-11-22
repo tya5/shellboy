@@ -948,3 +948,12 @@ After a forced owner exit, a recovered terminal execution record does not prove
 that a surviving OS child stopped. If a schedule or Thread deletion was
 interrupted before its final commit, issue a new delete to finish it; the owner
 does not resume the interrupted deletion on startup.
+
+### Live attempt order
+
+With protocol 7, `events wait --text` reports a live attempt's
+`input_through_node_id` (the last selected input node, or `null` for no input)
+and cursor-ordered `attempt_ends`. Only a matching `not_adopted` proves that
+attempt was not saved. Keep adopted previews until saved history arrives;
+a resync is not evidence of discard. Order live previews by the saved input
+boundary, not by when the preview or a sent message arrived.

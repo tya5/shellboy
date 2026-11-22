@@ -7,6 +7,7 @@ impl Control {
         &'a self,
         thread: &'a str,
         attempt: &'a str,
+        input_through_node_id: Option<&str>,
     ) -> change_clock::LiveTextGuard<'a> {
         let guard = self
             .change_clock
@@ -15,6 +16,7 @@ impl Control {
         let clock = self.change_clock.clone();
         let t = thread.to_owned();
         let a = attempt.to_owned();
+        let boundary = input_through_node_id.map(str::to_owned);
         let _ = self
             .store
             .database
@@ -22,13 +24,23 @@ impl Control {
                 let allowed: bool =
                     db.query_row(NONTERMINAL, rusqlite::params![a, t], |r| r.get(0))?;
                 if allowed {
-                    clock.admit_live(&t, &a, &token, &alive);
+                    clock.admit_live(&t, &a, &token, &alive, boundary);
                 }
                 Ok(())
             })
             .await;
         self.text_changed.notify_waiters();
         guard
+    }
+    pub(super) fn record_attempt_end(
+        &self,
+        thread: &str,
+        attempt: &str,
+        outcome: crate::protocol::EventAttemptOutcome,
+    ) {
+        self.change_clock
+            .record_attempt_end(thread, attempt, outcome);
+        self.text_changed.notify_waiters();
     }
     pub(super) fn stream_admitted_delta(
         &self,
@@ -127,7 +139,7 @@ mod tests {
             db.call(move |_| {
                 let _ = ready_tx.send(());
                 release_rx.recv().unwrap();
-                clock.admit_live("t", "a", &token, &alive);
+                clock.admit_live("t", "a", &token, &alive, None);
                 Ok(())
             })
             .await
@@ -168,7 +180,7 @@ mod tests {
                 })
                 .await
                 .unwrap();
-            let guard = control.admit_live_stream("t", "a").await;
+            let guard = control.admit_live_stream("t", "a", None).await;
             assert!(guard.record(0, "text", false));
             assert!(guard.record(0, "reasoning", true));
             control
@@ -191,7 +203,7 @@ mod tests {
             );
             assert!(!guard.record(0, "late", false));
             assert!(!guard.record(0, "late", true));
-            let late = control.admit_live_stream("t", "a").await;
+            let late = control.admit_live_stream("t", "a", None).await;
             assert!(!late.record(0, "re-admission", false));
             let baseline = control.change_clock.snapshot(&[], true, true);
             assert!(baseline.1.is_empty() && baseline.2.is_empty());

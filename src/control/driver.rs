@@ -362,17 +362,25 @@ async fn drive_inner(
             match outcome {
                 Ok(_) => {
                     let current = snapshot.clone();
-                    control
+                    let saved = attempt.clone();
+                    let rejected = control
                         .store
                         .database
                         .call(move |db| {
                             let tx = db.transaction()?;
-                            reject_adoption(&tx, &current, &attempt)?;
+                            let rejected = reject_adoption(&tx, &current, &saved)?;
                             tx.commit()?;
-                            Ok(())
+                            Ok(rejected)
                         })
                         .await
                         .map_err(storage_error)?;
+                    if rejected {
+                        control.record_attempt_end(
+                            &snapshot.thread,
+                            &attempt,
+                            crate::protocol::EventAttemptOutcome::NotAdopted,
+                        );
+                    }
                 }
                 Err(failure) if !slot.stop.is_cancelled() => {
                     let body = json!({"reason":"human_turn_interrupted","attempt_id":attempt,"partial_text":failure.partial_text,"partial_reasoning":failure.partial_reasoning,"completed_items":failure.completed_items,"raw_response":failure.raw_response});
@@ -545,6 +553,14 @@ impl RequestCaller for ConversationCaller<'_, '_> {
         .await
     }
 
+    fn unsuccessful_attempt_committed(&self, attempt: &str) {
+        self.control.record_attempt_end(
+            &self.snapshot.thread,
+            attempt,
+            crate::protocol::EventAttemptOutcome::NotAdopted,
+        );
+    }
+
     fn attempt_changed(&self) {
         self.control.changed(&self.snapshot.thread);
     }
@@ -554,7 +570,18 @@ impl RequestCaller for ConversationCaller<'_, '_> {
         attempt: &'a str,
     ) -> Option<model::request_path::Observer<'a>> {
         self.attempt_changed();
-        Some(stream_observer(self.control, &self.snapshot.thread, attempt).await)
+        Some(
+            stream_observer(
+                self.control,
+                &self.snapshot.thread,
+                attempt,
+                self.snapshot
+                    .input
+                    .as_ref()
+                    .and_then(super::replay::ReplayLease::selected_tail),
+            )
+            .await,
+        )
     }
 }
 
@@ -798,9 +825,8 @@ fn reject_adoption(
     tx: &rusqlite::Transaction<'_>,
     snapshot: &Snapshot,
     attempt: &str,
-) -> rusqlite::Result<()> {
-    tx.execute("UPDATE model_attempt SET input_manifest_json=json_set(input_manifest_json,'$.adoption',json_object('outcome','not_adopted','reason','turn_fenced')) WHERE id=?1 AND turn_id=?2 AND generation=?3 AND state IN ('completed','cancelled') AND json_type(input_manifest_json,'$.adoption') IS NULL",params![attempt,snapshot.turn,snapshot.generation])?;
-    Ok(())
+) -> rusqlite::Result<bool> {
+    Ok(tx.execute("UPDATE model_attempt SET input_manifest_json=json_set(input_manifest_json,'$.adoption',json_object('outcome','not_adopted','reason','turn_fenced')) WHERE id=?1 AND turn_id=?2 AND generation=?3 AND state IN ('completed','cancelled') AND json_type(input_manifest_json,'$.adoption') IS NULL",params![attempt,snapshot.turn,snapshot.generation])? == 1)
 }
 
 fn save_interrupted_outcome(

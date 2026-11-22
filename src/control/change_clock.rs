@@ -12,7 +12,8 @@
 //! for a reader: the lock is held only for memory updates and copies, never across
 //! `.await` or I/O, and a reader that stops reading holds nothing here.
 use crate::protocol::{
-    EventLiveText, EventReasoningActivity, EventTextDelta, MAX_EVENT_CHANGES, MAX_FRAME_BYTES,
+    EventAttemptEnd, EventAttemptOutcome, EventLiveText, EventReasoningActivity, EventTextDelta,
+    MAX_EVENT_CHANGES, MAX_FRAME_BYTES,
 };
 use std::{
     collections::{BTreeMap, HashMap, VecDeque},
@@ -21,6 +22,9 @@ use std::{
 use tokio::sync::Notify;
 
 pub(crate) const MAX_CHANGE_THREADS: usize = 4096;
+// A hard count bound. Eviction advances the live cursor floor so clients resync
+// from saved history instead of guessing which attempt was discarded.
+const MAX_ATTEMPT_ENDS: usize = 256;
 /// Streaming attempts holding text at once; further attempts are refused until one ends.
 pub(crate) const MAX_LIVE_TEXT_ATTEMPTS: usize = 16;
 /// Retained text per attempt, each delta also charged its record size. Same size as
@@ -45,6 +49,7 @@ const DELTA_RECORD_BYTES: usize = std::mem::size_of::<Delta>();
 
 struct AttemptText {
     attempt: String,
+    input_through_node_id: Option<String>,
     /// Ascending by sequence; never empty after the first write.
     deltas: VecDeque<Delta>,
     charged: usize,
@@ -64,6 +69,8 @@ struct Inner {
     /// Keyed by Thread: a Thread streams one attempt at a time, and a later attempt replaces it.
     text: HashMap<String, AttemptText>,
     reasoning_activity: HashMap<String, AttemptActivity>,
+    attempt_ends: VecDeque<EventAttemptEnd>,
+    attempt_end_floor: u64,
 }
 
 struct AttemptActivity {
@@ -96,6 +103,7 @@ pub(crate) enum Poll {
         reasoning_activity: Vec<EventReasoningActivity>,
         reasoning_changed: bool,
         config_changed: bool,
+        attempt_ends: Vec<EventAttemptEnd>,
     },
 }
 
@@ -185,7 +193,14 @@ impl ChangeClock {
         }
     }
     // Worker -> reservation -> bounded memory; drop uses the same final two locks.
-    pub(crate) fn admit_live(&self, thread: &str, attempt: &str, token: &str, alive: &Mutex<bool>) {
+    pub(crate) fn admit_live(
+        &self,
+        thread: &str,
+        attempt: &str,
+        token: &str,
+        alive: &Mutex<bool>,
+        input_through_node_id: Option<String>,
+    ) {
         let live = alive.lock().unwrap_or_else(|p| p.into_inner());
         if !*live {
             return;
@@ -213,11 +228,44 @@ impl ChangeClock {
             thread.into(),
             AttemptText {
                 attempt: attempt.into(),
+                input_through_node_id,
                 deltas: VecDeque::new(),
                 charged: 0,
                 floor: 0,
             },
         );
+    }
+    pub(crate) fn record_attempt_end(
+        &self,
+        thread: &str,
+        attempt: &str,
+        outcome: EventAttemptOutcome,
+    ) {
+        let mut inner = self.lock();
+        inner.seq += 1;
+        let seq = inner.seq;
+        // An end can race a newer stream, but it can revoke only its own slot.
+        if inner
+            .reasoning_activity
+            .get(thread)
+            .is_some_and(|live| live.attempt == attempt)
+        {
+            inner.reasoning_activity.remove(thread);
+            inner.text.remove(thread);
+        }
+        inner.attempt_ends.push_back(EventAttemptEnd {
+            thread_id: thread.into(),
+            attempt_id: attempt.into(),
+            outcome,
+            seq,
+        });
+        if inner.attempt_ends.len() > MAX_ATTEMPT_ENDS {
+            inner.attempt_end_floor = inner
+                .attempt_ends
+                .pop_front()
+                .expect("end queue exceeds bound")
+                .seq;
+        }
     }
     pub(crate) fn revoke_live(&self, thread: &str, attempt: &str, token: Option<&str>) {
         let mut inner = self.lock();
@@ -241,7 +289,7 @@ impl ChangeClock {
         changed: &'a Notify,
     ) -> LiveTextGuard<'a> {
         let guard = self.reserve_live(thread, attempt, changed);
-        self.admit_live(thread, attempt, &guard.token, &guard.alive);
+        self.admit_live(thread, attempt, &guard.token, &guard.alive, None);
         changed.notify_waiters();
         guard
     }
@@ -306,6 +354,7 @@ impl ChangeClock {
                 thread.to_owned(),
                 AttemptText {
                     attempt: attempt.to_owned(),
+                    input_through_node_id: None,
                     deltas: VecDeque::new(),
                     charged: 0,
                     // Entered mid-attempt after being refused: earlier text is gone.
@@ -380,7 +429,7 @@ impl ChangeClock {
         if after > inner.seq {
             return None;
         }
-        if after < inner.floor {
+        if after < inner.floor || (include_text && after < inner.attempt_end_floor) {
             let text = if include_text {
                 inner.live_text(0, inner.seq, filter)
             } else {
@@ -424,6 +473,20 @@ impl ChangeClock {
         } else {
             (Vec::new(), false)
         };
+        let attempt_ends = if include_text {
+            inner
+                .attempt_ends
+                .iter()
+                .filter(|end| {
+                    end.seq > after
+                        && end.seq <= cursor
+                        && (filter.is_empty() || filter.contains(&end.thread_id))
+                })
+                .cloned()
+                .collect()
+        } else {
+            Vec::new()
+        };
         Some(Poll::Ready {
             changes,
             more,
@@ -434,6 +497,7 @@ impl ChangeClock {
             config_changed: inner
                 .config_changed_seq
                 .is_some_and(|seq| seq > after && seq <= cursor),
+            attempt_ends,
         })
     }
 }
@@ -509,6 +573,7 @@ impl Inner {
             attempts.push(EventLiveText {
                 thread_id: thread.clone(),
                 attempt_id: entry.attempt.clone(),
+                input_through_node_id: entry.input_through_node_id.clone(),
                 gap: after < entry.floor,
                 deltas,
             });
@@ -533,6 +598,50 @@ mod tests {
             }) => (changes, more, cursor),
             _ => panic!("expected ready"),
         }
+    }
+
+    #[test]
+    fn attempt_ends_page_in_clock_order_and_overflow_requires_resync() {
+        let clock = ChangeClock::new();
+        for n in 0..MAX_EVENT_CHANGES {
+            clock.record(&format!("hint-{n}"));
+        }
+        clock.record_attempt_end("t", "first", EventAttemptOutcome::Adopted);
+        clock.record("next-page");
+        clock.record_attempt_end("t", "second", EventAttemptOutcome::NotAdopted);
+        let Some(Poll::Ready {
+            cursor,
+            more: true,
+            attempt_ends,
+            ..
+        }) = clock.poll(0, &[], true, false)
+        else {
+            panic!("first page");
+        };
+        assert!(attempt_ends.is_empty());
+        let Some(Poll::Ready { attempt_ends, .. }) = clock.poll(cursor, &["t".into()], true, false)
+        else {
+            panic!("second page");
+        };
+        assert_eq!(
+            attempt_ends
+                .iter()
+                .map(|end| end.attempt_id.as_str())
+                .collect::<Vec<_>>(),
+            ["first", "second"]
+        );
+        assert!(attempt_ends[0].seq < attempt_ends[1].seq);
+        for n in 0..MAX_ATTEMPT_ENDS {
+            clock.record_attempt_end("t", &format!("a-{n}"), EventAttemptOutcome::NotAdopted);
+        }
+        assert!(matches!(
+            clock.poll(cursor, &[], true, false),
+            Some(Poll::Resync { .. })
+        ));
+        assert!(matches!(
+            clock.poll(cursor, &[], false, false),
+            Some(Poll::Ready { .. })
+        ));
     }
 
     #[test]
@@ -949,6 +1058,7 @@ mod tests {
             more: false,
             config_changed: false,
             live_text: Some(text),
+            attempt_ends: None,
             reasoning_activity: vec![],
         })
         .unwrap();
@@ -1299,7 +1409,7 @@ mod admission_fence_tests {
         let guard = clock.reserve_live("t", "a", &notify);
         let (token, alive) = guard.reservation();
         drop(guard);
-        clock.admit_live("t", "a", &token, &alive);
+        clock.admit_live("t", "a", &token, &alive, None);
         assert!(clock.snapshot(&[], true, true).1.is_empty());
         let guard = clock.live_text_guard("t", "a", &notify);
         {

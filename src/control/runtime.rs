@@ -508,7 +508,8 @@ impl Control {
                       more,
                       config_changed,
                       text,
-                      reasoning_activity| {
+                      reasoning_activity,
+                      attempt_ends| {
             let cursor = EventCursor {
                 v: 1,
                 instance_id: self.store.instance_id.clone(),
@@ -527,6 +528,7 @@ impl Control {
                     config_changed,
                     live_text: include_text.then_some(text),
                     reasoning_activity,
+                    attempt_ends: include_text.then_some(attempt_ends),
                 },
                 ErrorCode::InvalidState,
                 "Cannot encode events result",
@@ -546,6 +548,7 @@ impl Control {
                 false,
                 text,
                 activity,
+                vec![],
             );
         };
         let after = EventCursor::decode(token)?;
@@ -563,6 +566,7 @@ impl Control {
                 false,
                 text,
                 activity,
+                vec![],
             );
         }
         let deadline = tokio::time::Instant::now()
@@ -601,6 +605,7 @@ impl Control {
                         false,
                         text,
                         reasoning_activity,
+                        vec![],
                     );
                 }
                 Some(Poll::Ready {
@@ -611,6 +616,7 @@ impl Control {
                     reasoning_activity,
                     reasoning_changed,
                     config_changed,
+                    attempt_ends,
                 }) => {
                     if !changes.is_empty() || config_changed {
                         return result(
@@ -621,9 +627,10 @@ impl Control {
                             config_changed,
                             text,
                             reasoning_activity,
+                            attempt_ends,
                         );
                     }
-                    if reasoning_changed {
+                    if reasoning_changed || !attempt_ends.is_empty() {
                         return result(
                             EventsWaitStatus::Text,
                             cursor,
@@ -632,6 +639,7 @@ impl Control {
                             false,
                             text,
                             reasoning_activity,
+                            attempt_ends,
                         );
                     }
                     if text.iter().any(|attempt| !attempt.deltas.is_empty()) {
@@ -643,6 +651,7 @@ impl Control {
                             false,
                             text,
                             reasoning_activity,
+                            attempt_ends,
                         );
                     }
                     if deadline.is_some_and(|at| tokio::time::Instant::now() >= at) {
@@ -654,6 +663,7 @@ impl Control {
                             false,
                             text,
                             reasoning_activity,
+                            attempt_ends,
                         );
                     }
                 }

@@ -306,8 +306,11 @@ pub(super) async fn stream_observer<'a>(
     control: &'a Control,
     thread: &'a str,
     attempt: &'a str,
+    input_through_node_id: Option<&str>,
 ) -> model::request_path::Observer<'a> {
-    let live_text = control.admit_live_stream(thread, attempt).await;
+    let live_text = control
+        .admit_live_stream(thread, attempt, input_through_node_id)
+        .await;
     let mut stream_chars = 0usize;
     let mut last_receive_notice: Option<std::time::Instant> = None;
     Box::new(move |event| {

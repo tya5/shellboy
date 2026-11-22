@@ -386,7 +386,11 @@ async fn a_retry_is_a_new_attempt_whose_offsets_restart() {
         drop(first);
         let second = fixture.next_request().await;
         second.delta("second");
+        let retained_cursor = at.clone();
         let retried = read_text(&control, &mut at, &t, 0, "second").await;
+        let ended = poll(&control, Some(&retained_cursor), &[&t], 0).await;
+        assert_eq!(ended["attempt_ends"][0]["attempt_id"], failed);
+        assert_eq!(ended["attempt_ends"][0]["outcome"], "not_adopted");
         assert_ne!(failed, retried);
         assert_eq!(
             attempts(&control, &t).await,
@@ -399,6 +403,50 @@ async fn a_retry_is_a_new_attempt_whose_offsets_restart() {
         fixture.close().await;
     })
     .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn queued_message_advances_live_boundary_without_losing_previous_end() {
+    bounded("selected input boundary and previous attempt end", async {
+        let mut fixture = Fixture::new().await;
+        let control = fixture.control.clone();
+        let t = thread(&control).await;
+        send(&control, &t, "initial message").await;
+        let first = fixture.next_request().await;
+        let mut at = cursor(&poll(&control, None, &[&t], 0).await);
+        send(&control, &t, "queued P").await;
+        first.delta("R0");
+        let r0 = read_text(&control, &mut at, &t, 0, "R0").await;
+        let baseline = poll(&control, None, &[&t], 0).await;
+        let before = entry(&baseline, &t).unwrap()["input_through_node_id"].as_str().unwrap().to_owned();
+        at = cursor(&baseline);
+        first.complete("R0");
+        let second = fixture.next_request().await;
+        second.delta("R1");
+        // Wait for R1's text without advancing the cursor used by the paused consumer.
+        let mut observer = at.clone();
+        let r1 = read_text(&control, &mut observer, &t, 0, "R1").await;
+        let together = poll(&control, Some(&at), &[&t], 0).await;
+        let live = entry(&together, &t).unwrap();
+        assert_eq!(live["attempt_id"], r1);
+        assert_eq!(joined(live), "R1");
+        let after = live["input_through_node_id"].as_str().unwrap().to_owned();
+        let scope = t.clone();
+        let (before_ordinal, after_ordinal, message_ordinal) = control.store.database.call(move |db| {
+            let ordinal = |node: &str| db.query_row("SELECT ordinal FROM thread_path WHERE thread_id=?1 AND node_id=?2", rusqlite::params![scope,node], |row|row.get::<_,i64>(0));
+            let message = db.query_row("SELECT message_node_id FROM receipt WHERE target_thread_id=?1 ORDER BY rowid DESC LIMIT 1",[&scope],|row|row.get::<_,String>(0))?;
+            Ok((ordinal(&before)?,ordinal(&after)?,ordinal(&message)?))
+        }).await.unwrap();
+        assert!(before_ordinal < message_ordinal && message_ordinal <= after_ordinal);
+        let ends = together["attempt_ends"].as_array().unwrap();
+        assert_eq!(ends.len(), 1);
+        assert_eq!(ends[0]["attempt_id"], r0);
+        assert_eq!(ends[0]["outcome"], "adopted");
+        assert_eq!(poll(&control, Some(&cursor(&together)), &[&t], 0).await["attempt_ends"], json!([]));
+        second.complete("R1");
+        settled(&control, &t).await;
+        fixture.close().await;
+    }).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

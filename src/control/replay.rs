@@ -79,6 +79,7 @@ impl Drop for Frame {
 struct LeaseFrames {
     frames: Vec<Arc<Frame>>,
     witness: PathWitness,
+    selected_tail: Option<String>,
 }
 /// Identifies the exact saved path nodes (in path order, with payload
 /// revisions and tombstones) a lease was built from. Recorded in an attempt's
@@ -125,13 +126,21 @@ pub struct ReplayLease(Arc<LeaseFrames>);
 impl ReplayLease {
     fn new(frames: Vec<Arc<Frame>>) -> Result<Self, StorageError> {
         let witness = PathWitness::of(&frames);
+        let selected_tail = frames.last().map(|frame| frame.stamp.id.clone());
         let frames = tool_order::ordered(frames)?;
         for frame in &frames {
             if frame.pins.fetch_add(1, Ordering::AcqRel) == 0 {
                 frame.ledger.pinned.fetch_add(frame.bytes, Ordering::AcqRel);
             }
         }
-        Ok(Self(Arc::new(LeaseFrames { frames, witness })))
+        Ok(Self(Arc::new(LeaseFrames {
+            frames,
+            witness,
+            selected_tail,
+        })))
+    }
+    pub(super) fn selected_tail(&self) -> Option<&str> {
+        self.0.selected_tail.as_deref()
     }
     pub fn witness(&self) -> &PathWitness {
         &self.0.witness

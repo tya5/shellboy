@@ -479,6 +479,7 @@ pub(crate) trait RequestCaller: Send {
     }
     fn received(&mut self, _usage: StandardUsage) {}
     fn attempt_changed(&self) {}
+    fn unsuccessful_attempt_committed(&self, _attempt: &str) {}
 }
 
 pub(crate) struct RequestScope<'a> {
@@ -722,6 +723,7 @@ pub(crate) async fn execute_request<C: RequestCaller>(
             )
             .await
             .map_err(storage_error)?;
+            caller.unsuccessful_attempt_committed(&attempt);
             caller.received(usage);
             if partial && !cancelled && scope.kind == AttemptKind::Conversation {
                 partial_attempts.push(attempt.clone());
