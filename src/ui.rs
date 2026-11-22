@@ -8790,7 +8790,6 @@ mod tool_refresh_tests {
             parent_change: None,
             context: None,
             context_usage: None,
-            usage_totals: None,
         }
     }
     fn frame(ui: &UiState, read_revision: u64, facts: Option<ToolObservation>) -> UiUpdate {

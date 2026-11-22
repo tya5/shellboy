@@ -180,7 +180,6 @@ pub(super) fn read_tx(db: &Connection, thread: &str) -> Result<RawHeader, Storag
         recovery_reason: row.get(10)?,
         parent_change: None,
         shells_count: row.get::<_, i64>(11)? as u64,
-        usage_totals: None,
         context_usage: None,
         context: None,
     };

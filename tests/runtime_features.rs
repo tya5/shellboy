@@ -2323,13 +2323,25 @@ async fn thread_get_reports_uncertain_context_for_a_large_saved_thread() {
         tx.commit()?;
         Ok(())
     }).await.unwrap();
-    let details = request(&control, Command::ThreadGet(ThreadTarget {thread_id:Some(target)})).await;
+    let details = request(
+        &control,
+        Command::ThreadGet(ThreadTarget {
+            thread_id: Some(target),
+        }),
+    )
+    .await;
     assert!(details.get("usage_totals").is_none());
     let usage = &details["context_usage"];
-    assert_eq!(usage["last_successful_attempt"]["attempt_id"],"bound-2000");
-    assert_eq!(usage["last_successful_attempt"]["input_tokens"],3);
-    assert_eq!(usage["last_successful_attempt"]["next_request_pending"],Value::Null);
-    assert_eq!(usage["bounded_observation"]["output_coverage_complete"],false);
+    assert_eq!(usage["last_successful_attempt"]["attempt_id"], "bound-2000");
+    assert_eq!(usage["last_successful_attempt"]["input_tokens"], 3);
+    assert_eq!(
+        usage["last_successful_attempt"]["next_request_pending"],
+        Value::Null
+    );
+    assert_eq!(
+        usage["bounded_observation"]["output_coverage_complete"],
+        false
+    );
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
 }
