@@ -617,8 +617,6 @@ async fn prepare(options: &ExecOptions) -> Result<(Schema, String, ThreadCreateA
     Command::MessageSend(MessageSendArgs {
         human: false,
         resume_recovery: false,
-        to_human: false,
-        expect_reply: false,
         thread_id: Some("preflight".into()),
         text: prompt.clone(),
         deliver: Deliver::Next,
@@ -702,8 +700,14 @@ pub async fn execute(
         }
         for repair in 0..=options.max_repairs {
             session.progress.repairs=repair;session.progress.end_message_node_id=None;session.progress.message_id=None;session.progress.run_id=None;session.progress.turn_id=None;
-            let accepted:MessageAccepted=session.request("send",Command::MessageSend(MessageSendArgs{ human: false, resume_recovery: false,
- to_human: false,expect_reply:options.result == ResultMode::Reply,thread_id:session.progress.thread_id.clone(),text:prompt,deliver: Deliver::Next,sender_label:Some(options.sender_label.clone())})).await?;
+            let thread_id = session.progress.thread_id.clone();
+            let sender_label = Some(options.sender_label.clone());
+            let command = if options.result == ResultMode::Reply {
+                Command::MessageAsk(MessageAskArgs { human:false, sender_label, thread_id, text:prompt, to:None, deliver:Deliver::Next })
+            } else {
+                Command::MessageSend(MessageSendArgs { human:false, sender_label, thread_id, text:prompt, resume_recovery:false, deliver:Deliver::Next })
+            };
+            let accepted:MessageAccepted=session.request("send",command).await?;
             session.progress.message_id=Some(accepted.message_id);session.progress.run_id=accepted.run_id;session.progress.turn_id=accepted.turn_id;
             let raw=session.answer(options.result).await?;
             session.progress.stage="validate";

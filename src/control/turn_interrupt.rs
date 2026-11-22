@@ -314,8 +314,6 @@ mod tests {
                         resume_recovery: false,
 
                         human: false,
-                        to_human: false,
-                        expect_reply: false,
                         sender_label: None,
                         thread_id: Some(thread.clone()),
                         text: "fixture".into(),
@@ -412,8 +410,6 @@ mod tests {
                     Command::MessageSend(MessageSendArgs {
                         resume_recovery: false,
                         human: true,
-                        to_human: false,
-                        expect_reply: false,
                         sender_label: None,
                         thread_id: Some(thread.clone()),
                         text: "held H".into(),
@@ -439,6 +435,8 @@ mod tests {
                 Request::new(
                     format!("{}:held-frontier-question", owner.instance_id),
                     Command::MessageAsk(MessageAskArgs {
+                        human: false,
+                        sender_label: None,
                         thread_id: None,
                         to: None,
                         deliver: Deliver::Next,

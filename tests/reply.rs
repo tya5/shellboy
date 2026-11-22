@@ -20,12 +20,20 @@ fn request(command: Command) -> Request {
     Request::new(format!("fixture:{}", uuid::Uuid::new_v4()), command)
 }
 fn send(expected: bool) -> Command {
+    if expected {
+        return Command::MessageAsk(MessageAskArgs {
+            thread_id: Some("recipient".into()),
+            text: "synthetic request".into(),
+            deliver: Deliver::Next,
+            to: None,
+            human: false,
+            sender_label: None,
+        });
+    }
     Command::MessageSend(MessageSendArgs {
         resume_recovery: false,
 
         human: false,
-        to_human: false,
-        expect_reply: expected,
         sender_label: None,
         thread_id: Some("recipient".into()),
         text: "synthetic request".into(),
@@ -45,6 +53,8 @@ async fn named_ask_leaves_only_its_recipient_list_after_reply() {
     };
     let ask = |to: Option<&str>| {
         Command::MessageAsk(MessageAskArgs {
+            human: false,
+            sender_label: None,
             thread_id: None,
             to: to.map(str::to_owned),
             deliver: Deliver::Next,
@@ -281,7 +291,10 @@ async fn cancellation_releases_duty_and_lists_no_longer_awaiting() {
             .unwrap()
             .result;
         assert!(details.get("awaiting_reply").is_none());
-        assert_eq!(details["awaiting_replies"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            details["pending_replies"]["owed_by"],
+            serde_json::json!({"count":1,"exact":true})
+        );
         if admitted {
             let node = id.clone();
             store.database.call(move |db| { db.execute("UPDATE receipt SET state='applied',path_admission='admitted' WHERE message_node_id=?1",[node])?;Ok(()) }).await.unwrap();
@@ -341,7 +354,7 @@ async fn cancellation_releases_duty_and_lists_no_longer_awaiting() {
             .unwrap()
             .result;
         assert!(details.get("awaiting_reply").is_none());
-        assert!(details["awaiting_replies"].as_array().unwrap().is_empty());
+        assert_eq!(details["pending_replies"]["owed_by"]["count"], 0);
         let error = store
             .execute(
                 request(Command::MessageReply(MessageReplyArgs {
@@ -370,13 +383,13 @@ async fn models_can_request_and_reply_across_threads_including_their_own() {
         token: "synthetic".into(),
     };
     let mut self_send = match send(true) {
-        Command::MessageSend(args) => args,
+        Command::MessageAsk(args) => args,
         _ => unreachable!(),
     };
     self_send.thread_id = Some("sender".into());
     let accepted = store
         .execute(
-            request(Command::MessageSend(self_send)),
+            request(Command::MessageAsk(self_send)),
             Some(origin.clone()),
         )
         .await
@@ -387,6 +400,8 @@ async fn models_can_request_and_reply_across_threads_including_their_own() {
     let human_ask = store
         .execute(
             request(Command::MessageAsk(MessageAskArgs {
+                human: false,
+                sender_label: None,
                 thread_id: None,
                 to: None,
                 deliver: Deliver::Next,
@@ -407,29 +422,50 @@ async fn models_can_request_and_reply_across_threads_including_their_own() {
         .await
         .unwrap()
         .result;
-    assert_eq!(details["awaiting_replies"].as_array().unwrap().len(), 2);
-    for old in [
-        "awaiting_reply",
-        "awaiting_human",
-        "awaiting_thread_replies",
+    assert!(details.get("awaiting_replies").is_none());
+    assert_eq!(details["pending_replies"]["owed_by"]["count"], 1);
+    assert_eq!(details["pending_replies"]["asked_by"]["count"], 2);
+    for (owed_by, asked_by, to, expected) in [
+        (Some("sender"), None, None, vec![message_id.as_str()]),
+        (
+            None,
+            Some("sender"),
+            None,
+            vec![
+                message_id.as_str(),
+                human_ask["message_id"].as_str().unwrap(),
+            ],
+        ),
+        (
+            None,
+            None,
+            Some("human"),
+            vec![human_ask["message_id"].as_str().unwrap()],
+        ),
     ] {
-        assert!(details.get(old).is_none());
+        let page = store
+            .execute(
+                request(Command::MessageList(MessageListArgs {
+                    owed_by: owed_by.map(str::to_owned),
+                    asked_by: asked_by.map(str::to_owned),
+                    to: to.map(str::to_owned),
+                    limit: 10,
+                    cursor: None,
+                })),
+                None,
+            )
+            .await
+            .unwrap()
+            .result;
+        let ids: Vec<_> = page["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|item| item["message_id"].as_str().unwrap())
+            .collect();
+        assert_eq!(ids.len(), expected.len());
+        assert!(expected.iter().all(|id| ids.contains(id)));
     }
-    let duties = details["awaiting_replies"].as_array().unwrap();
-    assert_eq!(
-        duties
-            .iter()
-            .find(|d| d["recipient_kind"] == "human")
-            .unwrap()["message_id"],
-        human_ask["message_id"]
-    );
-    assert_eq!(
-        duties
-            .iter()
-            .find(|d| d["recipient_kind"] == "thread")
-            .unwrap()["message_id"],
-        message_id
-    );
     let not_applied = store
         .execute(
             request(Command::MessageReply(MessageReplyArgs {
@@ -881,10 +917,10 @@ async fn missing_reply_target_lists_only_calling_threads_pending_duties() {
     let recipient_id = recipient["message_id"].as_str().unwrap().to_owned();
     let unrelated = store
         .execute(
-            request(Command::MessageSend(MessageSendArgs {
+            request(Command::MessageAsk(MessageAskArgs {
                 thread_id: Some("sender".into()),
                 ..match send(true) {
-                    Command::MessageSend(args) => args,
+                    Command::MessageAsk(args) => args,
                     _ => unreachable!(),
                 }
             })),

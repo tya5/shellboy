@@ -1540,7 +1540,6 @@ impl Form {
             OpKind::MessageSend => (
                 vec![
                     thread(),
-                    f("expect_reply", "返信を依頼", "false".into(), Boolean),
                     f("resume_recovery", "回復待ちを解除", "false".into(), Boolean),
                     f("text", "依頼本文（Ctrl+J改行）", String::new(), Multiline),
                     f(
@@ -1560,8 +1559,6 @@ impl Form {
                     Ok(Command::MessageSend(MessageSendArgs {
                         human: false,
                         resume_recovery: form.boolean("resume_recovery")?,
-                        to_human: false,
-                        expect_reply: form.boolean("expect_reply")?,
                         sender_label: form.optional("sender_label")?,
                         deliver: form
                             .optional("deliver")?

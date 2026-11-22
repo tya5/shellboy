@@ -200,8 +200,6 @@ async fn send(control: &Arc<Control>, thread: &str, text: &str) {
             resume_recovery: false,
 
             human: false,
-            to_human: false,
-            expect_reply: false,
             sender_label: None,
             deliver: Deliver::Next,
             thread_id: Some(thread.into()),
@@ -623,8 +621,6 @@ async fn changed_file_retry_keeps_update_identity_and_success_advances_only_that
             resume_recovery: false,
 
             human: false,
-            to_human: false,
-            expect_reply: false,
             sender_label: None,
             deliver: Deliver::Next,
             thread_id: Some(thread.clone()),
@@ -1186,8 +1182,6 @@ async fn compacted_attachment_source_is_replaced_without_sending_its_file_entity
             resume_recovery: false,
 
             human: false,
-            to_human: false,
-            expect_reply: false,
             sender_label: None,
             deliver: Deliver::Next,
             thread_id: Some(thread.clone()),
@@ -1467,8 +1461,6 @@ async fn schema49_migrated_legacy_summary_reopens_as_user_before_newer_user_in_o
         Command::MessageSend(MessageSendArgs {
             resume_recovery: false,
             human: false,
-            to_human: false,
-            expect_reply: false,
             sender_label: None,
             deliver: Deliver::Next,
             thread_id: Some(thread.clone()),
@@ -1965,8 +1957,6 @@ async fn issue_160_auto_compaction_detached_attachment_and_retry() {
             Command::MessageSend(MessageSendArgs {
                 resume_recovery: false,
                 human: false,
-                to_human: false,
-                expect_reply: false,
                 sender_label: None,
                 deliver: Deliver::Next,
                 thread_id: Some(thread.clone()),
@@ -2086,8 +2076,6 @@ async fn issue_160_auto_compaction_detached_attachment_and_retry() {
             Command::MessageSend(MessageSendArgs {
                 resume_recovery: false,
                 human: false,
-                to_human: false,
-                expect_reply: false,
                 sender_label: None,
                 deliver: Deliver::Next,
                 thread_id: Some(thread.clone()),
@@ -2259,8 +2247,6 @@ async fn schema47_owner_startup_processes_first_message_and_keeps_another_thread
             Command::MessageSend(MessageSendArgs {
                 resume_recovery: false,
                 human: false,
-                to_human: false,
-                expect_reply: false,
                 sender_label: None,
                 deliver: Deliver::Next,
                 thread_id: Some(thread.into()),

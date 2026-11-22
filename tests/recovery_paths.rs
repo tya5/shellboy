@@ -170,8 +170,6 @@ async fn dropped_mutation_reply_preserves_auto_operation_id_and_does_not_resend(
             Command::MessageSend(MessageSendArgs {
                 resume_recovery: false,
                 human: false,
-                to_human: false,
-                expect_reply: false,
                 sender_label: None,
                 deliver: shellboy::protocol::Deliver::Next,
                 thread_id: Some("synthetic-thread".into()),
@@ -256,8 +254,6 @@ async fn mismatched_reply_keeps_the_requested_id_for_receipt_lookup() {
             Command::MessageSend(MessageSendArgs {
                 resume_recovery: false,
                 human: false,
-                to_human: false,
-                expect_reply: false,
                 sender_label: None,
                 deliver: shellboy::protocol::Deliver::Next,
                 thread_id: Some("synthetic-thread".into()),

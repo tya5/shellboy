@@ -746,8 +746,6 @@ mod frame_delivery_tests {
             Command::MessageSend(MessageSendArgs {
                 resume_recovery: false,
                 human: false,
-                to_human: false,
-                expect_reply: false,
                 sender_label: None,
                 deliver: crate::protocol::Deliver::Next,
                 thread_id: Some("t".into()),
@@ -837,8 +835,6 @@ mod frame_delivery_tests {
             Command::MessageSend(MessageSendArgs {
                 resume_recovery: false,
                 human: false,
-                to_human: false,
-                expect_reply: false,
                 sender_label: None,
                 deliver: crate::protocol::Deliver::Next,
                 thread_id: Some("t".into()),
@@ -1027,8 +1023,6 @@ mod frame_delivery_tests {
             Command::MessageSend(MessageSendArgs {
                 resume_recovery: false,
                 human: false,
-                to_human: false,
-                expect_reply: false,
                 sender_label: None,
                 deliver: crate::protocol::Deliver::Next,
                 thread_id: Some("t".into()),
@@ -1320,8 +1314,6 @@ mod frame_delivery_tests {
         let command = Command::MessageSend(MessageSendArgs {
             resume_recovery: false,
             human: true,
-            to_human: false,
-            expect_reply: false,
             sender_label: None,
             deliver: crate::protocol::Deliver::Next,
             thread_id: Some("t".into()),

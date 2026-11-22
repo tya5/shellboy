@@ -576,8 +576,6 @@ async fn queued_message_cancel_and_run_stop_advance_the_clock() {
             resume_recovery: false,
 
             human: false,
-            to_human: false,
-            expect_reply: false,
             sender_label: None,
             thread_id: Some(t.clone()),
             text: "second".into(),
@@ -798,13 +796,11 @@ async fn reply_settlement_is_announced() {
     let t = thread(&control).await;
     let sent = command(
         &control,
-        Command::MessageSend(MessageSendArgs {
-            resume_recovery: false,
-
+        Command::MessageAsk(shellboy::protocol::MessageAskArgs {
+            to: None,
             human: false,
-            to_human: false,
-            expect_reply: true,
             sender_label: None,
+
             thread_id: Some(t.clone()),
             text: "please reply".into(),
             deliver: Deliver::Next,
@@ -931,8 +927,6 @@ async fn turn_created_from_queued_input_is_announced_while_the_rate_gate_is_held
             resume_recovery: false,
 
             human: false,
-            to_human: false,
-            expect_reply: false,
             sender_label: None,
             thread_id: Some(a.clone()),
             text: "queued".into(),

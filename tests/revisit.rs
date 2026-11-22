@@ -117,8 +117,6 @@ async fn send(
             Command::MessageSend(MessageSendArgs {
                 resume_recovery: false,
                 human: false,
-                to_human: false,
-                expect_reply: false,
                 sender_label: None,
                 deliver,
                 thread_id: Some(thread.into()),
@@ -695,10 +693,11 @@ async fn model_shell_cli_can_reply_to_its_own_expected_message_and_finish() {
             200,
             tool(&cli_command(&[
                 "message",
-                "send",
+                "ask",
+                "--thread",
+                &f.thread,
                 "--deliver",
                 "complete",
-                "--expect-reply",
                 "--text",
                 "MODEL_SELF_REQUEST",
             ])),

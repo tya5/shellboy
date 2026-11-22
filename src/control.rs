@@ -2099,8 +2099,6 @@ mod failure_tests {
         let command = Command::MessageSend(MessageSendArgs {
             resume_recovery: false,
             human: false,
-            to_human: false,
-            expect_reply: false,
             thread_id: Some("target".into()),
             text: "synthetic sender".into(),
             deliver: Deliver::Next,

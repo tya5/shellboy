@@ -443,8 +443,6 @@ fn send(thread: &str, text: &str) -> Command {
         resume_recovery: false,
 
         human: false,
-        to_human: false,
-        expect_reply: false,
         sender_label: None,
         deliver: Deliver::Next,
         thread_id: Some(thread.into()),
@@ -570,8 +568,6 @@ async fn auto_unarchive_by_send_and_deliver_complete_wakes_the_new_run() {
             Command::MessageSend(MessageSendArgs {
                 resume_recovery: false,
                 human: false,
-                to_human: false,
-                expect_reply: false,
                 sender_label: None,
                 deliver,
                 thread_id: Some(thread.clone()),
@@ -601,8 +597,6 @@ async fn auto_unarchive_by_send_and_deliver_complete_wakes_the_new_run() {
             resume_recovery: false,
 
             human: false,
-            to_human: false,
-            expect_reply: false,
             sender_label: None,
             deliver: Deliver::Complete,
             thread_id: Some(busy.clone()),
@@ -641,12 +635,11 @@ async fn a_reply_that_starts_a_run_on_an_archived_sender_unarchives_it() {
     let turn_id = started["turn_id"].as_str().unwrap().to_owned();
     let asked = store
         .execute(
-            request(Command::MessageSend(MessageSendArgs {
-                resume_recovery: false,
+            request(Command::MessageAsk(shellboy::protocol::MessageAskArgs {
+                to: None,
                 human: false,
-                to_human: false,
-                expect_reply: true,
                 sender_label: None,
+
                 deliver: Deliver::Next,
                 thread_id: Some(recipient.clone()),
                 text: "please answer".into(),

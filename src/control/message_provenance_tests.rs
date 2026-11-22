@@ -17,7 +17,7 @@ async fn history_handler_drops_only_relation_at_exact_frame_boundary() {
     owner.db.call(|db| {
         db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('recipient','/','','fixture','fixture','2026-01-01T00:00:00Z');")?;Ok(())
     }).await.unwrap();
-    let command:Command=serde_json::from_value(json!({"command":"message.send","args":{"thread_id":"recipient","text":"synthetic saved body","expect_reply":true}})).unwrap();
+    let command:Command=serde_json::from_value(json!({"command":"message.ask","args":{"thread_id":"recipient","text":"synthetic saved body"}})).unwrap();
     let saved = control
         .store
         .execute(

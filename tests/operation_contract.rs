@@ -205,8 +205,6 @@ async fn lost_response_replays_original_acceptance_after_message_progress_and_re
             resume_recovery: false,
 
             human: false,
-            to_human: false,
-            expect_reply: false,
             sender_label: None,
             deliver: Deliver::Next,
             thread_id: Some(thread.clone()),
@@ -250,8 +248,6 @@ async fn lost_response_replays_original_acceptance_after_message_progress_and_re
         resume_recovery: false,
 
         human: false,
-        to_human: false,
-        expect_reply: false,
         sender_label: None,
         deliver: Deliver::Next,
         thread_id: Some(thread),

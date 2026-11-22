@@ -150,10 +150,8 @@ async fn start(control: &Arc<Control>) -> MessageAccepted {
         command(
             control,
             Command::MessageSend(MessageSendArgs {
-                to_human: false,
                 human: false,
                 resume_recovery: false,
-                expect_reply: false,
                 sender_label: None,
                 deliver: Deliver::Next,
                 thread_id: Some(thread["thread_id"].as_str().unwrap().into()),
@@ -660,8 +658,7 @@ async fn foreground_additional_input_is_accepted_while_shell_lives_and_stop_reap
         command(
             &control,
             Command::MessageSend(MessageSendArgs { human: false, resume_recovery: false,
- to_human: false, expect_reply: false,
-                sender_label: None,
+sender_label: None,
                 thread_id: Some(accepted.thread_id.clone()),
                 text: "while foreground waits".into(),
                 deliver: Deliver::Now,
@@ -930,10 +927,8 @@ async fn input_accepted_during_model_request_still_interrupts_the_next_foregroun
     command(
         &control,
         Command::MessageSend(MessageSendArgs {
-            to_human: false,
             human: false,
             resume_recovery: false,
-            expect_reply: false,
             sender_label: None,
             thread_id: Some(accepted.thread_id.clone()),
             text: "new input before shell starts".into(),
@@ -1065,10 +1060,8 @@ async fn incomplete_attempt_is_preserved_retry_reuses_turn_instruction_snapshot_
     let next = command(
         &control,
         Command::MessageSend(MessageSendArgs {
-            to_human: false,
             human: false,
             resume_recovery: false,
-            expect_reply: false,
             sender_label: None,
             deliver: Deliver::Next,
             thread_id: Some(accepted.thread_id.clone()),
@@ -2666,10 +2659,8 @@ async fn graceful_shutdown_captures_real_shell_wait_once_and_replays_context_aft
     command(
         &control,
         Command::MessageSend(MessageSendArgs {
-            to_human: false,
             human: false,
             resume_recovery: false,
-            expect_reply: false,
             sender_label: None,
             deliver: Deliver::Next,
             thread_id: Some(accepted.thread_id.clone()),
@@ -2764,10 +2755,8 @@ async fn graceful_context_revision_does_not_adopt_a_late_model_response() {
     command(
         &control,
         Command::MessageSend(MessageSendArgs {
-            to_human: false,
             human: false,
             resume_recovery: false,
-            expect_reply: false,
             sender_label: None,
             deliver: Deliver::Next,
             thread_id: Some(accepted.thread_id.clone()),
@@ -3073,7 +3062,14 @@ async fn expected_reply_terminal_and_cancel_outcomes_deliver_http_after_sender_r
         .await;
         let child = child["thread_id"].as_str().unwrap().to_owned();
         let executable = env!("CARGO_BIN_EXE_shellboy").replace('\'', "'\\''");
-        first.reply.send(tool(&format!("'{executable}' message send --thread '{child}' --expect-reply --text 'outcome fixture'"),false)).ok().unwrap();
+        first
+            .reply
+            .send(tool(
+                &format!("'{executable}' message ask --thread '{child}' --text 'outcome fixture'"),
+                false,
+            ))
+            .ok()
+            .unwrap();
         let mut recipient = None;
         for _ in 0..2 {
             let request = incoming(&mut requests).await;

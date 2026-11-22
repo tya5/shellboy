@@ -903,9 +903,6 @@ pub struct MessageSendOptions {
     /// Explicitly resume recovery; acceptance is not execution success. Track the returned Turn with wait/turn get.
     #[arg(long)]
     pub resume_recovery: bool,
-    /// Require a deliberate reply to this message.
-    #[arg(long)]
-    pub expect_reply: bool,
     /// Self-asserted name (at most 64 Unicode characters); grants no authority.
     #[arg(long)]
     pub sender_label: Option<String>,
@@ -1758,8 +1755,6 @@ impl Cli {
                 MessageCommand::Send(a) => C::MessageSend(wire::MessageSendArgs {
                     human: false,
                     resume_recovery: a.resume_recovery,
-                    to_human: false,
-                    expect_reply: a.expect_reply,
                     sender_label: a.sender_label,
                     thread_id: a.thread_id,
                     text: read_text(a.text, stdin).await?,
@@ -1773,6 +1768,8 @@ impl Cli {
                     cursor: a.cursor,
                 }),
                 MessageCommand::Ask(a) => C::MessageAsk(wire::MessageAskArgs {
+                    human: false,
+                    sender_label: None,
                     thread_id: a.thread_id,
                     to: a.to,
                     deliver: a.deliver.unwrap_or_default(),

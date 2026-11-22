@@ -56,8 +56,6 @@ async fn fixture_with_policy(
                 Command::MessageSend(MessageSendArgs {
                     resume_recovery: false,
                     human: false,
-                    to_human: false,
-                    expect_reply: false,
                     sender_label: None,
                     deliver: crate::protocol::Deliver::Next,
                     thread_id: Some(thread),
@@ -1785,13 +1783,11 @@ async fn cancelled_reply_notice_reaches_next_admission_without_changing_current_
             .execute(
                 Request::new(
                     format!("{}:expected", owner.instance_id),
-                    Command::MessageSend(MessageSendArgs {
-                        resume_recovery: false,
-
+                    Command::MessageAsk(crate::protocol::MessageAskArgs {
+                        to: None,
                         human: false,
-                        to_human: false,
-                        expect_reply: true,
                         sender_label: None,
+
                         deliver: crate::protocol::Deliver::Next,
                         thread_id: Some(first.thread_id.clone()),
                         text: "synthetic reply duty".into(),
@@ -2312,8 +2308,6 @@ async fn recovery_rewind_stops_exact_waiting_run_and_preserves_held_input_body_a
                 Command::MessageSend(MessageSendArgs {
                     resume_recovery: false,
                     human: true,
-                    to_human: false,
-                    expect_reply: false,
                     sender_label: None,
                     deliver: crate::protocol::Deliver::Next,
                     thread_id: Some(accepted.thread_id.clone()),
@@ -2385,8 +2379,6 @@ async fn recovery_rewind_stops_exact_waiting_run_and_preserves_held_input_body_a
                 Command::MessageSend(MessageSendArgs {
                     resume_recovery: false,
                     human: false,
-                    to_human: false,
-                    expect_reply: false,
                     sender_label: None,
                     deliver: crate::protocol::Deliver::Next,
                     thread_id: Some(accepted.thread_id.clone()),
@@ -2501,8 +2493,6 @@ async fn recovery_rewind_stops_exact_waiting_run_and_preserves_held_input_body_a
                 Command::MessageSend(MessageSendArgs {
                     resume_recovery: false,
                     human: true,
-                    to_human: false,
-                    expect_reply: false,
                     sender_label: None,
                     deliver: crate::protocol::Deliver::Next,
                     thread_id: Some(accepted.thread_id.clone()),
@@ -2639,8 +2629,6 @@ async fn recovery_rewind_group_boundary_failure_rolls_back_stop_path_branch_and_
                 Command::MessageSend(MessageSendArgs {
                     resume_recovery: false,
                     human: false,
-                    to_human: false,
-                    expect_reply: false,
                     sender_label: None,
                     deliver: crate::protocol::Deliver::Next,
                     thread_id: Some(accepted.thread_id.clone()),
@@ -2903,8 +2891,6 @@ async fn received_attempt_is_not_adopted_after_interrupt_and_run_carries_next_tu
                 Command::MessageSend(MessageSendArgs {
                     resume_recovery: false,
                     human: false,
-                    to_human: false,
-                    expect_reply: false,
                     sender_label: None,
                     deliver: crate::protocol::Deliver::Next,
                     thread_id: Some(snapshot.thread.clone()),

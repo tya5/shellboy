@@ -97,10 +97,8 @@ async fn send(store: &Store, thread: &str, text: &str) -> (MessageAccepted, Muta
     let result = execute(
         store,
         Command::MessageSend(MessageSendArgs {
-            to_human: false,
             human: false,
             resume_recovery: false,
-            expect_reply: false,
             sender_label: None,
             deliver: Deliver::Next,
             thread_id: Some(thread.into()),
@@ -129,10 +127,8 @@ async fn same_operation_is_durable_idempotent_conflict_checked_and_old_instance_
     let (_directory, store) = store().await;
     let thread = create(&store, None).await;
     let req = request(Command::MessageSend(MessageSendArgs {
-        to_human: false,
         human: false,
         resume_recovery: false,
-        expect_reply: false,
         sender_label: None,
         deliver: Deliver::Next,
         thread_id: Some(thread.thread_id.clone()),
@@ -389,10 +385,8 @@ async fn acceptance_assignments_are_immutable_across_completion_stop_and_delete(
     .unwrap();
     assert_eq!(detail.delivery_status, DeliveryStatus::Cancelled);
     let sending = request(Command::MessageSend(MessageSendArgs {
-        to_human: false,
         human: false,
         resume_recovery: false,
-        expect_reply: false,
         sender_label: None,
         deliver: Deliver::Next,
         thread_id: Some(thread.thread_id),
@@ -443,8 +437,6 @@ async fn machine_message_does_not_resume_recovery_but_new_human_instruction_does
                 request(Command::MessageSend(MessageSendArgs {
                     human: false,
                     resume_recovery: false,
-                    to_human: false,
-                    expect_reply: false,
                     sender_label: None,
                     deliver: Deliver::Next,
                     thread_id: Some(child.thread_id.clone()),
@@ -462,10 +454,8 @@ async fn machine_message_does_not_resume_recovery_but_new_human_instruction_does
     let mechanical = store
         .execute(
             request(Command::MessageSend(MessageSendArgs {
-                to_human: false,
                 human: false,
                 resume_recovery: false,
-                expect_reply: false,
                 sender_label: None,
                 deliver: Deliver::Next,
                 thread_id: Some(child.thread_id.clone()),
@@ -486,8 +476,6 @@ async fn machine_message_does_not_resume_recovery_but_new_human_instruction_does
         Command::MessageSend(MessageSendArgs {
             human: true,
             resume_recovery: false,
-            to_human: false,
-            expect_reply: false,
             sender_label: None,
             deliver: Deliver::Next,
             thread_id: Some(child.thread_id.clone()),
@@ -531,10 +519,8 @@ async fn stopping_one_run_does_not_freeze_organizational_children() {
     let child_result = store
         .execute(
             request(Command::MessageSend(MessageSendArgs {
-                to_human: false,
                 human: false,
                 resume_recovery: false,
-                expect_reply: false,
                 sender_label: None,
                 deliver: Deliver::Next,
                 thread_id: Some(child.thread_id.clone()),
@@ -572,10 +558,8 @@ async fn stopping_one_run_does_not_freeze_organizational_children() {
     let result = store
         .execute(
             request(Command::MessageSend(MessageSendArgs {
-                to_human: false,
                 human: false,
                 resume_recovery: false,
-                expect_reply: false,
                 sender_label: None,
                 deliver: Deliver::Next,
                 thread_id: Some(new_child.thread_id),
@@ -609,10 +593,8 @@ async fn receipt_failure_rolls_back_message_run_turn_and_caches_error_without_ef
     let thread = create(&store, None).await;
     store.database.call(|connection| {connection.execute_batch("CREATE TRIGGER fixture_reject_receipt BEFORE INSERT ON receipt BEGIN SELECT RAISE(ABORT,'fixture save failure'); END;")?;Ok(())}).await.unwrap();
     let req = request(Command::MessageSend(MessageSendArgs {
-        to_human: false,
         human: false,
         resume_recovery: false,
-        expect_reply: false,
         sender_label: None,
         deliver: Deliver::Next,
         thread_id: Some(thread.thread_id),
@@ -720,12 +702,11 @@ async fn thread_list_awaiting_human_pages_only_human_waits_with_oldest_timestamp
     );
     let human_receipt = store
         .execute(
-            request(Command::MessageSend(MessageSendArgs {
-                to_human: true,
+            request(Command::MessageAsk(shellboy::protocol::MessageAskArgs {
+                to: None,
                 human: false,
-                resume_recovery: false,
-                expect_reply: true,
                 sender_label: None,
+
                 deliver: Deliver::Next,
                 thread_id: None,
                 text: "first question".into(),
@@ -739,12 +720,11 @@ async fn thread_list_awaiting_human_pages_only_human_waits_with_oldest_timestamp
         .message_id;
     let second_receipt = store
         .execute(
-            request(Command::MessageSend(MessageSendArgs {
-                to_human: true,
+            request(Command::MessageAsk(shellboy::protocol::MessageAskArgs {
+                to: None,
                 human: false,
-                resume_recovery: false,
-                expect_reply: true,
                 sender_label: None,
+
                 deliver: Deliver::Next,
                 thread_id: None,
                 text: "second question".into(),
@@ -758,12 +738,11 @@ async fn thread_list_awaiting_human_pages_only_human_waits_with_oldest_timestamp
         .message_id;
     store
         .execute(
-            request(Command::MessageSend(MessageSendArgs {
-                to_human: false,
+            request(Command::MessageAsk(shellboy::protocol::MessageAskArgs {
+                to: None,
                 human: false,
-                resume_recovery: false,
-                expect_reply: true,
                 sender_label: None,
+
                 deliver: Deliver::Next,
                 thread_id: Some(other.thread_id.clone()),
                 text: "thread duty".into(),
@@ -859,10 +838,8 @@ async fn explicit_new_human_send_assigns_only_unassigned_stopping_messages_once(
         .await
         .unwrap();
     let restart_request = request(Command::MessageSend(MessageSendArgs {
-        to_human: false,
         human: false,
         resume_recovery: false,
-        expect_reply: false,
         sender_label: None,
         deliver: Deliver::Next,
         thread_id: Some(thread.thread_id.clone()),
@@ -1190,10 +1167,8 @@ async fn any_caller_may_stop_any_independent_run_without_cascade() {
     let accepted = store
         .execute(
             request(Command::MessageSend(MessageSendArgs {
-                to_human: false,
                 human: false,
                 resume_recovery: false,
-                expect_reply: false,
                 sender_label: None,
                 deliver: Deliver::Next,
                 thread_id: Some(owned.thread_id),
@@ -1252,10 +1227,8 @@ async fn authenticated_origin_credentials_are_not_saved_in_receipts_or_runtime_i
         started.turn_id.as_deref().unwrap(),
     );
     let req = request(Command::MessageSend(MessageSendArgs {
-        to_human: false,
         human: false,
         resume_recovery: false,
-        expect_reply: false,
         sender_label: None,
         deliver: Deliver::Next,
         thread_id: None,
@@ -2004,8 +1977,6 @@ async fn explicit_recovery_releases_only_the_resumed_turn_and_zero_row_cas_relea
                 Command::MessageSend(MessageSendArgs {
                     human: true,
                     resume_recovery: false,
-                    to_human: false,
-                    expect_reply: false,
                     sender_label: None,
                     deliver: Deliver::Next,
                     thread_id: Some(thread.thread_id.clone()),
@@ -2753,10 +2724,8 @@ async fn owned_send(store: &Store, origin: &Origin, thread: &str) -> MessageAcce
     let accepted = store
         .execute(
             request(Command::MessageSend(MessageSendArgs {
-                to_human: false,
                 human: false,
                 resume_recovery: false,
-                expect_reply: false,
                 sender_label: None,
                 deliver: Deliver::Next,
                 thread_id: Some(thread.into()),

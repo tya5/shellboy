@@ -92,7 +92,6 @@ impl Form {
             "remove_tags" => FieldId::RemoveTags,
             "sender_label" => FieldId::SenderLabel,
             "deliver" => FieldId::Deliver,
-            "expect_reply" => FieldId::ExpectReply,
             "resume_recovery" => FieldId::ResumeRecovery,
             "text" => FieldId::Text,
             "condition" | "target" => FieldId::Conditions,
@@ -1211,7 +1210,6 @@ fn field_label_for(id: FieldId, language: crate::config::UiLanguage) -> &'static
         FieldId::AddTags => local!(language, "付けるタグ", "Tags to add"),
         FieldId::RemoveTags => local!(language, "外すタグ", "Tags to remove"),
         FieldId::SenderLabel => local!(language, "送信者の表示名", "Sender display name"),
-        FieldId::ExpectReply => local!(language, "返信を依頼", "Expect a reply"),
         FieldId::ResumeRecovery => local!(language, "復旧待ちを再開", "Resume recovery wait"),
         FieldId::Deliver => local!(language, "届けるとき", "Delivery timing"),
         FieldId::Text => local!(language, "入力本文", "Message text"),
@@ -1627,11 +1625,6 @@ fn field_help_for(id: FieldId, language: crate::config::UiLanguage) -> &'static 
             language,
             "自己申告の表示名であり権限を与えません。message sendは最大64Unicode文字です。",
             "A self-declared label; it grants no authority. message send allows at most 64 Unicode characters."
-        ),
-        FieldId::ExpectReply => local!(
-            language,
-            "指定メッセージへの返信を依頼します。",
-            "Request an explicit reply to this message."
         ),
         FieldId::ResumeRecovery => local!(
             language,

@@ -94,8 +94,6 @@ fn send(thread: &str, text: &str) -> Command {
         resume_recovery: false,
 
         human: false,
-        to_human: false,
-        expect_reply: false,
         sender_label: None,
         deliver: Deliver::Next,
         thread_id: Some(thread.into()),
@@ -440,12 +438,11 @@ async fn a_pending_reply_is_delivered_to_its_sender_after_the_recipient_moves() 
     );
     let asked = store
         .execute(
-            request(Command::MessageSend(MessageSendArgs {
-                resume_recovery: false,
+            request(Command::MessageAsk(shellboy::protocol::MessageAskArgs {
+                to: None,
                 human: false,
-                to_human: false,
-                expect_reply: true,
                 sender_label: None,
+
                 deliver: Deliver::Next,
                 thread_id: Some(recipient.clone()),
                 text: "answer please".into(),

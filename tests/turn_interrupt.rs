@@ -147,8 +147,6 @@ async fn start(control: &Arc<Control>) -> MessageAccepted {
             Command::MessageSend(MessageSendArgs {
                 resume_recovery: false,
                 human: false,
-                to_human: false,
-                expect_reply: false,
                 sender_label: None,
                 thread_id: Some(thread["thread_id"].as_str().unwrap().into()),
                 text: "fixture instruction".into(),
@@ -330,8 +328,6 @@ async fn interrupted_foreground_keeps_owned_work_and_carries_queued_input_in_sam
             resume_recovery: false,
 
             human: false,
-            to_human: false,
-            expect_reply: false,
             sender_label: None,
             thread_id: Some(accepted.thread_id.clone()),
             text: "new direction after interruption".into(),
@@ -453,8 +449,6 @@ async fn recovery_turn_interrupt_is_idempotent_and_stale_target_cannot_stop_repl
             resume_recovery: false,
 
             human: false,
-            to_human: false,
-            expect_reply: false,
             sender_label: None,
             thread_id: Some(accepted.thread_id.clone()),
             text: "a replacement turn".into(),
@@ -708,8 +702,6 @@ async fn ordinary_queued_input_keeps_foreground_group_intact_without_extra_model
             resume_recovery: false,
 
             human: false,
-            to_human: false,
-            expect_reply: false,
             sender_label: None,
             thread_id: Some(accepted.thread_id.clone()),
             text: "ordinary report for the next boundary".into(),

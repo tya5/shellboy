@@ -100,8 +100,6 @@ impl Fixture {
             Command::MessageSend(MessageSendArgs {
                 resume_recovery: false,
                 human: false,
-                to_human: false,
-                expect_reply: false,
                 sender_label: None,
                 deliver: crate::protocol::Deliver::Next,
                 thread_id: Some("t".into()),

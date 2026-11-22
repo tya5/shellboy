@@ -121,8 +121,6 @@ async fn send(control: &Arc<Control>, thread: &str, text: &str) {
             Command::MessageSend(MessageSendArgs {
                 resume_recovery: false,
                 human: false,
-                to_human: false,
-                expect_reply: false,
                 sender_label: None,
                 deliver: Deliver::Next,
                 thread_id: Some(thread.into()),

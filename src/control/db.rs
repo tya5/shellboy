@@ -24,8 +24,14 @@ use crate::{
     storage::{DbWorker, StorageError},
 };
 
+enum ReplyIntent<'a> {
+    None,
+    Thread,
+    Named(&'a str),
+}
+
 struct SendContent<'a> {
-    ask_name: Option<&'a str>,
+    reply: ReplyIntent<'a>,
     elements: Vec<Value>,
     sender: MessageSender,
 }
@@ -743,8 +749,6 @@ impl Store {
                         &MessageSendArgs {
                             human: true,
                             resume_recovery: false,
-                            to_human: false,
-                            expect_reply: false,
                             sender_label: None,
                             thread_id: Some(target),
                             text: content.text.clone(),
@@ -754,7 +758,7 @@ impl Store {
                         &operation_id,
                         now,
                         SendContent {
-                            ask_name: None,
+                            reply: ReplyIntent::None,
                             elements: content.new_source_elements(files.len())?,
                             sender: MessageSender::recorded(None, None, true),
                         },
@@ -1039,7 +1043,7 @@ impl Store {
                 if args.connection.is_some()||args.model.is_some()||args.effort.is_some(){store.set_thread(&tx,&ThreadSetArgs{ auto_compact_target_percent:None,summary_max_chars:None,max_tokens:None,spill:None,agents: None,thread_id:Some(fork.clone()),connection:args.connection,model:args.model,effort:args.effort,cwd:None,title:None,auto_compact_at:None,parent_id: None},None,&now)?;}
                 let revision:i64=history::selection_revision(&tx, &fork, history::ThreadScope::Any).map_err(sql_error)?;
                 let mut result=store.send_content(&tx,&MessageSendArgs { human: true, resume_recovery: false,
- to_human: false, expect_reply: false, sender_label: None,thread_id:Some(fork),text:content.text.clone(),deliver:options.deliver},None,&operation_id,&now,SendContent { ask_name: None, elements: content.new_source_elements(files.len())?, sender: MessageSender::recorded(None, None, true) })?;
+  sender_label: None,thread_id:Some(fork),text:content.text.clone(),deliver:options.deliver},None,&operation_id,&now,SendContent { reply: ReplyIntent::None, elements: content.new_source_elements(files.len())?, sender: MessageSender::recorded(None, None, true) })?;
                 let message=result.result.get("message_id").and_then(Value::as_str).ok_or_else(||error(ErrorCode::InvalidState,"Accepted edit has no source node"))?;
                 crate::attachments::add_tx(&tx,&crate::attachments::AddPlan{thread_id:result.result["thread_id"].as_str().unwrap().into(),selection_revision:revision,files},Some(message))?;
                 result.result["source_thread_id"]=json!(thread);result.result["replaced_request_id"]=json!(node);
@@ -1140,8 +1144,6 @@ impl Store {
                         &MessageSendArgs {
                             human: true,
                             resume_recovery: false,
-                            to_human: false,
-                            expect_reply: false,
                             sender_label: None,
                             thread_id: Some(thread_id),
                             text: text.as_ref().clone(),
@@ -1151,7 +1153,7 @@ impl Store {
                         &operation_id,
                         now,
                         SendContent {
-                            ask_name: None,
+                            reply: ReplyIntent::None,
                             elements: vec![json!({"type":"input_text","text":text.as_str()})],
                             sender: MessageSender::recorded(None, None, true),
                         },
@@ -2026,7 +2028,7 @@ impl Store {
             operation_id,
             now,
             SendContent {
-                ask_name: None,
+                reply: ReplyIntent::None,
                 elements: vec![json!({"type":"input_text","text":args.text})],
                 sender: MessageSender::recorded(caller, args.sender_label.clone(), args.human),
             },
@@ -2047,14 +2049,16 @@ impl Store {
                 "named questions require the current model Thread",
             ));
         }
-        let name = named.then(|| args.to.as_deref().unwrap_or("human"));
+        let reply = if named {
+            ReplyIntent::Named(args.to.as_deref().unwrap_or("human"))
+        } else {
+            ReplyIntent::Thread
+        };
         self.send_content(
             tx,
             &MessageSendArgs {
-                human: false,
+                human: args.human,
                 resume_recovery: false,
-                to_human: named,
-                expect_reply: true,
                 sender_label: None,
                 thread_id: args.thread_id.clone(),
                 text: args.text.clone(),
@@ -2065,8 +2069,8 @@ impl Store {
             now,
             SendContent {
                 elements: vec![json!({"type":"input_text","text":args.text})],
-                sender: MessageSender::recorded(caller, None, false),
-                ask_name: name,
+                sender: MessageSender::recorded(caller, args.sender_label.clone(), args.human),
+                reply,
             },
         )
     }
@@ -2086,20 +2090,10 @@ impl Store {
                 "message exceeds configured input limit",
             ));
         }
-        if args.to_human
-            && (!args.expect_reply
-                || args.human
-                || caller.is_none()
-                || args.thread_id.is_some()
-                || args.deliver != Deliver::Next)
-        {
-            return Err(error(
-                ErrorCode::InvalidArgument,
-                "human questions require a model origin, the current Thread, and default delivery",
-            ));
-        }
+        let named = matches!(content.reply, ReplyIntent::Named(_));
+        let expects_reply = !matches!(content.reply, ReplyIntent::None);
         let id = target(args.thread_id.as_deref(), caller)?;
-        if args.to_human {
+        if named {
             let exists: bool = tx
                 .query_row(
                     "SELECT EXISTS(SELECT 1 FROM thread WHERE id=?1 AND deleted_at IS NULL)",
@@ -2111,7 +2105,7 @@ impl Store {
                 return Err(error(ErrorCode::ThreadNotFound, "target Thread not found"));
             }
         }
-        if args.expect_reply {
+        if expects_reply {
             let limit = crate::protocol::MAX_PENDING_REPLY_DUTIES;
             let pending: i64 = tx.query_row(
                 "SELECT count(*) FROM (SELECT 1 FROM receipt INDEXED BY receipt_reply_pending \
@@ -2134,7 +2128,7 @@ impl Store {
             status,
             reason,
             wake,
-        } = if args.to_human {
+        } = if named {
             MessageAssignment {
                 run: None,
                 turn: None,
@@ -2155,14 +2149,14 @@ impl Store {
             )?
         };
         let message_id = uuid::Uuid::new_v4().to_string();
-        let role = if args.to_human { "assistant" } else { "user" };
+        let role = if named { "assistant" } else { "user" };
         let payload = json!({"role":role,"content":content.elements});
         let body = payload.to_string();
-        tx.execute("INSERT INTO node(id,turn_id,kind,created_at,payload_json,payload_bytes,body_hash) VALUES(?1,?2,?3,?4,?5,?6,?7)",params![message_id,assigned_turn,if args.to_human {"assistant"} else {"user"},now,body,body.len() as i64,hash(body.as_bytes())]).map_err(sql_error)?;
+        tx.execute("INSERT INTO node(id,turn_id,kind,created_at,payload_json,payload_bytes,body_hash) VALUES(?1,?2,?3,?4,?5,?6,?7)",params![message_id,assigned_turn,if named {"assistant"} else {"user"},now,body,body.len() as i64,hash(body.as_bytes())]).map_err(sql_error)?;
         self.index
             .authorize_new_tx(tx, std::slice::from_ref(&message_id))?;
         let receipt_id = uuid::Uuid::new_v4().to_string();
-        let state = if args.to_human {
+        let state = if named {
             "applied"
         } else {
             match status {
@@ -2172,8 +2166,8 @@ impl Store {
             }
         };
         let accepted = MessageAccepted {
-            to_human: args.to_human,
-            expect_reply: args.expect_reply,
+            to_human: named,
+            expect_reply: expects_reply,
             message_id: message_id.clone(),
             thread_id: id.clone(),
             delivery_status: status,
@@ -2184,14 +2178,14 @@ impl Store {
         };
         let mut saved_acceptance = serde_json::to_value(&accepted)
             .map_err(|_| error(ErrorCode::InvalidState, "Cannot encode message acceptance"))?;
-        if args.expect_reply {
+        if expects_reply {
             saved_acceptance["reply"] = json!({"state":"pending"});
         }
-        if let Some(name) = content.ask_name {
+        if let ReplyIntent::Named(name) = content.reply {
             saved_acceptance["ask_name"] = json!(name);
         }
         tx.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,run_id,turn_id,state,created_at,updated_at,hold_reason,result_json) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?9,?10,?11)",params![receipt_id,operation_id,serde_json::to_string(&content.sender).unwrap(),id,message_id,accepted.run_id,accepted.turn_id,state,now,reason,saved_acceptance.to_string()]).map_err(sql_error)?;
-        if args.to_human {
+        if named {
             // Unarchive immediately, but defer only selected-path mutation to a real path boundary.
             archive::clear_automatically(tx, &id, archive::UnarchiveReason::QuestionAsked, now)
                 .map_err(sql_error)?;
@@ -2214,7 +2208,7 @@ impl Store {
             // Queued or held messages change saved delivery state without a wake (#243).
             result.changed_threads.push(id);
         }
-        if args.expect_reply
+        if expects_reply
             && let Some(origin) = caller
             && origin.thread_id != accepted_thread
         {
@@ -2493,15 +2487,14 @@ fn read_thread_details(
     id: &str,
     include_summarizing: bool,
 ) -> Result<ThreadDetails> {
-    let mut details=connection.query_row("SELECT title,cwd,profile_id,model_id,effort,parent_thread_id,agents_path,auto_compact_at,archived_at,auto_compact_target_percent,summary_max_chars,max_tokens,spill_override FROM thread WHERE id=?1 AND deleted_at IS NULL",[id],|row|Ok(ThreadDetails { instruction_sources: None, archived_at: row.get(8)?, tags: Vec::new(), auto_compact_at: row.get::<_,Option<i64>>(7)?.map(|v|v as u64), effective_auto_compact_at: None, auto_compact_target_percent: row.get::<_,Option<i64>>(9)?.map(|v|v as u64), summary_max_chars:row.get::<_,Option<i64>>(10)?.map(|v|v as u64), effective_auto_compact_target_percent:None,effective_summary_max_chars:None,max_tokens:row.get::<_,Option<i64>>(11)?.map(|v|v as u64),spill:crate::storage::decode_spill_override(row.get_ref(12)?,12)?,effective_spill:false,effective_max_tokens:None,awaiting_replies: Vec::new(), last_end_message: None, last_input: None,  last_compaction:None,summarizing:false,agents_path: row.get(6)?,context_usage:None,thread_id:id.into(),title:row.get(0)?,cwd:row.get(1)?,connection:row.get(2)?,model:row.get(3)?,effort:row.get(4)?,parent_id:row.get(5)?,run_id:None,turn_id:None,shells_count:0,recovery_reason:None,parent_change:None,context:None})).optional().map_err(sql_error)?.ok_or_else(||error(ErrorCode::ThreadNotFound,"Thread not found"))?;
+    let mut details=connection.query_row("SELECT title,cwd,profile_id,model_id,effort,parent_thread_id,agents_path,auto_compact_at,archived_at,auto_compact_target_percent,summary_max_chars,max_tokens,spill_override FROM thread WHERE id=?1 AND deleted_at IS NULL",[id],|row|Ok(ThreadDetails { instruction_sources: None, archived_at: row.get(8)?, tags: Vec::new(), auto_compact_at: row.get::<_,Option<i64>>(7)?.map(|v|v as u64), effective_auto_compact_at: None, auto_compact_target_percent: row.get::<_,Option<i64>>(9)?.map(|v|v as u64), summary_max_chars:row.get::<_,Option<i64>>(10)?.map(|v|v as u64), effective_auto_compact_target_percent:None,effective_summary_max_chars:None,max_tokens:row.get::<_,Option<i64>>(11)?.map(|v|v as u64),spill:crate::storage::decode_spill_override(row.get_ref(12)?,12)?,effective_spill:false,effective_max_tokens:None,pending_replies: Default::default(), last_end_message: None, last_input: None,  last_compaction:None,summarizing:false,agents_path: row.get(6)?,context_usage:None,thread_id:id.into(),title:row.get(0)?,cwd:row.get(1)?,connection:row.get(2)?,model:row.get(3)?,effort:row.get(4)?,parent_id:row.get(5)?,run_id:None,turn_id:None,shells_count:0,recovery_reason:None,parent_change:None,context:None})).optional().map_err(sql_error)?.ok_or_else(||error(ErrorCode::ThreadNotFound,"Thread not found"))?;
     details.instruction_sources = connection.query_row(
         "SELECT CASE WHEN s.content_hash GLOB 'instruction-bundle-v1:sha256:*' AND json_valid(substr(s.body,38)) THEN json_extract(substr(s.body,38),'$.extra') ELSE NULL END FROM turn t JOIN instruction_snapshot s ON s.id=t.instruction_snapshot_id WHERE t.thread_id=?1 ORDER BY t.created_at DESC,t.rowid DESC LIMIT 1",[id],|r|r.get::<_,Option<String>>(0)).optional().map_err(sql_error)?.flatten().and_then(|body|serde_json::from_str::<Vec<Value>>(&body).ok()).map(|mut files| {for file in &mut files {if let Some(file)=file.as_object_mut() { file.remove("body"); }} json!({"extra":files,"snapshot":"latest_prepared_turn"})});
     details.tags = tags::for_thread(connection, id)?;
     details.context = Some(crate::context::for_thread(connection, id)?);
     details.last_end_message = crate::thread_observation::last_end_message(connection, id)?;
     details.last_input = crate::thread_observation::last_input(connection, id)?;
-    details.awaiting_replies =
-        super::reply::awaiting_replies_tx(connection, id, None).map_err(sql_error)?;
+    details.pending_replies = super::reply::pending_counts(connection, id).map_err(sql_error)?;
     details.title = thread_display_title(connection, id, &details.title)?;
     let run: Option<(String, String)> = connection
         .query_row(
@@ -5099,12 +5092,11 @@ mod agents_reference_tests {
             .unwrap()
             .to_owned();
         let send = |text: String| {
-            Command::MessageSend(MessageSendArgs {
+            Command::MessageAsk(crate::protocol::MessageAskArgs {
+                to: None,
                 human: false,
-                resume_recovery: false,
-                to_human: false,
-                expect_reply: true,
                 sender_label: None,
+
                 thread_id: Some(thread.clone()),
                 text,
                 deliver: Deliver::Next,
@@ -5589,8 +5581,6 @@ mod agents_reference_tests {
                     req(Command::MessageSend(MessageSendArgs {
                         human: false,
                         resume_recovery: false,
-                        to_human: false,
-                        expect_reply: false,
                         thread_id: Some(target.clone()),
                         text: "synthetic sender fixture".into(),
                         deliver: Deliver::Next,
@@ -5721,8 +5711,6 @@ mod agents_reference_tests {
                 req(Command::MessageSend(MessageSendArgs {
                     human: false,
                     resume_recovery: false,
-                    to_human: false,
-                    expect_reply: false,
                     thread_id: Some(target),
                     text: "no authority from label".into(),
                     deliver: Deliver::Next,
@@ -5993,8 +5981,6 @@ mod message_acknowledgement_state_tests {
             Command::MessageSend(MessageSendArgs {
                 human: false,
                 resume_recovery: false,
-                to_human: false,
-                expect_reply: false,
                 sender_label: None,
                 thread_id: Some("t".into()),
                 text: "urgent".into(),
@@ -6072,6 +6058,8 @@ mod message_acknowledgement_state_tests {
                 Request::new(
                     "fixture:question-admission",
                     Command::MessageAsk(MessageAskArgs {
+                        human: false,
+                        sender_label: None,
                         thread_id: None,
                         to: None,
                         deliver: Deliver::Next,
@@ -6717,8 +6705,6 @@ mod independent_run_notification_tests {
                 Command::MessageSend(MessageSendArgs {
                     human: false,
                     resume_recovery: false,
-                    to_human: false,
-                    expect_reply: false,
                     sender_label: None,
                     thread_id: Some("child".into()),
                     text: "synthetic delegation".into(),
@@ -6762,8 +6748,6 @@ mod independent_run_notification_tests {
                                 Command::MessageSend(MessageSendArgs {
                                     human: false,
                                     resume_recovery: false,
-                                    to_human: false,
-                                    expect_reply: false,
                                     sender_label: None,
                                     thread_id: Some("child".into()),
                                     text: "another input".into(),

@@ -952,10 +952,8 @@ fn current_output_and_history_results_require_observation_fields() {
 #[test]
 fn message_resume_recovery_is_optional_and_round_trips() {
     let command = Command::MessageSend(MessageSendArgs {
-        to_human: false,
         human: false,
         resume_recovery: true,
-        expect_reply: false,
         sender_label: None,
         thread_id: None,
         text: "x".into(),
@@ -975,8 +973,6 @@ fn message_delivery_timing_is_one_optional_wire_field() {
         Command::MessageSend(MessageSendArgs {
             resume_recovery: false,
             human: false,
-            to_human: false,
-            expect_reply: false,
             sender_label: None,
             thread_id: None,
             text: "x".into(),

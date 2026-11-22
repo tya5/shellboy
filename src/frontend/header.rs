@@ -162,7 +162,7 @@ pub(super) fn read_tx(db: &Connection, thread: &str) -> Result<RawHeader, Storag
         effective_auto_compact_target_percent: None,
         effective_summary_max_chars: None,
         effective_max_tokens: None,
-        awaiting_replies: Vec::new(),
+        pending_replies: Default::default(),
         last_end_message: None,
         last_input: None,
         last_compaction: None,

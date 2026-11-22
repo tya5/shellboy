@@ -20,12 +20,20 @@ fn request(command: Command) -> Request {
     Request::new(format!("fixture:{}", uuid::Uuid::new_v4()), command)
 }
 fn send(expected: bool) -> Command {
+    if expected {
+        return Command::MessageAsk(MessageAskArgs {
+            thread_id: Some("recipient".into()),
+            text: "synthetic request".into(),
+            deliver: Deliver::Next,
+            to: None,
+            human: false,
+            sender_label: None,
+        });
+    }
     Command::MessageSend(MessageSendArgs {
         resume_recovery: false,
 
         human: false,
-        to_human: false,
-        expect_reply: expected,
         sender_label: None,
         thread_id: Some("recipient".into()),
         text: "synthetic request".into(),

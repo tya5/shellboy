@@ -103,6 +103,8 @@ async fn human_question_reply_cancel_and_attachment_frontier_preserve_fifo() {
         Request::new(
             format!("fixture:{operation}"),
             Command::MessageAsk(MessageAskArgs {
+                human: false,
+                sender_label: None,
                 thread_id: None,
                 to: None,
                 deliver: Deliver::Next,
@@ -425,8 +427,6 @@ async fn held_frontier_defers_the_replied_question_and_later_attachment() {
                 Command::MessageSend(MessageSendArgs {
                     human: true,
                     resume_recovery: false,
-                    to_human: false,
-                    expect_reply: false,
                     sender_label: None,
                     thread_id: Some("t".into()),
                     text: "held H".into(),
@@ -462,6 +462,8 @@ async fn held_frontier_defers_the_replied_question_and_later_attachment() {
             Request::new(
                 "fixture:held-frontier-question",
                 Command::MessageAsk(MessageAskArgs {
+                    human: false,
+                    sender_label: None,
                     thread_id: None,
                     to: None,
                     deliver: Deliver::Next,
@@ -898,8 +900,6 @@ async fn only_explicit_unadmitted_now_input_releases_foreground_wait() {
                 Command::MessageSend(MessageSendArgs {
                     resume_recovery: false,
                     human: false,
-                    to_human: false,
-                    expect_reply: false,
                     sender_label: None,
                     thread_id: Some("t".into()),
                     text: "ordinary".into(),
@@ -927,8 +927,6 @@ async fn only_explicit_unadmitted_now_input_releases_foreground_wait() {
                 Command::MessageSend(MessageSendArgs {
                     resume_recovery: false,
                     human: false,
-                    to_human: false,
-                    expect_reply: false,
                     sender_label: None,
                     thread_id: Some("t".into()),
                     text: "urgent".into(),

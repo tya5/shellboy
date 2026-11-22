@@ -1004,8 +1004,6 @@ async fn message_delivery_timing_replaces_now_and_revisit_commands() {
             Command::MessageSend(MessageSendArgs {
                 resume_recovery: false,
                 human: false,
-                to_human: false,
-                expect_reply: false,
                 sender_label: None,
                 thread_id: None,
                 text: "Check again".into(),

@@ -147,24 +147,24 @@ fn append_admission_notice_tx(
     Ok(())
 }
 
-pub(super) fn list_pending(
-    db: &Connection,
-    args: &crate::protocol::MessageListArgs,
-) -> Result<crate::protocol::Page<Value>, crate::protocol::ApiError> {
-    use crate::protocol::{ApiError, ErrorCode, Page, PageCursor};
-    let (index, predicate, key) = if let Some(thread) = args.owed_by.as_deref() {
+fn pending_direction<'a>(
+    owed_by: Option<&'a str>,
+    asked_by: Option<&'a str>,
+    to: Option<&'a str>,
+) -> (&'static str, &'static str, &'a str) {
+    if let Some(thread) = owed_by {
         (
             "receipt_pending_owed",
             "r.target_thread_id=?1 AND json_extract(r.result_json,'$.ask_name') IS NULL",
             thread,
         )
-    } else if let Some(thread) = args.asked_by.as_deref() {
+    } else if let Some(thread) = asked_by {
         (
             "receipt_pending_asked",
             "json_extract(r.sender_json,'$.thread_id')=?1 AND json_extract(r.sender_json,'$.kind')='model'",
             thread,
         )
-    } else if let Some(name) = args.to.as_deref() {
+    } else if let Some(name) = to {
         (
             "receipt_pending_to",
             "json_extract(r.result_json,'$.ask_name')=?1",
@@ -172,7 +172,41 @@ pub(super) fn list_pending(
         )
     } else {
         ("receipt_pending_by_time", "?1=''", "")
+    }
+}
+
+pub(super) fn pending_counts(
+    db: &Connection,
+    thread: &str,
+) -> rusqlite::Result<crate::protocol::PendingReplyCounts> {
+    let count = |owed_by, asked_by| {
+        let (index, predicate, key) = pending_direction(owed_by, asked_by, None);
+        let sql = format!(
+            "SELECT COUNT(*) FROM (SELECT 1 FROM receipt r INDEXED BY {index} WHERE json_extract(r.result_json,'$.reply.state')='pending' AND {predicate} LIMIT ?2)"
+        );
+        let cap = crate::protocol::MAX_PENDING_REPLY_DUTIES as i64;
+        let count = db.query_row(&sql, params![key, cap + 1], |row| row.get::<_, i64>(0))?;
+        Ok::<_, rusqlite::Error>(crate::protocol::PendingReplyCount {
+            count: count as u64,
+            exact: count <= cap,
+        })
     };
+    Ok(crate::protocol::PendingReplyCounts {
+        owed_by: count(Some(thread), None)?,
+        asked_by: count(None, Some(thread))?,
+    })
+}
+
+pub(super) fn list_pending(
+    db: &Connection,
+    args: &crate::protocol::MessageListArgs,
+) -> Result<crate::protocol::Page<Value>, crate::protocol::ApiError> {
+    use crate::protocol::{ApiError, ErrorCode, Page, PageCursor};
+    let (index, predicate, key) = pending_direction(
+        args.owed_by.as_deref(),
+        args.asked_by.as_deref(),
+        args.to.as_deref(),
+    );
     let scope = "message.list.pending";
     let filter = json!([index, key]).to_string();
     let (time, id): (String, String) = if let Some(token) = &args.cursor {
@@ -447,8 +481,6 @@ impl super::db::Store {
                 &MessageSendArgs {
                     human: caller.is_none(),
                     resume_recovery: saved["to_human"] == true && caller.is_none(),
-                    to_human: false,
-                    expect_reply: false,
                     sender_label: args.sender_label.clone(),
                     thread_id: Some(target.into()),
                     text: args.text.clone(),

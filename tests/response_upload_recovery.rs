@@ -127,8 +127,6 @@ async fn upload_recovery(auto_trim: bool) {
             Command::MessageSend(MessageSendArgs {
                 resume_recovery: false,
                 human: false,
-                to_human: false,
-                expect_reply: false,
                 sender_label: None,
                 deliver: Deliver::Next,
                 thread_id: Some(thread.clone()),
@@ -302,8 +300,6 @@ async fn refused_proxy_connections_exhaust_the_finite_retry_budget() {
             Command::MessageSend(MessageSendArgs {
                 resume_recovery: false,
                 human: false,
-                to_human: false,
-                expect_reply: false,
                 sender_label: None,
                 deliver: Deliver::Next,
                 thread_id: Some(thread.clone()),

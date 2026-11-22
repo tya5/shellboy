@@ -289,7 +289,6 @@ const MEANINGS: &[Meaning] = &[
             ("thread_id", FieldId::Thread),
             ("sender_label", FieldId::SenderLabel),
             ("deliver", FieldId::Deliver),
-            ("expect_reply", FieldId::ExpectReply),
             ("resume_recovery", FieldId::ResumeRecovery),
             ("text", FieldId::Text),
             ("text_stdin", FieldId::Text),

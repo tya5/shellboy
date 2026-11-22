@@ -290,8 +290,6 @@ impl Fixture {
                 Command::MessageSend(MessageSendArgs {
                     resume_recovery: false,
                     human: false,
-                    to_human: false,
-                    expect_reply: false,
                     sender_label: None,
                     deliver: Deliver::Next,
                     thread_id: Some(id),
@@ -897,8 +895,6 @@ async fn run_end_selects_last_turn_after_processing_turn() {
             Command::MessageSend(MessageSendArgs {
                 resume_recovery: false,
                 human: false,
-                to_human: false,
-                expect_reply: false,
                 thread_id: Some(accepted.thread_id.clone()),
                 text: "later turn".into(),
                 deliver: Deliver::Complete,

@@ -228,18 +228,27 @@ impl<W: Write> Chat<'_, W> {
         // Take the cursor before sending so a change between send and the first
         // read is reported by the first wait instead of being missed.
         self.baseline().await?;
-        let accepted: MessageAccepted = self
-            .call(Command::MessageSend(MessageSendArgs {
-                resume_recovery: false,
+        let thread_id = self.thread.clone();
+        let command = if self.until == ResultMode::Reply {
+            Command::MessageAsk(MessageAskArgs {
                 human: self.human,
-                to_human: false,
-                expect_reply: self.until == ResultMode::Reply,
                 sender_label: None,
-                thread_id: self.thread.clone(),
+                thread_id,
                 text,
+                to: None,
                 deliver: Deliver::Next,
-            }))
-            .await?;
+            })
+        } else {
+            Command::MessageSend(MessageSendArgs {
+                human: self.human,
+                sender_label: None,
+                thread_id,
+                text,
+                resume_recovery: false,
+                deliver: Deliver::Next,
+            })
+        };
+        let accepted: MessageAccepted = self.call(command).await?;
         self.message = Some(accepted.message_id.clone());
         self.run = accepted.run_id.clone();
         self.turn = accepted.turn_id.clone();

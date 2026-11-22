@@ -320,10 +320,8 @@ async fn unadmitted_input_is_delivered_once_on_the_rewound_path() {
     let request = Request::new(
         format!("instance:{}", uuid::Uuid::new_v4()),
         Command::MessageSend(MessageSendArgs {
-            to_human: false,
             human: true,
             resume_recovery: false,
-            expect_reply: false,
             sender_label: None,
             thread_id: Some("T".into()),
             text: "continue after rewind".into(),
