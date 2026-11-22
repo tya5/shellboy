@@ -133,6 +133,7 @@ const MEANINGS: &[Meaning] = &[
             ("query", FieldId::Query),
             ("awaiting", FieldId::Awaiting),
             ("archived", FieldId::Archived),
+            ("order", FieldId::ThreadListOrder),
             ("tags", FieldId::Tags),
             ("cwd", FieldId::Cwd),
         ],

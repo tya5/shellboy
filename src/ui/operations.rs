@@ -1163,6 +1163,12 @@ impl Form {
                         Choice(&["", "human"]),
                     ));
                     v.push(f(
+                        "order",
+                        "並び順",
+                        "updated".into(),
+                        Choice(&["updated", "created"]),
+                    ));
+                    v.push(f(
                         "archived",
                         "アーカイブ済み（空=隠す）",
                         String::new(),
@@ -1179,7 +1185,11 @@ impl Form {
                 },
                 |form, cwd| {
                     Ok(Command::ThreadList(ThreadListArgs {
-                        order: Default::default(),
+                        order: if form.optional("order")?.as_deref() == Some("created") {
+                            crate::protocol::ThreadListOrder::Created
+                        } else {
+                            crate::protocol::ThreadListOrder::Updated
+                        },
                         limit: form.number("limit")?,
                         cursor: form.optional("cursor")?,
                         query: form.optional("query")?,

@@ -85,6 +85,7 @@ impl Form {
             "title" | "title_mode" => FieldId::Title,
             "descendants" => FieldId::Descendants,
             "archived" => FieldId::Archived,
+            "order" => FieldId::ThreadListOrder,
             "awaiting" => FieldId::Awaiting,
             "tags" => FieldId::Tags,
             "add_tags" => FieldId::AddTags,
@@ -1194,6 +1195,7 @@ fn field_label_for(id: FieldId, language: crate::config::UiLanguage) -> &'static
         FieldId::ScheduleCommand => local!(language, "コマンド", "Command"),
         FieldId::Title => local!(language, "表示タイトル", "Display title"),
         FieldId::Descendants => local!(language, "子孫も対象", "Include descendants"),
+        FieldId::ThreadListOrder => local!(language, "並び順", "Order"),
         FieldId::Archived => local!(language, "アーカイブの扱い", "Archived conversations"),
         FieldId::Tags => local!(language, "タグで絞り込み", "Filter by tags"),
         FieldId::AddTags => local!(language, "付けるタグ", "Tags to add"),
@@ -1577,6 +1579,11 @@ fn field_help_for(id: FieldId, language: crate::config::UiLanguage) -> &'static 
             language,
             "親子関係上の子孫Threadも削除／削除影響確認／アーカイブの対象へ含めます。",
             "Include descendant Threads in deletion, its impact preview, or archiving."
+        ),
+        FieldId::ThreadListOrder => local!(
+            language,
+            "updatedは更新順、createdは作成順（新しい順）。createdはアーカイブ指定とのみ併用できます。",
+            "Choose updated (default) or created (newest first). Created order only supports archive selection."
         ),
         FieldId::Archived => local!(
             language,

@@ -2430,8 +2430,12 @@ mod thread_creation_migration_tests {
                 VALUES('receipt','op','{}','held','held-node','held','30','{}');
             INSERT INTO thread_path(thread_id,ordinal,node_id) VALUES('fork',0,'known');").unwrap();
         run(&mut db, 52, &|_, _| {}, &|| {}).unwrap();
-        for (id, expected) in [("t",Some("20")), ("held",Some("10")), ("fork",None)] {
-            let actual: Option<String> = db.query_row("SELECT created_at FROM thread WHERE id=?1", [id], |r| r.get(0)).unwrap();
+        for (id, expected) in [("t", Some("20")), ("held", Some("10")), ("fork", None)] {
+            let actual: Option<String> = db
+                .query_row("SELECT created_at FROM thread WHERE id=?1", [id], |r| {
+                    r.get(0)
+                })
+                .unwrap();
             assert_eq!(actual.as_deref(), expected, "{id}");
         }
     }
