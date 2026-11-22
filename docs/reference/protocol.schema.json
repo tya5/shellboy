@@ -1,5 +1,5 @@
 {
-  "$id": "https://shellboy.dev/schema/protocol-v8.json",
+  "$id": "https://shellboy.dev/schema/protocol-v9.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "capabilities": [
     "events.reasoning_activity",
@@ -8689,8 +8689,7 @@
             "string",
             "null"
           ]
-        },
-        "usage_totals": true
+        }
       },
       "required": [
         "summarizing",
@@ -11983,8 +11982,7 @@
             "string",
             "null"
           ]
-        },
-        "usage_totals": true
+        }
       },
       "required": [
         "summarizing",
@@ -12206,8 +12204,7 @@
             "string",
             "null"
           ]
-        },
-        "usage_totals": true
+        }
       },
       "required": [
         "summarizing",
@@ -12357,6 +12354,6 @@
       "type": "object"
     }
   },
-  "protocol_version": 8,
-  "title": "Shellboy local RPC protocol v8"
+  "protocol_version": 9,
+  "title": "Shellboy local RPC protocol v9"
 }
