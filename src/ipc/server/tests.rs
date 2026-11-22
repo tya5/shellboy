@@ -146,6 +146,95 @@ impl Fixture {
 }
 
 #[tokio::test]
+async fn parked_waits_leave_ordinary_and_stop_admission_available() {
+    use crate::protocol::{
+        EventsWaitArgs, Request, RunTarget, WaitArgs, WaitCondition, read_frame, write_frame,
+    };
+    let mut fixture = Fixture::new();
+    let mut clients = Vec::new();
+    let mut accepted = Vec::new();
+    let wait = || {
+        Command::Wait(WaitArgs {
+            after: None,
+            conditions: vec![WaitCondition::RunEnded {
+                run_id: "run".into(),
+            }],
+            timeout_ms: 60000,
+        })
+    };
+    for number in 0..32 {
+        let command = if number % 2 == 0 {
+            wait()
+        } else {
+            Command::EventsWait(EventsWaitArgs {
+                after: None,
+                thread_ids: Vec::new(),
+                timeout_ms: 60000,
+                include_text: false,
+                include_reasoning_activity: false,
+            })
+        };
+        clients.push(fixture.connect_command(number, command).await);
+        accepted.push(fixture.accepted().await);
+    }
+
+    let mut rejected = fixture.pending_connection().await;
+    write_frame(&mut rejected, &Request::new("fixture:32".into(), wait()))
+        .await
+        .unwrap();
+    let response = crate::test_watchdog::watchdog(
+        "wait capacity refusal",
+        read_frame::<_, Response<serde_json::Value>>(&mut rejected),
+    )
+    .await
+    .unwrap()
+    .unwrap()
+    .unwrap();
+    let error = response.error.unwrap();
+    assert_eq!(error.code, ErrorCode::InvalidState);
+    let details = error.details.unwrap();
+    assert_eq!(details["phase"], "admission");
+    assert_eq!(details["request_may_have_been_applied"], false);
+    let eof = crate::test_watchdog::watchdog(
+        "refused wait closes",
+        read_frame::<_, Response<serde_json::Value>>(&mut rejected),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(eof.is_none());
+    assert!(fixture.incoming.try_recv().is_err());
+
+    let ordinary = fixture.connect(33).await;
+    let stop = fixture
+        .connect_command(
+            34,
+            Command::RunStop(RunTarget {
+                run_id: "run".into(),
+            }),
+        )
+        .await;
+    for _ in 0..2 {
+        let invocation = fixture.accepted().await;
+        invocation
+            .reply
+            .send(Response::success(
+                invocation.request.operation_id,
+                serde_json::Value::Null,
+            ))
+            .unwrap();
+    }
+    assert!(ordinary.await.unwrap().unwrap().ok);
+    assert!(stop.await.unwrap().unwrap().ok);
+    assert!(clients.iter().all(|client| !client.is_finished()));
+    drop(accepted);
+    for client in clients {
+        assert!(!client.await.unwrap().unwrap().ok);
+    }
+    fixture.server.shutdown().await.unwrap();
+}
+
+#[tokio::test]
 async fn full_work_admission_does_not_block_status_or_stop_and_remains_bounded() {
     use crate::protocol::{RunTarget, StatusArgs, WaitArgs, WaitCondition};
     let mut fixture = Fixture::new();
