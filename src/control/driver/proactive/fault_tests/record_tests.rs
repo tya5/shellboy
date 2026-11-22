@@ -220,14 +220,7 @@ async fn record_boundary(fault: Fault, scenario: Scenario) -> Value {
     if fault == Fault::RejectFact {
         assert!(receipt.terminal["committed_stages"][scenario.stage()].is_null());
     }
-    if fault == Fault::RejectFinal && scenario == Scenario::ActiveSpill {
-        assert!(receipt.terminal["committed_stages"]["active_spill"].is_object());
-        assert!(
-            receipt.terminal["committed_stages"]["active_summary"].is_null(),
-            "rejected strict FINISH rolls back the follow-on summary transaction"
-        );
-    }
-    if scenario == Scenario::ActiveSpill && fault == Fault::Remeasurement {
+    if scenario.continues_to_active_summary(fault) {
         assert!(receipt.terminal["committed_stages"]["active_summary"].is_object());
         let mut prior = receipt.terminal["committed_stages"].clone();
         prior.as_object_mut().unwrap().remove("active_summary");
