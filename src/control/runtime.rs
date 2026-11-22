@@ -723,7 +723,7 @@ impl Control {
                 usize::from(record_shell_stop(&tx,&execution,ShellStopIntent::Explicit)?)
             };
             let target = if changed != 0 {
-                Some(tx.query_row("SELECT COALESCE(r.thread_id,q.thread_id) FROM shell_execution s LEFT JOIN run r ON r.id=s.owner_run_id LEFT JOIN schedule q ON q.id=s.schedule_id WHERE s.id=?1",[execution],|r|r.get::<_,String>(0))?)
+                Some(tx.query_row("SELECT COALESCE(r.thread_id,q.thread_id,s.detached_thread_id) FROM shell_execution s LEFT JOIN run r ON r.id=s.owner_run_id LEFT JOIN schedule q ON q.id=s.schedule_id WHERE s.id=?1",[execution],|r|r.get::<_,String>(0))?)
             } else { None };
             tx.commit()?;
             Ok(target)
@@ -795,12 +795,12 @@ impl Control {
         let execution = execution.to_owned();
         let (stop,eof,thread) = self.store.database.call(move |db| {
             let tx = db.transaction()?;
-            let (state,stdin,run,thread):(String,String,Option<String>,String) = tx.query_row("SELECT s.state,s.stdin_state,r.state,COALESCE(r.thread_id,q.thread_id) FROM shell_execution s LEFT JOIN run r ON r.id=s.owner_run_id LEFT JOIN schedule q ON q.id=s.schedule_id WHERE s.id=?1",[&execution],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)))?;
+            let (state,stdin,run,thread):(String,String,Option<String>,String) = tx.query_row("SELECT s.state,s.stdin_state,r.state,COALESCE(r.thread_id,q.thread_id,s.detached_thread_id) FROM shell_execution s LEFT JOIN run r ON r.id=s.owner_run_id LEFT JOIN schedule q ON q.id=s.schedule_id WHERE s.id=?1",[&execution],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)))?;
             let stop = !matches!(state.as_str(),"starting"|"running") || run.as_deref().is_some_and(|state| state!="live");
             if spawned {
                 tx.execute("UPDATE shell_execution SET shell_json=json_set(shell_json,'$.spawned',json('true')),state=CASE WHEN state='starting' THEN 'running' ELSE state END WHERE id=?1",[execution])?;
-            } else if stop {
-                tx.execute("UPDATE shell_execution SET state='stopped',end_reason=COALESCE(end_reason,'stopped_before_spawn'),output_complete=0,ended_at=?2 WHERE id=?1 AND state IN ('starting','stopping')",rusqlite::params![execution,chrono::Utc::now().to_rfc3339()])?;
+            } else if stop && tx.execute("UPDATE shell_execution SET state='stopped',end_reason=COALESCE(end_reason,'stopped_before_spawn'),output_complete=0,ended_at=?2 WHERE id=?1 AND state IN ('starting','stopping')",rusqlite::params![&execution,chrono::Utc::now().to_rfc3339()])? != 0 {
+                super::schedule::retire_oneshot(&tx,&execution)?;
             }
             tx.commit()?;
             Ok((stop,stdin=="closed",thread))

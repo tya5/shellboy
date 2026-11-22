@@ -604,6 +604,11 @@ and font and report whether this option helps.
 
 Use the Thread scheduler (cron, 定期実行, スケジュール) to run commands at set times.
 
+One-shot schedules (`--at` or `--in`) disappear from `schedule list` when their
+execution settles, even if it fails or is stopped. Find the result with
+`shellboy shell list --thread THREAD`, then inspect its status and saved output
+with `shell get` and `shell read`. Recurring schedules stay listed.
+
 Use `shellboy schedule add --thread THREAD --cron '0 * * * *' -- 'echo check'`
 for a recurring command, or replace `--cron` with `--at` (an RFC 3339 time)
 or `--in 10m` for a one-shot. The command uses the Thread's working directory

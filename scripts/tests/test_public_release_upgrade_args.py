@@ -45,7 +45,7 @@ class PublicUpgradeArguments(unittest.TestCase):
         self.assertIn('(45, "0045_thread_spill_override")', names)
         self.assertIn('(46, "0046_scope_identity_v2")', names)
         self.assertIn('(47, "0047_drop_selection_nonappend_generation")', names)
-        self.assertEqual(upgrade.CURRENT_SCHEMA_VERSION, 52)
+        self.assertEqual(upgrade.CURRENT_SCHEMA_VERSION, 53)
         self.assertTrue((ROOT / 'migrations/0046_scope_identity_v2.sql').is_file())
         self.assertTrue((ROOT / 'migrations/0047_drop_selection_nonappend_generation.sql').is_file())
         self.assertTrue((ROOT / 'migrations/0048_human_question_path_admission.sql').is_file())
@@ -55,6 +55,30 @@ class PublicUpgradeArguments(unittest.TestCase):
         self.assertTrue((ROOT / 'migrations/0050_attachment_page_order.sql').is_file())
         self.assertTrue((ROOT / 'migrations/0045_thread_spill_override.sql').is_file())
         self.assertTrue((ROOT / 'migrations/0039_independent_runs.sql').is_file())
+
+    def test_schedule_retirement_migration_preserves_spent_rows_and_output(self):
+        db = sqlite3.connect(':memory:')
+        db.executescript((ROOT / 'tests/fixtures/storage-current-schema43.sql').read_text())
+        upgrade.prepare_schema(db, 52)
+        db.executescript("""
+            INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)
+                VALUES('t','/','','p','m','now');
+            INSERT INTO schedule(id,thread_id,once_at,enabled,cwd,command)
+                VALUES('q','t',1,1,'/','fixture');
+            INSERT INTO shell_execution(id,schedule_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at)
+                VALUES('s','q','s','exited','/','{}','utf-8','utf-8','closed','now');
+            INSERT INTO output_chunk(execution_id,sequence,stream,stream_offset,bytes,received_at)
+                VALUES('s',1,'stdout',0,X'0102','now');
+        """)
+        upgrade.apply_migration(db, 53)
+        self.assertEqual(db.execute('SELECT schedule_id, detached_thread_id FROM shell_execution').fetchone(), ('q', None))
+        self.assertEqual(db.execute('SELECT bytes FROM output_chunk').fetchone(), (b'\x01\x02',))
+        with self.assertRaises(sqlite3.IntegrityError):
+            db.execute("UPDATE shell_execution SET schedule_id=NULL,detached_thread_id='t',state='running' WHERE id='s'")
+        fresh = sqlite3.connect(':memory:')
+        fresh.executescript((ROOT / 'src/storage/current.sql').read_text())
+        sql = "SELECT name,sql FROM sqlite_schema WHERE tbl_name IN ('shell_execution','output_chunk') ORDER BY name"
+        self.assertEqual(db.execute(sql).fetchall(), fresh.execute(sql).fetchall())
 
     def test_schema44_to_current_spill_migration_replays_and_converges(self):
         fixture = ROOT / 'tests/fixtures/storage-current-schema43.sql'
@@ -68,7 +92,7 @@ class PublicUpgradeArguments(unittest.TestCase):
         db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('old','/','','p','m','now')")
         upgrade.prepare_schema(db, upgrade.CURRENT_SCHEMA_VERSION)
         self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], upgrade.CURRENT_SCHEMA_VERSION)
-        self.assertEqual(db.execute("SELECT version,name FROM schema_migration ORDER BY version DESC LIMIT 1").fetchone(), (upgrade.CURRENT_SCHEMA_VERSION, '0052_unified_model_attempt'))
+        self.assertEqual(db.execute("SELECT version,name FROM schema_migration ORDER BY version DESC LIMIT 1").fetchone(), (upgrade.CURRENT_SCHEMA_VERSION, '0053_retired_schedule_shells'))
         self.assertIsNone(db.execute("SELECT spill_override FROM thread WHERE id='old'").fetchone()[0])
         # The spill constraint remains pinned to 45 through the current schema.
         upgrade.check_migration(db, before_45, 44, upgrade.CURRENT_SCHEMA_VERSION)

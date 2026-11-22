@@ -166,7 +166,13 @@ pub(super) async fn dispatch(control: &Arc<Control>) -> Result<Option<DateTime<U
                     .store
                     .database
                     .call(move |db| {
-                        super::state::fail_shell_spawn(db, &shell.id, &super::state::now())?;
+                        let tx = db.transaction()?;
+                        if super::state::fail_shell_spawn(&tx, &shell.id, &super::state::now())?
+                            != 0
+                        {
+                            retire_oneshot(&tx, &shell.id)?;
+                        }
+                        tx.commit()?;
                         Ok(())
                     })
                     .await
@@ -176,6 +182,23 @@ pub(super) async fn dispatch(control: &Arc<Control>) -> Result<Option<DateTime<U
         }
     }
     Ok(next)
+}
+
+// Called only for an execution just settled in this transaction. A preexisting
+// spent one-shot is not a retirement candidate on startup or migration.
+pub(super) fn retire_oneshot(tx: &Transaction<'_>, execution: &str) -> rusqlite::Result<()> {
+    let owner: Option<(String, String)> = tx.query_row(
+        "SELECT q.id,q.thread_id FROM shell_execution s JOIN schedule q ON q.id=s.schedule_id WHERE s.id=?1 AND s.state IN ('exited','failed','stopped') AND q.once_at IS NOT NULL AND q.next_at IS NULL",
+        [execution], |r| Ok((r.get(0)?,r.get(1)?)),
+    ).optional()?;
+    if let Some((schedule, thread)) = owner {
+        tx.execute(
+            "UPDATE shell_execution SET schedule_id=NULL,detached_thread_id=?2 WHERE id=?1",
+            params![execution, thread],
+        )?;
+        tx.execute("DELETE FROM schedule WHERE id=?1", [schedule])?;
+    }
+    Ok(())
 }
 
 fn invalid(message: &'static str) -> ApiError {
@@ -420,8 +443,8 @@ pub(super) async fn delete(
             })
             .await
             .map_err(super::storage_error)?;
-        drain(control, executions).await?;
-        Ok::<_, ApiError>(targets)
+        drain(control, &executions).await?;
+        Ok::<_, ApiError>((targets, executions))
     }
     .await;
     if prepared.as_ref().is_err_and(ApiError::is_storage_failure) {
@@ -430,7 +453,7 @@ pub(super) async fn delete(
     let effects = control
         .store
         .finalize_deletion(request.operation_id, move |tx| {
-            let targets = prepared?;
+            let (targets, executions) = prepared?;
             match command {
                 Command::ThreadDelete(args) => {
                     let mut current = super::db::delete_targets(tx, &args)?;
@@ -446,18 +469,16 @@ pub(super) async fn delete(
                 Command::ScheduleRemove(args) => {
                     let id = args.schedule_id;
                     ensure_inactive(tx, &id, false)?;
-                    let thread = tx
-                        .query_row(
-                            "DELETE FROM schedule WHERE id=?1 RETURNING thread_id",
-                            [&id],
-                            |r| r.get::<_, String>(0),
-                        )
-                        .optional()
-                        .map_err(StorageError::from)
-                        .map_err(super::storage_error)?
-                        .ok_or_else(|| {
-                            ApiError::new(ErrorCode::TargetUnavailable, "Schedule not found")
-                        })?;
+                    let thread = tx.query_row(
+                        "DELETE FROM schedule WHERE id=?1 RETURNING thread_id", [&id], |r| r.get::<_, String>(0),
+                    ).optional().map_err(StorageError::from).map_err(super::storage_error)?;
+                    let thread = match thread {
+                        Some(thread) => thread,
+                        None => tx.query_row(
+                            "SELECT s.detached_thread_id FROM json_each(?1) j CROSS JOIN shell_execution s ON s.id=j.value WHERE s.detached_thread_id IS NOT NULL LIMIT 1",
+                            [serde_json::json!(executions).to_string()], |r| r.get::<_,String>(0),
+                        ).optional().map_err(StorageError::from).map_err(super::storage_error)?.ok_or_else(|| ApiError::new(ErrorCode::TargetUnavailable,"Schedule not found"))?,
+                    };
                     let mut result = super::MutationResult::value(
                         serde_json::json!({"accepted":true,"schedule_id":id}),
                     )?;
@@ -482,11 +503,11 @@ pub(super) async fn delete(
     Ok(value)
 }
 
-async fn drain(control: &Control, executions: Vec<String>) -> Result<(), ApiError> {
+async fn drain(control: &Control, executions: &[String]) -> Result<(), ApiError> {
     if executions.is_empty() {
         return Ok(());
     }
-    for id in &executions {
+    for id in executions {
         if let Some(handle) = control.live.clone_shell_handle(id).await {
             handle.stop();
         }
@@ -646,11 +667,12 @@ mod tests {
                 let state=db.query_row("SELECT state FROM operation_receipt WHERE operation_id=?1",[receipt],|r|r.get::<_,String>(0)).optional()?;
                 assert_eq!(state.as_deref(),[None,Some("pending"),Some("pending"),Some("completed")][point]);
                 let enabled=db.query_row("SELECT enabled FROM schedule WHERE id='q'",[],|r|r.get::<_,bool>(0)).optional()?;
-                assert_eq!(enabled,[Some(true),Some(true),Some(false),None][point]);
+                assert_eq!(enabled,[Some(true),Some(true),None,None][point]);
                 assert_eq!(db.query_row("SELECT deleted_at IS NOT NULL FROM thread WHERE id='target'",[],|r|r.get::<_,bool>(0))?,point==3);
                 if point==2 {
                     let reason=db.query_row("SELECT end_reason FROM shell_execution WHERE id='x' AND state IN ('failed','stopped')",[],|r|r.get::<_,String>(0))?;
                     assert!(reason.starts_with("previous_instance_interrupted"));
+                    assert_eq!(db.query_row("SELECT detached_thread_id FROM shell_execution WHERE id='x'",[],|r|r.get::<_,String>(0))?,"target");
                 }
                 if point==3 { assert!(!db.query_row("SELECT EXISTS(SELECT 1 FROM shell_execution WHERE id='x')",[],|r|r.get::<_,bool>(0))?); }
                 Ok(())
@@ -729,7 +751,7 @@ mod tests {
             .await
             .unwrap();
         let worker = control.clone();
-        let draining = tokio::spawn(async move { drain(&worker, targets).await });
+        let draining = tokio::spawn(async move { drain(&worker, &targets).await });
         crate::test_watchdog::watchdog("both scheduled children stop before first terminal write",async {
             for shell in &mut shells {
                 let completion=shell.completion.wait_for(Option::is_some).await.unwrap();
@@ -839,7 +861,77 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn scheduled_shell_runs_once_and_list_reports_saved_result() {
+    async fn removing_claimed_one_shot_accepts_proven_retirement_not_absence() {
+        let root = tempfile::tempdir().unwrap();
+        let owner =
+            crate::app::DataOwner::start(None, Some(root.path().join("data")), root.path().into())
+                .await
+                .unwrap();
+        let control = Control::new(&owner, root.path().into());
+        let cwd = root.path().to_string_lossy().into_owned();
+        owner.db.call(move |db| {
+            db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('t',?1,'','p','m','now')",[&cwd])?;
+            db.execute("INSERT INTO schedule(id,thread_id,once_at,enabled,cwd,command) VALUES('q','t',1,1,?1,'echo fixture')",[&cwd])?;
+            db.execute("INSERT INTO shell_execution(id,schedule_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at) VALUES('x','q','x','starting',?1,'{}','utf-8','utf-8','closed','2020-01-01T00:00:00Z')",[cwd])?;
+            Ok(())
+        }).await.unwrap();
+        let request = || {
+            Request::new(
+                format!("{}:{}", owner.instance_id, uuid::Uuid::new_v4()),
+                Command::ScheduleRemove(crate::protocol::ScheduleTarget {
+                    schedule_id: "q".into(),
+                }),
+            )
+        };
+        let first = request();
+        let running = control.clone();
+        let call = first.clone();
+        let deleting = tokio::spawn(async move { running.request(call).await });
+        // Read the prepared active execution before allowing the pre-spawn stop
+        // to settle. The DB writer has already committed the stop intent.
+        crate::test_watchdog::watchdog("remove racing one-shot retirement", async {
+            while !owner
+                .db
+                .call(|db| {
+                    Ok(db.query_row(
+                        "SELECT state='stopping' FROM shell_execution WHERE id='x'",
+                        [],
+                        |r| r.get::<_, bool>(0),
+                    )?)
+                })
+                .await
+                .unwrap()
+            {
+                tokio::task::yield_now().await;
+            }
+            assert!(control.shell_start_intent("x", false).await.unwrap().0);
+            let result = deleting.await.unwrap();
+            assert!(result.ok, "{:?}", result.error);
+            assert_eq!(result.result, control.request(first).await.result);
+        })
+        .await
+        .unwrap();
+        assert_eq!(
+            control.request(request()).await.error.unwrap().code,
+            crate::protocol::ErrorCode::TargetUnavailable
+        );
+        assert!(
+            control
+                .request(Request::new(
+                    format!("{}:get", owner.instance_id),
+                    Command::ShellGet(crate::protocol::ExecutionTarget {
+                        execution_id: "x".into()
+                    })
+                ))
+                .await
+                .ok
+        );
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn oneshot_retires_and_keeps_same_thread_shell_result() {
         let (root, owner, control, accepted) =
             super::super::driver::preparation_tests::fixture("http://127.0.0.1:1/v1").await;
         let thread = accepted.thread_id;
@@ -858,8 +950,8 @@ mod tests {
                 crate::protocol::ScheduleAddArgs {
                     thread_id: Some(thread.clone()),
                     cron: None,
-                    at: Some(Utc::now().to_rfc3339()),
-                    in_seconds: None,
+                    at: None,
+                    in_seconds: Some(1),
                     cwd: None,
                     description: None,
                     command: "echo schedule-witness".into(),
@@ -867,40 +959,60 @@ mod tests {
             )))
             .await;
         assert!(add.ok, "{:?}", add.error);
-        crate::test_watchdog::watchdog("schedule add through saved shell result", async {
-            loop {
-                let changed = control.changed.notified();
-                tokio::pin!(changed);
-                changed.as_mut().enable();
-                let list = control
-                    .request(request(Command::ScheduleList(
-                        crate::protocol::ThreadTarget {
-                            thread_id: Some(thread.clone()),
-                        },
-                    )))
-                    .await;
-                assert!(list.ok, "{:?}", list.error);
-                let body = list.result.unwrap();
-                if body["items"][0]["latest"]["state"] == "exited" {
-                    assert_eq!(body["items"][0]["latest"]["exit_code"], 0);
-                    assert!(
-                        body["items"][0]["latest"]["output_tail"]
-                            .as_str()
-                            .unwrap()
-                            .contains("schedule-witness")
-                    );
-                    assert_eq!(body["items"][0]["next_at"], json!(null));
-                    break;
+        let execution =
+            crate::test_watchdog::watchdog("one-shot retires and keeps the shell result", async {
+                loop {
+                    let changed = control.changed.notified();
+                    tokio::pin!(changed);
+                    changed.as_mut().enable();
+                    let list = control
+                        .request(request(Command::ShellList(
+                            serde_json::from_value(json!({"thread_id":thread})).unwrap(),
+                        )))
+                        .await;
+                    assert!(list.ok, "{:?}", list.error);
+                    let item = &list.result.unwrap()["items"][0];
+                    if item["state"] == "exited" {
+                        assert_eq!(item["exit_code"], 0);
+                        break item["execution_id"].as_str().unwrap().to_owned();
+                    }
+                    changed.await;
                 }
-                changed.await;
-            }
-        })
-        .await
-        .unwrap();
-        control.store.database.call(|db| {
-            assert_eq!(db.query_row("SELECT count(*) FROM shell_execution WHERE schedule_id IS NOT NULL AND owner_run_id IS NULL AND turn_id IS NULL",[],|r|r.get::<_,i64>(0))?,1);
-            Ok(())
-        }).await.unwrap();
+            })
+            .await
+            .unwrap();
+        let list = control
+            .request(request(Command::ScheduleList(
+                crate::protocol::ThreadTarget {
+                    thread_id: Some(thread.clone()),
+                },
+            )))
+            .await;
+        assert_eq!(list.result.unwrap()["items"], json!([]));
+        let get = control
+            .request(request(Command::ShellGet(
+                crate::protocol::ExecutionTarget {
+                    execution_id: execution.clone(),
+                },
+            )))
+            .await;
+        assert_eq!(get.result.unwrap()["thread_id"], thread);
+        let read = control
+            .request(request(Command::ShellRead(
+                crate::protocol::ShellReadArgs {
+                    execution_id: execution,
+                    cursor: None,
+                    encoding: None,
+                    limit_bytes: 4096,
+                },
+            )))
+            .await;
+        assert!(
+            read.result.unwrap()["text"]
+                .as_str()
+                .unwrap()
+                .contains("schedule-witness")
+        );
         control.shutdown().await.unwrap();
         server.shutdown().await.unwrap();
         dispatcher.await.unwrap();

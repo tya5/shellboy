@@ -3319,6 +3319,11 @@ pub(super) fn delete_thread(
     let targets = delete_targets(tx, args)?;
     for id in &targets {
         super::schedule::ensure_inactive(tx, id, true)?;
+        tx.execute(
+            "DELETE FROM shell_execution WHERE detached_thread_id=?1",
+            [id],
+        )
+        .map_err(sql_error)?;
         tx.execute("DELETE FROM schedule WHERE thread_id=?1", [id])
             .map_err(sql_error)?;
     }

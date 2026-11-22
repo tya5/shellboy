@@ -271,6 +271,11 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         sql: include_str!("../../migrations/0052_unified_model_attempt.sql"),
         foreign_keys: None,
     },
+    Migration {
+        version: 53,
+        sql: include_str!("../../migrations/0053_retired_schedule_shells.sql"),
+        foreign_keys: Some(Impact::Tables(&["shell_execution", "output_chunk"])),
+    },
 ];
 
 pub(super) fn run(
@@ -343,13 +348,13 @@ pub(super) fn run(
                 summary_attempts::convert(&transaction)?;
                 transaction.execute_batch(include_str!("migrate/retire_summary_ledger.sql"))?;
             }
-            if matches!(migration.version, 39 | 51 | 52) {
+            if matches!(migration.version, 39 | 51 | 52 | 53) {
                 super::check_integrity(&transaction, true, false)?;
             }
             transaction.commit()?;
             Ok(())
         };
-        if matches!(migration.version, 39 | 51 | 52) {
+        if matches!(migration.version, 39 | 51 | 52 | 53) {
             with_foreign_keys_disabled(connection, apply)?;
         } else {
             apply(connection)?;

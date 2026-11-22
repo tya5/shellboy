@@ -392,6 +392,8 @@ async fn save_completion(
         tx.execute("INSERT INTO event(id,kind,source_json,target_thread_id,target_run_id,payload_ref_json,created_at)VALUES(?1,'shell_ended',?2,?3,?4,?5,?6)",params![event,json!({"execution_id":execution}).to_string(),thread,run,json!({"execution_id":execution,"state":completed.state,"exit_code":completed.exit_code,"forced":completed.forced,"exit_signal":completed.exit_signal,"group_cleanup_confirmed":completed.group_cleanup_confirmed,"elapsed_ms":completed.elapsed_ms,"output_complete":completed.output_complete}).to_string(),now()])?;
         tx.execute("UPDATE event SET semantic_json=?2 WHERE id=?1",params![event,semantic])?;
         tx.execute("INSERT INTO delivery(event_id,recipient_id,state)VALUES(?1,?2,'pending')",params![event,run])?;
+        } else {
+            super::super::schedule::retire_oneshot(&tx,&execution)?;
         }
         tx.commit()?;Ok(())}).await.map_err(storage_error)?;
     control.index.wake();

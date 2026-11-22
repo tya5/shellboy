@@ -47,12 +47,19 @@ pub(super) fn query(thread: bool, active: bool) -> String {
             },
             "s.schedule_id IN (SELECT id FROM schedule WHERE thread_id=?1)",
         );
-        format!("SELECT * FROM ({run}) UNION ALL SELECT * FROM ({scheduled})")
+        if active {
+            format!("SELECT * FROM ({run}) UNION ALL SELECT * FROM ({scheduled})")
+        } else {
+            let detached = candidate("shell_detached_started_readback", "s.detached_thread_id=?1");
+            format!(
+                "SELECT * FROM ({run}) UNION ALL SELECT * FROM ({scheduled}) UNION ALL SELECT * FROM ({detached})"
+            )
+        }
     } else {
         run
     };
     format!(
-        "WITH candidates AS MATERIALIZED ({candidates}), window AS MATERIALIZED (SELECT * FROM candidates ORDER BY sec DESC,nano DESC,id DESC LIMIT {SCAN_LIMIT}), matched AS MATERIALIZED (SELECT w.* FROM window w JOIN shell_execution s ON s.id=w.id WHERE (?10 IS NULL OR s.state=?10) AND (?11 IS NULL OR s.exit_code=?11) AND (?12 IS NULL OR instr({command},?12)>0) ORDER BY w.sec DESC,w.nano DESC,w.id DESC LIMIT ?13+1) SELECT json_object('scanned',(SELECT count(*) FROM window),'candidate_more',(SELECT count(*) FROM candidates)>{SCAN_LIMIT},'tail',(SELECT json_array(sec,nano,id) FROM window ORDER BY sec,nano,id LIMIT 1),'items',json((SELECT json_group_array(json_object('execution_id',s.id,'run_id',s.owner_run_id,'thread_id',COALESCE(r.thread_id,q.thread_id),'schedule_id',s.schedule_id,'turn_id',s.turn_id,'started_at',s.started_at,'ended_at',s.ended_at,'state',s.state,'exit_code',s.exit_code,'sec',m.sec,'nano',m.nano,'description',substr(COALESCE(json_extract(s.shell_json,'$.description'),json_extract(s.shell_json,'$.request.description')),1,80),'raw_command',readback_prefix({command}),'command_characters',readback_chars({command})) ORDER BY m.sec DESC,m.nano DESC,m.id DESC) FROM matched m JOIN shell_execution s ON s.id=m.id LEFT JOIN run r ON r.id=s.owner_run_id LEFT JOIN schedule q ON q.id=s.schedule_id)))"
+        "WITH candidates AS MATERIALIZED ({candidates}), window AS MATERIALIZED (SELECT * FROM candidates ORDER BY sec DESC,nano DESC,id DESC LIMIT {SCAN_LIMIT}), matched AS MATERIALIZED (SELECT w.* FROM window w JOIN shell_execution s ON s.id=w.id WHERE (?10 IS NULL OR s.state=?10) AND (?11 IS NULL OR s.exit_code=?11) AND (?12 IS NULL OR instr({command},?12)>0) ORDER BY w.sec DESC,w.nano DESC,w.id DESC LIMIT ?13+1) SELECT json_object('scanned',(SELECT count(*) FROM window),'candidate_more',(SELECT count(*) FROM candidates)>{SCAN_LIMIT},'tail',(SELECT json_array(sec,nano,id) FROM window ORDER BY sec,nano,id LIMIT 1),'items',json((SELECT json_group_array(json_object('execution_id',s.id,'run_id',s.owner_run_id,'thread_id',COALESCE(r.thread_id,q.thread_id,s.detached_thread_id),'schedule_id',s.schedule_id,'turn_id',s.turn_id,'started_at',s.started_at,'ended_at',s.ended_at,'state',s.state,'exit_code',s.exit_code,'sec',m.sec,'nano',m.nano,'description',substr(COALESCE(json_extract(s.shell_json,'$.description'),json_extract(s.shell_json,'$.request.description')),1,80),'raw_command',readback_prefix({command}),'command_characters',readback_chars({command})) ORDER BY m.sec DESC,m.nano DESC,m.id DESC) FROM matched m JOIN shell_execution s ON s.id=m.id LEFT JOIN run r ON r.id=s.owner_run_id LEFT JOIN schedule q ON q.id=s.schedule_id)))"
     )
 }
 pub(crate) fn list(db: &Connection, a: &ShellListArgs, instance: &str) -> Result<Value, ApiError> {

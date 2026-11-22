@@ -75,6 +75,7 @@ pub(crate) const MIGRATION_NAMES: &[(i64, &str)] = &[
     (50, "0050_attachment_page_order"),
     (51, "0051_thread_schedule"),
     (52, "0052_unified_model_attempt"),
+    (53, "0053_retired_schedule_shells"),
 ];
 pub const SCHEMA_VERSION: i64 = MIGRATION_NAMES.len() as i64;
 pub const DEFAULT_QUEUE_CAPACITY: usize = 128;

@@ -916,6 +916,11 @@ limits by guesswork.
 
 ### Scheduled checks
 
+One-shot schedules (`--at` or `--in`) disappear from `schedule list` when their
+execution settles, even if it fails or is stopped. Find the result with
+`shellboy shell list --thread THREAD`, then inspect its status and saved output
+with `shell get` and `shell read`. Recurring schedules stay listed.
+
 The scheduler (cron, 定期実行, スケジュール) belongs to the Thread. It runs shell commands without starting a model
 Turn. To wake the owning Thread only when there is work, use a command such as:
 
