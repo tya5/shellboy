@@ -124,11 +124,10 @@ async fn schema40_upgrade_preserves_receipts_and_matches_fresh_indexes() {
         .unwrap();
     db.execute_batch("DROP INDEX node_notification_event; ALTER TABLE node DROP COLUMN notification_event_id; ALTER TABLE event DROP COLUMN semantic_json; DROP INDEX receipt_reply_node_lookup; DROP INDEX IF EXISTS attachment_page_order; DELETE FROM schema_migration WHERE version>=41; PRAGMA user_version=40;").unwrap();
     // The historical schema-40 shape still has migration 40's generation column.
-    db.execute(
-        "DROP INDEX IF EXISTS attachment_page_order; DELETE FROM schema_migration WHERE version=40",
-        [],
-    )
-    .unwrap();
+    db.execute_batch("DROP INDEX IF EXISTS attachment_page_order;")
+        .unwrap();
+    db.execute("DELETE FROM schema_migration WHERE version=40", [])
+        .unwrap();
     db.execute_batch(include_str!(
         "../migrations/0040_selection_nonappend_generation.sql"
     ))
