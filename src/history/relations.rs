@@ -255,7 +255,8 @@ mod tests {
              CREATE TABLE node(id TEXT PRIMARY KEY,kind TEXT,created_at TEXT,payload_revision INTEGER,turn_id TEXT);
              CREATE TABLE turn(id TEXT PRIMARY KEY,run_id TEXT,thread_id TEXT);
              CREATE TABLE run(id TEXT PRIMARY KEY,thread_id TEXT);
-             CREATE TABLE receipt(message_node_id TEXT,sender_json TEXT);
+             CREATE TABLE receipt(message_node_id TEXT,sender_json TEXT,client_operation_id TEXT,target_thread_id TEXT);
+             CREATE INDEX receipt_message_node ON receipt(message_node_id);
              CREATE TABLE model_attempt(id TEXT PRIMARY KEY);
              CREATE TABLE output_item(attempt_id TEXT NOT NULL REFERENCES model_attempt(id),ordinal INTEGER NOT NULL,item_id TEXT,item_type TEXT NOT NULL,phase TEXT,status TEXT NOT NULL,payload_json TEXT NOT NULL,node_id TEXT REFERENCES node(id),PRIMARY KEY(attempt_id,ordinal));
              CREATE INDEX output_item_node ON output_item(node_id);
@@ -371,7 +372,7 @@ mod tests {
             "CREATE TABLE node(id TEXT PRIMARY KEY,kind TEXT,created_at TEXT,payload_revision INTEGER,turn_id TEXT); \
              CREATE TABLE turn(id TEXT PRIMARY KEY,run_id TEXT,thread_id TEXT); \
              CREATE TABLE run(id TEXT PRIMARY KEY,thread_id TEXT); \
-             CREATE TABLE schema_migration(version INTEGER PRIMARY KEY,name TEXT); CREATE TABLE receipt(rowid INTEGER PRIMARY KEY,id TEXT,message_node_id TEXT,result_json TEXT,sender_json TEXT,target_thread_id TEXT); \
+             CREATE TABLE schema_migration(version INTEGER PRIMARY KEY,name TEXT); CREATE TABLE receipt(rowid INTEGER PRIMARY KEY,id TEXT,message_node_id TEXT,result_json TEXT,sender_json TEXT,client_operation_id TEXT,target_thread_id TEXT); CREATE INDEX receipt_message_node ON receipt(message_node_id); \
              INSERT INTO turn VALUES('turn','run','recipient'); \
              INSERT INTO run VALUES('run','recipient'); \
              INSERT INTO node VALUES('reply','user','now',0,'turn'); \
