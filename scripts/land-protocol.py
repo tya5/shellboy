@@ -156,11 +156,6 @@ def issue_numbers(text):
     return {int(n) for n in re.findall(r'#(\d+)', text or '')}
 
 
-def heading_anchor(heading):
-    """The anchor GitHub gives a heading: lowercase, punctuation dropped, spaces to hyphens."""
-    return re.sub(r'[^\w\- ]', '', heading.strip().lower()).replace(' ', '-')
-
-
 def lines(text):
     """(offset, line, inside a code fence) for each line; fence lines count as inside."""
     offset, fenced = 0, False
@@ -266,27 +261,6 @@ def plan_protocol(tree):
         issues.add(issue)
         parts.append((issue, rewrite_links(text, name, lambda *link: link, notes).strip('\n')))
         tree.delete(name)
-    folded = set()
-    for name in in_file:  # the in-file form used before per-version files
-        text = tree.text(name)
-        while found := next_heading(text):
-            offset, line, match = found
-            depth, start = level(line), offset + len(line)
-            end = next((o for o, other, fenced in lines(text) if o >= start and not fenced
-                        and HEADING.match(other) and level(other) <= depth), len(text))
-            section = text[start:end]
-            own = issue_numbers(match.group(1))
-            issues |= own
-            for _, inner, fenced in lines(section):
-                inner = None if fenced else NEXT_HEADING.match(inner)
-                issues |= issue_numbers(inner and inner.group(1))
-            section = rewrite_links(raise_headings(section, depth - 1), name, lambda *link: link, notes)
-            parts.append((min(own, default=0), section.strip('\n')))
-            before, after = text[:offset].rstrip('\n'), text[end:].lstrip('\n')
-            text = (before + ('\n\n' + after if after else '\n')) if before else after
-        tree.texts[name] = text
-        folded.add(name)
-
     if parts:
         earlier = set()
         bodies = [body for _, body in sorted(parts, key=lambda part: part[0]) if body]
@@ -300,15 +274,12 @@ def plan_protocol(tree):
         listed = sorted(issues | earlier)
         title = f'Protocol {target}' + (' (' + ', '.join(f'#{n}' for n in listed) + ')' if listed else '')
         tree.create(notes, f'# {title}\n\n' + '\n\n'.join(b for b in bodies if b) + '\n')
-        anchor = heading_anchor(title)
         merged = {name for _, name in next_files}
 
         def redirect(path, fragment):
             to_anchor = fragment is not None and fragment.startswith('protocol-next')
             if path in merged:
-                return notes, anchor if to_anchor else fragment
-            if path in folded and to_anchor:
-                return notes, anchor
+                return notes, None if to_anchor else fragment
             return None
 
         for name in docs + [notes]:
@@ -319,6 +290,10 @@ def plan_protocol(tree):
     if not tree.deletes and all(text == tree.original[name] for name, text in tree.texts.items()):
         print(f'land-protocol: already Protocol {target}; nothing to do for the protocol')
         return None
+    for name in in_file:
+        for _, line, fenced in lines(tree.original[name]):
+            if not fenced and (match := NEXT_HEADING.match(line)):
+                issues |= issue_numbers(match.group(1))
     subject = f'Protocol {target}'
     if issues:
         subject += ': ' + ', '.join(f'#{n}' for n in sorted(issues))
