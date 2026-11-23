@@ -1065,3 +1065,7 @@ invalid or absent value is treated as unknown. A client that refuses the
 advertised protocol before connecting includes the valid value in its local
 `protocol_mismatch` error details when present. No additional handshake or
 request is sent, and the version is not used for compatibility or peer checks.
+
+## Protocol next (#36)
+
+Studio-only exact-set deletion adds `thread.delete_set_preview` with a non-empty, duplicate-free `thread_ids` list of at most 256 IDs. The owner reports facts per submitted Thread only: live/stopping Runs (maximum 50 detailed rows per Thread with an explicit `more` indicator) and scheduled executions that the existing ThreadDeletion stop phase will stop. It returns a marker over the sorted exact set. Unlisted descendants are never expanded. The subsequent `thread.delete_set` consumes that same list and marker; the owner recomputes the set before mutation. Version changes are applied once by `scripts/land-protocol.py` when the coordinated batch lands.

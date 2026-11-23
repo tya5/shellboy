@@ -1528,6 +1528,9 @@ impl Store {
             Command::ThreadDeletePreview(args) => {
                 MutationResult::value(crate::deletion::preview(tx, args)?)
             }
+            Command::ThreadDeleteSetPreview(args) => {
+                MutationResult::value(crate::deletion::preview_set(tx, &args.thread_ids)?)
+            }
             Command::MessageReply(args) => self.reply(tx, args, caller, operation_id, now),
             Command::MessageSend(args) => self.send(tx, args, caller, operation_id, now),
             Command::MessageAsk(args) => self.ask(tx, args, caller, operation_id, now),

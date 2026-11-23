@@ -60,6 +60,7 @@ fn operation_result_schemas(
     opaque!("thread.fork");
     opaque!("thread.delete");
     opaque!("thread.delete_preview");
+    opaque!("thread.delete_set_preview");
     opaque!("thread.prune");
     opaque!("thread.rewind");
     result!("thread.archive", ThreadArchiveResult);
@@ -831,6 +832,11 @@ args!(ThreadDeleteArgs {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     preview_marker: Option<DeletionPreviewMarker>
 });
+args!(ThreadDeleteSetArgs {
+    thread_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    preview_marker: Option<DeletionPreviewMarker>
+});
 args!(ThreadPruneArgs {
     #[serde(default)]
     thread_id: Option<String>,
@@ -1375,6 +1381,8 @@ pub enum Command {
     ThreadDelete(ThreadDeleteArgs),
     #[serde(rename = "thread.delete_preview")]
     ThreadDeletePreview(ThreadDeleteArgs),
+    #[serde(rename = "thread.delete_set_preview")]
+    ThreadDeleteSetPreview(ThreadDeleteSetArgs),
     #[serde(rename = "thread.prune")]
     ThreadPrune(ThreadPruneArgs),
     #[serde(rename = "thread.rewind")]

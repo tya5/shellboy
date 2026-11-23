@@ -62,7 +62,7 @@ named_jobs! {
     ScheduleAdd => schedule_add, ScheduleSet => schedule_set, ScheduleEnable => schedule_enable, ScheduleDisable => schedule_disable, ScheduleRemove => schedule_remove,  ScheduleList => schedule_list,
     CompactList => compact_list, CompactPreview => compact_preview, ShellList => shell_list,
     ThreadCreate => thread_create, ThreadFork => thread_fork, ThreadDelete => thread_delete,
-    ThreadDeletePreview => thread_delete_preview, ThreadPrune => thread_prune, ThreadRewind => thread_rewind, ThreadArchive => thread_archive,
+    ThreadDeletePreview => thread_delete_preview, ThreadDeleteSetPreview => thread_delete_set_preview, ThreadPrune => thread_prune, ThreadRewind => thread_rewind, ThreadArchive => thread_archive,
     ThreadUnarchive => thread_unarchive, ThreadTag => thread_tag, ThreadTags => thread_tags, ThreadCwds => thread_cwds, ThreadSet => thread_set,
     MessageSend => message_send, MessageAsk => message_ask, MessageReply => message_reply, MessageCancel => message_cancel, MessageGet => message_get, MessageList => message_list, IdResolve => id_resolve,
     OperationGet => operation_get, RunGet => run_get, RunRetry => run_retry, RunStop => run_stop,
@@ -120,6 +120,7 @@ impl Kind {
             | Kind::CompactPreview
             | Kind::ShellList
             | Kind::ThreadDeletePreview
+            | Kind::ThreadDeleteSetPreview
             | Kind::MessageGet
             | Kind::MessageList
             | Kind::IdResolve

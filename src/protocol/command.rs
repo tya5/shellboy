@@ -32,6 +32,9 @@ impl Command {
             Self::ThreadFork(_) => ("thread.fork", CommandRoute::Database),
             Self::ThreadDelete(_) => ("thread.delete", CommandRoute::Runtime),
             Self::ThreadDeletePreview(_) => ("thread.delete_preview", CommandRoute::Database),
+            Self::ThreadDeleteSetPreview(_) => {
+                ("thread.delete_set_preview", CommandRoute::Database)
+            }
             Self::ThreadPrune(_) => ("thread.prune", CommandRoute::Database),
             Self::ThreadRewind(_) => ("thread.rewind", CommandRoute::Database),
             Self::ThreadArchive(_) => ("thread.archive", CommandRoute::Database),
@@ -144,6 +147,7 @@ impl Command {
             | Self::ThreadFork(_)
             | Self::ThreadDelete(_)
             | Self::ThreadDeletePreview(_)
+            | Self::ThreadDeleteSetPreview(_)
             | Self::ThreadPrune(_)
             | Self::ThreadRewind(_)
             | Self::ThreadArchive(_)
@@ -207,6 +211,7 @@ impl Command {
             | Self::ThreadFork(_)
             | Self::ThreadDelete(_)
             | Self::ThreadDeletePreview(_)
+            | Self::ThreadDeleteSetPreview(_)
             | Self::ThreadPrune(_)
             | Self::ThreadRewind(_)
             | Self::ThreadArchive(_)
@@ -297,6 +302,7 @@ impl Command {
             | Self::ShellList(_)
             | Self::UsageGet(_)
             | Self::ThreadDeletePreview(_)
+            | Self::ThreadDeleteSetPreview(_)
             | Self::ThreadPrune(_)
             | Self::MessageGet(_)
             | Self::MessageList(_)
@@ -355,6 +361,7 @@ impl Command {
             | Self::ShellList(_)
             | Self::UsageGet(_)
             | Self::ThreadDeletePreview(_)
+            | Self::ThreadDeleteSetPreview(_)
             | Self::MessageGet(_)
             | Self::MessageList(_)
             | Self::IdResolve(_)

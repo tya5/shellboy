@@ -458,6 +458,22 @@
         {
           "properties": {
             "args": {
+              "$ref": "#/definitions/ThreadDeleteSetArgs"
+            },
+            "command": {
+              "const": "thread.delete_set_preview",
+              "type": "string"
+            }
+          },
+          "required": [
+            "command",
+            "args"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "args": {
               "$ref": "#/definitions/ThreadPruneArgs"
             },
             "command": {
@@ -5547,6 +5563,35 @@
           "additionalProperties": false,
           "properties": {
             "args": {
+              "$ref": "#/definitions/ThreadDeleteSetArgs"
+            },
+            "command": {
+              "const": "thread.delete_set_preview",
+              "type": "string"
+            },
+            "operation_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "origin": true,
+            "protocol_version": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "args",
+            "command",
+            "operation_id",
+            "protocol_version"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "args": {
               "$ref": "#/definitions/ThreadPruneArgs"
             },
             "command": {
@@ -8728,6 +8773,31 @@
       },
       "required": [
         "thread_id"
+      ],
+      "type": "object"
+    },
+    "ThreadDeleteSetArgs": {
+      "additionalProperties": false,
+      "properties": {
+        "preview_marker": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/DeletionPreviewMarker"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "thread_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "thread_ids"
       ],
       "type": "object"
     },
@@ -12142,6 +12212,7 @@
     "thread.cwds": true,
     "thread.delete": true,
     "thread.delete_preview": true,
+    "thread.delete_set_preview": true,
     "thread.fork": true,
     "thread.get": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",

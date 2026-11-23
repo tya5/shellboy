@@ -6,6 +6,80 @@ use serde_json::{Value, json};
 use crate::protocol::{ApiError, ErrorCode, ThreadDeleteArgs};
 
 pub(crate) const MAX_PREVIEW_THREADS: u32 = observation::THREAD_LIMIT as u32 + 1;
+pub(crate) const MAX_DELETE_SET_THREADS: usize = observation::THREAD_LIMIT;
+
+/// Exact-set preview. It never expands parent/descendant relationships.
+pub(crate) fn preview_set(connection: &Connection, ids: &[String]) -> Result<Value, ApiError> {
+    if ids.is_empty() || ids.len() > MAX_DELETE_SET_THREADS {
+        return Err(ApiError::new(
+            ErrorCode::InvalidArgument,
+            "thread_ids must contain 1..=256 Threads",
+        ));
+    }
+    let unique = ids.iter().collect::<std::collections::BTreeSet<_>>();
+    if unique.len() != ids.len() || ids.iter().any(|id| id.is_empty() || id.len() > 256) {
+        return Err(ApiError::new(
+            ErrorCode::InvalidArgument,
+            "thread_ids must be distinct non-empty IDs of at most 256 bytes",
+        ));
+    }
+    let inspect = |db: &Connection| -> Result<Value, ApiError> {
+        let ids_json = serde_json::to_string(ids).expect("string IDs serialize");
+        let selected = {
+            let mut statement = db.prepare("SELECT j.value, count(r.id) FILTER (WHERE r.state='live'), count(r.id) FILTER (WHERE r.state='stopping') FROM json_each(?1) j JOIN thread t ON t.id=j.value AND t.deleted_at IS NULL LEFT JOIN run r ON r.thread_id=t.id AND r.state IN ('live','stopping') GROUP BY j.value ORDER BY j.value")
+                .map_err(sql_error)?;
+            statement
+                .query_map([&ids_json], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, i64>(2)?,
+                    ))
+                })
+                .map_err(sql_error)?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .map_err(sql_error)?
+        };
+        if selected.len() != ids.len() {
+            return Err(ApiError::new(
+                ErrorCode::ThreadNotFound,
+                "One or more Threads were not found",
+            ));
+        }
+        let mut targets = Vec::with_capacity(ids.len());
+        for (id, live, stopping) in selected {
+            let runs = db.prepare("SELECT id,state FROM run WHERE thread_id=?1 AND state IN ('live','stopping') ORDER BY id LIMIT 51")
+                .map_err(sql_error)?.query_map([id.as_str()], |row| Ok(json!({"id":row.get::<_,String>(0)?,"state":row.get::<_,String>(1)?})))
+                .map_err(sql_error)?.collect::<rusqlite::Result<Vec<_>>>().map_err(sql_error)?;
+            let scheduled = db.prepare("SELECT s.id FROM schedule q JOIN shell_execution s ON s.schedule_id=q.id WHERE q.thread_id=?1 AND s.state IN ('starting','running','stopping') ORDER BY s.id LIMIT 51")
+                .map_err(sql_error)?.query_map([id.as_str()], |row| row.get::<_,String>(0))
+                .map_err(sql_error)?.collect::<rusqlite::Result<Vec<_>>>().map_err(sql_error)?;
+            let scheduled_total: i64 = db.query_row(
+                "SELECT count(*) FROM schedule q JOIN shell_execution s ON s.schedule_id=q.id WHERE q.thread_id=?1 AND s.state IN ('starting','running','stopping')", [id.as_str()], |row| row.get(0),
+            ).map_err(sql_error)?;
+            targets.push(json!({"thread_id":id,"live_run_count":live,"stopping_run_count":stopping,
+                "runs":runs.iter().take(50).collect::<Vec<_>>(),"runs_more":runs.len()>50,
+                "scheduled_execution_ids":scheduled.iter().take(50).collect::<Vec<_>>(),"scheduled_execution_count":scheduled_total,"scheduled_executions_more":scheduled_total>50}));
+        }
+        let sorted = ids
+            .iter()
+            .map(String::as_str)
+            .collect::<std::collections::BTreeSet<_>>();
+        let marker = target_marker(sorted.iter().copied());
+        let deletable = targets.iter().all(|t| {
+            t["live_run_count"].as_i64() == Some(0) && t["stopping_run_count"].as_i64() == Some(0)
+        });
+        Ok(
+            json!({"thread_ids":sorted,"targets":targets,"preview_marker":marker,"deletable_now":deletable}),
+        )
+    };
+    if connection.is_autocommit() {
+        let tx = connection.unchecked_transaction().map_err(sql_error)?;
+        inspect(&tx)
+    } else {
+        inspect(connection)
+    }
+}
 
 /// Canonical digest of a complete, bounded, sorted distinct target set.
 pub(crate) fn target_marker<'a>(
@@ -191,6 +265,51 @@ mod marker_tests {
         )
         .unwrap();
         compare("empty selected path-node set");
+    }
+
+    #[test]
+    fn exact_set_preview_lists_only_submitted_threads_and_bounded_run_stop_facts() {
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE thread(id TEXT PRIMARY KEY,deleted_at TEXT,parent_thread_id TEXT); CREATE TABLE run(id TEXT,thread_id TEXT,state TEXT); CREATE TABLE schedule(id TEXT,thread_id TEXT); CREATE TABLE shell_execution(id TEXT,schedule_id TEXT,state TEXT); INSERT INTO thread VALUES('a',NULL,NULL),('b',NULL,NULL),('child',NULL,'a'); INSERT INTO run VALUES('live-a','a','live'),('stop-b','b','stopping'); INSERT INTO schedule VALUES('sched-a','a'); INSERT INTO shell_execution VALUES('exec-a','sched-a','running');")
+            .unwrap();
+        for index in 0..51 {
+            db.execute(
+                "INSERT INTO run VALUES(?1,'b','live')",
+                [format!("live-{index:02}")],
+            )
+            .unwrap();
+        }
+        let preview = preview_set(&db, &["b".into(), "a".into()]).unwrap();
+        assert_eq!(preview["thread_ids"], json!(["a", "b"]));
+        assert_eq!(preview["targets"].as_array().unwrap().len(), 2);
+        assert_eq!(preview["targets"][0]["thread_id"], "a");
+        assert_eq!(
+            preview["targets"][0]["scheduled_execution_ids"],
+            json!(["exec-a"])
+        );
+        assert_eq!(preview["targets"][0]["scheduled_execution_count"], 1);
+        assert_eq!(preview["targets"][1]["runs"].as_array().unwrap().len(), 50);
+        assert_eq!(preview["targets"][1]["runs_more"], true);
+        assert_eq!(preview["deletable_now"], false);
+        assert_eq!(preview["preview_marker"]["thread_count"], 2);
+        assert_eq!(
+            preview["preview_marker"]["ids_hash"],
+            target_marker(["a", "b"]).ids_hash
+        );
+    }
+
+    #[test]
+    fn set_preview_rejects_missing_and_empty_targets() {
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE thread(id TEXT PRIMARY KEY,deleted_at TEXT,parent_thread_id TEXT); CREATE TABLE run(id TEXT,thread_id TEXT,state TEXT); CREATE TABLE schedule(id TEXT,thread_id TEXT); CREATE TABLE shell_execution(id TEXT,schedule_id TEXT,state TEXT);").unwrap();
+        assert_eq!(
+            preview_set(&db, &["missing".into()]).unwrap_err().code,
+            ErrorCode::ThreadNotFound
+        );
+        assert_eq!(
+            preview_set(&db, &[]).unwrap_err().code,
+            ErrorCode::InvalidArgument
+        );
     }
 
     #[test]
