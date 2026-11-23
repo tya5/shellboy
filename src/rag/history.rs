@@ -482,7 +482,7 @@ pub(super) fn keyword(
 }
 pub(super) async fn semantic(
     context: &search::Context,
-    query: &str,
+    query: &mut search::QueryEmbedding<'_>,
     thread: Option<&str>,
 ) -> Result<(Vec<search::Hit>, bool, Vec<String>)> {
     let descriptor = {
@@ -540,28 +540,22 @@ pub(super) async fn semantic(
             })?,
     };
     let dimension = descriptor.dimension;
-    let response = search::embed(&profile, &[query.into()], Some(dimension)).await?;
+    let vector = query.vector(&profile, dimension).await?;
     let db = open(&context.history)?;
     // Embedding releases the old snapshot. Deletion is a permanent scope
     // failure, not an index witness change for which retry would help.
     validate_thread(&db.connection, thread)?;
-    let matches = crate::index::rag_hits(
-        &db.connection,
-        &descriptor,
-        &response.vectors[0],
-        100,
-        thread,
-    )
-    .map_err(|error| {
-        if error.code == crate::protocol::ErrorCode::ThreadNotFound {
-            err("thread_not_found", "Search Thread does not exist")
-        } else {
-            err(
-                "history_changed",
-                "History index changed or its witnesses expired; retry search",
-            )
-        }
-    })?;
+    let matches = crate::index::rag_hits(&db.connection, &descriptor, vector, 100, thread)
+        .map_err(|error| {
+            if error.code == crate::protocol::ErrorCode::ThreadNotFound {
+                err("thread_not_found", "Search Thread does not exist")
+            } else {
+                err(
+                    "history_changed",
+                    "History index changed or its witnesses expired; retry search",
+                )
+            }
+        })?;
     let mut hits = Vec::new();
     let mut raw_spans = Vec::new();
     for found in &matches {

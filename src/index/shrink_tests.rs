@@ -619,10 +619,11 @@ async fn changes_during_conversion_are_never_lost() {
     let source = f.source.clone();
     let added = unit_vector((0..8).map(|i| if i == 3 { 1.0 } else { 0.0 }));
     let adopted = added.clone();
-    // Delete the newest source, then adopt: MAX+1 would reuse the row behind the cursor.
+    // Tombstone the newest source, then adopt another while conversion is in flight.
     let row: i64 = f.db.call(move |db| {
         let tx = db.transaction()?;
-        store::delete_source_vectors_tx(&tx, "node-00039").unwrap();
+        tx.execute("UPDATE node SET payload_json=NULL,deleted_reason='collected',payload_revision=payload_revision+1 WHERE id='node-00039'", [])?;
+        store::retire_index_source_tx(&tx, "node-00039", false).unwrap();
         tx.execute("INSERT INTO node(id,kind,created_at,payload_json,body_hash)VALUES('late','user','2026-11-07T00:00:00Z','{}','body')", [])?;
         tx.execute("INSERT INTO thread_path(thread_id,ordinal,node_id)VALUES('thread',1000,'late')", [])?;
         let work = Work::pending(
@@ -639,13 +640,13 @@ async fn changes_during_conversion_are_never_lost() {
         tx.commit()?;
         Ok(row)
     }).await.unwrap();
-    assert_eq!(row, 41, "above the cursor rather than the freed row 40");
+    assert_eq!(row, 41, "new vector goes above the conversion cursor");
     let target = f.record().await.unwrap().target.unwrap();
-    assert_eq!(f.count("SELECT count(*) FROM embedding_chunk WHERE space_id=?1 AND source_node_id='node-00039'", &target).await, 0, "deletion reaches the candidate");
+    assert_eq!(f.count("SELECT count(*) FROM embedding_chunk WHERE space_id=?1 AND source_node_id='node-00039'", &target).await, 1, "source retirement retains the candidate vector");
     f.drain().await;
     let active = f.active().await;
     assert_eq!(active.id, target);
-    assert_eq!(f.count(CHUNKS, &active.id).await, 40);
+    assert_eq!(f.count(CHUNKS, &active.id).await, 41);
     let hits = f.rank(&active, &added, 1).await;
     assert_eq!(hits[0].node_id, "late");
     assert_eq!(

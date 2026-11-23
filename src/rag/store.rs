@@ -22,7 +22,10 @@ CREATE TABLE blocks(revision_id TEXT NOT NULL REFERENCES revisions(id),ordinal I
 CREATE TABLE chunks(id TEXT PRIMARY KEY,revision_id TEXT NOT NULL REFERENCES revisions(id),ordinal INTEGER NOT NULL,start INTEGER NOT NULL,end INTEGER NOT NULL,hash TEXT NOT NULL,location TEXT NOT NULL,UNIQUE(revision_id,ordinal));
 CREATE TABLE spaces(id TEXT PRIMARY KEY,dimension INTEGER NOT NULL,profile TEXT NOT NULL,model TEXT NOT NULL,endpoint_hash TEXT NOT NULL,table_name TEXT NOT NULL);
 CREATE TABLE embeddings(space_id TEXT NOT NULL REFERENCES spaces(id),hash TEXT NOT NULL,vec_rowid INTEGER NOT NULL,PRIMARY KEY(space_id,hash));
-PRAGMA user_version=4;";
+PRAGMA user_version=5;";
+const SOURCE_HASH_SCHEMA: &str = "CREATE TABLE source_chunk_hashes(
+    source_id TEXT NOT NULL REFERENCES sources(id),hash TEXT NOT NULL,PRIMARY KEY(source_id,hash));
+CREATE INDEX source_chunk_hashes_by_hash ON source_chunk_hashes(hash,source_id);";
 
 // Proven hot paths: max vector row allocation and orphan-hash cleanup (#26).
 const HOT_QUERY_INDEXES: &str = "
@@ -94,7 +97,7 @@ pub(super) fn open(path: &Path, write: bool) -> Result<Store> {
         db.execute_batch("PRAGMA query_only=ON;")?;
     }
     let version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    if !matches!(version, 1..=4) {
+    if !matches!(version, 1..=5) {
         return Err(err(
             "schema_unsupported",
             "Knowledge database schema is not supported; no migration was attempted",
@@ -123,13 +126,13 @@ pub(super) fn open(path: &Path, write: bool) -> Result<Store> {
     Ok(Store {
         db,
         uuid,
-        migrated_from_schema: (write && version < 4).then_some(version),
+        migrated_from_schema: (write && version < 5).then_some(version),
         _lock: lock,
     })
 }
 fn validate_schema(db: &Connection) -> Result<()> {
     let version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    if version != 4 {
+    if version != 5 {
         return Err(err(
             "schema_unsupported",
             "Knowledge database schema requires migration; run shellboy rag init to migrate without registering materials or indexing before reading",
@@ -160,7 +163,7 @@ fn writer_lock(path: &Path) -> Result<WriterLock> {
     })?;
     Ok(WriterLock(file))
 }
-fn prune_embeddings(db: &Connection) -> Result<()> {
+fn remove_source_embeddings(db: &Connection, source: &str) -> Result<()> {
     let spaces = {
         let mut q = db.prepare("SELECT id,table_name FROM spaces")?;
         q.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
@@ -174,8 +177,8 @@ fn prune_embeddings(db: &Connection) -> Result<()> {
             return Err(err("schema_unsupported", "Invalid vector table identity"));
         }
         let rows = {
-            let mut q=db.prepare("SELECT vec_rowid FROM embeddings e WHERE space_id=?1 AND NOT EXISTS(SELECT 1 FROM chunks c WHERE c.hash=e.hash)")?;
-            q.query_map([&space], |r| r.get::<_, i64>(0))?
+            let mut q=db.prepare("SELECT e.vec_rowid FROM source_chunk_hashes owned JOIN embeddings e ON e.space_id=?1 AND e.hash=owned.hash WHERE owned.source_id=?2 AND NOT EXISTS(SELECT 1 FROM source_chunk_hashes other WHERE other.hash=owned.hash AND other.source_id!=?2)")?;
+            q.query_map(params![space, source], |r| r.get::<_, i64>(0))?
                 .collect::<std::result::Result<Vec<_>, _>>()?
         };
         for row in rows {
@@ -197,7 +200,7 @@ pub(super) fn initialize(path: &Path) -> Result<Value> {
         drop(_lock);
         let s = open(path, true)?;
         return Ok(
-            json!({"database_uuid":s.uuid,"already_initialized":true,"schema_version":4,"migrated_from_schema":s.migrated_from_schema,"next":"Knowledge database is ready. Optional: register materials with rag source add PATH --name NAME, then rag index --dry-run; for bundled guide semantics use rag index --source docs --dry-run --mode semantic"}),
+            json!({"database_uuid":s.uuid,"already_initialized":true,"schema_version":5,"migrated_from_schema":s.migrated_from_schema,"next":"Knowledge database is ready. Optional: register materials with rag source add PATH --name NAME, then rag index --dry-run; for bundled guide semantics use rag index --source docs --dry-run --mode semantic"}),
         );
     }
     crate::storage::register_vec()
@@ -206,6 +209,7 @@ pub(super) fn initialize(path: &Path) -> Result<Value> {
     db.execute_batch("PRAGMA journal_mode=WAL;PRAGMA synchronous=FULL;PRAGMA foreign_keys=ON;")?;
     let tx = db.transaction()?;
     tx.execute_batch(SCHEMA)?;
+    tx.execute_batch(SOURCE_HASH_SCHEMA)?;
     tx.execute_batch(HOT_QUERY_INDEXES)?;
     let uuid = format!("rag-{}", uuid::Uuid::new_v4());
     tx.execute("INSERT INTO meta VALUES('uuid',?1)", [&uuid])?;
@@ -213,7 +217,7 @@ pub(super) fn initialize(path: &Path) -> Result<Value> {
     tx.execute("INSERT INTO sources(id,name,root,kind) VALUES('@docs','@docs','','builtin'),('@derived','derived','','derived')",[])?;
     tx.commit()?;
     Ok(
-        json!({"database_uuid":uuid,"already_initialized":false,"schema_version":4,"migrated_from_schema":null,"next":"Register materials with rag source add PATH --name NAME, then rag index --dry-run; for bundled guide semantics use rag index --source docs --dry-run --mode semantic"}),
+        json!({"database_uuid":uuid,"already_initialized":false,"schema_version":5,"migrated_from_schema":null,"next":"Register materials with rag source add PATH --name NAME, then rag index --dry-run; for bundled guide semantics use rag index --source docs --dry-run --mode semantic"}),
     )
 }
 pub(super) fn resolve_source(db: &Connection, id: &str) -> Result<String> {
@@ -320,10 +324,11 @@ pub(super) fn source_command(path: &Path, command: SourceCommand, cwd: &Path) ->
             tx.execute("DELETE FROM blocks WHERE revision_id IN(SELECT r.id FROM revisions r JOIN documents d ON d.id=r.document_id WHERE d.source_id=?1)",[&id])?;
             tx.execute("DELETE FROM revisions WHERE document_id IN(SELECT id FROM documents WHERE source_id=?1)",[&id])?;
             tx.execute("DELETE FROM documents WHERE source_id=?1", [&id])?;
+            remove_source_embeddings(&tx, &id)?;
+            tx.execute("DELETE FROM source_chunk_hashes WHERE source_id=?1", [&id])?;
             if id != "@derived" {
                 tx.execute("DELETE FROM sources WHERE id=?1", [&id])?;
             }
-            prune_embeddings(&tx)?;
             tx.execute(
                 "UPDATE meta SET value=CAST(value AS INTEGER)+1 WHERE key='generation'",
                 [],
@@ -421,6 +426,11 @@ pub(super) fn prepare(s: &mut Store, input: RevisionInput<'_>) -> Result<(String
             let end = start + segment.text.len();
             local_byte += segment.text.len();
             local_scalar = segment.end;
+            let segment_hash = hash(segment.text.as_bytes());
+            tx.execute(
+                "INSERT OR IGNORE INTO source_chunk_hashes VALUES(?1,?2)",
+                params![source, segment_hash],
+            )?;
             tx.execute(
                 "INSERT INTO chunks VALUES(?1,?2,?3,?4,?5,?6,?7)",
                 params![
@@ -429,7 +439,7 @@ pub(super) fn prepare(s: &mut Store, input: RevisionInput<'_>) -> Result<(String
                     chunk_ordinal,
                     start as i64,
                     end as i64,
-                    hash(segment.text.as_bytes()),
+                    segment_hash,
                     block.location.to_string()
                 ],
             )?;
@@ -454,15 +464,12 @@ pub(super) fn publish(s: &mut Store, document: &str, revision: &str) -> Result<(
     if previous.as_deref() != Some(revision) {
         // Publication and retirement share a transaction: failed indexing keeps
         // the previous version, and readers see either complete snapshot.
-        let removed_chunks = tx.execute("DELETE FROM chunks WHERE revision_id IN (SELECT id FROM revisions WHERE document_id=?1 AND id!=?2)", params![document, revision])?;
+        tx.execute("DELETE FROM chunks WHERE revision_id IN (SELECT id FROM revisions WHERE document_id=?1 AND id!=?2)", params![document, revision])?;
         tx.execute("DELETE FROM blocks WHERE revision_id IN (SELECT id FROM revisions WHERE document_id=?1 AND id!=?2)", params![document, revision])?;
         tx.execute(
             "DELETE FROM revisions WHERE document_id=?1 AND id!=?2",
             params![document, revision],
         )?;
-        if removed_chunks > 0 {
-            prune_embeddings(&tx)?;
-        }
     }
     tx.execute(
         "UPDATE meta SET value=CAST(value AS INTEGER)+1 WHERE key='generation'",

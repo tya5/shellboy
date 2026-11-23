@@ -352,11 +352,11 @@ impl ShellOutputReader {
                 && canonical_encoding(&state.encoding)?.name()!=requested
             {
                 // The retained bytes and cursor generation are unchanged. Derived
-                // text vectors must be rebuilt explicitly in the new decoding.
+                // text vectors from the old decoding are retained but no longer match.
                 let mut statement=tx.prepare("SELECT DISTINCT r.node_id FROM tool_result r JOIN tool_call c ON c.group_id=r.group_id AND c.call_id=r.call_id JOIN shell_execution e ON e.id=c.operation_id OR e.operation_id=c.operation_id WHERE e.id=?1").map_err(sql_error)?;
                 let nodes=statement.query_map([&execution],|row|row.get::<_,String>(0)).map_err(sql_error)?.collect::<std::result::Result<Vec<_>,_>>().map_err(sql_error)?;
                 drop(statement);
-                for node in nodes {crate::index::delete_raw_vectors_tx(&tx,&node)?;}
+                for node in nodes {crate::index::retire_index_source_tx(&tx,&node,true)?;}
                 tx.execute("UPDATE shell_execution SET output_encoding=?2 WHERE id=?1",params![execution,requested]).map_err(sql_error)?;
                 state.encoding=requested;
                 encoding_changed = true;

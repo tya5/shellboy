@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use shellboy::{
     config::{Config, Connection},
-    index::{IndexService, delete_source_vectors_tx, split_text},
+    index::{IndexService, retire_index_source_tx, split_text},
     protocol::{IndexArgs, IndexScope},
     storage::DbWorker,
 };
@@ -361,7 +361,7 @@ async fn stale_embedding_result_cannot_resurrect_deleted_source() {
     let task =
         tokio::spawn(async move { service.process_one(CancellationToken::new()).await.unwrap() });
     started.await.unwrap();
-    f.db.call(|db|{let tx=db.transaction()?;delete_source_vectors_tx(&tx,"source").unwrap();tx.execute("UPDATE node SET payload_json=NULL,payload_revision=payload_revision+1,deleted_reason='expired' WHERE id='source'",[])?;tx.commit()?;Ok(())}).await.unwrap();
+    f.db.call(|db|{let tx=db.transaction()?;retire_index_source_tx(&tx,"source",false).unwrap();tx.execute("UPDATE node SET payload_json=NULL,payload_revision=payload_revision+1,deleted_reason='expired' WHERE id='source'",[])?;tx.commit()?;Ok(())}).await.unwrap();
     release.send(()).unwrap();
     assert!(task.await.unwrap());
     assert_eq!(f.service.status(args()).await.unwrap().done, 0);
@@ -473,7 +473,7 @@ async fn explicit_length_error_splits_finitely_and_rebuild_failure_preserves_old
     f.close().await;
 }
 #[tokio::test]
-async fn rebuild_success_switches_once_and_all_space_vector_gc_rolls_back_atomically() {
+async fn rebuild_switches_and_source_retirement_hides_paid_vectors() {
     let f = Fixture::new(Config::default()).await;
     f.node("source", "cat").await;
     f.service.enqueue_new(&["source".into()]).await.unwrap();
@@ -491,10 +491,10 @@ async fn rebuild_success_switches_once_and_all_space_vector_gc_rolls_back_atomic
     f.drain().await;
     let new = f.service.status(args()).await.unwrap().space_id.unwrap();
     assert_ne!(old, new);
-    let counts=f.db.call(|db|{let tx=db.transaction()?;delete_source_vectors_tx(&tx,"source").unwrap();tx.execute("UPDATE node SET payload_json=NULL,payload_revision=payload_revision+1 WHERE id='source'",[])?;tx.rollback()?;let chunks=db.query_row("SELECT COUNT(*) FROM embedding_chunk WHERE source_node_id='source'",[],|r|r.get::<_,i64>(0))?;let mut statement=db.prepare("SELECT state FROM index_space ORDER BY state")?;let states=statement.query_map([],|r|r.get::<_,String>(0))?.collect::<Result<Vec<_>,_>>()?;Ok((chunks,states))}).await.unwrap();
+    let counts=f.db.call(|db|{let tx=db.transaction()?;retire_index_source_tx(&tx,"source",false).unwrap();tx.execute("UPDATE node SET payload_json=NULL,payload_revision=payload_revision+1 WHERE id='source'",[])?;tx.rollback()?;let chunks=db.query_row("SELECT COUNT(*) FROM embedding_chunk WHERE source_node_id='source'",[],|r|r.get::<_,i64>(0))?;let mut statement=db.prepare("SELECT state FROM index_space ORDER BY state")?;let states=statement.query_map([],|r|r.get::<_,String>(0))?.collect::<Result<Vec<_>,_>>()?;Ok((chunks,states))}).await.unwrap();
     assert_eq!(counts.0, 2);
     assert_eq!(counts.1, vec!["active", "inactive"]);
-    f.db.call(|db|{let tx=db.transaction()?;delete_source_vectors_tx(&tx,"source").unwrap();tx.execute("UPDATE node SET payload_json=NULL,payload_revision=payload_revision+1,deleted_reason='expired' WHERE id='source'",[])?;tx.commit()?;Ok(())}).await.unwrap();
+    f.db.call(|db|{let tx=db.transaction()?;retire_index_source_tx(&tx,"source",false).unwrap();tx.execute("UPDATE node SET payload_json=NULL,payload_revision=payload_revision+1,deleted_reason='expired' WHERE id='source'",[])?;tx.commit()?;Ok(())}).await.unwrap();
     assert!(f.service.search("cat", 10).await.unwrap().is_empty());
     let count=f.db.call(|db|Ok(db.query_row("SELECT COUNT(*) FROM app_meta WHERE key LIKE 'index.preview.%' OR key LIKE 'index.input.%'",[],|r|r.get::<_,i64>(0))?)).await.unwrap();
     assert_eq!(count, 0);
@@ -809,7 +809,7 @@ async fn raw_gc_keeps_canonical_quote_and_attachment_vectors_including_legacy_wi
     assert_eq!(management["coverage"]["coverage_unverified_sources"], 0);
     f.db.call(|db| {
         let tx = db.transaction()?;
-        delete_source_vectors_tx(&tx, "raw-node").unwrap();
+        retire_index_source_tx(&tx, "raw-node", false).unwrap();
         tx.commit()?;
         Ok(())
     })
@@ -817,8 +817,8 @@ async fn raw_gc_keeps_canonical_quote_and_attachment_vectors_including_legacy_wi
     .unwrap();
     assert_eq!(
         f.service.status(args()).await.unwrap().done,
-        0,
-        "full source deletion still removes canonical jobs"
+        1,
+        "source retirement still retains the canonical paid job"
     );
     f.close().await;
 }
@@ -907,11 +907,11 @@ async fn full_raw_middle_is_indexed_in_bounded_segments_and_gc_marker_blocks_new
             .iter()
             .all(|r| r["input"][0].as_str().unwrap().chars().count() <= 1000)
     );
-    f.db.call(|db|{let tx=db.transaction()?;tx.execute("INSERT INTO app_meta(key,value)VALUES('raw_tombstone.execution','{\"state\":\"deleting\"}')",[])?;tx.execute("UPDATE shell_execution SET retention_generation=retention_generation+1 WHERE id='execution'",[])?;delete_source_vectors_tx(&tx,"raw-node").unwrap();tx.execute("DELETE FROM output_chunk WHERE execution_id='execution'",[])?;tx.commit()?;Ok(())}).await.unwrap();
+    f.db.call(|db|{let tx=db.transaction()?;tx.execute("INSERT INTO app_meta(key,value)VALUES('raw_tombstone.execution','{\"state\":\"deleting\"}')",[])?;tx.execute("UPDATE shell_execution SET retention_generation=retention_generation+1 WHERE id='execution'",[])?;retire_index_source_tx(&tx,"raw-node",true).unwrap();tx.execute("DELETE FROM output_chunk WHERE execution_id='execution'",[])?;tx.commit()?;Ok(())}).await.unwrap();
     let preview = f.service.enqueue_tool_raw("raw-node").await.unwrap();
     assert_eq!(preview.unavailable, 0);
     assert_eq!(preview.segments, 0);
-    assert_eq!(f.service.status(args()).await.unwrap().done, 0);
+    assert!(f.service.status(args()).await.unwrap().done > 0);
     f.close().await;
 }
 #[tokio::test]

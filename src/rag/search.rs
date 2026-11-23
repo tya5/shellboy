@@ -112,6 +112,47 @@ pub(super) async fn embed(
     }
     Ok(response)
 }
+/// Request identity, independent of a store's splitter or storage format.
+#[derive(Eq, Hash, PartialEq)]
+struct QueryIdentity {
+    connection: String,
+    endpoint: String,
+    model: String,
+    requested_dimensions: Option<usize>,
+    dimension: usize,
+}
+
+pub(super) struct QueryEmbedding<'a> {
+    text: &'a str,
+    vectors: std::collections::HashMap<QueryIdentity, Vec<f32>>,
+}
+
+impl QueryEmbedding<'_> {
+    pub(super) async fn vector(&mut self, profile: &Profile, dimension: usize) -> Result<&[f32]> {
+        let key = QueryIdentity {
+            connection: profile.name.clone(),
+            endpoint: profile.endpoint_hash.clone(),
+            model: profile.model.clone(),
+            requested_dimensions: profile.requested_dimensions,
+            dimension,
+        };
+        use std::collections::hash_map::Entry;
+        Ok(match self.vectors.entry(key) {
+            Entry::Occupied(saved) => saved.into_mut(),
+            Entry::Vacant(slot) => {
+                let response = embed(profile, &[self.text.into()], Some(dimension)).await?;
+                slot.insert(
+                    response
+                        .vectors
+                        .into_iter()
+                        .next()
+                        .expect("one query vector"),
+                )
+            }
+        })
+    }
+}
+
 pub(super) async fn embed_revision(
     s: &mut store::Store,
     revision: &str,
@@ -301,7 +342,7 @@ fn material_hits(s: &store::Store, source: &str, query: &str) -> Result<Vec<Hit>
 pub(super) async fn material_semantic(
     s: &store::Store,
     source: &str,
-    query: &str,
+    query: &mut QueryEmbedding<'_>,
     profile: &Profile,
 ) -> Result<Vec<Hit>> {
     let before = s.db.unchecked_transaction()?;
@@ -334,8 +375,8 @@ pub(super) async fn material_semantic(
         ));
     }
     before.commit()?;
-    let response = embed(profile, &[query.into()], Some(dimension)).await?;
-    let vector = serde_json::to_string(&response.vectors[0]).expect("finite vector");
+    let vector =
+        serde_json::to_string(query.vector(profile, dimension).await?).expect("finite vector");
     let snapshot = s.db.unchecked_transaction()?;
     let current: String =
         snapshot.query_row("SELECT value FROM meta WHERE key='generation'", [], |r| {
@@ -640,6 +681,10 @@ pub(super) async fn search(
     let mut resolved_sources = HashSet::new();
     let mut breaker = ProviderBreaker::default();
     let mut history_budget = history::KEYWORD_NODE_LIMIT;
+    let mut query_embedding = QueryEmbedding {
+        text: query,
+        vectors: Default::default(),
+    };
     for scope in &scopes {
         let mut keyword = if mode == SearchMode::Semantic {
             "not_requested"
@@ -668,7 +713,7 @@ pub(super) async fn search(
                             "Provider failure paused semantic search; no request was sent",
                         ));
                     }
-                    lists.push(super::builtin::semantic(context, query).await?);
+                    lists.push(super::builtin::semantic(context, &mut query_embedding).await?);
                     semantic = "ok";
                 }
                 return Ok(());
@@ -708,7 +753,7 @@ pub(super) async fn search(
                         ));
                     }
                     let (hits, automatic, auto_kinds) =
-                        history::semantic(context, query, thread).await?;
+                        history::semantic(context, &mut query_embedding, thread).await?;
                     lists.push(hits);
                     semantic = "ok";
                     let omitted = crate::config::INDEXABLE_KINDS
@@ -753,7 +798,7 @@ pub(super) async fn search(
                     ));
                 }
                 let profile = embedding_profile(context)?;
-                lists.push(material_semantic(&s, &id, query, &profile).await?);
+                lists.push(material_semantic(&s, &id, &mut query_embedding, &profile).await?);
                 semantic = "ok";
             }
             Ok(())

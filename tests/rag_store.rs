@@ -285,10 +285,10 @@ async fn semantic_cache_reuses_successful_content_and_unregister_prunes_vectors(
 }
 
 #[tokio::test]
-async fn publishing_retires_old_revision_without_deleting_shared_embeddings() {
+async fn publishing_retires_old_revision_while_preserving_paid_embeddings() {
     let root = tempfile::tempdir().unwrap();
     let root = root.path();
-    let (_, _, server) = proxy(root).await;
+    let (requests, _, server) = proxy(root).await;
     init(root).await;
     std::fs::write(root.join("one.md"), "OLD shared 日本語").unwrap();
     std::fs::write(root.join("two.md"), "OLD shared 日本語").unwrap();
@@ -340,7 +340,51 @@ async fn publishing_retires_old_revision_without_deleting_shared_embeddings() {
     let remaining: i64 = db
         .query_row("SELECT COUNT(*) FROM embeddings", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(remaining, 1, "unreferenced old embedding is retired");
+    assert_eq!(remaining, 2, "unreferenced paid content remains cached");
+    std::fs::write(root.join("one.md"), "OLD shared 日本語").unwrap();
+    let before = requests.load(Ordering::SeqCst);
+    assert_eq!(
+        index(root, Some("one"), IndexMode::Semantic).await["ok"],
+        true
+    );
+    assert_eq!(requests.load(Ordering::SeqCst), before);
+    assert_eq!(
+        call(
+            root,
+            RagCommand::Source {
+                command: SourceCommand::Remove {
+                    source: "one".into()
+                }
+            }
+        )
+        .await["ok"],
+        true
+    );
+    assert_eq!(
+        db.query_row("SELECT COUNT(*) FROM embeddings", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        2,
+        "the other source still owns the old vector"
+    );
+    assert_eq!(
+        call(
+            root,
+            RagCommand::Source {
+                command: SourceCommand::Remove {
+                    source: "two".into()
+                }
+            }
+        )
+        .await["ok"],
+        true
+    );
+    assert_eq!(
+        db.query_row("SELECT COUNT(*) FROM embeddings", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
     server.abort();
 }
 
@@ -1479,7 +1523,7 @@ async fn legacy_chunks_migrate_without_duplicate_text_and_embed_utf8_ranges() {
     assert_eq!(index(root, None, IndexMode::Keyword).await["ok"], true);
     {
         let db = rusqlite::Connection::open(root.join("knowledge.db")).unwrap();
-        db.execute_batch("ALTER TABLE chunks ADD COLUMN text TEXT; UPDATE chunks SET text=(SELECT CAST(substr(CAST(b.text AS BLOB),chunks.start+1,chunks.end-chunks.start) AS TEXT) FROM blocks b WHERE b.revision_id=chunks.revision_id AND b.ordinal=0); PRAGMA user_version=3;").unwrap();
+        db.execute_batch("DROP TABLE source_chunk_hashes; ALTER TABLE chunks ADD COLUMN text TEXT; UPDATE chunks SET text=(SELECT CAST(substr(CAST(b.text AS BLOB),chunks.start+1,chunks.end-chunks.start) AS TEXT) FROM blocks b WHERE b.revision_id=chunks.revision_id AND b.ordinal=0); PRAGMA user_version=3;").unwrap();
     }
     {
         let db = rusqlite::Connection::open(root.join("knowledge.db")).unwrap();
@@ -1790,8 +1834,8 @@ async fn docs_semantic_requires_explicit_index_and_search_never_prepares_guides(
     );
     assert_eq!(
         requests.load(Ordering::SeqCst),
-        before_default + 2,
-        "docs and registered materials query embeddings only"
+        before_default + 1,
+        "docs and registered materials share the query embedding"
     );
     let ingested = call(
         root,
@@ -1864,13 +1908,13 @@ async fn successful_semantic_scope_breaks_provider_failure_streak_without_extra_
     .await;
     assert_eq!(
         requests.load(Ordering::SeqCst),
-        7,
-        "intervening successful scopes must break the streak: {result}"
+        2,
+        "the first success supplies all remaining equivalent queries: {result}"
     );
     let errors = result["result"]["scope_errors"].as_array().unwrap();
-    assert_eq!(errors.len(), 4);
-    assert!(errors.iter().all(|e| e["code"] == "embedding_failed"));
-    assert_eq!(result["result"]["items"].as_array().unwrap().len(), 3);
+    assert_eq!(errors.len(), 1);
+    assert_eq!(errors[0]["code"], "embedding_failed");
+    assert_eq!(result["result"]["items"].as_array().unwrap().len(), 6);
     requests.store(0, Ordering::SeqCst);
     fail_at.store(usize::MAX - 3, Ordering::SeqCst);
     let stopped = call(

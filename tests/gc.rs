@@ -186,6 +186,57 @@ async fn raw_retention_respects_live_and_pins_then_expires_durably() {
 }
 
 #[tokio::test]
+async fn expired_raw_output_does_not_delete_paid_embeddings() {
+    let f = Fixture::new(Config::default()).await;
+    f.raw(
+        "expired",
+        "exited",
+        "2020-01-01T00:00:00Z",
+        vec![1; 8],
+        false,
+    )
+    .await;
+    f.node("result", Some("turn")).await;
+    f.db.call(|db| {
+        db.execute_batch("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at) VALUES('conversation','live','a','turn',0,0,'p','m',0,'completed','{}','now');
+            INSERT INTO tool_group VALUES('g','a','turn','completed','now');
+            INSERT INTO tool_call VALUES('g','c',0,'shell','{}','completed','expired');
+            INSERT INTO tool_result VALUES('g','c','result','completed');
+            INSERT INTO index_space(id,profile_id,model_id,dimension,splitter_version,state,vec_table_name) VALUES('s','p','m',2,'fixture','inactive','shellboy_vec_0123456789abcdef0123456789abcdef');
+            CREATE VIRTUAL TABLE shellboy_vec_0123456789abcdef0123456789abcdef USING vec0(embedding float[2]);
+            INSERT INTO shellboy_vec_0123456789abcdef0123456789abcdef(rowid,embedding) VALUES(1,'[1,0]');
+            INSERT INTO embedding_job(id,space_id,source_node_id,source_revision,body_kind,source_hash,span_start,span_end,state) VALUES('j','s','result',0,'tool_raw','h',0,1,'done');
+            INSERT INTO embedding_chunk VALUES('c','j','s','result',0,0,1,'h',1);")?;
+        Ok(())
+    }).await.unwrap();
+    assert_eq!(
+        f.gc.collect(StorageCategory::Raw, now())
+            .await
+            .unwrap()
+            .raw_bytes_collected,
+        8
+    );
+    f.gc.collect(StorageCategory::Index, now()).await.unwrap();
+    f.db.call(|db| {
+        assert_eq!(
+            scalar(db, "SELECT COUNT(*) FROM embedding_chunk WHERE id='c'")?,
+            1
+        );
+        assert_eq!(
+            scalar(
+                db,
+                "SELECT COUNT(*) FROM shellboy_vec_0123456789abcdef0123456789abcdef"
+            )?,
+            1
+        );
+        Ok(())
+    })
+    .await
+    .unwrap();
+    f.db.shutdown().await.unwrap();
+}
+
+#[tokio::test]
 async fn interrupted_raw_collection_resumes_marker_without_incrementing_generation_twice() {
     let f = Fixture::new(Config::default()).await;
     f.raw("raw", "exited", "2020-01-01T00:00:00Z", vec![7; 32], false)

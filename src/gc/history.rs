@@ -295,7 +295,7 @@ fn tombstone_node(
     kind: &str,
     turn: &Option<String>,
 ) -> Result<()> {
-    crate::index::delete_source_vectors_tx(tx, node)?;
+    crate::index::retire_index_source_tx(tx, node, false)?;
     // A node released by `thread prune` records that reason (#235); the rest keep the thread-deletion reason.
     let reason = if crate::history::reachability::released_by_prune(tx, node).map_err(sql_error)? {
         crate::history::prune::PRUNED_REASON

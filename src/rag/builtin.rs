@@ -1,5 +1,7 @@
 //! Explicit bundled guide indexing and read-only semantic queries.
-use super::search::{Context, Hit, embed_revision, embedding_profile, material_semantic};
+use super::search::{
+    Context, Hit, QueryEmbedding, embed_revision, embedding_profile, material_semantic,
+};
 use super::*;
 use rusqlite::OptionalExtension;
 use std::collections::BTreeMap;
@@ -118,7 +120,10 @@ pub(super) fn preparation(context: &Context) -> Result<Option<search::Preparatio
     search::material_preparation(&s, "@docs", &profile)
 }
 
-pub(super) async fn semantic(context: &Context, query: &str) -> Result<Vec<Hit>> {
+pub(super) async fn semantic(
+    context: &Context,
+    query: &mut QueryEmbedding<'_>,
+) -> Result<Vec<Hit>> {
     let profile = embedding_profile(context)?;
     let s = store::open(&context.database, false).map_err(|error| {
         if error.code == "db_not_found" {

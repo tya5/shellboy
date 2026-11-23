@@ -111,17 +111,28 @@ async fn collection_keeps_a_retained_space_with_vectors_and_takes_an_empty_one()
     f.space(0, "inactive", false).await;
     f.space(1, "discarded", false).await;
     f.space(2, "inactive", false).await;
+    f.space(3, "inactive", false).await;
     f.db.call(|db| {
-        db.execute("DELETE FROM embedding_chunk WHERE space_id='space-002'", [])?;
+        db.execute(
+            "DELETE FROM embedding_chunk WHERE space_id IN ('space-002','space-003')",
+            [],
+        )?;
+        db.execute(
+            "DELETE FROM shellboy_vec_00000000000000000000000000000002 WHERE rowid=1",
+            [],
+        )?;
         Ok(())
     })
     .await
     .unwrap();
     assert_eq!(f.collect().await.inactive_index_spaces_collected, 2);
     f.db.call(|db| {
-        let left: String =
-            db.query_row("SELECT group_concat(id) FROM index_space", [], |r| r.get(0))?;
-        assert_eq!(left, "space-000");
+        let left: String = db.query_row(
+            "SELECT group_concat(id) FROM (SELECT id FROM index_space ORDER BY id)",
+            [],
+            |r| r.get(0),
+        )?;
+        assert_eq!(left, "space-000,space-003");
         let chunks: i64 = db.query_row("SELECT count(*) FROM embedding_chunk", [], |r| r.get(0))?;
         assert_eq!(chunks, 1);
         Ok(())

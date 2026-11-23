@@ -532,10 +532,10 @@ impl GcService {
                             if !owns {
                                 continue;
                             }
-                            if let Err(error) = crate::index::delete_source_vectors_tx(&tx, node) {
-                                return Ok(Err(error));
+                            match crate::index::retire_index_source_tx(&tx, node, false) {
+                                Ok(changed) => removed += u64::from(changed != 0),
+                                Err(error) => return Ok(Err(error)),
                             }
-                            removed += 1;
                         }
                         tx.commit()?;
                         let last = (rows.len() == limit.rows())
@@ -1185,7 +1185,7 @@ fn begin_raw(
     if !marked {
         let nodes=tx.prepare("SELECT DISTINCT r.node_id FROM tool_result r JOIN tool_call c ON c.group_id=r.group_id AND c.call_id=r.call_id WHERE c.operation_id=?1 OR c.operation_id=(SELECT operation_id FROM shell_execution WHERE id=?1)").map_err(sql_error)?.query_map([execution],|row|row.get::<_,String>(0)).map_err(sql_error)?.collect::<rusqlite::Result<Vec<_>>>().map_err(sql_error)?;
         for node in nodes {
-            crate::index::delete_raw_vectors_tx(&tx, &node)?;
+            crate::index::retire_index_source_tx(&tx, &node, true)?;
         }
         tx.execute(
             "UPDATE shell_execution SET retention_generation=retention_generation+1 WHERE id=?1",

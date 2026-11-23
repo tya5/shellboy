@@ -47,8 +47,7 @@ pub(crate) use search::{rag_hits, rag_profile_key, rag_space};
 use source::{Source, source_bodies};
 use split::drain_segments;
 pub use split::{Segment, split_text};
-pub(crate) use store::delete_raw_vectors_tx;
-pub use store::delete_source_vectors_tx;
+pub use store::retire_index_source_tx;
 use store::{
     RawWitness, Space, Witness, decode_json, encode_json, group_current, json_meta, load_space,
     maybe_activate_candidate, meta, set_json_meta, set_meta, space_for_group, update_json_meta,
@@ -1766,7 +1765,7 @@ mod source_metadata_tests {
                 db.query_row("SELECT COUNT(*) FROM app_meta", [], |row| row.get(0))?;
             {
                 let tx = db.transaction()?;
-                delete_source_vectors_tx(&tx, "target").unwrap();
+                retire_index_source_tx(&tx, "target", false).unwrap();
                 assert_eq!(
                     tx.query_row("SELECT COUNT(*) FROM app_meta", [], |row| row
                         .get::<_, i64>(0))?,
@@ -1780,7 +1779,7 @@ mod source_metadata_tests {
                 before
             );
             let tx = db.transaction()?;
-            delete_source_vectors_tx(&tx, "target").unwrap();
+            retire_index_source_tx(&tx, "target", false).unwrap();
             tx.commit()?;
             assert_eq!(
                 db.query_row("SELECT COUNT(*) FROM app_meta", [], |row| row

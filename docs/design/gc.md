@@ -81,14 +81,14 @@ sweepの既存node batch内でtombstone確定と同transactionに当該nodeの�
 
 ## 履歴収集の段分離（R2-8）
 
-history_stepの既存単一write transaction内でroots/provenance/sweepをprivate関数へ分け、破壊的tombstone手順を一箇所にまとめる。TEMP marks/session、BATCH、有限horizon、root revision変更時とlate pinの到達性再検証、cursor進捗、全space vector削除→node tombstone→所有証拠解放→output_item→incomplete attemptの順序は不変。段分離はGC再開状態やworkerを増やさず、Stageの保存済みsnake_case bytesを維持する。
+history_stepの既存単一write transaction内でroots/provenance/sweepをprivate関数へ分け、破壊的tombstone手順を一箇所にまとめる。TEMP marks/session、BATCH、有限horizon、root revision変更時とlate pinの到達性再検証、cursor進捗、索引の本文プレビューと未完了作業の削除（購入済み vector は保持）→node tombstone→所有証拠解放→output_item→incomplete attemptの順序は不変。段分離はGC再開状態やworkerを増やさず、Stageの保存済みsnake_case bytesを維持する。
 
 
 ## Index-space collection (#55, #253)
 
 Paid vectors are not deleted automatically. Maintenance and `storage collect --category index` (also `all`) run the same routine, which takes only what holds no paid work: a `discarded` int8 conversion candidate (cancelled, abandoned or stopped at the room limit; a free copy) and an `inactive` space with no vectors. An `inactive` space with vectors stays: the old space after a rebuild or conversion, and a rebuild candidate replaced by a newer rebuild, whose vectors were paid for. That one carries `index.partial.<space>`, which status and the `index remove` dry run show and which keeps `select_space` refusing it. `storage collect` no longer counts as an explicit request to delete such a space, because it names none and offers no preview of one. Only `index remove --space ID` deletes it, for one named space, after its dry run. Candidates superseded before this change have no such marker: they count as retained and complete, and they stay until removed the same way.
 
-Transactions cover at most 32 spaces and yield between batches. Current active pointers, current rebuild candidate pointers, the source of a running conversion (its `index.shrink.<space>` record) and any running embedding job protect a space. Validate generated vector-table identifiers before DDL. Drop vectors and associated chunks/jobs/input/preview/query/request-mode/conversion metadata in the same transaction; rollback retains the whole batch. Report `inactive_index_spaces_collected` separately from reclaimed source vectors. This does not delete conversation originals or promise physical SQLite/WAL shrink. See [index operations](index-operations.md).
+Transactions cover at most 32 spaces and yield between batches. Current active pointers, current rebuild candidate pointers, the source of a running conversion (its `index.shrink.<space>` record) and any running embedding job protect a space. Validate generated vector-table identifiers before DDL. Drop vectors and associated chunks/jobs/input/preview/query/request-mode/conversion metadata in the same transaction; rollback retains the whole batch. Report `inactive_index_spaces_collected` separately from `index_sources_collected` (sources whose cached text or unfinished work was reclaimed, not vectors). This does not delete conversation originals or promise physical SQLite/WAL shrink. See [index operations](index-operations.md).
 
 
 ## Finished submission copies (#60)

@@ -423,76 +423,46 @@ pub(super) fn maybe_activate_candidate(
     tx.execute("DELETE FROM app_meta WHERE key=?1", [keys.rebuild()])?;
     Ok(true)
 }
-/// Delete every derived body in the transaction that tombstones source text.
-pub fn delete_source_vectors_tx(tx: &Transaction<'_>, node_id: &str) -> Result<(), ApiError> {
-    delete_vectors_tx(tx, node_id, false)
-}
-/// Raw retention/decoding never invalidates immutable canonical quotes or paths.
-pub(crate) fn delete_raw_vectors_tx(tx: &Transaction<'_>, node_id: &str) -> Result<(), ApiError> {
-    delete_vectors_tx(tx, node_id, true)
-}
-fn delete_vectors_tx(tx: &Transaction<'_>, node_id: &str, raw_only: bool) -> Result<(), ApiError> {
-    let embedding_chunk_sql = "SELECT c.id,c.vec_row_id,s.vec_table_name FROM embedding_chunk c JOIN index_space s ON s.id=c.space_id WHERE c.source_node_id=?1 AND (NOT ?2 OR EXISTS(SELECT 1 FROM embedding_job j WHERE j.id=c.job_id AND j.body_kind='tool_raw'))";
-    let embedding_job_sql =
-        "SELECT id FROM embedding_job WHERE source_node_id=?1 AND (NOT ?2 OR body_kind='tool_raw')";
-    let embedding_chunk_sql_2 = "DELETE FROM embedding_chunk WHERE source_node_id=?1 AND (NOT ?2 OR job_id IN (SELECT id FROM embedding_job WHERE source_node_id=?1 AND body_kind='tool_raw'))";
-    let embedding_job_sql_2 =
-        "DELETE FROM embedding_job WHERE source_node_id=?1 AND (NOT ?2 OR body_kind='tool_raw')";
-    let mut statement = tx.prepare(embedding_chunk_sql).map_err(sql_error)?;
-    let rows = statement
-        .query_map(params![node_id, raw_only], |r| {
-            Ok((
-                r.get::<_, String>(0)?,
-                r.get::<_, i64>(1)?,
-                r.get::<_, String>(2)?,
-            ))
-        })
-        .map_err(sql_error)?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(sql_error)?;
-    drop(statement);
-    for (chunk, row, table) in rows {
-        valid_table(&table).map_err(db_error)?;
-        tx.execute(&format!("DELETE FROM {table} WHERE rowid=?1"), [row])
-            .map_err(sql_error)?;
-        tx.execute(
-            "DELETE FROM app_meta WHERE key=?1",
-            [IndexKeys::preview(&chunk)],
+/// Retire source text and unfinished work, not the purchased vectors or their witnesses.
+pub fn retire_index_source_tx(
+    tx: &Transaction<'_>,
+    node: &str,
+    raw_only: bool,
+) -> Result<usize, ApiError> {
+    let mut changed = tx
+        .execute(
+            "DELETE FROM app_meta WHERE key IN (
+        SELECT 'index.preview.'||c.id FROM embedding_chunk c JOIN embedding_job j ON j.id=c.job_id
+        WHERE c.source_node_id=?1 AND (NOT ?2 OR j.body_kind='tool_raw')
+        UNION ALL SELECT 'index.input.'||j.id FROM embedding_job j
+        WHERE j.source_node_id=?1 AND (NOT ?2 OR j.body_kind='tool_raw'))",
+            params![node, raw_only],
         )
         .map_err(sql_error)?;
-    }
-    let mut statement = tx.prepare(embedding_job_sql).map_err(sql_error)?;
-    let jobs = statement
-        .query_map(params![node_id, raw_only], |row| row.get::<_, String>(0))
-        .map_err(sql_error)?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(sql_error)?;
-    drop(statement);
-    for job in jobs {
-        tx.execute(
-            "DELETE FROM app_meta WHERE key=?1",
-            [IndexKeys::input(&job)],
+    changed += tx
+        .execute(
+            "DELETE FROM embedding_job WHERE source_node_id=?1
+        AND (NOT ?2 OR body_kind='tool_raw')
+        AND NOT EXISTS(SELECT 1 FROM embedding_chunk WHERE job_id=embedding_job.id)",
+            params![node, raw_only],
         )
-        .map_err(sql_error)?;
-    }
-    tx.execute(embedding_chunk_sql_2, params![node_id, raw_only])
-        .map_err(sql_error)?;
-    tx.execute(embedding_job_sql_2, params![node_id, raw_only])
         .map_err(sql_error)?;
     if raw_only {
-        // Keep the indexed node lookup used by full source deletion (G11).
-        tx.execute(
-            &format!("{DELETE_BOOTSTRAP_SOURCE} AND json_extract(value,'$.body_kind')='tool_raw'"),
-            [node_id],
-        )
-        .map_err(sql_error)?;
+        changed += tx
+            .execute(
+                &format!(
+                    "{DELETE_BOOTSTRAP_SOURCE} AND json_extract(value,'$.body_kind')='tool_raw'"
+                ),
+                [node],
+            )
+            .map_err(sql_error)?;
     } else {
-        tx.execute(DELETE_BOOTSTRAP_SOURCE, [node_id])
+        changed += tx
+            .execute(DELETE_BOOTSTRAP_SOURCE, [node])
             .map_err(sql_error)?;
-        tx.execute(DELETE_AUTO_SOURCE, [node_id])
-            .map_err(sql_error)?;
+        changed += tx.execute(DELETE_AUTO_SOURCE, [node]).map_err(sql_error)?;
     }
-    Ok(())
+    Ok(changed)
 }
 
 /// One successful API result and its fixed authorization, owned by

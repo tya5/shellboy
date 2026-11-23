@@ -75,10 +75,24 @@ pub(crate) fn reclaim_step(
         };
         *after = id.clone();
         if removal_blocker(&tx, &id)?.is_none() {
-            let empty_or_discarded: bool = tx.query_row(
-                "SELECT state='discarded' OR NOT EXISTS(SELECT 1 FROM embedding_chunk WHERE space_id=?1) FROM index_space WHERE id=?1",
-                [&id], |r|r.get(0))?;
-            if empty_or_discarded {
+            let (state, table, has_chunks): (String, String, bool) = tx.query_row(
+                "SELECT state,vec_table_name,EXISTS(SELECT 1 FROM embedding_chunk WHERE space_id=?1) FROM index_space WHERE id=?1",
+                [&id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+            // Only discarded conversions are known to contain free copies.
+            // A missing chunk link is not proof that an inactive table is empty.
+            let eligible = if state == "discarded" {
+                true
+            } else if has_chunks {
+                false
+            } else {
+                valid_table(&table)?;
+                !tx.query_row(
+                    &format!("SELECT EXISTS(SELECT 1 FROM {table} LIMIT 1)"),
+                    [],
+                    |r| r.get::<_, bool>(0),
+                )?
+            };
+            if eligible {
                 tx.execute("UPDATE index_space SET state='removing' WHERE id=?1", [&id])?;
             }
         }
