@@ -1,5 +1,7 @@
 # 公開用リポジトリの構成
 
+Core [v0.14.0](https://github.com/tya5/shellboy/releases/tag/v0.14.0) was published on 2026-11-23 from tag commit `b644b3c`; see the [release notes](release-v0.14.0-draft.md).
+
 2026-10-26。公開先は `tya5/shellboy`。名称変更と公開準備を終え、利用者の明示許可によりmainと [v0.1.0 Release](https://github.com/tya5/shellboy/releases/tag/v0.1.0) を公開しました。
 
 2026-10-26、追加修正を [v0.1.1](https://github.com/tya5/shellboy/releases/tag/v0.1.1) として公開しました。tagは `e55da58`、Windows x64・macOS ARM64・Linux x64の配布物とSHA256SUMSを提供し、公開ダウンロードと照合を確認しています。v0.1.0は保持しています。

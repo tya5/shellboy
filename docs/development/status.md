@@ -1,5 +1,7 @@
 # Development status
 
+Core [v0.14.0](https://github.com/tya5/shellboy/releases/tag/v0.14.0) was published on 2026-11-23 from tag commit `b644b3c`; see the [release notes](release-v0.14.0-draft.md).
+
 ## Core #370 asking a person versus asking a Thread
 
 A model ask addressed to its own Thread is refused with `invalid_argument`
