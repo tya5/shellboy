@@ -601,6 +601,81 @@ mod tests {
         .unwrap()
     }
     #[test]
+    fn late_completion_cannot_rewrite_a_saved_answer_or_end_time() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        db.execute_batch(
+            "INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('t','/','','p','m','now');
+             INSERT INTO run(id,thread_id,state,created_at) VALUES('r','t','live','now');
+             INSERT INTO turn(id,thread_id,run_id,state,created_at) VALUES('u','t','r','running','now');
+             INSERT INTO node(id,turn_id,kind,created_at) VALUES('answer','u','assistant_response','now');",
+        ).unwrap();
+        let tx = db.transaction().unwrap();
+        let (run, turn, answer) = ("r", "u", "answer");
+        for run_state in ["completed", "stopped", "failed", "stopping"] {
+            for turn_state in ["completed", "stopped", "failed"] {
+                tx.execute(
+                    "UPDATE run SET state=?1,ended_at='original-run'",
+                    [run_state],
+                )
+                .unwrap();
+                tx.execute(
+                    "UPDATE turn SET state=?1,ended_at='original-turn',answer_node_id=?2",
+                    params![turn_state, answer],
+                )
+                .unwrap();
+                complete_idle_run(&tx, run).unwrap();
+                complete_answer_turn(&tx, turn, answer).unwrap();
+                assert_eq!(
+                    tx.query_row("SELECT state,ended_at FROM run", [], |r| Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, String>(1)?
+                    )))
+                    .unwrap(),
+                    (run_state.into(), "original-run".into())
+                );
+                assert_eq!(
+                    tx.query_row("SELECT state,ended_at FROM turn", [], |r| Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, String>(1)?
+                    )))
+                    .unwrap(),
+                    (turn_state.into(), "original-turn".into())
+                );
+            }
+        }
+        tx.execute("UPDATE run SET state='completed'", []).unwrap();
+        tx.execute("UPDATE turn SET state='completed'", []).unwrap();
+        assert_eq!(
+            complete_answer_turn(&tx, turn, "different-answer")
+                .unwrap_err()
+                .into_api_error()
+                .code,
+            ErrorCode::OperationConflict
+        );
+        assert_eq!(
+            tx.query_row("SELECT answer_node_id FROM turn", [], |r| r
+                .get::<_, String>(0))
+                .unwrap(),
+            answer
+        );
+        assert_eq!(
+            complete_idle_run(&tx, "missing")
+                .unwrap_err()
+                .into_api_error()
+                .code,
+            ErrorCode::TargetUnavailable
+        );
+        assert_eq!(
+            complete_answer_turn(&tx, "missing", answer)
+                .unwrap_err()
+                .into_api_error()
+                .code,
+            ErrorCode::TargetUnavailable
+        );
+    }
+
+    #[test]
     fn executor_preserves_provider_body_without_writing_compaction_facts() {
         for current in [None, Some("owned")] {
             let db = fixture("inflight");

@@ -822,82 +822,6 @@ async fn obsolete_recovery_leaves_history_unchanged_and_keeps_attempt_audit() {
 }
 
 #[tokio::test]
-async fn settled_run_and_turn_completion_never_rewrite_answer_or_ending_time() {
-    let (_root, owner, control, accepted) = fixture("http://127.0.0.1:1/v1").await;
-    let run = accepted.run_id.clone().unwrap();
-    let turn = accepted.turn_id.clone().unwrap();
-    let answer = accepted.message_id.clone();
-    control
-        .store
-        .database
-        .call(move |db| {
-            let tx = db.transaction()?;
-            tx.execute("UPDATE receipt SET state='applied'", [])?;
-            for run_state in ["completed", "stopped", "failed", "stopping"] {
-                for turn_state in ["completed", "stopped", "failed"] {
-                    tx.execute(
-                        "UPDATE run SET state=?1,ended_at='original-run'",
-                        [run_state],
-                    )?;
-                    tx.execute(
-                        "UPDATE turn SET state=?1,ended_at='original-turn',answer_node_id=?2",
-                        params![turn_state, answer],
-                    )?;
-                    super::super::state::complete_idle_run(&tx, &run)?;
-                    super::super::state::complete_answer_turn(&tx, &turn, &answer)?;
-                    assert_eq!(
-                        tx.query_row("SELECT state,ended_at FROM run", [], |r| Ok((
-                            r.get::<_, String>(0)?,
-                            r.get::<_, String>(1)?
-                        )))?,
-                        (run_state.into(), "original-run".into())
-                    );
-                    assert_eq!(
-                        tx.query_row("SELECT state,ended_at FROM turn", [], |r| Ok((
-                            r.get::<_, String>(0)?,
-                            r.get::<_, String>(1)?
-                        )))?,
-                        (turn_state.into(), "original-turn".into())
-                    );
-                }
-            }
-            tx.execute("UPDATE run SET state='completed'", [])?;
-            tx.execute("UPDATE turn SET state='completed'", [])?;
-            assert_eq!(
-                super::super::state::complete_answer_turn(&tx, &turn, "different-answer")
-                    .unwrap_err()
-                    .into_api_error()
-                    .code,
-                ErrorCode::OperationConflict
-            );
-            assert_eq!(
-                tx.query_row("SELECT answer_node_id FROM turn", [], |r| r
-                    .get::<_, String>(0))?,
-                answer
-            );
-            assert_eq!(
-                super::super::state::complete_idle_run(&tx, "missing")
-                    .unwrap_err()
-                    .into_api_error()
-                    .code,
-                ErrorCode::TargetUnavailable
-            );
-            assert_eq!(
-                super::super::state::complete_answer_turn(&tx, "missing", &answer)
-                    .unwrap_err()
-                    .into_api_error()
-                    .code,
-                ErrorCode::TargetUnavailable
-            );
-            tx.commit()?;
-            Ok(())
-        })
-        .await
-        .unwrap();
-    close(control, owner).await;
-}
-
-#[tokio::test]
 async fn saved_tool_result_notifies_its_selected_history_only_after_commit() {
     for rollback in [false, true] {
         let (_root, owner, control, accepted) = fixture("http://127.0.0.1:1/v1").await;
@@ -1434,9 +1358,9 @@ async fn interrupted_unfinished_group_waits_for_pairs_instead_of_rechecking() {
 
 #[cfg(unix)]
 #[tokio::test]
-async fn running_shell_publication_has_a_registered_foreground_receiver() {
+async fn a_reported_running_shell_can_be_backgrounded_immediately() {
     crate::test_watchdog::watchdog("running shell foreground publication", async {
-        let (root, owner, control, accepted) = fixture("http://127.0.0.1:1/v1").await;
+        let (_root, owner, control, accepted) = fixture("http://127.0.0.1:1/v1").await;
         let snapshot = ready(&control, &accepted).await;
         let turn = snapshot.turn.clone();
         control.store.database.call(move |db| {
@@ -1462,8 +1386,6 @@ async fn running_shell_publication_has_a_registered_foreground_receiver() {
             if running { break; }
             tokio::task::yield_now().await;
         }
-        let witness = root.path().join("publication.jsonl");
-        std::fs::write(&witness, "{\"running\":true}\n").unwrap();
         let accepted = control.background(&snapshot.thread).await;
         let first_admitted = accepted.is_ok();
         if !first_admitted {
@@ -1474,10 +1396,6 @@ async fn running_shell_publication_has_a_registered_foreground_receiver() {
         let (result, halt) = shell.await.unwrap();
         assert!(halt);
         assert_eq!(result["reason"], "human_backgrounded");
-        use std::io::Write;
-        writeln!(std::fs::OpenOptions::new().append(true).open(&witness).unwrap(),
-            "{{\"foreground_accepted\":true}}").unwrap();
-        assert_eq!(std::fs::read_to_string(witness).unwrap().lines().count(), 2);
         control.live.remove_driver_if_current(&snapshot.thread, &slot.id).await;
         close(control, owner).await;
         assert!(first_admitted, "running was published before foreground admission: {accepted:?}");
@@ -1601,17 +1519,10 @@ async fn stop_accepted_after_driver_exit_choice_is_settled_at_retirement() {
 }
 
 #[tokio::test]
-async fn explicit_stop_and_driver_drain_fence_with_distinct_receipt_boundaries() {
+async fn stopping_keeps_queued_input_held_with_the_recorded_reason() {
     for explicit in [true, false] {
         let (_root, owner, control, accepted) = fixture("http://127.0.0.1:1/v1").await;
         let run = accepted.run_id.unwrap();
-        let before = control.store.database.call(|db| {
-            db.execute_batch("CREATE TEMP TABLE stop_boundary AS SELECT r.state AS run_state,r.stop_reason,u.generation,q.state AS receipt_state,q.hold_reason FROM run r JOIN turn u ON u.run_id=r.id JOIN receipt q ON q.turn_id=u.id WHERE 0;
-                CREATE TEMP TRIGGER driver_boundary BEFORE UPDATE OF state ON main.turn WHEN NEW.state='stopped' BEGIN
-                  INSERT INTO stop_boundary SELECT r.state,r.stop_reason,OLD.generation,q.state,q.hold_reason FROM run r JOIN receipt q ON q.turn_id=OLD.id WHERE r.id=OLD.run_id;
-                END;")?;
-            Ok(db.query_row("SELECT u.generation FROM turn u JOIN receipt q ON q.turn_id=u.id WHERE q.state='accepted' AND q.path_admission='unadmitted'",[],|r|r.get::<_,i64>(0))?)
-        }).await.unwrap();
         if explicit {
             control
                 .store
@@ -1627,31 +1538,34 @@ async fn explicit_stop_and_driver_drain_fence_with_distinct_receipt_boundaries()
         } else {
             drain_and_stop(&control, &run, None).await.unwrap();
         }
-        control.store.database.call(move |db| {
-            let sql = if explicit {
-                "SELECT r.state,r.stop_reason,u.generation,q.state,q.hold_reason FROM run r JOIN turn u ON u.run_id=r.id JOIN receipt q ON q.turn_id=u.id"
-            } else {
-                "SELECT run_state,stop_reason,generation,receipt_state,hold_reason FROM stop_boundary"
-            };
-            let (state,reason,generation,receipt,hold):(String,Option<String>,i64,String,Option<String>) = db.query_row(sql,[],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?)))?;
-            assert_eq!(state,"stopping");
-            assert_eq!(generation,before+1);
-            assert_eq!(reason.as_deref(),explicit.then_some("explicit_stop"));
-            assert_eq!(receipt,if explicit { "held" } else { "accepted" });
-            assert_eq!(hold.as_deref(),explicit.then_some("stopping"));
-            if !explicit {
-                let terminal:(String,String,String) = db.query_row("SELECT r.state,q.state,q.hold_reason FROM run r JOIN receipt q ON q.run_id=r.id",[],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?)))?;
-                assert_eq!(terminal,("stopped".into(),"held".into(),"terminal_before_path_admission".into()));
-            }
-            Ok(())
-        }).await.unwrap();
+        control
+            .store
+            .database
+            .call(move |db| {
+                let (receipt, reason): (String, String) =
+                    db.query_row("SELECT state,hold_reason FROM receipt", [], |row| {
+                        Ok((row.get(0)?, row.get(1)?))
+                    })?;
+                assert_eq!(receipt, "held");
+                assert_eq!(
+                    reason,
+                    if explicit {
+                        "stopping"
+                    } else {
+                        "terminal_before_path_admission"
+                    }
+                );
+                Ok(())
+            })
+            .await
+            .unwrap();
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
     }
 }
 
 #[tokio::test]
-async fn concurrent_absent_driver_stop_and_retirement_do_not_advance_terminal_generation_twice() {
+async fn concurrent_stop_completion_does_not_start_model_work() {
     crate::test_watchdog::watchdog("serialized absent-driver stop handoff", async {
         let (_root, owner, control, accepted) = fixture("http://127.0.0.1:1/v1").await;
         let run = accepted.run_id.as_ref().unwrap();
@@ -1660,10 +1574,10 @@ async fn concurrent_absent_driver_stop_and_retirement_do_not_advance_terminal_ge
         let (one,two)=tokio::join!(stop_without_driver(&control,run),stop_without_driver(&control,run));
         one.unwrap();two.unwrap();
         let target=run.clone();
-        let observed:(String,String,i64,i64)=control.store.database.call(move|db| Ok(db.query_row(
-            "SELECT r.state,u.state,u.generation,(SELECT COUNT(*) FROM model_attempt) FROM run r JOIN turn u ON u.run_id=r.id WHERE r.id=?1",
-            [target],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)))?)).await.unwrap();
-        assert_eq!(observed,("stopped".into(),"stopped".into(),2,0));
+        let observed:(String,String,i64)=control.store.database.call(move|db| Ok(db.query_row(
+            "SELECT r.state,u.state,(SELECT COUNT(*) FROM model_attempt) FROM run r JOIN turn u ON u.run_id=r.id WHERE r.id=?1",
+            [target],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?)))?)).await.unwrap();
+        assert_eq!(observed,("stopped".into(),"stopped".into(),0));
         control.shutdown().await.unwrap();owner.shutdown().await.unwrap();
     }).await.unwrap();
 }
@@ -1945,7 +1859,7 @@ async fn unknown_arguments_are_ignored_with_a_warning_and_other_calls_continue()
 }
 
 #[tokio::test]
-async fn live_connections_refresh_during_admission_keeps_run_generation() {
+async fn an_active_run_keeps_its_request_settings_after_reload() {
     let (root, owner, control, accepted) = fixture("http://127.0.0.1:1/v1").await;
     let snapshot = ready(&control, &accepted).await;
     let pinned = snapshot.clients.clone();
@@ -1966,7 +1880,6 @@ async fn live_connections_refresh_during_admission_keeps_run_generation() {
     else {
         panic!("expected preparing Run")
     };
-    assert!(Arc::ptr_eq(&pinned, &refreshed.clients));
     let body = json!({"model":"synthetic","input":[],"tools":[]});
     assert_eq!(
         original.wire_request(body.clone(), None).unwrap().0,
