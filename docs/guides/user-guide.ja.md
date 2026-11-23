@@ -412,6 +412,10 @@ Ctrl+Cは現在会話のRunと所有する背景処理の停止です。Escは�
 要約文の長さは未確定で、会話が変わった後の編集を許可するものでもありません。
 詳しい上限は CLI reference を参照してください。
 
+### コマンドを常駐させる
+
+Run とは独立して監視コマンドを動かすには、`shellboy service add --thread THREAD --command 'my-watcher'` を使います。`service list --thread THREAD` で状態と直近の結果を確認できます。`service stop --service ID` で停止と無効化、`service start --service ID` で再開、`service remove --service ID` で停止と削除を行います。有効なサービスはオーナーの起動時に開始します。予期しない終了や起動失敗では、自動再起動せず、無効化して `service:<id>` から通知します。コマンドからは `shellboy message send --thread "$SHELLBOY_THREAD_ID" --text TEXT` でスレッドに入力を送れます。
+
 ## 保存とリソース
 
 会話・回答・推論・要約はデータディレクトリに保存され、自動では期限切れ削除しません。

@@ -394,12 +394,25 @@ pub(super) fn start_service(
         "UPDATE schedule SET next_at=CASE WHEN enabled=0 THEN ?2 ELSE next_at END,enabled=1 WHERE id=?1 AND kind='service' AND NOT EXISTS(SELECT 1 FROM shell_execution WHERE schedule_id=?1 AND state='stopping') RETURNING thread_id",
         params![id,Utc::now().timestamp()], |r| r.get(0),
     ).optional().map_err(StorageError::from).map_err(super::storage_error)?;
-    let thread = thread.ok_or_else(|| {
-        ApiError::new(
-            crate::protocol::ErrorCode::TargetUnavailable,
-            "Service not found",
-        )
-    })?;
+    let Some(thread) = thread else {
+        let exists: bool = tx
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM schedule WHERE id=?1 AND kind='service')",
+                [id],
+                |row| row.get(0),
+            )
+            .map_err(StorageError::from)
+            .map_err(super::storage_error)?;
+        use crate::protocol::ErrorCode;
+        return Err(if exists {
+            ApiError::new(
+                ErrorCode::InvalidState,
+                "Service is stopping; retry after it stops",
+            )
+        } else {
+            ApiError::new(ErrorCode::TargetUnavailable, "Service not found")
+        });
+    };
     let mut result = super::MutationResult::value(serde_json::json!({"service_id":id}))?;
     result.changed_threads.push(thread);
     Ok(result)
@@ -744,6 +757,47 @@ mod tests {
     use super::*;
     use crate::protocol::{Command, Request};
     use serde_json::json;
+
+    #[tokio::test]
+    async fn service_start_distinguishes_stopping_from_missing() {
+        use crate::protocol::{ErrorCode, ServiceTarget};
+        let (_root, owner, control, accepted) =
+            super::super::driver::preparation_tests::fixture("http://127.0.0.1:1/v1").await;
+        let thread = accepted.thread_id;
+        owner.db.call(move |db| {
+            db.execute("INSERT INTO schedule(id,thread_id,kind,enabled,cwd,command) VALUES('service',?1,'service',0,'.','echo fixture')", [&thread])?;
+            db.execute("INSERT INTO shell_execution(id,schedule_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at) VALUES('execution','service','execution','stopping','.','{}','utf-8','utf-8','closed','2020-01-01T00:00:00Z')", [])?;
+            Ok(())
+        }).await.unwrap();
+        for (id, code) in [
+            ("service", ErrorCode::InvalidState),
+            ("missing", ErrorCode::TargetUnavailable),
+        ] {
+            let result = control
+                .request(Request::new(
+                    format!("{}:start-{id}", owner.instance_id),
+                    Command::ServiceStart(ServiceTarget {
+                        service_id: id.into(),
+                    }),
+                ))
+                .await;
+            assert_eq!(result.error.unwrap().code, code);
+        }
+        owner
+            .db
+            .call(|db| {
+                assert!(!db.query_row(
+                    "SELECT enabled FROM schedule WHERE id='service'",
+                    [],
+                    |row| row.get::<_, bool>(0)
+                )?);
+                Ok(())
+            })
+            .await
+            .unwrap();
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+    }
 
     #[test]
     fn wall_clock_jumps_coalesce_missed_occurrences_without_replaying() {

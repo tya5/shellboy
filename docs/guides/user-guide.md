@@ -633,6 +633,10 @@ Synthetic terminal tests verify emitted clear/erase sequences and modeled cells,
 not font pixels. Windows hardware is unverified; please check your own terminal
 and font and report whether this option helps.
 
+### Keep a command running
+
+Use `shellboy service add --thread THREAD --command 'my-watcher'` for a command that should run independently of a Run. `service list --thread THREAD` shows its status and latest result. Use `service stop --service ID` to stop and disable it, `service start --service ID` to enable and start it again, and `service remove --service ID` to stop and delete it. Enabled services start when the owner starts. An unexpected exit or spawn failure disables the service and sends a `service:<id>` notice instead of restarting it. The command can send input with `shellboy message send --thread "$SHELLBOY_THREAD_ID" --text TEXT`.
+
 ### Schedule a command
 
 Use the Thread scheduler (cron, 定期実行, スケジュール) to run commands at set times.

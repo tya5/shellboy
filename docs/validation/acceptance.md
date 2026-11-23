@@ -2,7 +2,7 @@
 
 ## Core #348 Thread-owned services
 
-Local macOS witnesses exercised real service exit and graceful owner restart, explicit stop/start/remove, an IPC file trigger that starts a Turn through a loopback model mock, and rotation that expires an evicted cursor without advancing its generation. The schema upgrade fixture preserves existing timed definitions, executions, and output. Native Linux and Windows results require hosted CI. Forced owner death for a service has not been verified separately from the shared process supervision path.
+Local macOS witnesses exercised real service exit and graceful owner restart, explicit stop/start/remove, an IPC file trigger that starts a Turn through a loopback model mock, and rotation that expires an evicted cursor without advancing its generation. The schema upgrade fixture preserves existing timed definitions, executions, and output. The Ubuntu test job in run 45117810911 passed at `a6e4f870`, including `forced_owner_death_cleans_and_restarts_enabled_service`: it kills only the owner and checks native cleanup, restart, `enabled=1`, and zero notices. That run did not exercise macOS or Windows; forced owner death was not part of the local macOS checks listed here.
 
 ## #315 Retry after partial output (source only)
 

@@ -96,6 +96,7 @@ the current Turn's snapshot. The provenance header itself adds no authority.
 | What you need | Entry point | Follow-up |
 |---|---|---|
 | Command meaning and examples | `shellboy <command> --help` / `shellboy docs search --query 'background'` | `docs get` using the returned guide ID |
+| Keep a watcher or other command running independently of a Run | `shellboy service --help` | `shellboy service list --thread THREAD_ID` |
 | Run a command at a set time or on a recurring schedule (scheduler / cron / 定期実行) | `shellboy schedule --help` | `shellboy schedule list --thread THREAD_ID` |
 | Current work state | `shellboy status --thread THREAD_ID` | get the target returned by each item; this is saved state, not an inference of OS process liveness |
 | Assignment of a sent request | `shellboy message get --message MESSAGE_ID` | inspect `reply.state`, then read `reply.node_id` when replied |
@@ -952,6 +953,8 @@ shellboy schedule add --thread THREAD --cron '0 * * * *' -- \
 ```
 
 Scheduled commands receive `SHELLBOY_THREAD_ID`, but no model shell Origin.
+
+For a long-running watcher, use `shellboy service add --thread THREAD --command 'my-watcher'` instead of a schedule or a background Run shell. Use `service list --thread THREAD` to inspect it and `service start|stop|remove --service ID` to manage it. A service can send input with `shellboy message send --thread "$SHELLBOY_THREAD_ID" --text TEXT`. Unexpected exit or spawn failure disables the service and sends one notice from `service:<id>`; it does not restart until explicitly started.
 
 Cron uses the owner's local time. At a daylight-saving gap, a fixed-time entry
 runs at the first valid time after the gap; interval entries skip nonexistent
