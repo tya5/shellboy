@@ -90,6 +90,8 @@ class PublicUpgradeArguments(unittest.TestCase):
         self.assertEqual(db.execute('SELECT bytes FROM output_chunk').fetchone(), (b'\x01\x02',))
         with self.assertRaises(sqlite3.IntegrityError):
             db.execute("UPDATE shell_execution SET schedule_id=NULL,detached_thread_id='t',state='running' WHERE id='s'")
+        # Compare full schemas only after both databases reach the same version.
+        upgrade.prepare_schema(db, upgrade.CURRENT_SCHEMA_VERSION)
         fresh = sqlite3.connect(':memory:')
         fresh.executescript((ROOT / 'src/storage/current.sql').read_text())
         sql = "SELECT name,sql FROM sqlite_schema WHERE tbl_name IN ('shell_execution','output_chunk') ORDER BY name"
