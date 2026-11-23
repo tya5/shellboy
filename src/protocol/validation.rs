@@ -940,6 +940,7 @@ impl Command {
             Self::HistoryWindow(a) => a.validate(),
             Self::HistoryGet(a) => a.validate(),
             Self::HistorySearch(a) => a.validate(),
+            Self::HistoryExport(a) => limit(a.limit, MAX_LIST_LIMIT),
             Self::HistoryRelations(a) => a.validate(),
             Self::ShellGet(a) | Self::ShellEof(a) | Self::ShellStop(a) => {
                 nonempty(&a.execution_id, "execution_id")

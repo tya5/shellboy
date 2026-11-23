@@ -439,6 +439,10 @@ impl ChangeClock {
         self.wakes.publish(keys);
         true
     }
+    pub(crate) fn thread_position(&self, thread: &str) -> u64 {
+        let inner = self.lock();
+        inner.by_thread.get(thread).copied().unwrap_or(inner.floor)
+    }
     /// The head and, when asked for, everything retained: for a client with no position.
     pub(crate) fn snapshot(
         &self,

@@ -192,6 +192,16 @@ fn fresh_clap_executable_paths_and_every_option_match_the_catalogue_bindings() {
             .any(|binding| binding.path == ["thread", "request"]),
         "the debug client must not be offered as a TUI form"
     );
+    let export = leaves
+        .remove("thread export")
+        .expect("tracked export CLI path");
+    for option in ["thread_id", "out"] {
+        assert!(
+            export
+                .get_arguments()
+                .any(|arg| arg.get_id() == option && arg.is_required_set())
+        );
+    }
     // Protocol schema export is a standalone machine-readable CLI path.
     let schema = leaves
         .remove("protocol schema")

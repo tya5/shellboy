@@ -972,3 +972,5 @@ and cursor-ordered `attempt_ends`. Only a matching `not_adopted` proves that
 attempt was not saved. Keep adopted previews until saved history arrives;
 a resync is not evidence of discard. Order live previews by the saved input
 boundary, not by when the preview or a sent message arrived.
+
+To export a Thread for the user, run `shellboy thread export --thread ID --out PATH`. The file can include private conversation data and encrypted reasoning, so use the requested destination and do not share it without permission. This is a live export of retained history, not a snapshot or a recovery of deleted data.

@@ -1632,6 +1632,12 @@ impl Store {
                     crate::history::message_budget::Slots::Body,
                 )
             }
+            Command::HistoryExport(args) => MutationResult::value(history::export::read(
+                tx,
+                args,
+                &self.instance_id,
+                operation_id,
+            )?),
             Command::HistoryRelations(args) => MutationResult::value(history::relations(tx, args)?),
             _ => Err(error(
                 ErrorCode::InvalidState,
