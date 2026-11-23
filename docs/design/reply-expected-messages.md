@@ -519,7 +519,7 @@ unavailable.
 | 0 | valid JSON in the reply | valid JSON in the Turn's end message, or an empty end message (D10) | valid JSON in the Run's end message, or an empty end message (D10) |
 | 2 | input error (unchanged) | same | same |
 | 3 | mismatch after repairs (unchanged) | same, non-empty text only | same, non-empty text only |
-| 4 | held at send; `recovery_wait`; Run `stopped` / `failed` with the reply still pending; reply `ignored`, `cancelled`, `recipient_deleted` | held at send; Turn `recovery_wait`, `stopped`, `failed`; Turn ended by Esc with no end message (D11); Thread deleted; node tombstoned | held at send; Run in recovery wait (the `run_ended` wait reports `recovery_wait`), `stopped`, `failed`; last Turn ended by Esc with no end message (D11); Thread deleted; node tombstoned |
+| 4 | held at send; `recovery_wait` (duty remains pending); reply `ignored` (including an unanswered applied duty when the recipient Run stops or fails), `cancelled`, `recipient_deleted` | held at send; Turn `recovery_wait`, `stopped`, `failed`; Turn ended by Esc with no end message (D11); Thread deleted; node tombstoned | held at send; Run in recovery wait (the `run_ended` wait reports `recovery_wait`), `stopped`, `failed`; last Turn ended by Esc with no end message (D11); Thread deleted; node tombstoned |
 | 5 | client deadline; the message stays pending and the Run-end rule later marks it `ignored` unless answered | client deadline (unchanged) | client deadline (unchanged) |
 | 6 | owner/transport/protocol/output failure (unchanged) | same | same |
 
@@ -588,8 +588,8 @@ Every flow in `docs/guides/delegation.md` and the Agent Guide.
 | Child finished without a result | parent sees an answer node or none | reminder once, then `ignored` notice wakes the parent; `last_end_message` still readable | no; failure is now explicit |
 | Progress reports | child `message send --thread PARENT` (ordinary) | unchanged; ordinary messages (D3) | no |
 | Wait for all owned work to drain | `wait run_ended` | unchanged | no |
-| Recovery decision | `run get` / `turn get` / `run retry` / `run stop` | unchanged; the pending reply survives retry and is answered after it | no |
-| Stop a child | `run stop --run CHILD_RUN` | unchanged; pending reply stays pending (decision Q2); parent may `message cancel` it | no |
+| Recovery decision | `run get` / `turn get` / `run retry` / `run stop` | the duty stays pending in `recovery_wait` and can be answered after retry; stopping the Run instead resolves it as `ignored` | no |
+| Stop a child | `run stop --run CHILD_RUN` | an unanswered applied duty becomes `ignored` and the parent is notified (Q2) | no |
 | After restart | interruption context + stored answers + unprocessed messages | same, with `message list --awaiting` and reply states instead of answers | no |
 | Delete child | `thread delete-preview` / `thread delete` | unchanged; up to 16 pending replies become `recipient_deleted` synchronously; legacy excess is completed by bounded history GC and the parent is notified after each committed batch | no |
 | Overview | `thread get` `last_answer` / `last_input` | `last_end_message` / `last_input`, plus `pending_replies` counts | no |
@@ -639,7 +639,7 @@ decided here without an explicit user answer (see [Decisions](#decisions)).
 | G19 | Reply vs cancel vs Run-end races | Design | same serialisation; whichever commits first decides the outcome |
 | G20 | Reply to a cancelled / ignored / deleted message | Decided | rejected with `details.reply_state`; the model can send an ordinary message instead (Q3) |
 | G21 | Independent Runs (#276) | Design | replies use ordinary send rules and do not create Run ownership; a reply does not require the sender’s Run to remain live |
-| G22 | `run stop` cascade | Decided | descendants stop; pending replies on them stay pending; the parent's waits end with the stop as today (Q2) |
+| G22 | `run stop` cascade | Decided | descendants stop; their unanswered applied duties become `ignored` and the senders are notified (Q2) |
 | G23 | Esc Turn interruption | Decided | reminder still applies once, as #187 delivery does; shown in the TUI (Q11) |
 | G24 | App shutdown | Design | reminder skipped once the start gate closes; nothing becomes `ignored` at shutdown |
 | G25 | TUI pending queue | Design | "reply expected" tag on queued reply-expected rows; admitted pending replies appear under `/replies` |
@@ -858,7 +858,7 @@ the memo gave no single recommendation, the choice made here is marked
 | # | Question | Decision |
 |---|---|---|
 | Q1 | What "thread request" means | The send-and-wait delegation recipe. The `thread request` debug command stays unchanged |
-| Q2 | Stopped or stuck recipient | User: messages stay awaiting reply when the recipient's work stops (Ctrl+C, `run stop`, app exit) or waits for recovery. The recipient may reply after resuming; the sender may cancel |
+| Q2 | Stopped or stuck recipient | When the recipient Run completes, stops, or fails, unanswered applied duties become `ignored` and the sender is notified. `recovery_wait` is not terminal: the duty stays pending and the recipient may reply after resuming; the sender may cancel while it is pending |
 | Q3 | Late reply after `ignored` / `cancelled` | Rejected with `details.reply_state`; the model can send an ordinary message instead |
 | Q4 | Sender's Thread deleted | Its pending messages become `cancelled` (`cancel_reason: sender_deleted`) and recipients that already received them are notified |
 | Q5 | Who may reply | Only the receiving Thread's model, or a human. A parent cannot reply for its child |
