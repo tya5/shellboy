@@ -3097,6 +3097,7 @@ pub(super) fn delete_thread(
     }
     for id in &targets {
         tx.execute("UPDATE thread SET deleted_at=?2,revision=revision+1,selection_revision=selection_revision+1,cursor_node_id=NULL,updated_at=?2 WHERE id=?1",params![id,now]).map_err(sql_error)?;
+        super::interruption::discard_staged_captures(tx, id).map_err(sql_error)?;
         crate::compaction::a_state::cleanup_tx(tx, id).map_err(storage_error)?;
         // Retain the last path/replacement as ownership evidence until payload
         // GC. Deleted Threads are not roots or public selection targets. Removing

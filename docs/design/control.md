@@ -315,6 +315,13 @@ current-format tool groups before terminalizing old Runs and receipts. Selection
 call / missing-result invariants, even when the Turn is already terminal; it is
 not release-version migration or an old-format compatibility reader.
 
+Thread deletion removes that Thread's unpublished capture rows and header in
+the deletion transaction, leaving published history alone. At recovery, a
+deleted target's remaining staging is discarded without publication. A live
+Thread whose cursor disagrees with its selected path keeps its single staged
+capture until the cursor is valid and the existing shutdown or startup
+consumption can append it. Other Threads' recovery proceeds independently.
+
 Preserve every saved result node/ID/payload. Missing pending calls with no
 admitted operation are `not_started`; admitted/running calls have an
 `interrupted` result with result_uncertain=true. Synthetic results have
