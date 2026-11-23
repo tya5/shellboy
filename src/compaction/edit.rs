@@ -194,7 +194,7 @@ impl Compactor {
             let rows=db.prepare("SELECT n.id,n.turn_id,n.payload_revision,n.payload_json,s.source_revision,s.source_hash,n.import_origin_json IS NOT NULL FROM replacement r JOIN replacement_source s ON s.replacement_id=r.id JOIN node n ON n.id=s.source_node_id WHERE r.output_node_id=?1 AND r.state='completed' ORDER BY s.ordinal LIMIT ?2")?.query_map(params![marker,(TURN_BOUNDARY_IDS+1) as i64],|row|Ok((row.get::<_,String>(0)?,row.get::<_,Option<String>>(1)?,row.get::<_,i64>(2)?,row.get::<_,Option<String>>(3)?,row.get::<_,i64>(4)?,row.get::<_,String>(5)?,row.get::<_,bool>(6)?)))?.collect::<Result<Vec<_>,_>>()?;
             if rows.is_empty()||rows.len()>TURN_BOUNDARY_IDS {return Err(StorageError::from(invalid("Context marker source list is unavailable or exceeds the bounded provenance budget")));}
             let mut sources=Vec::new();let mut completed=HashSet::new();let mut seen=HashSet::new();
-            for (id,turn,revision,body,saved_revision,saved_hash) in rows {
+            for (id,turn,revision,body,saved_revision,saved_hash,imported) in rows {
                 let payload:Value=body.and_then(|body|serde_json::from_str(&body).ok()).ok_or_else(||StorageError::from(invalid("A context marker source is unavailable; selected path retained")))?;
                 let hash=key(&(revision,&payload));
                 if revision!=saved_revision||hash!=saved_hash {return Err(StorageError::from(invalid("A context marker source changed; selected path retained")));}
