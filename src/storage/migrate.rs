@@ -651,7 +651,6 @@ mod question_admission_migration_tests {
     fn schema47() -> Connection {
         let db = Connection::open_in_memory().unwrap();
         db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
-        db.execute_batch("ALTER TABLE node DROP COLUMN import_origin_json; DELETE FROM schema_migration WHERE name='next_thread_import_origin';").unwrap();
         db.execute_batch(include_str!(
             "../../tests/fixtures/rewind-schedule-schema.sql"
         ))
@@ -1510,7 +1509,6 @@ mod activity_migration_tests {
         for start in [24, 25, 26, 27, 28] {
             let mut db = Connection::open_in_memory().unwrap();
             db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
-            db.execute_batch("ALTER TABLE node DROP COLUMN import_origin_json; DELETE FROM schema_migration WHERE name='next_thread_import_origin';").unwrap();
             db.execute_batch(crate::storage::REWIND_CURRENT_TO_42)
                 .unwrap();
             db.execute_batch("DROP INDEX IF EXISTS attachment_page_order; DELETE FROM schema_migration WHERE version>38; DROP INDEX node_notification_event; ALTER TABLE node DROP COLUMN notification_event_id; ALTER TABLE event DROP COLUMN semantic_json; DROP INDEX receipt_reply_node_lookup; DROP INDEX IF EXISTS receipt_human_reply_pending;")
@@ -1575,7 +1573,6 @@ mod activity_migration_tests {
     fn active_attempt_recovery_index_updates_only_interruptible_attempts() {
         let mut db = Connection::open_in_memory().unwrap();
         db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
-        db.execute_batch("ALTER TABLE node DROP COLUMN import_origin_json; DELETE FROM schema_migration WHERE name='next_thread_import_origin';").unwrap();
         db.execute_batch(crate::storage::REWIND_CURRENT_TO_42)
             .unwrap();
         db.execute_batch("DROP INDEX IF EXISTS attachment_page_order; DELETE FROM schema_migration WHERE version>38; DROP INDEX node_notification_event; ALTER TABLE node DROP COLUMN notification_event_id; ALTER TABLE event DROP COLUMN semantic_json; DROP INDEX receipt_reply_node_lookup; DROP INDEX IF EXISTS receipt_human_reply_pending;").unwrap();
@@ -1611,7 +1608,6 @@ mod activity_migration_tests {
     fn recovery_candidate_migration_backfills_preexisting_rows() {
         let mut db = Connection::open_in_memory().unwrap();
         db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
-        db.execute_batch("ALTER TABLE node DROP COLUMN import_origin_json; DELETE FROM schema_migration WHERE name='next_thread_import_origin';").unwrap();
         db.execute_batch(crate::storage::REWIND_CURRENT_TO_42)
             .unwrap();
         db.execute_batch("DROP INDEX IF EXISTS attachment_page_order; DELETE FROM schema_migration WHERE version>38; DROP INDEX node_notification_event; ALTER TABLE node DROP COLUMN notification_event_id; ALTER TABLE event DROP COLUMN semantic_json; DROP INDEX receipt_reply_node_lookup; DROP INDEX IF EXISTS receipt_human_reply_pending;").unwrap();
@@ -1640,7 +1636,6 @@ mod activity_migration_tests {
         for upgrade in [false, true] {
             let mut db = Connection::open_in_memory().unwrap();
             db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
-            db.execute_batch("ALTER TABLE node DROP COLUMN import_origin_json; DELETE FROM schema_migration WHERE name='next_thread_import_origin';").unwrap();
             if upgrade {
                 db.execute_batch(crate::storage::REWIND_CURRENT_TO_42)
                     .unwrap();
@@ -1707,7 +1702,6 @@ mod activity_migration_tests {
         use rusqlite::params;
         let mut db = Connection::open_in_memory().unwrap();
         db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
-        db.execute_batch("ALTER TABLE node DROP COLUMN import_origin_json; DELETE FROM schema_migration WHERE name='next_thread_import_origin';").unwrap();
         db.execute_batch(crate::storage::REWIND_CURRENT_TO_42)
             .unwrap();
         db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('legacy','','','p','m','now')", []).unwrap();
@@ -1737,7 +1731,6 @@ mod activity_migration_tests {
     fn version_23_activity_indexes_include_malformed_shell_without_rewriting_it() {
         let db = Connection::open_in_memory().unwrap();
         db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
-        db.execute_batch("ALTER TABLE node DROP COLUMN import_origin_json; DELETE FROM schema_migration WHERE name='next_thread_import_origin';").unwrap();
         db.execute_batch(crate::storage::REWIND_CURRENT_TO_42)
             .unwrap();
         db.execute_batch("DROP INDEX IF EXISTS attachment_page_order; DELETE FROM schema_migration WHERE version>38; DROP INDEX node_notification_event; ALTER TABLE node DROP COLUMN notification_event_id; ALTER TABLE event DROP COLUMN semantic_json; DROP INDEX receipt_reply_node_lookup; DROP INDEX IF EXISTS receipt_human_reply_pending;").unwrap();
@@ -1841,7 +1834,6 @@ mod generated_summary_role_migration_tests {
 
     fn fixture_on(db: Connection) -> Connection {
         db.execute_batch(CURRENT_SCHEMA).unwrap();
-        db.execute_batch("ALTER TABLE node DROP COLUMN import_origin_json; DELETE FROM schema_migration WHERE name='next_thread_import_origin';").unwrap();
         db.execute_batch(include_str!(
             "../../tests/fixtures/rewind-schedule-schema.sql"
         ))
