@@ -906,8 +906,9 @@ is not part of this foreground unit.
 
 `thread get`'s existing `recovery_reason` and `run get`/`run retry`'s existing
 `recovery_hint` include `remaining_held` while the Turn is recovery_wait. This is
-an exact status-readback count over the recipient's held index range, not a
-count or scan inside reply admission. No separate queue or worker is added.
+an exact status-readback count of inputs eligible for retry, using the same
+selection as the recovery batch. Unknown or otherwise ineligible input is not
+counted. Admission does not count the queue. No separate queue or worker is added.
 
 The ordered unit merges current-Turn recovery_wait input with terminal-Run
 interrupted input before LIMIT, rather than allocating separate source quotas.

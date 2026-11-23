@@ -171,40 +171,48 @@ async fn spawn_reserved(control: &Arc<Control>, shell: DueShell) -> Result<(), A
             )
             .await?;
         }
-        Err(_) => {
+        Err(error) => {
+            let shutdown = error
+                .details
+                .as_ref()
+                .is_some_and(|details| details["reason"] == "shutdown_before_spawn");
             let store = control.store.clone();
             let wakes = control.waits.keyed.clone();
-            let effects = control
-                .store
-                .database
-                .call(move |db| {
-                    let tx = db.transaction()?;
-                    let service = service_settlement(&tx, &shell.id)?;
-                    let mut effects = None;
-                    let changed =
-                        super::state::fail_shell_spawn(&tx, &shell.id, &super::state::now())? != 0;
-                    if changed {
-                        retire_oneshot(&tx, &shell.id)?;
-                        if let Some(service) = service {
-                            effects = service.finish(&store, &tx, &shell.id)?;
+            let effects =
+                control
+                    .store
+                    .database
+                    .call(move |db| {
+                        let tx = db.transaction()?;
+                        let service = service_settlement(&tx, &shell.id)?;
+                        let mut effects = None;
+                        let at = super::state::now();
+                        let changed = if shutdown {
+                            record_shell_stop(&tx, &shell.id, ShellStopIntent::OwnerShutdown)?;
+                            super::state::cancel_shell_spawn(&tx, &shell.id, &at)? != 0
+                        } else {
+                            super::state::fail_shell_spawn(&tx, &shell.id, &at)? != 0
+                        };
+                        if changed {
+                            retire_oneshot(&tx, &shell.id)?;
+                            if let Some(service) = service.filter(|_| !shutdown) {
+                                effects = service.finish(&store, &tx, &shell.id)?;
+                            }
                         }
-                    }
-                    tx.commit()?;
-                    if changed {
-                        wakes.publish(
-                            super::wait::wakes::Key::shell_terminal(shell.id)
-                                .into_iter()
-                                .chain(
-                                    effects
-                                        .iter_mut()
-                                        .flat_map(|effects| std::mem::take(&mut effects.wait_keys)),
-                                ),
-                        );
-                    }
-                    Ok(effects)
-                })
-                .await
-                .map_err(super::storage_error)?;
+                        tx.commit()?;
+                        if changed {
+                            wakes.publish(
+                                super::wait::wakes::Key::shell_terminal(shell.id)
+                                    .into_iter()
+                                    .chain(effects.iter_mut().flat_map(|effects| {
+                                        std::mem::take(&mut effects.wait_keys)
+                                    })),
+                            );
+                        }
+                        Ok(effects)
+                    })
+                    .await
+                    .map_err(super::storage_error)?;
             control.apply_effects(effects).await;
             control.changed(&shell.thread);
         }
@@ -365,7 +373,7 @@ pub(super) fn list(
     services: bool,
 ) -> Result<serde_json::Value, ApiError> {
     let sql = |e| super::storage_error(StorageError::from(e));
-    let mut query=tx.prepare("SELECT q.id,q.enabled,q.next_at,q.cron,q.once_at,q.cwd,q.command,q.description,q.last_skipped_at,s.id,s.state,s.exit_code,s.end_reason,s.started_at,s.ended_at FROM schedule q JOIN thread t ON t.id=q.thread_id AND t.deleted_at IS NULL LEFT JOIN shell_execution s ON s.id=(SELECT id FROM shell_execution WHERE schedule_id=q.id ORDER BY started_at DESC,id DESC LIMIT 1) WHERE q.thread_id=?1 AND q.kind=?2 ORDER BY q.id LIMIT 64").map_err(sql)?;
+    let mut query=tx.prepare("SELECT q.id,q.enabled,q.next_at,q.cron,q.once_at,q.cwd,q.command,q.description,q.last_skipped_at,s.id,s.state,s.exit_code,s.end_reason,s.started_at,s.ended_at FROM schedule q JOIN thread t ON t.id=q.thread_id AND t.deleted_at IS NULL LEFT JOIN shell_execution s ON s.id=(SELECT id FROM shell_execution WHERE schedule_id=q.id ORDER BY rowid DESC LIMIT 1) WHERE q.thread_id=?1 AND q.kind=?2 ORDER BY q.id LIMIT 64").map_err(sql)?;
     let items=query.query_map(params![thread, if services { "service" } else { "time" }],|r| {
         let id:Option<String>=r.get(9)?;
         let latest=if let Some(id)=id {
@@ -464,7 +472,14 @@ pub(super) fn change(
                         next_cron(&cron, now, &Local)
                             .ok_or_else(|| invalid("Cannot calculate the schedule time"))?,
                     ),
-                    None => once.filter(|value| *value > now.timestamp()),
+                    None => Some(once.filter(|value| *value > now.timestamp()).ok_or_else(
+                        || {
+                            ApiError::new(
+                                crate::protocol::ErrorCode::InvalidState,
+                                "The one-shot schedule has expired; add a new schedule",
+                            )
+                        },
+                    )?),
                 }
             } else {
                 None
@@ -764,6 +779,84 @@ mod tests {
     use super::*;
     use crate::protocol::{Command, Request};
     use serde_json::json;
+
+    #[tokio::test]
+    async fn runtime_audit_shutdown_cancels_reserved_thread_shells() {
+        let (root, owner, control, accepted) =
+            super::super::driver::preparation_tests::fixture("http://127.0.0.1:1/v1").await;
+        let thread = accepted.thread_id;
+        let saved_thread = thread.clone();
+        owner.db.call(move |db| {
+            for kind in ["time", "service"] {
+                db.execute("INSERT INTO schedule(id,thread_id,kind,once_at,enabled,cwd,command) VALUES(?1,?2,?1,CASE WHEN ?1='time' THEN 1 END,1,'.','echo fixture')", params![kind,saved_thread])?;
+                db.execute("INSERT INTO shell_execution(id,schedule_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at) VALUES(?1,?1,?1,'starting','.','{}','utf-8','utf-8','closed','2020-01-01T00:00:00Z')", [kind])?;
+            }
+            Ok(())
+        }).await.unwrap();
+        control.freeze_owner_admission();
+        for kind in ["time", "service"] {
+            spawn_reserved(
+                &control,
+                DueShell {
+                    id: kind.into(),
+                    thread: thread.clone(),
+                    cwd: root.path().into(),
+                    command: "echo fixture".into(),
+                },
+            )
+            .await
+            .unwrap();
+        }
+        let results = owner.db.call(|db| {
+            let mut query = db.prepare("SELECT id,state,end_reason,COALESCE(json_extract(shell_json,'$.spawned'),0) FROM shell_execution ORDER BY id")?;
+            Ok(query.query_map([], |r| Ok((r.get::<_, String>(0)?,r.get::<_, String>(1)?,r.get::<_, Option<String>>(2)?,r.get::<_, bool>(3)?)))?.collect::<rusqlite::Result<Vec<_>>>()?)
+        }).await.unwrap();
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+        assert_eq!(
+            results,
+            ["service", "time"].map(|kind| (
+                kind.to_owned(),
+                "stopped".to_owned(),
+                Some("owner_shutdown".to_owned()),
+                false
+            ))
+        );
+    }
+
+    #[tokio::test]
+    async fn runtime_audit_expired_disabled_one_shot_stays_disabled() {
+        let root = tempfile::tempdir().unwrap();
+        let db = crate::storage::DbWorker::open(root.path().join("db"))
+            .await
+            .unwrap();
+        db.call(|db| {
+        let tx = db.transaction().unwrap();
+        tx.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('t','/','','p','m','now'); INSERT INTO schedule(id,thread_id,once_at,enabled,cwd,command) VALUES('one','t',1,0,'.','echo fixture');").unwrap();
+        assert_eq!(change(&tx, "one", Change::Enabled(true)).err().unwrap().code, crate::protocol::ErrorCode::InvalidState);
+        assert_eq!(list(&tx, "t", false).unwrap()["items"][0]["enabled"], false);
+        Ok(())
+        }).await.unwrap();
+        db.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn runtime_audit_latest_execution_survives_clock_rollback() {
+        let root = tempfile::tempdir().unwrap();
+        let db = crate::storage::DbWorker::open(root.path().join("db"))
+            .await
+            .unwrap();
+        db.call(|db| {
+        let tx = db.transaction().unwrap();
+        tx.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('t','/','','p','m','now'); INSERT INTO schedule(id,thread_id,kind,enabled,cwd,command) VALUES('service','t','service',1,'.','echo fixture');").unwrap();
+        for (id, state, time) in [("z-first", "failed", "2020-01-02T00:00:00Z"), ("a-second", "running", "2020-01-01T00:00:00Z")] {
+            tx.execute("INSERT INTO shell_execution(id,schedule_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at) VALUES(?1,'service',?1,?2,'.','{}','utf-8','utf-8','closed',?3)", params![id,state,time]).unwrap();
+        }
+        assert_eq!(list(&tx, "t", true).unwrap()["items"][0]["latest"]["execution_id"], "a-second");
+        Ok(())
+        }).await.unwrap();
+        db.shutdown().await.unwrap();
+    }
 
     #[tokio::test]
     async fn service_start_distinguishes_stopping_from_missing() {

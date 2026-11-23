@@ -4424,11 +4424,6 @@
     "reason": "ASCII separator variant paired with the legacy Japanese minute-window suffix; both are selected by terminal width in the Japanese-compatible helper. The UI-language-specific English helper emits \"{n}-minute window\". No saved limit value is localized or rewritten.",
     "source_tokens_sha256": "e7304a7c4c3db8da2dd9c8e3debcdf8c5771dcbc1ba9808f8056fa0578171711"
   },
-  "src/ui/activity.rs:c6f792a1a40e17de:1": {
-    "category": "a",
-    "reason": "AutomaticCompactionSkip::label_localized has an explicit English arm for the same RejectedInvalidState | RejectedOther pattern (\"Auto-compaction deferred (previous attempt rejected)\"). The saved enum/state is unchanged.",
-    "source_tokens_sha256": "7b3a66f4adfea458be0918e9343396f06bb85d719bcb3a976a798cb68f3d45ac"
-  },
   "src/activity.rs:73e57aaae698a78b:1": {
     "category": "a",
     "reason": "Japanese status/display label in ActivityPhase::column_label or ActivityPhase::label; each same enum variant has an explicit English counterpart in column_label_for or label_for. Reviewed consumers are UI activity, live-work, threads, watch and presentation renderers; serialized values remain the phase enum, and labels are not model input.",

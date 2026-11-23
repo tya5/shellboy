@@ -518,9 +518,7 @@ impl ShellSupervisor {
         // Serialize native publication with emergency force cleanup. No await
         // or DB/file work occurs while this short native ownership lock is held.
         let mut groups = self.native_groups.lock().unwrap_or_else(|e| e.into_inner());
-        if matches!(owner, SpawnOwner::Run(_)) {
-            self.admit_start()?;
-        }
+        self.admit_start()?;
         let child = command.spawn();
         // Release the parent's copies of guardian/exec-error endpoints before
         // observing EOF on the private launch acknowledgment.

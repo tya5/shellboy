@@ -654,7 +654,8 @@ or `--in 10m` for a one-shot. The command uses the Thread's working directory
 unless you specify `--cwd`. `schedule list --thread THREAD` reports the next
 occurrence and latest saved result; `schedule disable --schedule ID` prevents
 future runs without stopping the current one. `schedule enable --schedule ID`
-resumes future occurrences, and `schedule remove --schedule ID` stops and deletes it.
+resumes future occurrences. If the only occurrence has passed, enable refuses
+the change; add a new schedule. `schedule remove --schedule ID` stops and deletes it.
 `schedule add --description TEXT` and `schedule set --schedule ID --description TEXT`
 attach a description.
 

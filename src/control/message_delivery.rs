@@ -237,6 +237,26 @@ pub(super) fn interrupted_remaining(db: &Connection, thread: &str) -> rusqlite::
     db.query_row(&format!("SELECT EXISTS(SELECT 1 FROM receipt INDEXED BY receipt_target WHERE target_thread_id=?1 AND state IN ('accepted','held') AND path_admission='unadmitted' AND ({terminal} OR (run_id IS NULL AND turn_id IS NULL AND hold_reason IN ('stopping','previous_instance_interrupted'))))"), [thread], |r| r.get(0))
 }
 
+// The retry count and the batch selector describe exactly the same input.
+fn recoverable_input() -> String {
+    format!(
+        "FROM receipt INDEXED BY receipt_target WHERE target_thread_id=?1 AND state IN ('accepted','held') AND ((path_admission='unadmitted' AND (({TERMINAL} AND NOT EXISTS(SELECT 1 FROM run live_run WHERE live_run.id=receipt.run_id AND live_run.state IN ('live','stopping'))) OR (run_id IS NULL AND turn_id IS NULL AND hold_reason IN ('stopping','previous_instance_interrupted')))) OR (run_id=?2 AND turn_id=?3 AND hold_reason='recovery_wait')) AND EXISTS(SELECT 1 FROM node source WHERE source.id=receipt.message_node_id AND source.payload_json IS NOT NULL AND source.deleted_reason IS NULL)"
+    )
+}
+
+pub(super) fn retry_remaining(
+    db: &Connection,
+    thread: &str,
+    run: &str,
+    turn: &str,
+) -> rusqlite::Result<i64> {
+    db.query_row(
+        &format!("SELECT count(*) {}", recoverable_input()),
+        params![thread, run, turn],
+        |r| r.get(0),
+    )
+}
+
 /// Caller has established a new Run under human/live-owning-parent authority.
 /// Existing message and receipt provenance stays fixed; only the selected path
 /// and the original delivery outcome advance. All writes share send's transaction.
@@ -249,14 +269,11 @@ pub(crate) fn recover_on_resume_tx(
     at: &str,
 ) -> Result<usize, StorageError> {
     repair_thread_batch_tx(tx, thread, at)?;
-    let terminal = format!(
-        "({TERMINAL} AND NOT EXISTS(SELECT 1 FROM run live_run WHERE live_run.id=receipt.run_id AND live_run.state IN ('live','stopping')))"
-    );
     // Merge interrupted and current recovery input before applying LIMIT: neither
     // source may overtake an older receipt from the other source. Repair has
     // its own bounded window: eligible accepted rows beyond it must participate
     // directly, rather than waiting for repair while newer held rows pass them.
-    let mut q = tx.prepare(&format!("SELECT id,message_node_id,run_id,turn_id,COALESCE(run_id=?2 AND turn_id=?3 AND hold_reason='recovery_wait',0) FROM receipt INDEXED BY receipt_target WHERE target_thread_id=?1 AND state IN ('accepted','held') AND ((path_admission='unadmitted' AND ({terminal} OR (run_id IS NULL AND turn_id IS NULL AND hold_reason IN ('stopping','previous_instance_interrupted')))) OR (run_id=?2 AND turn_id=?3 AND hold_reason='recovery_wait')) AND EXISTS(SELECT 1 FROM node source WHERE source.id=receipt.message_node_id AND source.payload_json IS NOT NULL AND source.deleted_reason IS NULL) ORDER BY created_at,rowid LIMIT 128"))?;
+    let mut q = tx.prepare(&format!("SELECT id,message_node_id,run_id,turn_id,COALESCE(run_id=?2 AND turn_id=?3 AND hold_reason='recovery_wait',0) {} ORDER BY created_at,rowid LIMIT 128", recoverable_input()))?;
     let rows = q
         .query_map(params![thread, run, turn], |r| {
             Ok((

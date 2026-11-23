@@ -2919,17 +2919,19 @@ fn recovery_status(
     turn: &str,
     reason: Option<String>,
 ) -> Result<Option<String>> {
-    let recovering: bool = connection
+    let run: Option<String> = connection
         .query_row(
-            "SELECT state='recovery_wait' FROM turn WHERE id=?1",
+            "SELECT run_id FROM turn WHERE id=?1 AND state='recovery_wait'",
             [turn],
             |r| r.get(0),
         )
+        .optional()
         .map_err(sql_error)?;
-    if !recovering {
+    let Some(run) = run else {
         return Ok(super::usage_limit_retry::public_reason(reason));
-    }
-    let remaining: i64 = connection.query_row("SELECT count(*) FROM receipt INDEXED BY receipt_target WHERE target_thread_id=?1 AND state='held'", [thread], |r| r.get(0)).map_err(sql_error)?;
+    };
+    let remaining = super::message_delivery::retry_remaining(connection, thread, &run, turn)
+        .map_err(sql_error)?;
     if remaining == 0 {
         return Ok(reason);
     }
@@ -7301,13 +7303,14 @@ mod retry_tracking_diagnosis_287 {
         }
     }
     #[tokio::test]
-    async fn retry_queue_unit_and_saved_receipt_are_not_execution_outcomes() {
+    async fn runtime_audit_retry_queue_unit_and_saved_receipt_are_not_execution_outcomes() {
         let root = tempfile::tempdir().unwrap();
         let database = DbWorker::open(root.path().join("synthetic.db"))
             .await
             .unwrap();
         database.call(|db| {
             db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','','synthetic','synthetic','before'); INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','live','before'); INSERT INTO turn(id,thread_id,run_id,state,created_at,recovery_reason_json)VALUES('turn','t','r','recovery_wait','before','{}');")?;
+            db.execute_batch("INSERT INTO node(id,kind,created_at,payload_json)VALUES('unknown','user','before','{}'); INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,path_admission,hold_reason,created_at)VALUES('unknown','unknown','null','t','unknown','held','unknown','uncertain_path_admission','before');")?;
             for n in 0..129 {
                 let id=format!("held-{n:03}");
                 db.execute("INSERT INTO node(id,turn_id,kind,created_at,payload_json)VALUES(?1,'turn','user','before','{}')",[&id])?;
