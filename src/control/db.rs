@@ -825,7 +825,7 @@ impl Store {
         self.reserve_hashed(
             request.operation_id,
             caller,
-            admission.fingerprint(fingerprint),
+            fingerprint,
             preflight,
             admission,
         )
@@ -866,7 +866,7 @@ impl Store {
             let tx=db.transaction()?;
             let saved:Option<(String,Option<String>)>=tx.query_row("SELECT request_hash,result_ref_json FROM operation_receipt WHERE operation_id=?1",[&operation_id],|row|Ok((row.get(0)?,row.get(1)?))).optional()?;
             if let Some((previous,body))=saved {
-                if !admission.matches_fingerprint(&previous, &fingerprint) {return Ok(Err(error(ErrorCode::OperationConflict,"operation ID was already used with different arguments")));}
+                if previous!=fingerprint {return Ok(Err(error(ErrorCode::OperationConflict,"operation ID was already used with different arguments")));}
                 let result=if let Some(body)=body {
                     if body==super::receipt::EXPIRED_OUTCOME {return Ok(Ok(RuntimeReservation::Saved(Err(super::receipt::expired_error()))));}
                     let outcome:SavedOutcome=serde_json::from_str(&body).map_err(|_|StorageError::Schema("saved runtime operation result is malformed".into()))?;

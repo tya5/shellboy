@@ -11,7 +11,6 @@ const CONTROL_HEADROOM_BYTES: u64 = 2 * (MAX_OUTCOME_BYTES + MAX_FRAME_BYTES as 
 // A request's full wire metadata bounds the stored origin and operation ID.
 const WAIT_TOTAL_BYTES: u64 =
     crate::ipc::MAX_WAIT_WORK as u64 * (MAX_OUTCOME_BYTES + MAX_FRAME_BYTES as u64 + 4096);
-const WAIT_HASH_PREFIX: &str = "wait:";
 const CONTROL_TOTAL_BYTES: u64 = TOTAL_BYTES + CONTROL_HEADROOM_BYTES;
 
 #[derive(Clone, Copy)]
@@ -27,17 +26,6 @@ impl Admission {
             command if crate::ipc::is_wait(command) => Self::Wait,
             _ => Self::Normal,
         }
-    }
-    pub(super) fn fingerprint(self, hash: String) -> String {
-        match self {
-            Self::Wait => format!("{WAIT_HASH_PREFIX}{hash}"),
-            _ => hash,
-        }
-    }
-    pub(super) fn matches_fingerprint(self, saved: &str, fingerprint: &str) -> bool {
-        saved == fingerprint
-            || matches!(self, Self::Wait)
-                && fingerprint.strip_prefix(WAIT_HASH_PREFIX) == Some(saved)
     }
     fn limit(self) -> u64 {
         match self {
@@ -125,14 +113,14 @@ fn usage_lanes(db: &Connection, instance: &str) -> Result<(u64, u64)> {
         "SELECT q.logical_bytes+pending.reserved-pending.wait_bytes, pending.wait_bytes
          FROM quota_counter q CROSS JOIN (
              SELECT COALESCE(SUM(reserved_bytes),0) AS reserved,
-             COALESCE(SUM(CASE WHEN substr(request_hash,1,length(?2))=?2 THEN
+             COALESCE(SUM(CASE WHEN lane='wait' THEN
                  512+octet_length(operation_id)+octet_length(instance_id)+octet_length(origin_json)
                  +octet_length(request_hash)+octet_length(created_at)+COALESCE(octet_length(result_ref_json),0)
                  +reserved_bytes ELSE 0 END),0) AS wait_bytes
              FROM operation_receipt INDEXED BY operation_receipt_pending_budget
              WHERE instance_id=?1 AND state='pending'
          ) pending WHERE q.category='operation_receipt'",
-        params![instance, WAIT_HASH_PREFIX],
+        [instance],
         |r| Ok((r.get::<_, i64>(0)? as u64, r.get::<_, i64>(1)? as u64)),
     ).map_err(sql)
 }
@@ -322,28 +310,6 @@ pub(super) fn reserve(
         matches!(admission, Admission::Wait),
     )
 }
-#[cfg(test)]
-#[allow(clippy::too_many_arguments)]
-fn reserve_with_limit(
-    db: &Connection,
-    instance: &str,
-    operation: &str,
-    origin: &str,
-    fingerprint: &str,
-    now: &str,
-    total: u64,
-) -> Result<()> {
-    reserve_in_lane(
-        db,
-        instance,
-        operation,
-        origin,
-        fingerprint,
-        now,
-        total,
-        false,
-    )
-}
 #[allow(clippy::too_many_arguments)]
 fn reserve_in_lane(
     db: &Connection,
@@ -372,7 +338,7 @@ fn reserve_in_lane(
         error.hint=Some("Current terminal results are reclaimed under pressure before this refusal. Inspect shellboy operation get --operation ID and pending/protected work with shellboy status. Wait for pending work to finish; if identity metadata or protected receipts still fill the budget, finish current work and restart the owner explicitly. Same-ID replay may return operation_expired and never reexecutes the command.".into());
         return Err(error);
     }
-    db.execute("INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,created_at,reserved_bytes)VALUES(?1,?2,?3,?4,'pending',?5,?6)",params![operation,instance,origin,fingerprint,now,MAX_OUTCOME_BYTES as i64]).map_err(sql)?;
+    db.execute("INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,created_at,reserved_bytes,lane)VALUES(?1,?2,?3,?4,'pending',?5,?6,?7)",params![operation,instance,origin,fingerprint,now,MAX_OUTCOME_BYTES as i64,if wait { "wait" } else { "normal" }]).map_err(sql)?;
     Ok(())
 }
 /// Includes recovery hints and the exact envelope, rather than assuming that a
@@ -511,7 +477,7 @@ mod tests {
     fn current_result_pressure_reclaims_body_but_preserves_identity_and_counter() {
         let db = fixture();
         let budget = MAX_OUTCOME_BYTES + 2048;
-        reserve_with_limit(
+        reserve_in_lane(
             &db,
             "current",
             "current:first",
@@ -519,6 +485,7 @@ mod tests {
             "hash",
             "now",
             budget,
+            false,
         )
         .unwrap();
         let outcome = encode("current:first", &Ok(json!({"text":"x".repeat(1500)}))).unwrap();
@@ -529,7 +496,7 @@ mod tests {
         .unwrap();
         let before = usage(&db, "current").unwrap();
         assert_eq!(collect(&db, "current", true).unwrap(), 1);
-        reserve_with_limit(
+        reserve_in_lane(
             &db,
             "current",
             "current:next",
@@ -537,6 +504,7 @@ mod tests {
             "hash",
             "now",
             budget,
+            false,
         )
         .unwrap();
         assert_eq!(
@@ -751,7 +719,7 @@ mod tests {
         let mut db = fixture();
         let budget = MAX_OUTCOME_BYTES + 1024;
         let tx = db.transaction().unwrap();
-        reserve_with_limit(
+        reserve_in_lane(
             &tx,
             "current",
             "current:first",
@@ -759,17 +727,19 @@ mod tests {
             "hash",
             "now",
             budget,
+            false,
         )
         .unwrap();
         assert_eq!(
-            reserve_with_limit(
+            reserve_in_lane(
                 &tx,
                 "current",
                 "current:second",
                 "null",
                 "hash",
                 "now",
-                budget
+                budget,
+                false,
             )
             .unwrap_err()
             .code,
@@ -780,7 +750,7 @@ mod tests {
             [],
         )
         .unwrap();
-        reserve_with_limit(
+        reserve_in_lane(
             &tx,
             "current",
             "current:second",
@@ -788,6 +758,7 @@ mod tests {
             "hash",
             "now",
             budget + 1024,
+            false,
         )
         .unwrap();
         tx.execute("INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,created_at,result_ref_json,reserved_bytes) VALUES('old:pending','old','null','hash','pending','2000-01-01',NULL,8388608)",[]).unwrap();
