@@ -1,5 +1,11 @@
 # Development status
 
+## Core #370 asking a person versus asking a Thread
+
+A model ask addressed to its own Thread is refused with `invalid_argument`
+and a hint to omit `--thread` when asking a person. Ordinary sends and named
+questions keep their routing. CLI help and the Agent Guide explain the distinction.
+
 ## Core #309 pending message tests
 
 Cancellation ID validation and the send request's default delivery mode are

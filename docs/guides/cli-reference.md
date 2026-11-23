@@ -516,9 +516,9 @@ successful measured usage, start/end time and next_request_pending after an edit
 Send with `shellboy message ask --thread THREAD --text 'Task'`;
 the receipt's `message_id` identifies the duty, independently of assignment or
 `--deliver now|complete`. The recipient replies after application with
-`shellboy message reply --message MESSAGE_ID --text 'Result'`. A model may not
-send an expected reply to its own Thread; only the recipient Thread's model (or
-a human) can reply. Ordinary progress messages create no reply duty.
+`shellboy message reply --message MESSAGE_ID --text 'Result'`. A model cannot
+ask its own Thread. To ask a person, omit `--thread`. Ordinary progress messages
+create no reply duty.
 
 ```sh
 shellboy wait --conditions-json '[{"type":"reply_received","message_id":"MESSAGE_ID"}]' --timeout-ms 30000

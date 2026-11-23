@@ -1005,6 +1005,7 @@ pub struct MessageSendOptions {
     /// Self-asserted name (at most 64 Unicode characters); grants no authority.
     #[arg(long)]
     pub sender_label: Option<String>,
+    /// Recipient Thread; omit to send to your current Thread. This does not ask a person or require a reply.
     #[arg(long = "thread")]
     pub thread_id: Option<String>,
     /// Delivery timing. Omitted: the next safe boundary. now: also release a
@@ -1035,6 +1036,7 @@ pub struct MessageAskOptions {
     /// Named recipient; defaults to human when no Thread is given.
     #[arg(long, conflicts_with = "thread_id")]
     pub to: Option<String>,
+    /// Thread whose reply you want (not your own). Omit to ask a person (--to human is the default).
     #[arg(long = "thread")]
     pub thread_id: Option<String>,
     #[arg(long, value_enum, requires = "thread_id")]

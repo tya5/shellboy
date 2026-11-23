@@ -232,20 +232,21 @@ When the preamble says `Reply expected`, finish the task and
 use `shellboy message reply --message MESSAGE_ID --text 'Result and evidence'`.
 Reply once to that specific applied message; an ordinary progress message or a
 Turn end message is not its reply. Any model may reply once the request has
-been applied, including a parent replying on behalf of a child. Models may also
-send reply-expected messages to their own Thread. If the duty is cancelled, do
-not send a late reply.
+been applied, including a parent replying on behalf of a child. If the duty is
+cancelled, do not send a late reply.
 See [Delegation](delegation.md#waiting-for-replies) for reminders and wait states.
 
 ### Ask the human for a decision
 
-`shellboy message ask --text 'Question and options'` saves a question for the
-human. The answer arrives as input in this Thread and starts a Run if needed.
-The Thread can have at most 16 unanswered requests, shared with reply-expected
-sends. To withdraw a pending question, use
-`shellboy message cancel --message MESSAGE_ID`.
+Run `shellboy message ask --text 'Question and options'` without `--thread`.
+The default recipient is `human`; no `--deliver` is needed. Use `--thread`
+only to ask another Thread for a reply, never to ask your own Thread.
 
-The bounded Web/API inbox is `shellboy message list --awaiting --owed-by THREAD_ID` (paged; each item has `message_id`, `created_at`, `asked_by`, `sender`, `recipient`, `excerpt`); `thread get --thread THREAD_ID` → `pending_replies` `{owed_by, asked_by}` gives `{count, exact}` (exact through 16). On `events wait --thread THREAD_ID` change hints, reread that Thread. Answer with `shellboy message reply --message MESSAGE_ID --text 'Decision'`; never notify a person for `recipient_kind: "thread"`.
+The person answers in Studio or the TUI. Their answer arrives as a message in
+this Thread, linked to your question by `reply_to`, and closes the question.
+It starts a Run if needed. Never use `message reply` on your own question.
+
+To withdraw a pending question, use `shellboy message cancel --message MESSAGE_ID`.
 
 ## Distinguish acceptance from completion
 

@@ -673,7 +673,7 @@ fn tool(command: &str) -> Value {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn model_shell_cli_can_reply_to_its_own_expected_message_and_finish() {
+async fn model_shell_cli_rejects_a_same_thread_ask_without_creating_a_duty() {
     let mut f = fixture().await;
     let (send_ipc, receive_ipc) = mpsc::channel(16);
     let ipc = shellboy::ipc::LocalServer::bind(&f.owner, send_ipc)
@@ -685,7 +685,6 @@ async fn model_shell_cli_can_reply_to_its_own_expected_message_and_finish() {
         .run_id
         .unwrap();
 
-    // The model asks itself for a reply; delivery is held until the current Run ends.
     incoming(&mut f.receive)
         .await
         .reply
@@ -703,81 +702,21 @@ async fn model_shell_cli_can_reply_to_its_own_expected_message_and_finish() {
             ])),
         ))
         .unwrap();
-    let original_turn = incoming(&mut f.receive).await;
-    assert!(
-        original_turn
-            .body
-            .to_string()
-            .contains("MODEL_SELF_REQUEST")
-    );
-    let message_id: String = f
-        .control
-        .store
-        .database
-        .call(|db| {
-            Ok(db.query_row(
-                "SELECT message_node_id FROM receipt ORDER BY rowid DESC LIMIT 1",
-                [],
-                |row| row.get(0),
-            )?)
-        })
-        .await
-        .unwrap();
-    original_turn
-        .reply
-        .send((200, answer("Original task finished")))
-        .unwrap();
-
-    // The completion delivery starts a revisit. Reply through the same shell CLI.
-    let revisit = incoming(&mut f.receive).await;
-    assert_order(
-        &revisit.body,
-        &["Original task finished", "MODEL_SELF_REQUEST"],
-        &[],
-    );
-    revisit
-        .reply
-        .send((
-            200,
-            tool(&cli_command(&[
-                "message",
-                "reply",
-                "--message",
-                &message_id,
-                "--text",
-                "Self reply delivered",
-            ])),
-        ))
-        .unwrap();
-    let after_reply = incoming(&mut f.receive).await;
-    assert!(
-        after_reply
-            .body
-            .to_string()
-            .contains("Self reply delivered")
-    );
-    after_reply
-        .reply
-        .send((200, answer("Self check finished")))
-        .unwrap();
+    let next = incoming(&mut f.receive).await;
+    let body = next.body.to_string();
+    assert!(body.contains("invalid_argument"), "{body}");
+    assert!(body.contains("To ask a person, omit --thread"), "{body}");
+    next.reply.send((200, answer("Task finished"))).unwrap();
     run_state(&f.control, &run, "completed").await;
-    assert_eq!(
-        run_revisit(&f.control, &run).await,
-        Some(RevisitSummary {
-            pending: false,
-            consumed_count: 1
-        })
-    );
-    let replied: i64 = f.control.store.database.call({
-        let message_id = message_id.clone();
-        move |db| Ok(db.query_row(
-            "SELECT count(*) FROM receipt WHERE message_node_id=?1 AND json_extract(result_json,'$.reply.state')='replied'",
-            [&message_id], |row| row.get(0))?)
+
+    let thread = f.thread.clone();
+    let pending: i64 = f.control.store.database.call(move |db| {
+        Ok(db.query_row(
+            "SELECT count(*) FROM receipt WHERE target_thread_id=?1 AND json_extract(result_json,'$.reply.state')='pending'",
+            [&thread], |row| row.get(0),
+        )?)
     }).await.unwrap();
-    assert_eq!(
-        replied, 1,
-        "self-target reply must be persisted before Run completion"
-    );
+    assert_eq!(pending, 0);
     f.control.shutdown().await.unwrap();
     ipc.shutdown().await.unwrap();
     serving.abort();

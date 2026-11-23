@@ -206,7 +206,8 @@ message ask (--thread THREAD [--deliver now|complete] | --to NAME)
 - `--to NAME` (conflicts with `--thread`; `--deliver` requires `--thread`) asks
   a named recipient, `human` when neither is given, and needs a calling model
   Thread. The duty is recorded on the asking Thread's own receipt.
-- Model self-targets are not rejected (#259).
+- A model asking its own Thread is rejected with `invalid_argument` (#370). Omit
+  `--thread` to ask a person instead.
 - Rejected (`reply_limit`) at the cap above.
 - The result carries `"expect_reply": true`; `message send` has no
   `--expect-reply` flag, so an ordinary send never creates a reply duty.
@@ -567,7 +568,7 @@ for callers that want it.
 
 | Action | Model caller | Human / external CLI (no Origin) |
 |---|---|---|
-| `message ask` | ordinary send authority; own Thread allowed (#259) | ordinary send authority |
+| `message ask` | ordinary send authority; cannot ask its own Thread (#370) | ordinary send authority |
 | `message reply` | only when its Thread is the original's target Thread (any Run of it). A parent cannot reply for its child; a fork cannot reply for its source | any message |
 | cancel the pending reply | only messages its own Thread sent (existing rule) | any message |
 | `wait reply_received` | any message, cycle-checked | any message |
@@ -648,7 +649,7 @@ decided here without an explicit user answer (see [Decisions](#decisions)).
 | G29 | Messages sent with `message send` | Design | unchanged except `message get` drops `answer_node_id` |
 | G30 | Wait `interrupted` from an arriving receipt | Design | `satisfied` wins when the arriving receipt is the awaited reply |
 | G31 | Wait cycles | Design | Thread → live Run edge, as in `thread_settled` |
-| G32 | Model asking its own Thread | Decided | allowed, superseded Q16 (#259) |
+| G32 | Model asking its own Thread | Decided | rejected with `invalid_argument` (#370) |
 | G33 | Child completion before Revisit boundary | Superseded by #302 | Child lifecycle events no longer wake a parent Run. Completion is handled by owner state, independently of user messages. |
 | G34 | Thread title derived from first user body | Design | a reply node on a sender Thread is a user node like any message; no special case |
 | G35 | `thread request` debug command | Decided | unchanged; it shows the new notice nodes in rebuilt requests (Q1) |
@@ -716,7 +717,8 @@ the operation fingerprint), `message reply` (`Command::MessageReply`,
 message items `answer_node_id` → `reply_node_id`,
 `wait reply_received` (condition, snapshot, cycle edge, precedence over
 `interrupted`), `message cancel` outcome `reply_cancelled` and its
-`context_changed` notice, `thread get` pending reply counts (now `pending_replies.owed_by` / `.asked_by`, #317); receipt-derived request/reply preambles and the 16-duty `reply_limit` admission cap. Model self-targets and cross-thread reply/cancel actors remain allowed per #259.
+`context_changed` notice, `thread get` pending reply counts (now `pending_replies.owed_by` / `.asked_by`, #317); receipt-derived request/reply preambles and the 16-duty `reply_limit` admission cap. At this step #259 allowed model self-targets and cross-thread reply/cancel actors;
+#370 later disallowed model self-asks.
 Pending replies have no Run-end effect yet; nothing uses them until step 4/5.
 
 - Schema: `migrations/0026_reply_expected.sql`, `src/storage/current.sql`,
@@ -870,7 +872,7 @@ the memo gave no single recommendation, the choice made here is marked
 | Q13 | Forks | A fork does not inherit the duty to reply; only the original Thread can reply |
 | Q14 | exec strictness | User: replaced by `exec --result reply\|turn-end\|run-end`, default `reply`. `reply` reminds once and then exits 4 `ignored`; `turn-end` and `run-end` send an ordinary message with no reply duty and never produce the reply outcomes. See [exec](#exec) |
 | Q15 | Cap (superseded by #262 user decision, 2026-11-08) | 16 pending duties per recipient Thread; the 17th new send/ask is refused with `reply_limit` and details containing limit/current_count |
-| Q16 | Asking yourself | Superseded by #259: a model may ask its own Thread |
+| Q16 | Asking yourself | Superseded by #370: a model cannot ask its own Thread |
 | Q17 | TUI glyph | Option B: no new mark; a label after the existing glyph. See [TUI rendering](#tui-rendering) |
 | D10 | Empty end message (user, after Q14; refined) | A successful empty result: exit 0 in every mode, also with `--schema`; Schema validation and repairs apply only to non-empty text. Exit 0 means valid JSON or an empty end message |
 | D11 | Turn ended by Esc, no end message (user, correcting an earlier judgement) | Not the same as empty: no result, treated like a stopped Turn, exit 4 |

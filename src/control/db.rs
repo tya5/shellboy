@@ -2034,6 +2034,15 @@ impl Store {
         operation_id: &str,
         now: &str,
     ) -> Result<MutationResult> {
+        if let (Some(thread), Some(origin)) = (args.thread_id.as_deref(), caller)
+            && thread == origin.thread_id
+        {
+            return Err(error(
+                ErrorCode::InvalidArgument,
+                "cannot ask your own Thread for a reply",
+            )
+            .hint("To ask a person, omit --thread"));
+        }
         let named = args.thread_id.is_none();
         if named && caller.is_none() {
             return Err(error(
