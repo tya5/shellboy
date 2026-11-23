@@ -205,7 +205,7 @@ fn main() -> ExitCode {
         return print_error(
             ApiError::new(
                 ErrorCode::InvalidArgument,
-                "--operation-id applies to owner RPCs; docs, protocol schema, startup, rag, config init, config check thread request and thread export do not accept an operation ID",
+                "--operation-id applies to owner RPCs; docs, protocol schema, startup, rag, config init, config check, thread request, and thread export do not accept an operation ID",
             ),
             cli.operation_id,
         );

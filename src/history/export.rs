@@ -186,19 +186,19 @@ struct GraphReader<'a> {
 impl GraphReader<'_> {
     fn relations(&mut self) -> Result<HistoryExportRelations, ApiError> {
         let previous = self.read(
-            "SELECT src AS target FROM edge WHERE dst=?2",
+            "SELECT src AS target FROM edge WHERE dst=?1",
             "g.target",
             |_, target| Ok(target),
         )?;
         let next = self.read(
-            "SELECT dst AS target FROM edge WHERE src=?2",
+            "SELECT dst AS target FROM edge WHERE src=?1",
             "g.target",
             |_, target| Ok(target),
         )?;
         let rows = self.read(
             "SELECT r.id,r.state,s.ordinal,s.source_node_id AS target FROM replacement r
              LEFT JOIN replacement_source s ON s.replacement_id=r.id
-             WHERE r.output_node_id=?2 AND r.state IN ('completed','pruned')",
+             WHERE r.output_node_id=?1 AND r.state IN ('completed','pruned')",
             "g.id,g.ordinal",
             |row, target| {
                 Ok((
@@ -231,7 +231,7 @@ impl GraphReader<'_> {
         }
         let replaced_by = self.read(
             "SELECT r.id,s.ordinal,r.output_node_id AS target FROM replacement_source s
-             JOIN replacement r ON r.id=s.replacement_id WHERE s.source_node_id=?2 AND r.state IN ('completed','pruned')",
+             JOIN replacement r ON r.id=s.replacement_id WHERE s.source_node_id=?1 AND r.state IN ('completed','pruned')",
             "g.id,g.ordinal", |row, output| Ok(HistoryExportMembership { group_id: row.get(0)?, ordinal: row.get(1)?, output: output.expect("output id is non-null") }),
         )?;
         Ok(HistoryExportRelations {
@@ -240,6 +240,37 @@ impl GraphReader<'_> {
             replacement_groups,
             replaced_by,
         })
+    }
+
+    fn reference(&self, id: String) -> Result<HistoryExportReference, ApiError> {
+        // Walk toward replacement outputs from this ID, using the source index.
+        // Never expand the Thread-wide membership closure for a graph reference.
+        let mut statement = self.db.prepare_cached(
+            "SELECT CASE
+                WHEN NOT EXISTS (SELECT 1 FROM node WHERE id=?2) THEN 0
+                WHEN EXISTS (
+                    WITH RECURSIVE outputs(id) AS (
+                        VALUES(?2)
+                        UNION
+                        SELECT r.output_node_id FROM outputs o
+                        JOIN replacement_source s ON s.source_node_id=o.id
+                        JOIN replacement r ON r.id=s.replacement_id
+                        WHERE r.state IN ('completed','pruned')
+                    )
+                    SELECT 1 FROM outputs o
+                    WHERE EXISTS (SELECT 1 FROM thread_path p WHERE p.thread_id=?1 AND p.node_id=o.id)
+                ) THEN 2
+                ELSE 1 END"
+        ).map_err(sql_error)?;
+        let scope = match statement
+            .query_row(params![self.thread, id], |row| row.get::<_, i64>(0))
+            .map_err(sql_error)?
+        {
+            0 => HistoryExportReferenceScope::Missing,
+            1 => HistoryExportReferenceScope::External,
+            _ => HistoryExportReferenceScope::Internal,
+        };
+        Ok(HistoryExportReference { id, scope })
     }
 
     fn read<T>(
@@ -253,22 +284,15 @@ impl GraphReader<'_> {
     ) -> Result<Vec<T>, ApiError> {
         let mut stmt = self
             .db
-            .prepare(&format!(
-                "{MEMBERS}, graph AS ({query})
-            SELECT g.*, CASE WHEN n.id IS NULL THEN 0 WHEN m.id IS NULL THEN 1 ELSE 2 END
-            FROM graph g LEFT JOIN node n ON n.id=g.target LEFT JOIN members m ON m.id=g.target
-            ORDER BY {order_by}"
-            ))
+            .prepare(&format!("SELECT g.* FROM ({query}) g ORDER BY {order_by}"))
             .map_err(sql_error)?;
         let column_count = stmt.column_count();
-        let mut rows = stmt
-            .query(params![self.thread, self.id])
-            .map_err(sql_error)?;
+        let mut rows = stmt.query([self.id]).map_err(sql_error)?;
         let mut result = Vec::new();
         while let Some(row) = rows.next().map_err(sql_error)? {
             // Bound retained relation rows before allocating them; exact frame fitting follows.
             let mut bytes = 16;
-            for column in 0..column_count - 1 {
+            for column in 0..column_count {
                 if let rusqlite::types::ValueRef::Text(value) =
                     row.get_ref(column).map_err(sql_error)?
                 {
@@ -279,15 +303,11 @@ impl GraphReader<'_> {
                 .remaining
                 .checked_sub(bytes)
                 .ok_or_else(|| oversized(self.id))?;
-            let scope = match row.get::<_, i64>(column_count - 1).map_err(sql_error)? {
-                0 => HistoryExportReferenceScope::Missing,
-                1 => HistoryExportReferenceScope::External,
-                _ => HistoryExportReferenceScope::Internal,
-            };
             let target = row
-                .get::<_, Option<String>>(column_count - 2)
+                .get::<_, Option<String>>(column_count - 1)
                 .map_err(sql_error)?
-                .map(|id| HistoryExportReference { id, scope });
+                .map(|id| self.reference(id))
+                .transpose()?;
             result.push(project(row, target).map_err(sql_error)?);
         }
         Ok(result)
