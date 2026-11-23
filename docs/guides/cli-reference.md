@@ -530,8 +530,10 @@ The reply arrives in a model sender's conversation, or external senders read
 `reply.node_id`. `satisfied` includes `replied`, `ignored`, `cancelled`, and
 `recipient_deleted`; inspect the snapshot. Timeouts do not cancel the request.
 An unanswered applied request gets one Run-end reminder, then `ignored` if still
-unanswered. Stop/recovery leaves it pending; combine a reply wait with
-`thread_settled` to detect stalls. See [Delegation](delegation.md).
+unanswered. Stopping or failing the recipient Run resolves an unanswered
+applied request as `ignored` and notifies the sender. `recovery_wait` and
+owner shutdown leave it pending. Combine a reply wait with `thread_settled`
+to detect stalls. See [Delegation](delegation.md).
 
 ## Interactive chat client (#242)
 

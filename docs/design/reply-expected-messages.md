@@ -757,8 +757,9 @@ and sender-deletion `cancelled` in the Thread deletion transaction (Q4);
 - Frontend: `src/presentation/events.rs`, `src/frontend/notices.rs`,
   `src/ui/presentation.rs`.
 - Tests: `tests/reply.rs` (reminder then `ignored`, Esc then reminder then
-  second Esc, ordering with waiting `complete` messages, stop/recovery keep
-  pending, deletion both ways, multiple waiters, restart with a pending wait),
+  second Esc, ordering with waiting `complete` messages, settlement as
+  `ignored` on stop or failure, preservation of pending duties during recovery
+  wait or shutdown, deletion both ways, multiple waiters, restart with a pending wait),
   `src/control/driver/revisit_tests.rs`.
 - Guides: `agent-guide.md` (how to see and answer reply-expected messages).
 - Designs: `control.md` (Run continue/complete row), `revisit.md` (ordering
