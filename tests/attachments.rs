@@ -77,7 +77,7 @@ impl Fixture {
         }
         let attempt = uuid::Uuid::new_v4().to_string();
         let id = attempt.clone();
-        let prepared=self.db.call(move|db|{let tx=db.transaction()?;let revision=qualify_prepared_tx(&tx,&prepared).unwrap();tx.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='turn'),?1,'turn',0,?2,'profile','model',0,'inflight','{}',?3)",params![id,revision,chrono::Utc::now().to_rfc3339()])?;record_prepared_tx(&tx,&prepared,&id).unwrap();tx.execute("UPDATE model_attempt SET state=?2 WHERE id=?1",params![id,if success{"completed"}else{"failed"}])?;tx.commit()?;Ok(prepared)}).await.unwrap();
+        let prepared=self.db.call(move|db|{let tx=db.transaction()?;let revision=qualify_prepared_tx(&tx,&prepared).unwrap();tx.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='turn'),?1,'turn',0,?2,'profile','model',0,'inflight','{}',?3)",params![id,revision,chrono::Utc::now().to_rfc3339()])?;record_prepared_tx(&tx,&prepared,&id).unwrap();tx.execute("UPDATE model_attempt SET state=?2,input_manifest_json=?3 WHERE id=?1",params![id,if success{"completed"}else{"failed"},if success{r#"{"adoption":{"outcome":"adopted"}}"#}else{"{}"}])?;tx.commit()?;Ok(prepared)}).await.unwrap();
         if success {
             self.service
                 .mark_success(&prepared, &attempt)
@@ -1342,7 +1342,7 @@ async fn managed_path_uses_ordinary_hash_baselines_missing_facts_and_gc() {
         )
         .unwrap();
         assert_eq!(metadata["path"], path.to_str().unwrap());
-        assert!(metadata["unavailable_reason"].is_null());
+        assert!(metadata.get("unavailable_reason").is_none());
         writeln!(
             log,
             "{}",
@@ -1396,7 +1396,8 @@ async fn managed_path_uses_ordinary_hash_baselines_missing_facts_and_gc() {
         )
         .unwrap();
         assert_eq!(metadata["path"], path.to_str().unwrap());
-        assert!(metadata["unavailable_reason"].is_string());
+        assert!(metadata.get("unavailable_reason").is_none());
+        assert!(missing.manifest[0].error.is_some());
         writeln!(
             log,
             "{}",

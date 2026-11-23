@@ -13,7 +13,7 @@ struct SelectionRow {
     hash: Option<String>,
     source_node_id: Option<String>,
     payload: Option<String>,
-    previously_included: bool,
+    previous_state: Option<String>,
 }
 impl SelectionRow {
     fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
@@ -29,7 +29,7 @@ impl SelectionRow {
             hash: row.get(8)?,
             source_node_id: row.get(9)?,
             payload: row.get(10)?,
-            previously_included: row.get(11)?,
+            previous_state: row.get(11)?,
         })
     }
 }
@@ -56,7 +56,7 @@ pub(super) fn snapshot_selection_tx(
     if expected_revision.is_some_and(|expected| expected != revision) {
         return Err(StorageError::from(stale()));
     }
-    let mut statement=tx.prepare("SELECT a.id,a.absolute_path,a.input_kind,s.protected,s.state,s.reason,m.id,m.state,(SELECT z.content_hash FROM attachment_send z JOIN model_attempt ma ON ma.id=z.attempt_id JOIN turn tu ON tu.id=ma.turn_id WHERE z.attachment_id=a.id AND tu.thread_id=s.thread_id AND z.state='sent' AND ma.state='completed' ORDER BY ma.started_at DESC,z.ordinal DESC LIMIT 1),a.source_node_id,n.payload_json,EXISTS(SELECT 1 FROM attachment_send z JOIN model_attempt ma ON ma.id=z.attempt_id JOIN turn tu ON tu.id=ma.turn_id WHERE z.attachment_id=a.id AND tu.thread_id=s.thread_id AND ma.state='completed') FROM attachment_selection s JOIN attachment_ref a ON a.id=s.attachment_id LEFT JOIN managed_file m ON m.absolute_path=a.absolute_path LEFT JOIN node n ON n.id=a.source_node_id WHERE s.thread_id=?1 AND (COALESCE(s.reason,'')<>'context_replacement' OR EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id=s.thread_id AND p.node_id=a.source_node_id) OR NOT EXISTS(SELECT 1 FROM attachment_send z JOIN model_attempt ma ON ma.id=z.attempt_id JOIN turn tu ON tu.id=ma.turn_id WHERE z.attachment_id=a.id AND z.state='excluded' AND tu.thread_id=s.thread_id AND ma.state='completed')) AND NOT (s.state='excluded' AND COALESCE(s.reason,'')='context_replacement' AND NOT EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id=s.thread_id AND p.node_id=a.source_node_id) AND n.id IS NOT NULL AND (n.payload_json IS NULL OR n.deleted_reason IS NOT NULL)) AND NOT EXISTS(SELECT 1 FROM attachment_delivery d WHERE d.node_id=a.source_node_id AND d.thread_id=s.thread_id AND d.status<>'applied') ORDER BY s.selected_order,a.id")?;
+    let mut statement=tx.prepare("SELECT a.id,a.absolute_path,a.input_kind,s.protected,s.state,s.reason,m.id,m.state,(SELECT z.content_hash FROM attachment_send z JOIN model_attempt ma ON ma.id=z.attempt_id JOIN turn tu ON tu.id=ma.turn_id WHERE z.attachment_id=a.id AND tu.thread_id=s.thread_id AND z.state='sent' AND json_extract(ma.input_manifest_json,'$.adoption.outcome')='adopted' ORDER BY ma.started_at DESC,ma.rowid DESC,z.ordinal DESC LIMIT 1),a.source_node_id,n.payload_json,(SELECT z.state FROM attachment_send z JOIN model_attempt ma ON ma.id=z.attempt_id JOIN turn tu ON tu.id=ma.turn_id WHERE z.attachment_id=a.id AND tu.thread_id=s.thread_id AND json_extract(ma.input_manifest_json,'$.adoption.outcome')='adopted' ORDER BY ma.started_at DESC,ma.rowid DESC,z.ordinal DESC LIMIT 1) FROM attachment_selection s JOIN attachment_ref a ON a.id=s.attachment_id LEFT JOIN managed_file m ON m.absolute_path=a.absolute_path LEFT JOIN node n ON n.id=a.source_node_id WHERE s.thread_id=?1 AND (COALESCE(s.reason,'')<>'context_replacement' OR EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id=s.thread_id AND p.node_id=a.source_node_id) OR NOT EXISTS(SELECT 1 FROM attachment_send z JOIN model_attempt ma ON ma.id=z.attempt_id JOIN turn tu ON tu.id=ma.turn_id WHERE z.attachment_id=a.id AND z.state='excluded' AND tu.thread_id=s.thread_id AND json_extract(ma.input_manifest_json,'$.adoption.outcome')='adopted')) AND NOT (s.state='excluded' AND COALESCE(s.reason,'')='context_replacement' AND NOT EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id=s.thread_id AND p.node_id=a.source_node_id) AND n.id IS NOT NULL AND (n.payload_json IS NULL OR n.deleted_reason IS NOT NULL)) AND NOT EXISTS(SELECT 1 FROM attachment_delivery d WHERE d.node_id=a.source_node_id AND d.thread_id=s.thread_id AND d.status<>'applied') ORDER BY s.selected_order,a.id")?;
     let mut selected = Vec::new();
     let mut pins = Vec::new();
     let mut detached_count = 0;
@@ -73,7 +73,7 @@ pub(super) fn snapshot_selection_tx(
             hash,
             source_node_id,
             payload,
-            previously_included,
+            previous_state,
         } = row?;
         let source_node_id = source_node_id.ok_or_else(|| {
             StorageError::InvalidInput(format!("Attachment {id} source is missing"))
@@ -151,7 +151,7 @@ pub(super) fn snapshot_selection_tx(
             active,
             reason,
             previous_hash: hash,
-            previously_included,
+            previous_state,
             detached,
         });
     }

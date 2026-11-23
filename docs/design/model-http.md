@@ -456,10 +456,18 @@ hint is passed to the encoder at all. `false` sends nothing cache-related.
 Prefix stability: the system prefix is the fixed system text plus the Turn's
 working-instruction snapshot; the tools are fixed per configuration. Events
 Shellboy inserts mid-conversation are appended as saved history items and never
-rewrite earlier items. What does invalidate the cache, by design: editing
-AGENTS.md (system, next Turn), an attachment update (its source message content
-changes in place), compaction or trim (history replaced), and a connection or
-model change.
+rewrite earlier items. A change to the effective working instructions (including
+the ordered common files or the Thread-local AGENTS file) takes effect at the
+next Turn. Rereading unchanged effective instructions does not itself change
+the prefix. A change of connection, model, role mapping, or tool schema is also
+a legitimate cache boundary; do not defer those changes merely to preserve
+cached input.
+
+Compaction or trim can replace previously sent history. A signed-reasoning
+recovery can drop historical reasoning blocks that cannot safely be replayed.
+Neither behavior changes under #382. Revisit compaction's edit boundary only
+if measured cache misses after compaction are a major cost. Attachment replay
+has its own constraints; see [Attachments](attachments.md).
 
 ### D-010 fact-preserving Chat tolerances (#64 review)
 

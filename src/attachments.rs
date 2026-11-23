@@ -142,7 +142,7 @@ struct Selected {
     active: bool,
     reason: Option<String>,
     previous_hash: Option<String>,
-    previously_included: bool,
+    previous_state: Option<String>,
     detached: bool,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -178,6 +178,8 @@ pub struct PreparedAttachments {
     pub selection_revision: i64,
     pub placements: Vec<PreparedPlacement>,
     pub notices: Vec<String>,
+    pub(crate) status_parts: Vec<Value>,
+    pub(crate) sent_suffix: Vec<Value>,
     pub excluded_ids: Vec<String>,
     pub manifest: Vec<AttachmentManifest>,
     _pins: Arc<PinLease>,
@@ -529,6 +531,8 @@ impl AttachmentService {
             selection_revision: revision,
             placements: Vec::new(),
             notices: Vec::new(),
+            status_parts: Vec::new(),
+            sent_suffix: Vec::new(),
             excluded_ids: excluded.clone(),
             manifest: Vec::new(),
             _pins: pins,
@@ -538,6 +542,7 @@ impl AttachmentService {
             .unwrap()
             .len();
         let mut notice_content_count = 0;
+        let mut status = StatusNotice::default();
         for s in selected {
             let notice_start = result.notices.len();
             let kind = if s.kind == AttachmentKind::Image {
@@ -553,7 +558,7 @@ impl AttachmentService {
                 api_item_index: None,
                 api_content_index: None,
                 api_content_count: 0,
-                first_inclusion: !s.previously_included && s.protected,
+                first_inclusion: s.previous_state.is_none() && s.protected,
                 previous_hash: s.previous_hash.clone(),
                 path: s.path.clone(),
                 kind: kind.into(),
@@ -583,10 +588,17 @@ impl AttachmentService {
                     )
                 };
                 result.notices.push(notice.clone());
-                expansion.push(json!({"type":"input_text","text":notice}));
+                if s.detached {
+                    expansion.push(json!({"type":"input_text","text":notice}));
+                } else if s.previous_state.as_deref() != Some("excluded") {
+                    status.push(format!(
+                        "Attachment excluded from sending: id={} source={} ({reason}); reattach its path to include it again",
+                        s.id, s.source_node_id
+                    ));
+                }
             } else {
                 match &read[&s.path] {
-                    Ok(content) => {
+                    Ok((_, content)) => {
                         manifest.raw_size = Some(content.raw_size);
                         manifest.content_hash = Some(content.hash.clone());
                         manifest.mime_type = Some(content.mime.clone());
@@ -602,7 +614,17 @@ impl AttachmentService {
                                 s.previous_hash.as_deref().unwrap_or("unknown"),
                                 content.hash
                             );
-                            result.notices.push(notice.clone());
+                            result.notices.push(notice);
+                            status.push(format!("Shellboy attachment updates v1: {}", json!([{
+                                "attachment_id": s.id, "source_node_id": s.source_node_id,
+                                "previous_hash": manifest.previous_hash, "content_hash": content.hash,
+                                "update_id": format!("{}:{}:{}", s.id, s.previous_hash.as_deref().unwrap_or(""), content.hash),
+                            }])));
+                        } else if s.previous_state.as_deref() == Some("unavailable") {
+                            status.push(format!(
+                                "Attachment available again: id={} source={}",
+                                s.id, s.source_node_id
+                            ));
                         }
                         let data = format!("data:{};base64,{}", content.mime, content.base64);
                         expansion.push(if s.kind==AttachmentKind::Image{json!({"type":"input_image","image_url":data,"detail":"auto"})}else{json!({"type":"input_file","filename":s.path.file_name().unwrap_or_default().to_string_lossy(),"file_data":data})});
@@ -616,20 +638,26 @@ impl AttachmentService {
                             s.path.display()
                         );
                         result.notices.push(notice.clone());
-                        expansion.push(json!({"type":"input_text","text":notice}));
+                        if s.previous_state.as_deref() != Some("unavailable") {
+                            let end = error.floor_char_boundary(error.len().min(1024));
+                            status.push(format!("Attachment unavailable: id={} source={} ({}); continue with the remaining conversation (see attachment list for current details)", s.id, s.source_node_id, &error[..end]));
+                        }
                     }
                 }
             }
-            let mut facts = json!({"attachment_id":s.id,"source_node_id":s.source_node_id,"source_element_index":s.source_element_index,"content_hash":manifest.content_hash,"previous_hash":manifest.previous_hash,"state":manifest.state,"first_inclusion":manifest.first_inclusion,"version":"current read for this request"});
-            // Detached exclusions already carry a bounded path notice. Do not
-            // duplicate a potentially huge path outside that notice's budget.
-            if !s.detached {
-                facts["path"] = json!(s.path);
-                facts["unavailable_reason"] =
-                    json!(manifest.error.as_deref().or(s.reason.as_deref()));
+            if manifest.first_inclusion && !s.detached {
+                status.push(format!(
+                    "Shellboy attachment first inclusion: id={} source={}",
+                    s.id, s.source_node_id
+                ));
             }
-            let metadata = json!({"type":"input_text","text":format!("[Shellboy attachment metadata] {facts}")});
-            let mut content = vec![metadata];
+            let mut content = Vec::new();
+            if !s.detached {
+                let facts = json!({"attachment_id":s.id,"source_node_id":s.source_node_id,
+                    "source_element_index":s.source_element_index,"path":s.path,
+                    "content_hash":manifest.content_hash});
+                content.push(json!({"type":"input_text","text":format!("[Shellboy attachment metadata] {facts}")}));
+            }
             content.extend(expansion);
             if s.detached {
                 // Account for the complete extra developer item, including JSON escaping.
@@ -652,6 +680,7 @@ impl AttachmentService {
             });
             result.manifest.push(manifest);
         }
+        result.status_parts = status.finish();
         Ok(result)
     }
     /// Call only after successful HTTP acceptance/completion and the driver's
@@ -694,6 +723,37 @@ pub fn exclude_replaced_sources_tx(
         removed += statement.execute(params![thread, source])?;
     }
     Ok(removed)
+}
+
+/// Bound the saved developer item, including JSON escaping. Keep detached
+/// exclusions on their separate, retryable budget; these entries are advisories.
+#[derive(Default)]
+struct StatusNotice {
+    parts: Vec<Value>,
+    bytes: usize,
+    omitted: usize,
+}
+impl StatusNotice {
+    fn push(&mut self, text: String) {
+        let part = json!({"type":"input_text","text":text});
+        let bytes = part.to_string().len() + 1;
+        // Reserve ample room for the developer wrapper and overflow counter.
+        if self.bytes + bytes <= MAX_BODY_BYTES as usize - 256 {
+            self.bytes += bytes;
+            self.parts.push(part);
+        } else {
+            self.omitted += 1;
+        }
+    }
+
+    fn finish(mut self) -> Vec<Value> {
+        if self.omitted > 0 {
+            self.parts.push(json!({"type":"input_text","text":format!(
+                "Shellboy omitted {} attachment status notices; see attachment list for current details", self.omitted
+            )}));
+        }
+        self.parts
+    }
 }
 
 /// Bounded path metadata, never a statement that file bytes were read.

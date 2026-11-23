@@ -1,5 +1,12 @@
 # Development status
 
+## Core #382 attachment replay prefixes
+
+Attachment source slots no longer carry changing status text. Successfully
+adopted requests save the bounded non-binary suffix before the response. Binary
+changes, lost authorization, and availability or budget transitions take
+precedence over cache stability. No schema or protocol change.
+
 ## Core #381 Studio read bounds
 
 State-filtered Thread pages have a bounded candidate scan, status chooses SQL

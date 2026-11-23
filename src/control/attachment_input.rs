@@ -119,10 +119,6 @@ pub(super) fn bind(
         manifest.api_content_count = placement.content.len();
         detached_content.extend(placement.content.iter().cloned());
     }
-    if !detached_content.is_empty() {
-        input.push(json!({"role":"developer","content":detached_content}));
-        tags.push(ItemTag::new(Category::Attachment));
-    }
     if prepared
         .placements
         .iter()
@@ -132,15 +128,14 @@ pub(super) fn bind(
             "Prepared attachment is missing from its original API source message",
         ));
     }
-    let updates: Vec<_> = prepared.manifest.iter().filter(|m| m.changed).map(|m| {
-        json!({"attachment_id":m.attachment_id,"source_node_id":m.source_node_id,
-            "previous_hash":m.previous_hash,"content_hash":m.content_hash,
-            "update_id":format!("{}:{}:{}",m.attachment_id,m.previous_hash.as_deref().unwrap_or(""),m.content_hash.as_deref().unwrap_or(""))})
-    }).collect();
-    if !updates.is_empty() {
-        input.push(json!({"role":"developer","content":[{"type":"input_text",
-            "text":format!("Shellboy attachment updates v1: {}",json!(updates))}]}));
-        tags.push(ItemTag::new(Category::Notice));
+    prepared.sent_suffix.clear();
+    for content in [detached_content, prepared.status_parts.clone()] {
+        if !content.is_empty() {
+            let item = json!({"role":"developer","content":content});
+            input.push(item.clone());
+            tags.push(ItemTag::new(Category::Notice));
+            prepared.sent_suffix.push(item);
+        }
     }
     Ok(())
 }

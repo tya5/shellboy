@@ -1,5 +1,13 @@
 # Validation record
 
+## Core #382 attachment replay prefixes
+
+On macOS, the attachment integration filter passed 67 tests (one opt-in
+real-proxy test ignored); the separately run automatic compaction and detached
+retry test passed. Consecutive loopback requests preserve earlier serialized
+input items across first adoption, a changed-file retry, loss of binary, and
+detached exclusion adoption. No installed-owner or provider cache measurement.
+
 ## Core #381 Studio read bounds
 
 Local `cargo check --tests --locked`, test layout, and classified language

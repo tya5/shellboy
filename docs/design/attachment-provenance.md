@@ -68,10 +68,26 @@ CLI AttachmentAdd、human draft送信、編集forkの3経路は、既存operatio
 
 Rust補助API AttachmentService::add/add_txは製品wire APIではないが、署名を保ったまま登録専用の安全な境界にする。source payloadが計画した数・順序の一意なattachment IDsを既に宣言している必要があり、本文に添付参照のない既存nodeへ後付け追加する呼出しは拒否する。既存nodeがコミット済みでも本文は変更されない。新表/worker/公開commandは追加しない。fixtureも最終sourceをINSERTする実運用と同じ手順へ移す。
 
-## 更新通知の保持と成功後の再送（M6）
+## Attachment replay and adopted notices (#382)
 
-更新通知の永続的な根拠は、HTTP開始前に保存する各model_attemptのinput_manifest_jsonとする。添付ID・source node・前回成功hash・今回hash・changedを保持し、決定的update IDを再構成できる。失敗／明示retryは同じ未処理更新として通知し、正常完了とbaseline更新を同じtransactionで確定する。
+The original source slot contains the ordered reference's ID, source, path,
+current binary hash (null when no binary is sent), and the currently authorized
+binary if present. First inclusion, previous hashes, and status or error text
+are not rendered at that position. The existing attempt manifest remains the
+audit record for those facts and for the exact API coordinates.
 
-正常完了した更新通知の文面を、後続要求のcanonical DAG本文へ追記して再送する案は採らない。後続モデル入力には元source位置の今回読取りmetadataを置くが、以前の更新が新たに起きたようには通知しない。「更新の事実が通常会話本文のreplayには残らない」という指摘自体は正しく、永続監査記録が失われることとは区別する。元本文と別に保持するDD §3.1の契約はattempt manifestで満たし、既存の不変DAG・selection・compactの意味を変更する新しいevent/table/workerは足さない。
+A changed or restored binary, or removal of a previously sent binary, can
+break the prefix at that slot once for the transition. Identical authorized
+bytes render identically; unavailable and excluded both render a reference
+without binary. Selection, file checks, and byte limits still take precedence.
+No historical bytes are retained to reconstruct a prefix. Deploying this
+renderer can itself change earlier input once.
 
-正常完了後の別要求とowner再起動を経ても元attemptのmanifestが保持されること、および後続要求が同じ更新を再通知しないことを実ownerとloopback HTTPで照合する。将来、過去の版変更をモデルが通常履歴から直接説明する要件を追加する場合は、監査情報への読取り導線と通知の再送・費用・compactionの扱いを一緒に再検討する。現在の選択内容を過去版bytesの保存保証と扱わない。
+First-inclusion, change, and availability/exclusion advisories go in a bounded
+developer suffix. A successfully adopted response saves exactly the sent suffix
+in the selected history before the answer, atomically with consumption and the
+hash baseline. Later requests replay it as historical context, not a fresh
+update. Failed or non-adopted attempts save nothing to replay and do not advance
+comparison state. Detached exclusions retain their separate bounded batches
+and existing provenance. No additional notification ledger, queue, or schema
+change is needed.

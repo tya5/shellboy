@@ -252,9 +252,7 @@ fn assert_position(body: &Value, item: &Value, before: &str, after: Option<&str>
         "attachment_id",
         "source_node_id",
         "source_element_index",
-        "first_inclusion",
         "content_hash",
-        "state",
     ] {
         assert_eq!(
             metadata[key], item[key],
@@ -275,6 +273,22 @@ fn assert_position(body: &Value, item: &Value, before: &str, after: Option<&str>
         "internal references cannot escape onto the wire"
     );
 }
+fn assert_input_prefix(before: &Value, after: &Value) {
+    let before = before["input"].as_array().unwrap();
+    let after = after["input"].as_array().unwrap();
+    assert!(
+        after.len() > before.len(),
+        "expected a new conversation tail"
+    );
+    for (i, item) in before.iter().enumerate() {
+        assert_eq!(
+            serde_json::to_vec(item).unwrap(),
+            serde_json::to_vec(&after[i]).unwrap(),
+            "previous input item {i} changed before the new tail"
+        );
+    }
+}
+
 async fn finish(control: &Control, thread: &str, value: Incoming) {
     value.reply.send((200, answer("synthetic answer"))).unwrap();
     settled(control, thread).await;
@@ -397,6 +411,12 @@ async fn original_order_survives_multiple_turns_and_manifest_matches_real_http_p
     assert_eq!(a["source_element_index"], 1);
     assert_eq!(a["first_inclusion"], true);
     assert_position(&first.body, a, "before A", Some("after A"), "input_image");
+    let mut prior = first.body.clone();
+    assert!(
+        prior
+            .to_string()
+            .contains("Shellboy attachment first inclusion:")
+    );
     finish(&control, &thread, first).await;
     for text in ["next without attachment", "another without attachment"] {
         send(&control, &thread, text).await;
@@ -421,6 +441,8 @@ async fn original_order_survives_multiple_turns_and_manifest_matches_real_http_p
             .unwrap();
         assert_eq!(latest["content"].as_array().unwrap().len(), 1);
         assert_eq!(next.body.to_string().matches("input_image").count(), 1);
+        assert_input_prefix(&prior, &next.body);
+        prior = next.body.clone();
         finish(&control, &thread, next).await;
     }
     assert!(control.replay_cache_stats().hits + control.replay_cache_stats().append_hits > 0);
@@ -686,6 +708,7 @@ async fn changed_file_retry_keeps_update_identity_and_success_advances_only_that
         attachments(&retried)[0]["attachment_id"],
         entry["attachment_id"]
     );
+    let changed_input = retry.body.clone();
     finish(&control, &thread, retry).await;
     let completed_manifest = manifest(&control, &thread).await;
     let mut completed_request = completed_manifest.clone();
@@ -721,9 +744,11 @@ async fn changed_file_retry_keeps_update_identity_and_success_advances_only_that
     );
     send(&control, &thread, "same new version again").await;
     let next = incoming(&control, &thread, &mut receive).await;
-    assert!(
-        updates(&next.body).is_empty(),
-        "normal completion acknowledges the update"
+    assert_input_prefix(&changed_input, &next.body);
+    assert_eq!(
+        updates(&next.body),
+        notification,
+        "replay the saved update exactly once"
     );
     let current = manifest(&control, &thread).await;
     assert_eq!(attachments(&current)[0]["changed"], false);
@@ -759,7 +784,7 @@ async fn changed_file_retry_keeps_update_identity_and_success_advances_only_that
     assert_eq!(attachments(&saved)[0]["changed"], true);
     send(&control, &thread, "same version after restart").await;
     let replay = incoming(&control, &thread, &mut receive).await;
-    assert!(updates(&replay.body).is_empty());
+    assert_eq!(updates(&replay.body), notification);
     let replayed = manifest(&control, &thread).await;
     assert_eq!(attachments(&replayed)[0]["changed"], false);
     assert_eq!(
@@ -777,7 +802,7 @@ async fn changed_file_retry_keeps_update_identity_and_success_advances_only_that
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn missing_and_excluded_states_stay_at_their_original_source_without_stale_entities() {
+async fn missing_and_excluded_states_add_only_suffix_notices_once_binary_is_absent() {
     let root = tempfile::tempdir().unwrap();
     let (url, mut receive, server) = proxy().await;
     let owner = owner(root.path(), &url).await;
@@ -804,7 +829,19 @@ async fn missing_and_excluded_states_stay_at_their_original_source_without_stale
         "input_text",
     );
     assert!(!missing.body.to_string().contains("input_image"));
+    let missing_input = missing.body.clone();
+    assert!(
+        missing_input
+            .to_string()
+            .contains("Attachment unavailable:")
+    );
     finish(&control, &thread, missing).await;
+    send(&control, &thread, "still missing").await;
+    let still_missing = incoming(&control, &thread, &mut receive).await;
+    assert_input_prefix(&missing_input, &still_missing.body);
+    let still_missing_input = still_missing.body.clone();
+    finish(&control, &thread, still_missing).await;
+
     let removed = request(
         &control,
         Command::AttachmentRemove(AttachmentRemoveArgs {
@@ -827,7 +864,21 @@ async fn missing_and_excluded_states_stay_at_their_original_source_without_stale
         "input_text",
     );
     assert!(!excluded.body.to_string().contains("input_image"));
+    assert_input_prefix(&still_missing_input, &excluded.body);
+    assert!(
+        excluded
+            .body
+            .to_string()
+            .contains("Attachment excluded from sending:")
+    );
+    let excluded_input = excluded.body.clone();
     finish(&control, &thread, excluded).await;
+    std::fs::write(root.path().join("image-a.png"), b"restored but revoked").unwrap();
+    send(&control, &thread, "still excluded").await;
+    let still_excluded = incoming(&control, &thread, &mut receive).await;
+    assert_input_prefix(&excluded_input, &still_excluded.body);
+    assert!(!still_excluded.body.to_string().contains("input_image"));
+    finish(&control, &thread, still_excluded).await;
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
     server.abort();
@@ -1241,10 +1292,18 @@ async fn compacted_attachment_source_is_replaced_without_sending_its_file_entity
         retry.body.to_string().contains("context_replacement"),
         "failed request does not consume the notice"
     );
+    let notice_input = retry.body.clone();
     finish(&control, &thread, retry).await;
     send(&control, &thread, "notice already consumed").await;
     let once = incoming(&control, &thread, &mut receive).await;
-    assert!(!once.body.to_string().contains("context_replacement"));
+    assert_input_prefix(&notice_input, &once.body);
+    assert_eq!(
+        once.body
+            .to_string()
+            .matches("Shellboy attachment exclusion v1:")
+            .count(),
+        1
+    );
     assert!(attachments(&manifest(&control, &thread).await).is_empty());
     finish(&control, &thread, once).await;
     send(&control, &fork, "fork retained its active attachment").await;
@@ -2099,7 +2158,19 @@ async fn issue_160_auto_compaction_detached_attachment_and_retry() {
                     .contains("context_replacement")
             );
         } else {
-            assert!(!retry_request.body.to_string().contains(&id));
+            // A previously adopted notice may still name the ID. The
+            // replacement must not bind the detached source or schedule a new notice.
+            assert!(
+                !retry_request
+                    .body
+                    .to_string()
+                    .contains("context_replacement")
+            );
+            assert!(
+                attachments(&manifest(&control, &thread).await)
+                    .iter()
+                    .all(|entry| entry["attachment_id"] != id)
+            );
         }
         // Simulate the old-version request failure only after the automatic
         // replacement has durably finished and the retry request sees its path.
@@ -2137,7 +2208,14 @@ async fn issue_160_auto_compaction_detached_attachment_and_retry() {
         if mode == "active" {
             assert!(retry.body.to_string().contains("context_replacement"));
         } else {
-            assert!(!retry.body.to_string().contains(&id));
+            // A previously adopted notice may still name the ID. The
+            // replacement must not bind the detached source or schedule a new notice.
+            assert!(!retry.body.to_string().contains("context_replacement"));
+            assert!(
+                attachments(&manifest(&control, &thread).await)
+                    .iter()
+                    .all(|entry| entry["attachment_id"] != id)
+            );
         }
         finish(&control, &thread, retry).await;
         control.shutdown().await.unwrap();

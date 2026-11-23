@@ -14,7 +14,10 @@
 
 同じ要求内の同パスは1回の実体readとArc<Encoded>を共有できるが、API入力要素とraw合計は重複したまま。全Thread共通のbyte LRUはBase64/hash/MIMEの保持bytesを管理する。上限0や単体が予算超過でも有効添付を拒否せず、今回だけ使って解放する。弱参照の観測表により、cacheから外れても送信側がpinしているEncodedの生存量を計上する。JSONの今回必要な組立bufferと保持cacheは別で、RAM全体がcache予算に等しいとは表示しない。
 
-準備結果の `placements` はsource node／要素位置ごとにResponsesのinput_image/input_fileとinput_textメタデータを持つ。driverは履歴内の元の要素位置へ展開し、末尾へまとめて追加しない。`notices` は同じ通知の表示用一覧なので、driverは二重でモデル入力に追加しない。不在/単一上限等はunavailable manifest＋対象パス/理由のテキストとし、送信可能分を継続する。以前の成功送信hashと異なると変更通知を入れる。失敗したattemptのhashを比較基準へ採用しない。
+`placements` keep current authorized binary and stable metadata at their
+original source slots. Model status text is a bounded, separate suffix saved on
+adoption; `notices` is the preparation/display diagnostic list and is not
+replayed directly. See [attachment provenance](attachment-provenance.md).
 
 合計が要求上限を超えると、過去の非保護添付をselected_order順に除外候補へする。新規保護分が現在の内容で上限を超えれば全要求を保留する。自動除外はまだDBへ確定せず、`adopt_prepared_tx` をAPI attempt受付transaction内で呼ぶ。ここでThread selection CAS、attempt/Turn generation、live Runを検査し、除外とattachment_send manifestを原子的に記録する。除外があればThread/model_attemptのselection revisionを更新し、新revisionを返す。driverは後続採用CASにこのrevisionを使う。容量が減ってもexcludedを自動復活させない。
 
@@ -52,9 +55,11 @@ CLI追加はshell／外部CLIとも専用の補助nodeを作る。保存済みAs
 
 context_replacementで元sourceが現在のpath外にある添付は、実体を読まず、path・ID・source・除外理由のtrusted metadataだけを次の通常要求の安全境界へdeveloper通知として置く。既存PreparedPlacementに一時的なpath外通知flagを持たせ、manifestへ実際のAPI座標を記録する。元source本文や架空のsource message、実体hash/sent事実は生成しない。path外へ配置できるのはこのexcluded通知だけで、通常添付のprovenance不一致は従来どおり拒否する。
 
-同Threadのcompleted attemptに既存attachment_send/excludedが保存されていれば通知を消費済みとし、失敗/取消attemptでは再通知する。activeからcontext除外へ遷移する既存規則に従い、先行する別理由のexcludedをactiveへ復活させる操作は追加しない。新たな通知台帳/永続state/workerは不要とする。別forkのselection・送信履歴は混ぜない。
+同Threadの採用済みattemptに既存attachment_send/excludedが保存されていれば通知を消費済みとし、失敗/取消attemptでは再通知する。activeからcontext除外へ遷移する既存規則に従い、先行する別理由のexcludedをactiveへ復活させる操作は追加しない。新たな通知台帳/永続state/workerは不要とする。別forkのselection・送信履歴は混ぜない。
 
-元pathを明示的に再選択した場合は、context除外済みでも元sourceのattachment_ref位置へexcluded状態文を展開し、bindを失敗させない。実体を自動復活させず、必要なら従来どおりpathを新IDで再添付する。元source/ref/外部ファイルと共有forkは保持する。compactionがThread selectionを原子的に置換する境界は変更しない。
+On adoption, save the exact detached notice at that replay boundary.
+
+元pathを明示的に再選択した場合は、context除外済みでも元sourceのattachment_ref位置へ実体なしmetadataを展開し、bindを失敗させない。実体を自動復活させず、必要なら従来どおりpathを新IDで再添付する。元source/ref/外部ファイルと共有forkは保持する。compactionがThread selectionを原子的に置換する境界は変更しない。
 
 path外通知は既存一覧既定値と同じ最大50件の候補を一回に準備し、追加developer item全体のserialized UTF-8 JSONを既存本文取得上限64KiB以内にする。これは追加通知の上限であり要求全体の上限ではない。pathはUTF-8境界で最大4KiBへ省略し、省略flag・元pathのUTF-8 byte数/SHA256（ファイルhashではない）・既存attachment list導線を添える。単一の巨大pathでも通知でき、JSON escapingも予算に含める。未通知分はexcludedのまま既存ledgerにadmitせず、成功後の次の自然要求で続きを通知する。失敗時は同じ分を再通知し、自動要求/新queue/公開設定は追加しない。
 
@@ -73,8 +78,8 @@ managed PNGはtemp本文のsync→rename→Unixの両親directoryのsyncを有�
 ## Managed paths as ordinary attachment paths (#79)
 
 Managed clipboard images retain the ordinary absolute `path` field in add/list
-results. Per-request attachment metadata exposes that same path and any observed
-unavailability. Managed and external files share preparation, current-byte reads,
+results. The source slot exposes that same path; new observed unavailability is
+reported separately at the request tail. Managed and external files share preparation, current-byte reads,
 per-Thread/ID successful-send hash baselines and change notices. Do not change
 permissions, introduce exports or add a retention pin merely to display a path.
 List joins managed lifecycle state through its existing unique path index on
@@ -109,7 +114,7 @@ must not cause invalid UTF-8 or arbitrary binary to be declared text or an image
 This classification does not prove that a provider accepts a recognized format.
 
 Unknown binary is handled exactly like an unreadable attachment: no binary is
-sent, its original source slot expands to an English unavailable notice saying
+sent, its original source slot contains no binary and a suffix notice says
 the format was not sent, and the attempt manifest records `unavailable` with
 the reason. The original file and reference remain intact, and success does
 not mark that content sent or establish a hash baseline. A later request reads
@@ -123,11 +128,12 @@ apply to both unsupported and unreadable attachments. No new setting or fallback
 Explicit removal from a saved Thread excludes the selected attachment by ID,
 including while a Turn waits for recovery, without deleting the file or source
 node. Selection revision fencing still prevents a stale in-flight preparation
-from being adopted. Explicit retry re-prepares the original Turn and emits an
-excluded notice in place of the bytes. File unavailability is an alternative
-non-destructive workaround: the existing path is read on preparation and an
-unavailable notice is sent in place of content; restoring the path makes it
-eligible on later requests again. Never automatically move a user's file.
+from being adopted. Explicit retry re-prepares the original Turn: the source reference carries no
+binary, and a new exclusion notice goes at the tail. File unavailability is an
+alternative non-destructive workaround: preparation checks the existing path
+and sends a separate unavailable notice without binary. Restoring the path
+makes an active attachment eligible again. Never automatically move a user's
+file.
 
 
 ## Bounded list pages (#327)

@@ -45,6 +45,11 @@ pub(super) async fn adopt_response(
                 return Ok(None);
             }
             save_partial_attempts(&tx,&current,&partial_attempts)?;
+            // Replay the exact non-binary suffix sent before this answer. It
+            // must not outlive a failed, cancelled, or rejected attempt.
+            for notice in &successful_attachments.sent_suffix {
+                history::append_node(&tx,&current.thread,&id(),Some(&current.turn),"event",notice,&now())?;
+            }
             let node=id();
             let payload = json!({"output":output,"reasoning_epoch":current.epoch,"group_id":group_id});
             history::append_node(&tx,&current.thread,&node,Some(&current.turn),"assistant_response",&payload,&now())?;
