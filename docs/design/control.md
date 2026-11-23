@@ -315,6 +315,18 @@ current-format tool groups before terminalizing old Runs and receipts. Selection
 call / missing-result invariants, even when the Turn is already terminal; it is
 not release-version migration or an old-format compatibility reader.
 
+Interruption staging grows with existing source rows of the interrupted Threads.
+It serializes derived JSON, including saved recovery diagnostics and wait
+conditions, not raw shell output, commands, or conversation bodies. Chunking
+and preview limits bound individual views, not total staging. The final
+payload appears in both the header and the final staged row. Staging does not
+check `limits.data_max_bytes`. The header is written last in the capture
+transaction, and an existing header prevents another capture for that Thread.
+Normally shutdown consumes it after draining, in one transaction per Thread;
+startup is the recovery path if shutdown did not finish. Consumption publishes
+the snapshot and removes its staging rows and header atomically. See #364 for
+staging left behind by a deleted Thread or an invalid path cursor.
+
 Preserve every saved result node/ID/payload. Missing pending calls with no
 admitted operation are `not_started`; admitted/running calls have an
 `interrupted` result with result_uncertain=true. Synthetic results have

@@ -434,6 +434,9 @@ pub(crate) fn capture_startup_interrupted_context(
     capture_context(tx, at, "previous_instance_interrupted", "startup", true)
 }
 
+// Staging is linear in existing interrupted work, with at most one capture per
+// Thread. Consumption publishes and removes it atomically after shutdown drain
+// or on startup after an interrupted shutdown.
 fn capture_context(
     tx: &rusqlite::Transaction<'_>,
     at: &str,
