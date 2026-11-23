@@ -78,7 +78,7 @@ context通知は、それ自体ではdeliveryを作らず、既に実行可能�
 | shell背景化 | foreground表示/待機を解除しshellは生存、未実行callはcancelled結果 | 通常完了通知で勝手に背景化しない。後続callを実spawnしない | 対象継続と取消件数をUI/モデルへ通知 |
 | receipt受付/結果 | 未記録→pending意図/受付結果を副作用前保存→結果確定 | 同ID同要求は共有/再生、異要求conflict。結果不明pendingで副作用を再実行しない | 受付とdownstreamを別表示。旧instanceは照会だけ |
 | wait観測 | 登録/状態確認→satisfied/timeout/interrupted/recovery_wait/unavailableを一度確定 | 循環を先に拒否。通知は再読のきっかけ、timeout境界も最終確認 | observer終了で対象を止めない。辺/保留情報を解放。詳細はwait設計 |
-| 添付受付/採用 | source nodeとref一括保存→安全境界で反映 | 人間messageへ付替えない。tool group全結果より前にモデル添付を入れない | 所属/選択/実体版を別表示。欠落は元位置に状態 |
+| 添付受付/採用 | source nodeとref一括保存→安全境界で反映 | 人間messageへ付替えない。tool group全結果より前にモデル添付を入れない | 所属/選択/実体版を別表示。欠落時は元位置に実体を送らず、状態は末尾に通知 |
 | 添付prepare | 選択/profile/sourceの世代検査→現在実体を準備→API直前再確認 | 更新/消失/取消しでstale bufferを送らない。既確定所属/順序は維持 | 送信pinは要求終了で解放。失敗は同messageを保持 |
 | managed画像 | creating→ready/failed、ready→deleting→deletedを保存 | deletingへ入った後pin/再活性化禁止 | unlinkはfile worker。再起動で掃除継続、外部原本は削除しない |
 | index job | pending→running→done/failed。共通障害ではspace pause | source版/space不一致のlate embedding不採用。過去全体を暗黙索引しない | 原文/vecを同transaction。失敗数/明示retryを表示 |

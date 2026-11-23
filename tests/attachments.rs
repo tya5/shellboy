@@ -214,6 +214,51 @@ async fn external_reference_observes_changes_deletion_and_force_reload_without_c
     assert!(!f.path.join("managed").exists());
     f.db.shutdown().await.unwrap();
 }
+#[cfg(unix)]
+#[tokio::test]
+async fn unreadable_attachment_cannot_reuse_a_matching_warm_cache_entry() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let f = Fixture::new(Config::default()).await;
+    let path = f.path.join("permission.txt");
+    f.add("permission.txt", b"only readable before revocation")
+        .await;
+    let first = f.prepare().await;
+    assert_eq!(first.manifest[0].state, "ready");
+    drop(f.adopt(first, true).await);
+    assert_eq!(f.service.cache_stats().entries, 1);
+
+    let original = std::fs::metadata(&path).unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0)).unwrap();
+    let denied = std::fs::metadata(&path).unwrap();
+    assert_eq!(denied.len(), original.len());
+    assert_eq!(denied.modified().unwrap(), original.modified().unwrap());
+    // A privileged runner may bypass Unix mode checks; prove the precondition
+    // before asserting behavior for a path the owner actually cannot read.
+    if unsafe { libc::geteuid() } == 0 && std::fs::File::open(&path).is_ok() {
+        std::fs::set_permissions(&path, original.permissions()).unwrap();
+        f.db.shutdown().await.unwrap();
+        return;
+    }
+    assert_eq!(
+        std::fs::File::open(&path).unwrap_err().kind(),
+        std::io::ErrorKind::PermissionDenied
+    );
+
+    let prepared = f.prepare().await;
+    std::fs::set_permissions(&path, original.permissions()).unwrap();
+    assert_eq!(prepared.manifest[0].state, "unavailable");
+    assert!(prepared.manifest[0].content_hash.is_none());
+    assert!(
+        prepared.placements[0]
+            .content
+            .iter()
+            .all(|part| part["type"] == "input_text")
+    );
+    drop(prepared);
+    f.db.shutdown().await.unwrap();
+}
+
 #[tokio::test]
 async fn failed_attempt_does_not_change_hash_baseline_or_protection() {
     let f = Fixture::new(Config::default()).await;

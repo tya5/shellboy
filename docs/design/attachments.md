@@ -10,14 +10,11 @@
 
 準備はまず有効選択のファイルを開き、本文を読まずに raw サイズを確認する。保護対象と古い順の除外をこの時点で決め、採用した参照の合計だけを予約する。読込み時に再度開き、予約を超えて成長したファイルは unavailable とする。形式不一致など本文でしか判定できない結果では、同じ要求内で除外を取り消さない。raw 予算とは別に Base64 と JSON の表現分が必要になる。
 
-各ファイルは毎回statし、不在/権限/単一上限失敗を古いcacheで代用しない。属性が一致する場合だけRAMのBase64を再利用できる。cache missやforce reloadは同じ読取りbyte列からSHA-256とBase64を作る。hashのための二度目の全文readはしない。属性を保つ書換えは通常cacheが見逃してよいが、force reloadで再読込みできる。MIMEはmagicを優先し拡張子を補助に使い、不明バイナリはapplication/octet-stream。画像/ファイルの指定は維持し、形式変換や別API fallbackをしない。任意形式のモデル理解を保証しない。
+各ファイルは毎回開いて送信時の読取権限を確認し、同じファイルハンドルの属性でcacheを判定する。不在/権限/単一上限失敗を古いcacheで代用しない。属性が一致する場合だけRAMのBase64を再利用できる。cache missやforce reloadは同じ読取りbyte列からSHA-256とBase64を作る。hashのための二度目の全文readはしない。属性を保つ書換えは通常cacheが見逃してよいが、force reloadで再読込みできる。MIMEはmagicを優先し拡張子を補助に使い、不明バイナリはapplication/octet-stream。画像/ファイルの指定は維持し、形式変換や別API fallbackをしない。任意形式のモデル理解を保証しない。
 
 同じ要求内の同パスは1回の実体readとArc<Encoded>を共有できるが、API入力要素とraw合計は重複したまま。全Thread共通のbyte LRUはBase64/hash/MIMEの保持bytesを管理する。上限0や単体が予算超過でも有効添付を拒否せず、今回だけ使って解放する。弱参照の観測表により、cacheから外れても送信側がpinしているEncodedの生存量を計上する。JSONの今回必要な組立bufferと保持cacheは別で、RAM全体がcache予算に等しいとは表示しない。
 
-`placements` keep current authorized binary and stable metadata at their
-original source slots. Model status text is a bounded, separate suffix saved on
-adoption; `notices` is the preparation/display diagnostic list and is not
-replayed directly. See [attachment provenance](attachment-provenance.md).
+`placements` は元位置の所属情報と送信可能な実体を保持する。状態文は別の有界な末尾通知とし、応答採用時に履歴へ保存する。`notices` は準備結果の診断表示用であり、その一覧をモデルへ直接再送しない。[添付の所属・再送位置](attachment-provenance.md)を参照。
 
 合計が要求上限を超えると、過去の非保護添付をselected_order順に除外候補へする。新規保護分が現在の内容で上限を超えれば全要求を保留する。自動除外はまだDBへ確定せず、`adopt_prepared_tx` をAPI attempt受付transaction内で呼ぶ。ここでThread selection CAS、attempt/Turn generation、live Runを検査し、除外とattachment_send manifestを原子的に記録する。除外があればThread/model_attemptのselection revisionを更新し、新revisionを返す。driverは後続採用CASにこのrevisionを使う。容量が減ってもexcludedを自動復活させない。
 
@@ -57,7 +54,7 @@ context_replacementで元sourceが現在のpath外にある添付は、実体を
 
 同Threadの採用済みattemptに既存attachment_send/excludedが保存されていれば通知を消費済みとし、失敗/取消attemptでは再通知する。activeからcontext除外へ遷移する既存規則に従い、先行する別理由のexcludedをactiveへ復活させる操作は追加しない。新たな通知台帳/永続state/workerは不要とする。別forkのselection・送信履歴は混ぜない。
 
-On adoption, save the exact detached notice at that replay boundary.
+応答採用時に、送った通知を同じ位置の履歴として保存する。
 
 元pathを明示的に再選択した場合は、context除外済みでも元sourceのattachment_ref位置へ実体なしmetadataを展開し、bindを失敗させない。実体を自動復活させず、必要なら従来どおりpathを新IDで再添付する。元source/ref/外部ファイルと共有forkは保持する。compactionがThread selectionを原子的に置換する境界は変更しない。
 

@@ -598,7 +598,7 @@ impl AttachmentService {
                 }
             } else {
                 match &read[&s.path] {
-                    Ok((_, content)) => {
+                    Ok(content) => {
                         manifest.raw_size = Some(content.raw_size);
                         manifest.content_hash = Some(content.hash.clone());
                         manifest.mime_type = Some(content.mime.clone());
