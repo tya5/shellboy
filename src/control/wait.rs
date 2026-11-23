@@ -41,7 +41,7 @@ pub(super) struct WaitRegistry {
     #[cfg(test)]
     pub(super) observations: std::sync::atomic::AtomicUsize,
     #[cfg(test)]
-    tracked_observations: StdMutex<HashMap<String, usize>>,
+    tracked_observations: StdMutex<HashMap<String, (wakes::Key, Vec<usize>)>>,
     #[cfg(test)]
     pub(super) output_commits: std::sync::atomic::AtomicUsize,
     #[cfg(test)]
@@ -236,14 +236,14 @@ async fn observe_inner(
                 .waits
                 .observations
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            if let Some(count) = control
+            if let Some((key, reads)) = control
                 .waits
                 .tracked_observations
                 .lock()
                 .unwrap()
                 .get_mut(&operation_id)
             {
-                *count += 1;
+                reads.push(control.waits.keyed.publications(key));
             }
         }
         let observation = control
@@ -654,12 +654,31 @@ mod tests {
             let mut clients = Vec::new();
             let mut collectors = Vec::new();
             let operations = [0, 1].map(|n| format!("{}:{n}", owner.instance_id));
-            control.waits.tracked_observations.lock().unwrap().extend(operations.iter().cloned().map(|id| (id, 0)));
+            let keys = ["sa", "sb"].map(|id| wakes::Key::ShellTerminal(id.into()));
+            control.waits.keyed.track_publications(keys.clone());
+            control.waits.tracked_observations.lock().unwrap().extend(
+                operations.iter().cloned().zip(keys.iter().cloned().map(|key| (key, Vec::new())))
+            );
             let observations = || {
                 let counts = control.waits.tracked_observations.lock().unwrap();
-                [counts[&operations[0]], counts[&operations[1]]]
+                operations.each_ref().map(|id| counts[id].1.clone())
             };
-            for (n, (id, thread, run, turn)) in [("sa", "a", "ra", "ta"), ("sb", "b", "rb", "tb")].into_iter().enumerate() {
+            // Keep native collectors out of the unrelated-change phase: their
+            // initial output or terminal work can race independently on Windows.
+            for (n, id) in ["sa", "sb"].into_iter().enumerate() {
+                clients.push(ipc.connect_command(n, Command::Wait(args(WaitCondition::ShellEnded { execution_id: id.into() }, 30_000))).await);
+                control.waits.parked.notified().await;
+            }
+            assert_eq!(observations(), [vec![0], vec![0]]);
+            let unrelated = Command::ThreadSet(Box::new(ThreadSetArgs {
+                thread_id: Some("parent".into()), title: Some("unrelated change".into()),
+                ..Default::default()
+            }));
+            assert!(ipc.connect_command(3, unrelated).await.await.unwrap().unwrap().ok);
+            tokio::task::yield_now().await;
+            assert_eq!(observations(), [vec![0], vec![0]], "an unrelated Thread change must not re-observe either wait");
+            assert_eq!(keys.each_ref().map(|key| control.waits.keyed.publications(key)), [0, 0]);
+            for (id, thread, run, turn) in [("sa", "a", "ra", "ta"), ("sb", "b", "rb", "tb")] {
                 let shell = crate::shell::ShellSupervisor::new(&crate::config::Config::default())
                     .spawn(id.into(), directory.path().into(), serde_json::from_value(json!({
                         "command": if cfg!(windows) { "set /p hold= & exit /b 7" } else { "read hold; exit 7" },
@@ -674,18 +693,8 @@ mod tests {
                         }, id, shell).await.unwrap()
                 });
                 collectors.push((handle, task));
-                clients.push(ipc.connect_command(n, Command::Wait(args(WaitCondition::ShellEnded { execution_id: id.into() }, 30_000))).await);
-                control.waits.parked.notified().await;
             }
-            let before = observations();
             let read = |id: &str| Command::ShellGet(ExecutionTarget { execution_id: id.into() });
-            let unrelated = Command::ThreadSet(Box::new(ThreadSetArgs {
-                thread_id: Some("parent".into()), title: Some("unrelated change".into()),
-                ..Default::default()
-            }));
-            assert!(ipc.connect_command(3, unrelated).await.await.unwrap().unwrap().ok);
-            tokio::task::yield_now().await;
-            assert_eq!(observations(), before, "an unrelated Thread change must not re-observe either wait");
             let (a, done_a) = collectors.remove(0);
             a.write("go\n", "utf-8").await.unwrap();
             done_a.await.unwrap();
@@ -695,7 +704,7 @@ mod tests {
             for key in ["state", "exit_code", "output_complete"] {
                 assert_eq!(saved["snapshot"]["conditions"][0][key], shell[key]);
             }
-            let count = observations();
+            let reads = observations();
             clients.remove(0).abort();
             let (b, done_b) = collectors.remove(0);
             b.stop();
@@ -705,8 +714,12 @@ mod tests {
             dispatch.await.unwrap();
             assert!(control.waits.keyed.is_empty());
             owner.shutdown().await.unwrap();
-            assert!(count[0] > before[0], "A must re-observe its shell completion");
-            assert_eq!(count[1], before[1], "A completing must not re-observe B");
+            assert!(reads[0].len() > 1, "A must re-observe its shell completion");
+            for (id, reads) in operations.iter().zip(&reads) {
+                for (rereads, &published) in reads.iter().enumerate().skip(1) {
+                    assert!(rereads <= published, "wait {id} re-read without its own key: {reads:?}");
+                }
+            }
         }).await.unwrap();
     }
 

@@ -45,6 +45,8 @@ struct Index {
     next: u64,
     by_key: HashMap<Key, HashMap<u64, Arc<Notify>>>,
     cursors: HashMap<u64, Cursor>,
+    #[cfg(test)]
+    publications: HashMap<Key, usize>,
 }
 struct Cursor {
     after: u64,
@@ -67,6 +69,20 @@ impl Wakes {
     pub(crate) fn is_empty(&self) -> bool {
         let index = self.0.lock().unwrap();
         index.by_key.is_empty() && index.cursors.is_empty()
+    }
+
+    #[cfg(test)]
+    pub(super) fn track_publications(&self, keys: impl IntoIterator<Item = Key>) {
+        self.0
+            .lock()
+            .unwrap()
+            .publications
+            .extend(keys.into_iter().map(|key| (key, 0)));
+    }
+
+    #[cfg(test)]
+    pub(super) fn publications(&self, key: &Key) -> usize {
+        self.0.lock().unwrap().publications[key]
     }
 
     pub(in crate::control) fn subscribe(
@@ -103,8 +119,14 @@ impl Wakes {
     ) {
         let listeners = {
             let index = self.0.lock().unwrap();
+            #[cfg(test)]
+            let mut index = index;
             let mut listeners = HashMap::new();
             for key in keys {
+                #[cfg(test)]
+                if let Some(count) = index.publications.get_mut(&key) {
+                    *count += 1;
+                }
                 if let Some(bucket) = index.by_key.get(&key) {
                     listeners.extend(bucket.iter().map(|(&id, notify)| (id, notify.clone())));
                 }
