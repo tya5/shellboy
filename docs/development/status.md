@@ -1,5 +1,14 @@
 # Development status
 
+## Core #309 preparation tests
+
+The settled-completion test now runs in `state::tests` against the database
+schema directly, without an owner, Control, or HTTP. The stop tests check the
+saved receipt reason and that concurrent stops start no model attempt, rather
+than asserting write order or generation counts. The shell-background and
+connection-reload tests retain their behavior checks without a scratch-file
+assertion or a pointer-identity check.
+
 ## Core #309 headless shutdown witnesses
 
 The headless signal test checks that repeated TERM during a Ctrl-C-initiated
