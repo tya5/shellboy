@@ -141,7 +141,10 @@ live after your Turn ends. An explicit `thread_settled` observer keeps waiting. 
 would also stop correct long commands.
 
 - Wait for a shell with `shellboy wait` and `shell_ended` for its
-  `execution_id`, including for services. For output, wait with `shell_output` and the saved `shell read` cursor, then read again and put the new read cursor in the next condition. `--after` is only for `thread_settled`. Do not use a loop you
+  `execution_id`. This also works for a Thread-owned service execution with no
+  Run. For output, wait with `shell_output` and the saved `shell read` cursor,
+  then read again and put the new read cursor in the next condition. `--after`
+  is only for `thread_settled`. Do not use a loop you
   write such as `until grep ...; do sleep 1; done`. The wait is saved, has a
   timeout, and a timeout leaves the shell running. The timeout includes time
   waiting for admission: the CLI retries capacity refusals itself and reports
@@ -964,6 +967,13 @@ shellboy schedule add --thread THREAD --cron '0 * * * *' -- \
 Scheduled commands receive `SHELLBOY_THREAD_ID`, but no model shell Origin.
 
 For a long-running watcher, use `shellboy service add --thread THREAD --command 'my-watcher'` instead of a schedule or a background Run shell. Use `service list --thread THREAD` to inspect it and `service start|stop|remove --service ID` to manage it. A service can send input with `shellboy message send --thread "$SHELLBOY_THREAD_ID" --text TEXT`. Unexpected exit or spawn failure disables the service and sends one notice from `service:<id>`; it does not restart until explicitly started.
+
+To observe a particular service execution, take its latest `execution_id` from
+`service list --thread THREAD` (not the service ID). Use `shell get --execution
+EXECUTION_ID` to verify the target, then a bounded `shell_ended` wait for exit
+or a `shell_output` wait with the cursor from `shell read` for new output. These
+waits observe that execution only; if the service starts again, look up the new
+execution ID. A wait timeout does not stop the service.
 
 Cron uses the owner's local time. At a daylight-saving gap, a fixed-time entry
 runs at the first valid time after the gap; interval entries skip nonexistent
