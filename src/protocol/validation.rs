@@ -852,30 +852,7 @@ impl Command {
             Self::ThreadCwds(a) => a.validate(),
             Self::ThreadBranches(a) => a.validate(),
             Self::ThreadDeleteSetPreview(a) => {
-                if a.thread_ids.is_empty()
-                    || a.thread_ids.len() > crate::deletion::MAX_DELETE_SET_THREADS
-                {
-                    return Err(invalid("thread_ids must contain 1..=256 Threads"));
-                }
-                let mut unique = std::collections::BTreeSet::new();
-                let mut total_bytes = 0usize;
-                for id in &a.thread_ids {
-                    nonempty(id, "thread_id")?;
-                    total_bytes = total_bytes.saturating_add(id.len());
-                    if id.len() > 256
-                        || total_bytes > crate::protocol::MAX_BODY_BYTES as usize
-                        || !unique.insert(id)
-                    {
-                        return Err(invalid(
-                            "thread_ids must be distinct IDs of at most 256 bytes",
-                        ));
-                    }
-                }
-                if serde_json::to_vec(&a.thread_ids)
-                    .is_ok_and(|ids| ids.len() > crate::protocol::MAX_BODY_BYTES as usize)
-                {
-                    return Err(invalid("thread_ids exceed the maximum request body size"));
-                }
+                crate::deletion::validate_set(&a.thread_ids)?;
                 if let Some(marker) = &a.preview_marker
                     && (marker.thread_count as usize != a.thread_ids.len()
                         || marker.ids_hash.len() != 64

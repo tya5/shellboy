@@ -194,6 +194,8 @@ fn rejects_unknown_fields_and_invalid_limits_without_echoing_inputs() {
         json!({"protocol_version":PROTOCOL_VERSION,"operation_id":"op","command":"thread.set","args":{}}),
         json!({"protocol_version":PROTOCOL_VERSION,"operation_id":"op","command":"thread.delete_set_preview","args":{"thread_ids":[]}}),
         json!({"protocol_version":PROTOCOL_VERSION,"operation_id":"op","command":"thread.delete_set_preview","args":{"thread_ids":["a","a"]}}),
+        json!({"protocol_version":PROTOCOL_VERSION,"operation_id":"op","command":"thread.delete_set_preview","args":{"thread_ids":[""]}}),
+        json!({"protocol_version":PROTOCOL_VERSION,"operation_id":"op","command":"thread.delete_set_preview","args":{"thread_ids":["x".repeat(257)]}}),
         json!({"protocol_version":PROTOCOL_VERSION,"operation_id":"op","command":"thread.delete_set_preview","args":{"thread_ids":vec!["x";257]}}),
         json!({"protocol_version":PROTOCOL_VERSION,"operation_id":"op","command":"thread.delete_set_preview","args":{"thread_ids":["a"],"preview_marker":{"thread_count":2,"ids_hash":"0000000000000000000000000000000000000000000000000000000000000000"}}}),
     ] {

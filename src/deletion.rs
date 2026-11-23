@@ -8,8 +8,8 @@ use crate::protocol::{ApiError, ErrorCode, ThreadDeleteArgs};
 pub(crate) const MAX_PREVIEW_THREADS: u32 = observation::THREAD_LIMIT as u32 + 1;
 pub(crate) const MAX_DELETE_SET_THREADS: usize = observation::THREAD_LIMIT;
 
-/// Exact-set preview. It never expands parent/descendant relationships.
-pub(crate) fn preview_set(connection: &Connection, ids: &[String]) -> Result<Value, ApiError> {
+/// Validate the exact bounded ID set before any SQL work.
+pub(crate) fn validate_set(ids: &[String]) -> Result<(), ApiError> {
     if ids.is_empty() || ids.len() > MAX_DELETE_SET_THREADS {
         return Err(ApiError::new(
             ErrorCode::InvalidArgument,
@@ -23,6 +23,11 @@ pub(crate) fn preview_set(connection: &Connection, ids: &[String]) -> Result<Val
             "thread_ids must be distinct non-empty IDs of at most 256 bytes",
         ));
     }
+    Ok(())
+}
+
+/// Exact-set preview. It never expands parent/descendant relationships.
+pub(crate) fn preview_set(connection: &Connection, ids: &[String]) -> Result<Value, ApiError> {
     let inspect = |db: &Connection| -> Result<Value, ApiError> {
         let ids_json = serde_json::to_string(ids).expect("string IDs serialize");
         let selected = {
@@ -265,51 +270,6 @@ mod marker_tests {
         )
         .unwrap();
         compare("empty selected path-node set");
-    }
-
-    #[test]
-    fn exact_set_preview_lists_only_submitted_threads_and_bounded_run_stop_facts() {
-        let db = rusqlite::Connection::open_in_memory().unwrap();
-        db.execute_batch("CREATE TABLE thread(id TEXT PRIMARY KEY,deleted_at TEXT,parent_thread_id TEXT); CREATE TABLE run(id TEXT,thread_id TEXT,state TEXT); CREATE TABLE schedule(id TEXT,thread_id TEXT); CREATE TABLE shell_execution(id TEXT,schedule_id TEXT,state TEXT); INSERT INTO thread VALUES('a',NULL,NULL),('b',NULL,NULL),('child',NULL,'a'); INSERT INTO run VALUES('live-a','a','live'),('stop-b','b','stopping'); INSERT INTO schedule VALUES('sched-a','a'); INSERT INTO shell_execution VALUES('exec-a','sched-a','running');")
-            .unwrap();
-        for index in 0..51 {
-            db.execute(
-                "INSERT INTO run VALUES(?1,'b','live')",
-                [format!("live-{index:02}")],
-            )
-            .unwrap();
-        }
-        let preview = preview_set(&db, &["b".into(), "a".into()]).unwrap();
-        assert_eq!(preview["thread_ids"], json!(["a", "b"]));
-        assert_eq!(preview["targets"].as_array().unwrap().len(), 2);
-        assert_eq!(preview["targets"][0]["thread_id"], "a");
-        assert_eq!(
-            preview["targets"][0]["scheduled_execution_ids"],
-            json!(["exec-a"])
-        );
-        assert_eq!(preview["targets"][0]["scheduled_execution_count"], 1);
-        assert_eq!(preview["targets"][1]["runs"].as_array().unwrap().len(), 50);
-        assert_eq!(preview["targets"][1]["runs_more"], true);
-        assert_eq!(preview["deletable_now"], false);
-        assert_eq!(preview["preview_marker"]["thread_count"], 2);
-        assert_eq!(
-            preview["preview_marker"]["ids_hash"],
-            target_marker(["a", "b"]).ids_hash
-        );
-    }
-
-    #[test]
-    fn set_preview_rejects_missing_and_empty_targets() {
-        let db = rusqlite::Connection::open_in_memory().unwrap();
-        db.execute_batch("CREATE TABLE thread(id TEXT PRIMARY KEY,deleted_at TEXT,parent_thread_id TEXT); CREATE TABLE run(id TEXT,thread_id TEXT,state TEXT); CREATE TABLE schedule(id TEXT,thread_id TEXT); CREATE TABLE shell_execution(id TEXT,schedule_id TEXT,state TEXT);").unwrap();
-        assert_eq!(
-            preview_set(&db, &["missing".into()]).unwrap_err().code,
-            ErrorCode::ThreadNotFound
-        );
-        assert_eq!(
-            preview_set(&db, &[]).unwrap_err().code,
-            ErrorCode::InvalidArgument
-        );
     }
 
     #[test]

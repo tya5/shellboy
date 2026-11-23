@@ -63,6 +63,42 @@ async fn preview(store: &Store, root: &str, descendants: bool) -> Value {
         .unwrap()
         .result
 }
+async fn preview_set(
+    store: &Store,
+    ids: Vec<String>,
+) -> Result<Value, shellboy::protocol::ApiError> {
+    store
+        .execute(
+            request(Command::ThreadDeleteSetPreview(ThreadDeleteSetArgs {
+                thread_ids: ids,
+                preview_marker: None,
+            })),
+            None,
+        )
+        .await
+        .map(|result| result.result)
+}
+fn expected_set_marker(ids: &[String]) -> DeletionPreviewMarker {
+    use sha2::{Digest, Sha256};
+    let ids = ids
+        .iter()
+        .map(String::as_str)
+        .collect::<std::collections::BTreeSet<_>>();
+    let mut hash = Sha256::new();
+    hash.update(b"shellboy.thread.delete.v1\0");
+    for id in &ids {
+        hash.update((id.len() as u32).to_be_bytes());
+        hash.update(id.as_bytes());
+    }
+    DeletionPreviewMarker {
+        thread_count: ids.len() as u32,
+        ids_hash: hash
+            .finalize()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect(),
+    }
+}
 fn marker(value: &Value) -> DeletionPreviewMarker {
     serde_json::from_value(value["preview_marker"].clone()).unwrap()
 }
@@ -311,5 +347,72 @@ fn old_protocol2_request_omits_marker_and_malformed_markers_are_rejected() {
     assert_eq!(
         serde_json::to_value(ErrorCode::PreviewStale).unwrap(),
         "preview_stale"
+    );
+}
+
+#[tokio::test]
+async fn set_preview_route_uses_migrated_schema_for_exact_ids_blockers_and_marker() {
+    let (_dir, store, root) = fixture().await;
+    children(
+        &store,
+        &root,
+        &["selected".into(), "omitted".into(), "deleted".into()],
+    )
+    .await;
+    children(&store, "omitted", &["outside-set-child".into()]).await;
+    let root_for_db = root.clone();
+    store.database.call(move |db| {
+        db.execute("UPDATE thread SET deleted_at='fixture' WHERE id='deleted'", [])?;
+        db.execute("INSERT INTO run(id,thread_id,state,created_at) VALUES('live-root',?1,'live','fixture')", [&root_for_db])?;
+        db.execute("INSERT INTO run(id,thread_id,state,created_at) VALUES('live-outside','outside-set-child','live','fixture')", [])?;
+        db.execute("INSERT INTO schedule(id,thread_id,cron,once_at,next_at,enabled,cwd,command) VALUES('scheduled-selected','selected','* * * * *',NULL,0,1,'/tmp','true')", [])?;
+        db.execute("INSERT INTO shell_execution(id,schedule_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at) VALUES('running-scheduled','scheduled-selected','op-scheduled','running','/tmp','{}','UTF-8','UTF-8','closed','fixture')", [])?;
+        Ok(())
+    }).await.unwrap();
+
+    let mut ids = vec![root.clone(), "selected".into()];
+    ids.sort();
+    let result = preview_set(&store, ids.clone()).await.unwrap();
+    assert_eq!(result["thread_ids"], json!(ids));
+    assert_eq!(result["targets"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        result["preview_marker"],
+        serde_json::to_value(expected_set_marker(&ids)).unwrap()
+    );
+    let root_target = result["targets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|target| target["thread_id"] == root)
+        .unwrap();
+    assert_eq!(root_target["live_run_count"], 1);
+    let selected_target = result["targets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|target| target["thread_id"] == "selected")
+        .unwrap();
+    assert_eq!(
+        selected_target["scheduled_execution_ids"],
+        json!(["running-scheduled"])
+    );
+    assert_eq!(selected_target["scheduled_execution_count"], 1);
+    assert_eq!(result["deletable_now"], false);
+    assert!(!result["targets"].to_string().contains("outside-set-child"));
+    assert!(!result["targets"].to_string().contains("live-outside"));
+
+    assert_eq!(
+        preview_set(&store, vec!["unknown".into()])
+            .await
+            .unwrap_err()
+            .code,
+        ErrorCode::ThreadNotFound
+    );
+    assert_eq!(
+        preview_set(&store, vec!["deleted".into()])
+            .await
+            .unwrap_err()
+            .code,
+        ErrorCode::ThreadNotFound
     );
 }
