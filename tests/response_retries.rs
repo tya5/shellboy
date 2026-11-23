@@ -3107,29 +3107,54 @@ async fn output_limit_stop_matches_wire_in_live_ends_and_saved_usage() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn output_limit_does_not_adopt_a_summary() {
-    let mut fixture = Fixture::with_history(0, 10, 5_000, false, Some(1_000), "summary limit").await;
-    fixture.incoming().await.reply.send(Reply::success()).ok().unwrap();
+    let mut fixture =
+        Fixture::with_history(0, 10, 5_000, false, Some(1_000), "summary limit").await;
+    fixture
+        .incoming()
+        .await
+        .reply
+        .send(Reply::success())
+        .ok()
+        .unwrap();
     assert_eq!(fixture.settled().await, "completed");
-    let operation = request(&fixture.control, Command::ContextEdit(ContextEditArgs {
-        thread_id: Some(fixture.accepted.thread_id.clone()),
-        action: ContextEditAction::Summary,
-        from_node_id: Some("old-large-context".into()),
-        to_node_id: Some("old-answer".into()),
-        max_chars: None,
-    })).await;
+    let operation = request(
+        &fixture.control,
+        Command::ContextEdit(ContextEditArgs {
+            thread_id: Some(fixture.accepted.thread_id.clone()),
+            action: ContextEditAction::Summary,
+            from_node_id: Some("old-large-context".into()),
+            to_node_id: Some("old-answer".into()),
+            max_chars: None,
+        }),
+    )
+    .await;
     let operation_id = operation["operation_id"].as_str().unwrap().to_owned();
     let cut = r#"{"type":"response.incomplete","response":{"id":"cut-summary","status":"incomplete","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"cut summary"}]}],"incomplete_details":{"reason":"max_output_tokens"}}}"#;
-    fixture.incoming().await.reply.send(terminal_sse("", cut, "")).ok().unwrap();
+    fixture
+        .incoming()
+        .await
+        .reply
+        .send(terminal_sse("", cut, ""))
+        .ok()
+        .unwrap();
     crate::test_watchdog::watchdog("cut Summary stays failed", async {
         loop {
-            let result = request(&fixture.control, Command::OperationGet(OperationTarget { operation_id: operation_id.clone() })).await;
+            let result = request(
+                &fixture.control,
+                Command::OperationGet(OperationTarget {
+                    operation_id: operation_id.clone(),
+                }),
+            )
+            .await;
             match result["downstream"]["state"].as_str() {
                 Some("failed") => break,
                 Some("completed") => panic!("cut Summary adopted: {result}"),
                 _ => tokio::task::yield_now().await,
             }
         }
-    }).await.unwrap();
+    })
+    .await
+    .unwrap();
     let thread = fixture.accepted.thread_id.clone();
     fixture.control.store.database.call(move |db| {
         let rows = db.prepare("SELECT state,json_extract(error_json,'$.error.kind'),json_extract(input_manifest_json,'$.adoption') FROM model_attempt WHERE thread_id=?1 AND kind='summary'")?

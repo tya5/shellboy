@@ -645,7 +645,9 @@ for other stops or older attempts without recorded evidence.
 
 Item-projected history windows retain retired admission notice ordinals as `kind: "model_context"` with `items: []`. This metadata-only row is not a display item and may appear within a response-budget-deferred suffix. Raw history keeps the original node kind and body.
 
-### Protocol next (#355)
+<a id="output-limit-adoption"></a>
+
+### Output-limited answer adoption — Protocol next (#355)
 
 An adopted output-limited Conversation ends with `outcome: adopted` and the
 existing `output_limit` evidence. A fenced attempt ends `not_adopted`. The

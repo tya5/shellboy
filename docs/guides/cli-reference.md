@@ -1174,4 +1174,4 @@ completion time. Failed/partial/time-out and empty writes keep the previous time
 Recovery rewind is available as `shellboy thread rewind --thread THREAD_ID --node NODE_ID --run RUN_ID`. It atomically stops only that exact `recovery_wait` Run and rewinds the selected path. Refusal leaves the Run and path untouched; ordinary `thread rewind` and `run stop` remain unchanged.
 
 `history get` and `history list` expose `provenance.output_limit` for an adopted
-[output-limited answer](../design/events-and-external-protocol.md#protocol-next-355).
+[output-limited answer](../design/events-and-external-protocol.md#output-limit-adoption).

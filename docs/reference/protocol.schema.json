@@ -4060,6 +4060,16 @@
             "null"
           ]
         },
+        "output_limit": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AttemptOutputLimit"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "run_id": {
           "type": [
             "string",
