@@ -309,22 +309,22 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     },
     Migration {
         version: 58,
-        sql: include_str!("../../migrations/next_thread_import_origin.sql"),
+        sql: include_str!("../../migrations/0058_thread_import_origin.sql"),
         foreign_keys: None,
     },
     Migration {
         version: 59,
-        sql: include_str!("../../migrations/next_thread_artifacts.sql"),
+        sql: include_str!("../../migrations/0059_thread_artifacts.sql"),
         foreign_keys: None,
     },
     Migration {
         version: 60,
-        sql: include_str!("../../migrations/next_operation_receipt_lane.sql"),
+        sql: include_str!("../../migrations/0060_operation_receipt_lane.sql"),
         foreign_keys: None,
     },
     Migration {
         version: 61,
-        sql: include_str!("../../migrations/next_schedule_service_kind.sql"),
+        sql: include_str!("../../migrations/0061_schedule_service_kind.sql"),
         foreign_keys: Some(Impact::Tables(&["schedule", "shell_execution"])),
     },
 ];

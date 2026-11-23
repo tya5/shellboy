@@ -80,10 +80,10 @@ pub(crate) const MIGRATION_NAMES: &[(i64, &str)] = &[
     (55, "0055_automatic_compaction"),
     (56, "0056_directional_reply_pending"),
     (57, "0057_answer_output_limit"),
-    (58, "next_thread_import_origin"),
-    (59, "next_thread_artifacts"),
-    (60, "next_operation_receipt_lane"),
-    (61, "next_schedule_service_kind"),
+    (58, "0058_thread_import_origin"),
+    (59, "0059_thread_artifacts"),
+    (60, "0060_operation_receipt_lane"),
+    (61, "0061_schedule_service_kind"),
 ];
 pub const SCHEMA_VERSION: i64 = MIGRATION_NAMES.len() as i64;
 pub const DEFAULT_QUEUE_CAPACITY: usize = 128;

@@ -12,5 +12,5 @@ DROP TABLE schedule;
 ALTER TABLE service_schedule RENAME TO schedule;
 CREATE INDEX schedule_thread ON schedule(thread_id,id);
 CREATE INDEX schedule_due ON schedule(next_at,id) WHERE enabled=1 AND next_at IS NOT NULL;
-INSERT INTO schema_migration(version,name) VALUES(61,'next_schedule_service_kind');
+INSERT INTO schema_migration(version,name) VALUES(61,'0061_schedule_service_kind');
 PRAGMA user_version=61;

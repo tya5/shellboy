@@ -14,5 +14,5 @@ CREATE TABLE artifact_version (
  created_at TEXT NOT NULL,
  PRIMARY KEY(artifact_id,version)
 ) WITHOUT ROWID;
-INSERT INTO schema_migration(version,name) VALUES(59,'next_thread_artifacts');
+INSERT INTO schema_migration(version,name) VALUES(59,'0059_thread_artifacts');
 PRAGMA user_version=59;

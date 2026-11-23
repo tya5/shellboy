@@ -60,7 +60,7 @@ class PublicUpgradeArguments(unittest.TestCase):
         db = sqlite3.connect(':memory:')
         db.executescript((ROOT / 'tests/fixtures/storage-current-schema43.sql').read_text())
         lane_version = next(version for version, path in upgrade.MIGRATION_FILES.items()
-                            if path.stem == "next_operation_receipt_lane")
+                            if path.stem == "0060_operation_receipt_lane")
         upgrade.prepare_schema(db, lane_version - 1)
         for state, result, reserved in [('pending', None, 8388608), ('completed', '{}', 0), ('failed', '{}', 0)]:
             db.execute("INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,result_ref_json,created_at,reserved_bytes) VALUES(?,'owner','null',?, ?, ?,'now',?)", (state, 'hash-' + state, state, result, reserved))

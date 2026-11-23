@@ -847,7 +847,7 @@ INSERT INTO schema_migration(version,name) VALUES(57,'0057_answer_output_limit')
 PRAGMA user_version=57;
 
 ALTER TABLE node ADD COLUMN import_origin_json TEXT;
-INSERT INTO schema_migration(version,name) VALUES(58,'next_thread_import_origin');
+INSERT INTO schema_migration(version,name) VALUES(58,'0058_thread_import_origin');
 PRAGMA user_version=58;
 PRAGMA user_version=58;
 
@@ -867,7 +867,7 @@ CREATE TABLE artifact_version (
  created_at TEXT NOT NULL,
  PRIMARY KEY(artifact_id,version)
 ) WITHOUT ROWID;
-INSERT INTO schema_migration(version,name) VALUES(59,'next_thread_artifacts');
+INSERT INTO schema_migration(version,name) VALUES(59,'0059_thread_artifacts');
 PRAGMA user_version=59;
 
 -- SQLite ADD COLUMN with CHECK also checks legacy columns. The new default is
@@ -875,8 +875,8 @@ PRAGMA user_version=59;
 PRAGMA ignore_check_constraints=ON;
 ALTER TABLE operation_receipt ADD COLUMN lane TEXT NOT NULL DEFAULT 'normal' CHECK(lane IN ('normal','wait'));
 PRAGMA ignore_check_constraints=OFF;
-INSERT INTO schema_migration(version,name) VALUES(60,'next_operation_receipt_lane');
+INSERT INTO schema_migration(version,name) VALUES(60,'0060_operation_receipt_lane');
 PRAGMA user_version=60;
 
-INSERT INTO schema_migration(version,name) VALUES(61,'next_schedule_service_kind');
+INSERT INTO schema_migration(version,name) VALUES(61,'0061_schedule_service_kind');
 PRAGMA user_version=61;
