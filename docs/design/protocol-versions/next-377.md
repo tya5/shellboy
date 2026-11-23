@@ -1,4 +1,6 @@
-# Instruction file warnings and live config reconciliation (#377)
+# Protocol next (#377)
+
+## Instruction file warnings and live config reconciliation
 
 `status` Run items and `thread.get` optionally expose `instruction_warnings`, a
 list of `{path,reason}` (at most eight). Reasons are `not_found`,

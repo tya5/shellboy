@@ -4225,6 +4225,9 @@ mapping whenever a command or response type changes.
 
 ### D-270: explicit common instructions fail closed at Turn preparation
 
+The fail-closed clause and explicit retry requirement below are historical and superseded by
+[D-377](#d-377-skip-unreadable-common-instructions-and-reconcile-live-config).
+
 Adopt an ordered root `extra_instructions` path array, eight absolute UTF-8 paths (4096 bytes each) and 8192 captured
 bytes per file. This is small opt-in guidance, not implicit global AGENTS discovery or a replacement for Thread
 roles. Files that cannot be read correctly stop preparation visibly rather than silently changing instruction
@@ -4641,3 +4644,17 @@ Only `*` and `?` are special. Allow at most 64 patterns per list and 256 UTF-8
 bytes per pattern; reject empty patterns and ID characters the provider catalog
 already disallows (whitespace and control characters). The loaded connection
 configuration filters the response only, never selecting or rejecting a model.
+
+
+### D-377: skip unreadable common instructions and reconcile live config
+
+Decided 2026-11-24 after one stale extra instruction file put Runs across the owner in recovery wait. A new
+Turn skips each unreadable or invalid configured common file and still applies the others in order. The Run
+records a typed warning with the path and reason in the same transaction as the Turn snapshot. `status` and
+`thread get` expose it without exposing file contents. D-270's bounds, saved snapshot reuse, and Thread-local
+AGENTS handling are unchanged.
+
+Hash-checked `config set` reconciles live fields against the running owner's adopted values. If the file
+already holds a desired live value but the owner does not, it reports `written: false` and
+`applied_to_running_owner: true`. Restart-only settings remain restart-only. There is no automatic removal,
+path guessing, retry timer, or file watching.
