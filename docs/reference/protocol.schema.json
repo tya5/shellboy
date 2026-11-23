@@ -2937,16 +2937,6 @@
     "HistoryBody": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
-        "body_unavailable_reason": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/HistoryBodyUnavailableReason"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
         "context": {
           "$ref": "#/definitions/ExecutionContext"
         },
@@ -3005,12 +2995,6 @@
       ],
       "title": "HistoryBody",
       "type": "object"
-    },
-    "HistoryBodyUnavailableReason": {
-      "enum": [
-        "prune_indeterminate"
-      ],
-      "type": "string"
     },
     "HistoryExecutionLink": {
       "properties": {
@@ -12691,16 +12675,6 @@
     "history.get": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
-        "body_unavailable_reason": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/HistoryBodyUnavailableReason"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
         "context": {
           "$ref": "#/definitions/ExecutionContext"
         },

@@ -10,6 +10,12 @@ The default `status` view is checked with a SQLite VM-step witness as terminal
 history and unrelated Threads grow. `--all` and terminal `--state` still scan
 ordering keys in proportion to matching work; revisit if `status --all` is slow
 on a real workload.
+## Core #381 history reads
+
+Item 8 keeps the exact pre-GC refusal: only prune sources can incur the
+O(consumer graph) reachability check; ordinary nodes do not traverse it. A
+retained source still returns its body. Revisit only after a real slow
+`history get` on a prune source. No stored projection or migration.
 
 ## Core #379 CLI and guide audit fixes
 

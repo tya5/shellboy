@@ -26,7 +26,7 @@ Omit body excerpts when inspecting path structure or locating large nodes:
 shellboy history list --thread THREAD_ID --excerpt-chars 0 --limit 20
 ```
 
-`--excerpt-chars` counts Unicode scalar characters, ranges from 0 to 4096, and defaults to 512. At 0, `excerpt` is empty and the body is neither retrieved nor parsed. `payload_chars` is the character count of the entire stored JSON, not the extracted body length or token count; reclaimed bodies return null. Inspect node ID, kind, adopted order (`selection.ordinal`), and size, then get only needed nodes. Origin context and destination selection can differ after forks, so both remain present. Links and provenance also remain: 50 items do not always fit within 16KiB. If large, reduce `--limit` or read subsequent shell output. Supply the same `--excerpt-chars` when continuing with a cursor.
+`--excerpt-chars` counts Unicode scalar characters, ranges from 0 to 4096, and defaults to 512. At 0, `excerpt` is empty and the body is neither retrieved nor parsed. For `history list`, `payload_chars` is the character count of the entire stored JSON, not the extracted body length or token count; reclaimed bodies return null. Inspect node ID, kind, adopted order (`selection.ordinal`), and size, then get only needed nodes. Origin context and destination selection can differ after forks, so both remain present. Links and provenance also remain: 50 items do not always fit within 16KiB. If large, reduce `--limit` or read subsequent shell output. Supply the same `--excerpt-chars` when continuing with a cursor.
 
 CLI output uses a JSON envelope. Check `ok` and `error`; read content from `result`. `history list` pages through node IDs, kinds, and excerpts on the selected path. If `result.next_cursor` exists, continue with the same Thread and conditions.
 
@@ -44,7 +44,7 @@ shellboy history window --thread THREAD_ID --ordinal 4000 --before 10 --after 10
 shellboy history window --thread THREAD_ID --node NODE_ID --before 5 --after 5
 ```
 
-With neither `--ordinal` nor `--node` the window ends at the last node. `--before` and `--after` default to 20 and `--before + --after + 1` is at most 200. Items have the same shape as `history list` (`--excerpt-chars` works the same, `selection.ordinal` is the position, counted from 0); there is no cursor and no run/since/status filter. The result is `{thread_id, revision, total, items}`: `total` is the path length (one past the last position) and `revision` is the Thread's selected-path revision.
+With neither `--ordinal` nor `--node` the window ends at the last node. `--before` and `--after` default to 20 and `--before + --after + 1` is at most 200. Items are in ascending `selection.ordinal` order (counted from 0); there is no cursor or run/since/status filter. A window may leave `payload_chars` null without loading the JSON: at `--excerpt-chars 0` the excerpt is empty, and if the source exceeds 1 MiB a requested excerpt is a budget placeholder, not original text. The result is `{thread_id, revision, total, items}`: `total` is the path length (one past the last position) and `revision` is the Thread's selected-path revision.
 
 Appending advances `revision` but never moves an earlier position, so a position you already read stays valid. Rewind and compaction also advance `revision` and move or remove positions. `revision` alone cannot tell the two apart, so when you reuse a position pass the node you saw there: `--ordinal N --expect-node NODE_ID`. A position past the end, a `--node` that is no longer on the path, or an `--expect-node` mismatch fails with `cursor_expired`, and `error.details` carries the current `revision` and `total`; read again from the end or from a position below `total`.
 
@@ -67,7 +67,7 @@ previous/next represent conversation neighbors; sources represent sources of sum
 shellboy history get --node NODE_ID --encoding UTF-8 --limit-bytes 65536 --cursor 'CURSOR'
 ```
 
-Continue using the `next_cursor` returned by that body. Cursors are opaque: do not edit or reuse them for another node/encoding. Current body pages are capped at 64KiB. For deleted/reclaimed bodies, inspect reasons such as `tombstone_reason`; do not reinterpret empty text as "there was originally no output."
+Continue using the `next_cursor` returned by that body. Cursors are opaque: do not edit or reuse them for another node/encoding. Current body pages are capped at 64KiB. Check `tombstone_reason` for a reclaimed body; a `target_unavailable` prune refusal is not an empty body either.
 
 A `history get` tool_result is the result/excerpt saved into the conversation. Retrieve stored shell raw output separately with paginated `shellboy shell read --execution EXECUTION_ID`. See [Shell](shell.md) for encoding changes and output retention. External attachments are path references; history cannot restore past external file contents.
 
@@ -89,7 +89,7 @@ List `provenance` and `context` describe node origin and storage state. `selecti
 
 `executions` comes from stored relationships between tool groups/calls and shell executions, not guessed from ID-like body text or acceptance JSON. Follow `execution_id` with `shell get/read`, and `request_node_id` / `result_node_id` with `history get`. Records without a unique request node omit its ID. Distinguish `call_state` from shell `state`.
 
-Each node lists at most eight executions. `execution_count` gives the total and `executions_truncated` indicates omissions. Calls cancelled or rejected without creating an execution are excluded from this count. `command_excerpt` is a saved command excerpt of at most 80 characters; inspect `shell get` or the original request for the full command.
+Each node lists at most eight executions. For `history list`, `execution_count` gives the total. In `history window`, `execution_count_exact: false` makes it a lower bound capped at nine, even when no links are shown; `executions_truncated` then also means completeness is unproved. Calls cancelled or rejected without creating an execution are excluded from this count. `command_excerpt` is a saved command excerpt of at most 80 characters; inspect `shell get` or the original request for the full command.
 
 ```bash
 shellboy shell get --execution EXECUTION_ID
