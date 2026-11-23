@@ -220,6 +220,56 @@ pub(crate) const BACKGROUND_STEP_BUDGET: u64 = 1 << 17;
 /// Progress-handler interval in VM steps; overshoot is at most one interval.
 pub(crate) const PROGRESS_GRANULARITY: u64 = 1024;
 
+thread_local! {
+    static READ_VM_MANAGED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static READ_VM_TICKS: std::cell::Cell<Option<u32>> = const { std::cell::Cell::new(None) };
+}
+
+fn read_vm_tick() -> bool {
+    READ_VM_TICKS.with(|ticks| match ticks.get() {
+        Some(0) => true,
+        Some(n) => {
+            ticks.set(Some(n - 1));
+            false
+        }
+        None => false,
+    })
+}
+
+/// Scope a read-only SQL check to a fixed number of VM progress ticks. A hit
+/// interrupts only this statement; it is not a failure of the enclosing read.
+pub(crate) fn bounded_read<T>(
+    db: &Connection,
+    ticks: u32,
+    read: impl FnOnce() -> rusqlite::Result<T>,
+) -> rusqlite::Result<Option<T>> {
+    let standalone = !READ_VM_MANAGED.get();
+    if standalone {
+        db.progress_handler(PROGRESS_GRANULARITY as i32, Some(read_vm_tick))?;
+    }
+    struct Restore<'a>(&'a Connection, bool, Option<u32>);
+    impl Drop for Restore<'_> {
+        fn drop(&mut self) {
+            READ_VM_TICKS.set(self.2);
+            if self.1 {
+                let _ = self.0.progress_handler(0, None::<fn() -> bool>);
+            }
+        }
+    }
+    let guard = Restore(db, standalone, READ_VM_TICKS.replace(Some(ticks)));
+    let result = read();
+    let exhausted = READ_VM_TICKS.get() == Some(0);
+    drop(guard);
+    match result {
+        Err(rusqlite::Error::SqliteFailure(err, _))
+            if exhausted && err.code == rusqlite::ErrorCode::OperationInterrupted =>
+        {
+            Ok(None)
+        }
+        other => other.map(Some),
+    }
+}
+
 /// Outcome of a background job. `Deferred` means the job was interrupted at its
 /// step budget while foreground work waited and its open transaction rolled
 /// back; the caller resumes later from committed state. It is not a failure.
@@ -901,13 +951,15 @@ impl DbWorker {
                             );
                         }
                     }
-                    false
+                    read_vm_tick()
                 }),
             )
             .is_ok();
+        let previous = READ_VM_MANAGED.replace(installed);
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             operation(observation.connection())
         }));
+        READ_VM_MANAGED.set(previous);
         if installed {
             let _ = observation
                 .connection()
@@ -1459,16 +1511,18 @@ where
                 PROGRESS_GRANULARITY as std::ffi::c_int,
                 Some(move || {
                     slow_backtrace.observe(Instant::now());
-                    false
+                    read_vm_tick()
                 }),
             )
             .is_ok();
+        let previous = READ_VM_MANAGED.replace(installed);
         let mut result = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             operation(connection)
         })) {
             Ok(result) => result,
             Err(_) => Err(StorageError::JobPanicked),
         };
+        READ_VM_MANAGED.set(previous);
         if installed {
             let _ = connection.progress_handler(0, None::<fn() -> bool>);
         }

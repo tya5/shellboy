@@ -1,5 +1,9 @@
 # Development status
 
+## Core #381 history reads (items 7 and 8)
+
+Window sources and execution candidates are bounded independently of response size. Exact saved JSON audit bodies read byte ranges; decoded and parts projections retain their full-rebuild fallback. Prune budget exhaustion withholds the body without a tombstone or RPC failure. No migration or stored projection.
+
 ## Core #379 CLI and guide audit fixes
 
 Shell waits resolve the owning Thread like `shell get`, including service executions without a Run. The CLI help and guides now distinguish direct self-waits from dependency cycles, live config adoption from restart-only changes, owner RPC selection from startup config, and Thread wait cursors from shell read cursors. They also explain rotation recovery and quoting dotted connection names. No schema or protocol number change.

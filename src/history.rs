@@ -20,8 +20,10 @@ pub(crate) fn is_legacy_admission_node(id: &str, kind: &str) -> bool {
 
 mod window;
 pub use window::{STATEMENTS_FOR_TESTS as WINDOW_STATEMENTS_FOR_TESTS, window};
+mod body_page;
 mod node_row;
 pub(crate) mod observation;
+mod window_links;
 pub use list::list_nodes;
 pub(crate) mod payload;
 mod raw_witness;
@@ -711,35 +713,35 @@ fn execution_links(
     let sql = execution_links_statement_for_tests();
     let mut statement = connection.prepare(&sql).map_err(sql_error)?;
     let rows = statement
-        .query_map([node], |row| {
-            let command: String = row.get(7)?;
-            let command_truncated = command.chars().count() > 80;
-            let command_excerpt = command
-                .chars()
-                .take(80)
-                .map(|c| if c.is_control() { ' ' } else { c })
-                .collect();
-            Ok(HistoryExecutionLink {
-                group_id: row.get(0)?,
-                call_id: row.get(1)?,
-                call_ordinal: row.get::<_, i64>(2)? as u64,
-                call_state: row.get(3)?,
-                execution_id: row.get(4)?,
-                state: row.get(5)?,
-                cwd: row.get(6)?,
-                command_excerpt,
-                command_truncated,
-                description: crate::tool_description::label(
-                    row.get::<_, Option<String>>(10)?.as_deref(),
-                ),
-                result_node_id: row.get(8)?,
-                request_node_id: row.get(9)?,
-            })
-        })
+        .query_map([node], execution_link_row)
         .map_err(sql_error)?
         .collect::<rusqlite::Result<Vec<_>>>()
         .map_err(sql_error)?;
     Ok((rows, count))
+}
+
+fn execution_link_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<HistoryExecutionLink> {
+    let command: String = row.get(7)?;
+    let command_truncated = command.chars().count() > 80;
+    let command_excerpt = command
+        .chars()
+        .take(80)
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+    Ok(HistoryExecutionLink {
+        group_id: row.get(0)?,
+        call_id: row.get(1)?,
+        call_ordinal: row.get::<_, i64>(2)? as u64,
+        call_state: row.get(3)?,
+        execution_id: row.get(4)?,
+        state: row.get(5)?,
+        cwd: row.get(6)?,
+        command_excerpt,
+        command_truncated,
+        description: crate::tool_description::label(row.get::<_, Option<String>>(10)?.as_deref()),
+        result_node_id: row.get(8)?,
+        request_node_id: row.get(9)?,
+    })
 }
 
 pub fn get_node(connection: &Connection, args: &HistoryGetArgs) -> Result<HistoryBody, ApiError> {
@@ -757,15 +759,25 @@ fn read_node(
             "history body limit must be in 1..=65536",
         ));
     }
-    let row = NodeRow::load_payload(connection, &args.node_id)
+    let (rowid, kind, revision, deleted_reason, has_payload): (i64, String, i64, Option<String>, bool) = connection
+        .query_row(
+            "SELECT rowid,kind,payload_revision,deleted_reason,typeof(payload_json)='text' FROM node WHERE id=?1",
+            [&args.node_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+        )
+        .optional()
         .map_err(sql_error)?
         .ok_or_else(|| ApiError::new(ErrorCode::TargetUnavailable, "history node not found"))?;
     // Released by `thread prune` and not held elsewhere: not retained, even
     // before the history GC has removed the body (#235).
-    if row.deleted_reason.as_deref() == Some(prune::PRUNED_REASON)
-        || (row.payload.is_some()
-            && reachability::released_by_prune(connection, &args.node_id).map_err(sql_error)?)
-    {
+    let prune_check = if deleted_reason.as_deref() == Some(prune::PRUNED_REASON) {
+        Some(true)
+    } else if has_payload {
+        reachability::bounded_prune_check(connection, &args.node_id).map_err(sql_error)?
+    } else {
+        Some(false)
+    };
+    if prune_check == Some(true) {
         return Err(ApiError::new(
             ErrorCode::TargetUnavailable,
             "node was pruned (thread prune) and is not retained",
@@ -780,7 +792,7 @@ fn read_node(
         args.encoding.as_str()
     };
     let cursor_scope = if args.parts {
-        if row.kind != "summary" {
+        if kind != "summary" {
             return Err(ApiError::new(
                 ErrorCode::InvalidArgument,
                 "Parts require a summary node",
@@ -788,7 +800,7 @@ fn read_node(
         }
         "history.get.parts"
     } else if args.end_message_only {
-        if row.kind != "assistant_response" {
+        if kind != "assistant_response" {
             return Err(ApiError::new(
                 ErrorCode::InvalidArgument,
                 "End-message projection requires an assistant response node",
@@ -803,7 +815,7 @@ fn read_node(
             token,
             cursor_scope,
             &args.node_id,
-            row.revision as u64,
+            revision as u64,
             Some(encoding),
         )?;
         let start = cursor
@@ -820,36 +832,45 @@ fn read_node(
             "conversation JSON text is UTF-8; use shell.read for raw re-decoding",
         ));
     }
+    let indeterminate = prune_check.is_none();
     let mut parts_info = None;
-    let text = if args.parts {
-        let value: Value = row
-            .payload
-            .as_deref()
-            .and_then(|body| serde_json::from_str(body).ok())
-            .ok_or_else(|| {
-                ApiError::new(ErrorCode::TargetUnavailable, "summary body is unavailable")
-            })?;
-        let (info, text) = crate::compaction::inspect_parts(connection, &value)?;
-        parts_info = Some(info);
-        // Part records are mutable cache rows: a collected or overwritten
-        // part changes the rebuilt text, so a stale cursor must not misalign.
-        if cursor_watermark.is_some_and(|mark| mark != text.len() as u64) {
-            return Err(ApiError::new(
-                ErrorCode::CursorExpired,
-                "summary parts changed since the cursor was issued",
-            )
-            .hint("restart reading without the cursor"));
-        }
-        text
-    } else if let Some(body) = &row.payload {
-        if matches!(
-            row.kind.as_str(),
+    let limit = args.limit_bytes as usize;
+    let (text, total_bytes) = if indeterminate {
+        (String::new(), 0)
+    } else if has_payload
+        && matches!(
+            kind.as_str(),
             "incomplete_response" | "model_stream_observation"
-        ) {
-            // Audit originals are exact saved JSON, independent of replay projection.
-            body.clone()
+        )
+    {
+        body_page::saved_json(connection, rowid, start, limit)?
+    } else {
+        let payload = if has_payload {
+            NodeRow::load_payload(connection, &args.node_id)
+                .map_err(sql_error)?
+                .and_then(|row| row.payload)
         } else {
-            let value: Value = serde_json::from_str(body).map_err(|_| {
+            None
+        };
+        let text = if args.parts {
+            let value = payload
+                .as_deref()
+                .and_then(|body| serde_json::from_str(body).ok())
+                .ok_or_else(|| {
+                    ApiError::new(ErrorCode::TargetUnavailable, "summary body is unavailable")
+                })?;
+            let (info, text) = crate::compaction::inspect_parts(connection, &value)?;
+            parts_info = Some(info);
+            if cursor_watermark.is_some_and(|mark| mark != text.len() as u64) {
+                return Err(ApiError::new(
+                    ErrorCode::CursorExpired,
+                    "summary parts changed since the cursor was issued",
+                )
+                .hint("restart reading without the cursor"));
+            }
+            text
+        } else if let Some(payload) = payload {
+            let value: Value = serde_json::from_str(&payload).map_err(|_| {
                 ApiError::new(
                     ErrorCode::InvalidState,
                     "stored history payload is malformed",
@@ -867,36 +888,21 @@ fn read_node(
             } else {
                 text_of_payload(&value)
             }
-        }
-    } else {
-        String::new()
+        } else {
+            String::new()
+        };
+        body_page::projected(&text, start, limit)?
     };
-    if start > text.len() || !text.is_char_boundary(start) {
-        return Err(ApiError::new(
-            ErrorCode::CursorExpired,
-            "body position is unavailable",
-        ));
-    }
-    let end = text.floor_char_boundary(
-        start
-            .saturating_add(args.limit_bytes as usize)
-            .min(text.len()),
-    );
-    if end == start && end < text.len() {
-        return Err(ApiError::new(
-            ErrorCode::InvalidArgument,
-            "limit_bytes must fit the next UTF-8 character",
-        ));
-    }
-    let next_cursor = if end < text.len() {
+    let end = start + text.len();
+    let next_cursor = if end < total_bytes {
         Some(
             PageCursor {
                 version: 1,
                 scope: cursor_scope.into(),
                 filter: args.node_id.clone(),
                 last_sort_key: end.to_string(),
-                watermark: text.len() as u64,
-                revision: row.revision as u64,
+                watermark: total_bytes as u64,
+                revision: revision as u64,
                 encoding: Some(encoding.into()),
             }
             .encode()?,
@@ -923,17 +929,16 @@ fn read_node(
         context: crate::context::for_node(connection, &args.node_id)?,
         provenance: relations::projected_provenance(connection, &args.node_id, None)?,
         node_id: args.node_id.clone(),
-        kind: row.kind,
-        text: text[start..end].into(),
+        kind,
+        text,
         source_node_ids: sources,
         previous_node_ids: previous,
         next_node_ids: next,
         next_cursor,
-        tombstone_reason: if row.payload.is_none() {
-            Some(
-                row.deleted_reason
-                    .unwrap_or_else(|| "body unavailable".into()),
-            )
+        body_unavailable_reason: indeterminate
+            .then_some(crate::protocol::HistoryBodyUnavailableReason::PruneIndeterminate),
+        tombstone_reason: if !has_payload {
+            Some(deleted_reason.unwrap_or_else(|| "body unavailable".into()))
         } else {
             None
         },

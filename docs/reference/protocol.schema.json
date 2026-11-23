@@ -2937,6 +2937,16 @@
     "HistoryBody": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
+        "body_unavailable_reason": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HistoryBodyUnavailableReason"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "context": {
           "$ref": "#/definitions/ExecutionContext"
         },
@@ -2995,6 +3005,12 @@
       ],
       "title": "HistoryBody",
       "type": "object"
+    },
+    "HistoryBodyUnavailableReason": {
+      "enum": [
+        "prune_indeterminate"
+      ],
+      "type": "string"
     },
     "HistoryExecutionLink": {
       "properties": {
@@ -3731,6 +3747,12 @@
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
+        },
+        "execution_count_exact": {
+          "type": [
+            "boolean",
+            "null"
+          ]
         },
         "executions": {
           "items": {
@@ -12663,6 +12685,16 @@
     "history.get": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
+        "body_unavailable_reason": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HistoryBodyUnavailableReason"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "context": {
           "$ref": "#/definitions/ExecutionContext"
         },

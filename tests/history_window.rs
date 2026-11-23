@@ -548,10 +548,23 @@ fn spill_tool_sources_are_identical_in_list_and_window_even_without_excerpts() {
         let mut request = args();
         request.excerpt_chars = 0;
         let positional = window(db, &request).unwrap();
-        assert_eq!(
-            serde_json::to_value(&listed.items).unwrap(),
-            serde_json::to_value(&positional.items).unwrap()
-        );
+        let mut listed_items = serde_json::to_value(&listed.items).unwrap();
+        let mut window_items = serde_json::to_value(&positional.items).unwrap();
+        for (listed, window) in listed_items
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .zip(window_items.as_array_mut().unwrap())
+        {
+            let metadata = window.as_object_mut().unwrap();
+            assert_eq!(metadata.remove("execution_count_exact"), Some(json!(true)));
+            assert_eq!(
+                metadata.remove("payload_chars"),
+                Some(serde_json::Value::Null)
+            );
+            listed.as_object_mut().unwrap().remove("payload_chars");
+        }
+        assert_eq!(listed_items, window_items);
         let sources = listed.items[0].spill_tools.as_ref().unwrap();
         assert_eq!(sources.items[0].call_id, "c");
         assert_eq!(sources.items[0].execution_id.as_deref(), Some("e"));
