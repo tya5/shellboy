@@ -1678,8 +1678,8 @@ fn field_help_for(id: FieldId, language: crate::config::UiLanguage) -> &'static 
         ),
         FieldId::ThreadListState => local!(
             language,
-            "一覧行の現在状態で絞り込みます。",
-            "Filter by the current state shown in list rows."
+            "一覧行の現在状態で絞り込みます。並び順は更新順です。",
+            "Filter by the current state shown in list rows, in update order."
         ),
         FieldId::ThreadListOrder => local!(
             language,
