@@ -317,6 +317,7 @@ async fn refused_wait_frame_survives_native_pipe_close() {
         work,
     ));
     let endpoint = Endpoint {
+        owner_version: None,
         protocol_version: PROTOCOL_VERSION,
         instance_id: "fixture".into(),
         transport: "pipe".into(),
