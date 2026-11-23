@@ -16,6 +16,15 @@ use std::{
 };
 use tokio_util::sync::CancellationToken;
 
+// Imported group IDs identify spans in saved history, not local tool jobs.
+macro_rules! local_tool_group_complete {
+    ($id:literal) => { concat!("EXISTS(SELECT 1 FROM tool_group g WHERE g.id=", $id,
+        " AND g.state='completed' AND NOT EXISTS(SELECT 1 FROM tool_call c WHERE c.group_id=g.id AND (c.state!='completed' OR NOT EXISTS(SELECT 1 FROM tool_result r WHERE r.group_id=c.group_id AND r.call_id=c.call_id))))") };
+}
+macro_rules! saved_tool_group_complete {
+    () => { concat!("CASE WHEN n.import_origin_json IS NOT NULL OR json_extract(n.payload_json,'$.group_id') IS NULL THEN 1 ELSE ", local_tool_group_complete!("json_extract(n.payload_json,'$.group_id')"), " END") };
+}
+
 mod activity;
 pub(crate) use activity::read_automatic_activity;
 mod attempt;
@@ -292,7 +301,7 @@ fn invalid(text: &str) -> ApiError {
     ApiError::new(ErrorCode::InvalidState, text)
 }
 
-fn key(value: &impl Serialize) -> String {
+pub(crate) fn key(value: &impl Serialize) -> String {
     let bytes = serde_json::to_vec(value).expect("serializable compaction data");
     crate::digest::sha256_hex(bytes)
 }
@@ -481,8 +490,8 @@ impl Compactor {
             let mut seen=HashSet::new();
             for (id,turn,revision,body,deleted,imported) in rows {
                 let payload:Value=if let Some(body)=body {serde_json::from_str(&body).map_err(|e|StorageError::Schema(e.to_string()))?}else{json!({"role":"developer","content":[{"type":"input_text","text":format!("Original node {id} is unavailable: {}",deleted.unwrap_or_else(||"missing payload".into()))}]})};
-                if let Some(group)=payload.get("group_id").and_then(Value::as_str) && seen.insert(group.to_owned()) {
-                    let complete:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM tool_group g WHERE g.id=?1 AND g.state='completed' AND NOT EXISTS(SELECT 1 FROM tool_call c WHERE c.group_id=g.id AND (c.state!='completed' OR NOT EXISTS(SELECT 1 FROM tool_result r WHERE r.group_id=c.group_id AND r.call_id=c.call_id))))",[group],|r|r.get(0))?;
+                if let Some(group)=payload.get("group_id").and_then(Value::as_str) && !imported && seen.insert(group.to_owned()) {
+                    let complete:bool=db.query_row(concat!("SELECT ", local_tool_group_complete!("?1")),[group],|r|r.get(0))?;
                     if complete {completed.insert(group.to_owned());}
                 }
                 let hash=key(&(revision,&payload));
@@ -1072,16 +1081,18 @@ pub(crate) fn test_spill_reduces(sources: &[(String, Value)], epoch: i64) -> boo
 fn spill_payload(group: &Group) -> Option<Value> {
     let mut output = Vec::new();
     for source in &group.sources {
-        let mut projected;
-        let payload = if source.imported {
-            projected = source.payload.clone();
-            crate::thread_import::scrub_provider_metadata(&mut projected);
-            &projected
-        } else {
-            &source.payload
-        };
+        let payload = &source.payload;
         if let Some(items) = payload.get("output").and_then(Value::as_array) {
-            output.extend(items.clone());
+            if source.imported {
+                output.extend(crate::control::replay::convert_source(
+                    payload.clone(),
+                    0,
+                    false,
+                    true,
+                ));
+            } else {
+                output.extend(items.clone());
+            }
         }
         // A whole span can contain a normal input accepted while the
         // tool ran. Preserve its replay projection after its receipt
@@ -1381,7 +1392,7 @@ fn source_groups(sources: Vec<Source>, completed: &HashSet<String>) -> Vec<Group
     for (index, source) in sources.into_iter().enumerate() {
         if let Some(id) = source.payload.get("group_id").and_then(Value::as_str) {
             end = end.max(last[id]);
-            group.complete &= completed.contains(id);
+            group.complete &= source.imported || completed.contains(id);
             group.tool = true;
         }
         group.sources.push(source);

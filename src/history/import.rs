@@ -16,9 +16,15 @@ pub(crate) fn write(tx: &Transaction<'_>, thread: &str, import: Import) -> Resul
             )
         })
         .collect();
+    let mut hashes = HashMap::new();
     for record in &import.records {
         let (_, node, graph, reason) = parts(record);
         let body = node.payload_json.as_deref();
+        if let Some(body) = body {
+            let payload: serde_json::Value = serde_json::from_str(body)
+                .map_err(|_| crate::thread_import::invalid("Invalid imported node payload"))?;
+            hashes.insert(node.id.as_str(), crate::compaction::key(&(0_i64, &payload)));
+        }
         let mut origins = node.import_origins.clone();
         origins.push(crate::protocol::ImportOrigin {
             source_thread_id: import.source_thread.clone(),
@@ -70,7 +76,7 @@ pub(crate) fn write(tx: &Transaction<'_>, thread: &str, import: Import) -> Resul
                 .iter()
                 .filter(|source| source.node.scope == Internal)
             {
-                tx.execute("INSERT INTO replacement_source(replacement_id,ordinal,source_node_id,source_revision) VALUES(?1,?2,?3,0)", params![group_id,source.ordinal,ids[source.node.id.as_str()]]).map_err(sql_error)?;
+                tx.execute("INSERT INTO replacement_source(replacement_id,ordinal,source_node_id,source_revision,source_hash) VALUES(?1,?2,?3,0,?4)", params![group_id,source.ordinal,ids[source.node.id.as_str()],hashes.get(source.node.id.as_str())]).map_err(sql_error)?;
             }
         }
     }

@@ -1150,30 +1150,38 @@ async fn thread_export_streams_saved_sources_and_tombstone() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn thread_import_validates_and_atomically_round_trips_saved_history() {
-    use shellboy::control::replay::ReplayCache;
+    use crate::runtime_features::{
+        answer, incoming_ordinary, owner, proxy, request, send, settled,
+    };
+    use shellboy::protocol::{
+        Command, CompactPreviewArgs, ContextEditAction, ContextEditArgs, OperationTarget,
+    };
     let root = tempfile::tempdir().unwrap();
-    let config = root.path().join("config.toml");
-    std::fs::write(&config, "default_connection='fixture'\ndefault_model='fixture'\n[connections.fixture]\nbase_url='http://127.0.0.1:9/v1'\n").unwrap();
-    let owner = DataOwner::start(
-        Some(config),
-        Some(root.path().join("data")),
-        root.path().into(),
-    )
-    .await
-    .unwrap();
+    let (url, mut provider, proxy_task) = proxy().await;
+    let owner = owner(root.path(), &url).await;
+    std::fs::write(root.path().join("AGENTS.md"), "import fixture").unwrap();
     let source = "aaaaaaaa-0000-4000-8000-000000000002";
     let saved = r#"{ "reasoning_epoch":0, "output":[{"type":"reasoning","encrypted_content":"opaque-secret"},{"type":"message","role":"assistant","content":[{"type":"output_text","text":"retained reply"}]}] }"#;
     owner.db.call(move |db| {
         db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES(?1,'/','/a','fixture','fixture','now')", [source])?;
         db.execute("INSERT INTO node(id,kind,created_at,payload_json,deleted_reason) VALUES('original','assistant','now',?1,NULL),('old','message','now',NULL,'pruned_unreachable')",[saved])?;
-        db.execute("INSERT INTO thread_path VALUES(?1,0,'original')",[source])?;
-        db.execute_batch("INSERT INTO replacement VALUES('original-group','original','source-key','f','p','pruned','now'); INSERT INTO replacement_source VALUES('original-group',7,'old',0,NULL); INSERT INTO edge VALUES('old','original');")?;
-        db.execute("INSERT INTO thread_replacement VALUES(?1,'original-group')",[source])?;
+        db.execute_batch(r#"
+          INSERT INTO node(id,kind,created_at,payload_json) VALUES
+            ('summary','summary','now','{"summary_format":"context-trim-v1","context_trim":{},"item":{"role":"developer","content":[{"type":"input_text","text":"selected summary"}]}}'),
+            ('inner','summary','now','{"item":{"role":"developer","content":[{"type":"input_text","text":"nested source"}]}}'),
+            ('call','assistant','now','{"group_id":"imported-group","reasoning_epoch":0,"output":[{"type":"reasoning","id":"bare-opaque","encrypted_content":"spill-secret"},{"type":"function_call","name":"shell","call_id":"import-call","arguments":"{}"}]}'),
+            ('result','tool_result','now','{"group_id":"imported-group","item":{"type":"function_call_output","call_id":"import-call","output":"tool-result"}}');
+          INSERT INTO replacement VALUES('original-group','inner','source-key','f','p','pruned','now'),('top-group','summary','top-key','f','p','completed','now');
+          INSERT INTO replacement_source VALUES('original-group',7,'old',0,NULL),('top-group',0,'inner',0,NULL),('top-group',1,'call',0,NULL),('top-group',2,'result',0,NULL);
+          INSERT INTO edge VALUES('old','inner'),('inner','summary'),('call','summary'),('result','summary'),('summary','original');
+        "#)?;
+        db.execute("INSERT INTO thread_path VALUES(?1,0,'summary'),(?1,1,'original')",[source])?;
+        db.execute("INSERT INTO thread_replacement VALUES(?1,'original-group'),(?1,'top-group')",[source])?;
         Ok(())
     }).await.unwrap();
     let control = Control::new(&owner, root.path().into());
-    let (send, receive) = tokio::sync::mpsc::channel(16);
-    let server = LocalServer::bind(&owner, send).await.unwrap();
+    let (ipc_send, receive) = tokio::sync::mpsc::channel(16);
+    let server = LocalServer::bind(&owner, ipc_send).await.unwrap();
     let task = tokio::spawn(control.clone().serve(receive));
     let file = root.path().join("archive.jsonl");
     let data_dir = &owner.loaded.data_dir;
@@ -1239,8 +1247,10 @@ async fn thread_import_validates_and_atomically_round_trips_saved_history() {
     let response = invoke(import()).await;
     assert_eq!(response["ok"], true, "{response}");
     let second = response["result"]["thread_id"].as_str().unwrap().to_owned();
-    owner.db.call(move |db| {
-        let row = db.query_row("SELECT n.id,n.payload_json,n.turn_id,n.import_origin_json,t.reasoning_epoch FROM thread_path p JOIN thread t ON t.id=p.thread_id JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1", [&second], |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,Option<String>>(2)?,r.get::<_,String>(3)?,r.get::<_,i64>(4)?)))?;
+    let witness_thread = second.clone();
+    let marker = owner.db.call(move |db| {
+        let second = witness_thread;
+        let row = db.query_row("SELECT n.id,n.payload_json,n.turn_id,n.import_origin_json,t.reasoning_epoch FROM thread_path p JOIN thread t ON t.id=p.thread_id JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND p.ordinal=1", [&second], |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,Option<String>>(2)?,r.get::<_,String>(3)?,r.get::<_,i64>(4)?)))?;
         assert_ne!(row.0, "original");
         assert_eq!(row.1,saved);
         assert!(row.2.is_none());
@@ -1249,19 +1259,102 @@ async fn thread_import_validates_and_atomically_round_trips_saved_history() {
         assert_eq!(origins.as_array().unwrap().len(),2);
         assert_eq!(origins[0]["source_thread_id"], source);
         assert_eq!(origins[1]["source_thread_id"], imported);
-        let graph = db.query_row("SELECT r.id,s.ordinal,n.id,n.deleted_reason FROM thread_replacement tr JOIN replacement r ON r.id=tr.replacement_id JOIN replacement_source s ON s.replacement_id=r.id JOIN node n ON n.id=s.source_node_id JOIN edge e ON e.src=n.id AND e.dst=r.output_node_id WHERE tr.thread_id=?1",[&second],|r|Ok((r.get::<_,String>(0)?,r.get::<_,i64>(1)?,r.get::<_,String>(2)?,r.get::<_,String>(3)?)))?;
+        let graph = db.query_row("SELECT r.id,s.ordinal,n.id,n.deleted_reason FROM thread_replacement tr JOIN replacement r ON r.id=tr.replacement_id JOIN replacement_source s ON s.replacement_id=r.id JOIN node n ON n.id=s.source_node_id JOIN edge e ON e.src=n.id AND e.dst=r.output_node_id WHERE tr.thread_id=?1 AND r.state='pruned'",[&second],|r|Ok((r.get::<_,String>(0)?,r.get::<_,i64>(1)?,r.get::<_,String>(2)?,r.get::<_,String>(3)?)))?;
         assert_ne!(graph.0,"original-group");
         assert_eq!(graph.1,7);
         assert_ne!(graph.2,"old");
         assert_eq!(graph.3,"pruned_unreachable");
-        let request = ReplayCache::new(1_000_000).load(db,&second)?.materialize();
-        assert_eq!(request.len(),1);
-        assert_eq!(request[0]["content"][0]["text"],"retained reply");
         assert_eq!(db.query_row("SELECT (SELECT count(*) FROM run)+(SELECT count(*) FROM turn)",[],|r|r.get::<_,i64>(0))?,0);
-        Ok(())
+        assert_eq!(db.query_row("SELECT count(*) FROM thread WHERE id=?1",[source],|r|r.get::<_, i64>(0))?,1);
+        Ok(db.query_row("SELECT node_id FROM thread_path WHERE thread_id=?1 AND ordinal=0", [&second], |r|r.get::<_,String>(0))?)
     }).await.unwrap();
+    let preview = request(
+        &control,
+        Command::CompactPreview(Box::new(CompactPreviewArgs {
+            thread_id: Some(second.clone()),
+            action: Some(ContextEditAction::Summary),
+            from_node_id: Some(marker.clone()),
+            to_node_id: Some(marker.clone()),
+            ..Default::default()
+        })),
+    )
+    .await;
+    assert!(!preview.is_null());
+    send(&control, &second, "new imported turn").await;
+    let outbound = incoming_ordinary(&control, &mut provider).await;
+    let input = outbound.body["input"].to_string();
+    for text in ["selected summary", "retained reply", "new imported turn"] {
+        assert!(input.contains(text), "{input}");
+    }
+    for text in [
+        "opaque-secret",
+        "spill-secret",
+        "tool-result",
+        "nested source",
+    ] {
+        assert!(!input.contains(text), "{input}");
+    }
+    outbound
+        .reply
+        .send((200, answer("ordinary imported answer")))
+        .unwrap();
+    settled(&control, &second).await;
+    let mut events = control.subscribe();
+    let restore = request(
+        &control,
+        Command::ContextEdit(ContextEditArgs::for_range(
+            ContextEditAction::Restore,
+            Some(second.clone()),
+            Some(marker),
+            None,
+        )),
+    )
+    .await;
+    let operation_id = restore["operation_id"].as_str().unwrap().to_owned();
+    crate::test_watchdog::watchdog("imported marker restore", async {
+        loop {
+            let status = request(
+                &control,
+                Command::OperationGet(OperationTarget {
+                    operation_id: operation_id.clone(),
+                }),
+            )
+            .await;
+            match status["downstream"]["state"].as_str() {
+                Some("completed") => break,
+                Some("failed") => panic!("{status}"),
+                _ => match events.recv().await {
+                    Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(error) => panic!("{error}"),
+                },
+            }
+        }
+    })
+    .await
+    .unwrap();
+    let config = std::sync::Arc::new(owner.loaded.config.clone());
+    let spill = shellboy::compaction::Compactor::new(owner.db.clone(), config)
+        .spill(&second, true)
+        .await
+        .unwrap();
+    assert!(spill.spilled_groups > 0);
+    send(&control, &second, "continue after spill").await;
+    let outbound = incoming_ordinary(&control, &mut provider).await;
+    let input = outbound.body["input"].to_string();
+    for text in ["nested source", "import-call", "continue after spill"] {
+        assert!(input.contains(text), "{input}");
+    }
+    for text in ["bare-opaque", "opaque-secret", "spill-secret"] {
+        assert!(!input.contains(text), "{input}");
+    }
+    outbound
+        .reply
+        .send((200, answer("ordinary spilled answer")))
+        .unwrap();
+    settled(&control, &second).await;
     server.shutdown().await.unwrap();
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
     task.await.unwrap();
+    proxy_task.abort();
 }

@@ -331,6 +331,7 @@ fn load(
     let groups = sources
         .iter()
         .chain(hidden.iter().flat_map(|(_, s)| s.iter()))
+        .filter(|s| !s.imported)
         .filter_map(|s| s.payload.get("group_id").and_then(Value::as_str))
         .map(str::to_owned)
         .collect::<HashSet<_>>();
