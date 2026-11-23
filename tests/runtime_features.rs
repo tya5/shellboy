@@ -4029,12 +4029,7 @@ pub(super) async fn finish_proactive_trace(
         .find(|report| !joined.contains(&report.attempt_id))
         .cloned()
     {
-        let report_turns = [report.row_turn_id.clone()];
-        let mut finish = Box::pin(automatic_attempts_finished_for_turns(
-            control,
-            &report_turns,
-            1,
-        ));
+        let mut finish = Box::pin(automatic_report_finished(control, &report.attempt_id));
         let terminal = loop {
             tokio::select! {
                 attempts = &mut finish => break attempts,
@@ -4069,15 +4064,9 @@ pub(super) async fn finish_proactive_trace(
                 }
             }
         };
-        assert_eq!(
-            terminal.len(),
-            1,
-            "each observed Summary maps to its exact accepted duty"
-        );
-        assert_eq!(terminal[0].id, report.attempt_id);
         joined.insert(report.attempt_id.clone());
         let record = automatic_attempt_record(control, report.attempt_id.clone()).await;
-        assert_eq!(record["token"], terminal[0].token);
+        assert_eq!(record["token"], terminal.token);
         // A saved automatic attempt can finish without any Summary POST.
         // Keep that FINISH as the count boundary, not as a serviced request.
         if let Some(boundary) = trace
@@ -4085,7 +4074,7 @@ pub(super) async fn finish_proactive_trace(
             .iter()
             .find(|boundary| boundary.report.attempt_id == report.attempt_id)
         {
-            finished.push(boundary.clone().finish(&terminal[0], &record));
+            finished.push(boundary.clone().finish(&terminal, &record));
         }
     }
     finished
@@ -4114,6 +4103,55 @@ impl ReportBoundary {
             outcome: record["outcome"].as_str().unwrap().to_owned(),
         }
     }
+}
+
+async fn automatic_report_finished(control: &Control, attempt: &str) -> ExpectedAutomaticAttempt {
+    let mut changes = control.subscribe();
+    crate::test_watchdog::watchdog("captured automatic report FINISH", async {
+        loop {
+            let id = attempt.to_owned();
+            let row = control
+                .store
+                .database
+                .call(move |db| {
+                    db.query_row(
+                        "SELECT token,outcome FROM automatic_compaction WHERE attempt_id=?1",
+                        [id],
+                        |row| {
+                            Ok((
+                                row.get::<_, Option<String>>(0)?,
+                                row.get::<_, Option<String>>(1)?,
+                            ))
+                        },
+                    )
+                    .optional()
+                    .map_err(Into::into)
+                })
+                .await
+                .unwrap_or_else(|error| panic!("report {attempt} did not save FINISH: {error}"));
+            if let Some((token, Some(outcome))) = row {
+                assert!(
+                    matches!(
+                        outcome.as_str(),
+                        "adopted" | "failed" | "no_target" | "cancelled"
+                    ),
+                    "unexpected terminal outcome {outcome} for {attempt}"
+                );
+                return ExpectedAutomaticAttempt {
+                    id: attempt.to_owned(),
+                    token: token
+                        .filter(|token| !token.is_empty())
+                        .expect("finished report has a nonempty token"),
+                };
+            }
+            match changes.recv().await {
+                Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                Err(error) => panic!("report {attempt} FINISH notification closed: {error}"),
+            }
+        }
+    })
+    .await
+    .unwrap_or_else(|error| panic!("report {attempt} did not save FINISH: {error}"))
 }
 
 async fn automatic_attempts_finished_for_turns(

@@ -616,26 +616,14 @@ async fn legal_new_run_reopens_provider_failure_memory() {
         second.admission_report.as_ref().unwrap()["input_tokens"],
         "fresh successful report is the trigger's reported input: {fresh_trigger:#?}"
     );
-    let fresh_turn = fresh_trigger["turn_id"].as_str().unwrap().to_owned();
-    let same_turn_attempts = all_events
+    // The serviced trace already joined the provider attempt by report ID and token.
+    let finished = second_finished
         .iter()
-        .filter(|event| event["turn_id"].as_str() == Some(fresh_turn.as_str()))
-        .count();
-    let terminal =
-        automatic_attempts_finished_for_turns(&control, &[fresh_turn], same_turn_attempts).await;
-    assert!(
-        terminal.iter().any(|attempt| attempt.id == second_attempt),
-        "exact provider-error attempt FINISH is observed"
-    );
-    let attempt_id = second_attempt.clone();
-    let second_record_raw: String = control.store.database.call(move |db| {
-        db.query_row(
-            "SELECT json_object('trigger',json(trigger_json)) FROM automatic_compaction WHERE attempt_id=?1",
-            [attempt_id],
-            |row| row.get(0),
-        ).map_err(Into::into)
-    }).await.unwrap();
-    let second_record: Value = serde_json::from_str(&second_record_raw).unwrap();
+        .find(|finished| finished.boundary.report.attempt_id == second_attempt)
+        .expect("the selected provider failure belongs to the serviced, finished trace");
+    let second_record = automatic_attempt_record(&control, second_attempt.clone()).await;
+    assert_eq!(second_record["token"], finished.boundary.gc_token);
+    assert_eq!(second_record["outcome"], finished.outcome);
     assert_eq!(
         second_record["trigger"]["run_id"],
         second.admission_report.as_ref().unwrap()["run_id"],
