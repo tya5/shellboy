@@ -384,7 +384,7 @@ Rules:
   malformed is `invalid_argument`; start again without `--after`.
 - At owner shutdown a pending poll ends with an error (`read_only: true`, `request_may_have_been_applied: false`); the next poll on the restarted owner returns `resync_required`.
 - No receipt is kept; after a lost reply simply ask again with the same cursor.
-  The owner keeps no per-client buffer. The call holds one ordinary request slot while it
+  The owner keeps no per-client buffer. The call holds one [wait permit](../design/protocol.md#ipc-admission) while it
   waits; a bridge serving several clients should share one long-poll.
 - Shell output bytes and model text deltas are not Thread hints. Use `shell read` or
   `wait` with `shell_output` for live output, and `--text` for model text.
@@ -408,7 +408,8 @@ Example: `{"status":"text","cursor":"eyJ2IjoxLC4uLn0","changes":[],"more":false,
 Start with a baseline (`--text` without `--after`): it returns the text already retained, so you join an answer under way.
 A Thread you were showing that is missing from `live_text` holds no text because its attempt ended. Discard the preview
 and read saved facts. While 16 attempts hold text, further attempts show no text; one enters later with `gap:true` when
-room frees up. A looping client can get `Local IPC work capacity is busy` at once when the ordinary request slots are full.
+room frees up. A looping client can get `Local IPC work capacity is busy` at once when all
+[wait permits](../design/protocol.md#ipc-admission) are in use.
 That is routine and nothing was applied: keep the preview and poll again with the same cursor. Each
 attempt keeps at most 64 KiB of text; text unread when an attempt ends is gone. When you add a Thread to
 `--thread`, take a new baseline.

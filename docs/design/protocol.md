@@ -203,7 +203,7 @@ frameの8MiB上限を先に検証し、payloadはTokioの長さ制限付きreade
 
 <a id="ipc-admission"></a>
 
-### Protocol next (#352)
+### IPC接続と受付済みworkの資源所有（P1/P6） — Protocol next (#352)
 
 接続枠と処理枠を分ける（#352）。待機（`wait` / `events.wait`）32、通常work 24、停止操作
 （RunStop/ShellStop/OwnerShutdown）2、Status観測2、メモリ観測1の独立した有限permitを持つ。
@@ -682,7 +682,7 @@ true `cursor` is the last returned seq; otherwise it is the clock head read in t
 The clock lives in `Control` (`src/control/change_clock.rs`): one sequence number per
 `Control::changed` call, latest sequence kept per Thread, at most 4096 Threads (oldest
 evicted, raising the floor). Memory only; it dies with `Control`, has no task or queue, and
-the owner keeps nothing per client. The call is admitted in an ordinary request slot,
+the owner keeps nothing per client. The call holds one [wait permit](#ipc-admission),
 returns on a matching change, timeout, caller disconnect or owner shutdown, and is
 cancellable by the shared runtime-observation wrapper. Models may call it.
 
@@ -782,7 +782,7 @@ Absent unless asked. `status` gains `text`, returned when text is new and no cha
 that attempt, including reasoning and refusal in the model stream; `live_text` omits reasoning deltas. The offset
 restarts with each attempt, and a retry has a new `attempt_id`. `gap:true` means text after the caller's position was lost. A Thread missing from
 `live_text` holds no text: its attempt ended, or 16 others hold text and it enters later with `gap:true`. Start with a baseline.
-A looping client can get "work capacity is busy" at once when ordinary slots are full; nothing was applied, so poll again with the same cursor. The text is never saved, not a position in saved output and not part of any
+A looping client can get "work capacity is busy" at once when all [wait permits](#ipc-admission) are in use; nothing was applied, so poll again with the same cursor. The text is never saved, not a position in saved output and not part of any
 receipt; retained text is limited to 64 KiB per attempt, counting 40 bytes per delta, and 16 attempts, and all of it
 fits one frame. Those limits are not a memory bound; the measured heap is in the validation record. Client rule
 and state record: [events-and-external-protocol](events-and-external-protocol.md) 2.5.
