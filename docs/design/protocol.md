@@ -203,7 +203,7 @@ frameの8MiB上限を先に検証し、payloadはTokioの長さ制限付きreade
 
 <a id="ipc-admission"></a>
 
-### IPC接続と受付済みworkの資源所有（P1/P6）
+### Protocol next (#352)
 
 接続枠と処理枠を分ける（#352）。待機（`wait` / `events.wait`）32、通常work 24、停止操作
 （RunStop/ShellStop/OwnerShutdown）2、Status観測2、メモリ観測1の独立した有限permitを持つ。

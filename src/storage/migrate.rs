@@ -304,7 +304,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     },
     Migration {
         version: 57,
-        sql: include_str!("../../migrations/0057_operation_receipt_lane.sql"),
+        sql: include_str!("../../migrations/next_operation_receipt_lane.sql"),
         foreign_keys: None,
     },
 ];
@@ -2453,7 +2453,7 @@ mod thread_creation_migration_tests {
         let mut db = Connection::open_in_memory().unwrap();
         db.execute_batch(super::super::CURRENT_SCHEMA).unwrap();
         db.execute_batch("ALTER TABLE operation_receipt DROP COLUMN lane;
-            DELETE FROM schema_migration WHERE version=57;
+            DELETE FROM schema_migration WHERE name='next_operation_receipt_lane';
             DROP INDEX receipt_named_reply_pending;
             DROP INDEX receipt_pending_by_time;
             DROP INDEX receipt_pending_owed;
@@ -2494,7 +2494,7 @@ mod automatic_compaction_migration_tests {
         let mut db = Connection::open_in_memory().unwrap();
         db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
         db.execute_batch("ALTER TABLE operation_receipt DROP COLUMN lane;
-            DELETE FROM schema_migration WHERE version=57;
+            DELETE FROM schema_migration WHERE name='next_operation_receipt_lane';
             DROP INDEX receipt_named_reply_pending;
             DROP INDEX receipt_pending_by_time;
             DROP INDEX receipt_pending_owed;

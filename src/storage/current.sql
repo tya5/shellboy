@@ -841,5 +841,5 @@ INSERT INTO schema_migration(version,name) VALUES(56,'0056_directional_reply_pen
 PRAGMA user_version=56;
 
 ALTER TABLE operation_receipt ADD COLUMN lane TEXT NOT NULL DEFAULT 'normal' CHECK(lane IN ('normal','wait'));
-INSERT INTO schema_migration(version,name) VALUES(57,'0057_operation_receipt_lane');
+INSERT INTO schema_migration(version,name) VALUES(57,'next_operation_receipt_lane');
 PRAGMA user_version=57;
