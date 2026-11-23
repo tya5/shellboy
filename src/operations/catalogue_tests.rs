@@ -6,6 +6,11 @@ pub(crate) const CLI_ONLY_OWNER_OPERATIONS: &[OperationId] = &[
     OperationId::ArtifactGet,
     OperationId::ArtifactRemove,
     OperationId::ScheduleAdd,
+    OperationId::ServiceAdd,
+    OperationId::ServiceList,
+    OperationId::ServiceStart,
+    OperationId::ServiceStop,
+    OperationId::ServiceRemove,
     OperationId::ScheduleList,
     OperationId::ScheduleSet,
     OperationId::ScheduleEnable,
@@ -88,7 +93,7 @@ fn fresh_clap_executable_paths_and_every_option_match_the_catalogue_bindings() {
     executable_commands(&parser, &mut vec![], &mut leaves);
     assert_eq!(
         leaves.len(),
-        100,
+        105,
         "track new CLI lifecycle paths explicitly"
     );
     for name in ["serve", "shutdown", "storage check"] {
@@ -259,7 +264,7 @@ fn fresh_clap_executable_paths_and_every_option_match_the_catalogue_bindings() {
     );
     assert_eq!(
         leaves.len(),
-        83,
+        88,
         "update executable-path inventory deliberately; UI launch/help/version are not operations"
     );
     let bindings = CLI_BINDINGS
@@ -383,8 +388,8 @@ fn fresh_clap_executable_paths_and_every_option_match_the_catalogue_bindings() {
 
 #[test]
 fn identities_are_complete_and_attach_is_the_only_explicit_alias() {
-    assert_eq!(OperationId::ALL.len(), 82);
-    assert_eq!(SPECS.len(), 82);
+    assert_eq!(OperationId::ALL.len(), 87);
+    assert_eq!(SPECS.len(), 87);
     let ids = OperationId::ALL.iter().copied().collect::<BTreeSet<_>>();
     assert_eq!(ids.len(), OperationId::ALL.len());
     assert_eq!(

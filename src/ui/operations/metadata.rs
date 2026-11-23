@@ -617,6 +617,11 @@ fn operation_label_for(id: OperationId, language: crate::config::UiLanguage) -> 
         OperationId::ArtifactList => local!(language, "成果物 · 一覧", "Artifact · List"),
         OperationId::ArtifactGet => local!(language, "成果物 · 参照", "Artifact · Get"),
         OperationId::ArtifactRemove => local!(language, "成果物 · 削除", "Artifact · Remove"),
+        OperationId::ServiceAdd => local!(language, "サービス · 追加", "Service · Add"),
+        OperationId::ServiceList => local!(language, "サービス · 一覧", "Service · List"),
+        OperationId::ServiceStart => local!(language, "サービス · 起動", "Service · Start"),
+        OperationId::ServiceStop => local!(language, "サービス · 停止", "Service · Stop"),
+        OperationId::ServiceRemove => local!(language, "サービス · 削除", "Service · Remove"),
         OperationId::ScheduleAdd => local!(language, "予定 · 追加", "Schedule · Add"),
         OperationId::ScheduleSet => local!(language, "予定 · 説明", "Schedule · Set"),
         OperationId::ScheduleEnable => local!(language, "予定 · 有効化", "Schedule · Enable"),
@@ -855,6 +860,23 @@ fn operation_meaning_for(id: OperationId, language: crate::config::UiLanguage) -
             language,
             "成果物の削除。",
             "Remove an artifact and its metadata."
+        ),
+        OperationId::ServiceAdd => local!(
+            language,
+            "サービスを保存して起動します。",
+            "Save and start a service."
+        ),
+        OperationId::ServiceList => local!(
+            language,
+            "サービスと実行結果を表示します。",
+            "List services and their latest executions."
+        ),
+        OperationId::ServiceStart => local!(language, "サービスを起動します。", "Start a service."),
+        OperationId::ServiceStop => local!(language, "サービスを停止します。", "Stop a service."),
+        OperationId::ServiceRemove => local!(
+            language,
+            "サービスを停止して削除します。",
+            "Stop and remove a service."
         ),
         OperationId::ScheduleAdd => local!(
             language,
@@ -1227,6 +1249,7 @@ fn field_label_for(id: FieldId, language: crate::config::UiLanguage) -> &'static
         FieldId::ArtifactTitle => local!(language, "題名", "Artifact title"),
         FieldId::ArtifactMime => local!(language, "MIME", "Optional MIME"),
         FieldId::ArtifactVersion => local!(language, "版", "Version number"),
+        FieldId::Service => local!(language, "サービスID", "Service ID"),
         FieldId::Schedule => local!(language, "予定ID", "Schedule ID"),
         FieldId::Cron => local!(language, "cron式", "Cron expression"),
         FieldId::At => local!(language, "日時", "Run at"),
@@ -1606,6 +1629,11 @@ fn field_help_for(id: FieldId, language: crate::config::UiLanguage) -> &'static 
         FieldId::ArtifactVersion => {
             local!(language, "参照する版の番号を指定します。", "Version number")
         }
+        FieldId::Service => local!(
+            language,
+            "サービスをIDで指定します。",
+            "Select a service by ID."
+        ),
         FieldId::Schedule => local!(
             language,
             "予定をIDで指定します。",

@@ -149,11 +149,13 @@ CREATE TABLE tool_result(
  status TEXT NOT NULL, FOREIGN KEY(group_id,call_id) REFERENCES tool_call(group_id,call_id),
  PRIMARY KEY(group_id,call_id));
 
-CREATE TABLE schedule(
+CREATE TABLE "schedule"(
  id TEXT PRIMARY KEY NOT NULL, thread_id TEXT NOT NULL REFERENCES thread(id) ON DELETE CASCADE,
+ kind TEXT NOT NULL DEFAULT 'time' CHECK(kind IN ('time','service')),
  cron TEXT, once_at INTEGER, next_at INTEGER, enabled INTEGER NOT NULL CHECK(enabled IN (0,1)),
  cwd TEXT NOT NULL, command TEXT NOT NULL, description TEXT, last_skipped_at INTEGER,
- CHECK((cron IS NULL) <> (once_at IS NULL)));
+ CHECK((kind='time' AND ((cron IS NULL) <> (once_at IS NULL)))
+    OR (kind='service' AND cron IS NULL AND once_at IS NULL)));
 CREATE INDEX schedule_thread ON schedule(thread_id,id);
 CREATE INDEX schedule_due ON schedule(next_at,id) WHERE enabled=1 AND next_at IS NOT NULL;
 
@@ -875,3 +877,6 @@ ALTER TABLE operation_receipt ADD COLUMN lane TEXT NOT NULL DEFAULT 'normal' CHE
 PRAGMA ignore_check_constraints=OFF;
 INSERT INTO schema_migration(version,name) VALUES(60,'next_operation_receipt_lane');
 PRAGMA user_version=60;
+
+INSERT INTO schema_migration(version,name) VALUES(61,'next_schedule_service_kind');
+PRAGMA user_version=61;

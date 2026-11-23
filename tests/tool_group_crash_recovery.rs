@@ -673,6 +673,27 @@ fn shutdown_owner_crash_child() {
         }).await.unwrap();
         let owner=open(&root).await;
         let control=Control::new(&owner, root.clone());
+        if phase == "service" {
+            use shellboy::protocol::{ServiceAddArgs, ThreadCreateArgs};
+            let (send, receive) = tokio::sync::mpsc::channel(8);
+            let _server = shellboy::ipc::LocalServer::bind(&owner, send).await.unwrap();
+            let _dispatcher = tokio::spawn(control.clone().serve(receive));
+            control.start().await.unwrap();
+            let t = rpc(&control, Command::ThreadCreate(ThreadCreateArgs {
+                agents:None, connection:None, cwd:None, model:None, effort:None, parent_id:None,
+            })).await;
+            let command = if cfg!(windows) {
+                "[IO.File]::AppendAllText((Join-Path (Get-Location) 'service-pids'), (\"$PID\" + [Environment]::NewLine)); Start-Sleep -Seconds 600"
+            } else {
+                "printf '%s\\n' \"$$\" >> service-pids; exec sleep 600"
+            };
+            rpc(&control, Command::ServiceAdd(ServiceAddArgs {
+                thread_id:Some(t["thread_id"].as_str().unwrap().into()),
+                cwd:Some(root.to_string_lossy().into_owned()), description:None, command:command.into(),
+            })).await;
+            std::future::pending::<()>().await;
+            return;
+        }
         owner.db.call(|db| {
             let tx=db.transaction()?;
             tx.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','','','fixture','fixture','now')",[])?;
@@ -769,6 +790,143 @@ impl Drop for ShutdownVictim {
         }
     }
 }
+fn spawn_shutdown_victim(command: &mut std::process::Command) -> ShutdownVictim {
+    let child = command.spawn().unwrap();
+    #[cfg(windows)]
+    let job = {
+        use std::os::windows::io::AsRawHandle;
+        let job = unsafe {
+            windows_sys::Win32::System::JobObjects::CreateJobObjectW(
+                std::ptr::null(),
+                std::ptr::null(),
+            )
+        };
+        assert!(!job.is_null());
+        assert_ne!(
+            unsafe {
+                windows_sys::Win32::System::JobObjects::AssignProcessToJobObject(
+                    job,
+                    child.as_raw_handle(),
+                )
+            },
+            0
+        );
+        job
+    };
+    ShutdownVictim {
+        child,
+        active: true,
+        #[cfg(windows)]
+        job,
+    }
+}
+
+#[tokio::test]
+async fn forced_owner_death_cleans_and_restarts_enabled_service() {
+    let root = tempfile::tempdir().unwrap();
+    config(root.path(), "http://127.0.0.1:1/v1");
+    let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+    command
+        .args([
+            "--exact",
+            "shutdown_owner_crash_child",
+            "--ignored",
+            "--nocapture",
+        ])
+        .env("SHELLBOY_SHUTDOWN_CRASH_ROOT", root.path())
+        .env("SHELLBOY_SHUTDOWN_CRASH_PHASE", "service")
+        .stdout(std::process::Stdio::null());
+    let mut victim = spawn_shutdown_victim(&mut command);
+    std::fs::write(root.path().join("go"), "").unwrap();
+    async fn pid(root: &Path, index: usize) -> u32 {
+        test_watchdog::watchdog("service native pid", async {
+            loop {
+                if let Some(pid) = std::fs::read_to_string(root.join("service-pids"))
+                    .ok()
+                    .and_then(|s| s.lines().nth(index)?.parse().ok())
+                {
+                    break pid;
+                }
+                sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap()
+    }
+    let first = pid(root.path(), 0).await;
+    #[cfg(windows)]
+    let process = {
+        use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_SYNCHRONIZE};
+        let process = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, first) };
+        assert!(!process.is_null());
+        process
+    };
+    // Kill only the owner, not the outer containment Job. Its own lifeline
+    // or kill-on-close Job must clean the service process.
+    victim.child.kill().unwrap();
+    victim.child.wait().unwrap();
+    #[cfg(unix)]
+    test_watchdog::watchdog("service process group disappears", async {
+        while unsafe { libc::kill(-(first as i32), 0) } == 0
+            || std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH)
+        {
+            sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    #[cfg(windows)]
+    unsafe {
+        let result = windows_sys::Win32::System::Threading::WaitForSingleObject(process, 5000);
+        windows_sys::Win32::Foundation::CloseHandle(process);
+        assert_eq!(result, windows_sys::Win32::Foundation::WAIT_OBJECT_0);
+    }
+    let owner = open(root.path()).await;
+    let control = Control::new(&owner, root.path().into());
+    let (send, receive) = tokio::sync::mpsc::channel(8);
+    let server = shellboy::ipc::LocalServer::bind(&owner, send)
+        .await
+        .unwrap();
+    let dispatcher = tokio::spawn(control.clone().serve(receive));
+    control.start().await.unwrap();
+    assert_ne!(pid(root.path(), 1).await, first);
+    owner
+        .db
+        .call(|db| {
+            assert_eq!(
+                db.query_row(
+                    "SELECT enabled FROM schedule WHERE kind='service'",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )?,
+                1
+            );
+            assert_eq!(
+                db.query_row(
+                    "SELECT count(*) FROM shell_execution WHERE schedule_id IS NOT NULL",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )?,
+                2
+            );
+            assert_eq!(
+                db.query_row(
+                    "SELECT count(*) FROM receipt WHERE client_operation_id LIKE 'service-ended:%'",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )?,
+                0
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+    server.shutdown().await.unwrap();
+    dispatcher.await.unwrap();
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+}
+
 #[tokio::test]
 async fn forced_shutdown_boundaries_preserve_facts_and_recover_without_duplicate_tools() {
     for phase in [
@@ -801,34 +959,7 @@ async fn forced_shutdown_boundaries_preserve_facts_and_recover_without_duplicate
         command
             .env("SHELLBOY_SHUTDOWN_CRASH_ROOT", root.path())
             .env("SHELLBOY_SHUTDOWN_CRASH_PHASE", phase);
-        let child = command.spawn().unwrap();
-        #[cfg(windows)]
-        let job = {
-            use std::os::windows::io::AsRawHandle;
-            let job = unsafe {
-                windows_sys::Win32::System::JobObjects::CreateJobObjectW(
-                    std::ptr::null(),
-                    std::ptr::null(),
-                )
-            };
-            assert!(!job.is_null());
-            assert_ne!(
-                unsafe {
-                    windows_sys::Win32::System::JobObjects::AssignProcessToJobObject(
-                        job,
-                        child.as_raw_handle(),
-                    )
-                },
-                0
-            );
-            job
-        };
-        let mut victim = ShutdownVictim {
-            child,
-            active: true,
-            #[cfg(windows)]
-            job,
-        };
+        let mut victim = spawn_shutdown_victim(&mut command);
         std::fs::write(root.path().join("go"), b"contained").unwrap();
         test_watchdog::watchdog("child reaches named persisted shutdown boundary", async {
             while !root.path().join("boundary-ready").exists() {

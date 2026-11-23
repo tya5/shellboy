@@ -1358,6 +1358,27 @@ impl Store {
             }
             Command::ArtifactList(args) => MutationResult::value(crate::artifacts::list(tx, args)?),
             Command::ArtifactGet(args) => MutationResult::value(crate::artifacts::get(tx, args)?),
+            Command::ServiceAdd(args) => {
+                let thread = target(args.thread_id.as_deref(), caller)?;
+                let mut result =
+                    MutationResult::value(super::schedule::add_service(tx, &thread, args)?)?;
+                self.database
+                    .signals()
+                    .mark(crate::maintenance::Work::Schedule);
+                result.changed_threads.push(thread);
+                Ok(result)
+            }
+            Command::ServiceStart(args) => {
+                let result = super::schedule::start_service(tx, &args.service_id)?;
+                self.database
+                    .signals()
+                    .mark(crate::maintenance::Work::Schedule);
+                Ok(result)
+            }
+            Command::ServiceList(args) => {
+                let thread = target(args.thread_id.as_deref(), caller)?;
+                MutationResult::value(super::schedule::list(tx, &thread, true)?)
+            }
             Command::ScheduleAdd(args) => {
                 let thread = target(args.thread_id.as_deref(), caller)?;
                 let mut result = MutationResult::value(super::schedule::add(tx, &thread, args)?)?;
@@ -1385,7 +1406,7 @@ impl Store {
             }
             Command::ScheduleList(args) => {
                 let thread = target(args.thread_id.as_deref(), caller)?;
-                MutationResult::value(super::schedule::list(tx, &thread)?)
+                MutationResult::value(super::schedule::list(tx, &thread, false)?)
             }
             Command::ThreadList(args) => MutationResult::value(thread_list(tx, args)?),
             Command::ThreadTags(args) => MutationResult::value(tags::names(tx, args)?),
@@ -2042,6 +2063,28 @@ impl Store {
             },
         )
     }
+    pub(super) fn send_service_notice(
+        &self,
+        tx: &Transaction<'_>,
+        args: &MessageSendArgs,
+        operation_id: &str,
+        now: &str,
+    ) -> Result<MutationResult> {
+        // The owner builds this bounded text from exit facts, not a draft.
+        self.admit_content(
+            tx,
+            args,
+            None,
+            operation_id,
+            now,
+            SendContent {
+                reply: ReplyIntent::None,
+                elements: vec![json!({"type":"input_text","text":args.text})],
+                sender: MessageSender::recorded(None, args.sender_label.clone(), false),
+            },
+        )
+    }
+
     fn send_content(
         &self,
         tx: &Transaction<'_>,
@@ -2058,6 +2101,18 @@ impl Store {
                 "message exceeds configured input limit",
             ));
         }
+        self.admit_content(tx, args, caller, operation_id, now, content)
+    }
+
+    fn admit_content(
+        &self,
+        tx: &Transaction<'_>,
+        args: &MessageSendArgs,
+        caller: Option<&Origin>,
+        operation_id: &str,
+        now: &str,
+        content: SendContent<'_>,
+    ) -> Result<MutationResult> {
         let named = matches!(content.reply, ReplyIntent::Named(_));
         let expects_reply = !matches!(content.reply, ReplyIntent::None);
         let id = target(args.thread_id.as_deref(), caller)?;

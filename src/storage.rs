@@ -83,6 +83,7 @@ pub(crate) const MIGRATION_NAMES: &[(i64, &str)] = &[
     (58, "next_thread_import_origin"),
     (59, "next_thread_artifacts"),
     (60, "next_operation_receipt_lane"),
+    (61, "next_schedule_service_kind"),
 ];
 pub const SCHEMA_VERSION: i64 = MIGRATION_NAMES.len() as i64;
 pub const DEFAULT_QUEUE_CAPACITY: usize = 128;

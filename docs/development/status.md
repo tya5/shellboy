@@ -48,6 +48,10 @@ and the docs' own rule text are not rewritten; `#protocol-12-` anchors are.
 No Rust source changed. Next: the integration owner runs it on the first batch
 with a wire change and records the result.
 
+## Core #348 Thread-owned services
+
+Services share the timed-schedule table, maintenance dispatch, and shell cleanup. The owner preserves enabled services across shutdown and startup, but does not restart them after their own exit. The collector rotates output for Thread-owned executions only. See [Thread-owned shell definitions](../design/thread-owned-shells.md).
+
 ## Core #324 deterministic Ubuntu integration witnesses
 
 The candidate branch `task/core324-nondeterministic-tests` is based directly on

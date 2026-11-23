@@ -3230,3 +3230,120 @@ async fn startup_maintenance_settles_terminal_reply_backlog_beyond_one_batch() {
         close(control, owner, server).await;
     }
 }
+
+#[tokio::test]
+async fn thread_service_file_trigger_sends_through_ipc_and_drains() {
+    let (url, mut requests, server) = proxy().await;
+    let (directory, owner, control) =
+        runtime_with_io(&url, "\n[limits]\nshell_raw_bytes=8192\n").await;
+    let (send, receive) = mpsc::channel(32);
+    let local = shellboy::ipc::LocalServer::bind(&owner, send)
+        .await
+        .unwrap();
+    let serving = tokio::spawn(control.clone().serve(receive));
+    control.start().await.unwrap();
+    let created = command(
+        &control,
+        Command::ThreadCreate(ThreadCreateArgs {
+            agents: None,
+            connection: None,
+            cwd: None,
+            model: None,
+            effort: None,
+            parent_id: None,
+        }),
+    )
+    .await;
+    let thread = created["thread_id"].as_str().unwrap().to_owned();
+    let exe = env!("CARGO_BIN_EXE_shellboy").replace('\'', "'\\''");
+    let added = command(&control, Command::ServiceAdd(ServiceAddArgs {
+        thread_id: Some(thread.clone()), cwd: Some(directory.path().to_string_lossy().into_owned()), description: None,
+        command: format!("printf prefix; while [ ! -f trigger ]; do sleep 0.05; done; cat payload; printf retained-tail; '{exe}' message send --thread \"$SHELLBOY_THREAD_ID\" --text 'service file trigger witness' || exit 91; exec sleep 600"),
+    })).await;
+    let (execution, old_cursor) = watchdog("service saves its output prefix", async {
+        loop {
+            let listed = command(
+                &control,
+                Command::ServiceList(ThreadTarget {
+                    thread_id: Some(thread.clone()),
+                }),
+            )
+            .await;
+            let latest = &listed["items"][0]["latest"];
+            if latest["output_tail"] == "prefix" {
+                let execution = latest["execution_id"].as_str().unwrap().to_owned();
+                let read = command(
+                    &control,
+                    Command::ShellRead(ShellReadArgs {
+                        execution_id: execution.clone(),
+                        cursor: None,
+                        encoding: None,
+                        limit_bytes: 1,
+                    }),
+                )
+                .await;
+                assert_eq!(read["text"], "p");
+                break (execution, read["cursor"].as_str().unwrap().to_owned());
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    std::fs::write(directory.path().join("payload"), vec![b'x'; 32768]).unwrap();
+    std::fs::write(directory.path().join("trigger"), "ready").unwrap();
+    let model = incoming(&mut requests).await;
+    assert!(
+        model
+            .body
+            .to_string()
+            .contains("service file trigger witness")
+    );
+    model.reply.send(Reply::json(json!({"id":"service-witness","status":"completed","output":[{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"received"}]}]}))).ok().unwrap();
+    let service_id = added["service_id"].as_str().unwrap().to_owned();
+    command(&control, Command::ServiceStop(ServiceTarget { service_id })).await;
+    let listed = command(
+        &control,
+        Command::ServiceList(ThreadTarget {
+            thread_id: Some(thread),
+        }),
+    )
+    .await;
+    let item = &listed["items"][0];
+    assert_eq!(item["enabled"], false);
+    assert_eq!(item["latest"]["state"], "stopped");
+    let read = command(
+        &control,
+        Command::ShellRead(ShellReadArgs {
+            execution_id: execution.clone(),
+            cursor: None,
+            encoding: None,
+            limit_bytes: 8192,
+        }),
+    )
+    .await;
+    assert!(read["text"].as_str().unwrap().contains("retained-tail"));
+    let oldest = read["oldest_sequence"].as_u64().unwrap();
+    assert!(oldest > 0);
+    assert!(read["stdout_start_offset"].as_u64().unwrap() >= 24576);
+    let expired = control
+        .request(Request::new(
+            format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
+            Command::ShellRead(ShellReadArgs {
+                execution_id: execution,
+                cursor: Some(old_cursor),
+                encoding: None,
+                limit_bytes: 8192,
+            }),
+        ))
+        .await
+        .error
+        .unwrap();
+    assert_eq!(expired.code, ErrorCode::OutputExpired);
+    let details = expired.details.unwrap();
+    assert_eq!(details["oldest_sequence"], oldest);
+    assert_eq!(details["retention_generation"], 0);
+    local.shutdown().await.unwrap();
+    serving.abort();
+    close(control, owner, server).await;
+}

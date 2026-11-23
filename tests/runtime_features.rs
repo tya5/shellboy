@@ -2940,11 +2940,22 @@ impl HeadlessOwner {
     }
     async fn finish(mut self, normal: bool, record: &std::path::Path) {
         let status = self.child.wait().await.unwrap();
-        assert_eq!(status.success(), normal);
         let mut tail = String::new();
         self.stdout.read_to_string(&mut tail).await.unwrap();
         let mut errors = String::new();
         self.stderr.read_to_string(&mut errors).await.unwrap();
+        fn diagnostic_tail(text: &str) -> std::borrow::Cow<'_, str> {
+            let bytes = text.as_bytes();
+            String::from_utf8_lossy(&bytes[bytes.len().saturating_sub(2048)..])
+        }
+        assert_eq!(
+            status.success(),
+            normal,
+            "phase={:?}, exit={status}, stdout_tail={:?}, stderr_tail={:?}",
+            record.file_stem(),
+            diagnostic_tail(&tail),
+            diagnostic_tail(&errors),
+        );
         assert!(errors.is_empty(), "{errors}");
         if normal {
             assert_eq!(tail.lines().count(), 1, "{tail}");
@@ -3351,7 +3362,10 @@ async fn headless_ctrl_c_and_repeated_term_drain_or_force_kill_preserve_database
                 owner.child.kill().await.unwrap();
             }
             hold.execute_batch("ROLLBACK").unwrap();
-            owner.finish(!force, &root.path().join("first.jsonl")).await;
+            let phase = if force { "forced-kill" } else { "signal-drain" };
+            owner
+                .finish(!force, &root.path().join(format!("{phase}.jsonl")))
+                .await;
             let restarted = HeadlessOwner::start(&data, &config).await;
             assert_ne!(restarted.ready["instance_id"], identity);
             let db = headless_db(&data);

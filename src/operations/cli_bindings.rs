@@ -58,6 +58,41 @@ const MEANINGS: &[Meaning] = &[
         None,
     ),
     (
+        OperationId::ServiceAdd,
+        &["service", "add"],
+        &[
+            ("thread_id", FieldId::Thread),
+            ("cwd", FieldId::Cwd),
+            ("description", FieldId::ScheduleDescription),
+            ("command", FieldId::ScheduleCommand),
+        ],
+        None,
+    ),
+    (
+        OperationId::ServiceList,
+        &["service", "list"],
+        &[("thread_id", FieldId::Thread)],
+        None,
+    ),
+    (
+        OperationId::ServiceStart,
+        &["service", "start"],
+        &[("service_id", FieldId::Service)],
+        None,
+    ),
+    (
+        OperationId::ServiceStop,
+        &["service", "stop"],
+        &[("service_id", FieldId::Service)],
+        None,
+    ),
+    (
+        OperationId::ServiceRemove,
+        &["service", "remove"],
+        &[("service_id", FieldId::Service)],
+        None,
+    ),
+    (
         OperationId::ScheduleAdd,
         &["schedule", "add"],
         &[

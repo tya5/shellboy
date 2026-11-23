@@ -95,6 +95,38 @@ class PublicUpgradeArguments(unittest.TestCase):
         sql = "SELECT name,sql FROM sqlite_schema WHERE tbl_name IN ('shell_execution','output_chunk') ORDER BY name"
         self.assertEqual(db.execute(sql).fetchall(), fresh.execute(sql).fetchall())
 
+    def test_schedule_kind_migration_preserves_execution_and_output(self):
+        db = sqlite3.connect(':memory:')
+        db.executescript((ROOT / 'tests/fixtures/storage-current-schema43.sql').read_text())
+        upgrade.prepare_schema(db, 53)
+        db.executescript("""
+            INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)
+                VALUES('t','/','','p','m','now');
+            INSERT INTO schedule(id,thread_id,once_at,next_at,enabled,cwd,command)
+                VALUES('q','t',1,1,1,'/','fixture');
+            INSERT INTO shell_execution(id,schedule_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at)
+                VALUES('s','q','s','running','/','{}','utf-8','utf-8','closed','now');
+            INSERT INTO output_chunk(execution_id,sequence,stream,stream_offset,bytes,received_at)
+                VALUES('s',1,'stdout',0,X'0102','now');
+        """)
+        upgrade.prepare_schema(db, upgrade.CURRENT_SCHEMA_VERSION)
+        self.assertEqual(db.execute('SELECT kind,once_at,next_at FROM schedule').fetchone(), ('time', 1, 1))
+        self.assertEqual(db.execute('SELECT schedule_id FROM shell_execution').fetchone(), ('q',))
+        self.assertEqual(db.execute('SELECT bytes FROM output_chunk').fetchone(), (b'\x01\x02',))
+        self.assertEqual(db.execute('PRAGMA foreign_key_check').fetchall(), [])
+        db.execute("INSERT INTO schedule(id,thread_id,kind,enabled,cwd,command) VALUES('v','t','service',0,'/','fixture')")
+        with self.assertRaises(sqlite3.IntegrityError):
+            db.execute("UPDATE schedule SET once_at=1 WHERE id='v'")
+        with self.assertRaises(sqlite3.IntegrityError):
+            db.execute("UPDATE schedule SET once_at=NULL WHERE id='q'")
+        fresh = sqlite3.connect(':memory:')
+        fresh.executescript((ROOT / 'src/storage/current.sql').read_text())
+        sql = "SELECT name,sql FROM sqlite_schema WHERE tbl_name='schedule' ORDER BY name"
+        self.assertEqual(db.execute(sql).fetchall(), fresh.execute(sql).fetchall())
+        db.execute("DELETE FROM schedule WHERE id='q'")
+        self.assertEqual(db.execute('SELECT count(*) FROM shell_execution').fetchone(), (0,))
+        self.assertEqual(db.execute('SELECT count(*) FROM output_chunk').fetchone(), (0,))
+
     def test_schema44_to_current_spill_migration_replays_and_converges(self):
         fixture = ROOT / 'tests/fixtures/storage-current-schema43.sql'
         db = sqlite3.connect(':memory:')

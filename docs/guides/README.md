@@ -14,6 +14,7 @@ Operation guides for people using Shellboy and models working inside it. Start w
 | Use keys, slash commands, drafts, or paste | [TUI operations](tui.md) |
 | Create subagents, assign work, report, or wait | [Delegation and child agents](delegation.md) |
 | Run shell commands and manage input, output, or background work | [Shell](shell.md) |
+| Keep a watcher running independently of Runs | [Keep a command running](user-guide.md#keep-a-command-running) |
 | Run commands at a set time or on a recurring schedule | [Schedule a command](user-guide.md#schedule-a-command) · [Scheduled checks for agents](agent-guide.md#scheduled-checks) |
 | Retrieve history, originals, forks, search, or compaction | [History and search](history-and-search.md) |
 | Attach files or images | [Attachments](attachments.md) |
@@ -31,6 +32,7 @@ For people: User Guide → TUI operations → task-specific guides. For models: 
 | Turn | An interval ending in one normal response; it can contain multiple model requests and tool executions. |
 | Run | An execution lifetime that owns only its Thread's foreground and background shells. It can remain live after a Turn answers while those shells are active. |
 | Child agent / subagent | Another Thread carrying out a request sent as a reply-expected message. |
+| Service | A long-running command owned by a Thread, independent of its Runs. |
 | Schedule | A command scheduled by a Thread, independent of its Runs. |
 | cwd | The Thread's shell working directory, separate from its storage data directory. |
 | data-dir / owner | The storage location for the database and execution state / the running Shellboy instance managing that location. |

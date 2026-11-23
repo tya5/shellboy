@@ -1513,6 +1513,7 @@ impl Control {
                             "app_shutdown",
                             "shutdown",
                         )?;
+                        schedule::prepare_owner_shutdown(&tx)?;
                         tx.commit()?;
                         Ok(())
                     })

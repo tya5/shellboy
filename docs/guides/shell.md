@@ -211,7 +211,7 @@ shellboy shell read --execution EXECUTION_ID --encoding CP932 --limit-bytes 6553
 shellboy shell read --execution EXECUTION_ID --cursor CURSOR --limit-bytes 65536
 ```
 
-Inspect `text`, `raw_bytes`, `encoding`, `cursor`, `decode_errors`, and `output_complete`. A cursor is opaque and binds information including execution ID, position, retention generation, and encoding. Do not edit it. To reread from the beginning with another encoding, specify that encoding without a cursor. Mixing a different encoding with an old cursor produces `cursor_encoding_mismatch`. Explicit encoding changes invalidate the associated index; explicitly reindex if needed.
+Inspect `text`, `raw_bytes`, `encoding`, `cursor`, `decode_errors`, and `output_complete`. After rotation, `oldest_sequence` identifies the first retained chunk; `stdout_start_offset` and `stderr_start_offset` identify the first retained raw byte offset for each stream with remaining output. These fields are optional. A cursor is opaque and binds information including execution ID, position, retention generation, and encoding. Do not edit it. To reread from the beginning with another encoding, specify that encoding without a cursor. Mixing a different encoding with an old cursor produces `cursor_encoding_mismatch`. Explicit encoding changes invalidate the associated index; explicitly reindex if needed.
 
 CP932/windows-31j/ms932 are treated as Shift_JIS variants. For UTF-16, specify `UTF-16LE` / `UTF-16BE` with known byte order. Do not rely on ambiguous UTF-16 input conversion. For invalid output bytes, inspect `decode_errors` and reread the raw output with an appropriate encoding.
 
@@ -233,7 +233,7 @@ shellboy shell get --execution EXECUTION_ID
 
 Stop's `accepted:true` means the request was accepted. Confirm terminal state before reporting that stopping has completed. Shell `state` is `starting` / `running` / `stopping` / `exited` / `failed` / `stopped`. `exit_code` has a value only when available. `output_complete` and end reason are separate facts. Even a terminal shell cannot guarantee complete output storage if draining or similar work is incomplete.
 
-Reaching the raw output limit stops the target and records the reason and incompleteness. Shellboy does not hide stored bytes and let a process run indefinitely. Any caller, including a model, may write/EOF/stop any shell (no authority check; an unknown execution ID is still an error). Check the execution ID first so you do not disturb another Run's work. After an application restart, old PIDs are not used to stop processes.
+Run-owned shells stop at the raw output limit and record the reason and incompleteness. Thread-owned shells (timed schedules and services) instead rotate their oldest output at `shell_raw_bytes` without stopping the process or renumbering retained chunks. An evicted cursor returns `output_expired`; start without a cursor to read the retained window. Any caller, including a model, may write/EOF/stop any shell (no authority check; an unknown execution ID is still an error). Check the execution ID first so you do not disturb another Run's work. After an application restart, old PIDs are not used to stop processes.
 
 ## PowerShell arguments
 

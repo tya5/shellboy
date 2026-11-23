@@ -60,6 +60,7 @@ named_jobs! {
     OwnerShutdown => owner_shutdown, Status => status, ModelList => model_list,
     ThreadList => thread_list, ThreadGet => thread_get, ThreadBranches => thread_branches, UsageGet => usage_get,
     ArtifactAdd => artifact_add, ArtifactUpdate => artifact_update, ArtifactList => artifact_list, ArtifactGet => artifact_get, ArtifactRemove => artifact_remove,
+    ServiceAdd => service_add, ServiceList => service_list, ServiceStart => service_start, ServiceStop => service_stop, ServiceRemove => service_remove,
     ScheduleAdd => schedule_add, ScheduleSet => schedule_set, ScheduleEnable => schedule_enable, ScheduleDisable => schedule_disable, ScheduleRemove => schedule_remove,  ScheduleList => schedule_list,
     CompactList => compact_list, CompactPreview => compact_preview, ShellList => shell_list,
     ThreadImport => thread_import, ThreadCreate => thread_create, ThreadFork => thread_fork, ThreadDelete => thread_delete,
@@ -114,6 +115,7 @@ impl Kind {
             | Kind::ArtifactList
             | Kind::ArtifactGet
             | Kind::ScheduleList
+            | Kind::ServiceList
             | Kind::ThreadTags
             | Kind::ThreadCwds
             | Kind::ThreadGet
@@ -141,6 +143,8 @@ impl Kind {
             Kind::ArtifactAdd
             | Kind::ArtifactUpdate
             | Kind::ArtifactRemove
+            | Kind::ServiceAdd
+            | Kind::ServiceStart
             | Kind::ScheduleAdd
             | Kind::ScheduleSet
             | Kind::ScheduleEnable
@@ -166,7 +170,9 @@ impl Kind {
             | Kind::AttachmentRemove
             | Kind::Compact
             | Kind::ContextEdit => MutationExempt,
-            Kind::ScheduleRemove
+            Kind::ServiceStop
+            | Kind::ServiceRemove
+            | Kind::ScheduleRemove
             | Kind::ModelList
             | Kind::Wait
             | Kind::EventsWait
@@ -224,9 +230,21 @@ mod tests {
             );
         }
         assert!(Kind::HistoryExport.read_lane());
+        use Classification::{MutationDeclaredBound, PureRead, Runtime};
+        let service_kinds = [
+            (Kind::ServiceAdd, MutationDeclaredBound),
+            (Kind::ServiceList, PureRead),
+            (Kind::ServiceStart, MutationDeclaredBound),
+            (Kind::ServiceStop, Runtime),
+            (Kind::ServiceRemove, Runtime),
+        ];
+        for (kind, expected) in service_kinds {
+            assert_eq!(kind.classification(), expected, "{kind:?}");
+            assert!(!UNDECLARED_WRITER_BOUNDS.contains(&kind));
+        }
         assert_eq!(
             Kind::ALL.len(),
-            79,
+            79 + service_kinds.len(),
             "classify new kinds and update this ratchet"
         );
     }

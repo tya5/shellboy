@@ -256,11 +256,16 @@ pub(in crate::control) async fn install_shell(
 }
 
 pub(in crate::control) async fn collect_shell(
-    control: &Control,
+    control: &Arc<Control>,
     owner: &ShellOwner,
     execution: &str,
     mut shell: crate::shell::ShellExecution,
 ) -> Result<ShellCompletion, ApiError> {
+    let rotation_limit = owner
+        .run()
+        .is_none()
+        .then_some(control.store.config.limits.shell_raw_bytes);
+    let mut retained = 0u64;
     let mut stdout = 0i64;
     let mut stderr = 0i64;
     let mut save_failure = None;
@@ -274,6 +279,7 @@ pub(in crate::control) async fn collect_shell(
             drop(batch);
             continue;
         }
+        let mut next_retained = retained;
         let execution = execution.to_owned();
         let marker_execution = execution.clone();
         let (mut next_stdout, mut next_stderr) = (stdout, stderr);
@@ -295,6 +301,7 @@ pub(in crate::control) async fn collect_shell(
                         let (stream,offset)=match chunk.stream {OutputStream::Stdout=>("stdout",&mut next_stdout),OutputStream::Stderr=>("stderr",&mut next_stderr)};
                         tx.execute("INSERT INTO output_chunk(execution_id,sequence,stream,stream_offset,bytes,received_at)VALUES(?1,?2,?3,?4,?5,?6)",params![execution,chunk.sequence as i64,stream,*offset,&chunk.bytes,now()])?;
                         *offset+=chunk.bytes.len() as i64;
+                        if rotation_limit.is_some() { next_retained += chunk.bytes.len() as u64; }
                         saved_sequence=Some(chunk.sequence as i64+1);
                         // Retain byte permits until commit, just like output-only batches.
                         chunks.push(chunk);
@@ -305,15 +312,22 @@ pub(in crate::control) async fn collect_shell(
                     }
                 }
             }
+            if let Some(limit) = rotation_limit {
+                let mut evict = tx.prepare_cached("DELETE FROM output_chunk WHERE execution_id=?1 AND sequence=(SELECT min(sequence) FROM output_chunk WHERE execution_id=?1) RETURNING length(bytes)")?;
+                while next_retained > limit {
+                    next_retained -= evict.query_row([&execution], |r| r.get::<_,i64>(0))? as u64;
+                }
+            }
             if let Some(sequence)=saved_sequence {tx.execute("UPDATE shell_execution SET saved_sequence=?2 WHERE id=?1",params![execution,sequence])?;}
             tx.commit()?;
             if had_output { wakes.publish([Key::ShellOutput(execution)]); }
             for saved in acknowledgements {let _=saved.send(Ok(()));}
             drop(chunks);
-            Ok((next_stdout, next_stderr,had_output))
+            Ok((next_stdout, next_stderr,next_retained,had_output))
         }).await;
         match saved {
-            Ok((out, err, had_output)) => {
+            Ok((out, err, bytes, had_output)) => {
+                retained = bytes;
                 (stdout, stderr) = (out, err);
                 #[cfg(test)]
                 {
@@ -373,7 +387,7 @@ pub(in crate::control) async fn collect_shell(
 }
 
 async fn save_completion(
-    control: &Control,
+    control: &Arc<Control>,
     owner: &ShellOwner,
     execution: &str,
     completion: &ShellCompletion,
@@ -383,12 +397,15 @@ async fn save_completion(
     let completed = completion.clone();
     let index = control.index.clone();
     let wakes = control.waits.keyed.clone();
-    control.store.database.call(move|db|{let tx=db.transaction()?;let state=serde_json::to_value(completed.state).unwrap_or(Value::Null);
-        if tx.execute("UPDATE shell_execution SET state=CASE WHEN end_reason='schedule_timeout' THEN 'stopped' ELSE ?2 END,exit_code=CASE WHEN end_reason='schedule_timeout' THEN NULL ELSE ?3 END,end_reason=CASE WHEN end_reason='schedule_timeout' THEN end_reason ELSE ?4 END,output_complete=?5,ended_at=?6,shell_json=json_set(shell_json,'$.completion',json(?7)) WHERE id=?1 AND state IN ('starting','running','stopping')",params![execution,state.as_str().unwrap_or("failed"),completed.exit_code,completed.reason,completed.output_complete,now(),json!({"forced":completed.forced,"exit_signal":completed.exit_signal,"group_cleanup_confirmed":completed.group_cleanup_confirmed,"elapsed_ms":completed.elapsed_ms}).to_string()])? == 0 {
+    let store = control.store.clone();
+    let effects = control.store.database.call(move|db|{let tx=db.transaction()?;
+        let service = super::super::schedule::service_settlement(&tx,&execution)?;
+        let state=serde_json::to_value(completed.state).unwrap_or(Value::Null);
+        if tx.execute("UPDATE shell_execution SET state=CASE WHEN end_reason='schedule_timeout' THEN 'stopped' ELSE ?2 END,exit_code=CASE WHEN end_reason='schedule_timeout' THEN NULL ELSE ?3 END,end_reason=CASE WHEN end_reason IN ('schedule_timeout','owner_shutdown') THEN end_reason ELSE ?4 END,output_complete=?5,ended_at=?6,shell_json=json_set(shell_json,'$.completion',json(?7)) WHERE id=?1 AND state IN ('starting','running','stopping')",params![execution,state.as_str().unwrap_or("failed"),completed.exit_code,completed.reason,completed.output_complete,now(),json!({"forced":completed.forced,"exit_signal":completed.exit_signal,"group_cleanup_confirmed":completed.group_cleanup_confirmed,"elapsed_ms":completed.elapsed_ms}).to_string()])? == 0 {
             let saved:Option<String> = tx.query_row("SELECT state FROM shell_execution WHERE id=?1",[&execution],|r|r.get(0)).optional()?;
             let saved=saved.ok_or_else(||ApiError::new(ErrorCode::TargetUnavailable,"Shell execution no longer exists"))?;
             let saved:ShellState=serde_json::from_value(Value::String(saved)).map_err(|_|ApiError::new(ErrorCode::InvalidState,"Unknown saved shell state"))?;
-            if matches!(saved,ShellState::Exited|ShellState::Failed|ShellState::Stopped) {return Ok(());}
+            if matches!(saved,ShellState::Exited|ShellState::Failed|ShellState::Stopped) {return Ok(None);}
             return Err(ApiError::new(ErrorCode::OperationConflict,"Shell completion is no longer current").into());
         }
         crate::stdin_facts::save(&tx,&execution,&crate::stdin_facts::StdinFact{open:false,successful_write_at:None})?;
@@ -405,9 +422,11 @@ async fn save_completion(
         } else {
             super::super::schedule::retire_oneshot(&tx,&execution)?;
         }
+        let mut effects = service.map(|service| service.finish(&store,&tx,&execution)).transpose()?.flatten();
         tx.commit()?;
-        wakes.publish([Key::ShellTerminal(execution.clone()), Key::ShellOutput(execution)]);
-        Ok(())}).await.map_err(storage_error)?;
+        wakes.publish(Key::shell_terminal(execution).into_iter().chain(effects.iter_mut().flat_map(|effects| std::mem::take(&mut effects.wait_keys))));
+        Ok(effects)}).await.map_err(storage_error)?;
+    control.apply_effects(effects).await;
     control.index.wake();
     // A terminal execution's output becomes eligible for raw retention.
     control

@@ -54,6 +54,7 @@ impl IoSession {
         keep_open: bool,
         record_facts: bool,
         budget_size: usize,
+        raw_limit: Option<u64>,
         config: &Config,
     ) -> (Self, ShellHandle, mpsc::Receiver<ShellEvent>)
     where
@@ -137,14 +138,19 @@ impl IoSession {
                 tx,
                 sequence: 0,
                 total: 0,
-                raw_limit: config.limits.shell_raw_bytes,
+                raw_limit,
             }),
             budget: Arc::new(Semaphore::new(budget_size)),
             chunk_size: config
                 .io
                 .output_batch_bytes
                 .min(budget_size as u64)
-                .min(READ_CHUNK as u64) as usize,
+                .min(READ_CHUNK as u64)
+                .min(if raw_limit.is_none() {
+                    config.limits.shell_raw_bytes
+                } else {
+                    u64::MAX
+                }) as usize,
             stop: stop.clone(),
             failure: failure.clone(),
         });

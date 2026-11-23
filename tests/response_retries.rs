@@ -4064,7 +4064,32 @@ async fn model_filter_changes_catalog_not_direct_model_execution() {
             })
         ),
         async {
-            let incoming = requests.recv().await.unwrap();
+            let incoming = crate::test_watchdog::watchdog("direct model POST", async {
+                loop {
+                    let incoming = requests.recv().await.unwrap();
+                    if incoming.body["model"] != "embed-test" {
+                        break incoming;
+                    }
+                    let input = incoming.body["input"].as_array().expect("embedding inputs");
+                    let data: Vec<_> = input
+                        .iter()
+                        .enumerate()
+                        .map(|(index, _)| json!({"index":index,"embedding":[1.0,2.0]}))
+                        .collect();
+                    incoming
+                        .reply
+                        .send(Reply::http(
+                            200,
+                            "application/json",
+                            &json!({"data":data}).to_string(),
+                            "",
+                        ))
+                        .ok()
+                        .unwrap();
+                }
+            })
+            .await
+            .unwrap();
             assert_eq!(incoming.body["model"], "gpt-4-preview");
             incoming.reply.send(Reply::success()).ok().unwrap();
         }

@@ -77,6 +77,9 @@ pub struct ShellOutputReader {
 struct Snapshot {
     details: ShellDetails,
     saved: u64,
+    oldest: u64,
+    stdout_start_offset: Option<u64>,
+    stderr_start_offset: Option<u64>,
     generation: u64,
     encoding: String,
 }
@@ -256,8 +259,8 @@ impl ShellOutputReader {
         let state = self
             .db(move |db| {
                 let tx = db.transaction().map_err(sql_error)?;
-                let state = snapshot(&tx, &execution)?;
-                ensure_raw_start(&tx, &state, &execution)?;
+                let mut state = snapshot(&tx, &execution)?;
+                set_raw_start(&tx, &mut state, &execution)?;
                 ReadPin::insert_tx(&tx, &pin_id, &instance, &execution, state.generation)?;
                 tx.commit().map_err(sql_error)?;
                 Ok(state)
@@ -266,12 +269,12 @@ impl ShellOutputReader {
         let decoders = Decoders::new(canonical_encoding(&state.encoding)?);
         Ok(OutputStreamReader {
             reader: self.clone(),
-            snapshot: state,
-            pin: Some(pin),
             position: Position {
-                sequence: 0,
+                sequence: state.oldest,
                 offset: 0,
             },
+            snapshot: state,
+            pin: Some(pin),
             streams,
             decoders,
             done: false,
@@ -340,7 +343,7 @@ impl ShellOutputReader {
             let tx=db.transaction().map_err(sql_error)?;
             let mut state=snapshot(&tx,&execution)?;
             if let Some(cursor)=&expected{validate_cursor(&tx,&state,&execution,cursor,requested.as_deref(),Some(streams))?;}
-            ensure_raw_start(&tx,&state,&execution)?;
+            set_raw_start(&tx,&mut state,&execution)?;
             let mut encoding_changed = false;
             if let Some(requested)=requested
                 && canonical_encoding(&state.encoding)?.name()!=requested
@@ -386,7 +389,7 @@ impl ShellOutputReader {
     ) -> Result<ShellOutput> {
         let mut decoders = Decoders::new(encoding);
         let mut position = Position {
-            sequence: 0,
+            sequence: state.oldest,
             offset: 0,
         };
         let target = old.as_ref().map_or(position, |c| Position {
@@ -458,6 +461,9 @@ impl ShellOutputReader {
             encoding: encoding.name().into(),
             cursor,
             raw_bytes,
+            oldest_sequence: (state.oldest != 0).then_some(state.oldest),
+            stdout_start_offset: state.stdout_start_offset,
+            stderr_start_offset: state.stderr_start_offset,
             output_complete: state.details.output_complete && position.sequence == state.saved,
             decode_errors,
         })
@@ -500,8 +506,8 @@ impl ShellOutputReader {
         let prepared = self
             .db(move |db| {
                 let tx = db.transaction().map_err(sql_error)?;
-                let state = snapshot(&tx, &execution)?;
-                ensure_raw_start(&tx, &state, &execution)?;
+                let mut state = snapshot(&tx, &execution)?;
+                set_raw_start(&tx, &mut state, &execution)?;
                 ReadPin::insert_tx(&tx, &pin_id, &instance, &execution, state.generation)?;
                 tx.commit().map_err(sql_error)?;
                 Ok(state)
@@ -541,7 +547,7 @@ impl ShellOutputReader {
     ) -> Result<String> {
         let mut decoders = Decoders::new(canonical_encoding(&state.encoding)?);
         let mut position = Position {
-            sequence: 0,
+            sequence: state.oldest,
             offset: 0,
         };
         let mut head = String::new();
@@ -602,7 +608,6 @@ pub fn wait_position(db: &Connection, execution_id: &str, token: &str) -> Result
     let cursor = OutputCursor::decode(token)?;
     let state = snapshot(db, execution_id)?;
     validate_cursor(db, &state, execution_id, &cursor, None, None)?;
-    ensure_raw_start(db, &state, execution_id)?;
     if state.terminal() {
         return Ok(true);
     }
@@ -662,27 +667,45 @@ fn snapshot(db: &Connection, execution: &str) -> Result<Snapshot> {
             turn_id: None,
         },
         saved: saved as u64,
+        oldest: 0,
+        stdout_start_offset: None,
+        stderr_start_offset: None,
         generation: generation as u64,
         encoding,
     })
 }
-fn ensure_raw_start(db: &Connection, state: &Snapshot, execution: &str) -> Result<()> {
+fn set_raw_start(db: &Connection, state: &mut Snapshot, execution: &str) -> Result<()> {
+    state.oldest = raw_start(db, state, execution)?;
+    if state.oldest != 0 {
+        let start = |stream| -> Result<Option<u64>> {
+            Ok(db.query_row(
+                "SELECT min(stream_offset) FROM output_chunk WHERE execution_id=?1 AND stream=?2",
+                params![execution,stream], |r| r.get::<_,Option<i64>>(0),
+            ).map_err(sql_error)?.map(|offset| offset as u64))
+        };
+        state.stdout_start_offset = start("stdout")?;
+        state.stderr_start_offset = start("stderr")?;
+    }
+    Ok(())
+}
+fn raw_start(db: &Connection, state: &Snapshot, execution: &str) -> Result<u64> {
     if let Some(error) = raw_tombstone(db, execution)? {
         return Err(error);
     }
-    if state.saved > 0 {
-        let first: Option<i64> = db
-            .query_row(
-                "SELECT MIN(sequence) FROM output_chunk WHERE execution_id=?1 AND sequence<?2",
-                params![execution, state.saved as i64],
-                |r| r.get(0),
-            )
-            .map_err(sql_error)?;
-        if first != Some(0) {
-            return Err(expired_output_for(db, execution, state.generation)?);
-        }
+    if state.saved == 0 {
+        return Ok(0);
     }
-    Ok(())
+    let first: Option<i64> = db
+        .query_row(
+            "SELECT MIN(sequence) FROM output_chunk WHERE execution_id=?1",
+            [execution],
+            |r| r.get(0),
+        )
+        .map_err(sql_error)?;
+    if first == Some(0) || state.details.run_id.is_none() {
+        return Ok(first.map_or(state.saved, |value| value as u64));
+    }
+    Err(expired_output_for(db, execution, state.generation)?)
 }
 fn validate_cursor(
     db: &Connection,

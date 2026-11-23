@@ -123,6 +123,11 @@ pub enum CliCommand {
         #[command(subcommand)]
         command: ArtifactCommand,
     },
+    /// Manage long-running shell services owned by a Thread.
+    Service {
+        #[command(subcommand)]
+        command: ServiceCommand,
+    },
     /// Manage scheduled commands owned by a Thread.
     Schedule {
         #[command(subcommand)]
@@ -540,6 +545,37 @@ pub enum ArtifactCommand {
     Remove {
         #[arg(long = "artifact")]
         artifact_id: String,
+    },
+}
+
+#[derive(Debug, Clone, Subcommand)]
+pub enum ServiceCommand {
+    /// Save and immediately start a service.
+    Add {
+        #[arg(long = "thread")]
+        thread_id: Option<String>,
+        #[arg(long)]
+        cwd: Option<String>,
+        #[arg(long)]
+        description: Option<String>,
+        #[arg(long, allow_hyphen_values = true)]
+        command: String,
+    },
+    List {
+        #[arg(long = "thread")]
+        thread_id: Option<String>,
+    },
+    Start {
+        #[arg(long = "service")]
+        service_id: String,
+    },
+    Stop {
+        #[arg(long = "service")]
+        service_id: String,
+    },
+    Remove {
+        #[arg(long = "service")]
+        service_id: String,
     },
 }
 
@@ -1971,6 +2007,31 @@ impl Cli {
                 }),
                 ArtifactCommand::Remove { artifact_id } => {
                     C::ArtifactRemove(wire::ArtifactRemoveArgs { artifact_id })
+                }
+            },
+            CliCommand::Service { command } => match command {
+                ServiceCommand::Add {
+                    thread_id,
+                    cwd,
+                    description,
+                    command,
+                } => C::ServiceAdd(wire::ServiceAddArgs {
+                    thread_id,
+                    cwd,
+                    description,
+                    command,
+                }),
+                ServiceCommand::List { thread_id } => {
+                    C::ServiceList(wire::ThreadTarget { thread_id })
+                }
+                ServiceCommand::Start { service_id } => {
+                    C::ServiceStart(wire::ServiceTarget { service_id })
+                }
+                ServiceCommand::Stop { service_id } => {
+                    C::ServiceStop(wire::ServiceTarget { service_id })
+                }
+                ServiceCommand::Remove { service_id } => {
+                    C::ServiceRemove(wire::ServiceTarget { service_id })
                 }
             },
             CliCommand::Schedule { command } => match command {
