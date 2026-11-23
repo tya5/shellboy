@@ -1,5 +1,11 @@
 # Development status
 
+## Core #309 headless shutdown witnesses
+
+The headless Ctrl-C case checks clean exit and reopening. Existing native
+termination and forced-owner-death tests own escalation and shutdown crash
+boundaries; headless startup interruption remains a separate witness.
+
 ## Core #356 per-version protocol files
 
 Bundle `bundle/core-wire-a` moves the per-version sections of

@@ -3141,50 +3141,56 @@ async fn headless_stop_boundaries_preserve_saved_tool_effects_and_recovery_count
 }
 
 #[tokio::test]
-async fn headless_shutdown_requires_explicit_directory_and_final_output_loss_is_not_success() {
-    crate::test_watchdog::watchdog(
-        "headless shutdown addressing and final output failure",
-        async {
-            let root = tempfile::tempdir().unwrap();
-            let config = root.path().join("config.toml");
-            std::fs::write(&config, "").unwrap();
-            let data = root.path().join("data");
-            let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_shellboy"))
-                .arg("shutdown")
-                .env("SHELLBOY_DATA_DIR", root.path().join("parent"))
-                .output()
-                .await
-                .unwrap();
-            assert!(!output.status.success());
-            assert!(output.stderr.is_empty());
-            let response: Value = serde_json::from_slice(&output.stdout).unwrap();
-            assert_eq!(response["error"]["code"], "invalid_argument");
-            assert!(!root.path().join("parent").exists());
-            let process = HeadlessOwner::start(&data, &config).await;
-            let HeadlessOwner {
-                mut child,
-                stdout,
-                mut stderr,
-                ..
-            } = process;
-            drop(stdout);
-            let accepted = headless_cli(&data, &["shutdown"]).await;
-            assert_eq!(accepted["state"], "accepted");
-            assert!(!child.wait().await.unwrap().success());
-            let mut errors = String::new();
-            stderr.read_to_string(&mut errors).await.unwrap();
-            assert!(
-                errors.is_empty(),
-                "post-ready failures do not become startup stderr"
-            );
-            assert!(!data.join("endpoint.json").exists());
-            let _lock = shellboy::app::OwnerLock::acquire(&data).unwrap();
-            let integrity: String = headless_db(&data)
-                .query_row("PRAGMA quick_check", [], |r| r.get(0))
-                .unwrap();
-            assert_eq!(integrity, "ok");
-        },
-    )
+async fn headless_shutdown_requires_explicit_directory() {
+    crate::test_watchdog::watchdog("headless shutdown addressing", async {
+        let root = tempfile::tempdir().unwrap();
+        let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_shellboy"))
+            .arg("shutdown")
+            .env("SHELLBOY_DATA_DIR", root.path().join("parent"))
+            .output()
+            .await
+            .unwrap();
+        assert!(!output.status.success());
+        assert!(output.stderr.is_empty());
+        let response: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(response["error"]["code"], "invalid_argument");
+        assert!(!root.path().join("parent").exists());
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn headless_shutdown_final_output_loss_is_not_success() {
+    crate::test_watchdog::watchdog("headless shutdown final output failure", async {
+        let root = tempfile::tempdir().unwrap();
+        let config = root.path().join("config.toml");
+        std::fs::write(&config, "").unwrap();
+        let data = root.path().join("data");
+        let process = HeadlessOwner::start(&data, &config).await;
+        let HeadlessOwner {
+            mut child,
+            stdout,
+            mut stderr,
+            ..
+        } = process;
+        drop(stdout);
+        let accepted = headless_cli(&data, &["shutdown"]).await;
+        assert_eq!(accepted["state"], "accepted");
+        assert!(!child.wait().await.unwrap().success());
+        let mut errors = String::new();
+        stderr.read_to_string(&mut errors).await.unwrap();
+        assert!(
+            errors.is_empty(),
+            "post-ready failures do not become startup stderr"
+        );
+        assert!(!data.join("endpoint.json").exists());
+        let _lock = shellboy::app::OwnerLock::acquire(&data).unwrap();
+        let integrity: String = headless_db(&data)
+            .query_row("PRAGMA quick_check", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(integrity, "ok");
+    })
     .await
     .unwrap();
 }
@@ -3331,66 +3337,29 @@ async fn headless_background_parent_stop_reaps_nested_owner_and_tool_without_ree
 
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn headless_ctrl_c_and_repeated_term_drain_or_force_kill_preserve_database() {
-    for force in [false, true] {
-        crate::test_watchdog::watchdog("headless signals at blocked snapshot", async {
-            let root = tempfile::tempdir().unwrap();
-            let config = root.path().join("config.toml");
-            std::fs::write(&config, "").unwrap();
-            let data = root.path().join("data");
-            let mut owner = HeadlessOwner::start(&data, &config).await;
-            let identity = owner.ready["instance_id"].clone();
-            let endpoint: shellboy::app::Endpoint =
-                serde_json::from_slice(&std::fs::read(data.join("endpoint.json")).unwrap())
-                    .unwrap();
-            let hold = rusqlite::Connection::open(data.join("shellboy.db")).unwrap();
-            hold.execute_batch("BEGIN IMMEDIATE").unwrap();
-            let pid = owner.child.id().unwrap() as i32;
-            assert_eq!(unsafe { libc::kill(pid, libc::SIGINT) }, 0);
-            loop {
-                if tokio::net::UnixStream::connect(&endpoint.address)
-                    .await
-                    .is_err()
-                {
-                    break;
-                }
-                tokio::task::yield_now().await;
-            }
-            assert_eq!(unsafe { libc::kill(pid, libc::SIGTERM) }, 0);
-            assert_eq!(unsafe { libc::kill(pid, libc::SIGTERM) }, 0);
-            if force {
-                owner.child.kill().await.unwrap();
-            }
-            hold.execute_batch("ROLLBACK").unwrap();
-            let phase = if force { "forced-kill" } else { "signal-drain" };
-            owner
-                .finish(!force, &root.path().join(format!("{phase}.jsonl")))
-                .await;
-            let restarted = HeadlessOwner::start(&data, &config).await;
-            assert_ne!(restarted.ready["instance_id"], identity);
-            let db = headless_db(&data);
-            assert_eq!(
-                db.query_row("PRAGMA quick_check", [], |r| r.get::<_, String>(0))
-                    .unwrap(),
-                "ok"
-            );
-            for table in ["operation_receipt", "model_attempt", "tool_result"] {
-                assert_eq!(
-                    db.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r
-                        .get::<_, i64>(0))
-                        .unwrap(),
-                    0
-                );
-            }
-            drop(db);
-            headless_cli(&data, &["shutdown"]).await;
-            restarted
-                .finish(true, &root.path().join("restart.jsonl"))
-                .await;
-        })
-        .await
-        .unwrap();
-    }
+async fn headless_ctrl_c_shuts_down_cleanly_and_allows_reopening() {
+    crate::test_watchdog::watchdog("headless Ctrl-C and reopen", async {
+        let root = tempfile::tempdir().unwrap();
+        let config = root.path().join("config.toml");
+        std::fs::write(&config, "").unwrap();
+        let data = root.path().join("data");
+        let owner = HeadlessOwner::start(&data, &config).await;
+        let identity = owner.ready["instance_id"].clone();
+        let pid = owner.child.id().unwrap() as i32;
+        assert_eq!(unsafe { libc::kill(pid, libc::SIGINT) }, 0);
+        owner
+            .finish(true, &root.path().join("signal-drain.jsonl"))
+            .await;
+
+        let reopened = HeadlessOwner::start(&data, &config).await;
+        assert_ne!(reopened.ready["instance_id"], identity);
+        headless_cli(&data, &["shutdown"]).await;
+        reopened
+            .finish(true, &root.path().join("restart.jsonl"))
+            .await;
+    })
+    .await
+    .unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -3467,7 +3436,7 @@ async fn headless_native_cutpoint_helper() {
             pause();
         }
     };
-    let prepared = shellboy::owner_session::initialize_reporting(
+    shellboy::owner_session::initialize_reporting(
         Some(root.join("config.toml")),
         Some(root.join("data")),
         tokio_util::sync::CancellationToken::new(),
@@ -3476,20 +3445,12 @@ async fn headless_native_cutpoint_helper() {
     .await
     .unwrap()
     .unwrap();
-    if cut == "snapshot_committed" {
-        prepared.control.prepare_shutdown().await.unwrap();
-        pause();
-    }
-    if cut == "before_database_close" {
-        prepared.control.shutdown().await.unwrap();
-        pause();
-    }
     panic!("unknown cutpoint");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn headless_native_startup_snapshot_and_database_close_kills_keep_committed_facts() {
-    crate::test_watchdog::watchdog("native common owner startup/drain cutpoints", async {
+async fn headless_native_startup_kills_keep_committed_facts() {
+    crate::test_watchdog::watchdog("native owner startup interruption", async {
         let root = tempfile::tempdir().unwrap();
         let (url, mut requests, proxy_task) = proxy().await;
         let data = root.path().join("data");
@@ -3508,7 +3469,7 @@ async fn headless_native_startup_snapshot_and_database_close_kills_keep_committe
         }
         headless_cli(&data, &["shutdown"]).await;
         seed.finish(true, &root.path().join("seed.jsonl")).await;
-        for cut in ["startup_database", "startup_interrupted", "snapshot_committed", "before_database_close"] {
+        for cut in ["startup_database", "startup_interrupted"] {
             let witness = root.path().join("cut.jsonl");
             std::fs::write(&witness, "").unwrap();
             let mut child = tokio::process::Command::new(std::env::current_exe().unwrap())
