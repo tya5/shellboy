@@ -909,6 +909,18 @@ are not cancelled. Input preparation is not skipped. Embeddings and model-list
 requests are outside this first version. Short bottom-line TUI rendering is
 tracked separately in #85; use run get/the existing recovery reason for now.
 
+## Schedules and services
+
+`shellboy schedule enable --schedule ID` resumes future occurrences. For a
+disabled one-shot whose scheduled time has passed, it returns `invalid_state`
+and leaves the schedule disabled. Use `schedule add` to set a new time.
+
+Once the owner accepts shutdown, scheduled commands and services that have not
+passed the start gate cannot launch, even if their execution is already
+reserved. Cancellation before launch does not disable a service or send a
+service failure notice. A shutdown acknowledgment is not proof that previously
+started processes have exited.
+
 ## Terminal-free owner startup (#5)
 
 `shellboy serve --data-dir DIR [--config FILE]` starts an owner without a terminal.

@@ -955,6 +955,9 @@ One-shot schedules (`--at` or `--in`) disappear from `schedule list` when their
 execution settles, even if it fails or is stopped. Find the result with
 `shellboy shell list --thread THREAD`, then inspect its status and saved output
 with `shell get` and `shell read`. Recurring schedules stay listed.
+If a disabled one-shot's time has passed, `schedule enable --schedule ID`
+returns `invalid_state` and leaves it disabled. Add a new schedule for a future
+time instead of retrying enable.
 
 The scheduler (cron, 定期実行, スケジュール) belongs to the Thread. It runs shell commands without starting a model
 Turn. `schedule add` and `schedule set --schedule ID --description TEXT` take an optional description. To wake the owning Thread only when there is work, use a command such as:
@@ -974,6 +977,10 @@ EXECUTION_ID` to verify the target, then a bounded `shell_ended` wait for exit
 or a `shell_output` wait with the cursor from `shell read` for new output. These
 waits observe that execution only; if the service starts again, look up the new
 execution ID. A wait timeout does not stop the service.
+
+Once the owner accepts shutdown, a scheduled command or service that has not
+passed the start gate cannot launch, even if the owner already reserved its
+execution. This cancellation does not disable a service or send a failure notice.
 
 Cron uses the owner's local time. At a daylight-saving gap, a fixed-time entry
 runs at the first valid time after the gap; interval entries skip nonexistent
