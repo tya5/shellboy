@@ -122,8 +122,9 @@ fn receipts_step(
     // Only otherwise-deletable receipts reach this guard, so the candidate
     // receipt is not itself a live root. A surviving consumer keeps its facts.
     let reachable = crate::history::reachability::live_root_sql("receipt.message_node_id");
-    let sql =
-        format!("DELETE FROM receipt WHERE id=?1 AND {RECEIPT_ELIGIBLE} AND NOT ({reachable}) RETURNING message_node_id");
+    let sql = format!(
+        "DELETE FROM receipt WHERE id=?1 AND {RECEIPT_ELIGIBLE} AND NOT ({reachable}) RETURNING message_node_id"
+    );
     let at = Utc::now().to_rfc3339();
     report.candidates = rows.len() as u64;
     let mut wake_threads = std::collections::BTreeSet::new();
