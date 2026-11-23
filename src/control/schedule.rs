@@ -1581,13 +1581,13 @@ mod tests {
             })
             .await
             .unwrap();
-        // TUI Quit closes the Run gate before Control begins shutdown.
-        control.close_tool_start_admission();
         spawn_reserved(&control, reserved).await.unwrap();
         let first = row(&control, &thread).await;
         assert_eq!(first["latest"]["state"], "running");
         assert_eq!(next_deadline(&control).await.unwrap(), None);
         let first_id = first["latest"]["execution_id"].as_str().unwrap().to_owned();
+        // TUI Quit closes admission before shutting down the running service.
+        control.close_tool_start_admission();
         control.shutdown().await.unwrap();
         drop(control);
         owner.shutdown().await.unwrap();
