@@ -197,6 +197,7 @@ fn main() -> ExitCode {
                     }
                     | CliCommand::Thread {
                         command: shellboy::cli::ThreadCommand::Request(_)
+                            | shellboy::cli::ThreadCommand::Export(_)
                     }
             )
         )
@@ -204,7 +205,7 @@ fn main() -> ExitCode {
         return print_error(
             ApiError::new(
                 ErrorCode::InvalidArgument,
-                "--operation-id applies to owner RPCs; docs, protocol schema, startup, rag, config init, config check and thread request are standalone commands",
+                "--operation-id applies to owner RPCs; docs, protocol schema, startup, rag, config init, config check thread request and thread export do not accept an operation ID",
             ),
             cli.operation_id,
         );
@@ -391,6 +392,24 @@ fn main() -> ExitCode {
         Some(CliCommand::Startup(options)) => standalone_response(runtime.block_on(
             shellboy::startup::execute(options, cli.config, cli.data_dir, &cwd),
         )),
+        Some(CliCommand::Thread {
+            command: shellboy::cli::ThreadCommand::Export(options),
+        }) => {
+            match runtime.block_on(async {
+                let data_dir = resolve_cli_data_dir(
+                    cli.data_dir.as_deref(),
+                    &PathEnvironment::current(),
+                    &cwd,
+                )
+                .map_err(|error| ApiError::new(ErrorCode::ConfigInvalid, error.to_string()))?;
+                shellboy::thread_export::execute(options, &data_dir, origin(&data_dir)).await
+            }) {
+                Ok(result) => standalone_response(
+                    serde_json::json!({"protocol_version":shellboy::protocol::PROTOCOL_VERSION,"ok":true,"result":result}),
+                ),
+                Err(error) => print_error(error, None),
+            }
+        }
         Some(CliCommand::Thread {
             command: shellboy::cli::ThreadCommand::Request(options),
         }) => standalone_response(runtime.block_on(shellboy::request_inspect::execute(

@@ -64,6 +64,7 @@ impl Command {
             Self::HistoryWindow(_) => ("history.window", CommandRoute::Database),
             Self::HistoryGet(_) => ("history.get", CommandRoute::Database),
             Self::HistorySearch(_) => ("history.search", CommandRoute::Runtime),
+            Self::HistoryExport(_) => ("history.export", CommandRoute::Database),
             Self::HistoryRelations(_) => ("history.relations", CommandRoute::Database),
             Self::ShellGet(_) => ("shell.get", CommandRoute::Runtime),
             Self::ShellRead(_) => ("shell.read", CommandRoute::Runtime),
@@ -166,6 +167,7 @@ impl Command {
             | Self::HistoryList(_)
             | Self::HistoryWindow(_)
             | Self::HistoryGet(_)
+            | Self::HistoryExport(_)
             | Self::HistoryRelations(_)
             | Self::ShellWrite(_)
             | Self::ShellEof(_)
@@ -231,6 +233,7 @@ impl Command {
             | Self::HistoryWindow(_)
             | Self::HistoryGet(_)
             | Self::HistorySearch(_)
+            | Self::HistoryExport(_)
             | Self::HistoryRelations(_)
             | Self::ShellGet(_)
             | Self::ShellRead(_)
@@ -310,6 +313,7 @@ impl Command {
             | Self::HistoryWindow(_)
             | Self::HistoryGet(_)
             | Self::HistorySearch(_)
+            | Self::HistoryExport(_)
             | Self::HistoryRelations(_)
             | Self::ShellGet(_)
             | Self::ShellRead(_)
@@ -365,6 +369,7 @@ impl Command {
             | Self::HistoryWindow(_)
             | Self::HistoryGet(_)
             | Self::HistorySearch(_)
+            | Self::HistoryExport(_)
             | Self::HistoryRelations(_)
             | Self::ShellGet(_)
             | Self::ShellRead(_)

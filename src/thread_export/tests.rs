@@ -14,7 +14,7 @@ fn thread_export_trailer_counts_and_hashes_exact_written_lines() {
         .line(&json!({"type":"tombstone","id":"collected","reason":"pruned_unreachable"}))
         .unwrap();
     assert!(!path.exists());
-    let trailer = output.publish(&path).unwrap();
+    let trailer = output.publish(&path, 42).unwrap();
     let bytes = std::fs::read(&path).unwrap();
     let tail_start = bytes[..bytes.len() - 1]
         .iter()
@@ -24,7 +24,7 @@ fn thread_export_trailer_counts_and_hashes_exact_written_lines() {
     let mut hashed = bytes[..tail_start].to_vec();
     assert_eq!(
         serde_json::from_slice::<serde_json::Value>(&bytes[tail_start..]).unwrap(),
-        json!({"type":"trailer","lines":6,"sha256":trailer.sha256})
+        json!({"type":"trailer","lines":6,"change_position":42,"sha256":trailer.sha256})
     );
     assert_eq!(trailer.lines, 6);
     assert_eq!(digest_hex(&Sha256::digest(&hashed)), trailer.sha256);

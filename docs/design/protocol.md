@@ -1077,3 +1077,7 @@ request is sent, and the version is not used for compatibility or peer checks.
 Item-projected history windows report retired admission notice ordinals as
 `kind: "model_context"` with `items: []`. Raw history retains the original
 node kind and body.
+
+## Protocol next (#344)
+
+`history.export` is a read-only owner observation with `{thread_id, cursor?, limit?}`. Its `items` enumerate retained current-path nodes and their recursively replaced sources once in saved insertion order. `payload_json` is the original stored JSON text, not a reserialized object; it can contain encrypted reasoning. Retained rows whose bodies were collected return tombstones; entirely removed records cannot be exported. The cursor is scoped to the Thread and owner instance. Each page reads live saved state and returns `change_position` from the owner's existing Thread change clock. A change does not invalidate the cursor. The clock is a hint, not a snapshot or GC fence. Pages return fewer records as needed to fit the frame; if the next single record cannot fit, `input_limit` identifies its `node_id`.

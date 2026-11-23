@@ -51,6 +51,7 @@ fn operation_result_schemas(
     result!("status", StatusResult);
     result!("model.list", ModelListResult);
     result!("thread.list", Page<ThreadSummary>);
+    result!("history.export", HistoryExportPage);
     result!("thread.get", ThreadDetails);
     opaque!("thread.branches");
     result!("usage.get", UsageGetResult);
@@ -1115,6 +1116,25 @@ impl Default for HistorySearchArgs {
 states!(HistoryRelation {
     Previous => "previous", Next => "next", Sources => "sources", Replacements => "replacements"
 });
+args!(HistoryExportArgs {thread_id: String, #[serde(default = "list_limit")] limit: u32, #[serde(default)] cursor: Option<String> });
+record!(HistoryExportPage {items: Vec<HistoryExportRecord>, next_cursor: Option<String>, change_position: u64});
+record!(HistoryExportNode {id: String, order: i64, current_ordinal: Option<i64>, payload_json: String, provenance: NodeProvenance});
+record!(HistoryExportRelations {previous: Vec<String>, replaces: Vec<String>, replaced_by: Vec<String>});
+states!(HistoryExportRole { Current => "current", ReplacedSource => "replaced_source" });
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum HistoryExportRecord {
+    Node {
+        role: HistoryExportRole,
+        node: Box<HistoryExportNode>,
+        relations: HistoryExportRelations,
+        owner_thread_id: Option<String>,
+    },
+    Tombstone {
+        id: String,
+        reason: String,
+    },
+}
 args!(HistoryRelationsArgs { node_id: String, relation: HistoryRelation, #[serde(default = "list_limit")] limit: u32, #[serde(default, skip_serializing_if = "Option::is_none")] cursor: Option<String> });
 states!(MessageReplyState { Pending => "pending", Replied => "replied", Ignored => "ignored", Cancelled => "cancelled" });
 record!(MessageProvenance {
@@ -1440,6 +1460,8 @@ pub enum Command {
     HistoryGet(HistoryGetArgs),
     #[serde(rename = "history.search")]
     HistorySearch(HistorySearchArgs),
+    #[serde(rename = "history.export")]
+    HistoryExport(HistoryExportArgs),
     #[serde(rename = "history.relations")]
     HistoryRelations(HistoryRelationsArgs),
     #[serde(rename = "shell.get")]
@@ -2518,6 +2540,7 @@ mod message_acknowledgement_tests {
             "history.get",
             "history.search",
             "history.relations",
+            "history.export",
             "shell.get",
             "shell.read",
             "shell.write",
@@ -2557,7 +2580,7 @@ mod message_acknowledgement_tests {
                 "missing result schema for {name}"
             );
         }
-        assert_eq!(results.len(), 71);
+        assert_eq!(results.len(), 72);
         for name in ["thread.create", "connection.test"] {
             assert_eq!(
                 results[name],

@@ -1172,3 +1172,7 @@ completion time. Failed/partial/time-out and empty writes keep the previous time
 
 
 Recovery rewind is available as `shellboy thread rewind --thread THREAD_ID --node NODE_ID --run RUN_ID`. It atomically stops only that exact `recovery_wait` Run and rewinds the selected path. Refusal leaves the Run and path untouched; ordinary `thread rewind` and `run stop` remain unchanged.
+
+### Export a Thread
+
+`shellboy thread export --thread ID --out PATH` streams retained conversation history from a running owner to a JSONL file. Include the full ID or a unique Thread prefix. The file can contain private conversations and encrypted reasoning; share it only as intended. Export is live and does not recover data already removed. See [Thread export format](../design/thread-export.md).
