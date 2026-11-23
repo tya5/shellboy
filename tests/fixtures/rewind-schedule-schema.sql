@@ -1,7 +1,7 @@
 -- Test-only inverse through schema 50 for fixtures made by a current owner.
 DROP TABLE artifact_version;
 DROP TABLE artifact;
-DELETE FROM schema_migration WHERE version IN (57,58);
+DELETE FROM schema_migration WHERE name IN ('next_thread_artifacts','next_artifact_list_order');
 DROP INDEX receipt_named_reply_pending;
 DROP INDEX receipt_pending_by_time;
 DROP INDEX receipt_pending_owed;

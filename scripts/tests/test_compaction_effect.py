@@ -12,7 +12,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 _migration_names = (ROOT / 'src/storage.rs').read_text().split('const MIGRATION_NAMES', 1)[1].split('];', 1)[0]
-SCHEMA_VERSION = len(re.findall(r'^\s*\(\d+,\s*"', _migration_names, re.MULTILINE))
+MIGRATION_NAMES = re.findall(r'^\s*\(\d+,\s*"([^"]+)"', _migration_names, re.MULTILINE)
+SCHEMA_VERSION = len(MIGRATION_NAMES)
 SCRIPT = ROOT / 'scripts/dev/compaction-effect.py'
 MIGRATIONS = ROOT / 'migrations'
 spec = importlib.util.spec_from_file_location('compaction_effect', SCRIPT)
@@ -23,8 +24,8 @@ spec.loader.exec_module(effect)
 class CompactionEffectTests(unittest.TestCase):
     def fixture(self, path):
         db = sqlite3.connect(path)
-        for migration in sorted(MIGRATIONS.glob('*.sql')):
-            db.executescript(migration.read_text())
+        for name in MIGRATION_NAMES:
+            db.executescript((MIGRATIONS / f'{name}.sql').read_text())
         db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('thread','/','/AGENTS.md','profile','default','2026-11-03T00:00:00Z')")
         db.execute("INSERT INTO run(id,thread_id,state,created_at) VALUES('run','thread','completed','2026-11-03T00:00:00Z')")
         for i, started in enumerate((

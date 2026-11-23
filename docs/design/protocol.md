@@ -1065,3 +1065,12 @@ invalid or absent value is treated as unknown. A client that refuses the
 advertised protocol before connecting includes the valid value in its local
 `protocol_mismatch` error details when present. No additional handshake or
 request is sent, and the version is not used for compatibility or peer checks.
+
+## Protocol next (#316)
+
+Thread artifact metadata uses `artifact.add`, `artifact.update`, `artifact.list`,
+`artifact.get`, and `artifact.remove`. The owner stores opaque URI, title, and
+optional MIME strings; updates append versions. List pages use descending update
+time and ascending ID, and `artifact.get` can read an exact version or page
+through version history. See [Thread artifacts](thread-artifacts.md) for request
+limits, cursor scope, and lifecycle behavior.

@@ -4641,6 +4641,3 @@ Only `*` and `?` are special. Allow at most 64 patterns per list and 256 UTF-8
 bytes per pattern; reject empty patterns and ID characters the provider catalog
 already disallows (whitespace and control characters). The loaded connection
 configuration filters the response only, never selecting or rejecting a model.
-## Thread artifacts and opaque external references (#316)
-
-Core owns the metadata because it is responsible for Thread deletion, archive, fork, and rewind. Store externally defined references and optional MIME as opaque strings. Core does not infer their meaning from their form; the client or convention that supplies them decides how to interpret them. Keeping a version preserves the reference, not the referenced content. Use bounded pages rather than lifetime count caps on long-lived Threads.
