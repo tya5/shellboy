@@ -240,7 +240,7 @@ The Thread can have at most 16 unanswered requests, shared with reply-expected
 sends. To withdraw a pending question, use
 `shellboy message cancel --message MESSAGE_ID`.
 
-The bounded Web/API inbox is `thread get --thread THREAD_ID` → `awaiting_replies` (up to 16, for only that Thread; legacy excess is retained but not listed). Each item includes `message_id`, `recipient_kind` (`human` or `thread`), `recipient_thread_id`, `excerpt`, `created_at`, `elapsed_ms`, `delivery_status`, and `reminded`. On `events wait --thread THREAD_ID` change hints, reread that Thread. Answer with `shellboy message reply --message MESSAGE_ID --text 'Decision'`; never notify a person for `recipient_kind: "thread"`.
+The bounded Web/API inbox is `shellboy message list --awaiting --owed-by THREAD_ID` (paged; each item has `message_id`, `created_at`, `asked_by`, `sender`, `recipient`, `excerpt`); `thread get --thread THREAD_ID` → `pending_replies` `{owed_by, asked_by}` gives `{count, exact}` (exact through 16). On `events wait --thread THREAD_ID` change hints, reread that Thread. Answer with `shellboy message reply --message MESSAGE_ID --text 'Decision'`; never notify a person for `recipient_kind: "thread"`.
 
 ## Distinguish acceptance from completion
 
@@ -846,8 +846,8 @@ and output limit); the latest closed and the latest active failure are remembere
 failures are retried at the next eligible report. An explicit compact of the same failed range is refused the same
 way until the range, the output limit or the model changes.
 
-The protocol has no Run ownership or duplicate reply-duty lists. Use `awaiting_replies` and inspect its recipient
-tag. External peers must match the advertised version exactly; update Studio/clients with the owner, without a
+The protocol has no Run ownership or duplicate reply-duty lists. Use `pending_replies` counts and `message list --awaiting`, and inspect the
+recipient of each item. External peers must match the advertised version exactly; update Studio/clients with the owner, without a
 fallback to an older protocol. A Run owns shells only. Explicit own Run/Turn/invoking-shell waits fail with `self_wait`; other observations
 have no dependency graph. Child requests use expected replies and normal delivery after the sender Turn ends.
 

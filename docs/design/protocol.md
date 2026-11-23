@@ -635,11 +635,11 @@ candidate rejected before mkdir; aggregation must not grant deletion authority.
 
 ## Explicit Replies (#194 Step 2)
 
-The adopted [reply design](reply-expected-messages.md) adds `expect_reply` to
-`message.send`, `message.reply` (`message_id`, text, optional sender label),
+The adopted [reply design](reply-expected-messages.md) adds `message.ask` (replacing the original `expect_reply` field on `message.send`),
+`message.reply` (`message_id`, text, optional sender label),
 `reply_received` to wait conditions, and `reply_cancelled` to cancel outcomes.
 `message.get` removes `answer_node_id` in favor of optional `expect_reply`,
-`reply`, and `reply_to`. `thread.get` exposes up to 128 `awaiting_reply` entries.
+`reply`, and `reply_to`. `thread.get` exposes `pending_replies` `{owed_by, asked_by}` counts (`{count, exact}`, exact through 16); `message.list` pages the duties.
 Reply eligibility, authority, body creation, delivery, and terminal-state CAS
 commit atomically. Operation replay returns the saved result, not a second
 reply. Any model or human may reply after application.

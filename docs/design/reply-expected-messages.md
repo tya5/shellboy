@@ -246,8 +246,8 @@ duplicated.
 
 ### How a model lists pending reply-expected messages
 
-`message list --awaiting` pages pending duties with exactly one direction
-filter: `--owed-by THREAD` (Thread-directed asks it must answer), `--asked-by
+`message list --awaiting` pages pending duties with at most one direction
+filter (none lists every pending duty, oldest first): `--owed-by THREAD` (Thread-directed asks it must answer), `--asked-by
 THREAD` (asks it sent, named or Thread-directed) or `--to NAME` (asks to that
 name). Items are `{message_id, created_at, asked_by, sender, recipient, excerpt}`,
 oldest first, with `--limit` / `--cursor`. `thread get` returns

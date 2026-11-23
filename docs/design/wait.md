@@ -70,7 +70,7 @@ Remove the complete combined resource/dependency graph and all reachability/cycl
 Run/Turn/shell ID comparison alone rejects `self_wait`. Explicit other Run/Turn/shell/reply/Thread conditions remain observations. They finish on a matching fact, interruption,
 unavailability or the requested observation deadline; a cycle can simply time out. This is not task supervision.
 Retain bounded pending operation bindings and interrupted-wait facts for crash inspection, without graph edges or
-automatic replay. For child tasks use `message send --expect-reply` and end the sender Turn, not synchronous Run/Turn
+automatic replay. For child tasks use `message ask --thread T` and end the sender Turn, not synchronous Run/Turn
 waiting. A delivered explicit reply resumes the sender's ordinary conversation. No live parent Run is required.
 
 ### Claude review correction (#276)

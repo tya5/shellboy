@@ -401,7 +401,7 @@ human by default) to request a deliberate reply and retain its message ID. The r
 --text TEXT` (or `--text-stdin`). `message get --message M` exposes reply state;
 `wait --conditions-json '[{"type":"reply_received","message_id":"M"}]'` waits
 for a terminal reply state, not a Turn's end message. `message list --awaiting`
-with one of `--owed-by T`, `--asked-by T` or `--to NAME` pages pending duties,
+with at most one of `--owed-by T`, `--asked-by T` or `--to NAME` pages pending duties,
 and `thread get` returns `pending_replies.owed_by` / `.asked_by` counts. See the adopted reply design for Run-end and exec
 behavior implemented by subsequent steps.
 

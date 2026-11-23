@@ -549,7 +549,7 @@ are recorded in D-243-1, D-244-2 and D-275-1 and the adopted behavior in [protoc
 Under section 4.2, this is a versioned breaking change, not an additive capability: the current protocol becomes 5.
 Remove `RunDetails.owner_run_id`, `RunDetails.owned_run_ids`, `ParentChange.live_run_owner_run_id`,
 `ThreadDetails.children_count`, and the three Thread-get lists `awaiting_reply`, `awaiting_human`,
-`awaiting_thread_replies`. Use `awaiting_replies` with `recipient_kind` and `recipient_thread_id`. Shell ownership
+`awaiting_thread_replies`. Use `pending_replies` counts and `message.list`. Shell ownership
 fields and `owned_execution_ids` remain. The old `wait_cycle` error is removed; direct self-resource observation
 returns typed `self_wait` without a dependency graph. Welcome/Endpoint/envelopes advertise exact version 5, and
 version 4 peers fail closed rather than negotiate a downgrade. No aliases, payload rewrites or compatibility shim.

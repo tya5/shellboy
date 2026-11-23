@@ -251,9 +251,9 @@ the redundant submitted copy must not collect the archived message source.
 
 ## Reply-Expected Messages (#194 Step 2)
 
-`message send --expect-reply` creates a pending reply duty in the acceptance
-receipt. Ordinary sends omit that flag, retaining their existing fingerprint.
-At most 128 duties may remain pending per recipient Thread, including held or
+`message ask` creates a pending reply duty in the acceptance
+receipt. Ordinary sends use `message send`, retaining their existing fingerprint.
+At most 16 duties (`MAX_PENDING_REPLY_DUTIES`) may remain pending per recipient Thread, including held or
 unassigned input. Replay does not create a second duty. A model may require a reply from any Thread, including its own. Admission appends an ordered, once-only
 `reply_expected` notice after the input in the same transaction. Explicit
 replies use `message reply`; Turn end messages do not satisfy duties.
