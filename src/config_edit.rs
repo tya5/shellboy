@@ -708,7 +708,7 @@ fn apply_runtime(
             )
         })
         .collect();
-    let new_hash = sha256_hex(&edited);
+    let new_hash = sha256_hex(edited);
     let mut result = json!({
         "config_path": path,
         "written": written,
