@@ -1010,43 +1010,49 @@ async fn automatic_compaction_skip_is_limited_to_the_live_run_and_turn() {
 }
 
 #[cfg(unix)]
-#[test]
-fn automatic_compaction_live_pty_shows_and_clears_in_both_languages() {
+fn automatic_compaction_live_pty(language: &str, mode: Option<&str>) {
     let root = tempfile::tempdir().unwrap();
-    for (language, mode) in [
-        ("en", "ok"),
-        ("ja", "ok"),
-        ("en", "error"),
-        ("en", "cancel"),
-    ] {
-        let mut command = std::process::Command::new("python3");
-        command
-            .args([
-                "tests/support/auto_compaction_pty.py",
-                "--binary",
-                env!("CARGO_BIN_EXE_shellboy"),
-                "--language",
-                language,
-                "--out",
-            ])
-            .arg(root.path().join(format!("{language}-{mode}.json")));
-        match mode {
-            "error" => {
-                command.arg("--summary-error");
-            }
-            "cancel" => {
-                command.arg("--cancel");
-            }
-            _ => {}
-        }
-        let output = command
-            .output()
-            .expect("run isolated synthetic PTY fixture");
-        assert!(
-            output.status.success(),
-            "{language}, mode={mode}: stdout={} stderr={}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
+    let output = std::process::Command::new("python3")
+        .args([
+            "tests/support/auto_compaction_pty.py",
+            "--binary",
+            env!("CARGO_BIN_EXE_shellboy"),
+            "--language",
+            language,
+            "--out",
+        ])
+        .arg(root.path().join("observation.json"))
+        .args(mode)
+        .output()
+        .expect("run isolated synthetic PTY fixture");
+    assert!(
+        output.status.success(),
+        "{language}, mode={mode:?}: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn automatic_compaction_live_pty_shows_and_clears_in_english() {
+    automatic_compaction_live_pty("en", None);
+}
+
+#[cfg(unix)]
+#[test]
+fn automatic_compaction_live_pty_shows_and_clears_in_japanese() {
+    automatic_compaction_live_pty("ja", None);
+}
+
+#[cfg(unix)]
+#[test]
+fn automatic_compaction_live_pty_clears_when_the_summary_is_rejected() {
+    automatic_compaction_live_pty("en", Some("--summary-error"));
+}
+
+#[cfg(unix)]
+#[test]
+fn automatic_compaction_live_pty_clears_on_cancel() {
+    automatic_compaction_live_pty("en", Some("--cancel"));
 }

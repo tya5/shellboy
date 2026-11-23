@@ -7,6 +7,11 @@ external harness instead of linking the full integration suite again. The
 collected-source query test still adds 10,000 unrelated relations to the real
 schema and checks the same VM-step bound and index; its seed uses bounded tool
 groups to avoid quadratic recovery-trigger work. No tests were skipped and no timeouts changed.
+The four independent live PTY scenarios are separately scheduled by libtest
+with the existing thread budget. The stream test waits for an opted-in reader
+to observe the reasoning delta before asserting that the opt-out view has no
+change, removing a fixed 30-second negative wait. No new scheduler or shared
+database, and no watchdog or platform gate changes.
 Hosted before/after timing awaits the next green all-OS landing run.
 
 
