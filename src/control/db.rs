@@ -3799,7 +3799,7 @@ mod thread_list_plan_tests {
         let plans: Vec<String> = db
             .prepare(&format!(
                 "EXPLAIN QUERY PLAN {}",
-                thread_summary::page_sql(ArchivedFilter::Exclude, 0, false, false)
+                thread_summary::page_sql(ArchivedFilter::Exclude, 0, false)
             ))
             .unwrap()
             .query_map(params![100_i64, "", "", 50], |r| r.get(3))
@@ -3829,7 +3829,7 @@ mod thread_list_plan_tests {
     fn outer_plan(db: &Connection, mode: ArchivedFilter) -> Vec<String> {
         db.prepare(&format!(
             "EXPLAIN QUERY PLAN {}",
-            thread_summary::page_sql(mode, 0, false, false)
+            thread_summary::page_sql(mode, 0, false)
         ))
         .unwrap()
         .query_map(params![100_i64, "", "", 50], |r| {
@@ -3997,12 +3997,7 @@ mod thread_list_plan_tests {
             // Archived rows are the newest by `updated_at`: a residual filter would
             // have to walk past all of them before reaching one visible Thread.
             let mut statement = db
-                .prepare(&thread_summary::page_sql(
-                    ArchivedFilter::Exclude,
-                    0,
-                    false,
-                    false,
-                ))
+                .prepare(&thread_summary::page_sql(ArchivedFilter::Exclude, 0, false))
                 .unwrap();
             let rows = statement
                 .query_map(params![1_000_000_i64, "", "", 50], |_| Ok(()))
@@ -4031,7 +4026,7 @@ mod thread_list_plan_tests {
         }
         db.prepare(&format!(
             "EXPLAIN QUERY PLAN {}",
-            thread_summary::page_sql(mode, tags, cwd, false)
+            thread_summary::page_sql(mode, tags, cwd)
         ))
         .unwrap()
         .query_map(rusqlite::params_from_iter(binds), |r| {
@@ -4077,7 +4072,6 @@ mod thread_list_plan_tests {
                 ArchivedFilter::Exclude,
                 tags,
                 cwd,
-                false,
             ))
             .unwrap();
         let rows = statement
@@ -4179,12 +4173,7 @@ mod thread_list_plan_tests {
         ))
         .unwrap();
         let mut statement = db
-            .prepare(&thread_summary::page_sql(
-                ArchivedFilter::Exclude,
-                1,
-                false,
-                false,
-            ))
+            .prepare(&thread_summary::page_sql(ArchivedFilter::Exclude, 1, false))
             .unwrap();
         let rows = statement
             .query_map(params![1_000_000_i64, "", "", 21_i64, "big"], |_| Ok(()))

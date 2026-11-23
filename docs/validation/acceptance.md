@@ -1,5 +1,12 @@
 # Validation record
 
+## Core #381 Studio read bounds
+
+Local `cargo check --tests --locked`, test layout, and classified language
+audit passed. Synthetic witnesses check sparse state continuation, receipt
+category work, and page-scoped status. Hosted checks and a matched Studio
+pair are not established by the local gates.
+
 ## Core #379 CLI and guide audit fixes
 
 On macOS the temporary-owner service integration test failed before the fix with `target_unavailable` and passed after it (one test). It observes saved output while the service still runs, then observes termination after an explicit stop, without a Run. The compiled CLI help was checked for the distinct cursor rules and dotted-key quoting. No installed-owner or other-OS verification.

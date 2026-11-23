@@ -10621,6 +10621,9 @@
           "minimum": 0,
           "type": "integer"
         },
+        "awaiting_replies_exact": {
+          "type": "boolean"
+        },
         "awaiting_reply": {
           "default": 0,
           "format": "uint64",
@@ -10632,6 +10635,9 @@
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
+        },
+        "awaiting_thread_count_exact": {
+          "type": "boolean"
         },
         "awaiting_thread_replies": {
           "default": 0,

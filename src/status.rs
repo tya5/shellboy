@@ -8,7 +8,6 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use std::cmp::Ordering;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct WorkItem {
@@ -181,40 +180,29 @@ impl WorkKind {
             Self::Turn => "turn",
         }
     }
-    fn terminal(self, state: &str) -> bool {
+    fn terminal_states(self) -> &'static [&'static str] {
         match self {
-            Self::Run | Self::Turn => matches!(state, "completed" | "stopped" | "failed"),
-            Self::Shell => matches!(state, "exited" | "failed" | "stopped"),
-            Self::Message => matches!(state, "applied" | "cancelled"),
-            Self::Attempt => matches!(state, "completed" | "failed" | "incomplete" | "cancelled"),
+            Self::Run | Self::Turn => &["completed", "stopped", "failed"],
+            Self::Shell => &["exited", "failed", "stopped"],
+            Self::Message => &["applied", "cancelled"],
+            Self::Attempt => &["completed", "failed", "incomplete", "cancelled"],
         }
     }
 }
-#[derive(Clone, PartialEq, Eq)]
-struct SortKey {
-    activity: DateTime<FixedOffset>,
+struct PagePosition {
+    activity: Vec<u8>,
     kind: WorkKind,
     id: String,
+    watermark: Vec<u8>,
 }
-impl Ord for SortKey {
-    fn cmp(&self, other: &Self) -> Ordering {
-        other
-            .activity
-            .cmp(&self.activity)
-            .then_with(|| self.kind.cmp(&other.kind))
-            .then_with(|| self.id.cmp(&other.id))
-    }
+
+fn time_key(time: DateTime<FixedOffset>) -> Vec<u8> {
+    let mut key = Vec::with_capacity(12);
+    key.extend_from_slice(&((time.timestamp() as u64) ^ (1 << 63)).to_be_bytes());
+    key.extend_from_slice(&time.timestamp_subsec_nanos().to_be_bytes());
+    key
 }
-impl PartialOrd for SortKey {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-struct ProjectedWork {
-    item: WorkItem,
-    key: SortKey,
-    source_at: DateTime<FixedOffset>,
-}
+
 fn links(kind: WorkKind, item: &WorkItem) -> Result<Vec<Command>> {
     let mut links = match kind {
         WorkKind::Run => vec![Command::RunGet(RunTarget {
@@ -355,10 +343,6 @@ fn check_scope(db: &Connection, args: &StatusArgs) -> Result<Scope> {
         filter,
     })
 }
-struct PagePosition {
-    after: SortKey,
-    watermark: DateTime<FixedOffset>,
-}
 const RESPONSE_CANDIDATE_LIMIT: usize = 256;
 const RESPONSE_NODE_LIMIT: usize = 64;
 fn response_nodes(db: &Connection, attempt_id: &str) -> Result<(Vec<ResponseNodeRef>, bool)> {
@@ -407,7 +391,7 @@ fn decode_cursor(args: &StatusArgs, instance: &str, filter: &str) -> Result<Opti
         }
         let bytes = URL_SAFE_NO_PAD.decode(token).map_err(|_| cursor_error())?;
         let cursor: Cursor = serde_json::from_slice(&bytes).map_err(|_| cursor_error())?;
-        if cursor.version != 2
+        if cursor.version != 3
             || cursor.instance != instance
             || cursor.scope != "durable_only"
             || cursor.filter != filter
@@ -417,36 +401,29 @@ fn decode_cursor(args: &StatusArgs, instance: &str, filter: &str) -> Result<Opti
         if cursor.last.1.is_empty() {
             return Err(cursor_error());
         }
+        let watermark = URL_SAFE_NO_PAD
+            .decode(cursor.watermark)
+            .map_err(|_| cursor_error())?;
+        if watermark.len() != 12 {
+            return Err(cursor_error());
+        }
         Some(PagePosition {
-            after: SortKey {
-                activity: stamp(&cursor.last_activity).map_err(|_| cursor_error())?,
-                kind: WorkKind::parse(&cursor.last.0).map_err(|_| cursor_error())?,
-                id: cursor.last.1,
-            },
-            watermark: stamp(&cursor.watermark).map_err(|_| cursor_error())?,
+            activity: time_key(stamp(&cursor.last_activity).map_err(|_| cursor_error())?),
+            kind: WorkKind::parse(&cursor.last.0).map_err(|_| cursor_error())?,
+            id: cursor.last.1,
+            watermark,
         })
     } else {
         None
     };
     Ok(cursor)
 }
-fn work_item(row: &rusqlite::Row<'_>, kind: WorkKind, state: String) -> Result<ProjectedWork> {
+fn work_item(row: &rusqlite::Row<'_>, kind: WorkKind, state: String) -> Result<WorkItem> {
     let id: String = row.get(1).map_err(sql)?;
     let created_at: Option<String> = row.get(7).map_err(sql)?;
     let started_at: Option<String> = row.get(8).map_err(sql)?;
     let ended_at: Option<String> = row.get(9).map_err(sql)?;
     let updated_at: Option<String> = row.get(10).map_err(sql)?;
-    let source_at = stamp(
-        created_at
-            .as_deref()
-            .or(started_at.as_deref())
-            .ok_or_else(|| {
-                ApiError::new(
-                    ErrorCode::InvalidState,
-                    "Work has no recorded source timestamp",
-                )
-            })?,
-    )?;
     let activity = [&created_at, &started_at, &ended_at, &updated_at]
         .into_iter()
         .filter_map(|v| v.as_deref())
@@ -531,16 +508,7 @@ fn work_item(row: &rusqlite::Row<'_>, kind: WorkKind, state: String) -> Result<P
             })
         })
         .collect();
-    let key = SortKey {
-        activity: activity.0,
-        kind,
-        id,
-    };
-    Ok(ProjectedWork {
-        item,
-        key,
-        source_at,
-    })
+    Ok(item)
 }
 fn encode_cursor(cursor: &Cursor) -> String {
     URL_SAFE_NO_PAD.encode(serde_json::to_vec(cursor).expect("status cursor"))
@@ -551,79 +519,165 @@ fn encode_cursor(cursor: &Cursor) -> String {
 pub fn snapshot(db: &Connection, args: &StatusArgs, instance: &str) -> Result<StatusSnapshot> {
     let scope = check_scope(db, args)?;
     let cursor = decode_cursor(args, instance, &scope.filter)?;
-    let mut watermark = cursor.as_ref().map(|position| position.watermark);
-    // Every source keeps its native lifecycle. Only common metadata and explicit
-    // identifiers are joined; origin tokens and model/shell payloads stay out.
-    let query="WITH work(kind,id,state,thread_id,run_id,turn_id,owner_run_id,created_at,started_at,ended_at,updated_at,operation_id,answer_node_id,attempt_connection,attempt_model,reason) AS (
-      SELECT 'run',r.id,r.state,r.thread_id,r.id,(SELECT id FROM turn WHERE run_id=r.id ORDER BY created_at DESC,id DESC LIMIT 1),NULL,r.created_at,NULL,r.ended_at,NULL,NULL,(SELECT answer_node_id FROM turn WHERE run_id=r.id ORDER BY created_at DESC,id DESC LIMIT 1),NULL,NULL,r.stop_reason FROM run r
-      UNION ALL SELECT 'turn',t.id,t.state,t.thread_id,t.run_id,t.id,NULL,t.created_at,NULL,t.ended_at,NULL,NULL,t.answer_node_id,NULL,NULL,CASE WHEN json_valid(t.recovery_reason_json) THEN COALESCE(json_extract(t.recovery_reason_json,'$.kind'),json_extract(t.recovery_reason_json,'$.code')) END FROM turn t JOIN run r ON r.id=t.run_id
-      UNION ALL SELECT 'shell',s.id,s.state,r.thread_id,s.owner_run_id,s.turn_id,s.owner_run_id,NULL,s.started_at,s.ended_at,NULL,NULL,NULL,NULL,NULL,s.end_reason FROM shell_execution s JOIN run r ON r.id=s.owner_run_id
-      UNION ALL SELECT 'message',m.message_node_id,m.state,m.target_thread_id,m.run_id,m.turn_id,NULL,m.created_at,NULL,NULL,NULLIF(m.updated_at,''),CASE WHEN EXISTS(SELECT 1 FROM operation_receipt o WHERE o.operation_id=m.client_operation_id) THEN m.client_operation_id END,NULL,NULL,NULL,m.hold_reason FROM receipt m LEFT JOIN run r ON r.id=m.run_id LEFT JOIN turn t ON t.id=m.turn_id
-      UNION ALL SELECT 'attempt',a.id,a.state,t.thread_id,t.run_id,t.id,NULL,NULL,a.started_at,a.ended_at,NULL,NULL,t.answer_node_id,a.profile_id,a.model_id,CASE WHEN json_valid(a.error_json) THEN COALESCE(json_extract(a.error_json,'$.kind'),json_extract(a.error_json,'$.code')) END FROM model_attempt a JOIN turn t ON t.id=a.turn_id JOIN run r ON r.id=t.run_id
-    ) SELECT w.*,t.title,t.parent_thread_id,t.profile_id,t.model_id,(SELECT json_object('expect_reply',json_extract(m.result_json,'$.expect_reply'),'reply',json_extract(m.result_json,'$.reply'),'reply_to',json_extract(m.result_json,'$.reply_to')) FROM receipt m WHERE w.kind='message' AND m.message_node_id=w.id) FROM work w JOIN thread t ON t.id=w.thread_id WHERE (?1 IS NULL OR w.thread_id=?1) AND (?2 IS NULL OR w.run_id=?2) ORDER BY w.kind,w.id";
-    let mut statement = db.prepare(query).map_err(sql)?;
+    let flags = rusqlite::functions::FunctionFlags::SQLITE_UTF8
+        | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC;
+    db.create_scalar_function("status_time_key", 1, flags, |ctx| {
+        let time: Option<String> = ctx.get(0)?;
+        time.as_deref()
+            .map(stamp)
+            .transpose()
+            .map(|time| time.map(time_key).unwrap_or_default())
+            .map_err(|err| {
+                rusqlite::Error::UserFunctionError(Box::new(std::io::Error::other(err.message)))
+            })
+    })
+    .map_err(sql)?;
+    let kinds = [
+        WorkKind::Attempt,
+        WorkKind::Message,
+        WorkKind::Run,
+        WorkKind::Shell,
+        WorkKind::Turn,
+    ];
+    let sources = [
+        (
+            "a",
+            "a.id",
+            "model_attempt a JOIN turn t ON t.id=a.turn_id",
+            "t.thread_id",
+            "t.run_id",
+            "a.started_at",
+            "a.ended_at",
+            "NULL",
+        ),
+        (
+            "m",
+            "m.message_node_id",
+            "receipt m",
+            "m.target_thread_id",
+            "m.run_id",
+            "m.created_at",
+            "NULL",
+            "NULLIF(m.updated_at,'')",
+        ),
+        (
+            "r",
+            "r.id",
+            "run r",
+            "r.thread_id",
+            "r.id",
+            "r.created_at",
+            "r.ended_at",
+            "NULL",
+        ),
+        (
+            "s",
+            "s.id",
+            "shell_execution s JOIN run r ON r.id=s.owner_run_id",
+            "r.thread_id",
+            "s.owner_run_id",
+            "s.started_at",
+            "s.ended_at",
+            "NULL",
+        ),
+        (
+            "t",
+            "t.id",
+            "turn t",
+            "t.thread_id",
+            "t.run_id",
+            "t.created_at",
+            "t.ended_at",
+            "NULL",
+        ),
+    ];
+    let mut sources_sql = Vec::new();
+    for (kind, (alias, id, from, thread, run, created, ended, updated)) in
+        kinds.into_iter().zip(sources)
+    {
+        let mut predicate = String::new();
+        if args.thread_id.is_some() {
+            predicate.push_str(&format!(" AND {thread}=:thread"));
+        }
+        if args.run_id.is_some() {
+            predicate.push_str(&format!(" AND {run}=:run"));
+        }
+        if !scope.states.is_empty() {
+            predicate.push_str(&format!(
+                " AND {alias}.state IN (SELECT value FROM json_each(:states))"
+            ));
+        } else if !args.all {
+            predicate.push_str(&format!(
+                " AND {alias}.state NOT IN ({})",
+                kind.terminal_states()
+                    .iter()
+                    .map(|state| format!("'{state}'"))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            ));
+        }
+        let source = format!("status_time_key({created})");
+        let activity = format!("max({source},status_time_key({ended}),status_time_key({updated}))");
+        sources_sql.push(format!("SELECT '{}' kind,{id} id,{alias}.rowid rid,{source} source,{activity} activity FROM {from} WHERE 1{predicate}", kind.as_str()));
+    }
+    // Only sort/filter identity keys. The five detail branches seek by rowid
+    // after the bounded page is chosen, so non-page work is never projected.
+    let sources_sql = sources_sql.join(" UNION ALL ");
+    let query = format!(
+        r#"WITH input(thread,run,states,since,after,key_kind,key_id,watermark,lim) AS (
+        VALUES (:thread,:run,:states,:since,:after,:kind,:id,:watermark,:lim)
+    ), candidates AS NOT MATERIALIZED ({sources_sql}),
+    page_keys AS MATERIALIZED (
+        SELECT c.kind,c.id,c.rid,c.activity,
+               coalesce(input.watermark,(SELECT max(source) FROM candidates WHERE activity>=:since)) watermark
+        FROM candidates c CROSS JOIN input
+        WHERE c.activity>=input.since AND (input.watermark IS NULL OR c.source<=input.watermark)
+          AND (input.after IS NULL OR c.activity<input.after OR
+               (c.activity=input.after AND (c.kind,c.id)>(input.key_kind,input.key_id)))
+        ORDER BY c.activity DESC,c.kind,c.id LIMIT (SELECT lim FROM input)
+    ),
+    work(kind,id,state,thread_id,run_id,turn_id,owner_run_id,created_at,started_at,ended_at,updated_at,operation_id,answer_node_id,attempt_connection,attempt_model,reason) AS (
+      SELECT 'run',r.id,r.state,r.thread_id,r.id,(SELECT id FROM turn WHERE run_id=r.id ORDER BY created_at DESC,id DESC LIMIT 1),NULL,r.created_at,NULL,r.ended_at,NULL,NULL,(SELECT answer_node_id FROM turn WHERE run_id=r.id ORDER BY created_at DESC,id DESC LIMIT 1),NULL,NULL,r.stop_reason FROM run r WHERE r.rowid IN (SELECT rid FROM page_keys WHERE kind='run')
+      UNION ALL SELECT 'turn',t.id,t.state,t.thread_id,t.run_id,t.id,NULL,t.created_at,NULL,t.ended_at,NULL,NULL,t.answer_node_id,NULL,NULL,CASE WHEN json_valid(t.recovery_reason_json) THEN COALESCE(json_extract(t.recovery_reason_json,'$.kind'),json_extract(t.recovery_reason_json,'$.code')) END FROM turn t JOIN run r ON r.id=t.run_id WHERE t.rowid IN (SELECT rid FROM page_keys WHERE kind='turn')
+      UNION ALL SELECT 'shell',s.id,s.state,r.thread_id,s.owner_run_id,s.turn_id,s.owner_run_id,NULL,s.started_at,s.ended_at,NULL,NULL,NULL,NULL,NULL,s.end_reason FROM shell_execution s JOIN run r ON r.id=s.owner_run_id WHERE s.rowid IN (SELECT rid FROM page_keys WHERE kind='shell')
+      UNION ALL SELECT 'message',m.message_node_id,m.state,m.target_thread_id,m.run_id,m.turn_id,NULL,m.created_at,NULL,NULL,NULLIF(m.updated_at,''),CASE WHEN EXISTS(SELECT 1 FROM operation_receipt o WHERE o.operation_id=m.client_operation_id) THEN m.client_operation_id END,NULL,NULL,NULL,m.hold_reason FROM receipt m LEFT JOIN run r ON r.id=m.run_id LEFT JOIN turn t ON t.id=m.turn_id WHERE m.rowid IN (SELECT rid FROM page_keys WHERE kind='message')
+      UNION ALL SELECT 'attempt',a.id,a.state,t.thread_id,t.run_id,t.id,NULL,NULL,a.started_at,a.ended_at,NULL,NULL,t.answer_node_id,a.profile_id,a.model_id,CASE WHEN json_valid(a.error_json) THEN COALESCE(json_extract(a.error_json,'$.kind'),json_extract(a.error_json,'$.code')) END FROM model_attempt a JOIN turn t ON t.id=a.turn_id JOIN run r ON r.id=t.run_id WHERE a.rowid IN (SELECT rid FROM page_keys WHERE kind='attempt')
+    ) SELECT w.*,t.title,t.parent_thread_id,t.profile_id,t.model_id,(SELECT json_object('expect_reply',json_extract(m.result_json,'$.expect_reply'),'reply',json_extract(m.result_json,'$.reply'),'reply_to',json_extract(m.result_json,'$.reply_to')) FROM receipt m WHERE w.kind='message' AND m.message_node_id=w.id),p.watermark FROM page_keys p JOIN work w ON w.kind=p.kind AND w.id=p.id JOIN thread t ON t.id=w.thread_id ORDER BY p.activity DESC,p.kind,p.id"#
+    );
+    let mut statement = db.prepare(&query).map_err(sql)?;
     let mut rows = statement
-        .query(params![args.thread_id, args.run_id])
+        .query(rusqlite::named_params! {
+            ":thread": args.thread_id, ":run": args.run_id,
+            ":states": serde_json::to_string(&scope.states).expect("status states"),
+            ":since": scope.since.map(time_key).unwrap_or_default(),
+            ":after": cursor.as_ref().map(|cursor| &cursor.activity),
+            ":kind": cursor.as_ref().map(|cursor| cursor.kind.as_str()),
+            ":id": cursor.as_ref().map(|cursor| &cursor.id),
+            ":watermark": cursor.as_ref().map(|cursor| &cursor.watermark),
+            ":lim": i64::from(args.limit) + 1,
+        })
         .map_err(sql)?;
-    let mut digest = Sha256::new();
     let mut selected = Vec::new();
+    let mut watermark: Option<Vec<u8>> = None;
     while let Some(row) = rows.next().map_err(sql)? {
         let kind = WorkKind::parse(&row.get::<_, String>(0).map_err(sql)?)?;
-        let state: String = row.get(2).map_err(sql)?;
-        // Keep native-state exclusion ahead of timestamp/target projection, as
-        // terminal rows can dominate the durable store in the default view.
-        if (scope.states.is_empty() && !args.all && kind.terminal(&state))
-            || (!scope.states.is_empty() && !scope.states.contains(&state))
-        {
-            continue;
-        }
-        let mut projected = work_item(row, kind, state)?;
+        let mut item = work_item(row, kind, row.get(2).map_err(sql)?)?;
         if kind == WorkKind::Run {
-            projected.item.revisit =
-                crate::control::revisit::summary_for_run(db, &projected.item.id).map_err(sql)?;
+            item.revisit = crate::control::revisit::summary_for_run(db, &item.id).map_err(sql)?;
         }
-        let item = &projected.item;
-        if scope
-            .since
-            .is_some_and(|since| projected.key.activity < since)
-        {
-            continue;
-        }
-        if cursor.is_some() && watermark.is_some_and(|upper| projected.source_at > upper) {
-            continue;
-        }
-        if cursor.is_none() {
-            watermark =
-                Some(watermark.map_or(projected.source_at, |upper| upper.max(projected.source_at)));
-        }
-        let body = serde_json::to_vec(&item).expect("work item");
-        digest.update((body.len() as u64).to_le_bytes());
-        digest.update(&body);
-        if cursor
-            .as_ref()
-            .is_some_and(|position| projected.key <= position.after)
-        {
-            continue;
-        }
-        selected.push(projected);
-        selected.sort_by(|a, b| a.key.cmp(&b.key));
-        selected.truncate(args.limit as usize + 1);
+        watermark = row.get(21).map_err(sql)?;
+        selected.push(item);
     }
-    let fingerprint = digest
-        .finalize()
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect::<String>();
     // A page can hold many Runs; bound the added warning bytes without hiding
     // any Run's warnings. The ordinary cursor resumes at the first deferred row.
     let mut remaining_warning_bytes = 256_usize * 1024;
     let mut page_len = 0;
     for projected in selected.iter_mut().take(args.limit as usize) {
-        if projected.item.kind == "run" {
+        if projected.kind == "run" {
             let warnings: Option<String> = db
                 .query_row(
                     "SELECT instruction_warnings_json FROM run WHERE id=?1",
-                    [&projected.item.id],
+                    [&projected.id],
                     |r| r.get(0),
                 )
                 .map_err(sql)?;
@@ -632,7 +686,7 @@ pub fn snapshot(db: &Connection, args: &StatusArgs, instance: &str) -> Result<St
                     break;
                 };
                 remaining_warning_bytes = remaining;
-                projected.item.instruction_warnings =
+                projected.instruction_warnings =
                     crate::instructions::decode_warnings(Some(&warnings));
             }
         }
@@ -640,15 +694,13 @@ pub fn snapshot(db: &Connection, args: &StatusArgs, instance: &str) -> Result<St
     }
     let next_cursor = if selected.len() > page_len {
         selected.truncate(page_len);
-        let last = &selected.last().expect("nonzero page").item;
+        let last = selected.last().expect("nonzero page");
         Some(encode_cursor(&Cursor {
-            version: 2,
+            version: 3,
             instance: instance.into(),
             scope: "durable_only".into(),
-            filter: scope.filter,
-            watermark: watermark
-                .expect("nonempty page source timestamp")
-                .to_rfc3339(),
+            filter: scope.filter.clone(),
+            watermark: URL_SAFE_NO_PAD.encode(watermark.expect("nonempty page source timestamp")),
             last: (last.kind.clone(), last.id.clone()),
             last_activity: last.activity_at.clone(),
         }))
@@ -656,18 +708,33 @@ pub fn snapshot(db: &Connection, args: &StatusArgs, instance: &str) -> Result<St
         None
     };
     for projected in &mut selected {
-        if projected.item.kind == "attempt" {
+        if projected.kind == "attempt" {
             let query = format!(
                 "SELECT {} FROM model_attempt r WHERE r.id=?1",
                 crate::compaction::discard::status_sql("r")
             );
             let text: Option<String> = db
-                .query_row(&query, [&projected.item.id], |r| r.get(0))
+                .query_row(&query, [&projected.id], |r| r.get(0))
                 .map_err(sql)?;
-            projected.item.compaction_outcome =
+            (projected.response_nodes, projected.response_nodes_truncated) =
+                response_nodes(db, &projected.id)?;
+            projected.compaction_outcome =
                 text.as_deref().and_then(crate::compaction::discard::decode);
         }
     }
+    let mut digest = Sha256::new();
+    digest.update(scope.filter.as_bytes());
+    digest.update(args.limit.to_le_bytes());
+    for item in &selected {
+        let body = serde_json::to_vec(item).expect("work item");
+        digest.update((body.len() as u64).to_le_bytes());
+        digest.update(&body);
+    }
+    let fingerprint = digest
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
     let filters = StatusFilters {
         memory: args.memory,
         thread_id: args.thread_id.clone(),
@@ -683,19 +750,12 @@ pub fn snapshot(db: &Connection, args: &StatusArgs, instance: &str) -> Result<St
     // the durable fingerprint or cursor sort keys.
     let observed = chrono::Utc::now();
     for selected in &mut selected {
-        if selected.item.kind == "attempt" {
-            (
-                selected.item.response_nodes,
-                selected.item.response_nodes_truncated,
-            ) = response_nodes(db, &selected.item.id)?;
-        }
-        if selected.item.kind == "shell" {
-            let timing =
-                crate::shell::timing::read(db, &selected.item.id, observed).map_err(sql)?;
-            (selected.item.stdin_open, selected.item.stdin_last_write_at) =
-                crate::stdin_facts::read(db, &selected.item.id).map_err(sql)?;
-            selected.item.elapsed_ms = timing.elapsed_ms;
-            selected.item.last_output_at = timing.last_output_at;
+        if selected.kind == "shell" {
+            let timing = crate::shell::timing::read(db, &selected.id, observed).map_err(sql)?;
+            (selected.stdin_open, selected.stdin_last_write_at) =
+                crate::stdin_facts::read(db, &selected.id).map_err(sql)?;
+            selected.elapsed_ms = timing.elapsed_ms;
+            selected.last_output_at = timing.last_output_at;
         }
     }
     Ok(StatusSnapshot {
@@ -708,7 +768,7 @@ pub fn snapshot(db: &Connection, args: &StatusArgs, instance: &str) -> Result<St
         scope: "durable_only".into(),
         consistency: "single_sqlite_read_transaction".into(),
         fingerprint,
-        items: selected.into_iter().map(|p| p.item).collect(),
+        items: selected,
         next_cursor,
         additional_properties: Default::default(),
     })
@@ -717,6 +777,45 @@ pub fn snapshot(db: &Connection, args: &StatusArgs, instance: &str) -> Result<St
 #[cfg(test)]
 mod response_node_tests {
     use super::*;
+
+    #[test]
+    fn status_projects_only_the_returned_page_and_ignores_terminal_work_by_default() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        db.execute_batch("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at) VALUES('t','Title','/','','p','m','now');
+            INSERT INTO run(id,thread_id,state,created_at) VALUES('live','t','live','2026-11-24T00:00:00.000000002Z'),('older','t','completed','2026-11-23T19:00:00.000000001-05:00');
+            WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<5000)
+            INSERT INTO run(id,thread_id,state,created_at) SELECT 'history'||i,'t','completed','2026-11-22T00:00:00Z' FROM n;").unwrap();
+        let args = StatusArgs {
+            limit: 1,
+            ..Default::default()
+        };
+        let active = snapshot(&db, &args, "fixture").unwrap();
+        assert_eq!(active.items.len(), 1);
+        assert_eq!(active.items[0].id, "live");
+        assert!(active.next_cursor.is_none());
+        let all = StatusArgs { all: true, ..args };
+        let first = snapshot(&db, &all, "fixture").unwrap();
+        db.execute(
+            "UPDATE run SET stop_reason='changed off page' WHERE id='older'",
+            [],
+        )
+        .unwrap();
+        let unchanged = snapshot(&db, &all, "fixture").unwrap();
+        assert_eq!(unchanged.fingerprint, first.fingerprint);
+        let next = snapshot(
+            &db,
+            &StatusArgs {
+                cursor: first.next_cursor,
+                ..all
+            },
+            "fixture",
+        )
+        .unwrap();
+        assert_eq!(next.items.len(), 1);
+        assert_eq!(next.items[0].id, "older");
+        assert_eq!(next.items[0].reason.as_deref(), Some("changed off page"));
+    }
 
     #[test]
     fn response_nodes_bound_candidates_and_disclose_incomplete_results() {

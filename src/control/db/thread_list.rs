@@ -58,7 +58,7 @@ pub(crate) fn thread_list(
     let state = args.state.map(crate::protocol::ThreadListState::as_str);
     let scope = match (args.order, state) {
         (ThreadListOrder::Updated, Some(state)) => {
-            format!("{}.state.{state}", list_scope(args.archived))
+            format!("{}.state_scan.{state}", list_scope(args.archived))
         }
         (ThreadListOrder::Updated, None) => list_scope(args.archived).to_owned(),
         (ThreadListOrder::Created, _) => format!("thread.list.created.{}", args.archived.as_str()),
@@ -69,6 +69,7 @@ pub(crate) fn thread_list(
         .map(|token| PageCursor::decode(token, &scope, &cursor_filter, 0, None))
         .transpose()?;
     let watermark: i64 = match (args.order, &cursor) {
+        _ if state.is_some() => 0,
         (ThreadListOrder::Created, _) => 0,
         (ThreadListOrder::Updated, Some(cursor)) => i64::try_from(cursor.watermark)
             .map_err(|_| error(ErrorCode::CursorExpired, "invalid thread watermark"))?,
@@ -100,8 +101,11 @@ pub(crate) fn thread_list(
     // Filter against the same derived labels returned by ThreadGet/List. Keep
     // candidates as a cursor: a filtered miss scans without collecting history.
     let sql = match args.order {
+        ThreadListOrder::Updated if state.is_some() => {
+            thread_summary::state_candidate_sql(args.archived, position.is_some())
+        }
         ThreadListOrder::Updated => {
-            thread_summary::page_sql(args.archived, tags.len(), cwd.is_some(), state.is_some())
+            thread_summary::page_sql(args.archived, tags.len(), cwd.is_some())
         }
         ThreadListOrder::Created => {
             thread_summary::created_page_sql(args.archived, position.as_ref().map(|(time, _)| time))
@@ -113,18 +117,44 @@ pub(crate) fn thread_list(
     } else {
         -1
     };
+    let candidate_limit = i64::from(crate::protocol::MAX_LIST_LIMIT) + 1;
     let mut binds: Vec<&dyn rusqlite::ToSql> = match args.order {
+        ThreadListOrder::Updated if state.is_some() && position.is_some() => {
+            vec![&candidate_limit, &last_time, &last_id]
+        }
+        ThreadListOrder::Updated if state.is_some() => vec![&candidate_limit],
         ThreadListOrder::Updated => vec![&watermark, &last_time, &last_id, &page_limit],
         ThreadListOrder::Created => vec![&last_time, &last_id, &page_limit],
     };
-    binds.extend(tags.iter().map(|tag| tag as &dyn rusqlite::ToSql));
-    binds.extend(cwd.iter().map(|path| path as &dyn rusqlite::ToSql));
-    binds.extend(state.iter().map(|state| state as &dyn rusqlite::ToSql));
+    if state.is_none() {
+        binds.extend(tags.iter().map(|tag| tag as &dyn rusqlite::ToSql));
+        binds.extend(cwd.iter().map(|path| path as &dyn rusqlite::ToSql));
+    }
     let mut rows = statement.query(binds.as_slice()).map_err(sql_error)?;
     let mut items = Vec::new();
+    let mut scanned = 0;
+    let mut last_examined = None;
+    let mut continuation = None;
     while let Some(row) = rows.next().map_err(sql_error)? {
         let raw = thread_summary::decode(row).map_err(sql_error)?;
         let id = &raw.thread_id;
+        if let Some(state) = state {
+            if scanned == crate::protocol::MAX_LIST_LIMIT || items.len() == args.limit as usize {
+                continuation = last_examined;
+                break;
+            }
+            scanned += 1;
+            last_examined = Some((Some(raw.updated_at.clone()), id.clone()));
+            if raw.state != state || cwd.is_some_and(|path| path != raw.cwd) {
+                continue;
+            }
+            if !tags.is_empty() {
+                let actual = super::tags::for_thread(connection, id)?;
+                if !tags.iter().all(|tag| actual.contains(tag)) {
+                    continue;
+                }
+            }
+        }
         let title = thread_display_title(connection, id, &raw.stored_title)?;
         if !thread_summary::matches_filter(id, &title, &raw.cwd, filter) {
             continue;
@@ -134,31 +164,31 @@ pub(crate) fn thread_list(
             break;
         }
     }
-    let next_cursor = if items.len() > args.limit as usize {
+    if items.len() > args.limit as usize {
         items.pop();
         let last = items.last().unwrap();
-        Some(
+        continuation = Some((
+            match args.order {
+                ThreadListOrder::Updated => Some(last.updated_at.clone()),
+                ThreadListOrder::Created => last.created_at.clone(),
+            },
+            last.thread_id.clone(),
+        ));
+    }
+    let next_cursor = continuation
+        .map(|position| {
             PageCursor {
                 version: 1,
                 scope,
                 filter: cursor_filter,
-                last_sort_key: serde_json::to_string(&(
-                    match args.order {
-                        ThreadListOrder::Updated => Some(last.updated_at.as_str()),
-                        ThreadListOrder::Created => last.created_at.as_deref(),
-                    },
-                    &last.thread_id,
-                ))
-                .unwrap(),
+                last_sort_key: serde_json::to_string(&position).unwrap(),
                 watermark: watermark as u64,
                 revision: 0,
                 encoding: None,
             }
-            .encode()?,
-        )
-    } else {
-        None
-    };
+            .encode()
+        })
+        .transpose()?;
     attach_tags(connection, &mut items)?;
     Ok(Page { items, next_cursor })
 }
@@ -307,8 +337,7 @@ fn awaiting_human_candidates(
         .map(|rows| {
             rows.into_iter()
                 .map(|(id, count, oldest)| {
-                    let exact =
-                        count < (crate::protocol::MAX_HUMAN_REPLY_SUMMARY_DUTIES + 1) as i64;
+                    let exact = thread_summary::reply_count_exact(count.max(0) as u64);
                     (
                         id,
                         AwaitingHumanCount {
@@ -405,5 +434,59 @@ mod tests {
         )
         .unwrap();
         assert!(empty.items.is_empty() && empty.next_cursor.is_none());
+    }
+
+    #[test]
+    fn sparse_state_page_continues_without_scanning_all_threads() {
+        let measure = |num_threads| {
+            let db = Connection::open_in_memory().unwrap();
+            db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+            db.execute_batch(&format!("
+                WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<{num_threads})
+                INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at)
+                SELECT printf('t%06d',i),'Title','/','','p','m','2026-11-24T00:00:00Z' FROM n;
+                INSERT INTO run(id,thread_id,state,created_at)
+                SELECT 'r'||id,id,'failed',updated_at FROM thread WHERE id=printf('t%06d',{num_threads}-200);
+            ")).unwrap();
+            let args = ThreadListArgs {
+                state: Some(crate::protocol::ThreadListState::Failed),
+                archived: ArchivedFilter::Include,
+                limit: 1,
+                ..Default::default()
+            };
+            let first = thread_list(&db, &args).unwrap();
+            assert!(first.items.is_empty());
+            let cursor = first.next_cursor.expect("unexamined candidates remain");
+            let second = thread_list(
+                &db,
+                &ThreadListArgs {
+                    cursor: Some(cursor),
+                    ..args
+                },
+            )
+            .unwrap();
+            assert_eq!(
+                second.items[0].thread_id,
+                format!("t{:06}", num_threads - 200)
+            );
+            let sql = thread_summary::state_candidate_sql(ArchivedFilter::Include, true);
+            let mut statement = db.prepare(&sql).unwrap();
+            let rows = statement
+                .query_map(
+                    params![
+                        201,
+                        "2026-11-24T00:00:00Z",
+                        format!("t{:06}", num_threads - 199)
+                    ],
+                    |_| Ok(()),
+                )
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap();
+            assert_eq!(rows.len(), 201);
+            statement.get_status(rusqlite::StatementStatus::VmStep)
+        };
+        let (few, many) = (measure(450), measure(8000));
+        assert!(many <= few + 100, "{few} -> {many}");
     }
 }

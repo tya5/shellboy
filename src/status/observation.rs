@@ -432,7 +432,7 @@ pub(crate) fn matches_filters(
         if !args.state.iter().any(|wanted| wanted == state) {
             return Some(false);
         }
-    } else if !args.all && kind.canonical().terminal(state) {
+    } else if !args.all && kind.canonical().terminal_states().contains(&state) {
         return Some(false);
     }
     for (filter, name) in [(&args.thread_id, "thread_id"), (&args.run_id, "run_id")] {

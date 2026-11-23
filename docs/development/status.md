@@ -1,5 +1,11 @@
 # Development status
 
+## Core #381 Studio read bounds
+
+State-filtered Thread pages have a bounded candidate scan, status chooses SQL
+page keys before projection, and list reply counts disclose lower bounds.
+See [the protocol changes](../design/protocol-versions/next-381.md).
+
 ## Core #379 CLI and guide audit fixes
 
 Shell waits resolve the owning Thread like `shell get`, including service executions without a Run. The CLI help and guides now distinguish direct self-waits from dependency cycles, live config adoption from restart-only changes, owner RPC selection from startup config, and Thread wait cursors from shell read cursors. They also explain rotation recovery and quoting dotted connection names. No schema or protocol number change.

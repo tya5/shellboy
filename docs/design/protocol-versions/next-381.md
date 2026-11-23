@@ -1,0 +1,18 @@
+# Bounded Studio list reads (#381)
+
+`thread.list` reports `awaiting_replies_exact` for the total and
+`awaiting_thread_count_exact` for the Thread-directed count (including its
+`awaiting_thread_replies` field). Like `awaiting_named_count_exact`, an absent
+flag means exact; false means at least the reported number. A saturated count
+reports 17, not an exact total. Named oldest is omitted when the named count
+is not exact.
+
+A `thread.list` state filter examines at most 200 candidates plus a lookahead.
+A present `next_cursor` means more matches may exist, even if `items` is empty.
+Keep all filters when continuing; this is a live scan, not a frozen snapshot.
+Previous state-filter cursors expire; other Thread list cursors are unchanged.
+
+`status` pages and excludes unused terminal work in SQL before projecting
+rows. Its fingerprint identifies the normalized query and the durable rows
+actually returned on the page. It does not describe other pages or include
+read-time shell observations. Old `status` cursors expire.

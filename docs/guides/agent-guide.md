@@ -477,7 +477,14 @@ Creation order puts null last and breaks ties by descending Thread ID.
 
 To tidy mass-produced Threads, archive finished ones instead of deleting them: `shellboy thread archive --thread ID_1 --thread ID_2` (up to 200 IDs per call; add `--descendants` to include each Thread's children) hides them from the default `shellboy thread list` and changes nothing else (history, search, usage and messages still work, no storage is freed, `updated_at` does not move). There is no archive-by-filter command, so choose the IDs yourself: read `shellboy thread list --limit 200` (each item has `state`, `updated_at`, `last_end_message` and `parent_id`) and pick Threads whose work is complete and whose results you or the user no longer need in the list. Do not archive a Thread whose Run you still wait on; a Run in progress is not stopped, but the Thread leaves the list. List what you archived with `thread list --archived only` and reverse it with `shellboy thread unarchive --thread ID`. Omitting `--thread` archives your own Thread, and a bare `thread archive --descendants` hides your whole own subtree, so name IDs explicitly. Archive only Threads you created or were asked to tidy: never your parent or the Thread the user is talking in, since that hides it from the user's list. A new Run on an archived Thread unarchives it, and a call that selects more than 256 Threads with `--descendants` is refused without changes.
 
-Use `shellboy thread list --state failed --limit 50` (or `--state recovery_wait`) to page current Thread states in update order; keep the state filter when passing `--cursor NEXT_CURSOR`.
+Use `shellboy thread list --state failed --limit 50` (or `--state recovery_wait`) to page current Thread states in update order; keep all filters when passing `--cursor NEXT_CURSOR`. A short or empty page
+with `next_cursor` means more matches may exist; continue until the cursor is
+absent. Rows can move as activity changes, so this is not a frozen snapshot.
+
+`awaiting_replies_exact` and `awaiting_thread_count_exact` describe the total
+and Thread-directed pending counts, respectively. As with
+`awaiting_named_count_exact`, absent means exact and `false` means 17 or more,
+not exactly 17.
 
 To find Threads waiting on a named recipient across the owner, pass the name to `--awaiting`. For the default recipient, use `shellboy thread list --awaiting human --limit 50` and continue with `--cursor NEXT_CURSOR`. Each item reports `awaiting_named_count` and `awaiting_named_count_exact`: counts through 16 are exact; count 17 with exact=false means 17 or more. Legacy pending receipts are retained and counted with a 17-row bound. `awaiting_named_oldest_at` is the minimum saved question time only when the count is exact; it is absent for 17-or-more. This is a paged read over pending replies for the selected name only; Thread-to-Thread reply duties are excluded. The `awaiting` filter is exclusive with query, tag, cwd, and state filters; archived mode remains available.
 

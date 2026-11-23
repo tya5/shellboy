@@ -4403,6 +4403,8 @@ impl UiState {
                 awaiting_named_count_exact: true,
                 awaiting_named_count: 0,
                 awaiting_thread_count: 0,
+                awaiting_thread_count_exact: true,
+                awaiting_replies_exact: true,
                 awaiting_named_oldest_at: None,
                 awaiting_replies: 0,
                 last_end_message: None,

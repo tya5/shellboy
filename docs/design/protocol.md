@@ -352,6 +352,8 @@ at read time from the saved start and wall clock, not a process-liveness
 check or monotonic measurement. For terminal shells it is the saved completion
 duration, if known. No output or reclaimed output gives last_output_at: null.
 Status timing does not affect activity_at, sorting, cursor or fingerprint.
+The fingerprint describes the normalized query and durable rows on the returned
+page, not unreturned work.
 
 
 ## Index operation additions (#42/#43/#55)

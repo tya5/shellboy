@@ -33,8 +33,8 @@ fn columns_from() -> String {
     {revisit_pending},{revisit_delivered},
     u.id,u.answer_node_id,latest.ended_at,a.started_at,u.generation,t.archived_at,
     (SELECT count(*) FROM (SELECT 1 FROM receipt q INDEXED BY receipt_reply_pending WHERE q.target_thread_id=t.id AND json_extract(q.result_json,'$.reply.state')='pending' LIMIT {sample_limit})),
-    (SELECT count(*) FROM (SELECT 1 FROM receipt q INDEXED BY receipt_reply_pending WHERE q.target_thread_id=t.id AND json_extract(q.result_json,'$.reply.state')='pending' AND COALESCE(json_extract(q.result_json,'$.to_human'),0)<>1 LIMIT {sample_limit})),
-    (SELECT count(*) FROM (SELECT 1 FROM receipt q INDEXED BY receipt_reply_pending WHERE q.target_thread_id=t.id AND json_extract(q.result_json,'$.reply.state')='pending' AND json_extract(q.result_json,'$.to_human')=1 LIMIT {sample_limit})),
+    (SELECT count(*) FROM (SELECT 1 FROM receipt q INDEXED BY receipt_other_reply_pending WHERE q.target_thread_id=t.id AND json_extract(q.result_json,'$.reply.state')='pending' AND COALESCE(json_extract(q.result_json,'$.to_human'),0)<>1 LIMIT {sample_limit})),
+    (SELECT count(*) FROM (SELECT 1 FROM receipt q INDEXED BY receipt_human_reply_pending WHERE q.target_thread_id=t.id AND json_extract(q.result_json,'$.reply.state')='pending' AND json_extract(q.result_json,'$.to_human')=1 LIMIT {sample_limit})),
     CASE WHEN (SELECT count(*) FROM (SELECT 1 FROM receipt q INDEXED BY receipt_human_reply_pending WHERE q.target_thread_id=t.id AND json_extract(q.result_json,'$.reply.state')='pending' AND json_extract(q.result_json,'$.to_human')=1 LIMIT {sample_limit}))<={limit} THEN (SELECT min(q.created_at) FROM (SELECT r.created_at FROM receipt r INDEXED BY receipt_human_reply_pending WHERE r.target_thread_id=t.id AND json_extract(r.result_json,'$.reply.state')='pending' AND json_extract(r.result_json,'$.to_human')=1 ORDER BY r.created_at LIMIT {sample_limit}) q) END, t.created_at
 FROM thread t {activity_joins}
 "
@@ -96,9 +96,9 @@ pub(crate) struct RawSummary {
     pub(crate) stored_title: String,
     pub(super) cwd: String,
     pub(crate) parent_id: Option<String>,
-    updated_at: String,
+    pub(super) updated_at: String,
     created_at: Option<String>,
-    state: String,
+    pub(super) state: String,
     stop_reason: Option<String>,
     pub(crate) activity: RawActivity,
     pub(crate) identity: SummaryIdentity,
@@ -125,7 +125,27 @@ pub(crate) struct SummaryIdentity {
 
 /// Every mode repeats its partial-index predicate literally so SQLite can use
 /// `threads_visible_updated` / `threads_archived_updated` (see the plan tests).
-pub(super) fn page_sql(mode: ArchivedFilter, tags: usize, cwd: bool, state: bool) -> String {
+pub(super) fn state_candidate_sql(mode: ArchivedFilter, after: bool) -> String {
+    let (index, archive) = match mode {
+        ArchivedFilter::Exclude => ("threads_visible_updated", " AND archived_at IS NULL"),
+        ArchivedFilter::Only => ("threads_archived_updated", " AND archived_at IS NOT NULL"),
+        ArchivedFilter::Include => ("threads_updated_seek", ""),
+    };
+    let range = if after {
+        " AND (updated_at,id)<(?2,?3)"
+    } else {
+        ""
+    };
+    let candidates = format!(
+        "SELECT id FROM thread INDEXED BY {index} WHERE deleted_at IS NULL{archive}{range} ORDER BY updated_at DESC,id DESC LIMIT ?1"
+    );
+    let source =
+        format!("FROM ({candidates}) candidates CROSS JOIN thread t ON t.id=candidates.id ");
+    let projection = columns_from().replacen("FROM thread t ", &source, 1);
+    format!("{projection} ORDER BY t.updated_at DESC,t.id DESC")
+}
+
+pub(super) fn page_sql(mode: ArchivedFilter, tags: usize, cwd: bool) -> String {
     let columns_from = columns_from();
     // INDEXED BY pins the partial index: without table statistics the planner
     // prefers `threads_updated` plus a sort, which reads past every archived Thread.
@@ -170,9 +190,6 @@ pub(super) fn page_sql(mode: ArchivedFilter, tags: usize, cwd: bool, state: bool
     if cwd {
         extra(format!("t.cwd=?{}", 5 + tags));
     }
-    if state {
-        extra(format!("{CURRENT_STATE}=?{}", 5 + tags + usize::from(cwd)));
-    }
     let window = "t.rowid<=?1
       AND (?2='' OR t.updated_at<?2 OR (t.updated_at=?2 AND t.id<?3))
       ORDER BY t.updated_at DESC,t.id DESC LIMIT ?4";
@@ -180,9 +197,8 @@ pub(super) fn page_sql(mode: ArchivedFilter, tags: usize, cwd: bool, state: bool
         // Choose the page from IDs and sort keys only, then read the summary columns
         // (latest Run, Turn, activity subqueries) for just those rows: without this
         // they would run for every member of the tag before the sort.
-        let state_joins = if state { RUN_TURN_JOINS } else { "" };
         let inner = format!(
-            "SELECT t.id AS id {source}{state_joins} WHERE {predicate} AND t.deleted_at IS NULL{archived} AND {window}"
+            "SELECT t.id AS id {source} WHERE {predicate} AND t.deleted_at IS NULL{archived} AND {window}"
         );
         let columns_from = columns_from.replacen(
             "FROM thread t ",
@@ -267,12 +283,15 @@ pub(crate) fn decode(row: &Row<'_>) -> rusqlite::Result<RawSummary> {
         archived_at: row.get(21)?,
         awaiting_replies: row.get::<_, i64>(22)?.max(0) as u64,
         awaiting_reply: row.get::<_, i64>(24)?.max(0) as u64,
-        awaiting_reply_exact: row.get::<_, i64>(24)?.max(0)
-            < (crate::protocol::MAX_HUMAN_REPLY_SUMMARY_DUTIES + 1) as i64,
+        awaiting_reply_exact: reply_count_exact(row.get::<_, i64>(24)?.max(0) as u64),
         awaiting_thread_replies: row.get::<_, i64>(23)?.max(0) as u64,
         awaiting_named_oldest_at: row.get(25)?,
     })
 }
+pub(super) fn reply_count_exact(count: u64) -> bool {
+    count <= MAX_HUMAN_REPLY_SUMMARY_DUTIES
+}
+
 pub(crate) fn prepare(raw: RawSummary, title: String, excerpt: String) -> ThreadSummary {
     ThreadSummary {
         awaiting_reply: if raw.awaiting_reply_exact {
@@ -282,6 +301,8 @@ pub(crate) fn prepare(raw: RawSummary, title: String, excerpt: String) -> Thread
         },
         awaiting_thread_replies: raw.awaiting_thread_replies,
         awaiting_replies: raw.awaiting_replies,
+        awaiting_replies_exact: reply_count_exact(raw.awaiting_replies),
+        awaiting_thread_count_exact: reply_count_exact(raw.awaiting_thread_replies),
         awaiting_named_count: if raw.awaiting_reply_exact {
             raw.awaiting_reply
         } else {
@@ -395,21 +416,52 @@ mod tests {
         );
     }
     #[test]
-    fn awaiting_reply_count_uses_the_pending_receipt_index() {
-        let db = fixture();
-        let query = "SELECT count(*) FROM receipt INDEXED BY receipt_reply_pending WHERE target_thread_id=?1 AND json_extract(result_json,'$.reply.state')='pending'";
-        let mut plan = db.prepare(&format!("EXPLAIN QUERY PLAN {query}")).unwrap();
-        let details = plan
-            .query_map(["t"], |r| r.get::<_, String>(3))
-            .unwrap()
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .unwrap();
-        assert!(
-            details
-                .iter()
-                .any(|detail| detail.contains("receipt_reply_pending")),
-            "{details:?}"
-        );
+    fn reply_count_work_stays_flat_when_the_opposite_category_grows() {
+        for to_human in [0, 1] {
+            let db = fixture();
+            let add = |low, high| {
+                db.execute_batch(&format!(r#"
+                WITH RECURSIVE n(i) AS (VALUES({low}) UNION ALL SELECT i+1 FROM n WHERE i<{high})
+                INSERT INTO node(id,kind,created_at,payload_json) SELECT 'q'||i,'user','0','{{}}' FROM n;
+                INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,result_json)
+                SELECT 'r'||id,'r'||id,'{{}}','t',id,'applied','0',json_object('to_human',{to_human},'reply',json_object('state','pending'))
+                FROM node WHERE id GLOB 'q*' AND CAST(substr(id,2) AS INTEGER) BETWEEN {low} AND {high};
+            "#)).unwrap()
+            };
+            let measure = || {
+                let query = format!("{}WHERE t.id='t'", columns_from());
+                let mut statement = db.prepare(&query).unwrap();
+                let raw = statement.query_row([], decode).unwrap();
+                (
+                    prepare(raw, "title".into(), String::new()),
+                    statement.get_status(StatementStatus::VmStep),
+                )
+            };
+            add(1, 20);
+            let (_, few) = measure();
+            add(21, 5000);
+            let (row, many) = measure();
+            assert!(many <= few + 20, "{few} -> {many}");
+            assert_eq!(
+                (row.awaiting_replies, row.awaiting_replies_exact),
+                (17, false)
+            );
+            if to_human == 1 {
+                assert_eq!(
+                    (row.awaiting_thread_count, row.awaiting_thread_count_exact),
+                    (0, true)
+                );
+            } else {
+                assert_eq!(
+                    (row.awaiting_thread_count, row.awaiting_thread_count_exact),
+                    (17, false)
+                );
+                assert_eq!(
+                    (row.awaiting_named_count, row.awaiting_named_count_exact),
+                    (0, true)
+                );
+            }
+        }
     }
 
     #[test]
