@@ -15,3 +15,7 @@ Export is live, not a snapshot. Membership, roles and payloads reflect saved dat
 `shellboy thread import --in PATH` verifies exact UTF-8/LF bytes, the trailer count and SHA-256, and file-internal graph references before sending one request. A hash detects corruption, not authenticity. The entire request must fit the 8,388,608-byte frame; imports also cap nodes at 1,024 and graph references at 4,096. An inconsistent live export may require a fresh export while the Thread is idle.
 
 Import creates an independent Thread with the destination owner defaults, new node and replacement IDs, and no Run, Turn, or attachment restoration. Stored payload text remains exact. `node.import_origins`, when present, is a flat array ordered oldest to newest; each import appends one inert source record. External and missing references remain provenance, not local graph links. Imported opaque reasoning is not sent on conversation continuation; summary rendering retains its existing opaque-data omission.
+
+Restore refuses imported trim or spill markers that depend on source-local anchors. Their IDs remain provenance, not references into the destination Thread ([#367](https://github.com/tya5/shellboy/issues/367)).
+
+Compaction treats imported tool spans as complete as saved, without consulting a local tool ledger. A live export can therefore include a call whose result was not yet saved.

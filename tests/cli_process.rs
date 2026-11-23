@@ -1168,15 +1168,17 @@ async fn thread_import_validates_and_atomically_round_trips_saved_history() {
         db.execute_batch(r#"
           INSERT INTO node(id,kind,created_at,payload_json) VALUES
             ('summary','summary','now','{"summary_format":"context-trim-v1","context_trim":{},"item":{"role":"developer","content":[{"type":"input_text","text":"selected summary"}]}}'),
+            ('anchored','summary','now','{"context_trim":{"first_node_id":"anchored-source","original_order":["anchored-source","original"],"retained_node_ids":["original"]},"item":{"role":"developer","content":[{"type":"input_text","text":"anchored context notice"}]}}'),
+            ('anchored-source','message','now','{"role":"user","content":[{"type":"input_text","text":"anchored original"}]}'),
             ('inner','summary','now','{"item":{"role":"developer","content":[{"type":"input_text","text":"nested source"}]}}'),
             ('call','assistant','now','{"group_id":"imported-group","reasoning_epoch":0,"output":[{"type":"reasoning","id":"bare-opaque","encrypted_content":"spill-secret"},{"type":"function_call","name":"shell","call_id":"import-call","arguments":"{}"}]}'),
             ('result','tool_result','now','{"group_id":"imported-group","item":{"type":"function_call_output","call_id":"import-call","output":"tool-result"}}');
-          INSERT INTO replacement VALUES('original-group','inner','source-key','f','p','pruned','now'),('top-group','summary','top-key','f','p','completed','now');
-          INSERT INTO replacement_source VALUES('original-group',7,'old',0,NULL),('top-group',0,'inner',0,NULL),('top-group',1,'call',0,NULL),('top-group',2,'result',0,NULL);
-          INSERT INTO edge VALUES('old','inner'),('inner','summary'),('call','summary'),('result','summary'),('summary','original');
+          INSERT INTO replacement VALUES('original-group','inner','source-key','f','p','pruned','now'),('top-group','summary','top-key','f','p','completed','now'),('anchored-group','anchored','anchor-key','f','p','completed','now');
+          INSERT INTO replacement_source VALUES('original-group',7,'old',0,NULL),('top-group',0,'inner',0,NULL),('top-group',1,'call',0,NULL),('top-group',2,'result',0,NULL),('anchored-group',0,'anchored-source',0,NULL);
+          INSERT INTO edge VALUES('old','inner'),('inner','summary'),('call','summary'),('result','summary'),('summary','anchored'),('anchored-source','anchored'),('anchored','original');
         "#)?;
-        db.execute("INSERT INTO thread_path VALUES(?1,0,'summary'),(?1,1,'original')",[source])?;
-        db.execute("INSERT INTO thread_replacement VALUES(?1,'original-group'),(?1,'top-group')",[source])?;
+        db.execute("INSERT INTO thread_path VALUES(?1,0,'summary'),(?1,1,'anchored'),(?1,2,'original')",[source])?;
+        db.execute("INSERT INTO thread_replacement VALUES(?1,'original-group'),(?1,'top-group'),(?1,'anchored-group')",[source])?;
         Ok(())
     }).await.unwrap();
     let control = Control::new(&owner, root.path().into());
@@ -1248,9 +1250,9 @@ async fn thread_import_validates_and_atomically_round_trips_saved_history() {
     assert_eq!(response["ok"], true, "{response}");
     let second = response["result"]["thread_id"].as_str().unwrap().to_owned();
     let witness_thread = second.clone();
-    let marker = owner.db.call(move |db| {
+    let (marker, anchored) = owner.db.call(move |db| {
         let second = witness_thread;
-        let row = db.query_row("SELECT n.id,n.payload_json,n.turn_id,n.import_origin_json,t.reasoning_epoch FROM thread_path p JOIN thread t ON t.id=p.thread_id JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND p.ordinal=1", [&second], |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,Option<String>>(2)?,r.get::<_,String>(3)?,r.get::<_,i64>(4)?)))?;
+        let row = db.query_row("SELECT n.id,n.payload_json,n.turn_id,n.import_origin_json,t.reasoning_epoch FROM thread_path p JOIN thread t ON t.id=p.thread_id JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND p.ordinal=2", [&second], |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,Option<String>>(2)?,r.get::<_,String>(3)?,r.get::<_,i64>(4)?)))?;
         assert_ne!(row.0, "original");
         assert_eq!(row.1,saved);
         assert!(row.2.is_none());
@@ -1266,7 +1268,7 @@ async fn thread_import_validates_and_atomically_round_trips_saved_history() {
         assert_eq!(graph.3,"pruned_unreachable");
         assert_eq!(db.query_row("SELECT (SELECT count(*) FROM run)+(SELECT count(*) FROM turn)",[],|r|r.get::<_,i64>(0))?,0);
         assert_eq!(db.query_row("SELECT count(*) FROM thread WHERE id=?1",[source],|r|r.get::<_, i64>(0))?,1);
-        Ok(db.query_row("SELECT node_id FROM thread_path WHERE thread_id=?1 AND ordinal=0", [&second], |r|r.get::<_,String>(0))?)
+        Ok(db.query_row("SELECT a.node_id,b.node_id FROM thread_path a JOIN thread_path b ON b.thread_id=a.thread_id AND b.ordinal=1 WHERE a.thread_id=?1 AND a.ordinal=0", [&second], |r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?)))?)
     }).await.unwrap();
     let preview = request(
         &control,
@@ -1299,39 +1301,66 @@ async fn thread_import_validates_and_atomically_round_trips_saved_history() {
         .send((200, answer("ordinary imported answer")))
         .unwrap();
     settled(&control, &second).await;
-    let mut events = control.subscribe();
-    let restore = request(
-        &control,
-        Command::ContextEdit(ContextEditArgs::for_range(
-            ContextEditAction::Restore,
-            Some(second.clone()),
-            Some(marker),
-            None,
-        )),
-    )
-    .await;
-    let operation_id = restore["operation_id"].as_str().unwrap().to_owned();
-    crate::test_watchdog::watchdog("imported marker restore", async {
-        loop {
-            let status = request(
-                &control,
-                Command::OperationGet(OperationTarget {
-                    operation_id: operation_id.clone(),
-                }),
-            )
-            .await;
-            match status["downstream"]["state"].as_str() {
-                Some("completed") => break,
-                Some("failed") => panic!("{status}"),
-                _ => match events.recv().await {
-                    Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
-                    Err(error) => panic!("{error}"),
-                },
+    for (target, source_local) in [(anchored.clone(), true), (marker, false)] {
+        let mut events = control.subscribe();
+        let restore = request(
+            &control,
+            Command::ContextEdit(ContextEditArgs::for_range(
+                ContextEditAction::Restore,
+                Some(second.clone()),
+                Some(target),
+                None,
+            )),
+        )
+        .await;
+        let operation_id = restore["operation_id"].as_str().unwrap().to_owned();
+        crate::test_watchdog::watchdog("imported marker restore", async {
+            loop {
+                let status = request(
+                    &control,
+                    Command::OperationGet(OperationTarget {
+                        operation_id: operation_id.clone(),
+                    }),
+                )
+                .await;
+                match status["downstream"]["state"].as_str() {
+                    Some("completed") => {
+                        assert!(!source_local, "{status}");
+                        break;
+                    }
+                    Some("failed") => {
+                        assert!(source_local, "{status}");
+                        assert!(
+                            status["downstream"]["outcome"]["error"]["message"]
+                                .as_str()
+                                .unwrap()
+                                .contains("imported marker with source-local anchors"),
+                            "{status}"
+                        );
+                        break;
+                    }
+                    _ => match events.recv().await {
+                        Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                        Err(error) => panic!("{error}"),
+                    },
+                }
             }
-        }
-    })
-    .await
-    .unwrap();
+        })
+        .await
+        .unwrap();
+    }
+    let witness_thread = second.clone();
+    assert!(
+        owner
+            .db
+            .call(move |db| Ok(db.query_row(
+                "SELECT EXISTS(SELECT 1 FROM thread_path WHERE thread_id=?1 AND node_id=?2)",
+                [&witness_thread, &anchored],
+                |r| r.get::<_, bool>(0)
+            )?))
+            .await
+            .unwrap()
+    );
     let config = std::sync::Arc::new(owner.loaded.config.clone());
     let spill = shellboy::compaction::Compactor::new(owner.db.clone(), config)
         .spill(&second, true)

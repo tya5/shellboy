@@ -358,14 +358,23 @@ impl Compactor {
                 "No selected context marker matches the restore request",
             ));
         };
+        let metadata = marker_metadata(&marker)
+            .ok_or_else(|| invalid("Selected node is not a context marker"))?;
+        if marker.imported
+            && ["first_node_id", "original_order", "retained_node_ids"]
+                .iter()
+                .any(|field| metadata.get(field).is_some())
+        {
+            return Err(edit_error(
+                "Cannot restore an imported marker with source-local anchors; selected path retained",
+            ));
+        }
         range::validate(
             &snapshot,
             std::slice::from_ref(&(index..index + 1)),
             range::RangeMode::Summary,
         )?;
         let (originals, completed) = self.replacement_sources(&snapshot, &marker).await?;
-        let metadata = marker_metadata(&marker)
-            .ok_or_else(|| invalid("Selected node is not a context marker"))?;
         let original_order = if metadata.get("original_order").is_some() {
             node_ids(metadata, "original_order")?
         } else {
