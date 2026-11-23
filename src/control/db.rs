@@ -2152,8 +2152,9 @@ impl Store {
                 return Err(ApiError::new(
                     ErrorCode::ReplyLimit,
                     format!("target Thread has {pending} pending reply duties (limit {limit})"),
-                ).details(json!({"limit":limit,"current_count":pending}))
-                 .hint("Withdraw an outstanding request you sent, or wait for a reply before asking again. This request was not accepted"));
+                )
+                .details(json!({"limit":limit,"current_count":pending}))
+                .with_recovery_hint());
             }
         }
         let MessageAssignment {
@@ -4912,7 +4913,12 @@ mod agents_reference_tests {
         assert_eq!(error.code, ErrorCode::ReplyLimit);
         assert_eq!(error.details.as_ref().unwrap()["limit"], 16);
         assert_eq!(error.details.as_ref().unwrap()["current_count"], 16);
-        assert!(error.message.contains("reply to or cancel"));
+        assert_eq!(
+            error.hint.as_deref(),
+            Some(
+                "Withdraw an outstanding request you sent, or wait for a reply before asking again. This request was not accepted"
+            )
+        );
         let retained_thread = thread.clone();
         let retained = store.database.call(move |db| Ok(db.query_row(
             "SELECT count(*) FROM receipt WHERE target_thread_id=?1 AND json_extract(result_json,'$.reply.state')='pending' AND COALESCE(json_extract(result_json,'$.to_human'),0)=0",

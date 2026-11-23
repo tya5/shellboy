@@ -107,7 +107,7 @@ explicit decision; elapsed time alone does not resume it.
 | R5 | Long-lived secretary Thread versus a fresh Thread per job | **Cost unmeasured.** No figure assumed | Run both on one real job; compare `usage get --thread T` per landed item; keep the cheaper |
 | R6 | Liveness and failure alerts | External | Scheduler history, exit codes, a heartbeat file (section 6) |
 | R7 | Archive can hide a question | #262 unarchives when a question is created. An archive afterwards hides the Thread's pending count from the default list | Cleanup excludes Threads with a pending count. #262 should settle whether `thread archive` reports them |
-| R8 | Question cap versus "can accumulate" | Superseded by #262 decision (2026-11-08): 16 pending duties per recipient Thread, including human asks | Reject the 17th with `reply_limit`; clear completed replies or cancel obsolete ones before retrying |
+| R8 | Question cap versus "can accumulate" | Superseded by #262 decision (2026-11-08): 16 pending duties per recipient Thread, including human asks | Reject the 17th ask with `reply_limit`; withdraw a request you sent, or wait for a reply |
 | R9 | Disk guard limit | A running command's own writes are not stopped. Free space that cannot be read does not hold work | Stated in #261; guide text with it |
 | R10 | Web readiness | Protocol 4 and generated schema (#244/#275) are on main; the separate `shellboy-studio` bridge's usability was not verified by these Core changes | Keep TUI or CLI as the fallback until the bridge itself is checked |
 

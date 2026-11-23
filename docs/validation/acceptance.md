@@ -11199,11 +11199,12 @@ Explicit FK-OFF detection, rollback/restoration and the legacy partial-index mig
 focused results precede the new final-SHA CI; the older 6cad05f0 CI is not evidence for the correction.
 ### #262 per-recipient reply-duty admission cap (validation in progress)
 
-- The single limit constant is 16. Message ask and expect-reply share one
+- The single limit constant is 16. Named and Thread-directed asks share one
   write-transaction guard; the query reads no more than 17 pending indexed rows.
-- The 17th addition must return typed `reply_limit` with `limit` and
-  `current_count`; a committed reply or cancellation must allow a subsequent
-  addition. Nothing deletes old over-limit data.
+- The 17th ask must return typed `reply_limit` with `limit` and `current_count`.
+  The hint advises withdrawing a request you sent or waiting for a reply. A
+  committed reply or cancellation must allow a subsequent ask. Ordinary sends
+  do not create duties. Nothing deletes old over-limit data.
 - Legacy reading must cap per-Thread aggregate samples and use the human partial
   index for candidate seeks with a receipt-sequence watermark. The EXPLAIN and
   5,000-Thread/off-page exclusion test must show bounded VM steps; a separate

@@ -664,7 +664,7 @@ The adopted [reply design](reply-expected-messages.md) adds `message.ask` (repla
 `reply`, and `reply_to`. `thread.get` exposes `pending_replies` `{owed_by, asked_by}` counts (`{count, exact}`, exact through 16); `message.list` pages the duties.
 Reply eligibility, authority, body creation, delivery, and terminal-state CAS
 commit atomically. Operation replay returns the saved result, not a second
-reply. Any model or human may reply after application.
+reply. The receiving Thread's model, or a caller without an Origin, may reply after application.
 
 ## Change hints `events.wait` (#243 stage B)
 

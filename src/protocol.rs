@@ -457,7 +457,7 @@ impl ApiError {
             ErrorCode::OutputExpired => "Inspect shell state and retained history; unavailable raw output cannot be reconstructed by retrying read",
             ErrorCode::SelfWait => "Observe another Run, Turn or shell; do not wait for the invoking resource itself",
             ErrorCode::InputLimit => "Inspect the input bound in command help; do not treat truncated input as accepted",
-            ErrorCode::ReplyLimit => "Reply to or cancel an outstanding request in the target Thread, then retry; the rejected message was not accepted",
+            ErrorCode::ReplyLimit => "Withdraw an outstanding request you sent, or wait for a reply before asking again. This request was not accepted",
             ErrorCode::StorageLimit => "Inspect shellboy storage status and storage capacity; resolve the cause before explicitly choosing a recovery action",
             ErrorCode::SaveFailed => "Preserve unsaved input and inspect capacity/permissions; do not keep submitting mutations while saving is unavailable",
             ErrorCode::IoFailed => "Inspect any known operation receipt and saved target state; read shellboy docs get --id shellboy/recovery-and-storage before repeating a side effect",

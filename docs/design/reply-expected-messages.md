@@ -167,7 +167,7 @@ states never change again.
 
 ### Fail-safe cap
 
-A `message ask` is rejected with typed `reply_limit` when the receiving Thread already has 16 pending duties (for a named ask, the asking Thread's own receipt). The count is read with an indexed `LIMIT 17` inside the same write transaction as receipt insertion. The error includes `details.limit` and `details.current_count` and directs the caller to reply to or cancel an outstanding request before retry. This per-Thread cap covers both named asks and Thread-directed asks. Legacy over-limit rows are preserved; reads remain bounded.
+A `message ask` is rejected with typed `reply_limit` when the receiving Thread already has 16 pending duties (for a named ask, the asking Thread's own receipt). The count is read with an indexed `LIMIT 17` inside the same write transaction as receipt insertion. The error includes `details.limit` and `details.current_count` and directs the caller to withdraw a request it sent, or wait for a reply. This per-Thread cap covers both named asks and Thread-directed asks. Legacy over-limit rows are preserved; reads remain bounded.
 
 ### Migration 26
 
@@ -871,7 +871,7 @@ the memo gave no single recommendation, the choice made here is marked
 | Q12 | Remove `history get --final-answer-only` | **Judgement:** not removed. The recommendation assumed exec would stop using it, but the user's Q14 answer (`--result turn-end\|run-end`) needs the end-message projection. It is renamed `--end-message-only` with the rest of the "answer" vocabulary |
 | Q13 | Forks | A fork does not inherit the duty to reply; only the original Thread can reply |
 | Q14 | exec strictness | User: replaced by `exec --result reply\|turn-end\|run-end`, default `reply`. `reply` reminds once and then exits 4 `ignored`; `turn-end` and `run-end` send an ordinary message with no reply duty and never produce the reply outcomes. See [exec](#exec) |
-| Q15 | Cap (superseded by #262 user decision, 2026-11-08) | 16 pending duties per recipient Thread; the 17th new send/ask is refused with `reply_limit` and details containing limit/current_count |
+| Q15 | Cap (superseded by #262 user decision, 2026-11-08) | 16 pending duties per recipient Thread; the 17th ask is refused with `reply_limit` and details containing limit/current_count. Withdraw a request you sent, or wait for a reply |
 | Q16 | Asking yourself | Superseded by #370: a model cannot ask its own Thread |
 | Q17 | TUI glyph | Option B: no new mark; a label after the existing glyph. See [TUI rendering](#tui-rendering) |
 | D10 | Empty end message (user, after Q14; refined) | A successful empty result: exit 0 in every mode, also with `--schema`; Schema validation and repairs apply only to non-empty text. Exit 0 means valid JSON or an empty end message |
