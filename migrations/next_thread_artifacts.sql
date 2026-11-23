@@ -4,7 +4,7 @@ CREATE TABLE artifact (
  created_at TEXT NOT NULL,
  updated_at TEXT NOT NULL
 );
-CREATE INDEX artifact_thread_page ON artifact(thread_id,id);
+CREATE INDEX artifact_thread_page ON artifact(thread_id,updated_at DESC,id);
 CREATE TABLE artifact_version (
  artifact_id TEXT NOT NULL REFERENCES artifact(id) ON DELETE CASCADE,
  version INTEGER NOT NULL CHECK(version>=1),
