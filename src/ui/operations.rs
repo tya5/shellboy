@@ -1186,6 +1186,7 @@ impl Form {
                 |form, cwd| {
                     Ok(Command::ThreadList(ThreadListArgs {
                         thread_ids: None,
+                        state: None,
                         order: if form.optional("order")?.as_deref() == Some("created") {
                             crate::protocol::ThreadListOrder::Created
                         } else {

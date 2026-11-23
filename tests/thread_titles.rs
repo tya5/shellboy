@@ -62,6 +62,7 @@ async fn list(
             store,
             Command::ThreadList(ThreadListArgs {
                 thread_ids: None,
+                state: None,
                 order: Default::default(),
                 limit,
                 cursor,
@@ -359,6 +360,7 @@ async fn displayed_title_search_paginates_matches_and_retains_query_watermark() 
         .execute(
             request(Command::ThreadList(ThreadListArgs {
                 thread_ids: None,
+                state: None,
                 order: Default::default(),
                 limit: 2,
                 cursor: first.next_cursor,

@@ -696,6 +696,7 @@ mod tests {
                 &db,
                 &crate::protocol::ThreadListArgs {
                     thread_ids: None,
+                    state: None,
                     order: Default::default(),
                     limit: 50,
                     cursor: cursor.clone(),

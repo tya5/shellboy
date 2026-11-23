@@ -97,6 +97,7 @@ async fn list(
         store,
         Command::ThreadList(ThreadListArgs {
             thread_ids: None,
+            state: None,
             order: Default::default(),
             limit,
             cursor,
@@ -420,6 +421,7 @@ async fn archived_threads_stay_readable_countable_and_can_receive_messages() {
         &store,
         Command::ThreadList(ThreadListArgs {
             thread_ids: None,
+            state: None,
             order: Default::default(),
             limit: 10,
             cursor: None,

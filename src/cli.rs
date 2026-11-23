@@ -722,6 +722,9 @@ pub struct ListOptions {
     /// Only Threads with an unanswered question for this recipient name.
     #[arg(long)]
     pub awaiting: Option<String>,
+    /// Only Threads whose current list state matches (updated order only).
+    #[arg(long, value_enum)]
+    pub state: Option<wire::ThreadListState>,
     /// Archived Threads: exclude (default, hidden), include, or only.
     #[arg(long, value_enum, default_value_t = wire::ArchivedFilter::Exclude)]
     pub archived: wire::ArchivedFilter,
@@ -1175,6 +1178,14 @@ impl ValueEnum for wire::ThreadListOrder {
             Self::Updated => "updated",
             Self::Created => "created",
         }))
+    }
+}
+impl ValueEnum for wire::ThreadListState {
+    fn value_variants<'a>() -> &'a [Self] {
+        Self::ALL
+    }
+    fn to_possible_value(&self) -> Option<clap::builder::PossibleValue> {
+        Some(clap::builder::PossibleValue::new(self.as_str()))
     }
 }
 impl ValueEnum for wire::ArchivedFilter {
@@ -1762,6 +1773,7 @@ impl Cli {
                 }),
                 ThreadCommand::List(a) => C::ThreadList(wire::ThreadListArgs {
                     thread_ids: None,
+                    state: a.state,
                     order: a.order,
                     limit: a.limit,
                     cursor: a.cursor,

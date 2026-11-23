@@ -10361,6 +10361,16 @@
             "null"
           ]
         },
+        "state": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ThreadListState"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "tags": {
           "items": {
             "type": "string"
@@ -10384,6 +10394,22 @@
       "enum": [
         "updated",
         "created"
+      ],
+      "type": "string"
+    },
+    "ThreadListState": {
+      "description": "The current state reported by a Thread list row, not its activity phase.",
+      "enum": [
+        "idle",
+        "live",
+        "stopping",
+        "preparing",
+        "running",
+        "waiting",
+        "recovery_wait",
+        "completed",
+        "stopped",
+        "failed"
       ],
       "type": "string"
     },

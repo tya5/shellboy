@@ -7,7 +7,7 @@
 基本形:
 
 ```text
-shellboy thread list [--limit 50] [--cursor TOKEN] [--query TEXT] [--archived exclude|include|only] [--tag TAG]... [--cwd PATH]
+shellboy thread list [--limit 50] [--cursor TOKEN] [--query TEXT] [--state STATE] [--archived exclude|include|only] [--tag TAG]... [--cwd PATH]
 shellboy thread get [--thread ID]
 shellboy thread export --thread ID --out PATH
 shellboy thread import --in PATH

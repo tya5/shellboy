@@ -72,6 +72,7 @@ impl ThreadListArgs {
                 ));
             }
             if self.cursor.is_some()
+                || self.state.is_some()
                 || !self.order.is_updated()
                 || self.query.is_some()
                 || self.awaiting.is_some()
@@ -98,20 +99,24 @@ impl ThreadListArgs {
             && (self.query.is_some()
                 || !self.tags.is_empty()
                 || self.cwd.is_some()
-                || self.awaiting.is_some())
+                || self.awaiting.is_some()
+                || self.state.is_some())
         {
             return Err(invalid(
-                "order=created cannot be combined with query, tags, cwd, or awaiting",
+                "order=created cannot be combined with query, tags, cwd, awaiting, or state",
             ));
         }
         if let Some(name) = self.awaiting.as_deref() {
             validate_recipient_name(name)?;
         }
         if self.awaiting.is_some()
-            && (self.query.is_some() || !self.tags.is_empty() || self.cwd.is_some())
+            && (self.query.is_some()
+                || !self.tags.is_empty()
+                || self.cwd.is_some()
+                || self.state.is_some())
         {
             return Err(invalid(
-                "awaiting cannot be combined with query, tags, or cwd",
+                "awaiting cannot be combined with query, tags, cwd, or state",
             ));
         }
         if self.tags.len() > MAX_THREAD_TAGS {

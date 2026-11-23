@@ -3482,6 +3482,7 @@ mod thread_list_plan_tests {
             let db = setup(late);
             let args = |cursor| ThreadListArgs {
                 thread_ids: None,
+                state: None,
                 order: Default::default(),
                 limit: 1,
                 cursor,
@@ -3546,6 +3547,7 @@ mod thread_list_plan_tests {
             &db,
             &ThreadListArgs {
                 thread_ids: None,
+                state: None,
                 order: Default::default(),
                 limit: 1,
                 cursor: None,
@@ -3605,6 +3607,7 @@ mod thread_list_plan_tests {
         }
         let args = |cursor| ThreadListArgs {
             thread_ids: None,
+            state: None,
             order: Default::default(),
             limit: 1,
             cursor,
@@ -3646,6 +3649,7 @@ mod thread_list_plan_tests {
                 db,
                 &ThreadListArgs {
                     thread_ids: None,
+                    state: None,
                     order: Default::default(),
                     limit: 1,
                     cursor: None,
@@ -3683,6 +3687,7 @@ mod thread_list_plan_tests {
         }
         let args = |cursor, archived| ThreadListArgs {
             thread_ids: None,
+            state: None,
             order: Default::default(),
             limit: 1,
             cursor,
@@ -3787,7 +3792,7 @@ mod thread_list_plan_tests {
         let plans: Vec<String> = db
             .prepare(&format!(
                 "EXPLAIN QUERY PLAN {}",
-                thread_summary::page_sql(ArchivedFilter::Exclude, 0, false)
+                thread_summary::page_sql(ArchivedFilter::Exclude, 0, false, false)
             ))
             .unwrap()
             .query_map(params![100_i64, "", "", 50], |r| r.get(3))
@@ -3817,7 +3822,7 @@ mod thread_list_plan_tests {
     fn outer_plan(db: &Connection, mode: ArchivedFilter) -> Vec<String> {
         db.prepare(&format!(
             "EXPLAIN QUERY PLAN {}",
-            thread_summary::page_sql(mode, 0, false)
+            thread_summary::page_sql(mode, 0, false, false)
         ))
         .unwrap()
         .query_map(params![100_i64, "", "", 50], |r| {
@@ -3985,7 +3990,12 @@ mod thread_list_plan_tests {
             // Archived rows are the newest by `updated_at`: a residual filter would
             // have to walk past all of them before reaching one visible Thread.
             let mut statement = db
-                .prepare(&thread_summary::page_sql(ArchivedFilter::Exclude, 0, false))
+                .prepare(&thread_summary::page_sql(
+                    ArchivedFilter::Exclude,
+                    0,
+                    false,
+                    false,
+                ))
                 .unwrap();
             let rows = statement
                 .query_map(params![1_000_000_i64, "", "", 50], |_| Ok(()))
@@ -4014,7 +4024,7 @@ mod thread_list_plan_tests {
         }
         db.prepare(&format!(
             "EXPLAIN QUERY PLAN {}",
-            thread_summary::page_sql(mode, tags, cwd)
+            thread_summary::page_sql(mode, tags, cwd, false)
         ))
         .unwrap()
         .query_map(rusqlite::params_from_iter(binds), |r| {
@@ -4060,6 +4070,7 @@ mod thread_list_plan_tests {
                 ArchivedFilter::Exclude,
                 tags,
                 cwd,
+                false,
             ))
             .unwrap();
         let rows = statement
@@ -4161,7 +4172,12 @@ mod thread_list_plan_tests {
         ))
         .unwrap();
         let mut statement = db
-            .prepare(&thread_summary::page_sql(ArchivedFilter::Exclude, 1, false))
+            .prepare(&thread_summary::page_sql(
+                ArchivedFilter::Exclude,
+                1,
+                false,
+                false,
+            ))
             .unwrap();
         let rows = statement
             .query_map(params![1_000_000_i64, "", "", 21_i64, "big"], |_| Ok(()))
@@ -4320,6 +4336,7 @@ mod activity_list_tests {
                 &db,
                 &ThreadListArgs {
                     thread_ids: None,
+                    state: None,
                     order: Default::default(),
                     limit: 50,
                     cursor,

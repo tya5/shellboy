@@ -19,6 +19,8 @@ LEFT JOIN model_attempt a ON a.rowid=(SELECT rowid FROM model_attempt WHERE turn
     AND latest.state='live' AND u.state='running' ORDER BY rowid DESC LIMIT 1)"
     )
 }
+const CURRENT_STATE: &str = "COALESCE(u.state,latest.state,'idle')";
+
 fn columns_from() -> String {
     let activity_joins = activity_joins();
     let sample_limit = crate::protocol::MAX_HUMAN_REPLY_SUMMARY_DUTIES + 1;
@@ -27,7 +29,7 @@ fn columns_from() -> String {
         crate::control::revisit::summary_sql("t.id", "latest.id");
     format!(
         "SELECT t.id,t.title,t.cwd,t.parent_thread_id,t.updated_at,
-    COALESCE(u.state,latest.state), latest.stop_reason,latest.id,{ACTIVITY_COLUMNS},
+    {CURRENT_STATE}, latest.stop_reason,latest.id,{ACTIVITY_COLUMNS},
     {revisit_pending},{revisit_delivered},
     u.id,u.answer_node_id,latest.ended_at,a.started_at,u.generation,t.archived_at,
     (SELECT count(*) FROM (SELECT 1 FROM receipt q INDEXED BY receipt_reply_pending WHERE q.target_thread_id=t.id AND json_extract(q.result_json,'$.reply.state')='pending' LIMIT {sample_limit})),
@@ -96,7 +98,7 @@ pub(crate) struct RawSummary {
     pub(crate) parent_id: Option<String>,
     updated_at: String,
     created_at: Option<String>,
-    state: Option<String>,
+    state: String,
     stop_reason: Option<String>,
     pub(crate) activity: RawActivity,
     pub(crate) identity: SummaryIdentity,
@@ -123,7 +125,7 @@ pub(crate) struct SummaryIdentity {
 
 /// Every mode repeats its partial-index predicate literally so SQLite can use
 /// `threads_visible_updated` / `threads_archived_updated` (see the plan tests).
-pub(super) fn page_sql(mode: ArchivedFilter, tags: usize, cwd: bool) -> String {
+pub(super) fn page_sql(mode: ArchivedFilter, tags: usize, cwd: bool, state: bool) -> String {
     let columns_from = columns_from();
     // INDEXED BY pins the partial index: without table statistics the planner
     // prefers `threads_updated` plus a sort, which reads past every archived Thread.
@@ -168,6 +170,9 @@ pub(super) fn page_sql(mode: ArchivedFilter, tags: usize, cwd: bool) -> String {
     if cwd {
         extra(format!("t.cwd=?{}", 5 + tags));
     }
+    if state {
+        extra(format!("{CURRENT_STATE}=?{}", 5 + tags + usize::from(cwd)));
+    }
     let window = "t.rowid<=?1
       AND (?2='' OR t.updated_at<?2 OR (t.updated_at=?2 AND t.id<?3))
       ORDER BY t.updated_at DESC,t.id DESC LIMIT ?4";
@@ -175,8 +180,9 @@ pub(super) fn page_sql(mode: ArchivedFilter, tags: usize, cwd: bool) -> String {
         // Choose the page from IDs and sort keys only, then read the summary columns
         // (latest Run, Turn, activity subqueries) for just those rows: without this
         // they would run for every member of the tag before the sort.
+        let state_joins = if state { RUN_TURN_JOINS } else { "" };
         let inner = format!(
-            "SELECT t.id AS id {source}WHERE {predicate} AND t.deleted_at IS NULL{archived} AND {window}"
+            "SELECT t.id AS id {source}{state_joins} WHERE {predicate} AND t.deleted_at IS NULL{archived} AND {window}"
         );
         let columns_from = columns_from.replacen(
             "FROM thread t ",
@@ -291,7 +297,7 @@ pub(crate) fn prepare(raw: RawSummary, title: String, excerpt: String) -> Thread
         title,
         cwd: raw.cwd,
         parent_id: raw.parent_id,
-        state: raw.state.unwrap_or_else(|| "idle".into()),
+        state: raw.state,
         latest_run_stop_reason: raw.stop_reason,
         revisit: crate::control::revisit::summary(raw.revisit_pending, raw.revisit_delivered),
         updated_at: raw.updated_at,

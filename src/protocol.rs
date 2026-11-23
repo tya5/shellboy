@@ -1087,11 +1087,55 @@ impl ThreadListOrder {
         *self == Self::Updated
     }
 }
-args!(ThreadListArgs { #[serde(default, skip_serializing_if = "Option::is_none")] thread_ids: Option<Vec<String>>, #[serde(default, skip_serializing_if = "ThreadListOrder::is_updated")] order: ThreadListOrder, #[serde(default = "list_limit")] limit: u32, #[serde(default)] cursor: Option<String>, #[serde(default)] query: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] awaiting: Option<String>, #[serde(default, skip_serializing_if = "ArchivedFilter::is_exclude")] archived: ArchivedFilter, #[serde(default, skip_serializing_if = "Vec::is_empty")] tags: Vec<String>, #[serde(default, skip_serializing_if = "Option::is_none")] cwd: Option<String> });
+/// The current state reported by a Thread list row, not its activity phase.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ThreadListState {
+    Idle,
+    Live,
+    Stopping,
+    Preparing,
+    Running,
+    Waiting,
+    RecoveryWait,
+    Completed,
+    Stopped,
+    Failed,
+}
+impl ThreadListState {
+    pub(crate) const ALL: &[Self] = &[
+        Self::Idle,
+        Self::Live,
+        Self::Stopping,
+        Self::Preparing,
+        Self::Running,
+        Self::Waiting,
+        Self::RecoveryWait,
+        Self::Completed,
+        Self::Stopped,
+        Self::Failed,
+    ];
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Idle => "idle",
+            Self::Live => "live",
+            Self::Stopping => "stopping",
+            Self::Preparing => "preparing",
+            Self::Running => "running",
+            Self::Waiting => "waiting",
+            Self::RecoveryWait => "recovery_wait",
+            Self::Completed => "completed",
+            Self::Stopped => "stopped",
+            Self::Failed => "failed",
+        }
+    }
+}
+args!(ThreadListArgs { #[serde(default, skip_serializing_if = "Option::is_none")] state: Option<ThreadListState>, #[serde(default, skip_serializing_if = "Option::is_none")] thread_ids: Option<Vec<String>>, #[serde(default, skip_serializing_if = "ThreadListOrder::is_updated")] order: ThreadListOrder, #[serde(default = "list_limit")] limit: u32, #[serde(default)] cursor: Option<String>, #[serde(default)] query: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] awaiting: Option<String>, #[serde(default, skip_serializing_if = "ArchivedFilter::is_exclude")] archived: ArchivedFilter, #[serde(default, skip_serializing_if = "Vec::is_empty")] tags: Vec<String>, #[serde(default, skip_serializing_if = "Option::is_none")] cwd: Option<String> });
 impl Default for ThreadListArgs {
     fn default() -> Self {
         Self {
             thread_ids: None,
+            state: None,
             order: ThreadListOrder::Updated,
             limit: list_limit(),
             cursor: None,

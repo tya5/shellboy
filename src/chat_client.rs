@@ -175,6 +175,7 @@ impl<W: Write> Chat<'_, W> {
             &self.data,
             Command::ThreadList(ThreadListArgs {
                 thread_ids: None,
+                state: None,
                 order: Default::default(),
                 limit: 1,
                 cursor: None,

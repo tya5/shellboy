@@ -64,6 +64,62 @@ fn request(command: Command) -> Request {
 async fn execute(store: &Store, command: Command) -> MutationResult {
     store.execute(request(command), None).await.unwrap()
 }
+#[tokio::test]
+async fn thread_list_state_pages_current_failures_in_update_order() {
+    use clap::Parser;
+    let (directory, store) = store().await;
+    store
+        .database
+        .call(|db| {
+            db.execute_batch(
+                "INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at) VALUES
+            ('old','Old','/','','p','m','01'),('older','Older','/','','p','m','00'),
+            ('recovered','Recovered','/','','p','m','02');
+            INSERT INTO run(id,thread_id,state,created_at) VALUES
+            ('old-failed','old','failed','01'),('older-failed','older','failed','00'),
+            ('prior-failure','recovered','failed','01'),('latest','recovered','live','02');
+            INSERT INTO turn(id,thread_id,run_id,state,created_at) VALUES
+            ('waiting','recovered','latest','recovery_wait','02');",
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+
+    let cli = shellboy::cli::Cli::try_parse_from([
+        "shellboy", "thread", "list", "--state", "failed", "--limit", "1",
+    ])
+    .unwrap();
+    let command = cli.into_command(directory.path()).await.unwrap().unwrap();
+    let first = execute(&store, command.clone()).await.result;
+    assert_eq!(first["items"][0]["thread_id"], "old");
+    assert_eq!(first["items"][0]["state"], "failed");
+    let next = first["next_cursor"].as_str().unwrap().to_owned();
+    create(&store, None).await;
+    let refreshed = execute(&store, command.clone()).await.result;
+    assert_eq!(refreshed["items"], first["items"]);
+
+    let Command::ThreadList(mut args) = command else {
+        panic!("expected list command")
+    };
+    args.cursor = Some(next);
+    let second = execute(&store, Command::ThreadList(args.clone()))
+        .await
+        .result;
+    assert_eq!(second["items"][0]["thread_id"], "older");
+    assert!(second["next_cursor"].is_null());
+    args.state = Some(ThreadListState::RecoveryWait);
+    let err = store
+        .execute(request(Command::ThreadList(args.clone())), None)
+        .await
+        .unwrap_err();
+    assert_eq!(err.code, ErrorCode::CursorExpired);
+    args.cursor = None;
+    let waiting = execute(&store, Command::ThreadList(args)).await.result;
+    assert_eq!(waiting["items"][0]["thread_id"], "recovered");
+    assert_eq!(waiting["items"][0]["state"], "recovery_wait");
+}
+
 async fn thread_revisions(store: &Store, id: &str) -> (i64, i64, i64, i64) {
     let id = id.to_owned();
     store.database.call(move |db| {
@@ -637,6 +693,7 @@ async fn list_watermark_and_query_cursor_are_bounded_and_filter_bound() {
         &store,
         Command::ThreadList(ThreadListArgs {
             thread_ids: None,
+            state: None,
             order: Default::default(),
             limit: 1,
             cursor: None,
@@ -655,6 +712,7 @@ async fn list_watermark_and_query_cursor_are_bounded_and_filter_bound() {
         &store,
         Command::ThreadList(ThreadListArgs {
             thread_ids: None,
+            state: None,
             order: Default::default(),
             limit: 200,
             cursor: first.next_cursor.clone(),
@@ -676,6 +734,7 @@ async fn list_watermark_and_query_cursor_are_bounded_and_filter_bound() {
         .execute(
             request(Command::ThreadList(ThreadListArgs {
                 thread_ids: None,
+                state: None,
                 order: Default::default(),
                 limit: 1,
                 cursor: first.next_cursor,
@@ -758,6 +817,7 @@ async fn thread_list_awaiting_human_pages_only_human_waits_with_oldest_timestamp
         &store,
         Command::ThreadList(ThreadListArgs {
             thread_ids: None,
+            state: None,
             order: Default::default(),
             limit: 1,
             cursor: None,
@@ -793,6 +853,7 @@ async fn thread_list_awaiting_human_pages_only_human_waits_with_oldest_timestamp
         &store,
         Command::ThreadList(ThreadListArgs {
             thread_ids: None,
+            state: None,
             order: Default::default(),
             limit: 20,
             cursor: None,

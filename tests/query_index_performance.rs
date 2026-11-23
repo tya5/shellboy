@@ -136,6 +136,7 @@ async fn performance_native_wait_and_thread_page_indexes() {
                 &control,
                 Command::ThreadList(ThreadListArgs {
                     thread_ids: None,
+                    state: None,
                     order: Default::default(),
                     limit: 50,
                     cursor: None,

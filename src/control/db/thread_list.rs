@@ -55,9 +55,13 @@ pub(crate) fn thread_list(
     };
     let cwd = cwd_normalized.as_deref();
     let cursor_filter = list_cursor_filter(filter, &tags, cwd);
-    let scope = match args.order {
-        ThreadListOrder::Updated => list_scope(args.archived).to_owned(),
-        ThreadListOrder::Created => format!("thread.list.created.{}", args.archived.as_str()),
+    let state = args.state.map(crate::protocol::ThreadListState::as_str);
+    let scope = match (args.order, state) {
+        (ThreadListOrder::Updated, Some(state)) => {
+            format!("{}.state.{state}", list_scope(args.archived))
+        }
+        (ThreadListOrder::Updated, None) => list_scope(args.archived).to_owned(),
+        (ThreadListOrder::Created, _) => format!("thread.list.created.{}", args.archived.as_str()),
     };
     let cursor = args
         .cursor
@@ -97,7 +101,7 @@ pub(crate) fn thread_list(
     // candidates as a cursor: a filtered miss scans without collecting history.
     let sql = match args.order {
         ThreadListOrder::Updated => {
-            thread_summary::page_sql(args.archived, tags.len(), cwd.is_some())
+            thread_summary::page_sql(args.archived, tags.len(), cwd.is_some(), state.is_some())
         }
         ThreadListOrder::Created => {
             thread_summary::created_page_sql(args.archived, position.as_ref().map(|(time, _)| time))
@@ -115,6 +119,7 @@ pub(crate) fn thread_list(
     };
     binds.extend(tags.iter().map(|tag| tag as &dyn rusqlite::ToSql));
     binds.extend(cwd.iter().map(|path| path as &dyn rusqlite::ToSql));
+    binds.extend(state.iter().map(|state| state as &dyn rusqlite::ToSql));
     let mut rows = statement.query(binds.as_slice()).map_err(sql_error)?;
     let mut items = Vec::new();
     while let Some(row) = rows.next().map_err(sql_error)? {

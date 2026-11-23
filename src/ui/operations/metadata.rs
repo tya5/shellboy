@@ -69,6 +69,7 @@ impl Form {
             "command_contains" => FieldId::CommandContains,
             "exit_code" => FieldId::ExitCode,
             "state" if self.operation == OpKind::Status => FieldId::States,
+            "state" if self.operation == OpKind::ThreadList => FieldId::ThreadListState,
             "state" => FieldId::State,
             "all" => FieldId::All,
             "children" => FieldId::IncludeChildren,
@@ -1259,6 +1260,7 @@ fn field_label_for(id: FieldId, language: crate::config::UiLanguage) -> &'static
         FieldId::Title => local!(language, "表示タイトル", "Display title"),
         FieldId::Descendants => local!(language, "子孫も対象", "Include descendants"),
         FieldId::ThreadListOrder => local!(language, "並び順", "Order"),
+        FieldId::ThreadListState => local!(language, "Threadの現在状態", "Current Thread state"),
         FieldId::Archived => local!(language, "アーカイブの扱い", "Archived conversations"),
         FieldId::Tags => local!(language, "タグで絞り込み", "Filter by tags"),
         FieldId::AddTags => local!(language, "付けるタグ", "Tags to add"),
@@ -1673,6 +1675,11 @@ fn field_help_for(id: FieldId, language: crate::config::UiLanguage) -> &'static 
             language,
             "親子関係上の子孫Threadも削除／削除影響確認／アーカイブの対象へ含めます。",
             "Include descendant Threads in deletion, its impact preview, or archiving."
+        ),
+        FieldId::ThreadListState => local!(
+            language,
+            "一覧行の現在状態で絞り込みます。",
+            "Filter by the current state shown in list rows."
         ),
         FieldId::ThreadListOrder => local!(
             language,
