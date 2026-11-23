@@ -2750,6 +2750,13 @@ mod message_acknowledgement_tests {
     }
 
     #[test]
+    fn send_without_a_delivery_mode_queues_for_the_next_request() {
+        let args: MessageSendArgs =
+            serde_json::from_value(serde_json::json!({"thread_id":"t","text":"queued"})).unwrap();
+        assert_eq!(args.deliver, Deliver::Next);
+    }
+
+    #[test]
     fn acknowledgement_delivery_mode_is_typed_defaults_next_and_accepts_additive_fields() {
         let mut wire = serde_json::json!({"message_id":"message","thread_id":"thread","delivery_status":"accepted","assignment":"new_run","run_id":"run","turn_id":"turn","deliver":"now"});
         let accepted: MessageAccepted = serde_json::from_value(wire.clone()).unwrap();

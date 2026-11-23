@@ -1047,6 +1047,32 @@ fn validate_dimensions(dimensions: Option<usize>) -> Result<(), ApiError> {
 }
 
 #[cfg(test)]
+mod message_cancel_tests {
+    use super::*;
+
+    #[test]
+    fn cancellation_requires_one_to_128_distinct_message_ids() {
+        let validate =
+            |message_ids| Command::MessageCancel(MessageCancelArgs { message_ids }).validate();
+        let ids: Vec<_> = (0..128).map(|n| format!("message-{n}")).collect();
+        assert!(validate(ids.clone()).is_ok());
+
+        let mut too_many = ids;
+        too_many.push("extra".into());
+        for invalid in [
+            vec![],
+            too_many,
+            vec!["duplicate".into(), "duplicate".into()],
+        ] {
+            assert_eq!(
+                validate(invalid).unwrap_err().code,
+                ErrorCode::InvalidArgument
+            );
+        }
+    }
+}
+
+#[cfg(test)]
 mod thread_list_id_tests {
     use super::*;
 

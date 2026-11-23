@@ -1,5 +1,13 @@
 # Development status
 
+## Core #309 pending message tests
+
+Cancellation ID validation and the send request's default delivery mode are
+now tested at the protocol boundary. The cancellation test still checks
+outcomes, replay, and archived references without probing the history GC
+predicate directly. The retired-copy test still checks space reclaimed and
+exact replay after admission, without asserting the database schema version.
+
 ## Core #309 preparation tests
 
 The settled-completion test now runs in `state::tests` against the database

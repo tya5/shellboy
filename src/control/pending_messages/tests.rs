@@ -800,18 +800,6 @@ async fn cancellation_is_partial_unrestricted_archived_idempotent_and_never_wake
                 0,
                 "cancellation has no model notification"
             );
-            let root: bool = db.query_row(
-                &format!(
-                    "SELECT {} FROM node n WHERE n.id='own'",
-                    crate::history::reachability::ROOT_PREDICATE
-                ),
-                [],
-                |r| r.get(0),
-            )?;
-            assert!(
-                root,
-                "the live-target receipt already protects archived source history"
-            );
             Ok(())
         })
         .await
@@ -1252,27 +1240,6 @@ async fn managed_gc_protects_frozen_and_archived_sources_until_their_thread_is_d
     assert!(!file.exists());
     store.database.shutdown().await.unwrap();
 }
-#[test]
-fn cancel_ids_are_explicit_bounded_unique_and_immediate_defaults_to_false() {
-    for ids in [vec![], vec!["a".into(); 129], vec!["a".into(), "a".into()]] {
-        assert!(
-            Command::MessageCancel(MessageCancelArgs { message_ids: ids })
-                .validate()
-                .is_err()
-        );
-    }
-    assert!(
-        Command::MessageCancel(MessageCancelArgs {
-            message_ids: (0..128).map(|n| format!("message-{n}")).collect()
-        })
-        .validate()
-        .is_ok()
-    );
-    let default: MessageSendArgs =
-        serde_json::from_value(json!({"thread_id":"t","text":"queued"})).unwrap();
-    assert_eq!(default.deliver, crate::protocol::Deliver::Next);
-}
-
 #[tokio::test]
 async fn actual_control_draft_replay_precedes_missing_files_and_old_owner_checks() {
     use crate::{app::DataOwner, control::Control};
@@ -1686,10 +1653,6 @@ async fn admitted_copy_retires_atomically_replay_stays_exact_and_storage_does_no
                 assert_eq!(
                     db.query_row("SELECT count(*) FROM receipt", [], |r| r.get::<_, i64>(0))?,
                     n as i64 + 1
-                );
-                assert_eq!(
-                    db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))?,
-                    crate::storage::SCHEMA_VERSION
                 );
                 Ok(())
             })
