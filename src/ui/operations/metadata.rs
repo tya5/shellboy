@@ -69,7 +69,6 @@ impl Form {
             "command_contains" => FieldId::CommandContains,
             "exit_code" => FieldId::ExitCode,
             "state" if self.operation == OpKind::Status => FieldId::States,
-            "state" if self.operation == OpKind::ThreadList => FieldId::ThreadListState,
             "state" => FieldId::State,
             "all" => FieldId::All,
             "children" => FieldId::IncludeChildren,
@@ -1676,11 +1675,12 @@ fn field_help_for(id: FieldId, language: crate::config::UiLanguage) -> &'static 
             "親子関係上の子孫Threadも削除／削除影響確認／アーカイブの対象へ含めます。",
             "Include descendant Threads in deletion, its impact preview, or archiving."
         ),
-        FieldId::ThreadListState => local!(
-            language,
-            "一覧行の現在状態で絞り込みます。並び順は更新順です。",
-            "Filter by the current state shown in list rows, in update order."
-        ),
+        FieldId::ThreadListState => match language {
+            crate::config::UiLanguage::Ja => crate::operations::THREAD_LIST_STATE_HELP_JA,
+            crate::config::UiLanguage::En => {
+                "Filter by the current state shown in list rows, in update order."
+            }
+        },
         FieldId::ThreadListOrder => local!(
             language,
             "updatedは更新順、createdは作成順（新しい順）。createdはアーカイブ指定とのみ併用できます。",

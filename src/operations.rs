@@ -421,6 +421,9 @@ pub(crate) const RAG_DB_ARGUMENT: GlobalArgument = GlobalArgument {
 };
 
 pub(crate) const DEFAULT_SETTLEMENT_STATES: &str = "completed recovery_wait failed stopped";
+pub(crate) const THREAD_LIST_STATE_HELP_JA: &str =
+    "一覧行の現在状態で絞り込みます。並び順は更新順です。";
+
 pub(crate) const FIELD_SPECS: &[FieldSpec] = &[
     FieldSpec {
         id: FieldId::Artifact,
@@ -890,7 +893,7 @@ pub(crate) const FIELD_SPECS: &[FieldSpec] = &[
         id: FieldId::ThreadListState,
         default_origin: DefaultOrigin::None,
         label: "Threadの現在状態",
-        help: "一覧行の現在状態で絞り込みます。並び順は更新順です。",
+        help: THREAD_LIST_STATE_HELP_JA,
         kind: FieldType::Choice,
         discovery: Discovery::None,
     },
