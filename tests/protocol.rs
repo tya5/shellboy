@@ -1534,7 +1534,7 @@ fn typed_usage_result_preserves_null_omission_and_unknown_provider_usage_leaves(
         "usage":{"input_tokens":8,"input_tokens_details":{"cached_tokens":3,"provider_extra":"kept"},
             "provider_usage_extension":{"x":1}},
         "prompt_cache_diagnostics":{"type":"cache_miss","future_diag":true},
-        "input_bytes":null});
+        "input_bytes":null,"output_limit":null});
     let decoded: UsageGetResult = serde_json::from_value(attempt.clone()).unwrap();
     let UsageGetResult::Attempt(value) = decoded else {
         panic!("attempt usage shape misclassified")
