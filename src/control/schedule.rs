@@ -181,7 +181,8 @@ async fn spawn_reserved(control: &Arc<Control>, shell: DueShell) -> Result<(), A
                     let tx = db.transaction()?;
                     let service = service_settlement(&tx, &shell.id)?;
                     let mut effects = None;
-                    let changed = super::state::fail_shell_spawn(&tx, &shell.id, &super::state::now())? != 0;
+                    let changed =
+                        super::state::fail_shell_spawn(&tx, &shell.id, &super::state::now())? != 0;
                     if changed {
                         retire_oneshot(&tx, &shell.id)?;
                         if let Some(service) = service {
@@ -190,7 +191,15 @@ async fn spawn_reserved(control: &Arc<Control>, shell: DueShell) -> Result<(), A
                     }
                     tx.commit()?;
                     if changed {
-                        wakes.publish(super::wait::wakes::Key::shell_terminal(shell.id).into_iter().chain(effects.iter_mut().flat_map(|effects| std::mem::take(&mut effects.wait_keys))));
+                        wakes.publish(
+                            super::wait::wakes::Key::shell_terminal(shell.id)
+                                .into_iter()
+                                .chain(
+                                    effects
+                                        .iter_mut()
+                                        .flat_map(|effects| std::mem::take(&mut effects.wait_keys)),
+                                ),
+                        );
                     }
                     Ok(effects)
                 })
