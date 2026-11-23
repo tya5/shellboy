@@ -27,9 +27,9 @@ fn thread_export_trailer_counts_and_hashes_exact_written_lines() {
         json!({"type":"trailer","lines":6,"sha256":trailer.sha256})
     );
     assert_eq!(trailer.lines, 6);
-    assert_eq!(format!("{:x}", Sha256::digest(&hashed)), trailer.sha256);
+    assert_eq!(digest_hex(&Sha256::digest(&hashed)), trailer.sha256);
     hashed[1] ^= 1;
-    assert_ne!(format!("{:x}", Sha256::digest(&hashed)), trailer.sha256);
+    assert_ne!(digest_hex(&Sha256::digest(&hashed)), trailer.sha256);
 }
 
 #[test]
