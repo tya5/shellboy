@@ -92,31 +92,86 @@ class LandProtocolTests(unittest.TestCase):
         self.assertEqual(self.git('status', '--porcelain'), '')
         self.assertEqual(self.git('rev-list', '--count', 'main..HEAD').strip(), '2')
 
-    def test_next_heading_alone_bumps_and_names_issues(self):
-        doc = (DOC + '\n## Protocol next (#12)\n\nSee [it](#protocol-next-12); '
-               'patches write `Protocol next (#N)`.\n')
+    def test_next_files_merge_into_one_version_file(self):
+        self.write('docs/design/protocol-versions/next-30.md',
+                   '# Protocol next (#30)\n\nThirty; builds on [twelve](next-12.md#detail).\n\n'
+                   '## Detail thirty\n\nMore thirty.\n')
+        self.write('docs/design/protocol-versions/next-12.md',
+                   '# Protocol next (#12)\n\nTwelve, see [base](../protocol.md#protocol).\n\n'
+                   '## Detail\n\n```\n# not a heading\n```\n')
+        self.write('docs/guides/use.md', 'See [12](../design/protocol-versions/next-12.md#protocol-next-12), '
+                   '[30](../design/protocol-versions/next-30.md#detail-thirty) and '
+                   '[folder](../design/protocol-versions/).\n')
+        self.commit('two patches')
+        result = self.land()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.subject(), 'Protocol 12: #12, #30')
+        self.assertEqual(self.read('docs/design/protocol-versions/12.md'),
+                         '# Protocol 12 (#12, #30)\n\n'
+                         'Twelve, see [base](../protocol.md#protocol).\n\n'
+                         '## Detail\n\n```\n# not a heading\n```\n\n'
+                         'Thirty; builds on [twelve](#detail).\n\n'
+                         '## Detail thirty\n\nMore thirty.\n')
+        self.assertFalse((self.root / 'docs/design/protocol-versions/next-12.md').exists())
+        self.assertFalse((self.root / 'docs/design/protocol-versions/next-30.md').exists())
+        self.assertEqual(self.read('docs/guides/use.md'),
+                         'See [12](../design/protocol-versions/12.md#protocol-12-12-30), '
+                         '[30](../design/protocol-versions/12.md#detail-thirty) and '
+                         '[folder](../design/protocol-versions/).\n')
+        self.assertEqual(self.read('docs/design/protocol.md'), DOC)
+        self.assertIn('VERSION: u32 = 12;', self.read('src/protocol.rs'))
+        self.assertEqual(self.git('status', '--porcelain'), '')
+
+    def test_old_in_file_heading_folds_into_version_file(self):
+        doc = (DOC + '\n## Protocol next (#12)\n\nTwelve uses [y](other.md#y) and '
+               '[eleven](#protocol-11-317).\n\n### Twelve detail\n\nMore.\n\n'
+               '## Later\n\nKept; see [it](#protocol-next-12); '
+               'patches write `Protocol next (#N)` or `# Protocol next (#issue)`; Protocol next prose.\n')
         self.write('docs/design/protocol.md', doc)
-        self.write('docs/design/other.md', '### Protocol next (#9, #30)\n')
-        self.commit('patch')
+        self.write('docs/design/other.md', '# Other\n\n### Protocol next (#9, #30)\n\nNine.\n')
+        self.write('docs/guides/use.md', 'See [p](../design/protocol.md#protocol-next-12).\n')
+        self.commit('patches in flight')
         result = self.land()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.subject(), 'Protocol 12: #9, #12, #30')
-        text = self.read('docs/design/protocol.md')
-        self.assertIn('## Protocol 12 (#12)', text)
-        self.assertIn('(#protocol-12-12)', text)
-        self.assertIn('`Protocol next (#N)`', text)
-        self.assertEqual(self.read('docs/design/other.md'), '### Protocol 12 (#9, #30)\n')
+        self.assertEqual(self.read('docs/design/protocol-versions/12.md'),
+                         '# Protocol 12 (#9, #12, #30)\n\nNine.\n\n'
+                         'Twelve uses [y](../other.md#y) and [eleven](../protocol.md#protocol-11-317).\n\n'
+                         '## Twelve detail\n\nMore.\n')
+        self.assertEqual(self.read('docs/design/protocol.md'),
+                         DOC + '\n## Later\n\nKept; see [it](protocol-versions/12.md#protocol-12-9-12-30); '
+                         'patches write `Protocol next (#N)` or `# Protocol next (#issue)`; Protocol 12 prose.\n')
+        self.assertEqual(self.read('docs/design/other.md'), '# Other\n')
+        self.assertEqual(self.read('docs/guides/use.md'),
+                         'See [p](../design/protocol-versions/12.md#protocol-12-9-12-30).\n')
         self.assertIn('"protocol_version": 12,', self.read('docs/reference/protocol.schema.json'))
 
     def test_second_run_does_nothing(self):
-        self.write('docs/design/protocol.md', DOC + '\n## Protocol next (#12)\n')
+        self.write('docs/design/protocol-versions/next-12.md', '# Protocol next (#12)\n\nTwelve.\n')
+        self.write('docs/design/protocol.md', DOC + '\n## Protocol next (#13)\n\nThirteen.\n')
         self.commit('patch')
         self.assertEqual(self.land().returncode, 0)
         landed = self.head()
+        notes = self.read('docs/design/protocol-versions/12.md')
+        self.assertEqual(notes, '# Protocol 12 (#12, #13)\n\nTwelve.\n\nThirteen.\n')
         result = self.land()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.head(), landed)
         self.assertIn('nothing to do', result.stdout)
+        self.assertEqual(self.read('docs/design/protocol-versions/12.md'), notes)
+
+    def test_patch_added_after_landing_joins_the_version_file(self):
+        self.write('docs/design/protocol-versions/next-12.md', '# Protocol next (#12)\n\nTwelve.\n')
+        self.commit('patch')
+        self.assertEqual(self.land().returncode, 0)
+        self.write('docs/design/protocol-versions/next-8.md', '# Protocol next (#8)\n\nEight.\n')
+        self.commit('later patch')
+        result = self.land()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.subject(), 'Protocol 12: #8')
+        self.assertEqual(self.read('docs/design/protocol-versions/12.md'),
+                         '# Protocol 12 (#8, #12)\n\nTwelve.\n\nEight.\n')
+        self.assertIn('VERSION: u32 = 12;', self.read('src/protocol.rs'))
 
     def test_version_two_ahead_fails(self):
         self.write('src/protocol.rs', RUST.replace('VERSION: u32 = 11', 'VERSION: u32 = 13'))

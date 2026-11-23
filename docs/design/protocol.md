@@ -28,6 +28,8 @@ The local owner handshake is the compatibility boundary for external clients, in
 
 A wire change that a supported peer cannot safely ignore requires a protocol version bump and coordinated release. Use additive result fields only where the older client uses tolerant decoding; never infer compatibility from syntactic JSON parsing. The dynamic `events.wait` result may carry an additive field only with a protocol-version bump: typed RPC results are strict even when JSON is syntactically extensible. A capability documents the feature but does not make an old client tolerant. External clients may rely on documented commands/arguments, response fields and omission rules, enumerated errors, cursor behavior, sender provenance, capabilities, and documented bounds. They must not depend on SQLite tables, internal logs, undocumented `details`, implementation module names, event timing, or incidental ordering not stated here. Operation receipts make retries safe only with the same operation ID and same request; transport uncertainty is not evidence a mutation was unapplied. Cursor tokens are opaque and scoped to the issuing owner/query; restart or expiry requires resynchronization, not decoding or editing the token.
 
+What each protocol version changed, from 5 on, is in [protocol-versions](protocol-versions/), one file `N.md` per version; a wire-changing patch adds its own file there (see [setup](../development/setup.md#protocol-number-at-landing-356)).
+
 Core #294 adds `Welcome.owner_version` as optional metadata and does not bump
 protocol 7: existing Welcome decoders ignore additive fields, and older owners
 can omit it. This is the only public owner software-version source. The value
@@ -960,14 +962,7 @@ lookup was insufficient: parsing payload JSON before applying substring limits s
 
 `thread.branch_kind` records `fork` or `rewind` when a branch is created. Pre-migration rows and non-branch roots retain NULL and serialize as `unknown`; no kind is inferred from path shape. Migration 37 adds only this nullable checked field.
 
-## #276 protocol 5: independent Runs
-
-Main protocol 4 already includes #275 reasoning activity. Version 5 retains that capability and removes Run ownership
-and the duplicate Thread-get reply-duty lists; see the exact inventory in events-and-external-protocol.md and #280.
-Only direct invoking Run/Turn/shell ID waits are rejected with `self_wait`; no cycle graph remains. Reply duties stay
-pending through `recovery_wait`, and explicit replies/outcomes use ordinary requesting-Thread delivery after its Run
-ends. Shell ownership and organizational Thread parentage are unchanged. No protocol-4 alias or downgrade is provided.
-### Saved assistant response references on status attempts (#279)
+## Saved assistant response references on status attempts (#279)
 
 Durable `status` attempt WorkItems expose `response_nodes`, an output-item-ordered list of saved `assistant_response` references from the existing `output_item` rows for that exact `attempt_id`. Each entry preserves `ordinal`, nullable provider `item_id`, provider `kind`, nullable `phase`, and the saved `node_id`; repeated items that point at the same node remain repeated entries so item identity/order is not lost. Studio may pass `node_id` to `history.window`; it must not use `end_message_node_id` for intermediate attempts. That field remains exclusively the Turn's final answer pointer. For each attempt, the list contains only eligible assistant-response items found within the inspected candidate prefix. It can be empty because no row was saved yet/at all, because saved rows have no assistant-response node, or because all inspected candidates were ineligible. An empty list with `response_nodes_truncated=false` means the full candidate range was inspected and contained no eligible response; an empty list with `response_nodes_truncated=true` means later candidates were not inspected and eligible refs may exist. Failed/retried attempts retain their own refs; retries use different attempt IDs. Live-only observations use an empty list and `response_nodes_truncated=false` because they have no durable output-item ownership.
 
@@ -978,17 +973,7 @@ This is additive to protocol 5. Before this change `status` result was an opaque
 Visibility lifetime: intermediate `assistant_response` rows are appended to the selected `thread_path` in the same transaction as their `output_item` links, so every published `node_id` is immediately a valid `history.window` anchor. A rewind/fork may later remove a node from that selected path; as with other positional history anchors, `history.window` then returns its normal stale-anchor error. No lookup is performed by body text or timestamp. Response adoption calls `Control::changed(thread_id)` after the commit; it records a durable thread change on the `events.wait` clock before notifying waiters, so the persisted-ref change is observable without polling or guessing.
 
 
-## Protocol 5 (Issue #262; historical)
-
-`ThreadSummary.awaiting_named_count` is exact through 16. Value 17 with
-`awaiting_named_count_exact=false` means 17 or more. The bool defaults to true
-when absent and is omitted when true. Protocol 5 is required because strict
-typed response records cannot assume older clients tolerate an added field.
-The human inbox uses live Thread-ID cursor v2; old snapshot cursors expire.
-The exact count and oldest-time semantics follow: 17 with `exact=false` is a
-lower bound (17+), and oldest is null when that bound is inexact.
-
-### Closed Shell Stdin (#282)
+## Closed Shell Stdin (#282)
 
 Shell stdin is closed by default. `initial_stdin` is delivered before automatic
 EOF; set `stdin_open: true` at shell creation for later interactive input.
@@ -1002,7 +987,7 @@ Partial writes, timeouts and in-flight failures retain their typed write result;
 `shell.stop` remains idempotent. Its `ShellStopResult` is an untagged union: `{ "accepted": true }` when a stop is accepted, or the same `ShellDetails` as `shell.get` when the execution has already finished.
 
 `attachment.remove` returns `AttachmentRemoveResult`, containing `attachment_id` and `removed: true` on success. None of these result declarations changes the existing wire shape or protocol version.
-### Model Admission Sender Identity (#285)
+## Model Admission Sender Identity (#285)
 
 Replay and request inspection derive one developer preamble immediately before
 the received body from its canonical admission receipt (#297; see
@@ -1071,15 +1056,3 @@ invalid or absent value is treated as unknown. A client that refuses the
 advertised protocol before connecting includes the valid value in its local
 `protocol_mismatch` error details when present. No additional handshake or
 request is sent, and the version is not used for compatibility or peer checks.
-
-## Protocol 14 (#297)
-
-Item-projected history windows report retired admission notice ordinals as
-`kind: "model_context"` with `items: []`. Raw history retains the original
-node kind and body.
-
-## Protocol 15 (#355)
-
-For output-limited adopted answers, history provenance may include `output_limit`
-with the [saved attempt evidence](events-and-external-protocol.md#output-limit-adoption).
-It is absent on ordinary answers and does not enter model replay.
