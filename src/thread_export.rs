@@ -45,7 +45,7 @@ impl ExportFile {
         let trailer = Trailer {
             kind: "trailer",
             lines: self.lines,
-            sha256: format!("{:x}", self.hash.finalize()),
+            sha256: digest_hex(&self.hash.finalize()),
         };
         serde_json::to_writer(&mut self.file, &trailer)?;
         self.file.write_all(b"\n")?;
@@ -53,6 +53,10 @@ impl ExportFile {
         self.file.persist(path).map_err(|error| error.error)?;
         Ok(trailer)
     }
+}
+
+fn digest_hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 #[cfg(test)]
