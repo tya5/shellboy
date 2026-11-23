@@ -16,15 +16,29 @@ fn artifact_list_seeks_across_equal_update_times() {
          SELECT id,1,'opaque:path','Output',created_at FROM artifact;",
     )
     .unwrap();
-    let mut args = ArtifactListArgs { thread_id: "t".into(), limit: 2, cursor: None };
+    let mut args = ArtifactListArgs {
+        thread_id: "t".into(),
+        limit: 2,
+        cursor: None,
+    };
     for expected in [["z", "a"], ["b", "c"]] {
         let result = list(&tx, &args).unwrap();
-        assert_eq!(result.items.iter().map(|a| a.artifact_id.as_str()).collect::<Vec<_>>(), expected);
+        assert_eq!(
+            result
+                .items
+                .iter()
+                .map(|a| a.artifact_id.as_str())
+                .collect::<Vec<_>>(),
+            expected
+        );
         args.cursor = Some(result.next_cursor.unwrap());
     }
     let mut other = args.clone();
     other.thread_id = "other".into();
-    assert_eq!(list(&tx, &other).unwrap_err().code, ErrorCode::CursorExpired);
+    assert_eq!(
+        list(&tx, &other).unwrap_err().code,
+        ErrorCode::CursorExpired
+    );
     let result = list(&tx, &args).unwrap();
     assert_eq!(result.items.len(), 1);
     assert_eq!(result.items[0].artifact_id, "d");

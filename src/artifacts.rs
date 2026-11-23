@@ -7,7 +7,7 @@ use crate::protocol::{
 use rusqlite::{OptionalExtension, Row, Transaction, params};
 
 type Result<T> = std::result::Result<T, ApiError>;
-const LIST: &str = "artifact.list";
+const LIST: &str = "artifact.list.updated_at_desc.id_asc";
 const VERSIONS: &str = "artifact.versions";
 
 fn sql(error: rusqlite::Error) -> ApiError {
@@ -200,19 +200,42 @@ fn page<T>(
 }
 pub(crate) fn list(tx: &Transaction<'_>, a: &ArtifactListArgs) -> Result<Page<ArtifactSummary>> {
     let limit = page_limit(a.limit)?;
-    let after = seek(a.cursor.as_deref(), LIST, &a.thread_id)?.unwrap_or_default();
+    let after = seek(a.cursor.as_deref(), LIST, &a.thread_id)?
+        .map(|key| {
+            serde_json::from_str::<(String, String)>(&key).map_err(|_| {
+                ApiError::new(ErrorCode::CursorExpired, "invalid artifact list cursor")
+            })
+        })
+        .transpose()?;
     check_thread(tx, &a.thread_id)?;
-    let query = format!(
-        "SELECT {FIELDS} FROM artifact a {LATEST_JOIN} WHERE a.thread_id=?1 AND a.id>?2 ORDER BY a.id LIMIT ?3"
-    );
-    let items = tx
-        .prepare(&query)
-        .map_err(sql)?
-        .query_map(params![a.thread_id, after, limit as i64 + 1], summary)
-        .map_err(sql)?
-        .collect::<rusqlite::Result<_>>()
-        .map_err(sql)?;
-    page(items, limit, LIST, &a.thread_id, |a| a.artifact_id.clone())
+    let mut items = Vec::new();
+    let mut read = |range: &str, after: &[&dyn rusqlite::ToSql]| -> Result<()> {
+        let remaining = (limit + 1 - items.len()) as i64;
+        if remaining == 0 {
+            return Ok(());
+        }
+        let query = format!(
+            "SELECT {FIELDS} FROM artifact a {LATEST_JOIN} WHERE a.thread_id=?1 {range}
+             ORDER BY a.updated_at DESC, a.id LIMIT ?2"
+        );
+        let mut binds: Vec<&dyn rusqlite::ToSql> = vec![&a.thread_id, &remaining];
+        binds.extend_from_slice(after);
+        let mut stmt = tx.prepare(&query).map_err(sql)?;
+        for row in stmt.query_map(binds.as_slice(), summary).map_err(sql)? {
+            items.push(row.map_err(sql)?);
+        }
+        Ok(())
+    };
+    if let Some((updated, id)) = after {
+        // Mixed sort directions need two index ranges: the remaining tie, then older rows.
+        read("AND a.updated_at=?3 AND a.id>?4", &[&updated, &id])?;
+        read("AND a.updated_at<?3", &[&updated])?;
+    } else {
+        read("", &[])?;
+    }
+    page(items, limit, LIST, &a.thread_id, |a| {
+        serde_json::json!([a.updated_at, a.artifact_id]).to_string()
+    })
 }
 pub(crate) fn get(tx: &Transaction<'_>, a: &ArtifactGetArgs) -> Result<ArtifactGetResult> {
     if let Some(n) = a.version {

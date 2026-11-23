@@ -296,6 +296,11 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         sql: include_str!("../../migrations/0057_thread_artifacts.sql"),
         foreign_keys: None,
     },
+    Migration {
+        version: 58,
+        sql: include_str!("../../migrations/0058_artifact_list_order.sql"),
+        foreign_keys: None,
+    },
 ];
 
 pub(super) fn run(
@@ -2429,7 +2434,7 @@ mod thread_creation_migration_tests {
     fn schema54_backfills_earliest_owned_activity_without_inherited_path_or_updates() {
         let mut db = Connection::open_in_memory().unwrap();
         db.execute_batch(super::super::CURRENT_SCHEMA).unwrap();
-        db.execute_batch("DROP TABLE artifact_version; DROP TABLE artifact; DELETE FROM schema_migration WHERE version=57; DROP INDEX receipt_named_reply_pending;
+        db.execute_batch("DROP TABLE artifact_version; DROP TABLE artifact; DELETE FROM schema_migration WHERE version IN (57,58); DROP INDEX receipt_named_reply_pending;
             DROP INDEX receipt_pending_by_time;
             DROP INDEX receipt_pending_owed;
             DROP INDEX receipt_pending_asked;
@@ -2468,7 +2473,7 @@ mod automatic_compaction_migration_tests {
     fn automatic_compaction_migration_preserves_known_list_facts() {
         let mut db = Connection::open_in_memory().unwrap();
         db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
-        db.execute_batch("DROP TABLE artifact_version; DROP TABLE artifact; DELETE FROM schema_migration WHERE version=57; DROP INDEX receipt_named_reply_pending;
+        db.execute_batch("DROP TABLE artifact_version; DROP TABLE artifact; DELETE FROM schema_migration WHERE version IN (57,58); DROP INDEX receipt_named_reply_pending;
             DROP INDEX receipt_pending_by_time;
             DROP INDEX receipt_pending_owed;
             DROP INDEX receipt_pending_asked;
