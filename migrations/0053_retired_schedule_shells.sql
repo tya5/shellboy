@@ -1,3 +1,4 @@
+-- rebuild: foreign keys off
 CREATE TABLE detached_shell_execution(
  id TEXT PRIMARY KEY NOT NULL, owner_run_id TEXT REFERENCES run(id),
  turn_id TEXT REFERENCES turn(id), schedule_id TEXT REFERENCES schedule(id) ON DELETE CASCADE, detached_thread_id TEXT REFERENCES thread(id) ON DELETE CASCADE, operation_id TEXT NOT NULL UNIQUE,

@@ -11,6 +11,17 @@ pub(super) struct Migration {
     pub foreign_keys: Option<Impact>,
 }
 
+/// First line of a migration that rebuilds tables: it runs with foreign keys
+/// off and is checked before commit. The SQL file is the only list of such
+/// migrations, so landing can renumber them by text (#359).
+const REBUILD_MARKER: &str = "-- rebuild: foreign keys off";
+
+impl Migration {
+    fn rebuilds_tables(&self) -> bool {
+        self.sql.lines().next() == Some(REBUILD_MARKER)
+    }
+}
+
 pub(super) const MIGRATIONS: &[Migration] = &[
     Migration {
         version: 2,
@@ -363,13 +374,13 @@ pub(super) fn run(
                 summary_attempts::convert(&transaction)?;
                 transaction.execute_batch(include_str!("migrate/retire_summary_ledger.sql"))?;
             }
-            if matches!(migration.version, 39 | 51 | 52 | 53) {
+            if migration.rebuilds_tables() {
                 super::check_integrity(&transaction, true, false)?;
             }
             transaction.commit()?;
             Ok(())
         };
-        if matches!(migration.version, 39 | 51 | 52 | 53) {
+        if migration.rebuilds_tables() {
             with_foreign_keys_disabled(connection, apply)?;
         } else {
             apply(connection)?;
@@ -1106,6 +1117,18 @@ mod question_admission_migration_tests {
 #[cfg(test)]
 mod activity_migration_tests {
     use super::*;
+
+    #[test]
+    fn historical_table_rebuilds_carry_the_marker() {
+        let rebuilds: Vec<_> = MIGRATIONS
+            .iter()
+            .filter(|migration| migration.rebuilds_tables())
+            .map(|migration| migration.version)
+            .collect();
+        for version in [39, 51, 52, 53] {
+            assert!(rebuilds.contains(&version), "{version}");
+        }
+    }
 
     #[test]
     fn executor_matches_registered_migration_versions() {

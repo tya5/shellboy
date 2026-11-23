@@ -1,3 +1,4 @@
+-- rebuild: foreign keys off
 DROP TRIGGER IF EXISTS reject_owner_cycle_insert;
 DROP TRIGGER IF EXISTS reject_owner_cycle_update;
 DROP INDEX IF EXISTS runs_by_owner;

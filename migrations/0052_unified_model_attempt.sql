@@ -1,3 +1,4 @@
+-- rebuild: foreign keys off
 -- Foreign keys are disabled only around the checked rebuild; existing IDs and rowids are preserved.
 CREATE TABLE model_attempt_new(
  id TEXT PRIMARY KEY NOT NULL, turn_id TEXT REFERENCES turn(id),

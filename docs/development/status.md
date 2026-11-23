@@ -1,5 +1,18 @@
 # Development status
 
+## Core #359 migration numbers at landing
+
+Branch `task/core359-land-migrations` (on #356) extends
+`scripts/land-protocol.py`: `next_<slug>` migrations are numbered main + 1, + 2, …
+in batch commit order in the same commit as the protocol bump. The table-rebuild
+list (39, 51, 52, 53) moved from `storage::migrate` and
+`check-release-upgrade.py` into a first-line marker in those four SQL files;
+the release-upgrade choices, the error catalogue's supported range and two
+script tests now derive the current schema instead of naming it. Rule:
+[setup](setup.md#migration-numbers-at-landing-359). Tests:
+`scripts/tests/test_land_migrations.py`. Next: the integration owner uses it on
+the first batch with two migrations and records the result.
+
 ## Core #356 protocol number at landing
 
 Branch `task/core356-land-protocol` adds `scripts/land-protocol.py` and its

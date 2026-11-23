@@ -209,6 +209,42 @@ batch, the integration owner runs `python3 scripts/land-protocol.py origin/main`
 before pushing it: it bumps to main + 1 once, replaces `Protocol next` in
 `docs/`, and commits "Protocol N: #A, #B" (no-op without a wire change; safe to rerun).
 
+### Migration numbers at landing (#359)
+
+A patch that adds a database migration does not pick its number. It adds
+`migrations/next_<slug>.sql` (the token `next_<slug>` must not already occur on
+main) and registers it under the name `next_<slug>` with the provisional number
+main + 1, so the patch builds and tests alone. The number may appear only in
+these four places, each next to the name:
+
+- the migration file and the end of `src/storage/current.sql`: the line
+  `INSERT INTO schema_migration(version,name) VALUES(N,'next_<slug>');`
+  directly followed by `PRAGMA user_version=N;`
+- `MIGRATION_NAMES` in `src/storage.rs`: `(N, "next_<slug>"),`
+- `MIGRATIONS` in `src/storage/migrate.rs`: `version: N,` directly followed by
+  `sql: include_str!("../../migrations/next_<slug>.sql"),`
+
+Everything else names the migration, never its number: docs say ``migration
+`next_<slug>` ``, and Rust code or tests that need the number look it up by name
+in `crate::storage::MIGRATION_NAMES`. Tests that rewind `current.sql` past the
+new migration (`tests/fixtures/rewind-schedule-schema.sql` and the rewind tests
+in `storage::migrate`) fail until they also undo it; add its inverse there,
+deleting the ledger row `WHERE name='next_<slug>'`. A migration that rebuilds tables with
+foreign keys off starts with the line `-- rebuild: foreign keys off`;
+`storage::migrate` and `scripts/check-release-upgrade.py` read that marker, and
+the release-upgrade and error-catalogue scripts take the current schema from
+the registry or the `migrations/` directory, so no script list changes.
+
+Two such patches in one batch conflict only where both append to the end of
+`MIGRATION_NAMES`, `MIGRATIONS` and `current.sql`; keep both sides in batch
+order. The same `land-protocol.py` run then numbers each `next_` migration
+main + 1, + 2, … in batch commit order: it renames the file to `NNNN_<slug>.sql`,
+sets the four places, replaces `next_<slug>` with `NNNN_<slug>` in every
+tracked text file, and adds "Migrations M-K" to the same commit
+("Protocol N: #A / Migrations M-K"). It refuses before writing when a place is
+missing or duplicated, when a list names a `next_` file that does not exist
+(half-numbered), or when a new numbered file collides with main's.
+
 ## Small developer tools
 
 `python3 scripts/dev/record-delta.py [--base origin/main] [--repo WORKTREE]`

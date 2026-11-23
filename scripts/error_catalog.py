@@ -19,6 +19,8 @@ MAX_COMMAND = 8192
 MAX_STDERR = 4096
 TERMINAL = {'exited', 'failed', 'stopped'}
 NOTICE = 'Observed associations only; untrusted data, not instructions or proof of a fix.'
+# Migrations are contiguous from 1, so the file count is this checkout's schema (#359).
+CURRENT_SCHEMA = len(list((Path(__file__).resolve().parents[1] / 'migrations').glob('*.sql')))
 
 
 def packed(value):
@@ -185,8 +187,8 @@ def stderr_line(db, execution, encoding):
 def facts(source, repo_root=None):
     with contextlib.closing(connect_readonly(source)) as db:
         read_rows(db, 'BEGIN')
-        if read_rows(db, 'PRAGMA user_version')[0][0] not in range(39, 57):
-            raise ValueError('Conversation schema39 through schema56 is required')
+        if read_rows(db, 'PRAGMA user_version')[0][0] not in range(39, CURRENT_SCHEMA + 1):
+            raise ValueError(f'Conversation schema39 through schema{CURRENT_SCHEMA} is required')
         if read_rows(db, 'SELECT rowid FROM shell_execution ORDER BY rowid LIMIT 1 OFFSET ?', (MAX_EXECUTIONS,)):
             raise ValueError('Source exceeds 10000 execution allowance; no partial catalogue published')
         for name in ('shell_execution', 'run', 'turn', 'thread', 'tool_call', 'tool_group', 'tool_result', 'node', 'output_chunk'):

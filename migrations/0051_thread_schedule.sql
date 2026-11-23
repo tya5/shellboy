@@ -1,3 +1,4 @@
+-- rebuild: foreign keys off
 CREATE TABLE schedule(
  id TEXT PRIMARY KEY NOT NULL, thread_id TEXT NOT NULL REFERENCES thread(id) ON DELETE CASCADE,
  cron TEXT, once_at INTEGER, next_at INTEGER, enabled INTEGER NOT NULL CHECK(enabled IN (0,1)),

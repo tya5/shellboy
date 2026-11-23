@@ -6,7 +6,7 @@ with tempfile.TemporaryDirectory(prefix='shellboy-issue26-') as temp:
  db=sqlite3.connect(str(pathlib.Path(temp)/'fixture.db'))
  db.create_function('octet_length',1,lambda x: None if x is None else len(x.encode() if isinstance(x,str) else x),deterministic=True)
  for migration in sorted((REPO/'migrations').glob('*.sql')):
-  if int(migration.name[:4]) <= 9: db.executescript(migration.read_text())
+  if migration.name[:4].isdigit() and int(migration.name[:4]) <= 9: db.executescript(migration.read_text())
  db.executemany("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES(?,?,'/','/AGENTS.md','fixture','fixture',?)",[(f't{i:04}',f'synthetic {i}',f'{i:08}') for i in range(1000)])
  runs=[];turns=[];shells=[]
  for i in range(10000):

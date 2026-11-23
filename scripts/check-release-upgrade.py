@@ -39,6 +39,11 @@ def registered_migration_versions(registry):
 
 REGISTERED_MIGRATION_VERSIONS = registered_migration_versions(_migration_names)
 CURRENT_SCHEMA_VERSION = REGISTERED_MIGRATION_VERSIONS[-1]
+# Files by registered name, so an unlanded `next_<slug>` migration resolves too (#359).
+MIGRATION_FILES = {int(version): MIGRATIONS / f'{name}.sql'
+                   for version, name in re.findall(r'^\s*\((\d+),\s*"([^"]+)"', _migration_names, re.MULTILINE)}
+# A table-rebuild migration says so on its first line; src/storage/migrate.rs reads the same marker.
+REBUILD_MARKER = '-- rebuild: foreign keys off'
 RETIRE_SUMMARY_LEDGER_SQL = ROOT / 'src/storage/migrate/retire_summary_ledger.sql'
 SPILL_OVERRIDE_SCHEMA_VERSION = 45
 if SPILL_OVERRIDE_SCHEMA_VERSION not in REGISTERED_MIGRATION_VERSIONS:
@@ -81,7 +86,7 @@ def preserved(db, before):
 
 def check_migration(db, before, start, target):
     assert db.execute('PRAGMA user_version').fetchone() == (target,)
-    expected = before + [(version, next(MIGRATIONS.glob(f'{version:04d}_*.sql')).stem)
+    expected = before + [(version, MIGRATION_FILES[version].stem)
                          for version in range(start + 1, target + 1)]
     assert ledger(db) == expected, 'migration ledger prefix or suffix changed'
     assert db.execute('PRAGMA integrity_check').fetchall() == [('ok',)]
@@ -324,8 +329,8 @@ def apply_migration(db, version):
         require_empty_summary_ledger_for_sql_staging(db)
         sql = (MIGRATIONS / '0052_unified_model_attempt.sql').read_text() + RETIRE_SUMMARY_LEDGER_SQL.read_text()
     else:
-        sql = DERIVED[version].read_text() if version in DERIVED else next(MIGRATIONS.glob(f'{version:04d}_*.sql')).read_text()
-    if version not in (39, 51, 52, 53):
+        sql = DERIVED[version].read_text() if version in DERIVED else MIGRATION_FILES[version].read_text()
+    if sql.split('\n', 1)[0].rstrip('\r') != REBUILD_MARKER:
         db.executescript('BEGIN IMMEDIATE;\n' + sql + '\nCOMMIT;')
         return
     # Mirror the table-rebuild contract: check FK before committing.
@@ -345,7 +350,7 @@ def prepare_schema(db, target):
     start = db.execute('PRAGMA user_version').fetchone()[0]
     if start == target:
         return
-    assert start in (14, 17, 19, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, CURRENT_SCHEMA_VERSION) and target in (14, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, CURRENT_SCHEMA_VERSION) and start <= target, 'unexpected synthetic fixture schema'
+    assert start in (14, 17, 19, *range(24, CURRENT_SCHEMA_VERSION + 1)) and target in (14, *range(16, CURRENT_SCHEMA_VERSION + 1)) and start <= target, 'unexpected synthetic fixture schema'
     if start < 46 <= target:
         require_empty_scope_facts_for_sql_staging(db)
     if start < 49 <= target:
@@ -365,11 +370,11 @@ def parse_args(argv=None):
     parser.add_argument('--new', type=Path, required=True)
     parser.add_argument('--root', type=Path, required=True)
     parser.add_argument('--old-version', choices=tuple(PUBLIC_SCHEMA), default='0.10.0')
-    parser.add_argument('--start-schema', type=int, choices=(14, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, CURRENT_SCHEMA_VERSION), default=None,
+    parser.add_argument('--start-schema', type=int, choices=(14, *range(16, CURRENT_SCHEMA_VERSION + 1)), default=None,
                         help='defaults to the public old schema; 16/17 can stage derived indexes on a stopped schema 14 copy')
     parser.add_argument('--expected-version', default=CARGO_VERSION, help='defaults to the Cargo.toml package version')
-    parser.add_argument('--expected-new-schema', type=int, choices=(14, 15, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, CURRENT_SCHEMA_VERSION), default=CURRENT_SCHEMA_VERSION,
-                        help='56 for directional reply duties; 55 for automatic compaction records; 54 for Thread creation times; 53 for retired scheduled shell readback; 52 for unified model attempts; 51 for Thread schedules; 50 for attachment page order; 49 for generated-summary message-role migration; 48 for human-question path-admission settlement; 47 for dropping the retired selection witness; 46 for canonical fact scope identity; 45 for the per-Thread automatic-spill override; 44 for the per-Thread output limit; 43 for Thread summary settings; 42 for notification semantic metadata; 40 for the non-append selection witness; 39 for independent Runs; 38 for the human-reply pending index; 34 for the Thread tag table and cwd list index; 33 for the index space int8 scale column; 32 for the Thread archive column and partial list indexes; 31 for the per-Thread summary parameter columns; 30 for the per-Thread compaction threshold column; 29 for the active-attempt recovery index; earlier versions retain historical release checks')
+    parser.add_argument('--expected-new-schema', type=int, choices=(14, 15, *range(17, CURRENT_SCHEMA_VERSION + 1)), default=CURRENT_SCHEMA_VERSION,
+                        help='defaults to the current registered schema; each version is named by its migrations/ file')
     args = parser.parse_args(argv)
     public_schema = PUBLIC_SCHEMA[args.old_version]
     if args.start_schema is None:
