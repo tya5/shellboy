@@ -226,6 +226,7 @@ pub(super) fn history_snippet(
         },
         executions_truncated: execution_count > executions.len() as u64,
         execution_count,
+        execution_count_exact: None,
         executions,
         node_id,
         kind: row.get(1).map_err(sql_error)?,
@@ -246,9 +247,8 @@ pub(super) struct AdmittedSnippet<'a> {
     pub payload_chars: Option<u64>,
     pub body: Option<&'a Value>,
     pub excerpt_chars: u32,
-    pub item_projection: crate::protocol::HistoryNodeItems,
-    pub executions: Vec<HistoryExecutionLink>,
-    pub execution_count: u64,
+    pub item_projection: Option<crate::protocol::HistoryNodeItems>,
+    pub links: window_links::Links,
 }
 
 pub(super) fn history_snippet_with_items(
@@ -266,8 +266,7 @@ pub(super) fn history_snippet_with_items(
         body,
         excerpt_chars,
         item_projection,
-        executions,
-        execution_count,
+        links,
     } = admitted;
     let excerpt = if excerpt_chars == 0 {
         String::new()
@@ -290,9 +289,9 @@ pub(super) fn history_snippet_with_items(
     } else {
         None
     };
-    let executions_truncated = execution_count > executions.len() as u64;
+    let executions_truncated = !links.exact || links.count > links.rows.len() as u64;
     Ok(HistorySnippet {
-        item_projection: Some(item_projection),
+        item_projection,
         spill_tools,
         payload_chars,
         provenance: super::relations::projected_provenance(connection, &node_id, Some(thread_id))?,
@@ -303,8 +302,9 @@ pub(super) fn history_snippet_with_items(
             current_cwd: current_cwd.into(),
         },
         executions_truncated,
-        execution_count,
-        executions,
+        execution_count: links.count,
+        execution_count_exact: Some(links.exact),
+        executions: links.rows,
         node_id,
         kind,
         excerpt,

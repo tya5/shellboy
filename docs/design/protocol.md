@@ -950,6 +950,16 @@ activity. Studio rereads `thread.get` after existing Thread change hints and
 uses only `summarizing` for the current indicator. This is not a progress estimate
 and adds no list field, event or polling path.
 
+## Bounded history window and body reads (#381)
+
+`history.window` selects metadata before materializing a payload. Both modes admit at most 1 MiB of stored UTF-8 source JSON per node; the excerpt-only mode never reads it when `excerpt_chars` is zero. `payload_chars` can be null when the source was not loaded. A large source omitted from a non-item excerpt gets a source-budget placeholder rather than looking like an empty body. The item projection retains its existing typed source and response budget states.
+
+`history.window` returns at most eight validated direct execution links per node. `execution_count_exact: true` means all candidates were examined and the count is exact; `false` means `execution_count` is a lower bound (capped at nine), even when it is zero or fewer than eight links are shown. `executions_truncated` is true whenever completeness was not proved. Only an indexed candidate sample is sorted and hydrated. A request link's `request_node_id` may be omitted when the scan cannot prove its uniqueness. The count semantics for `history.list` are unchanged.
+
+`history.get` reads `incomplete_response` and `model_stream_observation` as a byte range of the saved JSON via SQLite incremental I/O. The byte cursor remains bound to node, revision, encoding, and projection, and pages end at UTF-8 character boundaries. Ordinary decoded text (including the end-message projection) and summary parts still rebuild text before slicing: their decoded offsets do not correspond to byte offsets in the canonical JSON, and parts are mutable cache records. There is no new stored projection.
+
+If the bounded prune-readability check cannot finish, `history.get` returns a successful metadata-only result with `body_unavailable_reason: "prune_indeterminate"`, empty `text`, and no `next_cursor` or tombstone. This is not proof of pruning, emptiness, or readability. Proven pruning still refuses the body. Live selected-path window rows already have a live path root, so the bound cannot suppress another row in the window. GC still uses the exact check.
+
 ## #274 spill-to-tool provenance
 
 `history.list` and `history.window` retain all existing fields and add `spill_tools` only for spill nodes:

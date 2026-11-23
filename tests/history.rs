@@ -530,6 +530,8 @@ async fn history_metadata_links_real_executions_and_preserves_fork_origin() {
         "get content and order must be index-independent"
     );
     database.call(|db| {
+        // The prior comparison only exercises the legacy list/get query with the index absent.
+        db.execute("CREATE INDEX history_tool_group_attempt ON tool_group(attempt_id)", [])?;
         for (id, value) in [("shell-0", json!("  inspect\nfiles\u{7} ")), ("shell-1", json!("  \t\r\n")), ("shell-2", json!(123)), ("shell-3", json!("語".repeat(90))), ("shell-5", json!("\u{1b}[31mred\u{1b}[0m\u{2028}line"))] {
             db.execute("UPDATE shell_execution SET shell_json=json_set(shell_json,'$.description',json(?2)) WHERE id=?1", params![id, value.to_string()])?;
         }
@@ -565,10 +567,17 @@ async fn history_metadata_links_real_executions_and_preserves_fork_origin() {
         })
         .await
         .unwrap();
-    assert_eq!(
-        serde_json::to_value(&page.items).unwrap(),
-        serde_json::to_value(&window.items).unwrap()
-    );
+    let mut window_wire = serde_json::to_value(&window.items).unwrap();
+    for item in window_wire.as_array_mut().unwrap() {
+        let exact = item
+            .as_object_mut()
+            .unwrap()
+            .remove("execution_count_exact")
+            .unwrap();
+        assert_eq!(exact, json!(item["node_id"] != "calls"));
+    }
+    assert_eq!(serde_json::to_value(&page.items).unwrap(), window_wire);
+
     let mut without_descriptions = serde_json::to_value(&page).unwrap();
     for item in without_descriptions["items"].as_array_mut().unwrap() {
         if let Some(executions) = item.get_mut("executions").and_then(Value::as_array_mut) {

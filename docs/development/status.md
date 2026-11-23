@@ -5,6 +5,9 @@
 State-filtered Thread pages have a bounded candidate scan, status chooses SQL
 page keys before projection, and list reply counts disclose lower bounds.
 See [the protocol changes](../design/protocol-versions/19.md).
+## Core #381 history reads (items 7 and 8)
+
+Window sources and execution candidates are bounded independently of response size. Exact saved JSON audit bodies read byte ranges; decoded and parts projections retain their full-rebuild fallback. Prune budget exhaustion withholds the body without a tombstone or RPC failure. No migration or stored projection.
 
 ## Core #379 CLI and guide audit fixes
 

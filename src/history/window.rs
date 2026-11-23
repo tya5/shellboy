@@ -10,104 +10,7 @@ pub fn window(
     connection: &Connection,
     args: &crate::protocol::HistoryWindowArgs,
 ) -> Result<crate::protocol::HistoryWindow, ApiError> {
-    if args.items {
-        return window_with_items(connection, args);
-    }
-    let invalid = |message| ApiError::new(ErrorCode::InvalidArgument, message);
-    if args.ordinal.is_some() && args.node_id.is_some() {
-        return Err(invalid("give at most one of ordinal and node_id"));
-    }
-    if args.expect_node_id.is_some() && args.ordinal.is_none() {
-        return Err(invalid("expect_node_id needs ordinal"));
-    }
-    if u64::from(args.before) + u64::from(args.after) + 1 > u64::from(MAX_LIST_LIMIT) {
-        return Err(invalid("before + after + 1 must be at most 200"));
-    }
-    if args.excerpt_chars > crate::protocol::MAX_HISTORY_EXCERPT_CHARS {
-        return Err(invalid("excerpt-chars must be in 0..=4096"));
-    }
-    let (revision, current_cwd): (u64, String) = connection
-        .query_row(
-            "SELECT selection_revision,cwd FROM thread WHERE id=?1 AND deleted_at IS NULL",
-            [&args.thread_id],
-            |row| Ok((row.get::<_, i64>(0)? as u64, row.get(1)?)),
-        )
-        .optional()
-        .map_err(sql_error)?
-        .ok_or_else(|| ApiError::new(ErrorCode::ThreadNotFound, "Thread not found"))?;
-    let total: u64 = connection
-        .query_row(TOTAL_SQL, [&args.thread_id], |row| {
-            row.get::<_, i64>(0).map(|n| n as u64)
-        })
-        .optional()
-        .map_err(sql_error)?
-        .unwrap_or(0);
-    let stale = |reason: &str| {
-        ApiError::new(ErrorCode::CursorExpired, reason)
-            .details(serde_json::json!({"revision": revision, "total": total}))
-    };
-    let anchor = if let Some(node_id) = &args.node_id {
-        connection
-            .query_row(NODE_SQL, params![args.thread_id, node_id], |row| {
-                row.get::<_, i64>(0).map(|n| n as u64)
-            })
-            .optional()
-            .map_err(sql_error)?
-            .ok_or_else(|| stale("node is not on the selected path"))?
-    } else if let Some(ordinal) = args.ordinal {
-        let node: Option<String> = connection
-            .query_row(
-                ORDINAL_SQL,
-                params![args.thread_id, ordinal as i64],
-                |row| row.get(0),
-            )
-            .optional()
-            .map_err(sql_error)?;
-        let node = node.ok_or_else(|| stale("position is past the end of the selected path"))?;
-        if args.expect_node_id.as_ref().is_some_and(|e| *e != node) {
-            return Err(stale("selected path changed at this position"));
-        }
-        ordinal
-    } else if total == 0 {
-        return Ok(crate::protocol::HistoryWindow {
-            thread_id: args.thread_id.clone(),
-            revision,
-            total,
-            items: Vec::new(),
-        });
-    } else {
-        total - 1
-    };
-    let low = anchor.saturating_sub(u64::from(args.before));
-    let high = anchor.saturating_add(u64::from(args.after));
-    let mut statement = connection.prepare_cached(WINDOW_SQL).map_err(sql_error)?;
-    let mut rows = statement
-        .query(params![
-            args.thread_id,
-            low as i64,
-            high.min(i64::MAX as u64) as i64,
-            args.excerpt_chars
-        ])
-        .map_err(sql_error)?;
-    let mut items = Vec::new();
-    while let Some(row) = rows.next().map_err(sql_error)? {
-        items.push(
-            list::history_snippet(
-                connection,
-                row,
-                &args.thread_id,
-                &current_cwd,
-                args.excerpt_chars,
-            )?
-            .0,
-        );
-    }
-    Ok(crate::protocol::HistoryWindow {
-        thread_id: args.thread_id.clone(),
-        revision,
-        total,
-        items,
-    })
+    window_projected(connection, args)
 }
 
 struct ItemWindowRow {
@@ -150,7 +53,7 @@ fn response_budget_projection() -> crate::protocol::HistoryNodeItems {
 
 /// Opt-in item projection. Metadata is scanned first; payload JSON is fetched
 /// only for a node whose stored UTF-8 byte count admits it under the source cap.
-fn window_with_items(
+fn window_projected(
     connection: &Connection,
     args: &crate::protocol::HistoryWindowArgs,
 ) -> Result<crate::protocol::HistoryWindow, ApiError> {
@@ -233,9 +136,7 @@ fn window_with_items(
     let low = anchor.saturating_sub(u64::from(args.before));
     let high = anchor.saturating_add(u64::from(args.after));
     let rows: Vec<ItemWindowRow> = {
-        let mut statement = snapshot
-            .prepare_cached(WINDOW_ITEMS_METADATA_SQL)
-            .map_err(sql_error)?;
+        let mut statement = snapshot.prepare_cached(WINDOW_SQL).map_err(sql_error)?;
         let mapped = statement
             .query_map(
                 params![args.thread_id, low as i64, high.min(i64::MAX as u64) as i64,],
@@ -259,6 +160,39 @@ fn window_with_items(
     let mut response_budget_exhausted = false;
     let mut window_items = Vec::with_capacity(rows.len());
     for row in rows {
+        let links = window_links::scan(snapshot, &row.node_id)?;
+        if !args.items {
+            let (body, payload_chars) = if args.excerpt_chars > 0 {
+                load_admitted_payload(snapshot, &row)?
+                    .map_or((None, None), |(body, chars)| (Some(body), Some(chars)))
+            } else {
+                (None, None)
+            };
+            let excerpt_reason = if row.payload_bytes as u64 > items::NODE_SOURCE_BYTES as u64
+                && row.deleted_reason.is_none()
+            {
+                Some("excerpt exceeds source budget; use history get".into())
+            } else {
+                row.deleted_reason
+            };
+            window_items.push(list::history_snippet_with_items(
+                snapshot,
+                list::AdmittedSnippet {
+                    thread_id: &args.thread_id,
+                    current_cwd: &current_cwd,
+                    node_id: row.node_id,
+                    kind: row.kind,
+                    deleted_reason: excerpt_reason,
+                    ordinal: row.ordinal,
+                    payload_chars,
+                    body: body.as_ref(),
+                    excerpt_chars: args.excerpt_chars,
+                    item_projection: None,
+                    links,
+                },
+            )?);
+            continue;
+        }
         let mut body: Option<serde_json::Value> = None;
         let mut payload_chars = None;
         let legacy_admission = is_legacy_admission_node(&row.node_id, &row.kind);
@@ -276,47 +210,30 @@ fn window_with_items(
         } else if row.payload_bytes as u64 > items::NODE_SOURCE_BYTES as u64 {
             unavailable_projection(&row.node_id, Unavailable::SourceBudget)
         } else {
-            let loaded: Option<(String, i64)> = snapshot
-                .query_row(
-                    ITEM_PAYLOAD_SQL,
-                    params![
-                        row.node_id,
-                        row.payload_bytes,
-                        items::NODE_SOURCE_BYTES as i64
-                    ],
-                    |payload_row| Ok((payload_row.get(0)?, payload_row.get(1)?)),
-                )
-                .optional()
-                .map_err(sql_error)?;
-            let Some((payload_json, chars)) = loaded else {
+            let Some((payload, chars)) = load_admitted_payload(snapshot, &row)? else {
                 window_items.push(list::history_snippet_with_items(
                     snapshot,
                     list::AdmittedSnippet {
                         thread_id: &args.thread_id,
                         current_cwd: &current_cwd,
                         node_id: row.node_id.clone(),
-                        kind: row.kind.clone(),
-                        deleted_reason: row.deleted_reason.clone(),
+                        kind: row.kind,
+                        deleted_reason: row.deleted_reason,
                         ordinal: row.ordinal,
                         payload_chars: None,
                         body: None,
                         excerpt_chars: args.excerpt_chars,
-                        item_projection: unavailable_projection(&row.node_id, Unavailable::Legacy),
-                        executions: Vec::new(),
-                        execution_count: 0,
+                        item_projection: Some(unavailable_projection(
+                            &row.node_id,
+                            Unavailable::Legacy,
+                        )),
+                        links,
                     },
                 )?);
                 continue;
             };
-            payload_chars = Some(chars.max(0) as u64);
-            let payload: serde_json::Value = serde_json::from_str(&payload_json).map_err(|_| {
-                ApiError::new(
-                    ErrorCode::InvalidState,
-                    "stored history payload is malformed",
-                )
-            })?;
-            let (links, link_count) = execution_links(snapshot, &row.node_id)?;
-            let projected = items::project(&row.node_id, &row.kind, &payload, &links);
+            payload_chars = Some(chars);
+            let projected = items::project(&row.node_id, &row.kind, &payload, &links.rows);
             let text_bytes = items::text_bytes(&projected);
             if response_text_bytes.saturating_add(text_bytes) > items::RESPONSE_TEXT_BYTES {
                 response_budget_exhausted = true;
@@ -336,18 +253,16 @@ fn window_with_items(
                         payload_chars,
                         body: body.as_ref(),
                         excerpt_chars: args.excerpt_chars,
-                        item_projection: crate::protocol::HistoryNodeItems {
+                        item_projection: Some(crate::protocol::HistoryNodeItems {
                             items: Some(projected),
                             items_unavailable_reason: None,
-                        },
-                        executions: links,
-                        execution_count: link_count,
+                        }),
+                        links,
                     },
                 )?);
                 continue;
             }
         };
-        let (links, link_count) = execution_links(snapshot, &row.node_id)?;
         window_items.push(list::history_snippet_with_items(
             snapshot,
             list::AdmittedSnippet {
@@ -364,9 +279,8 @@ fn window_with_items(
                 payload_chars,
                 body: body.as_ref(),
                 excerpt_chars: args.excerpt_chars,
-                item_projection,
-                executions: links,
-                execution_count: link_count,
+                item_projection: Some(item_projection),
+                links,
             },
         )?);
     }
@@ -378,15 +292,47 @@ fn window_with_items(
     })
 }
 
+fn load_admitted_payload(
+    db: &Connection,
+    row: &ItemWindowRow,
+) -> Result<Option<(Value, u64)>, ApiError> {
+    if row.deleted_reason.is_some()
+        || row.payload_bytes <= 0
+        || row.payload_bytes as u64 > items::NODE_SOURCE_BYTES as u64
+    {
+        return Ok(None);
+    }
+    db.query_row(
+        ITEM_PAYLOAD_SQL,
+        params![
+            row.node_id,
+            row.payload_bytes,
+            items::NODE_SOURCE_BYTES as i64
+        ],
+        |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as u64)),
+    )
+    .optional()
+    .map_err(sql_error)?
+    .map(|(body, chars)| {
+        serde_json::from_str(&body)
+            .map(|body| (body, chars))
+            .map_err(|_| {
+                ApiError::new(
+                    ErrorCode::InvalidState,
+                    "stored history payload is malformed",
+                )
+            })
+    })
+    .transpose()
+}
+
 pub(crate) const TOTAL_SQL: &str =
     "SELECT ordinal+1 FROM thread_path WHERE thread_id=?1 ORDER BY ordinal DESC LIMIT 1";
 pub(crate) const NODE_SQL: &str =
     "SELECT ordinal FROM thread_path WHERE thread_id=?1 AND node_id=?2";
 pub(crate) const ORDINAL_SQL: &str =
     "SELECT node_id FROM thread_path WHERE thread_id=?1 AND ordinal=?2";
-pub(crate) const WINDOW_SQL: &str = "SELECT n.id,n.kind,CASE WHEN ?4=0 THEN NULL ELSE n.payload_json END,n.deleted_reason,p.ordinal,n.created_at,length(n.payload_json) FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND p.ordinal>=?2 AND p.ordinal<=?3 ORDER BY p.ordinal";
-/// Item windows read metadata first; payload JSON is fetched only by NODE_SOURCE_BYTES admission.
-const WINDOW_ITEMS_METADATA_SQL: &str = "SELECT n.id,n.kind,n.deleted_reason,p.ordinal,n.payload_bytes FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND p.ordinal>=?2 AND p.ordinal<=?3 ORDER BY p.ordinal";
+const WINDOW_SQL: &str = "SELECT n.id,n.kind,n.deleted_reason,p.ordinal,n.payload_bytes FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND p.ordinal>=?2 AND p.ordinal<=?3 ORDER BY p.ordinal";
 const ITEM_PAYLOAD_SQL: &str = "SELECT payload_json,length(payload_json) FROM node WHERE id=?1 AND payload_bytes=?2 AND payload_bytes>0 AND payload_bytes<=?3 AND payload_json IS NOT NULL";
 
 /// Integration-test hook: the statements whose plans the cost tests inspect.
@@ -462,6 +408,20 @@ mod items_source_guard_tests {
             reads.load(Ordering::Relaxed) >= 1,
             "legacy path reads its selected payload"
         );
+    }
+
+    #[test]
+    fn window_bounds_non_item_excerpt_source_before_reading_payload() {
+        let db = fixture("x".repeat(crate::history::items::NODE_SOURCE_BYTES + 1));
+        let reads = payload_read_counter(&db);
+        let output = window(&db, &args(false)).unwrap();
+        assert_eq!(reads.load(Ordering::Relaxed), 0);
+        assert!(
+            output.items[0]
+                .excerpt
+                .starts_with("[excerpt exceeds source budget")
+        );
+        assert!(output.items[0].payload_chars.is_none());
     }
 
     #[test]

@@ -349,6 +349,13 @@ Use indexed meaning rather than exact wording when you need to:
 - Reuse the steps and cautions from similar work in another conversation, such as releases, installer validation, or merge-conflict handling.
 - Recover the reasons for an earlier decision in a leader, worker, or previous team's conversation.
 
+In `history window`, `execution_count_exact: false` means the count is only a
+lower bound, even when no execution links were shown. A source-budget excerpt
+placeholder does not mean the body is empty; fetch by node ID as needed. If
+`history get` returns `body_unavailable_reason: "prune_indeterminate"`, retain
+the node ID and treat the body as unverified, not empty or proven pruned. Do not
+poll the same read; use a retained summary or other evidence if available.
+
 If the node ID is known, use `history get`; for facts already visible in the current Turn, no search is needed. `history search` sends one query-embedding API request per search (may incur cost); keyword RAG retrieval does not use embeddings. `indexing.auto_history=false` can leave newer conversation nodes unindexed; heed `degraded` / `scope_status` and use keyword retrieval or authorized backfill for gaps. Semantic search requires configured embeddings and indexed coverage; configuration alone does not prove that a source is indexed.
 
 ```bash
