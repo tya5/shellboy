@@ -613,33 +613,7 @@ guard. This is a live-preview bound, not cancellation of the provider request,
 durable assistant result, receipt or model execution. Normal completion and saved
 result handling continue independently. `status(memory=true)` does not fence.
 
-### Protocol 8: selected input boundary and committed attempt ends (#337)
-
-Each `live_text` entry has a nullable `input_through_node_id`: the last node
-in the qualified selected path, before tool, attachment, or summary projection.
-It is fixed for an attempt, not the current Thread tip. Null means an empty path.
-
-`include_text` also requests `attempt_ends`, ordered by `seq` in the interval
-`(after, cursor]` of the same owner, with the same Thread filter. Each end names
-`thread_id`, `attempt_id`, and `outcome` (`adopted` or `not_adopted`). The Driver
-emits committed adoption decisions; a committed unsuccessful request also proves
-non-adoption. Loss of live text alone proves neither. An end survives replacement
-of its live text slot. The hard cap is 256 ends; a cursor behind an eviction gets
-`resync_required`, so clients refetch saved history rather than invent a discard.
-Baseline and resync carry no end evidence. No end is persisted or replayed across
-an owner restart. An adopted preview stops streaming but stays until saved output
-reconciles it. A client places previews relative to saved node order, not delivery
-order; absent a proven relationship to pending input, the preview goes above it.
-
-### Protocol 12: attempt output-limit evidence (#354)
-
-An attempt end includes `output_limit` only when the provider explicitly stopped
-at its output limit. It carries `stop: true`, the connection used, and the integer
-`sent_max_tokens` and its `source` (`thread_override`, `connection`, `default`,
-or `extra_body`). A missing or non-integer wire value leaves both fields null.
-This is evidence from that attempt, not a lookup of current settings.
-`usage.get` with `attempt_id` returns the same object from saved facts, or null
-for other stops or older attempts without recorded evidence.
+Changes to `events.wait` in protocol 8 and later are in [protocol-versions](protocol-versions/).
 
 ### Receipt-derived admission context (#297)
 

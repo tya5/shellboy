@@ -4,13 +4,18 @@
 Usage: python3 scripts/land-protocol.py [BASE_REF]   (default origin/main)
 
 Protocol (#356): wire-changing patches keep PROTOCOL_VERSION and the schema's
-three version fields at main's value and title their docs section
-`Protocol next (#N)`. This script bumps only when the schema differs from BASE
-(ignoring the version fields) or a docs heading says `Protocol next`:
+three version fields at main's value and describe the change in
+docs/design/protocol-versions/next-<issue>.md, headed `# Protocol next (#issue)`.
+This script bumps only when the schema differs from BASE (ignoring the version
+fields), a next file exists, or a docs heading says `Protocol next`:
 PROTOCOL_VERSION and the schema `$id`/`title`/`protocol_version` become
-BASE + 1 by exact text replacement, every `Protocol next` under docs/ becomes
-`Protocol N` (mentions inside a code span such as `Protocol next` are left
-alone, and `#protocol-next-` anchors follow the heading).
+BASE + 1 by exact text replacement. Every next file is merged, in issue order,
+into docs/design/protocol-versions/N.md headed `# Protocol N (#a, #b)` and
+deleted. A `Protocol next` heading section inside another doc (the form used
+before the per-version files) is moved into N.md the same way. Links to the
+merged files or to `#protocol-next-` anchors are pointed at N.md, and any other
+`Protocol next` under docs/ becomes `Protocol N` (mentions inside code, such as
+`Protocol next`, are left alone).
 
 Migrations (#359): a patch adds `migrations/next_<slug>.sql` and registers it
 under the name `next_<slug>` with a provisional number. In batch commit order
@@ -26,6 +31,7 @@ before anything is written.
 """
 import json
 from pathlib import Path
+import posixpath
 import re
 import subprocess
 import sys
@@ -38,9 +44,16 @@ SCHEMA_FIELDS = (
     re.compile(r'^(  "title": "[^"\n]* v)(\d+)(")', re.M),
     re.compile(r'^(  "protocol_version": )(\d+)(\b)', re.M),
 )
-NEXT = re.compile(r'(?<!`)Protocol next\b')
+NEXT = re.compile(r'Protocol next\b')
+CODE_SPAN = re.compile(r'(`+[^`\n]*?`+)')
 NEXT_ANCHOR = re.compile(r'#protocol-next-')
 NEXT_HEADING = re.compile(r'^#{1,6}[ \t].*?(?<!`)Protocol next\b(?:[ \t]*\(([^)\n]*)\))?', re.M)
+VERSIONS = 'docs/design/protocol-versions'
+NEXT_VERSION_FILE = re.compile(r'^docs/design/protocol-versions/next-(\d+)\.md$')
+HEADING = re.compile(r'^(#{1,6})[ \t]')
+FENCE = re.compile(r'^[ \t]{0,3}(```|~~~)')
+LINK = re.compile(r'(\]\()([^)\s]+)(\))')
+TITLE = re.compile(r'^# Protocol (\d+)(?: \(([^)\n]*)\))?\n')
 
 REGISTRY = 'src/storage.rs'
 EXECUTOR = 'src/storage/migrate.rs'
@@ -96,7 +109,7 @@ class Tree:
     def __init__(self, root, base):
         self.root, self.base = root, base
         self.names = [n for n in git('-C', str(root), 'ls-files', '-z').decode().split('\0') if n]
-        self.texts, self.original, self.renames = {}, {}, []
+        self.texts, self.original, self.renames, self.deletes = {}, {}, [], []
 
     def show(self, ref, path):
         return git('-C', str(self.root), 'show', f'{ref}:{path}').decode('utf-8')
@@ -116,18 +129,107 @@ class Tree:
     def apply(self):
         changed = []
         for name, text in self.texts.items():
-            if text is not None and text != self.original[name]:
+            if text is not None and text != self.original[name] and name not in self.deletes:
+                (self.root / name).parent.mkdir(parents=True, exist_ok=True)
                 (self.root / name).write_bytes(text.encode('utf-8'))
                 changed.append(name)
         if changed:
             git('-C', str(self.root), 'add', '--', *changed)
+        if self.deletes:
+            git('-C', str(self.root), 'rm', '-q', '-f', '--', *self.deletes)
         for old, new in self.renames:
             git('-C', str(self.root), 'mv', old, new)
-        return bool(changed or self.renames)
+        return bool(changed or self.deletes or self.renames)
+
+    def create(self, name, text):
+        if name not in self.names:
+            self.names.append(name)
+        self.text(name)
+        self.texts[name] = text
+
+    def delete(self, name):
+        self.names.remove(name)
+        self.deletes.append(name)
+
+
+def issue_numbers(text):
+    return {int(n) for n in re.findall(r'#(\d+)', text or '')}
+
+
+def heading_anchor(heading):
+    """The anchor GitHub gives a heading: lowercase, punctuation dropped, spaces to hyphens."""
+    return re.sub(r'[^\w\- ]', '', heading.strip().lower()).replace(' ', '-')
+
+
+def lines(text):
+    """(offset, line, inside a code fence) for each line; fence lines count as inside."""
+    offset, fenced = 0, False
+    for line in text.splitlines(keepends=True):
+        fence = bool(FENCE.match(line))
+        yield offset, line, fenced or fence
+        fenced ^= fence
+        offset += len(line)
+
+
+def next_heading(text):
+    """(offset, line, match) of the first `Protocol next` heading outside code fences."""
+    for offset, line, fenced in lines(text):
+        match = None if fenced else NEXT_HEADING.match(line)
+        if match:
+            return offset, line, match
+    return None
+
+
+def level(line):
+    return len(HEADING.match(line).group(1))
+
+
+def raise_headings(text, shift):
+    """Move headings `shift` levels up so a moved section fits under N.md's `#` title."""
+    out = []
+    for _, line, fenced in lines(text):
+        match = None if fenced else HEADING.match(line)
+        out.append(line[shift:] if match and len(match.group(1)) > shift else line)
+    return ''.join(out)
+
+
+def rewrite_links(text, here, fix, there=None):
+    """Rewrite relative Markdown links of text read at `here` and written at `there`.
+
+    fix(resolved path, fragment or None) returns the new (path, fragment), or
+    None to keep the link as written."""
+    there = there or here
+    directory = posixpath.dirname(there)
+
+    def one(match):
+        path, sep, fragment = match.group(2).partition('#')
+        if re.match(r'[A-Za-z][A-Za-z0-9+.-]*:', path):
+            return match.group(0)
+        resolved = posixpath.normpath(posixpath.join(posixpath.dirname(here), path)) if path else here
+        new = fix(resolved, fragment if sep else None)
+        if new is None:
+            return match.group(0)
+        path, fragment = new
+        if path == there and fragment is not None:
+            href = ''
+        else:
+            href = posixpath.relpath(path, directory or '.') + ('/' if match.group(2).split('#')[0].endswith('/') else '')
+        return f'{match.group(1)}{href}{"" if fragment is None else "#" + fragment}{match.group(3)}'
+
+    return LINK.sub(one, text)
+
+
+def outside_code(text, edit):
+    """Apply edit to the text outside code fences and inline code spans."""
+    out = []
+    for _, line, fenced in lines(text):
+        out.append(line if fenced else ''.join(
+            part if part.startswith('`') else edit(part) for part in CODE_SPAN.split(line)))
+    return ''.join(out)
 
 
 def plan_protocol(tree):
-    """Edit the protocol number in memory; return the commit subject part or None."""
+    """Edit the protocol number and version notes in memory; return the commit subject part or None."""
     base = tree.base
     base_version = version(tree.show(base, RUST), f'{base}:{RUST}')
     head_version = version(tree.show('HEAD', RUST), f'HEAD:{RUST}')
@@ -137,26 +239,84 @@ def plan_protocol(tree):
              f'only {base_version} (unbumped) or {target} (already landed) is valid. '
              'Patches must not change the protocol number.')
 
-    docs = [(n, tree.text(n)) for n in tree.names if n.startswith('docs/') and tree.text(n) is not None]
-    issues = set()
-    has_next = False
-    for _, text in docs:
-        for match in NEXT_HEADING.finditer(text):
-            has_next = True
-            issues.update(int(n) for n in re.findall(r'#(\d+)', match.group(1) or ''))
+    next_files = sorted((int(NEXT_VERSION_FILE.match(n).group(1)), n)
+                        for n in tree.names if NEXT_VERSION_FILE.match(n))
+    docs = [n for n in tree.names if n.startswith('docs/') and n != SCHEMA
+            and not NEXT_VERSION_FILE.match(n) and tree.text(n) is not None]
+    in_file = [n for n in docs if next_heading(tree.text(n))]
 
     schema_changed = (schema_body(tree.show(base, SCHEMA), f'{base}:{SCHEMA}')
                       != schema_body(tree.show('HEAD', SCHEMA), f'HEAD:{SCHEMA}'))
-    if head_version == base_version and not (schema_changed or has_next):
+    if head_version == base_version and not (schema_changed or next_files or in_file):
         print(f'land-protocol: no wire change against {base}; protocol stays {base_version}')
         return None
 
     tree.texts[RUST] = set_fields(tree.text(RUST), (VERSION,), target, RUST)
     tree.texts[SCHEMA] = set_fields(tree.text(SCHEMA), SCHEMA_FIELDS, target, SCHEMA)
-    for name, text in docs:
-        if name != SCHEMA:
-            tree.texts[name] = NEXT_ANCHOR.sub(f'#protocol-{target}-', NEXT.sub(f'Protocol {target}', text))
-    if all(text == tree.original[name] for name, text in tree.texts.items()):
+
+    notes = f'{VERSIONS}/{target}.md'
+    issues, parts = set(), []
+    for issue, name in next_files:
+        text = tree.text(name)
+        found = next_heading(text)
+        if found:
+            offset, line, match = found
+            issues |= issue_numbers(match.group(1))
+            text = raise_headings(text[:offset] + text[offset + len(line):], level(line) - 1)
+        issues.add(issue)
+        parts.append((issue, rewrite_links(text, name, lambda *link: link, notes).strip('\n')))
+        tree.delete(name)
+    folded = set()
+    for name in in_file:  # the in-file form used before per-version files
+        text = tree.text(name)
+        while found := next_heading(text):
+            offset, line, match = found
+            depth, start = level(line), offset + len(line)
+            end = next((o for o, other, fenced in lines(text) if o >= start and not fenced
+                        and HEADING.match(other) and level(other) <= depth), len(text))
+            section = text[start:end]
+            own = issue_numbers(match.group(1))
+            issues |= own
+            for _, inner, fenced in lines(section):
+                inner = None if fenced else NEXT_HEADING.match(inner)
+                issues |= issue_numbers(inner and inner.group(1))
+            section = rewrite_links(raise_headings(section, depth - 1), name, lambda *link: link, notes)
+            parts.append((min(own, default=0), section.strip('\n')))
+            before, after = text[:offset].rstrip('\n'), text[end:].lstrip('\n')
+            text = (before + ('\n\n' + after if after else '\n')) if before else after
+        tree.texts[name] = text
+        folded.add(name)
+
+    if parts:
+        earlier = set()
+        bodies = [body for _, body in sorted(parts, key=lambda part: part[0]) if body]
+        existing = tree.text(notes) if notes in tree.names else None
+        if existing is not None:  # a later rerun of an already landed batch
+            title = TITLE.match(existing)
+            if not title or int(title.group(1)) != target:
+                fail(f'{notes} exists but does not start with "# Protocol {target}"')
+            earlier = issue_numbers(title.group(2))
+            bodies.insert(0, existing[title.end():].strip('\n'))
+        listed = sorted(issues | earlier)
+        title = f'Protocol {target}' + (' (' + ', '.join(f'#{n}' for n in listed) + ')' if listed else '')
+        tree.create(notes, f'# {title}\n\n' + '\n\n'.join(b for b in bodies if b) + '\n')
+        anchor = heading_anchor(title)
+        merged = {name for _, name in next_files}
+
+        def redirect(path, fragment):
+            to_anchor = fragment is not None and fragment.startswith('protocol-next')
+            if path in merged:
+                return notes, anchor if to_anchor else fragment
+            if path in folded and to_anchor:
+                return notes, anchor
+            return None
+
+        for name in docs + [notes]:
+            tree.texts[name] = rewrite_links(tree.text(name), name, redirect)
+    for name in docs + ([notes] if parts else []):
+        tree.texts[name] = NEXT_ANCHOR.sub(f'#protocol-{target}-', outside_code(
+            tree.text(name), lambda prose: NEXT.sub(f'Protocol {target}', prose)))
+    if not tree.deletes and all(text == tree.original[name] for name, text in tree.texts.items()):
         print(f'land-protocol: already Protocol {target}; nothing to do for the protocol')
         return None
     subject = f'Protocol {target}'
