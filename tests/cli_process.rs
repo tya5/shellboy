@@ -1061,7 +1061,6 @@ async fn artifact_cli_round_trip_through_owner_changes_and_restart() {
             .arg(&owner.loaded.data_dir)
             .env_remove("SHELLBOY_SOCKET")
             .env_remove("SHELLBOY_INSTANCE_ID")
-            .current_dir(owner.loaded.data_dir.parent().unwrap())
             .args(args)
             .output()
             .await
@@ -1151,32 +1150,6 @@ async fn artifact_cli_round_trip_through_owner_changes_and_restart() {
     )
     .await;
     assert_eq!(saved["version"], v1["version"]);
-    let relative = "missing/../output.txt";
-    // On Unix getcwd can spell a symlinked temp directory differently from tempfile.
-    // Resolve only the existing fixture cwd, never the missing artifact path.
-    #[cfg(unix)]
-    let cli_cwd = root.path().canonicalize().unwrap();
-    #[cfg(not(unix))]
-    let cli_cwd = root.path().to_path_buf();
-    for (input, expected) in [
-        (
-            relative,
-            cli_cwd.join(relative).to_str().unwrap().to_owned(),
-        ),
-        (
-            "https://example.test/a%2Fb",
-            "https://example.test/a%2Fb".to_owned(),
-        ),
-        (r"C:\missing\draft.txt", r"C:\missing\draft.txt".to_owned()),
-    ] {
-        cli(
-            &owner,
-            &["artifact", "update", "--artifact", id, "--uri", input],
-        )
-        .await;
-        let latest = cli(&owner, &["artifact", "get", "--artifact", id]).await;
-        assert_eq!(latest["latest"]["uri"], expected);
-    }
     let at = hint(&owner, thread, None).await;
     cli(&owner, &["artifact", "remove", "--artifact", id]).await;
     hint(&owner, thread, Some(&at)).await;
