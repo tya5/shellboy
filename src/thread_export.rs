@@ -1,4 +1,5 @@
 //! Client-side JSONL export. Only a complete, synced file is published.
+use crate::atomic_file::AtomicFile;
 use crate::protocol::{
     ApiError, Command, ErrorCode, HistoryExportArgs, HistoryExportPage, Origin, PROTOCOL_VERSION,
     ThreadTarget,
@@ -8,7 +9,6 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use tempfile::NamedTempFile;
 
 #[derive(Debug, Clone, clap::Args)]
 pub struct ExportOptions {
@@ -88,7 +88,7 @@ fn write_error(error: io::Error) -> ApiError {
 }
 
 struct ExportFile {
-    file: NamedTempFile,
+    file: AtomicFile,
     hash: Sha256,
     lines: u64,
 }
@@ -109,7 +109,10 @@ impl ExportFile {
             .filter(|dir| !dir.as_os_str().is_empty())
             .unwrap_or(Path::new("."));
         Ok(Self {
-            file: NamedTempFile::new_in(parent)?,
+            file: AtomicFile::new(
+                parent.join(format!(".thread-export-{}.tmp", uuid::Uuid::new_v4())),
+                true,
+            )?,
             hash: Sha256::new(),
             lines: 0,
         })
@@ -118,7 +121,7 @@ impl ExportFile {
     fn line(&mut self, record: &impl Serialize) -> io::Result<()> {
         let mut bytes = serde_json::to_vec(record)?;
         bytes.push(b'\n');
-        self.file.write_all(&bytes)?;
+        self.file.file().write_all(&bytes)?;
         self.hash.update(bytes);
         self.lines += 1;
         Ok(())
@@ -131,10 +134,9 @@ impl ExportFile {
             change_position,
             sha256: digest_hex(&self.hash.finalize()),
         };
-        serde_json::to_writer(&mut self.file, &trailer)?;
-        self.file.write_all(b"\n")?;
-        self.file.as_file().sync_all()?;
-        self.file.persist(path).map_err(|error| error.error)?;
+        serde_json::to_writer(self.file.file(), &trailer)?;
+        self.file.file().write_all(b"\n")?;
+        self.file.publish(path)?;
         Ok(trailer)
     }
 }
