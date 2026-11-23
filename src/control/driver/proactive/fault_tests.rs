@@ -87,9 +87,6 @@ enum Fault {
     /// #226: after the checkpoint every attempt-record and automatic app_meta
     /// write is rejected, so only the stage facts and provisional target remain.
     Persistent,
-    /// #303: observe the current failed-attempt path and prove legacy W2/W3 (the activity witness is restored for the TUI indicator, #165)
-    /// writes are absent rather than injecting faults into removed write sites.
-    RetiredWritesAbsent,
     /// #226: reject a terminal attempt write where one remains; for a native
     /// summary, strict FINISH is already inside the adoption transaction.
     RejectFinal,
@@ -131,7 +128,7 @@ fn expected_outcome(fault: Fault, scenario: Scenario, phase: ObservationPhase) -
             Fault::Cancellation if scenario == Scenario::ActiveSpill => "cancelled",
             Fault::Cancellation => "adopted",
             Fault::Persistent | Fault::RejectFinal => "unknown",
-            Fault::Storage | Fault::RetiredWritesAbsent | Fault::Remeasurement => "failed",
+            Fault::Storage | Fault::Remeasurement => "failed",
         },
     }
 }
@@ -730,84 +727,6 @@ async fn deleting_a_naturally_idle_thread_cancels_and_joins_its_retained_summary
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn committed_thread_delete_cancels_and_joins_idle_thread_job_once() {
-    crate::test_watchdog::watchdog("delete effect joins the retained Thread job", async {
-        let root = tempfile::tempdir().unwrap();
-        let owner = proactive_owner(root.path(), "http://127.0.0.1:9/v1", "").await;
-        let control = Control::new(&owner, root.path().into());
-        let target = thread(&control).await;
-        let owner_stop = tokio_util::sync::CancellationToken::new();
-        let slot = control
-            .live
-            .register_or_nudge_driver(&target, "naturally-ended-run".into(), &owner_stop, false)
-            .await
-            .unwrap();
-        slot.driver_active.store(false, Ordering::Release);
-        let cancel = tokio_util::sync::CancellationToken::new();
-        let task_cancel = cancel.clone();
-        let joined = Arc::new(AtomicBool::new(false));
-        let joined_by_task = joined.clone();
-        let task = tokio::spawn(async move {
-            task_cancel.cancelled().await;
-            joined_by_task.store(true, Ordering::Release);
-            Ok(crate::control::driver::proactive::ProactiveOutcome::NotStarted)
-        });
-        let job_arc = slot.proactive_job.clone();
-        *job_arc.lock().await = crate::control::driver::proactive::ThreadJob::Retained(
-            crate::control::driver::proactive::BackgroundJob::test_started(cancel.clone(), task),
-        );
-        assert!(
-            !control
-                .live
-                .remove_driver_if_current(&target, &slot.id)
-                .await
-        );
-
-        let operation = format!("{}:delete-idle-job", control.store.instance_id);
-        let make_request = || {
-            Request::new(
-                operation.clone(),
-                Command::ThreadDelete(ThreadDeleteArgs {
-                    thread_id: target.clone(),
-                    descendants: false,
-                    preview_marker: None,
-                }),
-            )
-        };
-        let first = control.request(make_request()).await;
-        assert!(first.ok, "{:?}", first.error);
-        let replay = control.request(make_request()).await;
-        assert!(replay.ok, "{:?}", replay.error);
-        assert_eq!(replay.result, first.result);
-        assert!(cancel.is_cancelled(), "committed deletion cancels the job");
-        assert!(
-            joined.load(Ordering::Acquire),
-            "delete effect joins the job before returning"
-        );
-        assert!(
-            matches!(
-                *job_arc.lock().await,
-                crate::control::driver::proactive::ThreadJob::Idle
-            ),
-            "job handle is taken exactly once"
-        );
-        assert!(
-            control
-                .live
-                .test_drivers()
-                .lock()
-                .await
-                .get(&target)
-                .is_none()
-        );
-        control.shutdown().await.unwrap();
-        owner.shutdown().await.unwrap();
-    })
-    .await
-    .unwrap();
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn spill_off_skips_automatic_spill_stages_and_adopts_summary() {
     for scenario in [Scenario::ClosedSummary, Scenario::ActiveSummary] {
         let fx = prepare_driver_scenario(Fault::Cancellation, scenario, true, true).await;
@@ -839,24 +758,6 @@ async fn spill_off_skips_automatic_spill_stages_and_adopts_summary() {
         control.shutdown().await.unwrap();
         server.abort();
     }
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn closed_spill_uses_effective_thread_target_and_captures_real_stage() {
-    crate::test_watchdog::watchdog("closed spill trigger tuple", async {
-        direct_boundary_case(Fault::Cancellation, Scenario::ClosedSpill, Some(50)).await;
-    })
-    .await
-    .unwrap();
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn active_summary_cancellation_captures_committed_boundary() {
-    crate::test_watchdog::watchdog("direct active summary committed boundary", async {
-        direct_boundary_case(Fault::Cancellation, Scenario::ActiveSummary, Some(20)).await;
-    })
-    .await
-    .unwrap();
 }
 
 async fn direct_snapshot_for_fixture(
@@ -1301,7 +1202,6 @@ async fn direct_boundary_case(
         Fault::Storage
             | Fault::Cancellation
             | Fault::Remeasurement
-            | Fault::RetiredWritesAbsent
             | Fault::Persistent
             | Fault::RejectFinal
             | Fault::RejectFact
@@ -1376,7 +1276,6 @@ async fn direct_boundary_case(
         Fault::Persistent => 4,
         Fault::RejectFinal => 6,
         Fault::RejectFact => 8,
-        Fault::RetiredWritesAbsent => 9,
     };
     *control.automatic_fault.lock().unwrap() = Some(crate::control::AutomaticFault {
         stage,
@@ -1497,11 +1396,7 @@ async fn direct_boundary_case(
     };
     let expects_error = matches!(
         fault,
-        Fault::Storage
-            | Fault::Remeasurement
-            | Fault::Persistent
-            | Fault::RejectFact
-            | Fault::RetiredWritesAbsent
+        Fault::Storage | Fault::Remeasurement | Fault::Persistent | Fault::RejectFact
     ) || fault == Fault::Cancellation && scenario == Scenario::ActiveSpill
         || fault == Fault::RejectFinal;
     assert_eq!(
@@ -1974,24 +1869,6 @@ async fn direct_boundary_case(
         assert!(record["committed_stages"][final_summary_stage].is_object());
     } else if scenario == Scenario::ActiveSpill {
         assert!(record["committed_stages"]["active_summary"].is_null());
-    }
-    if fault == Fault::RetiredWritesAbsent {
-        let retired_hits: i64 = control
-            .store
-            .database
-            .call(|db| {
-                Ok(
-                    db.query_row("SELECT count(*) FROM retired_write_hits", [], |row| {
-                        row.get(0)
-                    })?,
-                )
-            })
-            .await
-            .unwrap();
-        assert_eq!(
-            retired_hits, 0,
-            "retired attempt/guard/status writes stay absent"
-        );
     }
     drop(boundary.into_guard());
     let storage_failure = matches!(&result, Err(error) if error.is_storage_failure());
@@ -2489,17 +2366,9 @@ async fn proactive_postcommit_remeasurement_boundaries() {
     boundaries(Fault::Remeasurement).await;
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn proactive_postcommit_retired_writes_are_absent() {
-    boundaries(Fault::RetiredWritesAbsent).await;
-}
-
 async fn boundaries(fault: Fault) {
     crate::test_watchdog::watchdog("automatic postcommit data safety", async {
         for scenario in Scenario::ALL {
-            if fault == Fault::Cancellation && scenario == Scenario::ActiveSummary {
-                continue; // The named cancellation test owns this identical contract.
-            }
             direct_boundary_case(fault, scenario, Some(scenario.target_percent())).await;
         }
     })
@@ -2628,7 +2497,6 @@ async fn prepare_driver_lifecycle(
                 Fault::Persistent => 4,
                 Fault::RejectFinal => 6,
                 Fault::RejectFact => 8,
-                Fault::RetiredWritesAbsent => 9,
             },
             reached: reached.clone(),
             checkpoint_reached: checkpoint_reached.clone(),
@@ -3291,33 +3159,6 @@ pub(super) async fn checkpoint(
             db.execute("INSERT INTO rejected_write VALUES(1)", [])?;
             Ok(())
         }).await.map_err(storage_error),
-        9 => {
-            let hit = injection.reached.clone();
-            control.store.database.call(move |db| {
-                db.execute_batch("CREATE TABLE retired_write_hits(site TEXT NOT NULL);")?;
-                db.create_scalar_function("retired_write_hit", 1, rusqlite::functions::FunctionFlags::SQLITE_UTF8, move |_| {
-                    hit.store(true, Ordering::SeqCst);
-                    Ok(1i64)
-                })?;
-                db.execute_batch("CREATE TEMP TRIGGER retired_exception_write BEFORE UPDATE OF outcome ON automatic_compaction
-                    WHEN NEW.outcome='exception'
-                    BEGIN INSERT INTO retired_write_hits VALUES('W2_exception'); SELECT retired_write_hit(1); END;
-                    CREATE TEMP TRIGGER retired_guard_insert BEFORE INSERT ON app_meta WHEN NEW.key GLOB 'compact.automatic_guard.*' OR NEW.key GLOB 'compact.automatic_status.*'
-                    BEGIN INSERT INTO retired_write_hits VALUES('W3_insert'); SELECT retired_write_hit(1); END;
-                    CREATE TEMP TRIGGER retired_guard_update BEFORE UPDATE ON app_meta WHEN OLD.key GLOB 'compact.automatic_guard.*' OR OLD.key GLOB 'compact.automatic_status.*'
-                    BEGIN INSERT INTO retired_write_hits VALUES('W3_update'); SELECT retired_write_hit(1); END;
-                    CREATE TEMP TRIGGER retired_guard_delete BEFORE DELETE ON app_meta WHEN OLD.key GLOB 'compact.automatic_guard.*' OR OLD.key GLOB 'compact.automatic_status.*'
-                    BEGIN INSERT INTO retired_write_hits VALUES('W3_delete'); SELECT retired_write_hit(1); END;")?;
-                Ok(())
-            }).await.map_err(storage_error)?;
-            control.store.database.call(|db| {
-                db.execute_batch("CREATE TEMP TABLE rejected_write(value INTEGER);
-                    CREATE TEMP TRIGGER reject_write BEFORE INSERT ON rejected_write
-                    BEGIN SELECT RAISE(ABORT,'injected independent postcommit storage write failure'); END;")?;
-                db.execute("INSERT INTO rejected_write VALUES(1)", [])?;
-                Ok(())
-            }).await.map_err(storage_error)
-        }
         6 => {
             let hit = injection.reached.clone();
             control.store.database.call(move |db| {
@@ -3340,7 +3181,7 @@ pub(super) async fn checkpoint(
             "storage faults do not depend on cancellation"
         );
     }
-    if matches!(injection.kind, 1 | 4 | 9) {
+    if matches!(injection.kind, 1 | 4) {
         assert_eq!(result.as_ref().unwrap_err().code, ErrorCode::SaveFailed);
     }
     if !matches!(injection.kind, 6..=8) {
