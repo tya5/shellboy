@@ -698,11 +698,13 @@ first. Run-end transitions are a subsequent implementation step.
 ## Reply lifecycle and deleted receipt ownership (#194 step 3, #197)
 
 Pending replies are bounded to 128 per recipient and use receipt_reply_pending.
-Only normal Run completion checks applied pending duties: already-reminded
-messages become ignored, and previously unreminded messages receive one durable
+Normal Run completion checks applied pending duties: already-reminded messages
+become ignored, and previously unreminded messages receive one durable
 reminded_at/reminded_run_id fact and one reply_reminder event containing each
-message ID and credential-free sender. Stop, recovery wait and shutdown do not
-consume or ignore duties. The reminder is once per message across restart.
+message ID and credential-free sender. Stopping or failing the recipient Run
+settles its unanswered applied duties as `ignored` and notifies the sender.
+Recovery wait and shutdown leave duties pending. The reminder is once per
+message across restart.
 
 Thread deletion terminalizes recipient duties in the delete transaction using
 one target_thread_id-indexed lookup per deleted Thread, bounded by the 128-duty

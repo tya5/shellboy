@@ -359,9 +359,10 @@ completion (control.md #52), so the rule above runs. Because the reminder is
 once per message, a second Esc after the reminder Turn lets the Run complete and
 marks the messages `ignored`. While a reminder Turn runs, the TUI shows it (the
 `reply_reminder` event row, rendered like other wake events) so a human can see
-why the Run continued (decision Q11). Stop, recovery wait and shutdown are not
-completions: pending replies stay pending; the recipient may reply after
-resuming and the sender may cancel (decision Q2).
+why the Run continued (decision Q11). A stopped or failed recipient Run settles
+its unanswered applied duties as `ignored` and notifies the sender. Recovery
+wait and shutdown leave duties pending; the recipient may reply after resuming,
+and the sender may cancel while the duty is pending (decision Q2).
 
 ## Delivery of the reply
 

@@ -583,7 +583,9 @@ previously reminded duty becomes ignored; each remaining unreminded duty gets
 one reminder, atomically creating a continuation Turn with a reply_reminder
 notice listing message IDs and verified sender facts. A second normal completion
 without a reply terminalizes it; no response text is guessed. Esc follows normal
-completion, whereas stop, recovery wait and shutdown preserve pending duties.
+completion. Recovery wait and shutdown preserve pending duties; a stopped or
+failed recipient Run settles its unanswered applied duties as `ignored` and
+notifies the sender.
 
 reply_reminder wakes its existing Run. reply_outcome notifies a live model
 sender's Run, or is saved as a context_changed notice for its next actual Turn
