@@ -2880,3 +2880,110 @@ async fn received_attempt_fence(truncated: bool) {
     }).await.unwrap();
     close(control, owner).await;
 }
+
+#[tokio::test]
+async fn extra_instruction_warning_survives_snapshot_replay_and_live_config_reconciliation() {
+    use crate::protocol::{ConfigChange, InstructionWarningReason, StatusArgs};
+    let (root, owner, control, accepted) = fixture("http://127.0.0.1:1").await;
+    let path = root.path().join("config.toml");
+    let missing = root.path().join("missing.md");
+    let good = root.path().join("good.md");
+    std::fs::write(&good, "valid common instructions").unwrap();
+    let changes = vec![ConfigChange {
+        field: "extra_instructions".into(),
+        value: Some(json!([missing, good])),
+    }];
+    let edited = format!(
+        "extra_instructions = [ {}, {} ] # hand-edited\n{}",
+        json!(missing),
+        json!(good),
+        std::fs::read_to_string(&path).unwrap()
+    );
+    std::fs::write(&path, &edited).unwrap();
+    assert!(control.store.config.current().extra_instructions.is_empty());
+    let hash = crate::digest::sha256_hex(&edited);
+    let applied = crate::config_edit::apply_live(
+        &path,
+        &hash,
+        &changes,
+        &control.store.config,
+        &control.store.clients,
+    )
+    .unwrap();
+    assert_eq!(applied.result["written"], false);
+    assert_eq!(applied.result["changes"][0]["field"], "extra_instructions");
+    assert_eq!(applied.result["applied_to_running_owner"], true);
+    assert_eq!(applied.result["restart_required"], false);
+    let again = crate::config_edit::apply_live(
+        &path,
+        &hash,
+        &changes,
+        &control.store.config,
+        &control.store.clients,
+    )
+    .unwrap();
+    assert_eq!(again.result["applied_to_running_owner"], false);
+    assert_eq!(again.result["changes"], json!([]));
+
+    let snapshot = ready(&control, &accepted).await;
+    let prompt = turn_instructions(&control, &snapshot)
+        .await
+        .unwrap()
+        .unwrap();
+    let items = super::request::leading_items(&snapshot.agents, Some(&prompt)).unwrap();
+    assert_eq!(items.len(), 2);
+    assert!(items[1].to_string().contains("valid common instructions"));
+    std::fs::write(&missing, "made available after preparation").unwrap();
+    assert_eq!(
+        turn_instructions(&control, &snapshot)
+            .await
+            .unwrap()
+            .unwrap(),
+        prompt
+    );
+    let thread_id = snapshot.thread.clone();
+    let run_id = snapshot.run.clone();
+    let instance = owner.instance_id.clone();
+    let (thread, status, point) = control
+        .store
+        .database
+        .call(move |db| {
+            use crate::status::observation::{self, Key, Kind, TextBudget};
+            let thread = super::super::db::thread_details(db, &thread_id).unwrap();
+            let status = crate::status::snapshot(
+                db,
+                &StatusArgs {
+                    run_id: Some(run_id.clone()),
+                    all: true,
+                    ..StatusArgs::default()
+                },
+                &instance,
+            )
+            .unwrap();
+            let raw = observation::read_status_tx(
+                db,
+                &[Key {
+                    kind: Kind::Run,
+                    id: run_id,
+                }],
+                &mut TextBudget::default(),
+            )?;
+            Ok((thread, status, observation::prepare(raw)))
+        })
+        .await
+        .unwrap();
+    assert_eq!(thread.instruction_warnings.len(), 1);
+    assert_eq!(thread.instruction_warnings[0].path, missing);
+    assert_eq!(
+        thread.instruction_warnings[0].reason,
+        InstructionWarningReason::NotFound
+    );
+    let run = status.items.iter().find(|item| item.kind == "run").unwrap();
+    assert_eq!(run.instruction_warnings, thread.instruction_warnings);
+    assert!(thread.recovery_reason.is_none());
+    assert_eq!(
+        point["items"][0]["current"]["instruction_warnings"],
+        json!(run.instruction_warnings)
+    );
+    close(control, owner).await;
+}

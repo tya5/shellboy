@@ -327,6 +327,11 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         sql: include_str!("../../migrations/0061_schedule_service_kind.sql"),
         foreign_keys: Some(Impact::Tables(&["schedule", "shell_execution"])),
     },
+    Migration {
+        version: 62,
+        sql: include_str!("../../migrations/next_instruction_warnings.sql"),
+        foreign_keys: None,
+    },
 ];
 
 pub(super) fn run(

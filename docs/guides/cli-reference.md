@@ -367,7 +367,7 @@ on a timer and read them only after a hint.
 | `live_text` | Only with `--text`; non-reasoning answer deltas only, never reasoning content |
 | `reasoning_activity` | Only with `--reasoning-activity`; bounded attempt metadata, never reasoning content |
 
-Example: `{"status":"changed","cursor":"eyJ2IjoxLC4uLn0","changes":[],"more":false,"config_changed":true}`. Config marks are coalesced to the latest write but not consumed, so each client cursor can observe them independently. A config.set that writes the file marks changes even when an owner restart is required; refused/no-op writes do not. Reread both loaded and file values with `config get`; the hint has no diff or values.
+Example: `{"status":"changed","cursor":"eyJ2IjoxLC4uLn0","changes":[],"more":false,"config_changed":true}`. Config marks are coalesced to the latest write but not consumed, so each client cursor can observe them independently. A config.set that writes the file or changes a loaded live value marks changes, even if no bytes were written in the latter case. Refused operations and true no-ops do not. Reread both loaded and file values with `config get`; the hint has no diff or values.
 
 Rules:
 

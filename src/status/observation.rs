@@ -190,13 +190,13 @@ pub(crate) fn point_sql(kind: Kind) -> String {
     } else {
         "NULL,NULL"
     };
-    let discard = if kind == Kind::Attempt {
-        crate::compaction::discard::status_sql("r")
-    } else {
-        "NULL".into()
+    let detail = match kind {
+        Kind::Run => "r.instruction_warnings_json".into(),
+        Kind::Attempt => crate::compaction::discard::status_sql("r"),
+        _ => "NULL".into(),
     };
     format!(
-        "SELECT {id},{fields},{owner},{operation},{answer},{connection},{model},substr(q.title,1,80),q.parent_thread_id,substr(q.profile_id,1,128),substr(q.model_id,1,256),{revisit},{elapsed},{output},{stdin},{discard},{guard} FROM json_each(?1) j CROSS JOIN {table} {joins} LEFT JOIN thread q ON q.id={thread} WHERE {id}=j.value LIMIT 201"
+        "SELECT {id},{fields},{owner},{operation},{answer},{connection},{model},substr(q.title,1,80),q.parent_thread_id,substr(q.profile_id,1,128),substr(q.model_id,1,256),{revisit},{elapsed},{output},{stdin},{detail},{guard} FROM json_each(?1) j CROSS JOIN {table} {joins} LEFT JOIN thread q ON q.id={thread} WHERE {id}=j.value LIMIT 201"
     )
 }
 
@@ -280,6 +280,8 @@ pub(crate) fn read_status_tx(
                     s.len()
                         > if column == 18 {
                             16384
+                        } else if column == 22 && kind == Kind::Run {
+                            200_000 // Eight paths, up to 4096 bytes each before JSON escaping.
                         } else if column == 8 {
                             2048
                         } else {
@@ -533,9 +535,18 @@ fn canonical_item(
         attempt_connection: get(12),
         attempt_model: get(13),
         reason: get(8),
-        compaction_outcome: get(23)
-            .as_deref()
-            .and_then(crate::compaction::discard::decode),
+        compaction_outcome: (fact.key.kind == Kind::Attempt)
+            .then(|| {
+                get(23)
+                    .as_deref()
+                    .and_then(crate::compaction::discard::decode)
+            })
+            .flatten(),
+        instruction_warnings: if fact.key.kind == Kind::Run {
+            crate::instructions::decode_warnings(get(23).as_deref())
+        } else {
+            Vec::new()
+        },
         revisit: get(18)
             .as_deref()
             .and_then(|facts| facts.split_once(':'))

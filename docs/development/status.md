@@ -1,5 +1,7 @@
 # Development status
 
+- #377: skip unreadable common instruction files with typed Run warnings; hash-checked config edits reconcile stale live values without rewriting unchanged files.
+
 ## Core #370 asking a person versus asking a Thread
 
 A model ask addressed to its own Thread is refused with `invalid_argument`

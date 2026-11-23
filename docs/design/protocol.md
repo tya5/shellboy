@@ -918,9 +918,11 @@ The root configuration field `extra_instructions` is an ordered array of absolut
 `config.get` exposes it and hash-checked `config.set` accepts its replacement. Path/list validation occurs before
 writing; file readability and captured-content bounds are checked during Turn preparation. Runtime edits report
 `applied_to_running_owner: true`, `restart_required: false` for this field; independent mixed-field flags retain
-existing semantics. Disk-only edits require restart. Configuration success is not evidence that listed files exist
-or user consent was obtained. A registered file failing observation returns a visible preparation/recovery error,
-not a truncated or partially populated request.
+existing semantics. A hash-checked edit reconciles the loaded live values even if the file already matches.
+`written: false` with `applied_to_running_owner: true` means the owner changed without a disk write. Disk edits
+alone are not watched. Configuration success is not evidence that files exist or that consent was obtained.
+An unreadable or invalid common file is skipped, with `instruction_warnings: [{path,reason}]` on Run status
+items and on `thread.get` for the latest Run. Warnings contain no captured content.
 
 `thread.get` optionally returns `instruction_sources: {extra: [{path,hash,bytes}],snapshot:"latest_prepared_turn"}`
 after preparing common instructions. It omits bodies and is historical, not live file/config state. `thread request`
@@ -931,7 +933,7 @@ matches the instruction-prefix order. No schema migration or new daemon task is 
 #270 review correction: raw user AGENTS JSON is always literal text. Bundle representation uses a writer-owned
 persisted digest-kind namespace; no JSON field in a user file activates source decoding. `instruction_sources` omits
 raw snapshots even when they contain an `extra` JSON field. Repair/remove broken common-file registrations through
-the model-independent config CLI, then explicitly retry; fail-closed semantics are unchanged.
+the model-independent config CLI. The next new Turn observes the repair.
 
 ## Current automatic compaction (#341)
 

@@ -112,27 +112,79 @@ impl InstructionLoader {
         cwd: PathBuf,
         source_path: PathBuf,
         extra: Vec<PathBuf>,
-    ) -> Result<Option<InstructionSnapshot>, ApiError> {
+    ) -> Result<
+        (
+            Option<InstructionSnapshot>,
+            Vec<crate::protocol::InstructionWarning>,
+        ),
+        ApiError,
+    > {
         let local = self.prepare(cwd, source_path.clone()).await?;
         if extra.is_empty() {
-            return Ok(local);
+            return Ok((local, Vec::new()));
         }
         self.file_work(move || {
             let mut files = Vec::new();
+            let mut warnings = Vec::new();
             for path in extra {
-                let meta = std::fs::metadata(&path).map_err(|_| failed(&format!("Extra instruction file cannot be inspected: {}",path.display())))?;
-                if !meta.is_file() { return Err(failed(&format!("Extra instruction path is not a regular file: {}",path.display()))); }
-                let mut bytes=Vec::new();
-                File::open(&path).and_then(|f|f.take(8193).read_to_end(&mut bytes)).map_err(|_|failed(&format!("Extra instruction file cannot be read: {}",path.display())))?;
-                if bytes.len()>8192 { return Err(ApiError::new(ErrorCode::InputLimit,format!("Extra instruction file exceeds 8192 bytes: {}",path.display()))); }
-                let body=String::from_utf8(bytes).map_err(|_|failed(&format!("Extra instruction file is not UTF-8: {}",path.display())))?;
-                files.push(serde_json::json!({"path":path,"hash":crate::digest::sha256_hex(&body),"bytes":body.len(),"body":body}));
+                match read_extra(&path) {
+                    Ok(body) => files.push(serde_json::json!({
+                        "path": path, "hash": crate::digest::sha256_hex(&body),
+                        "bytes": body.len(), "body": body,
+                    })),
+                    Err(reason) => {
+                        warnings.push(crate::protocol::InstructionWarning { path, reason })
+                    }
+                }
             }
-            let body=format!("{}{}", BUNDLE_BODY_PREFIX, serde_json::json!({"extra":files,"local":local.as_ref().map(|s|s.body.as_ref())}));
-            Ok(Some(InstructionSnapshot { source_path, hash:format!("{BUNDLE_HASH_PREFIX}{}",crate::digest::sha256_hex(&body)),size:body.len() as u64,body:Arc::from(body),modified:None }))
-        }).await
+            if files.is_empty() {
+                return Ok((local, warnings));
+            }
+            let body = format!(
+                "{}{}",
+                BUNDLE_BODY_PREFIX,
+                serde_json::json!({"extra":files,"local":local.as_ref().map(|s|s.body.as_ref())})
+            );
+            Ok((
+                Some(InstructionSnapshot {
+                    source_path,
+                    hash: format!("{BUNDLE_HASH_PREFIX}{}", crate::digest::sha256_hex(&body)),
+                    size: body.len() as u64,
+                    body: Arc::from(body),
+                    modified: None,
+                }),
+                warnings,
+            ))
+        })
+        .await
     }
 }
+pub(crate) fn decode_warnings(value: Option<&str>) -> Vec<crate::protocol::InstructionWarning> {
+    value
+        .and_then(|json| serde_json::from_str(json).ok())
+        .unwrap_or_default()
+}
+
+fn read_extra(path: &std::path::Path) -> Result<String, crate::protocol::InstructionWarningReason> {
+    use crate::protocol::InstructionWarningReason as Reason;
+    let io_reason = |error: std::io::Error| match error.kind() {
+        std::io::ErrorKind::NotFound => Reason::NotFound,
+        std::io::ErrorKind::PermissionDenied => Reason::PermissionDenied,
+        _ => Reason::IoFailed,
+    };
+    if !std::fs::metadata(path).map_err(io_reason)?.is_file() {
+        return Err(Reason::NotRegularFile);
+    }
+    let mut bytes = Vec::new();
+    File::open(path)
+        .and_then(|f| f.take(8193).read_to_end(&mut bytes))
+        .map_err(io_reason)?;
+    if bytes.len() > 8192 {
+        return Err(Reason::InputLimit);
+    }
+    String::from_utf8(bytes).map_err(|_| Reason::InvalidUtf8)
+}
+
 // Keep the stat/read boundary explicit: file changes between them must not
 // let observed attributes substitute for the captured body/hash.
 fn read_snapshot(
@@ -274,6 +326,7 @@ mod extra_tests {
             .prepare_with_extra(root.path().into(), local.clone(), vec![])
             .await
             .unwrap()
+            .0
             .unwrap();
         assert_eq!(&*no_extra.body, "thread role");
         let first = loader
@@ -284,6 +337,7 @@ mod extra_tests {
             )
             .await
             .unwrap()
+            .0
             .unwrap();
         let same = loader
             .prepare_with_extra(
@@ -293,6 +347,7 @@ mod extra_tests {
             )
             .await
             .unwrap()
+            .0
             .unwrap();
         assert_eq!(first.body, same.body);
         assert_eq!(first.hash, same.hash);
@@ -305,6 +360,7 @@ mod extra_tests {
             .prepare_with_extra(root.path().into(), local.clone(), vec![one.clone(), two])
             .await
             .unwrap()
+            .0
             .unwrap();
         assert_ne!(next.hash, first.hash);
         assert_eq!(bundle(&first.body).unwrap(), captured);
@@ -313,51 +369,53 @@ mod extra_tests {
             .prepare_with_extra(root.path().into(), local, vec![one])
             .await
             .unwrap()
+            .0
             .unwrap();
         assert!(bundle(&missing_local.body).unwrap()["local"].is_null());
     }
 
     #[tokio::test]
-    async fn extra_instructions_fail_closed_for_missing_directory_oversize_and_invalid_utf8() {
+    async fn extra_instructions_skip_bad_files_and_keep_good_files_in_order() {
+        use crate::protocol::InstructionWarningReason::*;
         let root = tempfile::tempdir().unwrap();
-        let path = root.path().join("extra.md");
+        let path = |name: &str| root.path().join(name);
+        std::fs::write(path("one"), "first").unwrap();
+        std::fs::write(path("two"), vec![b'a'; 8192]).unwrap();
+        std::fs::write(path("big"), vec![b'a'; 8193]).unwrap();
+        std::fs::write(path("invalid"), [255]).unwrap();
         let loader = InstructionLoader::new(&Config::default());
-        for body in [None, Some(vec![b'a'; 8193]), Some(vec![255])] {
-            if let Some(body) = body {
-                std::fs::write(&path, body).unwrap();
-            }
-            let error = loader
-                .prepare_with_extra(
+        let (snapshot, warnings) = loader
+            .prepare_with_extra(
+                root.path().into(),
+                path("AGENTS.md"),
+                vec![
+                    path("missing"),
+                    path("one"),
+                    path("big"),
                     root.path().into(),
-                    root.path().join("absent"),
-                    vec![path.clone()],
-                )
-                .await
-                .err()
-                .unwrap();
-            assert!(error.message.contains("Extra instruction"));
-        }
-        std::fs::write(&path, vec![b'a'; 8192]).unwrap();
-        assert!(
-            loader
-                .prepare_with_extra(
-                    root.path().into(),
-                    root.path().join("absent"),
-                    vec![path.clone()]
-                )
-                .await
-                .is_ok()
+                    path("invalid"),
+                    path("two"),
+                ],
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            warnings
+                .into_iter()
+                .map(|w| (w.path, w.reason))
+                .collect::<Vec<_>>(),
+            vec![
+                (path("missing"), NotFound),
+                (path("big"), InputLimit),
+                (root.path().into(), NotRegularFile),
+                (path("invalid"), InvalidUtf8)
+            ]
         );
-        assert!(
-            loader
-                .prepare_with_extra(
-                    root.path().into(),
-                    root.path().join("absent"),
-                    vec![root.path().into()]
-                )
-                .await
-                .is_err()
-        );
+        let body = bundle(&snapshot.unwrap().body).unwrap();
+        assert_eq!(body["extra"][0]["body"], "first");
+        assert_eq!(body["extra"][1]["bytes"], 8192);
+        assert_eq!(body["extra"].as_array().unwrap().len(), 2);
+        assert!(body["local"].is_null());
     }
 
     #[test]
