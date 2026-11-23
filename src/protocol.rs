@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
-pub const PROTOCOL_VERSION: u32 = 11;
+pub const PROTOCOL_VERSION: u32 = 12;
 pub const PROTOCOL_CAPABILITIES: &[&str] = &["events.reasoning_activity", "id.resolve"];
 pub const MAX_FRAME_BYTES: usize = 8 * 1024 * 1024;
 pub const MAX_PENDING_REPLY_DUTIES: u64 = 16;
@@ -1267,10 +1267,25 @@ pub enum EventAttemptOutcome {
     Adopted,
     NotAdopted,
 }
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum OutputLimitSource {
+    ThreadOverride,
+    Connection,
+    Default,
+    ExtraBody,
+}
+record!(AttemptOutputLimit {
+    stop: bool,
+    sent_max_tokens: Option<u64>,
+    source: Option<OutputLimitSource>,
+    connection: String
+});
 record!(EventAttemptEnd {
     thread_id: String,
     attempt_id: String,
     outcome: EventAttemptOutcome,
+    #[serde(default, skip_serializing_if = "Option::is_none")] output_limit: Option<AttemptOutputLimit>,
     seq: u64
 });
 record!(EventsWaitResult { status: EventsWaitStatus, cursor: String, changes: Vec<EventChange>, more: bool, config_changed: bool, #[serde(default, skip_serializing_if="Option::is_none")] live_text: Option<Vec<EventLiveText>>, #[serde(default, skip_serializing_if="Option::is_none")] attempt_ends: Option<Vec<EventAttemptEnd>>, #[serde(default)] reasoning_activity: Vec<EventReasoningActivity> });
@@ -2163,6 +2178,7 @@ record!(UsageAttemptResult {
     usage: UsageAttemptPayload,
     prompt_cache_diagnostics: Option<PromptCacheDiagnostics>,
     input_bytes: Option<UsageInputBytes>,
+    output_limit: Option<AttemptOutputLimit>,
     #[serde(default, flatten)] additional_properties: std::collections::BTreeMap<String, Value>
 });
 record!(UsageBreakdownCoverage {

@@ -1750,8 +1750,7 @@ async fn admitted_attempt_records_the_exact_sent_body_bytes_by_source() {
     crate::test_watchdog::watchdog(
         "src/control/driver/preparation_tests.rs: admitted_attempt_records_the_exact_sent_body_bytes_by_source",
         client.response_observed(
-            &accepted.thread_id,
-            request,
+            client.prepare_response(request, Some(&accepted.thread_id)),
             CancellationToken::new(),
             None,
             None,

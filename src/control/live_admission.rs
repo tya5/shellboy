@@ -34,9 +34,10 @@ impl Control {
         thread: &str,
         attempt: &str,
         outcome: crate::protocol::EventAttemptOutcome,
+        output_limit: Option<crate::protocol::AttemptOutputLimit>,
     ) {
         self.change_clock
-            .record_attempt_end(thread, attempt, outcome);
+            .record_attempt_end(thread, attempt, outcome, output_limit);
     }
     pub(super) fn stream_admitted_delta(
         &self,

@@ -380,6 +380,7 @@ async fn drive_inner(
                             &snapshot.thread,
                             &attempt,
                             crate::protocol::EventAttemptOutcome::NotAdopted,
+                            None,
                         );
                     }
                 }
@@ -554,11 +555,16 @@ impl RequestCaller for ConversationCaller<'_, '_> {
         .await
     }
 
-    fn unsuccessful_attempt_committed(&self, attempt: &str) {
+    fn unsuccessful_attempt_committed(
+        &self,
+        attempt: &str,
+        output_limit: Option<crate::protocol::AttemptOutputLimit>,
+    ) {
         self.control.record_attempt_end(
             &self.snapshot.thread,
             attempt,
             crate::protocol::EventAttemptOutcome::NotAdopted,
+            output_limit,
         );
     }
 

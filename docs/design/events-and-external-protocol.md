@@ -630,3 +630,13 @@ Baseline and resync carry no end evidence. No end is persisted or replayed acros
 an owner restart. An adopted preview stops streaming but stays until saved output
 reconciles it. A client places previews relative to saved node order, not delivery
 order; absent a proven relationship to pending input, the preview goes above it.
+
+### Protocol 12: attempt output-limit evidence (#354)
+
+An attempt end includes `output_limit` only when the provider explicitly stopped
+at its output limit. It carries `stop: true`, the connection used, and the integer
+`sent_max_tokens` and its `source` (`thread_override`, `connection`, `default`,
+or `extra_body`). A missing or non-integer wire value leaves both fields null.
+This is evidence from that attempt, not a lookup of current settings.
+`usage.get` with `attempt_id` returns the same object from saved facts, or null
+for other stops or older attempts without recorded evidence.

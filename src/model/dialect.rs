@@ -39,6 +39,14 @@ pub fn encode_hinted(
 /// wire fragments built from it. With `tags`, also return the labels that
 /// partition the body; the body itself is identical to the untagged encoding.
 /// `tags` must have one entry per `input` item.
+pub(crate) fn output_limit_key(api: Api) -> &'static str {
+    match api {
+        Api::Responses => "max_output_tokens",
+        Api::ChatCompletions => "max_completion_tokens",
+        Api::AnthropicMessages => "max_tokens",
+    }
+}
+
 pub(crate) fn encode_tagged(
     api: Api,
     request: Value,
@@ -54,18 +62,13 @@ pub(crate) fn encode_tagged(
         Api::ChatCompletions => chat::encode(request, tags),
         Api::AnthropicMessages => messages::encode(
             request,
-            max_tokens.unwrap_or(crate::config::DEFAULT_MESSAGES_MAX_TOKENS),
+            max_tokens.ok_or_else(|| protocol("Messages output limit is missing"))?,
             cache,
             tags,
         ),
     }?;
     if let Some(limit) = max_tokens {
-        let key = match api {
-            Api::Responses => "max_output_tokens",
-            Api::ChatCompletions => "max_completion_tokens",
-            Api::AnthropicMessages => "max_tokens",
-        };
-        wire[key] = json!(limit);
+        wire[output_limit_key(api)] = json!(limit);
     }
     Ok((wire, labels))
 }

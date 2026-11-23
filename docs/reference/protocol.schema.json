@@ -1,5 +1,5 @@
 {
-  "$id": "https://shellboy.dev/schema/protocol-v11.json",
+  "$id": "https://shellboy.dev/schema/protocol-v12.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "capabilities": [
     "events.reasoning_activity",
@@ -208,6 +208,39 @@
       },
       "required": [
         "attachment_id"
+      ],
+      "type": "object"
+    },
+    "AttemptOutputLimit": {
+      "properties": {
+        "connection": {
+          "type": "string"
+        },
+        "sent_max_tokens": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "source": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/OutputLimitSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "stop": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "stop",
+        "connection"
       ],
       "type": "object"
     },
@@ -1996,6 +2029,16 @@
         },
         "outcome": {
           "$ref": "#/definitions/EventAttemptOutcome"
+        },
+        "output_limit": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AttemptOutputLimit"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "seq": {
           "format": "uint64",
@@ -4808,6 +4851,15 @@
           "type": "object"
         }
       ]
+    },
+    "OutputLimitSource": {
+      "enum": [
+        "thread_override",
+        "connection",
+        "default",
+        "extra_body"
+      ],
+      "type": "string"
     },
     "OwnerShutdownArgs": {
       "additionalProperties": false,
@@ -9685,6 +9737,16 @@
             }
           ]
         },
+        "output_limit": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AttemptOutputLimit"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "prompt_cache_diagnostics": {
           "anyOf": [
             {
@@ -12645,6 +12707,6 @@
       "type": "object"
     }
   },
-  "protocol_version": 11,
-  "title": "Shellboy local RPC protocol v11"
+  "protocol_version": 12,
+  "title": "Shellboy local RPC protocol v12"
 }

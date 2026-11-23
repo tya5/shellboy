@@ -22,6 +22,24 @@ pub(crate) struct SummaryGroup {
     pub started_at: String,
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
+pub(crate) struct AdmittedOutputLimit {
+    #[serde(flatten)]
+    resolved: super::http::ResolvedOutputLimit,
+    connection: String,
+}
+
+impl AdmittedOutputLimit {
+    pub(crate) fn stopped(self) -> crate::protocol::AttemptOutputLimit {
+        crate::protocol::AttemptOutputLimit {
+            stop: true,
+            sent_max_tokens: self.resolved.max_tokens,
+            source: self.resolved.source,
+            connection: self.connection,
+        }
+    }
+}
+
 pub(crate) type RequestOutcome = Result<ModelResponse, AttemptFailure>;
 
 #[allow(clippy::result_large_err)] // Preserve the transport outcome without re-boxing its failure.
@@ -479,7 +497,12 @@ pub(crate) trait RequestCaller: Send {
     }
     fn received(&mut self, _usage: StandardUsage) {}
     fn attempt_changed(&self) {}
-    fn unsuccessful_attempt_committed(&self, _attempt: &str) {}
+    fn unsuccessful_attempt_committed(
+        &self,
+        _attempt: &str,
+        _output_limit: Option<crate::protocol::AttemptOutputLimit>,
+    ) {
+    }
 }
 
 pub(crate) struct RequestScope<'a> {
@@ -556,6 +579,14 @@ pub(crate) async fn execute_request<C: RequestCaller>(
             return Ok(Execution::InputChanged);
         }
         let thread = row.scope.thread.clone();
+        let prepared = scope
+            .client
+            .prepare_response(payload.clone(), Some(&thread));
+        let output_limit = prepared.as_ref().ok().map(|wire| AdmittedOutputLimit {
+            resolved: wire.output_limit,
+            connection: scope.client.output_limit_connection().to_owned(),
+        });
+        let saved_output_limit = output_limit.as_ref().map(|limit| json!(limit));
         let attempt = uuid::Uuid::new_v4().to_string();
         let saved = attempt.clone();
         let token = cancel.clone();
@@ -568,6 +599,9 @@ pub(crate) async fn execute_request<C: RequestCaller>(
                 }
                 if !qualify(&tx, &mut row)? {
                     return Ok(false);
+                }
+                if let Some(limit) = saved_output_limit {
+                    row.manifest["output_limit"] = limit;
                 }
                 admit_attempt(&tx, &saved, row)?;
                 if let Some(link) = link {
@@ -591,13 +625,10 @@ pub(crate) async fn execute_request<C: RequestCaller>(
                 } else {
                     (None, None)
                 };
-                let response = scope.client.response_observed(
-                    &thread,
-                    payload.clone(),
-                    cancel.clone(),
-                    events,
-                    bypass,
-                );
+                let response =
+                    scope
+                        .client
+                        .response_observed(prepared, cancel.clone(), events, bypass);
                 tokio::pin!(response);
                 if let (Some(receive), Some(observer)) = (&mut receive, &mut observer) {
                     loop {
@@ -723,7 +754,12 @@ pub(crate) async fn execute_request<C: RequestCaller>(
             )
             .await
             .map_err(storage_error)?;
-            caller.unsuccessful_attempt_committed(&attempt);
+            caller.unsuccessful_attempt_committed(
+                &attempt,
+                output_limit
+                    .filter(|_| failure.error.kind == "output_limit")
+                    .map(AdmittedOutputLimit::stopped),
+            );
             caller.received(usage);
             if partial && !cancelled && scope.kind == AttemptKind::Conversation {
                 partial_attempts.push(attempt.clone());
