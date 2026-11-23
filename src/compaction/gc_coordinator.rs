@@ -27,19 +27,7 @@ pub(crate) enum WriterJobPhase {
 pub(crate) enum CompletionDisposition {
     Accepted,
     Closed,
-    Rejected(super::discard::RejectionReason),
     Stale,
-}
-
-pub(crate) fn owner_rejection_reason(
-    reason: super::discard::RejectionReason,
-    owner_cancelled: bool,
-) -> super::discard::RejectionReason {
-    if owner_cancelled {
-        super::discard::RejectionReason::Cancelled
-    } else {
-        reason
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -48,23 +36,12 @@ pub(crate) enum WriterCompletion {
     Failed,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum WriterLifecycle {
-    ProducerTerminated,
-    ChildPanicked,
-}
-
-#[derive(Debug)]
-enum ChildExit {
-    Finished(Option<WriterCompletion>),
-    Panicked,
-}
-
 struct OwnedGcJob {
     id: WriterJobId,
     cancel: CancellationToken,
     task: Option<JoinHandle<()>>,
-    completion_signal: Option<tokio::sync::oneshot::Receiver<ChildExit>>,
+    /// Sent once when the producer returns or panics: no adopter remains.
+    completion_signal: Option<tokio::sync::oneshot::Receiver<()>>,
     retirement_task: Option<JoinHandle<()>>,
     joined_receiver: Option<tokio::sync::oneshot::Receiver<JoinedFacts>>,
     joined: bool,
@@ -72,15 +49,12 @@ struct OwnedGcJob {
     retirement_wake: crate::storage::GcRetirementWake,
     phase: WriterJobPhase,
     terminal: Option<WriterCompletion>,
-    lifecycle: Option<WriterLifecycle>,
     adoption_candidate: Option<Dispatched>,
     stage: super::attempt::GcStage,
-    rejection: Option<super::discard::RejectionReason>,
 }
 
 #[derive(Debug)]
 struct JoinedFacts {
-    producer_panicked: bool,
     producer_joined: bool,
 }
 
@@ -94,9 +68,8 @@ fn start_join_reaper(job: &mut OwnedGcJob) {
     let wake = job.retirement_wake.clone();
     let id = job.id;
     let reaper = job.runtime.spawn(async move {
-        let producer_panicked = producer.await.is_err();
+        let _ = producer.await;
         JoinedFacts {
-            producer_panicked,
             producer_joined: true,
         }
     });
@@ -104,7 +77,6 @@ fn start_join_reaper(job: &mut OwnedGcJob) {
         let facts = match reaper.await {
             Ok(facts) => facts,
             Err(_) => JoinedFacts {
-                producer_panicked: true,
                 producer_joined: false,
             },
         };
@@ -118,32 +90,6 @@ fn close_for_lifecycle(job: &mut OwnedGcJob) {
     job.phase = WriterJobPhase::Closing;
     job.cancel.cancel();
     job.adoption_candidate = None;
-}
-
-fn record_child_exit(job: &mut OwnedGcJob, exit: ChildExit) {
-    let unexpected = match exit {
-        ChildExit::Finished(Some(terminal)) if job.terminal == Some(terminal) => false,
-        ChildExit::Finished(Some(terminal)) => {
-            job.lifecycle
-                .get_or_insert(WriterLifecycle::ProducerTerminated);
-            job.terminal.get_or_insert(terminal);
-            true
-        }
-        ChildExit::Finished(None) => {
-            job.lifecycle
-                .get_or_insert(WriterLifecycle::ProducerTerminated);
-            true
-        }
-        ChildExit::Panicked => {
-            job.lifecycle.get_or_insert(WriterLifecycle::ChildPanicked);
-            true
-        }
-    };
-    // The producer's exit only closes a candidate when it lacked an accepted
-    // terminal event; Ready/Failed completion remains the single authority.
-    if unexpected {
-        close_for_lifecycle(job);
-    }
 }
 
 /// Not Clone, Send-only as required by the storage Job, and never shared behind
@@ -170,7 +116,7 @@ impl WriterGcCoordinator {
     ) -> Result<WriterJobId, &'static str>
     where
         L: FnOnce(WriterJobId, CapturedSummaryInput, CancellationToken) -> F,
-        F: Future<Output = Option<WriterCompletion>> + Send + 'static,
+        F: Future<Output = ()> + Send + 'static,
     {
         if !db.is_autocommit() {
             return Err("GC job installation requires a committed capture");
@@ -197,11 +143,8 @@ impl WriterGcCoordinator {
             return Ok(id);
         };
         let task = runtime.spawn(async move {
-            let exit = match std::panic::AssertUnwindSafe(future).catch_unwind().await {
-                Ok(terminal) => ChildExit::Finished(terminal),
-                Err(_) => ChildExit::Panicked,
-            };
-            let _ = signal_tx.send(exit);
+            let _ = std::panic::AssertUnwindSafe(future).catch_unwind().await;
+            let _ = signal_tx.send(());
             let _ = exit_wake.notify(id).await;
         });
         self.active = Some(OwnedGcJob {
@@ -216,10 +159,8 @@ impl WriterGcCoordinator {
             retirement_wake,
             phase: WriterJobPhase::Computing,
             terminal: None,
-            lifecycle: None,
             adoption_candidate: None,
             stage,
-            rejection: None,
         });
         Ok(id)
     }
@@ -228,22 +169,16 @@ impl WriterGcCoordinator {
         let Some(job) = self.active.as_mut().filter(|job| job.id == id) else {
             return false;
         };
-        if let Some(signal) = job.completion_signal.as_mut() {
-            match signal.try_recv() {
-                Ok(exit) => {
-                    job.completion_signal = None;
-                    record_child_exit(job, exit);
-                }
-                Err(tokio::sync::oneshot::error::TryRecvError::Empty) => {}
-                Err(tokio::sync::oneshot::error::TryRecvError::Closed) => {
-                    job.completion_signal = None;
-                    job.lifecycle
-                        .get_or_insert(WriterLifecycle::ProducerTerminated);
-                    if job.terminal.is_none() {
-                        close_for_lifecycle(job);
-                    }
-                }
-            }
+        // Only the producer adopts a Ready candidate, so its exit (or a dropped
+        // signal) always closes the job and hands it to the join reaper.
+        if let Some(signal) = job.completion_signal.as_mut()
+            && !matches!(
+                signal.try_recv(),
+                Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+            )
+        {
+            job.completion_signal = None;
+            close_for_lifecycle(job);
         }
         if job.phase != WriterJobPhase::Closing {
             return false;
@@ -252,9 +187,6 @@ impl WriterGcCoordinator {
         if let Some(receiver) = job.joined_receiver.as_mut()
             && let Ok(facts) = receiver.try_recv()
         {
-            if facts.producer_panicked {
-                job.lifecycle.get_or_insert(WriterLifecycle::ChildPanicked);
-            }
             job.joined = facts.producer_joined;
             job.joined_receiver = None;
         }
@@ -305,8 +237,6 @@ impl WriterGcCoordinator {
         }
         if job.phase == WriterJobPhase::Ready {
             CompletionDisposition::Accepted
-        } else if let Some(rejection) = job.rejection {
-            CompletionDisposition::Rejected(rejection)
         } else {
             CompletionDisposition::Closed
         }
@@ -426,7 +356,7 @@ mod lifecycle_event_tests {
         let task = runtime.spawn(async move {
             producer_stop.cancelled().await;
             result_tx.send(WriterCompletion::Failed).unwrap();
-            let _ = exit_tx.send(ChildExit::Finished(Some(WriterCompletion::Failed)));
+            let _ = exit_tx.send(());
             let _ = exit_wake.notify(id).await;
         });
         let stage = super::super::attempt::GcStage {
@@ -448,10 +378,8 @@ mod lifecycle_event_tests {
                 retirement_wake: wake,
                 phase: WriterJobPhase::Computing,
                 terminal: None,
-                lifecycle: None,
                 adoption_candidate: None,
                 stage,
-                rejection: None,
             }),
         };
 
@@ -478,16 +406,17 @@ mod lifecycle_event_tests {
     }
 
     #[tokio::test]
-    async fn matching_child_exit_preserves_the_single_ready_completion() {
+    async fn matching_producer_exit_closes_a_ready_job_and_its_join_receipt_retires_it() {
         let root = tempfile::tempdir().unwrap();
         let db = crate::storage::DbWorker::open(root.path().join("db"))
             .await
             .unwrap();
         let id = WriterJobId(77);
         let (exit_tx, completion_signal) = tokio::sync::oneshot::channel();
-        exit_tx
-            .send(ChildExit::Finished(Some(WriterCompletion::Ready)))
-            .unwrap();
+        let runtime = tokio::runtime::Handle::current();
+        // The producer returned without adopting its Ready candidate.
+        let task = runtime.spawn(async {});
+        exit_tx.send(()).unwrap();
         let stage = super::super::attempt::GcStage {
             attempt_id: "a".into(),
             token: "tok".into(),
@@ -499,49 +428,52 @@ mod lifecycle_event_tests {
             active: Some(OwnedGcJob {
                 id,
                 cancel: cancel.clone(),
-                task: None,
+                task: Some(task),
                 completion_signal: Some(completion_signal),
                 retirement_task: None,
                 joined_receiver: None,
                 joined: false,
-                runtime: tokio::runtime::Handle::current(),
+                runtime,
                 retirement_wake: db.gc_retirement_wake(),
                 phase: WriterJobPhase::Ready,
                 terminal: Some(WriterCompletion::Ready),
-                lifecycle: None,
                 adoption_candidate: None,
                 stage,
-                rejection: None,
             }),
         };
 
         assert!(!coordinator.process_lifecycle_event(WriterJobId(76)));
-        assert!(
-            coordinator
-                .active
-                .as_ref()
-                .unwrap()
-                .completion_signal
-                .is_some()
+        let job = coordinator.active.as_ref().unwrap();
+        assert_eq!(
+            job.phase,
+            WriterJobPhase::Ready,
+            "a wake for another id leaves the slot alone"
         );
-        assert!(!coordinator.process_lifecycle_event(id));
-        assert!(
-            coordinator
-                .active
-                .as_ref()
-                .unwrap()
-                .completion_signal
-                .is_none()
-        );
-        assert!(!coordinator.process_lifecycle_event(id));
-        let job = coordinator
-            .active
-            .as_ref()
-            .expect("Ready slot remains owned");
-        assert_eq!(job.phase, WriterJobPhase::Ready);
-        assert_eq!(job.terminal, Some(WriterCompletion::Ready));
-        assert!(job.lifecycle.is_none());
+        assert!(job.completion_signal.is_some());
         assert!(!cancel.is_cancelled());
+
+        assert!(!coordinator.process_lifecycle_event(id));
+        let job = coordinator.active.as_mut().unwrap();
+        assert_eq!(
+            job.phase,
+            WriterJobPhase::Closing,
+            "no adopter remains after the matching producer exit"
+        );
+        assert!(cancel.is_cancelled());
+        assert!(job.completion_signal.is_none());
+        let retirement = job
+            .retirement_task
+            .take()
+            .expect("closing starts the producer join reaper");
+
+        assert!(!coordinator.process_lifecycle_event(WriterJobId(76)));
+        assert!(coordinator.active.is_some());
+        retirement.await.unwrap();
+        assert!(
+            coordinator.process_lifecycle_event(id),
+            "the join receipt retires the writer's single slot"
+        );
+        assert!(coordinator.active.is_none());
         db.shutdown().await.unwrap();
     }
 }

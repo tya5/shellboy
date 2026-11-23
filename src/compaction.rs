@@ -33,9 +33,7 @@ mod gc_coordinator;
 #[cfg(test)]
 pub(crate) use gc_capture::{CapturedGroup, CapturedSourceStamp, GcSourceFacts};
 pub(crate) use gc_capture::{CapturedSummaryInput, GcCaptureOutcome};
-pub(crate) use gc_coordinator::{
-    CompletionDisposition, WriterCompletion, WriterGcCoordinator, WriterJobId,
-};
+pub(crate) use gc_coordinator::{CompletionDisposition, WriterGcCoordinator, WriterJobId};
 mod keys;
 pub(crate) mod preview;
 #[cfg(test)]
@@ -948,21 +946,15 @@ impl Compactor {
             let completion=db.complete_gc_job_cancellable(job_id,&mut pending,Some(&stop_for_job),failure_write).await;
             match completion{
                 Err(crate::storage::GcCompletionSubmitError::NotAdmitted(error))=>{
-                    let terminal=pending.take().map(|r|match r{Ok(_value)=>WriterCompletion::Ready,Err(_error)=>WriterCompletion::Failed});
                     let _ = result_tx.send(Err(report_error.unwrap_or_else(|| storage_error(error))));
-                    return terminal;
+                    return;
                 }
-                Err(crate::storage::GcCompletionSubmitError::AdmittedReplyLost(error))=>{let _=result_tx.send(Err(storage_error(error)));return None;}
+                Err(crate::storage::GcCompletionSubmitError::AdmittedReplyLost(error))=>{let _=result_tx.send(Err(storage_error(error)));return;}
                 Ok(CompletionDisposition::Accepted)=>{}
-                Ok(CompletionDisposition::Rejected(reason))=>{
-                    let reason=gc_coordinator::owner_rejection_reason(reason,stop_for_job.is_cancelled());
-                    let error=discard::rejected(reason,"GC source witness changed before adoption; original path retained");
-                    let _=result_tx.send(Err(error));return None;
-                }
-                Ok(_)=>{let _=result_tx.send(report_error.map_or_else(||Err(invalid("GC completion was not adoptable")),Err));return None;}
+                Ok(_)=>{let _=result_tx.send(report_error.map_or_else(||Err(invalid("GC completion was not adoptable")),Err));return;}
             }
-            let _dispatched=match dispatched{Ok(value)=>value,Err(error)=>{let _=result_tx.send(Err(report_error.unwrap_or(error)));return None;}};
-            let guard=tokio::select!{biased;_=stop_for_job.cancelled()=>{cancel.cancel();let _=result_tx.send(Err(invalid("GC cancelled by explicit Run Stop")));return None;},guard=boundary_for_job.clone().lock_owned()=>guard};
+            let _dispatched=match dispatched{Ok(value)=>value,Err(error)=>{let _=result_tx.send(Err(report_error.unwrap_or(error)));return;}};
+            let guard=tokio::select!{biased;_=stop_for_job.cancelled()=>{cancel.cancel();let _=result_tx.send(Err(invalid("GC cancelled by explicit Run Stop")));return;},guard=boundary_for_job.clone().lock_owned()=>guard};
             let apply_capture=captured.clone();let apply_config=config.clone();let apply_usage=usage.clone();let apply_cancel=cancel.clone();
             let adopted=db.adopt_gc_candidate(job_id,guard,move|tx,result|{
                 let node=summary::adopt_gc_result_tx(tx,&apply_config,&apply_capture,result,&apply_usage,&apply_cancel)?;
@@ -974,7 +966,6 @@ impl Compactor {
                 Ok((result_value,fact))
             }).await;
             match adopted{Ok(value)=>{let _=result_tx.send(Ok(value));}Err(error)=>{let _=result_tx.send(Err(storage_error(error)));}}
-            None
         },Some(run_stop.clone())).await.map_err(storage_error)?;
         let job = match admission {
             crate::storage::GcCaptureAdmission::NoTarget => {

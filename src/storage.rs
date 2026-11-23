@@ -558,9 +558,7 @@ impl DbWorker {
             ) -> Fut
             + Send
             + 'static,
-        Fut: std::future::Future<Output = Option<crate::compaction::WriterCompletion>>
-            + Send
-            + 'static,
+        Fut: std::future::Future<Output = ()> + Send + 'static,
     {
         let runtime = tokio::runtime::Handle::current();
         let wake = self.gc_retirement_wake();
@@ -1324,7 +1322,7 @@ where
         ) -> Fut
         + Send
         + 'static,
-    Fut: std::future::Future<Output = Option<crate::compaction::WriterCompletion>> + Send + 'static,
+    Fut: std::future::Future<Output = ()> + Send + 'static,
 {
     let (sender, receiver) = oneshot::channel();
     let job: Job = Box::new(move |db, _, _slow, coordinator| {
@@ -2765,9 +2763,8 @@ mod lane_budget_tests {
                         TestProducerExit::AwaitCancellation => {
                             let _ = cancel.cancelled().await;
                             let _ = tx.send(());
-                            None
                         }
-                        TestProducerExit::ReturnNone => None,
+                        TestProducerExit::ReturnNone => {}
                         TestProducerExit::Panic => panic!("synthetic idle GC producer panic"),
                     }
                 },
@@ -2832,7 +2829,7 @@ mod lane_budget_tests {
             .call_with_gc_capture_cancellable(
                 stage.clone(),
                 |_, _| Ok(crate::compaction::GcCaptureOutcome::NoTarget),
-                |_, _, _| async { None },
+                |_, _, _| async {},
                 None,
             )
             .await
@@ -2849,7 +2846,7 @@ mod lane_budget_tests {
                     observed.store(true, Ordering::SeqCst);
                     Ok(crate::compaction::GcCaptureOutcome::NoTarget)
                 },
-                |_, _, _| async { None },
+                |_, _, _| async {},
                 Some(stop),
             )
             .await
@@ -2972,7 +2969,7 @@ mod lane_budget_tests {
                 let _=producer_ready_tx.send(());
                 let _=complete_rx.await;
                 let (command,reply)=make_gc_completion_job(id,Err(crate::protocol::ApiError::new(crate::protocol::ErrorCode::IoFailed,"synthetic terminal failure")),None);
-                if db_for_producer.admit(Lane::Foreground,command).await.is_err(){let _=reply_tx.send(false);return Some(crate::compaction::WriterCompletion::Failed);}
+                if db_for_producer.admit(Lane::Foreground,command).await.is_err(){let _=reply_tx.send(false);return;}
                 let _=admitted_tx.send(());
                 let observed=reply.receive().await.is_ok();
                 let _=reply_tx.send(observed);
