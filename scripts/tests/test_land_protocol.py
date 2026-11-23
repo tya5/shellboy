@@ -115,45 +115,32 @@ class LandProtocolTests(unittest.TestCase):
         self.assertFalse((self.root / 'docs/design/protocol-versions/next-12.md').exists())
         self.assertFalse((self.root / 'docs/design/protocol-versions/next-30.md').exists())
         self.assertEqual(self.read('docs/guides/use.md'),
-                         'See [12](../design/protocol-versions/12.md#protocol-12-12-30), '
+                         'See [12](../design/protocol-versions/12.md), '
                          '[30](../design/protocol-versions/12.md#detail-thirty) and '
                          '[folder](../design/protocol-versions/).\n')
         self.assertEqual(self.read('docs/design/protocol.md'), DOC)
         self.assertIn('VERSION: u32 = 12;', self.read('src/protocol.rs'))
         self.assertEqual(self.git('status', '--porcelain'), '')
 
-    def test_old_in_file_heading_folds_into_version_file(self):
-        doc = (DOC + '\n## Protocol next (#12)\n\nTwelve uses [y](other.md#y) and '
-               '[eleven](#protocol-11-317).\n\n### Twelve detail\n\nMore.\n\n'
-               '## Later\n\nKept; see [it](#protocol-next-12); '
-               'patches write `Protocol next (#N)` or `# Protocol next (#issue)`; Protocol next prose.\n')
+    def test_stray_heading_is_numbered_in_place(self):
+        doc = DOC + '\n## Protocol next (#13)\n\nSee [note](#protocol-next-13). `Protocol next` stays literal.\n'
         self.write('docs/design/protocol.md', doc)
-        self.write('docs/design/other.md', '# Other\n\n### Protocol next (#9, #30)\n\nNine.\n')
-        self.write('docs/guides/use.md', 'See [p](../design/protocol.md#protocol-next-12).\n')
-        self.commit('patches in flight')
+        self.commit('legacy heading')
         result = self.land()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.subject(), 'Protocol 12: #9, #12, #30')
-        self.assertEqual(self.read('docs/design/protocol-versions/12.md'),
-                         '# Protocol 12 (#9, #12, #30)\n\nNine.\n\n'
-                         'Twelve uses [y](../other.md#y) and [eleven](../protocol.md#protocol-11-317).\n\n'
-                         '## Twelve detail\n\nMore.\n')
+        self.assertEqual(self.subject(), 'Protocol 12: #13')
         self.assertEqual(self.read('docs/design/protocol.md'),
-                         DOC + '\n## Later\n\nKept; see [it](protocol-versions/12.md#protocol-12-9-12-30); '
-                         'patches write `Protocol next (#N)` or `# Protocol next (#issue)`; Protocol 12 prose.\n')
-        self.assertEqual(self.read('docs/design/other.md'), '# Other\n')
-        self.assertEqual(self.read('docs/guides/use.md'),
-                         'See [p](../design/protocol-versions/12.md#protocol-12-9-12-30).\n')
-        self.assertIn('"protocol_version": 12,', self.read('docs/reference/protocol.schema.json'))
+                         doc.replace('Protocol next (#13)', 'Protocol 12 (#13)')
+                            .replace('#protocol-next-13', '#protocol-12-13'))
+        self.assertFalse((self.root / 'docs/design/protocol-versions/12.md').exists())
 
     def test_second_run_does_nothing(self):
         self.write('docs/design/protocol-versions/next-12.md', '# Protocol next (#12)\n\nTwelve.\n')
-        self.write('docs/design/protocol.md', DOC + '\n## Protocol next (#13)\n\nThirteen.\n')
         self.commit('patch')
         self.assertEqual(self.land().returncode, 0)
         landed = self.head()
         notes = self.read('docs/design/protocol-versions/12.md')
-        self.assertEqual(notes, '# Protocol 12 (#12, #13)\n\nTwelve.\n\nThirteen.\n')
+        self.assertEqual(notes, '# Protocol 12 (#12)\n\nTwelve.\n')
         result = self.land()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.head(), landed)
@@ -162,8 +149,12 @@ class LandProtocolTests(unittest.TestCase):
 
     def test_patch_added_after_landing_joins_the_version_file(self):
         self.write('docs/design/protocol-versions/next-12.md', '# Protocol next (#12)\n\nTwelve.\n')
+        guide = 'docs/guides/use.md'
+        self.write(guide, '[Twelve](../design/protocol-versions/next-12.md#protocol-next-12)\n')
         self.commit('patch')
         self.assertEqual(self.land().returncode, 0)
+        landed_link = '[Twelve](../design/protocol-versions/12.md)\n'
+        self.assertEqual(self.read(guide), landed_link)
         self.write('docs/design/protocol-versions/next-8.md', '# Protocol next (#8)\n\nEight.\n')
         self.commit('later patch')
         result = self.land()
@@ -171,6 +162,7 @@ class LandProtocolTests(unittest.TestCase):
         self.assertEqual(self.subject(), 'Protocol 12: #8')
         self.assertEqual(self.read('docs/design/protocol-versions/12.md'),
                          '# Protocol 12 (#8, #12)\n\nTwelve.\n\nEight.\n')
+        self.assertEqual(self.read(guide), landed_link)
         self.assertIn('VERSION: u32 = 12;', self.read('src/protocol.rs'))
 
     def test_version_two_ahead_fails(self):

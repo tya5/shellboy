@@ -210,11 +210,10 @@ with `##` subsections, so two wire patches never edit the same lines. After comp
 batch, the integration owner runs `python3 scripts/land-protocol.py origin/main`
 before pushing it: it bumps to main + 1 once, merges every `next-*.md` in issue
 order into `protocol-versions/N.md` headed `# Protocol N (#A, #B)`, deletes them,
-points links at the new file and anchor, and commits "Protocol N: #A, #B"
-(no-op without a wire change; safe to rerun). The earlier form, a
-`Protocol next (#N)` heading inside `protocol.md` or another design doc, is no
-longer used; the script still moves such a section into `N.md` for patches
-written before the per-version files.
+points title links at the new file without a fragment, preserves subsection
+links, and commits "Protocol N: #A, #B" (no-op without a wire change; safe to
+rerun). A stray in-file `Protocol next` heading is numbered in place, not moved.
+When rebasing an older wire patch, move its notes into `next-<issue>.md`.
 
 ### Migration numbers at landing (#359)
 

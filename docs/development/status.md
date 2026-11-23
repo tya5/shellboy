@@ -2,17 +2,16 @@
 
 ## Core #356 per-version protocol files
 
-Branch `task/core356-version-files` moves the per-version sections of
+Bundle `bundle/core-wire-a` moves the per-version sections of
 `docs/design/protocol.md` and `events-and-external-protocol.md` (protocols
-5–13; 9 is a pointer to its #346 note) verbatim into
+5–15; 9 is a pointer to its #346 note) verbatim into
 `docs/design/protocol-versions/N.md`; `protocol.md` keeps one pointer line. A
 wire patch now adds `protocol-versions/next-<issue>.md`, and
 `scripts/land-protocol.py` merges those into `N.md`, deletes them and rewrites
-links; the old in-file heading is still folded for patches in flight. Rule:
+links. Links to the version title target the file, so a later batch addition
+does not break them. Stray in-file headings are numbered in place. Rule:
 [setup](setup.md#protocol-number-at-landing-356). Tests:
-`scripts/tests/test_land_protocol.py`. Next: the in-flight wire patches (#344,
-#297, #335) resolve their `protocol.md` conflict once by keeping or moving
-their section; drop the in-file fold after they land.
+`scripts/tests/test_land_protocol.py`.
 
 ## Core #309 compaction fault tests
 
