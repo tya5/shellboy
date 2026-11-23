@@ -3337,16 +3337,33 @@ async fn headless_background_parent_stop_reaps_nested_owner_and_tool_without_ree
 
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn headless_ctrl_c_shuts_down_cleanly_and_allows_reopening() {
-    crate::test_watchdog::watchdog("headless Ctrl-C and reopen", async {
+async fn headless_repeated_term_does_not_escalate_drain() {
+    crate::test_watchdog::watchdog("headless repeated TERM during drain", async {
         let root = tempfile::tempdir().unwrap();
         let config = root.path().join("config.toml");
         std::fs::write(&config, "").unwrap();
         let data = root.path().join("data");
         let owner = HeadlessOwner::start(&data, &config).await;
         let identity = owner.ready["instance_id"].clone();
+        let endpoint: shellboy::app::Endpoint =
+            serde_json::from_slice(&std::fs::read(data.join("endpoint.json")).unwrap()).unwrap();
+        let hold = rusqlite::Connection::open(data.join("shellboy.db")).unwrap();
+        hold.execute_batch("BEGIN IMMEDIATE").unwrap();
         let pid = owner.child.id().unwrap() as i32;
         assert_eq!(unsafe { libc::kill(pid, libc::SIGINT) }, 0);
+        loop {
+            if tokio::net::UnixStream::connect(&endpoint.address)
+                .await
+                .is_err()
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(unsafe { libc::kill(pid, libc::SIGTERM) }, 0);
+        assert_eq!(unsafe { libc::kill(pid, libc::SIGTERM) }, 0);
+        hold.execute_batch("ROLLBACK").unwrap();
+        drop(hold);
         owner
             .finish(true, &root.path().join("signal-drain.jsonl"))
             .await;
