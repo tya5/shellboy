@@ -2153,8 +2153,13 @@ impl Store {
     }
 
     fn admit_content(
-        &self, tx: &Transaction<'_>, args: &MessageSendArgs, caller: Option<&Origin>,
-        operation_id: &str, now: &str, content: SendContent<'_>,
+        &self,
+        tx: &Transaction<'_>,
+        args: &MessageSendArgs,
+        caller: Option<&Origin>,
+        operation_id: &str,
+        now: &str,
+        content: SendContent<'_>,
     ) -> Result<MutationResult> {
         let named = matches!(content.reply, ReplyIntent::Named(_));
         let expects_reply = !matches!(content.reply, ReplyIntent::None);

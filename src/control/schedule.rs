@@ -525,7 +525,6 @@ impl ServiceSettlement {
             human: false,
             resume_recovery: false,
 
-
             sender_label: Some(format!("service:{id}")),
             thread_id: Some(self.thread),
             deliver: crate::protocol::Deliver::Next,
@@ -1189,7 +1188,6 @@ mod tests {
             .request(request(Command::MessageSend(MessageSendArgs {
                 human: false,
                 resume_recovery: false,
-
 
                 sender_label: None,
                 thread_id: Some(thread.clone()),
