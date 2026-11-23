@@ -475,7 +475,7 @@ impl<'a> HistoryReader<'a> {
             let (rows, read_revision, observed_at) = self.control.store.database.call(move |db| {
                 let tx = db.transaction()?;
                 let mut rows = Vec::with_capacity(node_ids.len());
-                let mut query = tx.prepare("SELECT id,kind,CASE WHEN length(CAST(payload_json AS BLOB))<=98304 THEN payload_json END,deleted_reason FROM node WHERE id=?1")?;
+                let mut query = tx.prepare("SELECT id,kind,CASE WHEN length(CAST(payload_json AS BLOB))<=98304 THEN payload_json END,deleted_reason,output_limit_json IS NOT NULL FROM node WHERE id=?1")?;
                 // Node/group identity constrains every call; a matching call ID
                 // elsewhere can never supply current lifecycle facts.
                 let mut tools = tx.prepare(r"
@@ -495,7 +495,7 @@ impl<'a> HistoryReader<'a> {
                     ORDER BY c.ordinal,c.call_id LIMIT 17")?;
                 for id in node_ids {
                     let row = query.query_row([&id], |row|Ok(RawNode {
-                        id:row.get(0)?,kind:row.get(1)?,payload:row.get(2)?,reason:row.get(3)?,received_recovery_wait:false,
+                        id:row.get(0)?,kind:row.get(1)?,payload:row.get(2)?,reason:row.get(3)?,received_recovery_wait:false,output_limited:row.get(4)?,
                     })).optional()?;
                     let current = if row.as_ref().is_some_and(|row|row.payload.is_some() && row.reason.is_none()) { tools.query_map([&id], |row| Ok((
                         row.get::<_,Option<String>>(0)?,row.get::<_,Option<String>>(1)?,
@@ -579,7 +579,7 @@ impl<'a> HistoryReader<'a> {
                 .call(move |db| {
                     let tx = db.transaction()?;
                     let row = tx.query_row(
-                            "SELECT n.id,n.kind,n.payload_json,n.deleted_reason,CASE WHEN n.kind='incomplete_response' THEN EXISTS(SELECT 1 FROM turn u WHERE u.id=n.turn_id AND u.state='recovery_wait') ELSE 0 END FROM node n WHERE n.id=?1",
+                            "SELECT n.id,n.kind,n.payload_json,n.deleted_reason,CASE WHEN n.kind='incomplete_response' THEN EXISTS(SELECT 1 FROM turn u WHERE u.id=n.turn_id AND u.state='recovery_wait') ELSE 0 END,n.output_limit_json IS NOT NULL FROM node n WHERE n.id=?1",
                             [&node_id],
                             |r| {
                                 Ok(RawNode {
@@ -588,6 +588,7 @@ impl<'a> HistoryReader<'a> {
                                     payload: r.get(2)?,
                                     reason: r.get(3)?,
                                     received_recovery_wait: r.get(4)?,
+                                    output_limited: r.get(5)?,
                                 })
                             },
                         )
@@ -839,11 +840,11 @@ fn history_rows(
 ) -> rusqlite::Result<Vec<PathNode>> {
     let (sql, bound) = match range {
         PathRange::From(bound) => (
-            "SELECT p.ordinal,n.id,n.kind,n.payload_json,n.deleted_reason,CASE WHEN n.kind='incomplete_response' THEN EXISTS(SELECT 1 FROM turn u WHERE u.id=n.turn_id AND u.state='recovery_wait') ELSE 0 END FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND p.ordinal>=?2 ORDER BY p.ordinal LIMIT 50",
+            "SELECT p.ordinal,n.id,n.kind,n.payload_json,n.deleted_reason,CASE WHEN n.kind='incomplete_response' THEN EXISTS(SELECT 1 FROM turn u WHERE u.id=n.turn_id AND u.state='recovery_wait') ELSE 0 END,n.output_limit_json IS NOT NULL FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND p.ordinal>=?2 ORDER BY p.ordinal LIMIT 50",
             bound,
         ),
         PathRange::Before(bound) => (
-            "SELECT p.ordinal,n.id,n.kind,n.payload_json,n.deleted_reason,CASE WHEN n.kind='incomplete_response' THEN EXISTS(SELECT 1 FROM turn u WHERE u.id=n.turn_id AND u.state='recovery_wait') ELSE 0 END FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND p.ordinal<?2 ORDER BY p.ordinal DESC LIMIT 50",
+            "SELECT p.ordinal,n.id,n.kind,n.payload_json,n.deleted_reason,CASE WHEN n.kind='incomplete_response' THEN EXISTS(SELECT 1 FROM turn u WHERE u.id=n.turn_id AND u.state='recovery_wait') ELSE 0 END,n.output_limit_json IS NOT NULL FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND p.ordinal<?2 ORDER BY p.ordinal DESC LIMIT 50",
             bound,
         ),
     };
@@ -865,6 +866,7 @@ fn raw_node_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<PathNode> {
             payload: row.get(3)?,
             reason: row.get(4)?,
             received_recovery_wait: row.get(5)?,
+            output_limited: row.get(6)?,
         },
     })
 }
@@ -1032,7 +1034,7 @@ mod read_stamping_tests {
             ("empty", "event", json!({"text":""})),
         ].into_iter().enumerate().map(|(ordinal,(id,kind,payload))|PathNode {
             ordinal:ordinal as i64,
-            node:RawNode{id:id.into(),kind:kind.into(),payload:Some(payload.to_string()),reason:None,received_recovery_wait:false},
+            node:RawNode{id:id.into(),kind:kind.into(),payload:Some(payload.to_string()),reason:None,received_recovery_wait:false,output_limited:false},
         }).collect()
     }
 

@@ -653,4 +653,4 @@ An adopted output-limited Conversation ends with `outcome: adopted` and the
 existing `output_limit` evidence. A fenced attempt ends `not_adopted`. The
 adopted answer saves the same evidence in `NodeProvenance.output_limit` for
 `history.get` and `history.list`. The evidence is outside model replay output;
-clients need not infer it from text, nor from current connection settings.
+clients need not infer it from text, nor from current connection settings. The bounded stop, sent-token limit and source are stored separately from the node body by migration `next_answer_output_limit`. An exact attempt reference supplies the saved connection even for an empty answer. Existing nodes have no such evidence.

@@ -302,6 +302,11 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         sql: include_str!("../../migrations/0056_directional_reply_pending.sql"),
         foreign_keys: None,
     },
+    Migration {
+        version: 57,
+        sql: include_str!("../../migrations/next_answer_output_limit.sql"),
+        foreign_keys: None,
+    },
 ];
 
 pub(super) fn run(
@@ -2452,6 +2457,9 @@ mod thread_creation_migration_tests {
             DROP INDEX receipt_pending_owed;
             DROP INDEX receipt_pending_asked;
             DROP INDEX receipt_pending_to;
+            ALTER TABLE node DROP COLUMN output_limit_json;
+            ALTER TABLE node DROP COLUMN output_limit_attempt_id;
+            DELETE FROM schema_migration WHERE name='next_answer_output_limit';
             DELETE FROM schema_migration WHERE version=56;
             DROP TABLE automatic_compaction; CREATE INDEX automatic_compaction_turn ON model_attempt(turn_id,started_at,id) WHERE CASE WHEN json_valid(error_json) THEN json_type(error_json,'$.automatic_trim')='object' OR json_type(error_json,'$.automatic_trim_attempt')='object' ELSE 0 END;
             DELETE FROM schema_migration WHERE version=55;
@@ -2491,6 +2499,9 @@ mod automatic_compaction_migration_tests {
             DROP INDEX receipt_pending_owed;
             DROP INDEX receipt_pending_asked;
             DROP INDEX receipt_pending_to;
+            ALTER TABLE node DROP COLUMN output_limit_json;
+            ALTER TABLE node DROP COLUMN output_limit_attempt_id;
+            DELETE FROM schema_migration WHERE name='next_answer_output_limit';
             DELETE FROM schema_migration WHERE version=56;
             DROP TABLE automatic_compaction;
             CREATE INDEX automatic_compaction_turn ON model_attempt(turn_id,started_at,id) WHERE CASE WHEN json_valid(error_json) THEN json_type(error_json,'$.automatic_trim')='object' OR json_type(error_json,'$.automatic_trim_attempt')='object' ELSE 0 END;

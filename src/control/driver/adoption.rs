@@ -46,9 +46,12 @@ pub(super) async fn adopt_response(
             }
             save_partial_attempts(&tx,&current,&partial_attempts)?;
             let node=id();
-            let mut payload = json!({"output":output,"reasoning_epoch":current.epoch,"group_id":group_id});
-            if let Some(limit) = node_limit { payload["output_limit"] = json!(limit); }
+            let payload = json!({"output":output,"reasoning_epoch":current.epoch,"group_id":group_id});
             history::append_node(&tx,&current.thread,&node,Some(&current.turn),"assistant_response",&payload,&now())?;
+            if let Some(limit) = node_limit {
+                let facts = json!({"stop":limit.stop,"sent_max_tokens":limit.sent_max_tokens,"source":limit.source});
+                tx.execute("UPDATE node SET output_limit_attempt_id=?2,output_limit_json=?3 WHERE id=?1",params![node,attempt_id,facts.to_string()])?;
+            }
             index.authorize_new_tx(&tx,std::slice::from_ref(&node)).map_err(crate::storage::StorageError::from)?;
             // Same commit/root-revision boundary as the selected answer. This
             // received source remains outside thread_path and model replay.

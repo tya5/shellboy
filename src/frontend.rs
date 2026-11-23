@@ -4238,6 +4238,7 @@ pub fn display_payload(payload: &Value) -> (String, Vec<(usize, usize)>) {
 struct RawNode {
     id: String,
     received_recovery_wait: bool,
+    output_limited: bool,
     kind: String,
     payload: Option<String>,
     reason: Option<String>,
@@ -4452,6 +4453,7 @@ impl RawNode {
         }
         let mut presentation =
             crate::presentation::project(&kind, &payload, &text, base_char_offset);
+        presentation.output_limited = self.output_limited;
         crate::presentation::render_markdown(&mut presentation, render_width.max(1));
         UiNode {
             presentation,
@@ -4660,6 +4662,7 @@ mod stream_tests {
             let make = || RawNode {
                 id: "answer".into(),
                 received_recovery_wait: false,
+                output_limited: false,
                 kind: "assistant".into(),
                 payload: Some(payload.clone()),
                 reason: None,

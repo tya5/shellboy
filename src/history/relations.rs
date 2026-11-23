@@ -58,7 +58,9 @@ fn provenance_with_sender_evidence(
     if result.kind == "assistant_response" {
         result.attempt_id = saved_attempt_id(connection, node_id)?;
         let output_limit: Option<String> = connection.query_row(
-            "SELECT CASE WHEN json_valid(payload_json) AND json_type(payload_json,'$.output_limit')='object' THEN json_extract(payload_json,'$.output_limit') END FROM node WHERE id=?1",
+            "SELECT CASE WHEN n.output_limit_json IS NOT NULL THEN
+               json_set(n.output_limit_json,'$.connection',json_extract(a.input_manifest_json,'$.output_limit.connection')) END
+             FROM node n LEFT JOIN model_attempt a ON a.id=n.output_limit_attempt_id WHERE n.id=?1",
             [node_id], |row| row.get(0),
         ).map_err(sql_error)?;
         result.output_limit = output_limit.and_then(|value| serde_json::from_str(&value).ok());
@@ -276,15 +278,15 @@ mod tests {
         let db = Connection::open_in_memory().unwrap();
         db.execute_batch(
             "PRAGMA foreign_keys=ON;
-             CREATE TABLE node(id TEXT PRIMARY KEY,kind TEXT,created_at TEXT,payload_revision INTEGER,turn_id TEXT);
+             CREATE TABLE node(id TEXT PRIMARY KEY,kind TEXT,created_at TEXT,payload_revision INTEGER,turn_id TEXT,output_limit_attempt_id TEXT,output_limit_json TEXT);
              CREATE TABLE turn(id TEXT PRIMARY KEY,run_id TEXT,thread_id TEXT);
              CREATE TABLE run(id TEXT PRIMARY KEY,thread_id TEXT);
              CREATE TABLE receipt(message_node_id TEXT,sender_json TEXT,client_operation_id TEXT,target_thread_id TEXT);
              CREATE INDEX receipt_message_node ON receipt(message_node_id);
-             CREATE TABLE model_attempt(id TEXT PRIMARY KEY);
+             CREATE TABLE model_attempt(id TEXT PRIMARY KEY,input_manifest_json TEXT NOT NULL DEFAULT '{}');
              CREATE TABLE output_item(attempt_id TEXT NOT NULL REFERENCES model_attempt(id),ordinal INTEGER NOT NULL,item_id TEXT,item_type TEXT NOT NULL,phase TEXT,status TEXT NOT NULL,payload_json TEXT NOT NULL,node_id TEXT REFERENCES node(id),PRIMARY KEY(attempt_id,ordinal));
              CREATE INDEX output_item_node ON output_item(node_id);
-             INSERT INTO node VALUES('assistant','assistant_response','now',0,NULL),('missing','assistant_response','now',0,NULL),('ambiguous','assistant_response','now',0,NULL),('other-kind','user','now',0,NULL);",
+             INSERT INTO node(id,kind,created_at,payload_revision,turn_id) VALUES('assistant','assistant_response','now',0,NULL),('missing','assistant_response','now',0,NULL),('ambiguous','assistant_response','now',0,NULL),('other-kind','user','now',0,NULL);",
         )
         .unwrap();
         db
@@ -330,7 +332,7 @@ mod tests {
     fn unique_malformed_attempt_owner_is_strict_not_absent() {
         let db = attempt_provenance_db();
         db.execute(
-            "INSERT INTO node VALUES('malformed','assistant_response','now',0,NULL),('oversized','assistant_response','now',0,NULL)",
+            "INSERT INTO node(id,kind,created_at,payload_revision,turn_id) VALUES('malformed','assistant_response','now',0,NULL),('oversized','assistant_response','now',0,NULL)",
             [],
         )
         .unwrap();
@@ -354,6 +356,14 @@ mod tests {
         let db = attempt_provenance_db();
         let owner = Uuid::new_v4().to_string();
         add_output_owner(&db, "assistant", &owner, 0);
+        db.execute(
+            "UPDATE model_attempt SET input_manifest_json=?2 WHERE id=?1",
+            params![owner, serde_json::json!({"adoption":{"outcome":"adopted"},"output_limit":{"connection":"fixture","max_tokens":1234,"source":"thread_override"}}).to_string()],
+        ).unwrap();
+        db.execute(
+            "UPDATE node SET output_limit_attempt_id=?1,output_limit_json=?2 WHERE id IN ('assistant','missing')",
+            params![owner, serde_json::json!({"stop":true,"sent_max_tokens":1234,"source":"thread_override"}).to_string()],
+        ).unwrap();
         let plan = db
             .prepare(&format!("EXPLAIN QUERY PLAN {ATTEMPT_OWNER_SQL}"))
             .unwrap()
@@ -381,10 +391,12 @@ mod tests {
             _ => Authorization::Allow,
         }))
         .unwrap();
-        assert_eq!(
-            provenance(&db, "assistant").unwrap().attempt_id.as_deref(),
-            Some(owner.as_str())
-        );
+        let provenance = provenance(&db, "assistant").unwrap();
+        assert_eq!(provenance.attempt_id.as_deref(), Some(owner.as_str()));
+        assert_eq!(provenance.output_limit.unwrap().sent_max_tokens, Some(1234));
+        let empty = self::provenance(&db, "missing").unwrap();
+        assert_eq!(empty.attempt_id, None);
+        assert_eq!(empty.output_limit.unwrap().connection, "fixture");
         db.authorizer(None::<fn(AuthContext<'_>) -> Authorization>)
             .unwrap();
     }

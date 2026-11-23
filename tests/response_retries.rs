@@ -2871,9 +2871,14 @@ async fn successful_connection_probe_releases_queued_threads_without_serializing
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn output_limit_stop_matches_wire_in_live_ends_and_saved_usage() {
-    let responses = |reason: &str| {
+    let responses = |reason: &str, empty: bool| {
+        let output = if empty {
+            json!([])
+        } else {
+            json!([{"type":"message","role":"assistant","status":"incomplete","content":[{"type":"output_text","text":"abc"}]}])
+        };
         json!({"type":"response.incomplete","response":{
-            "id":"limited","status":"incomplete","output":[{"type":"message","role":"assistant","status":"incomplete","content":[{"type":"output_text","text":"abc"}]}],"incomplete_details":{"reason":reason}
+            "id":"limited","status":"incomplete","output":output,"incomplete_details":{"reason":reason}
         }})
     };
     let messages = concat!(
@@ -2988,6 +2993,7 @@ async fn output_limit_stop_matches_wire_in_live_ends_and_saved_usage() {
             .as_str()
             .unwrap()
             .to_owned();
+        let empty = key == "max_output_tokens" && wire_limit.is_null() && reason != "eof";
         let body = if reason == "eof" {
             "data: {\"type\":\"response.output_text.delta\",\"delta\":\"abc\"}\n\n".to_owned()
         } else if key == "max_tokens" {
@@ -3004,7 +3010,7 @@ async fn output_limit_stop_matches_wire_in_live_ends_and_saved_usage() {
         } else if key == "max_completion_tokens" {
             chat.to_owned()
         } else {
-            format!("data: {}\n\n", responses(reason))
+            format!("data: {}\n\n", responses(reason, empty))
         };
         incoming
             .reply
@@ -3081,7 +3087,14 @@ async fn output_limit_stop_matches_wire_in_live_ends_and_saved_usage() {
             )
             .await;
             assert_eq!(history["provenance"]["output_limit"], expected);
-            assert!(history.to_string().contains("abc"), "{history}");
+            if empty {
+                assert!(
+                    history["provenance"].get("attempt_id").is_none(),
+                    "no synthetic output item: {history}"
+                );
+            } else {
+                assert!(history.to_string().contains("abc"), "{history}");
+            }
             assert_eq!(usage["output_limit"], expected);
         }
         if thread_limit.is_some() {
