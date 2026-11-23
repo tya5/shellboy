@@ -350,6 +350,13 @@ struct Entry {
     config_fields: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     rate_limit: Option<RateLimitTrace>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    owner_fd_limit: Option<OwnerFdLimitTrace>,
+}
+#[derive(Clone, Copy, Serialize)]
+struct OwnerFdLimitTrace {
+    soft: Option<u64>,
+    hard: Option<u64>,
 }
 #[derive(Clone, Serialize)]
 struct RateLimitTrace {
@@ -444,6 +451,7 @@ struct Record {
     shell_unknown_parameter: Option<String>,
     config_fields: Option<Vec<String>>,
     rate_limit: Option<RateLimitTrace>,
+    owner_fd_limit: Option<OwnerFdLimitTrace>,
 }
 struct Health {
     failed: AtomicBool,
@@ -490,6 +498,7 @@ impl Diagnostics {
                     startup_stage,
                     shell_unknown_parameter,
                     config_fields,
+                    owner_fd_limit,
                     rate_limit,
                 }) = receiver.recv()
                 {
@@ -520,6 +529,7 @@ impl Diagnostics {
                         startup_stage,
                         shell_unknown_parameter,
                         config_fields,
+                        owner_fd_limit,
                         rate_limit,
                     };
                     let mut line = match serde_json::to_vec(&entry) {
@@ -619,6 +629,7 @@ impl Diagnostics {
             startup_stage: None,
             shell_unknown_parameter: None,
             config_fields: None,
+            owner_fd_limit: None,
             rate_limit: None,
         });
     }
@@ -646,6 +657,7 @@ impl Diagnostics {
             startup_stage: None,
             shell_unknown_parameter: None,
             config_fields: None,
+            owner_fd_limit: None,
             rate_limit: None,
         });
     }
@@ -679,6 +691,7 @@ impl Diagnostics {
             startup_stage: None,
             shell_unknown_parameter: Some(name),
             config_fields: None,
+            owner_fd_limit: None,
             rate_limit: None,
         });
     }
@@ -709,6 +722,7 @@ impl Diagnostics {
             startup_stage: None,
             shell_unknown_parameter: None,
             config_fields: Some(fields),
+            owner_fd_limit: None,
             rate_limit: None,
         });
     }
@@ -735,6 +749,7 @@ impl Diagnostics {
             startup_stage: None,
             shell_unknown_parameter: None,
             config_fields: None,
+            owner_fd_limit: None,
             rate_limit: Some(RateLimitTrace {
                 connection: sanitize_id(connection),
                 status: 429,
@@ -744,6 +759,36 @@ impl Diagnostics {
                     .map(|d| d.as_millis().min(u64::MAX as u128) as u64),
                 applied_wait_ms: None,
             }),
+        });
+    }
+    #[cfg(unix)]
+    pub(crate) fn record_owner_fd_limit(&self, limits: Option<libc::rlimit>) {
+        // rlim_t's width is target dependent.
+        #[allow(clippy::unnecessary_cast)]
+        let limits = limits.map(|l| (l.rlim_cur as u64, l.rlim_max as u64));
+        self.enqueue_record(Record {
+            event: DiagnosticEvent::OwnerFdLimitConstrained,
+            ids: Default::default(),
+            failure: None,
+            stream_difference: None,
+            send: None,
+            shutdown: None,
+            tool_repair: None,
+            usage_slow: None,
+            ui_history: None,
+            lineage_slow: None,
+            db_job: None,
+            index_discard: None,
+            automatic_compaction_counts: None,
+            compaction_outcome: None,
+            startup_stage: None,
+            shell_unknown_parameter: None,
+            config_fields: None,
+            owner_fd_limit: Some(OwnerFdLimitTrace {
+                soft: limits.map(|l| l.0),
+                hard: limits.map(|l| l.1),
+            }),
+            rate_limit: None,
         });
     }
     pub fn record(&self, event: DiagnosticEvent, ids: DiagnosticIds) {
@@ -854,6 +899,7 @@ impl Diagnostics {
             startup_stage: None,
             shell_unknown_parameter: None,
             config_fields: None,
+            owner_fd_limit: None,
             rate_limit: None,
         });
     }
@@ -881,6 +927,7 @@ impl Diagnostics {
             startup_stage: None,
             shell_unknown_parameter: None,
             config_fields: None,
+            owner_fd_limit: None,
             rate_limit: None,
         });
     }
@@ -912,6 +959,7 @@ impl Diagnostics {
             startup_stage: None,
             shell_unknown_parameter: None,
             config_fields: None,
+            owner_fd_limit: None,
             rate_limit: None,
         });
     }
@@ -964,6 +1012,7 @@ impl Diagnostics {
             startup_stage: None,
             shell_unknown_parameter: None,
             config_fields: None,
+            owner_fd_limit: None,
             rate_limit: None,
         });
     }
@@ -1003,6 +1052,7 @@ impl Diagnostics {
             startup_stage: None,
             shell_unknown_parameter: None,
             config_fields: None,
+            owner_fd_limit: None,
             rate_limit: None,
         });
     }
@@ -1055,6 +1105,7 @@ impl Diagnostics {
             startup_stage: None,
             shell_unknown_parameter: None,
             config_fields: None,
+            owner_fd_limit: None,
             rate_limit: None,
         });
     }
@@ -1081,6 +1132,7 @@ impl Diagnostics {
             compaction_outcome: None,
             shell_unknown_parameter: None,
             config_fields: None,
+            owner_fd_limit: None,
             rate_limit: None,
             startup_stage: Some(StartupStageTrace {
                 stage,
@@ -1125,6 +1177,7 @@ impl Diagnostics {
             startup_stage: None,
             shell_unknown_parameter: None,
             config_fields: None,
+            owner_fd_limit: None,
             rate_limit: None,
         });
     }
@@ -1211,6 +1264,7 @@ impl Diagnostics {
             startup_stage: None,
             shell_unknown_parameter: None,
             config_fields: None,
+            owner_fd_limit: None,
             rate_limit: None,
         });
     }
@@ -1233,6 +1287,7 @@ impl Diagnostics {
             startup_stage,
             shell_unknown_parameter,
             config_fields,
+            owner_fd_limit,
             rate_limit,
         } = record;
         // IDs come from owned records, but keep even accidental callers bounded.
@@ -1272,6 +1327,7 @@ impl Diagnostics {
                     startup_stage,
                     shell_unknown_parameter,
                     config_fields,
+                    owner_fd_limit,
                     rate_limit,
                 })
                 .is_err()

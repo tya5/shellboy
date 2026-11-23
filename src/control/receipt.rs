@@ -8,24 +8,42 @@ const TOTAL_BYTES: u64 = 256 * 1024 * 1024;
 // Two bounded IPC stop requests can reserve their maximum outcome and metadata
 // even when ordinary admission has consumed its entire budget.
 const CONTROL_HEADROOM_BYTES: u64 = 2 * (MAX_OUTCOME_BYTES + MAX_FRAME_BYTES as u64 + 4096);
+// A request's full wire metadata bounds the stored origin and operation ID.
+const WAIT_TOTAL_BYTES: u64 =
+    crate::ipc::MAX_WAIT_WORK as u64 * (MAX_OUTCOME_BYTES + MAX_FRAME_BYTES as u64 + 4096);
+const WAIT_HASH_PREFIX: &str = "wait:";
 const CONTROL_TOTAL_BYTES: u64 = TOTAL_BYTES + CONTROL_HEADROOM_BYTES;
 
 #[derive(Clone, Copy)]
 pub(super) enum Admission {
     Normal,
     Stop,
+    Wait,
 }
 impl Admission {
     pub(super) fn for_command(command: &Command) -> Self {
         match command {
             Command::RunStop(_) | Command::ShellStop(_) => Self::Stop,
+            command if crate::ipc::is_wait(command) => Self::Wait,
             _ => Self::Normal,
         }
+    }
+    pub(super) fn fingerprint(self, hash: String) -> String {
+        match self {
+            Self::Wait => format!("{WAIT_HASH_PREFIX}{hash}"),
+            _ => hash,
+        }
+    }
+    pub(super) fn matches_fingerprint(self, saved: &str, fingerprint: &str) -> bool {
+        saved == fingerprint
+            || matches!(self, Self::Wait)
+                && fingerprint.strip_prefix(WAIT_HASH_PREFIX) == Some(saved)
     }
     fn limit(self) -> u64 {
         match self {
             Self::Normal => TOTAL_BYTES,
             Self::Stop => CONTROL_TOTAL_BYTES,
+            Self::Wait => WAIT_TOTAL_BYTES,
         }
     }
 }
@@ -100,10 +118,26 @@ fn size(value: &str) -> u64 {
     value.len() as u64
 }
 
+// The existing pending index fences both lanes to the current owner. Saved
+// outcomes and old pending metadata always remain in the shared actual budget.
+fn usage_lanes(db: &Connection, instance: &str) -> Result<(u64, u64)> {
+    db.query_row(
+        "SELECT q.logical_bytes+pending.reserved-pending.wait_bytes, pending.wait_bytes
+         FROM quota_counter q CROSS JOIN (
+             SELECT COALESCE(SUM(reserved_bytes),0) AS reserved,
+             COALESCE(SUM(CASE WHEN substr(request_hash,1,length(?2))=?2 THEN
+                 512+octet_length(operation_id)+octet_length(instance_id)+octet_length(origin_json)
+                 +octet_length(request_hash)+octet_length(created_at)+COALESCE(octet_length(result_ref_json),0)
+                 +reserved_bytes ELSE 0 END),0) AS wait_bytes
+             FROM operation_receipt INDEXED BY operation_receipt_pending_budget
+             WHERE instance_id=?1 AND state='pending'
+         ) pending WHERE q.category='operation_receipt'",
+        params![instance, WAIT_HASH_PREFIX],
+        |r| Ok((r.get::<_, i64>(0)? as u64, r.get::<_, i64>(1)? as u64)),
+    ).map_err(sql)
+}
 pub(super) fn usage(db: &Connection, instance: &str) -> Result<u64> {
-    // Actual bytes are derived transactionally by migration triggers; current
-    // pending reservations use a partial index instead of scanning saved bodies.
-    db.query_row("SELECT q.logical_bytes+(SELECT COALESCE(SUM(reserved_bytes),0) FROM operation_receipt INDEXED BY operation_receipt_pending_budget WHERE instance_id=?1 AND state='pending') FROM quota_counter q WHERE q.category='operation_receipt'",[instance],|r|r.get::<_,i64>(0).map(|n|n as u64)).map_err(sql)
+    Ok(usage_lanes(db, instance)?.0)
 }
 /// Protected intent is never removed. Current identities keep an expired-result
 /// marker; only old-instance identities may be deleted. All call sites own a
@@ -277,7 +311,7 @@ pub(super) fn reserve(
     now: &str,
     admission: Admission,
 ) -> Result<()> {
-    reserve_with_limit(
+    reserve_in_lane(
         db,
         instance,
         operation,
@@ -285,8 +319,10 @@ pub(super) fn reserve(
         fingerprint,
         now,
         admission.limit(),
+        matches!(admission, Admission::Wait),
     )
 }
+#[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 fn reserve_with_limit(
     db: &Connection,
@@ -297,6 +333,28 @@ fn reserve_with_limit(
     now: &str,
     total: u64,
 ) -> Result<()> {
+    reserve_in_lane(
+        db,
+        instance,
+        operation,
+        origin,
+        fingerprint,
+        now,
+        total,
+        false,
+    )
+}
+#[allow(clippy::too_many_arguments)]
+fn reserve_in_lane(
+    db: &Connection,
+    instance: &str,
+    operation: &str,
+    origin: &str,
+    fingerprint: &str,
+    now: &str,
+    total: u64,
+    wait: bool,
+) -> Result<()> {
     let required = ROW_BYTES
         + size(operation)
         + size(instance)
@@ -304,7 +362,9 @@ fn reserve_with_limit(
         + size(fingerprint)
         + size(now)
         + MAX_OUTCOME_BYTES;
-    if usage(db, instance)?.saturating_add(required) > total {
+    let (normal_used, wait_used) = usage_lanes(db, instance)?;
+    let used = if wait { wait_used } else { normal_used };
+    if used.saturating_add(required) > total {
         let mut error = ApiError::new(
             ErrorCode::StorageLimit,
             "Operation receipt budget is full; the command was not accepted",

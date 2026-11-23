@@ -18,10 +18,10 @@ use tokio_util::sync::CancellationToken;
 #[cfg(unix)]
 mod peer;
 mod server;
-pub(crate) use server::AdmissionRefusals;
 pub use server::LocalServer;
 #[cfg(test)]
 pub(crate) use server::tests::Fixture as TestServer;
+pub(crate) use server::{AdmissionRefusals, MAX_WAIT_WORK, is_wait};
 
 const FRAME_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
@@ -236,7 +236,7 @@ async fn serve_connection<S: AsyncRead + AsyncWrite + Unpin>(
         let admission = match work.try_acquire(&request.command) {
             Ok(permit) => permit,
             Err(error) => {
-                refused_wait = server::WorkAdmission::is_wait(&request.command);
+                refused_wait = server::is_wait(&request.command);
                 break 'request failure(error, "work_admission", "work_rejected", true);
             }
         };
@@ -398,7 +398,7 @@ where
                 status: crate::protocol::WaitStatus::Timeout,
                 matched: Vec::new(),
                 snapshot: serde_json::json!({"conditions": []}),
-                cursor: None,
+                cursor: args.after,
                 reason: Some(crate::protocol::wait_timeout_reason(
                     budget.as_millis() as u64
                 )),

@@ -194,7 +194,7 @@ fn owner_fd_soft_target(soft: libc::rlim_t, hard: libc::rlim_t) -> libc::rlim_t 
 }
 
 #[cfg(unix)]
-fn ensure_owner_fd_floor() -> bool {
+fn ensure_owner_fd_floor() -> Option<libc::rlimit> {
     let mut limits = libc::rlimit {
         rlim_cur: 0,
         rlim_max: 0,
@@ -202,14 +202,14 @@ fn ensure_owner_fd_floor() -> bool {
     // SAFETY: limits is initialized, writable, and valid for both calls.
     unsafe {
         if libc::getrlimit(libc::RLIMIT_NOFILE, &mut limits) != 0 {
-            return false;
+            return None;
         }
         let target = owner_fd_soft_target(limits.rlim_cur, limits.rlim_max);
         if target != limits.rlim_cur {
             limits.rlim_cur = target;
             let _ = libc::setrlimit(libc::RLIMIT_NOFILE, &limits);
         }
-        libc::getrlimit(libc::RLIMIT_NOFILE, &mut limits) == 0 && limits.rlim_cur >= OWNER_FD_FLOOR
+        (libc::getrlimit(libc::RLIMIT_NOFILE, &mut limits) == 0).then_some(limits)
     }
 }
 
@@ -279,11 +279,9 @@ impl DataOwner {
             loaded.config.logging.clone(),
         );
         #[cfg(unix)]
-        if !ensure_owner_fd_floor() {
-            diagnostics.record(
-                crate::diagnostics::DiagnosticEvent::OwnerFdLimitConstrained,
-                Default::default(),
-            );
+        match ensure_owner_fd_floor() {
+            Some(limits) if limits.rlim_cur >= OWNER_FD_FLOOR => {}
+            limits => diagnostics.record_owner_fd_limit(limits),
         }
         diagnostics.record_startup_stage(StartupStage::Configuration, configuration_elapsed, None);
         diagnostics.record_startup_stage(StartupStage::OwnerLock, lock_started.elapsed(), None);

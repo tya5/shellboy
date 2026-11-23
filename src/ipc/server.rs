@@ -23,7 +23,7 @@ use tokio_util::sync::CancellationToken;
 mod endpoint;
 use endpoint::EndpointFiles;
 
-const MAX_WAIT_WORK: usize = 32;
+pub(crate) const MAX_WAIT_WORK: usize = 32;
 const CONNECTION_HEADROOM: usize = 8;
 const MAX_CONNECTIONS: usize = MAX_WAIT_WORK
     + MAX_IPC_WORK
@@ -72,6 +72,10 @@ pub(super) struct WorkAdmission {
     observation: Arc<Semaphore>,
     memory_observation: Arc<Semaphore>,
 }
+pub(crate) fn is_wait(command: &Command) -> bool {
+    matches!(command, Command::Wait(_) | Command::EventsWait(_))
+}
+
 impl WorkAdmission {
     #[cfg(test)]
     pub(super) fn new() -> Self {
@@ -87,9 +91,7 @@ impl WorkAdmission {
             memory_observation: Arc::new(Semaphore::new(MAX_MEMORY_OBSERVATION_WORK)),
         }
     }
-    pub(super) fn is_wait(command: &Command) -> bool {
-        matches!(command, Command::Wait(_) | Command::EventsWait(_))
-    }
+
     pub(super) fn try_acquire(&self, command: &Command) -> Result<OwnedSemaphorePermit, ApiError> {
         let (slots, refused) = match command {
             Command::RunStop(_) | Command::ShellStop(_) | Command::OwnerShutdown(_) => {
@@ -99,7 +101,7 @@ impl WorkAdmission {
                 (&self.memory_observation, &self.refused.memory)
             }
             Command::Status(_) => (&self.observation, &self.refused.status),
-            command if Self::is_wait(command) => (&self.waits, &self.refused.waits),
+            command if is_wait(command) => (&self.waits, &self.refused.waits),
             _ => (&self.ordinary, &self.refused.ordinary),
         };
         slots.clone().try_acquire_owned().map_err(|_| {

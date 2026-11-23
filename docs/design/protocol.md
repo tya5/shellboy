@@ -201,6 +201,8 @@ frameの8MiB上限を先に検証し、payloadはTokioの長さ制限付きreade
 広告された長さだけで8MiBを先にzero-fillしない。宣言byte数に満たないEOFはJSON解析前に
 拒否し、次frameのbyteを取り込まない。上限変更や公開timeout設定は追加しない。
 
+<a id="ipc-admission"></a>
+
 ### IPC接続と受付済みworkの資源所有（P1/P6）
 
 接続枠と処理枠を分ける（#352）。待機（`wait` / `events.wait`）32、通常work 24、停止操作

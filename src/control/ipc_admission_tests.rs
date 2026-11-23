@@ -60,7 +60,10 @@ async fn real_ipc_waiters_leave_status_and_run_stop_available() {
                 if count == 32 {
                     break;
                 }
-                assert!(clients.iter().all(|client| !client.is_finished()), "a wait returned before all 32 parked");
+                assert!(
+                    clients.iter().all(|client| !client.is_finished()),
+                    "a wait returned before all 32 parked"
+                );
                 tokio::task::yield_now().await;
             }
         },
@@ -108,10 +111,20 @@ async fn real_ipc_waiters_leave_status_and_run_stop_available() {
     );
     let mutation = crate::test_watchdog::watchdog(
         "src/control/ipc_admission_tests.rs: ordinary mutation with 32 parked waits",
-        crate::ipc::call(&owner.loaded.data_dir, Command::ThreadCreate(ThreadCreateArgs {
-            agents: None, connection: None, cwd: None, model: None, effort: None, parent_id: None,
-        }), None, None),
-    ).await.unwrap().unwrap();
+        crate::ipc::call(
+            &owner.loaded.data_dir,
+            Command::ThreadTag(crate::protocol::ThreadTagArgs {
+                thread_ids: vec!["thread".into()],
+                add: vec!["admission-witness".into()],
+                remove: Vec::new(),
+            }),
+            None,
+            None,
+        ),
+    )
+    .await
+    .unwrap()
+    .unwrap();
     assert!(mutation.ok, "{mutation:?}");
     let stopped = crate::test_watchdog::watchdog(
         "src/control/ipc_admission_tests.rs: real_ipc_waiters_leave_status_and_run_stop_available",
