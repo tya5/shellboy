@@ -1,3 +1,4 @@
+-- rebuild: foreign keys off
 CREATE TABLE service_schedule(
  id TEXT PRIMARY KEY NOT NULL, thread_id TEXT NOT NULL REFERENCES thread(id) ON DELETE CASCADE,
  kind TEXT NOT NULL DEFAULT 'time' CHECK(kind IN ('time','service')),
@@ -11,5 +12,5 @@ DROP TABLE schedule;
 ALTER TABLE service_schedule RENAME TO schedule;
 CREATE INDEX schedule_thread ON schedule(thread_id,id);
 CREATE INDEX schedule_due ON schedule(next_at,id) WHERE enabled=1 AND next_at IS NOT NULL;
-INSERT INTO schema_migration(version,name) VALUES(57,'0057_schedule_service_kind');
+INSERT INTO schema_migration(version,name) VALUES(57,'next_schedule_service_kind');
 PRAGMA user_version=57;

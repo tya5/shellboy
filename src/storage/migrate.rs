@@ -304,7 +304,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     },
     Migration {
         version: 57,
-        sql: include_str!("../../migrations/0057_schedule_service_kind.sql"),
+        sql: include_str!("../../migrations/next_schedule_service_kind.sql"),
         foreign_keys: Some(Impact::Tables(&["schedule", "shell_execution"])),
     },
 ];
@@ -2461,7 +2461,7 @@ mod thread_creation_migration_tests {
             DROP INDEX receipt_pending_owed;
             DROP INDEX receipt_pending_asked;
             DROP INDEX receipt_pending_to;
-            DELETE FROM schema_migration WHERE version IN (56,57);
+            DELETE FROM schema_migration WHERE version=56 OR name='next_schedule_service_kind';
             DROP TABLE automatic_compaction; CREATE INDEX automatic_compaction_turn ON model_attempt(turn_id,started_at,id) WHERE CASE WHEN json_valid(error_json) THEN json_type(error_json,'$.automatic_trim')='object' OR json_type(error_json,'$.automatic_trim_attempt')='object' ELSE 0 END;
             DELETE FROM schema_migration WHERE version=55;
             DROP TABLE schedule; DROP INDEX threads_created; ALTER TABLE thread DROP COLUMN created_at;
@@ -2517,7 +2517,7 @@ mod automatic_compaction_migration_tests {
             DROP INDEX receipt_pending_owed;
             DROP INDEX receipt_pending_asked;
             DROP INDEX receipt_pending_to;
-            DELETE FROM schema_migration WHERE version IN (56,57);
+            DELETE FROM schema_migration WHERE version=56 OR name='next_schedule_service_kind';
             DROP TABLE automatic_compaction;
             CREATE INDEX automatic_compaction_turn ON model_attempt(turn_id,started_at,id) WHERE CASE WHEN json_valid(error_json) THEN json_type(error_json,'$.automatic_trim')='object' OR json_type(error_json,'$.automatic_trim_attempt')='object' ELSE 0 END;
             DELETE FROM schema_migration WHERE version=55;

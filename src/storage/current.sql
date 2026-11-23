@@ -841,5 +841,5 @@ CREATE INDEX receipt_pending_to ON receipt(json_extract(result_json,'$.ask_name'
  WHERE json_extract(result_json,'$.reply.state')='pending';
 INSERT INTO schema_migration(version,name) VALUES(56,'0056_directional_reply_pending');
 PRAGMA user_version=56;
-INSERT INTO schema_migration(version,name) VALUES(57,'0057_schedule_service_kind');
+INSERT INTO schema_migration(version,name) VALUES(57,'next_schedule_service_kind');
 PRAGMA user_version=57;

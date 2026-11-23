@@ -1,5 +1,7 @@
 # Thread-owned shell definitions
 
+## Protocol next (#348)
+
 Timed schedules and services share the `schedule` table, bounded to 64 definitions per Thread. A timed definition has exactly one timing expression; a service has neither. Both reserve a `shell_execution` through the same maintenance loop, inherit the same Thread environment, and use the same stop, drain and deletion paths. A service execution has no Run owner and cannot keep a Run live. From the service, use `shellboy message send --thread "$SHELLBOY_THREAD_ID"` to send ordinary input to its Thread.
 
 A timed execution is subject to the one-hour deadline. A service is not. `service add` enables it and requests a start now; `service start` explicitly enables it again. These operations use the shared `next_at` wakeup. `service stop` disables the definition and drains its process; `shell stop` on its execution also disables it. `service remove` drains before deleting the definition. Thread deletion drains both kinds. Commands for the two kinds reject each other's IDs.
