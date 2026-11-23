@@ -321,17 +321,28 @@ fn docs_keyword(query: &str) -> Vec<Hit> {
     hits
 }
 
+fn material_provenance(row: &rusqlite::Row<'_>, error_column: usize) -> rusqlite::Result<Value> {
+    let source: String = row.get(6)?;
+    let state: String = row.get(7)?;
+    let id: String = row.get(8)?;
+    let mut provenance = json!({"source":serde_json::from_str::<Value>(&source).unwrap_or(Value::Null),"state":state,"document_id":id,"retrieval_unit":"block"});
+    if let Some(saved) = row.get::<_, Option<String>>(error_column)? {
+        let detail = serde_json::from_str::<Value>(&saved).unwrap_or(Value::Null);
+        provenance["reason"] = json!(detail.get("code").and_then(Value::as_str).unwrap_or(&saved));
+    }
+    Ok(provenance)
+}
+
 fn material_hits(s: &store::Store, source: &str, query: &str) -> Result<Vec<Hit>> {
-    let mut q=s.db.prepare("SELECT b.ordinal,b.revision_id,b.text,b.location,r.kind,r.title,r.provenance,d.status,d.id FROM blocks b JOIN revisions r ON r.id=b.revision_id JOIN documents d ON d.active_revision=r.id WHERE d.source_id=?1 ORDER BY b.revision_id,b.ordinal")?;
+    let mut q=s.db.prepare("SELECT b.ordinal,b.revision_id,b.text,b.location,r.kind,r.title,r.provenance,d.status,d.id,d.error FROM blocks b JOIN revisions r ON r.id=b.revision_id JOIN documents d ON d.active_revision=r.id WHERE d.source_id=?1 ORDER BY b.revision_id,b.ordinal")?;
     let mut rows = q.query([source])?;
     let mut hits = Vec::new();
     while let Some(row) = rows.next()? {
         let text: String = row.get(2)?;
         if let Some(score) = keyword_score(&text, query) {
             let ordinal: i64 = row.get(0)?;
-            let provenance: String = row.get(6)?;
             let content_hash = hash(text.as_bytes());
-            hits.push(Hit{reference:Reference{version:1,store:s.uuid.clone(),kind:"material".into(),id:row.get(8)?,revision:row.get(1)?,hash:content_hash,witness:Some(json!({"block_ordinal":ordinal}))},excerpt:excerpt(&text),title:row.get(5)?,kind:row.get(4)?,location:json!({"source":serde_json::from_str::<Value>(&row.get::<_,String>(3)?).unwrap_or(Value::Null),"block_ordinal":ordinal,"block_offset_bytes":0,"block_end_bytes":text.len(),"coordinate":"extracted_utf8_bytes"}),provenance:json!({"source":serde_json::from_str::<Value>(&provenance).unwrap_or(Value::Null),"state":row.get::<_,String>(7)?,"document_id":row.get::<_,String>(8)?,"retrieval_unit":"block"}),scopes:vec![format!("source:{source}")],thread_scopes:vec![],score,distance:None,space:None,method:"keyword".into()});
+            hits.push(Hit{reference:Reference{version:1,store:s.uuid.clone(),kind:"material".into(),id:row.get(8)?,revision:row.get(1)?,hash:content_hash,witness:Some(json!({"block_ordinal":ordinal}))},excerpt:excerpt(&text),title:row.get(5)?,kind:row.get(4)?,location:json!({"source":serde_json::from_str::<Value>(&row.get::<_,String>(3)?).unwrap_or(Value::Null),"block_ordinal":ordinal,"block_offset_bytes":0,"block_end_bytes":text.len(),"coordinate":"extracted_utf8_bytes"}),provenance:material_provenance(row, 9)?,scopes:vec![format!("source:{source}")],thread_scopes:vec![],score,distance:None,space:None,method:"keyword".into()});
             hits.sort_by(Hit::compare);
             hits.truncate(100);
         }
@@ -390,7 +401,7 @@ pub(super) async fn material_semantic(
     }
     // Exact L2 is supplied by sqlite-vec. Full saved blocks are retrieval units;
     // indexed chunk ranges remain explicit UTF-8 coordinates in extracted text.
-    let mut q=snapshot.prepare(&format!("WITH positioned AS(SELECT revision_id,ordinal,text,location,COALESCE(SUM(length(CAST(text AS BLOB))+1) OVER(PARTITION BY revision_id ORDER BY ordinal ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING),0) AS start FROM blocks) SELECT b.ordinal,c.revision_id,b.text,b.location,r.kind,r.title,r.provenance,d.status,d.id,vec_distance_L2(v.embedding,?3) distance,c.start,c.end FROM chunks c JOIN documents d ON d.active_revision=c.revision_id JOIN revisions r ON r.id=c.revision_id JOIN positioned b ON b.revision_id=c.revision_id AND c.start>=b.start AND c.end<=b.start+length(CAST(b.text AS BLOB)) JOIN embeddings e ON e.hash=c.hash AND e.space_id=?2 JOIN {table} v ON v.rowid=e.vec_rowid WHERE d.source_id=?1 ORDER BY distance,c.id"))?;
+    let mut q=snapshot.prepare(&format!("WITH positioned AS(SELECT revision_id,ordinal,text,location,COALESCE(SUM(length(CAST(text AS BLOB))+1) OVER(PARTITION BY revision_id ORDER BY ordinal ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING),0) AS start FROM blocks) SELECT b.ordinal,c.revision_id,b.text,b.location,r.kind,r.title,r.provenance,d.status,d.id,vec_distance_L2(v.embedding,?3) distance,c.start,c.end,d.error FROM chunks c JOIN documents d ON d.active_revision=c.revision_id JOIN revisions r ON r.id=c.revision_id JOIN positioned b ON b.revision_id=c.revision_id AND c.start>=b.start AND c.end<=b.start+length(CAST(b.text AS BLOB)) JOIN embeddings e ON e.hash=c.hash AND e.space_id=?2 JOIN {table} v ON v.rowid=e.vec_rowid WHERE d.source_id=?1 ORDER BY distance,c.id"))?;
     let mut rows = q.query(params![source, profile.id, vector])?;
     let mut hits = Vec::new();
     let mut seen = HashSet::new();
@@ -407,7 +418,7 @@ pub(super) async fn material_semantic(
         }
         let text: String = row.get(2)?;
         let distance: f64 = row.get(9)?;
-        hits.push(Hit{reference:Reference{version:1,store:s.uuid.clone(),kind:"material".into(),id:row.get(8)?,revision,hash:hash(text.as_bytes()),witness:Some(json!({"block_ordinal":ordinal}))},excerpt:excerpt(&text),title:row.get(5)?,kind:row.get(4)?,location:json!({"source":serde_json::from_str::<Value>(&row.get::<_,String>(3)?).unwrap_or(Value::Null),"block_ordinal":ordinal,"chunk_start_bytes":row.get::<_,i64>(10)?,"chunk_end_bytes":row.get::<_,i64>(11)?,"coordinate":"extracted_utf8_bytes"}),provenance:json!({"source":serde_json::from_str::<Value>(&row.get::<_,String>(6)?).unwrap_or(Value::Null),"state":row.get::<_,String>(7)?,"document_id":row.get::<_,String>(8)?,"retrieval_unit":"block"}),scopes:vec![format!("source:{source}")],thread_scopes:vec![],score:distance,distance:Some(distance),space:Some(profile.id.clone()),method:"semantic".into()});
+        hits.push(Hit{reference:Reference{version:1,store:s.uuid.clone(),kind:"material".into(),id:row.get(8)?,revision,hash:hash(text.as_bytes()),witness:Some(json!({"block_ordinal":ordinal}))},excerpt:excerpt(&text),title:row.get(5)?,kind:row.get(4)?,location:json!({"source":serde_json::from_str::<Value>(&row.get::<_,String>(3)?).unwrap_or(Value::Null),"block_ordinal":ordinal,"chunk_start_bytes":row.get::<_,i64>(10)?,"chunk_end_bytes":row.get::<_,i64>(11)?,"coordinate":"extracted_utf8_bytes"}),provenance:material_provenance(row, 12)?,scopes:vec![format!("source:{source}")],thread_scopes:vec![],score:distance,distance:Some(distance),space:Some(profile.id.clone()),method:"semantic".into()});
         if hits.len() >= 100 {
             break;
         }

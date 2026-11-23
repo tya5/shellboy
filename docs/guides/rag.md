@@ -36,9 +36,16 @@ After a complete directory traversal, previously indexed documents now excluded 
 
 Windows document keys have used slash separators since v0.1.6. The first complete synchronization removes old backslash-key documents from the active index and registers the current slash keys with new document IDs. You do not need to recreate the database. Old keys and IDs do not identify the replacement documents for `inspect --id`; no legacy lookup or ID/revision preservation is provided. POSIX backslashes remain literal filename characters.
 
-Keyword indexing/search is the default and needs no API connection. Registration and dry-run do not call an API. The managed DB defaults to `rag.db` in the default data directory; choose another with `shellboy rag --db /absolute/path/knowledge.db`. It is separate from the conversation DB. Use the same DB-selection arguments for subsequent operations. Storage location resolves as for other CLI commands: `--data-dir` → `SHELLBOY_DATA_DIR` → OS default. `--config` selects RAG embedding configuration; the TOML's data_dir does not switch the search target. To search another conversation data directory, also supply `--data-dir PATH`.
+Keyword indexing/search is the default and needs no API connection. Registration and dry-run do not call an API. `rag --db PATH` selects only the standalone knowledge DB, not history, the owner, or the embedding configuration. Without `--db`, the knowledge DB is `rag.db` under the selected data directory. Choose the data directory with `--data-dir`, then `SHELLBOY_DATA_DIR`, then the OS default. `--config` selects embedding configuration; its TOML `data_dir` does not select either DB. Running from a project folder does not auto-discover `knowledge/rag.db`. Use the same DB options for later operations on that store.
 
-Identify a source by the ID returned by source add or its name. Originals are not copied; the index and extracted text are saved. Even if an original changes after synchronization, get returns the saved revision used by the search.
+```sh
+# Project materials only; no conversation history is searched.
+shellboy rag --db ./knowledge/rag.db search --scope source:notes --query 'release checks'
+# Deliberately add history from a specified conversation data directory.
+shellboy --data-dir /path/to/conversations rag --db ./knowledge/rag.db search --scope source:notes --scope history --query 'release checks'
+```
+
+Identify a source by the ID returned by source add or its name. Register a canonical path only once per knowledge DB; a different name for that path is rejected with the existing name. Existing registrations are not merged or removed automatically. Originals are not copied; the index and extracted text are saved. Even if an original changes after synchronization, get returns the saved revision used by the search. When a provider failure pauses a sync, unverified retained revisions are marked `stale` with `provenance.reason: embedding_paused` in search. Retry synchronization to verify them.
 
 ```bash
 shellboy rag status

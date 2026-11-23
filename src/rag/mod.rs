@@ -18,7 +18,7 @@ pub(crate) const MAX_INPUT: usize = 16 * 1024 * 1024;
 pub(crate) const SPLIT: usize = 2000;
 #[derive(Debug, Clone, Args)]
 pub struct RagOptions {
-    /// Independent knowledge database; defaults to DATA_DIR/rag.db.
+    /// Select only the knowledge database (default DATA_DIR/rag.db). Does not select history or the owner; use --data-dir for those.
     #[arg(long, global = true)]
     pub db: Option<PathBuf>,
     #[command(subcommand)]

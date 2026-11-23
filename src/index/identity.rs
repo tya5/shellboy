@@ -1196,3 +1196,29 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod retained_bytes_tests {
+    use super::*;
+
+    #[test]
+    fn retained_bytes_include_spaces_omitted_from_status() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        db.execute_batch("WITH RECURSIVE n(i) AS (VALUES(0) UNION ALL SELECT i+1 FROM n WHERE i<200)
+            INSERT INTO index_space SELECT printf('s%03d',i),'profile','model',8,'splitter',
+              CASE WHEN i=200 THEN 'active' ELSE 'inactive' END,
+              printf('shellboy_vec_%032x',i),CASE WHEN i=1 THEN 100.0 ELSE NULL END FROM n;
+            INSERT INTO node(id,kind,created_at) VALUES('n','user','now');
+            INSERT INTO embedding_job(id,space_id,source_node_id,source_revision,body_kind,source_hash,span_start,span_end,state)
+              SELECT 'j'||id,id,'n',0,'canonical','h',0,1,'done' FROM index_space WHERE id IN ('s000','s001','s200');
+            INSERT INTO embedding_chunk SELECT 'c'||id,id,space_id,'n',0,0,1,'h',1 FROM embedding_job;").unwrap();
+        let mut status = read_status(&db, IndexArgs::default(), Vec::new(), None, true).unwrap();
+        observations::enrich(&db, &mut status, &[], None).unwrap();
+        assert_eq!(status.spaces_total, 201);
+        assert!(status.spaces_truncated);
+        assert_eq!(status.spaces.len(), 200);
+        assert!(status.spaces.iter().all(|s| s.space_id != "s000"));
+        assert_eq!(status.retained_vector_payload_bytes, Some(32 + 8));
+    }
+}

@@ -56,6 +56,46 @@ async fn index(root: &Path, source: Option<&str>, mode: IndexMode) -> Value {
     )
     .await
 }
+#[tokio::test]
+async fn a_canonical_source_root_cannot_be_registered_under_two_names() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    init(root).await;
+    std::fs::create_dir(root.join("notes")).unwrap();
+    std::fs::write(root.join("notes/doc.md"), "distinct needle").unwrap();
+    add(root, "notes", "notes").await;
+    let duplicate = call(
+        root,
+        RagCommand::Source {
+            command: SourceCommand::Add {
+                path: "notes/.".into(),
+                name: "alias".into(),
+                exclude: vec!["*.md".into()],
+                clear_excludes: false,
+            },
+        },
+    )
+    .await;
+    assert_eq!(duplicate["error"]["code"], "conflict");
+    assert!(
+        duplicate["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("notes")
+    );
+    assert_eq!(index(root, None, IndexMode::Keyword).await["ok"], true);
+    let listed = call(
+        root,
+        RagCommand::Source {
+            command: SourceCommand::List,
+        },
+    )
+    .await;
+    assert_eq!(listed["result"]["items"].as_array().unwrap().len(), 1);
+    let found = search(root, "source:notes", "needle", SearchMode::Keyword).await;
+    assert_eq!(found["result"]["items"].as_array().unwrap().len(), 1);
+}
+
 async fn search(root: &Path, scope: &str, query: &str, mode: SearchMode) -> Value {
     call(
         root,
@@ -712,11 +752,29 @@ async fn provider_rate_limit_stops_the_invocation_and_retry_preserves_old_and_ca
     );
     let previous = search(root, "source:notes", "OLD", SearchMode::Keyword).await;
     assert_eq!(previous["result"]["items"].as_array().unwrap().len(), 5);
+    let retained = previous["result"]["items"].as_array().unwrap();
+    assert!(
+        retained
+            .iter()
+            .all(|hit| hit["provenance"]["state"] == "stale")
+    );
+    let deferred = retained.iter().find(|hit| hit["title"] == "3.md").unwrap();
+    assert_eq!(deferred["provenance"]["reason"], "embedding_paused");
     fail_at.store(usize::MAX, Ordering::SeqCst);
     let retried = index(root, None, IndexMode::Semantic).await;
     assert_eq!(retried["ok"], true);
     assert_eq!(retried["result"]["removed"], 1);
     assert_eq!(retried["result"]["sources"][0]["deletion_detection"], true);
+    let current = search(root, "source:notes", "NEW", SearchMode::Keyword).await;
+    assert_eq!(current["result"]["items"].as_array().unwrap().len(), 4);
+    assert!(
+        current["result"]["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|hit| hit["provenance"]["state"] == "ready"
+                && hit["provenance"].get("reason").is_none())
+    );
     let before = requests.load(Ordering::SeqCst);
     assert_eq!(index(root, None, IndexMode::Semantic).await["ok"], true);
     assert_eq!(

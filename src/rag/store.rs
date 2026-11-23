@@ -283,6 +283,19 @@ pub(super) fn source_command(path: &Path, command: SourceCommand, cwd: &Path) ->
                     json!({"source_id":id,"name":name,"root":root,"existing":true,"exclude":serde_json::from_str::<Value>(&patterns).unwrap_or(Value::Null)}),
                 );
             }
+            let registered: Option<String> =
+                s.db.query_row(
+                    "SELECT name FROM sources WHERE kind='file' AND root=?1 ORDER BY name LIMIT 1",
+                    [root],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            if let Some(registered) = registered {
+                return Err(err(
+                    "conflict",
+                    format!("Path is already registered as {registered}; use that source name"),
+                ));
+            }
             let count: i64 = s.db.query_row(
                 "SELECT COUNT(*) FROM sources WHERE kind!='builtin'",
                 [],
@@ -557,6 +570,7 @@ pub(super) async fn index(
         let seen: HashSet<String> = scan.files.iter().map(|(k, _)| k.clone()).collect();
         let mut source_failed = false;
         let mut source_deferred = false;
+        let mut attempted = Vec::new();
         for (key, path) in scan.files {
             if breaker.paused() {
                 deferred += 1;
@@ -564,6 +578,7 @@ pub(super) async fn index(
                 source_deferred = true;
                 continue;
             }
+            attempted.push(key.clone());
             let result = policy
                 .synchronize(&mut s, &source, &key, &path, &mut counts)
                 .await;
@@ -582,6 +597,25 @@ pub(super) async fn index(
             } else {
                 breaker.success();
             }
+        }
+        if source_deferred {
+            let tx = s.db.transaction()?;
+            let reason = json!({"code":"embedding_paused","message":"Synchronization was deferred after an embedding provider failure"}).to_string();
+            let attempted = serde_json::to_string(&attempted).expect("source keys");
+            let changed = tx.execute(
+                "UPDATE documents SET status='stale',error=?2
+                 WHERE source_id=?1 AND active_revision IS NOT NULL
+                 AND key NOT IN (SELECT value FROM json_each(?3))
+                 AND (status!='stale' OR error IS NOT ?2)",
+                params![source, reason, attempted],
+            )?;
+            if changed != 0 {
+                tx.execute(
+                    "UPDATE meta SET value=CAST(value AS INTEGER)+1 WHERE key='generation'",
+                    [],
+                )?;
+            }
+            tx.commit()?;
         }
         // The complete walk already observed failed files in `seen`. Their old
         // revisions stay stale without retaining unrelated deleted documents.

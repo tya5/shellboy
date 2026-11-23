@@ -502,6 +502,8 @@ To release disk used by originals you no longer need, prune them explicitly. Rea
 
 Within an authorized deletion task, use `shellboy thread delete-preview --thread THREAD_ID` (add `--descendants` to include descendants) to inspect blocking Runs, targeted descendants, and direct sharing, source, and attachment references. This is neither deletion authorization nor a guarantee of GC capacity; `reclaimable_bytes` is null. Actual delete rechecks current state. See [Recovery and storage](recovery-and-storage.md) and [CLI reference](cli-reference.md).
 
+For project knowledge, pass `rag --db ./knowledge/rag.db` consistently. It selects only that knowledge DB. A `history` scope still reads the conversation data directory selected by `--data-dir`, `SHELLBOY_DATA_DIR`, or the OS default; the owner is not changed by `--db`. Reuse the registered source name if the canonical path is already registered. A `stale` search hit after an embedding pause is from the previous saved revision, not verified against the file just scanned.
+
 ## Backfilling old embeddings and checking cost
 
 Paid embeddings already saved are retained until explicitly removed. Ordinary RAG sync, raw-output expiry, and source retirement can remove material from search without deleting its saved vectors. Reindexing identical knowledge text can reuse the prior vector. `rag source remove --source NAME` removes vectors exclusive to that registration; shared vectors stay. For history, use explicit `index remove --space ID` for an inactive space, not `storage collect`. One `rag search` shares a successful query embedding across scopes using the same provider request identity; it may still charge for each distinct identity.

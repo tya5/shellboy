@@ -335,7 +335,7 @@ for snapshot states, pre-retry cursor tracking, unknown/expired epochs and held-
 | `index remove --space ID --dry-run` | Changes nothing. space_id, connection, model, dimension, element_type, state, partial, segments, unfinished_jobs_deleted, vector_payload_bytes_freed, removable, blocked_by, effects. `target_unavailable` for an unknown space |
 | `index remove --space ID` | Deletes that one inactive space. Refused with `invalid_state` for the active index or a space a conversion, rebuild or running request is using |
 
-Each space in `index status` adds `int8_scale` when it is int8: stored value = round(element × int8_scale), clipped to ±127. `vector_payload_bytes` is then `segments × dimension × 1`. A retained space (inactive, with vectors) adds `retained_remove_with`, a replaced rebuild candidate adds `partial` and cannot be selected, and the status adds `retained_vector_payload_bytes`. `distance` is L2 between stored values within that space, not comparable across spaces.
+Each space in `index status` adds `int8_scale` when it is int8: stored value = round(element × int8_scale), clipped to ±127. `vector_payload_bytes` is then `segments × dimension × 1`. A retained space (inactive, with vectors) adds `retained_remove_with`, a replaced rebuild candidate adds `partial` and cannot be selected, and the status adds `retained_vector_payload_bytes`, the exact logical payload total across all inactive spaces, even when `spaces_truncated` is true. `distance` is L2 between stored values within that space, not comparable across spaces.
 
 ### Storage (2 operations, plus standalone `check` and `vacuum`)
 
