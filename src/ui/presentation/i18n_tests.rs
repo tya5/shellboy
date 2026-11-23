@@ -378,9 +378,17 @@ fn canonical_only_post_enrichment_pressure_still_runs_the_existing_bounder() {
 }
 
 #[test]
+fn saved_removed_child_event_uses_generic_caption_in_both_languages() {
+    let saved = json!({"kind":"child_run_ended","payload":{"thread_id":"child"}});
+    let value = node("event", "legacy-child", json!({"text":saved.to_string()}));
+    assert_eq!(label(UiLanguage::En, &value), "Other state change | child");
+    assert_eq!(label(UiLanguage::Ja, &value), "その他の状態変更");
+}
+
+#[test]
 fn typed_current_notice_caption_preserves_raw_command_and_title_in_both_languages() {
     use crate::presentation::messages::{Message, Text};
-    let saved = json!({"kind":"legacy_child_event","payload":{"thread_id":"child"}});
+    let saved = json!({"kind":"child_run_ended","payload":{"thread_id":"child"}});
     let mut value = node("event", "n", json!({"text":saved.to_string()}));
     value
         .presentation

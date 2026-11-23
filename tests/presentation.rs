@@ -53,6 +53,11 @@ fn saved_removed_child_events_fall_back_to_generic_event_display() {
         let projected = project("event", &payload, &text_of_payload(&payload), 0);
         assert_eq!(projected.kind, PresentationKind::Event, "{kind}");
         assert_eq!(projected.title, "その他の状態変更", "{kind}");
+        assert_eq!(
+            messages::event_title(kind, shellboy::config::UiLanguage::En),
+            "Other state change",
+            "{kind}"
+        );
         assert!(
             projected
                 .fields

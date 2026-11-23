@@ -466,7 +466,7 @@ refreshのquery/project/deliverは既存HistoryReaderを利用し、有限read s
 
 ## 結果通知を受けた続行の表示（X14）
 
-driverは継続入力へ取り込む通知を、既存event IDを持つShellboy event envelopeとしてcanonical経路に保存する。人向け投影はこのIDを持つ既知のshell終了・子の回答/終了/途中報告を「結果/回答/報告を受けて続行」と表示し、単なる「状態変更」だけで内容を隠さない。新しいCore状態・event種・永続field・DB照会は追加しない。
+driverは継続入力へ取り込む通知を、既存event IDを持つShellboy event envelopeとしてcanonical経路に保存する。人向け投影はこのIDを持つ既知のshell終了を「結果を受けて続行」と表示し、単なる「状態変更」だけで内容を隠さない。保存済みの未知kind（旧子event kindを含む）は一般の「その他の状態変更」表示に戻す。新しいCore状態・event種・永続field・DB照会は追加しない。
 
 表示が示すのはShellboyが当該通知を継続入力へ取り込んだことであり、新しいTurnを起動した唯一の原因、モデルによる観測完了、回答成功、副作用の再実行を保証するものではない。既に進行中のTurnへ届いた結果も同じ意味で扱う。event IDがない古い/合成envelope、未知のkind、通知でないcontext観測では因果を推測せず、既存の事実表示を保つ。event ID・元payload・通知対象はF6原文/詳細で確認できる。開始/待機/復旧/停止の現在状態は既存activity投影が担当する。
 

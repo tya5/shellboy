@@ -101,7 +101,7 @@ def main():
                                        "UNKNOWN_OBSERVATION" in s)
                         # The synthetic input is external CLI, not a TUI human receipt.
                         assert all(mark in static for mark in ["⇥", "⬦", "⁂", "◌"])
-                        assert "⁂ 通知" in static and "子の回答" in static
+                        assert "⁂ 通知" in static and "その他の状態変更" in static
                         terminal.send("/switch visual-shell-metadata\r")
                         scene("shell-metadata", lambda s: all(f"METADATA_{kind}" in s for kind in
                               ("SUCCESS", "NONZERO", "FAILED", "CANCELLED")))
