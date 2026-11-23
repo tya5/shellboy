@@ -58,20 +58,9 @@ pub fn write(data: &Path, identity: &str, width: u8) -> std::io::Result<()> {
     }
     let target = path(data, identity);
     let temp = data.join(format!(".terminal-width-tmp-{}", uuid::Uuid::new_v4()));
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&temp)?;
-    let result = (|| {
-        writeln!(file, "{width}")?;
-        file.sync_all()?;
-        drop(file);
-        std::fs::rename(&temp, &target)
-    })();
-    if result.is_err() {
-        let _ = std::fs::remove_file(&temp);
-    }
-    result
+    let mut file = crate::atomic_file::AtomicFile::new(temp, false)?;
+    writeln!(file.file(), "{width}")?;
+    file.publish(&target)
 }
 
 #[cfg(test)]

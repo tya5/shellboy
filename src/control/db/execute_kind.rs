@@ -67,7 +67,7 @@ named_jobs! {
     MessageSend => message_send, MessageAsk => message_ask, MessageReply => message_reply, MessageCancel => message_cancel, MessageGet => message_get, MessageList => message_list, IdResolve => id_resolve,
     OperationGet => operation_get, RunGet => run_get, RunRetry => run_retry, RunStop => run_stop,
     TurnGet => turn_get, Wait => wait, EventsWait => events_wait, HistoryList => history_list, HistoryWindow => history_window, HistoryGet => history_get,
-    HistorySearch => history_search, HistoryRelations => history_relations, ShellGet => shell_get,
+    HistorySearch => history_search, HistoryRelations => history_relations, HistoryExport => history_export, ShellGet => shell_get,
     ShellRead => shell_read, ShellWrite => shell_write, ShellEof => shell_eof, ShellStop => shell_stop,
     AttachmentAdd => attachment_add, AttachmentList => attachment_list, AttachmentRemove => attachment_remove,
     Compact => compact, ContextEdit => context_edit, IndexStatus => index_status,
@@ -130,6 +130,7 @@ impl Kind {
             | Kind::HistoryWindow
             | Kind::HistoryGet
             | Kind::HistoryRelations
+            | Kind::HistoryExport
             | Kind::AttachmentList => PureRead,
             // Bounded closure (65,536 sources) in one transaction; see history::prune.
             // Rewind refuses paths over history::rewind::PATH_LIMIT nodes.
@@ -215,9 +216,10 @@ mod tests {
                 "duplicate exemption"
             );
         }
+        assert!(Kind::HistoryExport.read_lane());
         assert_eq!(
             Kind::ALL.len(),
-            72,
+            73,
             "classify new kinds and update this ratchet"
         );
     }

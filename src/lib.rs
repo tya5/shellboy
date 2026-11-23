@@ -2,6 +2,7 @@
 
 pub mod activity;
 pub mod app;
+mod atomic_file;
 pub mod attachments;
 pub mod chat_client;
 pub mod cli;
@@ -44,6 +45,7 @@ pub mod startup;
 pub mod status;
 pub mod storage;
 pub mod terminal_links;
+pub mod thread_export;
 pub(crate) mod tool_description;
 #[doc(hidden)]
 pub mod trace_slot;

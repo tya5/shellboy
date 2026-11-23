@@ -1031,3 +1031,119 @@ async fn chat_missing_capability_uses_the_same_typed_cli_envelope_as_message_get
     );
     task.await.unwrap();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn thread_export_streams_saved_sources_and_tombstone() {
+    use sha2::{Digest, Sha256};
+    let root = tempfile::tempdir().unwrap();
+    let config = root.path().join("config.toml");
+    std::fs::write(&config, "").unwrap();
+    let owner = DataOwner::start(
+        Some(config),
+        Some(root.path().join("data")),
+        root.path().into(),
+    )
+    .await
+    .unwrap();
+    let thread = "aaaaaaaa-0000-4000-8000-000000000001";
+    let raw = r#"{ "encrypted_content": "keep\\u0020me", "number": 1.0 }"#;
+    owner.db.call(move |db| {
+        db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES(?1,'/','/a','fixture','fixture','now')",[thread])?;
+        db.execute("INSERT INTO node(id,kind,created_at,payload_json,deleted_reason) VALUES
+            ('one','reasoning','now',?1,NULL),('two','user','now','{}',NULL),
+            ('three','user','now','{}',NULL),('collected','reasoning','now',NULL,'pruned_unreachable'),
+            ('summary','summary','now','{}',NULL),('external','user','now','{}',NULL)",[raw])?;
+        db.execute("INSERT INTO thread_path VALUES(?1,0,'summary')",[thread])?;
+        db.execute_batch("INSERT INTO replacement VALUES('rep','summary','k','f','p','pruned','now');
+            INSERT INTO replacement_source VALUES('rep',0,'one',0,NULL),('rep',1,'two',0,NULL),('rep',2,'three',0,NULL),('rep',3,'collected',0,NULL);
+            INSERT INTO replacement VALUES('rep-second','summary','k2','f','p','completed','now');
+            INSERT INTO replacement_source VALUES('rep-second',7,'collected',0,NULL),('rep-second',12,'one',0,NULL);
+            INSERT INTO edge VALUES('one','two'),('two','collected'),('external','collected');")?;
+        db.execute("INSERT INTO thread_replacement VALUES(?1,'rep')",[thread])?;
+        Ok(())
+    }).await.unwrap();
+    let control = Control::new(&owner, root.path().into());
+    let (send, receive) = tokio::sync::mpsc::channel(16);
+    let server = LocalServer::bind(&owner, send).await.unwrap();
+    let task = tokio::spawn(control.clone().serve(receive));
+    let path = root.path().join("export.jsonl");
+    let output = crate::test_watchdog::watchdog(
+        "CLI export",
+        tokio::process::Command::new(env!("CARGO_BIN_EXE_shellboy"))
+            .kill_on_drop(true)
+            .env_remove("SHELLBOY_SOCKET")
+            .arg("--data-dir")
+            .arg(&owner.loaded.data_dir)
+            .args(["thread", "export", "--thread", thread, "--out"])
+            .arg(&path)
+            .output(),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let bytes = std::fs::read(path).unwrap();
+    let lines: Vec<_> = bytes.split_inclusive(|&b| b == b'\n').collect();
+    let records: Vec<Value> = lines
+        .iter()
+        .map(|line| serde_json::from_slice(line).unwrap())
+        .collect();
+    assert_eq!(records.len(), 7);
+    assert_eq!(records[0]["thread"]["thread_id"], thread);
+    assert!(records[0]["change_position"].is_u64());
+    for (record, id) in records[1..4].iter().zip(["one", "two", "three"]) {
+        assert_eq!(record["role"], "replaced_source");
+        assert_eq!(record["node"]["id"], id);
+    }
+    let internal = |id: &str| serde_json::json!({"id":id,"scope":"internal"});
+    assert_eq!(records[1]["node"]["payload_json"], raw);
+    assert_eq!(
+        records[2]["relations"]["previous"],
+        serde_json::json!([internal("one")])
+    );
+    let tombstone = &records[4];
+    assert_eq!(tombstone["type"], "tombstone");
+    assert_eq!(tombstone["node"]["id"], "collected");
+    assert_eq!(tombstone["node"]["provenance"]["kind"], "reasoning");
+    assert!(tombstone["node"].get("payload_json").is_none());
+    assert_eq!(tombstone["role"], "replaced_source");
+    assert_eq!(tombstone["reason"], "pruned_unreachable");
+    assert_eq!(
+        tombstone["relations"]["previous"],
+        serde_json::json!([{"id":"external","scope":"external"}, internal("two")])
+    );
+    assert_eq!(
+        tombstone["relations"]["replaced_by"],
+        serde_json::json!([
+            {"group_id":"rep","ordinal":3,"output":internal("summary")},
+            {"group_id":"rep-second","ordinal":7,"output":internal("summary")}
+        ])
+    );
+    let source = |ordinal, id| serde_json::json!({"ordinal":ordinal,"node":internal(id)});
+    assert_eq!(records[5]["role"], "current");
+    assert_eq!(records[5]["node"]["current_ordinal"], 0);
+    assert_eq!(
+        records[5]["relations"]["replacement_groups"],
+        serde_json::json!([
+            {"id":"rep","state":"pruned","sources":[source(0,"one"),source(1,"two"),source(2,"three"),source(3,"collected")]},
+            {"id":"rep-second","state":"completed","sources":[source(7,"collected"),source(12,"one")]}
+        ])
+    );
+    let trailer = &records[6];
+    assert_eq!(trailer["lines"], 6);
+    assert_eq!(trailer["change_position"], records[0]["change_position"]);
+    let mut body = lines[..6].concat();
+    let digest = |body: &[u8]| {
+        Sha256::digest(body)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>()
+    };
+    assert_eq!(trailer["sha256"], digest(&body));
+    body[1] ^= 1;
+    assert_ne!(trailer["sha256"], digest(&body));
+    server.shutdown().await.unwrap();
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+    task.await.unwrap();
+}

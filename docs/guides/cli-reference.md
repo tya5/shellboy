@@ -1175,3 +1175,7 @@ Recovery rewind is available as `shellboy thread rewind --thread THREAD_ID --nod
 
 `history get` and `history list` expose `provenance.output_limit` for an adopted
 [output-limited answer](../design/events-and-external-protocol.md#output-limit-adoption).
+
+### Export a Thread
+
+`shellboy thread export --thread ID --out PATH` streams retained conversation history from a running owner to a JSONL file. Include the full ID or a unique Thread prefix. The file can contain private conversations and encrypted reasoning; share it only as intended. Export is live and does not recover data already removed. See [Thread export format](../design/thread-export.md).

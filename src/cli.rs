@@ -363,6 +363,8 @@ pub struct ModelListOptions {
 pub enum ThreadCommand {
     List(ListOptions),
     Get(ThreadOptions),
+    /// Save retained conversation history as a JSONL file.
+    Export(crate::thread_export::ExportOptions),
     /// Create a saved Thread; send a message separately to start work.
     #[command(
         after_help = "Delegate from a parent model shell:\n  shellboy thread create --parent THREAD_ID\n  shellboy message send --thread CHILD_THREAD_ID --text 'Read-only audit; return findings and evidence'\n\nRead result.thread_id from create, then track the separate message_id/run_id/turn_id from send. Guide: shellboy docs get --id shellboy/delegation"
@@ -1650,7 +1652,7 @@ impl Cli {
                 thread_id: a.thread_id,
             }),
             CliCommand::Thread { command } => match command {
-                ThreadCommand::Request(_) => return Ok(None),
+                ThreadCommand::Request(_) | ThreadCommand::Export(_) => return Ok(None),
                 ThreadCommand::List(a) => C::ThreadList(wire::ThreadListArgs {
                     order: a.order,
                     limit: a.limit,

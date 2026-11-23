@@ -230,6 +230,7 @@ UIは既存のイベント・世代付き応答へリアクティブに追従し
 | activityとスクロール | [activity](tui-activity-indicator.md)、[scroll](tui-scrolling.md) | Turn/Run/背景処理を区別。自動圧縮中は既存app_metaの一時witnessを投影し、新規lifecycle・表・workerは追加しない (#165) |
 | raw期限とcanonical検索 | [index](index.md)、[gc](gc.md) | raw期限/encoding変更はtool_rawだけを無効化し、保存済み引用/添付パスを期限で検索から消さない。旧欠落分の暗黙有料再構築はしない |
 | 添付所属・順序 | [添付provenance](attachment-provenance.md)、[attachments](attachments.md) | 元source/要素位置を維持。後のmessageへ付替えない |
+| `thread export` / `history.export` (#344) | [Thread export](thread-export.md) | Read-only live paging over retained nodes and tombstones; the CLI publishes a complete JSONL file. |
 | 履歴filter・provenance・直接関係 | [検索と関係](search-and-relations.md) | DB順位付け前filter、L2距離、採用経路と生成元を区別。無制限DAG探索は追加しない |
 | 削除影響・操作追跡・実行context | [全体](observability-and-deletion.md)、[削除](deletion-impact.md)、[操作](operation-observability.md)、[context](execution-context.md) | 読取りの判定材料。reclaimable容量や未記録時刻を捏造しない |
 | docs・独立RAG | [採用仕様](docs-and-rag-spec.md)、[実装設計](docs-and-rag.md) | docsはowner/API不要。RAGは別store。履歴は明示read-only scope、生成モデルなし |

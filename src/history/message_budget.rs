@@ -88,6 +88,13 @@ pub(crate) fn fit(response: &mut Response<Value>, slots: Slots) -> Result<(), se
     }
     Ok(())
 }
+pub(crate) fn fits_complete<T: serde::Serialize>(
+    operation: &str,
+    body: &T,
+) -> Result<bool, serde_json::Error> {
+    Ok(serde_json::to_vec(&Response::success(operation, body))?.len() <= MAX_FRAME_BYTES)
+}
+
 fn valid(value: &Value, relation: &MessageProvenance) -> bool {
     use crate::protocol::MessageReplyState;
     let Some(object) = value.as_object() else {
