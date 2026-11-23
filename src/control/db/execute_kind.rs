@@ -218,7 +218,7 @@ mod tests {
         }
         assert_eq!(
             Kind::ALL.len(),
-            72,
+            73,
             "classify new kinds and update this ratchet"
         );
     }

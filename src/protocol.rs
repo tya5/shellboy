@@ -2565,7 +2565,7 @@ mod message_acknowledgement_tests {
                 "missing result schema for {name}"
             );
         }
-        assert_eq!(results.len(), 71);
+        assert_eq!(results.len(), 72);
         for name in ["thread.create", "connection.test"] {
             assert_eq!(
                 results[name],
