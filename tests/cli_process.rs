@@ -1088,6 +1088,7 @@ async fn artifact_cli_round_trip_through_owner_changes_and_restart() {
     std::fs::write(root.path().join("config.toml"), "default_connection='fixture'\ndefault_model='fixture'\n[connections.fixture]\nbase_url='http://127.0.0.1:1/v1'\n").unwrap();
     let cwd = root.path().join("cli-cwd");
     std::fs::create_dir(&cwd).unwrap();
+    #[cfg(unix)]
     let cwd = cwd.canonicalize().unwrap();
     let (owner, control, local, serving) = start(root.path()).await;
     let created = cli(&owner, &["thread", "create"]).await;
@@ -1114,7 +1115,10 @@ async fn artifact_cli_round_trip_through_owner_changes_and_restart() {
     let id = added["artifact_id"].as_str().unwrap();
     let at = hint(&owner, thread, Some(&at)).await;
     let list = cli(&owner, &["artifact", "list", "--thread", thread]).await;
-    assert_eq!(list["items"][0]["latest"]["uri"], absolute.to_str().unwrap());
+    assert_eq!(
+        list["items"][0]["latest"]["uri"],
+        absolute.to_str().unwrap()
+    );
     let v1 = cli(
         &owner,
         &["artifact", "get", "--artifact", id, "--version", "1"],
@@ -1122,12 +1126,29 @@ async fn artifact_cli_round_trip_through_owner_changes_and_restart() {
     .await;
     assert_eq!(v1["version"]["mime"], "text/plain");
     let relative = "versions/../next.txt";
-    let resolved = cli(&owner, &["artifact", "update", "--artifact", id, "--uri", relative]).await;
-    assert_eq!(resolved["version"]["uri"], cwd.join(relative).to_str().unwrap());
+    let resolved = cli(
+        &owner,
+        &["artifact", "update", "--artifact", id, "--uri", relative],
+    )
+    .await;
+    assert_eq!(
+        resolved["version"]["uri"],
+        cwd.join(relative).to_str().unwrap()
+    );
     let next = "new+client:opaque value/%2F";
     let unix = "/already/../absolute";
-    for uri in [unix, r"C:\missing\..\output.txt", r"\\server\share\output.txt", "https://example.test/a%2Fb", next] {
-        let updated = cli(&owner, &["artifact", "update", "--artifact", id, "--uri", uri]).await;
+    for uri in [
+        unix,
+        r"C:\missing\..\output.txt",
+        r"\\server\share\output.txt",
+        "https://example.test/a%2Fb",
+        next,
+    ] {
+        let updated = cli(
+            &owner,
+            &["artifact", "update", "--artifact", id, "--uri", uri],
+        )
+        .await;
         assert_eq!(updated["version"]["uri"], uri);
     }
     hint(&owner, thread, Some(&at)).await;

@@ -1172,3 +1172,12 @@ completion time. Failed/partial/time-out and empty writes keep the previous time
 
 
 Recovery rewind is available as `shellboy thread rewind --thread THREAD_ID --node NODE_ID --run RUN_ID`. It atomically stops only that exact `recovery_wait` Run and rewinds the selected path. Refusal leaves the Run and path untouched; ordinary `thread rewind` and `run stop` remain unchanged.
+
+
+## Thread artifacts
+
+- `shellboy artifact add --thread THREAD_ID --uri URI --title TITLE [--mime MIME]` registers an artifact.
+- `shellboy artifact update --artifact ARTIFACT_ID --uri URI [--title TITLE] [--mime MIME]` appends a version.
+- `shellboy artifact list --thread THREAD_ID [--limit N] [--cursor CURSOR]` lists latest metadata, newest-updated first. Equal timestamps sort by artifact ID. Pass `next_cursor` to continue the same live list; start again without a cursor to see entries that moved ahead of it.
+
+On add and update, the CLI joins a relative file path to its own current working directory before sending it. It does not check file existence or normalize `..` beyond the path join. Absolute paths, URLs and custom-scheme URIs are left unchanged. The owner stores the resulting string without resolving it against its own working directory.

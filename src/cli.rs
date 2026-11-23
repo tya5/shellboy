@@ -1924,7 +1924,7 @@ impl Cli {
                     mime,
                 } => C::ArtifactAdd(wire::ArtifactAddArgs {
                     thread_id,
-                    uri,
+                    uri: artifact_uri_from_cli(uri, startup_cwd)?,
                     title,
                     mime,
                 }),
@@ -1935,7 +1935,7 @@ impl Cli {
                     mime,
                 } => C::ArtifactUpdate(wire::ArtifactUpdateArgs {
                     artifact_id,
-                    uri,
+                    uri: artifact_uri_from_cli(uri, startup_cwd)?,
                     title,
                     mime,
                 }),
@@ -2220,4 +2220,28 @@ fn absolute_attachment(path: PathBuf, cwd: &Path) -> Result<String, ApiError> {
         ));
     }
     path_string(normalized)
+}
+
+fn artifact_uri_from_cli(uri: String, cwd: &Path) -> Result<String, ApiError> {
+    let path = Path::new(&uri);
+    let has_scheme = uri.split_once(':').is_some_and(|(name, _)| {
+        let mut bytes = name.bytes();
+        bytes.next().is_some_and(|byte| byte.is_ascii_alphabetic())
+            && bytes.all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'-' | b'.'))
+    });
+    // Preserve Windows drive paths and UNC paths even on a Unix CLI, and vice versa.
+    if uri.is_empty()
+        || path.is_absolute()
+        || uri.starts_with('/')
+        || uri.starts_with(r"\\")
+        || has_scheme
+    {
+        return Ok(uri);
+    }
+    cwd.join(path).into_os_string().into_string().map_err(|_| {
+        ApiError::new(
+            ErrorCode::InvalidArgument,
+            "The absolute artifact path is not valid UTF-8",
+        )
+    })
 }
