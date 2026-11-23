@@ -505,22 +505,89 @@ async fn extra_instructions_live_update_waits_for_next_turn_and_saved_sources_ar
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn extra_instructions_missing_file_is_visible_and_never_sends_partial_request() {
-    crate::test_watchdog::watchdog("extra instruction preparation failure", async {
-        let root=tempfile::tempdir().unwrap();
-        let (url,mut receive,server)=proxy().await;
-        let owner=owner(root.path(),&url).await;
-        let control=Control::new(&owner,root.path().into());
-        let missing=root.path().join("explicit-missing.md");
-        edit(&control,vec![change("extra_instructions",json!([missing]))]).await;
-        let target=thread(&control).await;
-        send(&control,&target,"do not send without configured instructions").await;
-        let reason=recovery(&control,&target).await;
-        assert!(reason.to_string().contains("Extra instruction file cannot be inspected"),"{reason}");
-        assert!(receive.try_recv().is_err());
-        let id=target.clone();
-        let snapshots=control.store.database.call(move |db|Ok(db.query_row("SELECT count(*) FROM turn WHERE thread_id=?1 AND instruction_snapshot_id IS NOT NULL",[id],|r|r.get::<_,i64>(0))?)).await.unwrap();
-        assert_eq!(snapshots,0);
-        control.shutdown().await.unwrap(); owner.shutdown().await.unwrap(); server.abort();
-    }).await.unwrap();
+async fn extra_instructions_missing_file_warns_without_blocking_the_run() {
+    use shellboy::protocol::{StatusArgs, ThreadTarget};
+
+    crate::test_watchdog::watchdog("missing common instruction warning", async {
+        let root = tempfile::tempdir().unwrap();
+        let (url, mut receive, server) = proxy().await;
+        let owner = owner(root.path(), &url).await;
+        let control = Control::new(&owner, root.path().into());
+        let missing = root.path().join("explicit-missing.md");
+        let common = root.path().join("common.md");
+        std::fs::write(&common, "retained common guidance").unwrap();
+
+        let config = root.path().join("config.toml");
+        let old = std::fs::read_to_string(&config).unwrap();
+        let desired = json!([missing, common]);
+        let hand_edited = format!("extra_instructions = {desired}\n{old}");
+        std::fs::write(&config, &hand_edited).unwrap();
+        let applied = edit(&control, vec![change("extra_instructions", desired)]).await;
+        assert_eq!(applied["written"], false);
+        assert_eq!(applied["applied_to_running_owner"], true);
+        assert_eq!(applied["restart_required"], false);
+        assert_eq!(std::fs::read_to_string(&config).unwrap(), hand_edited);
+
+        let target = thread(&control).await;
+        send(&control, &target, "continue with readable guidance").await;
+        let captured = incoming(&control, &mut receive).await;
+        assert!(
+            captured.body["input"][1]
+                .to_string()
+                .contains("retained common guidance")
+        );
+        assert!(
+            !captured.body["input"]
+                .to_string()
+                .contains("explicit-missing.md")
+        );
+        captured
+            .reply
+            .send((200, answer("completed without the missing file")))
+            .unwrap();
+        completed_run(&control, &target).await;
+
+        let warnings = json!([{"path": missing, "reason": "not_found"}]);
+        let details = request(
+            &control,
+            Command::ThreadGet(ThreadTarget {
+                thread_id: Some(target.clone()),
+            }),
+        )
+        .await;
+        assert_eq!(details["instruction_warnings"], warnings);
+        assert_eq!(
+            details["instruction_sources"]["extra"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            details["instruction_sources"]["extra"][0]["path"],
+            json!(common)
+        );
+        let status = request(
+            &control,
+            Command::Status(StatusArgs {
+                thread_id: Some(target),
+                all: true,
+                ..StatusArgs::default()
+            }),
+        )
+        .await;
+        let run = status["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["kind"] == "run")
+            .unwrap();
+        assert_eq!(run["state"], "completed");
+        assert_eq!(run["instruction_warnings"], warnings);
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+        server.abort();
+    })
+    .await
+    .unwrap();
 }
