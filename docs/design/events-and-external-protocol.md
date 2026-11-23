@@ -641,4 +641,6 @@ This is evidence from that attempt, not a lookup of current settings.
 `usage.get` with `attempt_id` returns the same object from saved facts, or null
 for other stops or older attempts without recorded evidence.
 
+### Receipt-derived admission context (#297)
+
 Item-projected history windows retain retired admission notice ordinals as `kind: "model_context"` with `items: []`. This metadata-only row is not a display item and may appear within a response-budget-deferred suffix. Raw history keeps the original node kind and body.

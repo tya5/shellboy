@@ -1071,3 +1071,9 @@ invalid or absent value is treated as unknown. A client that refuses the
 advertised protocol before connecting includes the valid value in its local
 `protocol_mismatch` error details when present. No additional handshake or
 request is sent, and the version is not used for compatibility or peer checks.
+
+## Protocol next (#297)
+
+Item-projected history windows report retired admission notice ordinals as
+`kind: "model_context"` with `items: []`. Raw history retains the original
+node kind and body.
