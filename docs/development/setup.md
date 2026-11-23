@@ -200,6 +200,15 @@ The decision is unit-tested in `scripts/tests/ci-reuse.test.cjs`. The skip itsel
 can only be observed on real main pushes; record those runs in the validation
 status when they occur.
 
+### Protocol number at landing (#356)
+
+Wire-changing patches do not change `PROTOCOL_VERSION` or the schema's `$id`,
+`title` and `protocol_version`; they regenerate the schema definitions as
+before and title their docs section `Protocol next (#N)`. After composing a
+batch, the integration owner runs `python3 scripts/land-protocol.py origin/main`
+before pushing it: it bumps to main + 1 once, replaces `Protocol next` in
+`docs/`, and commits "Protocol N: #A, #B" (no-op without a wire change; safe to rerun).
+
 ## Small developer tools
 
 `python3 scripts/dev/record-delta.py [--base origin/main] [--repo WORKTREE]`

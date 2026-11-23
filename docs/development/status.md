@@ -1,5 +1,16 @@
 # Development status
 
+## Core #356 protocol number at landing
+
+Branch `task/core356-land-protocol` adds `scripts/land-protocol.py` and its
+synthetic-repository tests (`scripts/tests/test_land_protocol.py`: no wire
+change, schema definition change, `Protocol next (#12)` heading only, second
+run, version two ahead). The rule is in
+[setup](setup.md#protocol-number-at-landing-356). Mentions inside a code span
+and the docs' own rule text are not rewritten; `#protocol-next-` anchors are.
+No Rust source changed. Next: the integration owner runs it on the first batch
+with a wire change and records the result.
+
 ## Core #324 deterministic Ubuntu integration witnesses
 
 The candidate branch `task/core324-nondeterministic-tests` is based directly on
