@@ -20,7 +20,7 @@ synthetic-repository tests (`scripts/tests/test_land_protocol.py`: no wire
 change, schema definition change, `Protocol next (#12)` heading only, second
 run, version two ahead). The rule is in
 [setup](setup.md#protocol-number-at-landing-356). Mentions inside a code span
-and the docs' own rule text are not rewritten; `#protocol-next-` anchors are.
+and the docs' own rule text are not rewritten; `#protocol-12-` anchors are.
 No Rust source changed. Next: the integration owner runs it on the first batch
 with a wire change and records the result.
 
