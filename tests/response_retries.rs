@@ -3726,8 +3726,6 @@ async fn model_filter_changes_catalog_not_direct_model_execution() {
             Command::MessageSend(MessageSendArgs {
                 resume_recovery: false,
                 human: false,
-                to_human: false,
-                expect_reply: false,
                 sender_label: None,
                 deliver: Deliver::Next,
                 thread_id: Some(thread),
