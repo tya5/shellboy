@@ -41,6 +41,8 @@ pub(super) struct WaitRegistry {
     #[cfg(test)]
     pub(super) observations: std::sync::atomic::AtomicUsize,
     #[cfg(test)]
+    tracked_observations: StdMutex<HashMap<String, usize>>,
+    #[cfg(test)]
     pub(super) output_commits: std::sync::atomic::AtomicUsize,
     #[cfg(test)]
     pub(super) output_save_micros: StdMutex<Vec<u128>>,
@@ -229,10 +231,21 @@ async fn observe_inner(
         let origin = caller.clone();
         let durable_id = operation_id.clone();
         #[cfg(test)]
-        control
-            .waits
-            .observations
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        {
+            control
+                .waits
+                .observations
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if let Some(count) = control
+                .waits
+                .tracked_observations
+                .lock()
+                .unwrap()
+                .get_mut(&operation_id)
+            {
+                *count += 1;
+            }
+        }
         let observation = control
             .store
             .database
@@ -640,6 +653,12 @@ mod tests {
             let dispatch = tokio::spawn(control.clone().serve(incoming));
             let mut clients = Vec::new();
             let mut collectors = Vec::new();
+            let operations = [0, 1].map(|n| format!("{}:{n}", owner.instance_id));
+            control.waits.tracked_observations.lock().unwrap().extend(operations.iter().cloned().map(|id| (id, 0)));
+            let observations = || {
+                let counts = control.waits.tracked_observations.lock().unwrap();
+                [counts[&operations[0]], counts[&operations[1]]]
+            };
             for (n, (id, thread, run, turn)) in [("sa", "a", "ra", "ta"), ("sb", "b", "rb", "tb")].into_iter().enumerate() {
                 let shell = crate::shell::ShellSupervisor::new(&crate::config::Config::default())
                     .spawn(id.into(), directory.path().into(), serde_json::from_value(json!({
@@ -658,7 +677,6 @@ mod tests {
                 clients.push(ipc.connect_command(n, Command::Wait(args(WaitCondition::ShellEnded { execution_id: id.into() }, 30_000))).await);
                 control.waits.parked.notified().await;
             }
-            let observations = || control.waits.observations.load(std::sync::atomic::Ordering::Relaxed);
             let before = observations();
             let read = |id: &str| Command::ShellGet(ExecutionTarget { execution_id: id.into() });
             let unrelated = Command::ThreadSet(Box::new(ThreadSetArgs {
@@ -666,6 +684,8 @@ mod tests {
                 ..Default::default()
             }));
             assert!(ipc.connect_command(3, unrelated).await.await.unwrap().unwrap().ok);
+            tokio::task::yield_now().await;
+            assert_eq!(observations(), before, "an unrelated Thread change must not re-observe either wait");
             let (a, done_a) = collectors.remove(0);
             a.write("go\n", "utf-8").await.unwrap();
             done_a.await.unwrap();
@@ -685,7 +705,8 @@ mod tests {
             dispatch.await.unwrap();
             assert!(control.waits.keyed.is_empty());
             owner.shutdown().await.unwrap();
-            assert_eq!(count, before + 1, "only A may inspect again");
+            assert!(count[0] > before[0], "A must re-observe its shell completion");
+            assert_eq!(count[1], before[1], "A completing must not re-observe B");
         }).await.unwrap();
     }
 
