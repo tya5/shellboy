@@ -1,3 +1,5 @@
+as published at tag b644b3c, not main
+
 # Shellboy Core v0.14.0 / Studio v0.3.0
 
 - Core: `v0.13.1` → `v0.14.0`（`898259c5` に版番号の更新だけを足した commit）
