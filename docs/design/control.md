@@ -610,3 +610,10 @@ shells only; application shutdown independently visits every live Run. A complet
 for its own shell work or ordinary current-Run completion conditions, never for another Run or pending child reply.
 Recovery and replay do not adopt, stop, or replay other Runs. Exact shell ownership, operation receipts, generation
 fences and explicit recovery decisions remain. There is no compatibility ownership graph or replacement queue.
+
+An explicit provider output-limit stop in a Conversation uses the ordinary
+answer-adoption transaction and generation fence. The attempt stays incomplete
+with its error and usage, gets the normal adoption disposition, and is not a
+compaction trigger sample. The Turn completes and the Run follows ordinary
+idle completion and reply-duty handling. No separate incomplete-response audit
+node is made for an adopted cut.

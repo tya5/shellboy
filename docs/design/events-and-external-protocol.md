@@ -644,3 +644,11 @@ for other stops or older attempts without recorded evidence.
 ### Receipt-derived admission context (#297)
 
 Item-projected history windows retain retired admission notice ordinals as `kind: "model_context"` with `items: []`. This metadata-only row is not a display item and may appear within a response-budget-deferred suffix. Raw history keeps the original node kind and body.
+
+### Protocol next (#355)
+
+An adopted output-limited Conversation ends with `outcome: adopted` and the
+existing `output_limit` evidence. A fenced attempt ends `not_adopted`. The
+adopted answer saves the same evidence in `NodeProvenance.output_limit` for
+`history.get` and `history.list`. The evidence is outside model replay output;
+clients need not infer it from text, nor from current connection settings.

@@ -669,3 +669,7 @@ To send a message to the owning Thread only when a flag file exists (POSIX shell
 shellboy schedule add --thread THREAD --cron '0 * * * *' -- \
   'if test -f needs-review; then shellboy message send --thread "$SHELLBOY_THREAD_ID" --text "Review is needed"; fi'
 ```
+
+When the provider stops a reply at its output limit, Shellboy keeps the text
+received so far as the answer and marks it as cut off. The Turn completes, and
+no tool call from that reply runs. The text remains in history after reopening.

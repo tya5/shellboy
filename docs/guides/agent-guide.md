@@ -972,3 +972,6 @@ and cursor-ordered `attempt_ends`. Only a matching `not_adopted` proves that
 attempt was not saved. Keep adopted previews until saved history arrives;
 a resync is not evidence of discard. Order live previews by the saved input
 boundary, not by when the preview or a sent message arrived.
+
+A reply cut off by the provider output limit becomes the Turn's answer; no
+tool call from it runs. Your next Turn sees the saved cut text without a marker.

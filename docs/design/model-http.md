@@ -400,10 +400,12 @@ provider terminal fact:
   response.
 - Anthropic Messages: `status = incomplete` and `stop_reason = max_tokens`.
 
-Only these exact cases use error kind `output_limit` and its remedy (raise the
-Thread or connection `max_tokens`). The response remains incomplete: retain the provider raw response and
-available partial text/items; never convert truncation into success or silently
-retry it. These terminal limit responses are not automatically retried. Other
+Only these exact cases use error kind `output_limit`. The attempt remains
+incomplete with the original provider data and usage; it is not retried. For a
+Conversation, the ordinary answer-adoption transaction saves the text and
+refusal items (or an empty answer) and completes the Turn. It never adopts or
+executes tool calls, or replays hidden reasoning from the cut attempt. Summary
+requests and other failure paths are unchanged. Other
 incomplete/finish/stop reasons are not guessed as output exhaustion: this
 includes Anthropic `model_context_window_exceeded`, refusals, filter outcomes,
 unknown reasons and transport/EOF failures without the matching terminal fact.

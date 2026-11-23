@@ -1077,3 +1077,7 @@ request is sent, and the version is not used for compatibility or peer checks.
 Item-projected history windows report retired admission notice ordinals as
 `kind: "model_context"` with `items: []`. Raw history retains the original
 node kind and body.
+
+For output-limited adopted answers, history provenance may include `output_limit`
+with the [saved attempt evidence](events-and-external-protocol.md#protocol-next-355).
+It is absent on ordinary answers and does not enter model replay.
