@@ -26,8 +26,7 @@ Completed); no surveyed product offers arbitrary re-parenting.
 ## Summary
 
 - `parent_id` (`thread.parent_thread_id`) is **conversation hierarchy only**. All
-  live-execution authority (stop, retry, recovery notification, Run completion,
-  wait cycles) follows `run.owner_run_id`. The parent is read at exactly one
+  live-execution ownership (stop, retry, recovery notification, Run completion) follows `run.owner_run_id`. The parent is read at exactly one
   authority point: when a model sends to a Thread **and a new Run starts**, the
   Run is owned by the caller's Run if the caller's Thread is the target's current
   parent. Ownership is then stored and never re-derived.
@@ -76,7 +75,7 @@ Uses of **`owner_run_id`** (not `parent_id`), unchanged by re-parenting:
   `src/control/state.rs:333-355`; `nudge_owner`, `src/control.rs:1086-1100`);
 - the parent Run stays live while owning Runs/shells (`src/control/driver.rs:559`);
   stopping it stops owned descendants (`driver.rs:793`);
-- model wait cycle check walks the owner chain (`src/control/wait.rs:375`);
+- historical: model waits once checked the owner chain; the current [Wait design](wait.md) has no dependency-cycle check;
 - ownership cycles are rejected by triggers (`migrations/0001_initial.sql:57-70`).
 
 **Historical answer to issue point 2 (superseded by #276).** The proposal kept

@@ -311,9 +311,7 @@ recipient.
   `{"type":"reply","message_id","state":"replied|ignored|cancelled|recipient_deleted","reply_node_id"?,"at"}`.
   As with `turn_completed`, satisfied does not mean success.
 - `--timeout-ms` bounds only that call (D6). A pending reply has no deadline.
-- Model callers: the cycle check adds the edge caller shell → recipient
-  Thread's live Run, the same edge `thread_settled` already uses, so a parent
-  and child waiting on each other's replies is rejected as `wait_cycle`.
+- Dependency cycles (including two models waiting on each other) are not detected and can time out. See [Wait](wait.md).
 - Any number of waiters on one message are all released by the one state
   change; each re-reads the DB.
 - A reply delivered as a message to a model caller that is waiting in a
@@ -572,7 +570,7 @@ for callers that want it.
 | `message ask` | ordinary send authority; cannot ask its own Thread (#370) | ordinary send authority |
 | `message reply` | only for a Thread-directed request received by its Thread (any Run of it), never a request it sent. A parent cannot reply for its child; a fork cannot reply for its source | any message |
 | cancel the pending reply | only messages its own Thread sent (existing rule) | any message |
-| `wait reply_received` | any message, cycle-checked | any message |
+| `wait reply_received` | any message; no dependency-cycle check | any message |
 
 ## Delegation mapping
 
@@ -649,7 +647,7 @@ decided here without an explicit user answer (see [Decisions](#decisions)).
 | G28 | Multiple waiters on one message | Design | all released by one transition |
 | G29 | Messages sent with `message send` | Design | unchanged except `message get` drops `answer_node_id` |
 | G30 | Wait `interrupted` from an arriving receipt | Design | `satisfied` wins when the arriving receipt is the awaited reply |
-| G31 | Wait cycles | Design | Thread → live Run edge, as in `thread_settled` |
+| G31 | Wait cycles | Superseded | Current waits do not detect dependency cycles; see [Wait](wait.md) |
 | G32 | Model asking its own Thread | Decided | rejected with `invalid_argument` (#370) |
 | G33 | Child completion before Revisit boundary | Superseded by #302 | Child lifecycle events no longer wake a parent Run. Completion is handled by owner state, independently of user messages. |
 | G34 | Thread title derived from first user body | Design | a reply node on a sender Thread is a user node like any message; no special case |
@@ -716,7 +714,7 @@ the operation fingerprint), `message reply` (`Command::MessageReply`,
 `"message.reply"`), the reply node and its two deliveries, `message get`
 `expect_reply` / `reply` / `reply_to` (removes `answer_node_id`), `status`
 message items `answer_node_id` → `reply_node_id`,
-`wait reply_received` (condition, snapshot, cycle edge, precedence over
+`wait reply_received` (condition, snapshot, precedence over
 `interrupted`), `message cancel` outcome `reply_cancelled` and its
 `context_changed` notice, `thread get` pending reply counts (now `pending_replies.owed_by` / `.asked_by`, #317); receipt-derived request/reply preambles and the 16-duty `reply_limit` admission cap. At this step #259 allowed model self-targets and cross-thread reply/cancel actors;
 #370 later disallowed model self-asks.
@@ -844,7 +842,7 @@ rejection paths (double reply, not applied, foreign Thread, fork, self target,
 cap 16/17); Run-end reminder then `ignored` with sender notice and wait
 release; ordering with waiting `complete` messages; cancel before and after
 admission; recipient deletion; restart with a pending wait; multiple waiters;
-cycle rejection; exec in each `--result` mode (success, `ignored`, timeout,
+bounded wait without dependency-cycle rejection; exec in each `--result` mode (success, `ignored`, timeout,
 recovery, empty end message (exit 0) and Esc-ended Turn (exit 4), turn-end vs run-end with a
 `--deliver complete` message and a reminder Turn); EXPLAIN QUERY PLAN for the
 pending-reply index. No timing assertions; no paid API.

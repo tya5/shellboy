@@ -227,6 +227,9 @@ impl OutputStreamReader {
         }))
     }
 }
+pub(super) const SHELL_THREAD_JOIN: &str = "FROM shell_execution s LEFT JOIN run r ON r.id=s.owner_run_id LEFT JOIN schedule q ON q.id=s.schedule_id";
+pub(super) const SHELL_THREAD_ID: &str = "COALESCE(r.thread_id,q.thread_id,s.detached_thread_id)";
+
 impl ShellOutputReader {
     pub fn new(database: DbWorker, instance_id: impl Into<String>) -> Self {
         Self {
@@ -287,7 +290,7 @@ impl ShellOutputReader {
             let db = &tx;
             let mut details = snapshot(db, &execution)?.details;
             let (command, cwd, thread, turn, forced, signal, confirmed, schedule) = db.query_row(
-                "SELECT json_extract(s.shell_json,'$.command'),s.cwd,COALESCE(r.thread_id,q.thread_id,s.detached_thread_id),s.turn_id,CASE json_type(s.shell_json,'$.completion.forced') WHEN 'true' THEN 1 WHEN 'false' THEN 0 END,CASE WHEN json_type(s.shell_json,'$.completion.exit_signal')='integer' AND json_extract(s.shell_json,'$.completion.exit_signal') BETWEEN -2147483648 AND 2147483647 THEN json_extract(s.shell_json,'$.completion.exit_signal') END,CASE json_type(s.shell_json,'$.completion.group_cleanup_confirmed') WHEN 'true' THEN 1 WHEN 'false' THEN 0 END,s.schedule_id FROM shell_execution s LEFT JOIN run r ON r.id=s.owner_run_id LEFT JOIN schedule q ON q.id=s.schedule_id WHERE s.id=?1",
+                &format!("SELECT json_extract(s.shell_json,'$.command'),s.cwd,{SHELL_THREAD_ID},s.turn_id,CASE json_type(s.shell_json,'$.completion.forced') WHEN 'true' THEN 1 WHEN 'false' THEN 0 END,CASE WHEN json_type(s.shell_json,'$.completion.exit_signal')='integer' AND json_extract(s.shell_json,'$.completion.exit_signal') BETWEEN -2147483648 AND 2147483647 THEN json_extract(s.shell_json,'$.completion.exit_signal') END,CASE json_type(s.shell_json,'$.completion.group_cleanup_confirmed') WHEN 'true' THEN 1 WHEN 'false' THEN 0 END,s.schedule_id {SHELL_THREAD_JOIN} WHERE s.id=?1"),
                 [&execution], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?)),
             ).map_err(sql_error)?;
             (details.stdin_open,details.stdin_last_write_at)=crate::stdin_facts::read(db,&execution).map_err(sql_error)?;
@@ -879,7 +882,11 @@ fn expired_output_for(db: &Connection, execution: &str, generation: u64) -> Resu
             |r| r.get(0),
         )
         .map_err(sql_error)?;
-    Ok(expired_output().details(serde_json::json!({"execution_id":execution,"retention_generation":generation,"oldest_sequence":oldest})))
+    let mut error = expired_output();
+    if oldest.is_some_and(|sequence| sequence > 0) {
+        error = error.hint("if this is rotated Thread-owned output, restart shell read without the cursor and inspect oldest_sequence and the retained stream offsets");
+    }
+    Ok(error.details(serde_json::json!({"execution_id":execution,"retention_generation":generation,"oldest_sequence":oldest})))
 }
 fn sql_error(error: rusqlite::Error) -> ApiError {
     crate::storage::save_error(format!("output database operation failed: {error}"))

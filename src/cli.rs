@@ -248,7 +248,7 @@ pub enum ConfigCliCommand {
     Get,
     /// Change named configuration fields; connections/defaults apply live, except the embedding connection.
     #[command(
-        after_help = "Needs a running owner; --config does not select the file.\n  shellboy config set --expected-hash HASH --set default_model=my-model --set ui.bell=false\n\nFIELD is a TOML dotted key, e.g. connections.proxy.base_url or connections.\"my.proxy\".base_url. VALUE is JSON when it parses as JSON and a plain string otherwise; write '\"123\"' for the string 123. Credentials stay in the environment: api_key_env takes a variable name."
+        after_help = "Needs a running owner; --config does not select the file.\n  shellboy config set --expected-hash HASH --set default_model=my-model --set ui.bell=false\n\nFIELD is a TOML dotted key, e.g. connections.proxy.base_url or connections.\"my.proxy\".base_url. For a dotted connection name, preserve the TOML quotes: --set 'connections.\"my.proxy\".base_url=https://example.test/v1'. VALUE is JSON when it parses as JSON and a plain string otherwise; write '\"123\"' for the string 123. Credentials stay in the environment: api_key_env takes a variable name."
     )]
     Set(ConfigSetOptions),
 }
@@ -1096,7 +1096,7 @@ pub struct ExecutionOptions {
 }
 #[derive(Debug, Clone, Args)]
 #[command(
-    after_help = "Wait for a saved target:\n  shellboy wait --conditions-json '[{\"type\":\"shell_ended\",\"execution_id\":\"WORK_EXECUTION_ID\"}]' --timeout-ms 30000\n  shellboy wait --conditions-json '[{\"type\":\"turn_completed\",\"turn_id\":\"CHILD_TURN_ID\"}]' --timeout-ms 30000\n  shellboy wait --conditions-json '[{\"type\":\"reply_received\",\"message_id\":\"MESSAGE_ID\"}]' --timeout-ms 30000\n\nThread conditions: {\"type\":\"thread_settled\",\"thread_ids\":[\"A\",\"B\"],\"states\":[\"completed\",\"recovery_wait\",\"failed\",\"stopped\"]}. Reply condition: {\"type\":\"reply_received\",\"message_id\":\"MESSAGE_ID\"}. Reuse result.cursor with --after and unchanged conditions to catch saved transitions.\n\nConditions use any semantics. timeout leaves the target running; satisfied means inspect target state, not guaranteed success. recovery_wait means inspect Run/Turn and choose recovery explicitly. Guide: shellboy docs get --id shellboy/delegation"
+    after_help = "Wait for a saved target:\n  shellboy wait --conditions-json '[{\"type\":\"shell_ended\",\"execution_id\":\"WORK_EXECUTION_ID\"}]' --timeout-ms 30000\n  shellboy wait --conditions-json '[{\"type\":\"turn_completed\",\"turn_id\":\"CHILD_TURN_ID\"}]' --timeout-ms 30000\n  shellboy wait --conditions-json '[{\"type\":\"reply_received\",\"message_id\":\"MESSAGE_ID\"}]' --timeout-ms 30000\n\nThread conditions: {\"type\":\"thread_settled\",\"thread_ids\":[\"A\",\"B\"],\"states\":[\"completed\",\"recovery_wait\",\"failed\",\"stopped\"]}. Reply condition: {\"type\":\"reply_received\",\"message_id\":\"MESSAGE_ID\"}. Use result.cursor with --after and unchanged conditions only for thread_settled. For shell_output, after satisfaction run shell read --execution ID --cursor CURSOR, then use the new read cursor inside the next shell_output condition (not --after).\n\nConditions use any semantics. timeout leaves the target running; satisfied means inspect target state, not guaranteed success. recovery_wait means inspect Run/Turn and choose recovery explicitly. Guide: shellboy docs get --id shellboy/delegation"
 )]
 pub struct WaitOptions {
     /// JSON array of typed thread_settled/turn_completed/run_ended/shell_ended/shell_output/reply_received conditions.

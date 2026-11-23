@@ -417,10 +417,10 @@ Even when logical capacity stops new indexing, semantic searches of existing ind
 | `config_invalid` / missing credentials | Reported key, connection profile, API root, environment variable name; restart to read edited TOML |
 | API balance/authentication/model error | Read saved provider reason and choose an available connection; no automatic other-provider fallback |
 | `thread_not_found` / `target_unavailable` | Target ID, data directory, deletion/collection state |
-| `invalid_state` / `wait_cycle` | State/ownership; do not wait on self/ancestors, take over another owner's Run, or retry a terminal Run |
+| `invalid_state` / `self_wait` | Inspect state; do not retry a terminal Run or wait on the invoking Run, Turn, or shell. Other dependency cycles are not detected |
 | `operation_conflict` / `operation_expired` | Do not change content under one ID; query old work and never blindly resend uncertain effects |
 | `cursor_expired` / `cursor_encoding_mismatch` | Restart list/body retrieval without cursor; do not reuse for another target/encoding |
-| `output_expired` | Raw reclaimed; separately inspect saved quotes/answers, never invent source |
+| `output_expired` | For a cursor evicted by rotation, read without the cursor to recover the retained window. For missing bytes, inspect saved quotes/answers; never invent source |
 | `input_limit` | Reported body/attachment/frame limit and target; no silent truncation |
 | `reply_limit` | Target Thread already has 16 pending reply duties (`details.limit`, `details.current_count`); your own unanswered human questions count toward your Thread's limit. Withdraw requests you sent with `message cancel`, or wait for a reply; never reply to your own question |
 | `storage_limit` | Inspect usage, reclaim according to retention or revise configuration, explicitly retry |

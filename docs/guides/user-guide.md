@@ -109,8 +109,7 @@ asks the endpoint for its model list so you can see whether it answers. See
 [store a key and check a connection](configuration.md#store-a-key-and-check-a-connection).
 
 This works in PowerShell too. Existing config files are never overwritten. Use
-identical `--config PATH` options throughout if you choose a custom path. Check
-uses only the model catalog, not a conversation request; no owner is required.
+the same `--config PATH` for `config init`, `config check`, and starting the owner when using a custom file. For owner commands such as `connection test` or `credentials set`, omit `--config` and pass the owner's `--data-dir` if custom. Check uses only the model catalog, not a conversation request; no owner is required.
 For `base_url`, write the API root (`https://proxy.example/v1`), **not**
 `.../v1/responses`. See [first setup](configuration.md#first-setup-without-an-owner)
 for OS paths, credentials and a keyless local-endpoint example. If an owner was

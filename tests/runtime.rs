@@ -3290,6 +3290,20 @@ async fn thread_service_file_trigger_sends_through_ipc_and_drains() {
     })
     .await
     .unwrap();
+    let waited = command(
+        &control,
+        Command::Wait(WaitArgs {
+            after: None,
+            conditions: vec![WaitCondition::ShellOutput {
+                execution_id: execution.clone(),
+                cursor: old_cursor.clone(),
+            }],
+            timeout_ms: 0,
+        }),
+    )
+    .await;
+    assert_eq!(waited["status"], "satisfied");
+    assert_eq!(waited["matched"][0]["type"], "shell_output");
     std::fs::write(directory.path().join("payload"), vec![b'x'; 32768]).unwrap();
     std::fs::write(directory.path().join("trigger"), "ready").unwrap();
     let model = incoming(&mut requests).await;
@@ -3302,6 +3316,19 @@ async fn thread_service_file_trigger_sends_through_ipc_and_drains() {
     model.reply.send(Reply::json(json!({"id":"service-witness","status":"completed","output":[{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"received"}]}]}))).ok().unwrap();
     let service_id = added["service_id"].as_str().unwrap().to_owned();
     command(&control, Command::ServiceStop(ServiceTarget { service_id })).await;
+    let waited = command(
+        &control,
+        Command::Wait(WaitArgs {
+            after: None,
+            conditions: vec![WaitCondition::ShellEnded {
+                execution_id: execution.clone(),
+            }],
+            timeout_ms: 0,
+        }),
+    )
+    .await;
+    assert_eq!(waited["status"], "satisfied");
+    assert_eq!(waited["matched"][0]["type"], "shell_ended");
     let listed = command(
         &control,
         Command::ServiceList(ThreadTarget {

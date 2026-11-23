@@ -4,6 +4,8 @@
 
 waitは観測operationで、解除・timeout・接続切断で対象を止めない。状態確認と登録はDBの短いsnapshotとControl登録mutexで扱い、通知を先に登録してから状態を確認する。通知欠落でも最終状態をDBから再読し、timeout到達時も最後に一度確認する。matchedは同じDB snapshot上で成立した条件をまとめる。
 
+`shell_ended` と `shell_output` の execution は `shell get` と同じ所有 Thread の解決順（Run、schedule、detached Thread）を使う。Run を持たないサービスも待機できる。削除済み Thread は待機対象外。
+
 `shell_output` の再観測通知はraw chunkとsaved_sequenceのcommit成功後に発行する。shell終了や他のCLI操作の完了を待たず、保存済みbyteへ到達できる。待機用の既存Notifyだけを使い、chunk単位のUI Changed eventや新しいpollerは増やさない。保存失敗時は成功通知を出さず、既存の保存障害処理へ進む。
 
 通常の `wait` は観測であり、Run間の所有関係や待機グラフによる循環判定は行わない。実行中のforeground shellから、そのshellを待っている自身のTurnやRunの終了を要求する場合は、既存の自己待機保護が働く。別Threadへの委譲では、返事を求めるメッセージを送り、受理後にTurnを終える。

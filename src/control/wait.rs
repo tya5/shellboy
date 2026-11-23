@@ -508,7 +508,7 @@ fn inspect(
             }
             WaitCondition::ShellEnded { execution_id }
             | WaitCondition::ShellOutput { execution_id, .. } => {
-                let row=db.query_row("SELECT s.state,s.owner_run_id,s.exit_code,s.output_complete,t.deleted_at FROM shell_execution s JOIN run r ON r.id=s.owner_run_id JOIN thread t ON t.id=r.thread_id WHERE s.id=?1",[execution_id],|row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,Option<i32>>(2)?,row.get::<_,Option<bool>>(3)?,row.get::<_,Option<String>>(4)?))).optional().map_err(sql_error)?;
+                let row=db.query_row(&format!("SELECT s.state,s.owner_run_id,s.exit_code,s.output_complete,t.deleted_at {} JOIN thread t ON t.id={} WHERE s.id=?1",super::output::SHELL_THREAD_JOIN,super::output::SHELL_THREAD_ID),[execution_id],|row|Ok((row.get::<_,String>(0)?,row.get::<_,Option<String>>(1)?,row.get::<_,Option<i32>>(2)?,row.get::<_,Option<bool>>(3)?,row.get::<_,Option<String>>(4)?))).optional().map_err(sql_error)?;
                 if let Some((state, run, exit, complete, deleted)) = row {
                     snapshots.push(json!({"type":"shell","execution_id":execution_id,"run_id":run,"state":state,"exit_code":exit,"output_complete":complete,"unavailable":deleted.is_some()}));
                     if deleted.is_some() {

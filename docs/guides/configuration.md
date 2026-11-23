@@ -169,7 +169,7 @@ shellboy config set --expected-hash HASH --set default_model=my-model --set ui.b
 - **Comments and order stay.** Comment lines above a removed key stay too; a comment at the end of the removed
   line goes with it.
 - `FIELD` is a TOML dotted key, such as `connections.proxy.request_timeout_ms` or
-  `connections."my.proxy".base_url`. `VALUE` is JSON when it parses as JSON and a plain string otherwise, so
+  `connections."my.proxy".base_url`. Quote the whole argument so shell parsing preserves the TOML quotes: `--set 'connections."my.proxy".base_url=https://example.test/v1'`. `VALUE` is JSON when it parses as JSON and a plain string otherwise, so
   write `'"123"'` for the string `123`. Command-line values can be visible to other local processes.
 - `data_dir` can't be changed here, because a restart would then open another, possibly empty, directory.
 - Add a connection with an object, `--set 'connections.new={"base_url":"https://x.example/v1","api_key_env":"X_KEY"}'`,

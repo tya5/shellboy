@@ -141,7 +141,7 @@ live after your Turn ends. An explicit `thread_settled` observer keeps waiting. 
 would also stop correct long commands.
 
 - Wait for a shell with `shellboy wait` and `shell_ended` for its
-  `execution_id` (or `shell_output` to resume reading), not with a loop you
+  `execution_id`, including for services. For output, wait with `shell_output` and the saved `shell read` cursor, then read again and put the new read cursor in the next condition. `--after` is only for `thread_settled`. Do not use a loop you
   write such as `until grep ...; do sleep 1; done`. The wait is saved, has a
   timeout, and a timeout leaves the shell running. The timeout includes time
   waiting for admission: the CLI retries capacity refusals itself and reports

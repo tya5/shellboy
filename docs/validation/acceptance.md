@@ -1,5 +1,9 @@
 # Validation record
 
+## Core #379 CLI and guide audit fixes
+
+On macOS the temporary-owner service integration test failed before the fix with `target_unavailable` and passed after it (one test). It observes saved output while the service still runs, then observes termination after an explicit stop, without a Run. The compiled CLI help was checked for the distinct cursor rules and dotted-key quoting. No installed-owner or other-OS verification.
+
 ## Core v0.15.0 release preparation
 
 The manifest and lockfile agree on `0.15.0`. Exact owner identity uses the

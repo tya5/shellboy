@@ -110,10 +110,10 @@ Brackets mean optional; `|` means alternatives. Add common global flags and `--h
 | Command | Behavior |
 |---|---|
 | `config get` | Read what the running owner loaded and the current file: `loaded`, `file` (`content_hash`, `valid`, `error`, `values`, `redacted_fields`), `differs`, `differing_fields`. No credential value is returned, only names. No receipt |
-| `config set --expected-hash HASH [--set FIELD=VALUE]... [--unset FIELD]...` | Change named fields. Refused with `operation_conflict` if the file changed since the read, `config_invalid` if the whole result fails validation, and `invalid_argument` if a name field is given what looks like a credential; each leaves the file untouched. Result: `written`, `content_hash`, `restart_required`, and `changes[]` with `field`, `previous`, `value`, `sensitive`, `restart_required` per field. Same `--operation-id` replays the saved outcome |
+| `config set --expected-hash HASH [--set FIELD=VALUE]... [--unset FIELD]...` | Change named fields. Refused with `operation_conflict` if the file changed since the read, `config_invalid` if the whole result fails validation, and `invalid_argument` if a name field is given what looks like a credential; each leaves the file untouched. Result: `written`, `content_hash`, `applied_to_running_owner`, `restart_required`, and `changes[]` with `field`, `previous`, `value`, `sensitive`, `restart_required` per field. Same `--operation-id` replays the saved outcome |
 
 Both need a running owner of the selected `--data-dir`, act on the file it loaded and refuse `--config`. With no
-owner they fail with `app_not_running`. Every field reaches the running owner only after a restart; standalone commands that read the file use it on their next run. See
+owner they fail with `app_not_running`. Use `restart_required` to tell whether a restart is needed. `applied_to_running_owner` reports live adoption; it can be true with `written: false` when applying an already-correct file value. Standalone commands that read the file use it on their next run. See
 [configuration](configuration.md#read-and-change-settings-through-the-owner).
 
 ### Stored keys and connection test (3 commands)
@@ -431,7 +431,7 @@ change its execution.
 
 List/get/read cursors are opaque continuation tokens. Pass the exact returned string to the same operation, target, filters, and encoding; never construct, edit, or reuse elsewhere. A list without next_cursor ends that enumeration. Shell read returns an observation cursor for subsequent reads until output_complete.
 
-Changed history path/revision or target can cause `cursor_expired`; encoding mismatch yields `cursor_encoding_mismatch`. Restart from the beginning. Shell cursors bind execution, raw retention generation, sequence/byte position, and decoder state. Reclaimed raw yields `output_expired`, not empty output. Explicitly changing read encoding invalidates the old cursor. `decode_errors=true` indicates invalid bytes during conversion; consider rereading raw with the correct encoding.
+Changed history path/revision or target can cause `cursor_expired`; encoding mismatch yields `cursor_encoding_mismatch`. Restart from the beginning. Shell cursors bind execution, raw retention generation, sequence/byte position, and decoder state. An evicted cursor or reclaimed raw yields `output_expired`, not empty output. After rotation, read without a cursor and check `oldest_sequence` and the retained stream offsets. Explicitly changing read encoding invalidates the old cursor. `decode_errors=true` indicates invalid bytes during conversion; consider rereading raw with the correct encoding.
 
 ## Error codes
 
@@ -449,7 +449,7 @@ Changed history path/revision or target can cause `cursor_expired`; encoding mis
 | `invalid_state` | Current state/ownership disallows it; inspect details/hint/get |
 | `cursor_expired` | Restart paging the same target from the beginning |
 | `cursor_encoding_mismatch` | Restore encoding or reread without cursor |
-| `output_expired` | Raw reclaimed; use saved excerpts/history rather than interpreting as empty output |
+| `output_expired` | For rotation, read without the cursor to resume at the retained boundary; use saved excerpts/history for raw bytes no longer retained |
 | `input_limit` | Body/attachment/stdin/frame limit; split or revise selection |
 | `reply_limit` | Target Thread already has 16 pending reply duties (`details.limit`, `details.current_count`); your own unanswered human questions count toward your Thread's limit. Withdraw requests you sent with `message cancel`, or wait for a reply; never reply to your own question |
 | `storage_limit` | Logical capacity limit (`details.reason=logical_limit`) or low free disk space on the data volume (`disk_free_low`, with `filesystem_free_bytes` and `disk_free_min_bytes`); inspect storage status/collect, consider unnecessary Thread deletion, explicitly retry |
@@ -702,7 +702,7 @@ $result = $json | ConvertFrom-Json
 
 
 Do not synchronously exec against your own currently blocked foreground model
-Turn: existing wait-cycle protection can reject that wait after message acceptance.
+Turn: it cannot finish until the foreground shell returns. A direct self-resource wait can be refused after message acceptance; other dependency cycles can time out.
 Inspect the reported message/operation IDs rather than resending. Prefer the new
 saved Thread default or a separate conversation. A timeout is not cancellation.
 
@@ -872,12 +872,7 @@ live shells (`starting`/`running`/`stopping`) of the watched Threads' live Runs 
 a Thread whose Run still owns one. It is saved-state information, not a stop or a timeout.
 `cursor` is the Thread continuation cursor when these conditions are present,
 otherwise the existing shell-output cursor. `snapshot.more` announces another
-saved matching change. Keep the cursor on timeout too and pass it to the next
-wait with unchanged conditions. It is independent of owner instance. Cursor
-anchors invalidated by data removal require a fresh observation; external SQL
-editing/VACUUM is not a supported continuation path. Self/owning-ancestor/composed
-model waits remain cycle checked. Human wait observation does not scan the model
-ownership graph. No-after reports current settled states, not arbitrary history.
+saved matching change. For `thread_settled`, keep the cursor on timeout too and pass it as `--after` with unchanged conditions. It is independent of owner instance. Cursor anchors invalidated by data removal require a fresh observation; external SQL editing/VACUUM is not a supported continuation path. Without `--after`, the Thread wait reports current settled states, not arbitrary history. For `shell_output`, use `shell read` at the saved read cursor and put the resulting cursor in the next condition, not `--after`. Direct model waits on the invoking Run, Turn or shell return `self_wait`; dependency cycles are not detected and can time out.
 
 `thread list/get` keep `excerpt` and add `last_end_message` and `last_input` objects
 (or null when absent). The end message includes `node_id`, `turn_id`, `at`, `excerpt`

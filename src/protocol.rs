@@ -454,7 +454,7 @@ impl ApiError {
 
             ErrorCode::CursorExpired => "Restart the same list/read with its original target and filters, without the old cursor; previously returned items or bytes may repeat",
             ErrorCode::CursorEncodingMismatch => "Restart shell read without the old cursor and specify the desired encoding; previously read bytes may be returned again",
-            ErrorCode::OutputExpired => "Inspect shell state and retained history; unavailable raw output cannot be reconstructed by retrying read",
+            ErrorCode::OutputExpired => "For rotated output, try shell read without a cursor; unavailable raw bytes cannot be reconstructed",
             ErrorCode::SelfWait => "Observe another Run, Turn or shell; do not wait for the invoking resource itself",
             ErrorCode::InputLimit => "Inspect the input bound in command help; do not treat truncated input as accepted",
             ErrorCode::ReplyLimit => "Withdraw an outstanding request you sent, or wait for a reply before asking again. This request was not accepted",

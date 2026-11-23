@@ -103,8 +103,11 @@ shellboy
 `shellboy connection test --connection proxy`は接続先にモデル一覧を問い合わせ、応答の
 有無を示します。[keyの保存と接続確認](configuration.md#store-a-key-and-check-a-connection)を参照してください。
 
-既存の設定ファイルは上書きしません。独自の場所なら全操作に同じ`--config PATH`を
-指定してください。`check`はownerなしで使え、モデル一覧だけを要求し、会話の要求は
+既存の設定ファイルは上書きしません。独自の設定ファイルを使う場合は、`config init`、
+`config check`、ownerの起動に同じ`--config PATH`を指定してください。`connection test`や
+`credentials set`など起動中のownerに対する操作では`--config`を省き、独自のデータ
+ディレクトリを使っている場合はownerと同じ`--data-dir`を指定します。
+`check`はownerなしで使え、モデル一覧だけを要求し、会話の要求は
 送りません。`base_url`は`https://proxy.example/v1`のようなAPI rootまでで、
 `.../v1/responses`までは書きません。[初回設定](configuration.md#first-setup-without-an-owner)
 にOS別の場所、資格情報とkeyなしのローカル接続の例があります。起動済みownerには

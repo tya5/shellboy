@@ -56,7 +56,7 @@ Choose the next observation from the stored state and result:
 | wait timeout | The target continues. Inspect the same execution and keep observing; do not restart the command |
 | exited / failed / stopped | Read exit_code, end_reason, output_complete, and trailing output. Terminal does not necessarily mean successful |
 | cursor_expired / cursor_encoding_mismatch | Check the target and encoding, then resume reading without a cursor. Previously read bytes may return again |
-| output_expired | Check retention state. Repeated reads cannot restore reclaimed raw output |
+| output_expired | For an evicted cursor, read without it to recover the retained window. Repeated reads cannot restore reclaimed bytes |
 
 When a human moves foreground work to the background, the shell stays alive and subsequent tool calls that have not executed are cancelled. If explicitly immediate instructions (`message send --deliver now` or the TUI immediate key) release a foreground wait, also inspect the existing execution. Do not treat release of the tool wait as process termination and execute the same command again.
 
@@ -224,7 +224,7 @@ shellboy wait --conditions-json '[{"type":"shell_output","execution_id":"EXECUTI
 shellboy shell read --execution EXECUTION_ID --cursor CURSOR --limit-bytes 65536
 ```
 
-Wait also returns when the target becomes terminal. For an empty trailing page, check `output_complete` and shell state too. Raw reclamation due to retention age/capacity produces `output_expired`; old-generation cursors and similar conditions produce explicit errors. Do not reinterpret them as successful empty output. See [Recovery and storage](recovery-and-storage.md).
+After output becomes available, read with the saved cursor and put the updated cursor in the next `shell_output` condition, not `--after`. Wait also returns when the target becomes terminal. For an empty trailing page, check `output_complete` and shell state too. Raw reclamation due to retention age/capacity produces `output_expired`; old-generation cursors and similar conditions produce explicit errors. Do not reinterpret them as successful empty output. See [Recovery and storage](recovery-and-storage.md).
 
 ## Stopping and storage completion
 
