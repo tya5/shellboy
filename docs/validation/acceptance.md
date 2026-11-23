@@ -1,5 +1,14 @@
 # Validation record
 
+## Core v0.15.0 release preparation
+
+The manifest and lockfile agree on `0.15.0`. Exact owner identity uses the
+compiled package version and the optional build Git SHA, not a separate VERSION
+file; the Welcome wire fixture uses the same package version source. This
+covers version alignment only. A non-publishing selector dry run is not native
+CI or packaged-binary evidence. Exact landed-SHA release checks, tag creation,
+publication, and installed-binary validation are separate.
+
 ## Core #348 Thread-owned services
 
 Local macOS witnesses exercised real service exit and graceful owner restart, explicit stop/start/remove, an IPC file trigger that starts a Turn through a loopback model mock, and rotation that expires an evicted cursor without advancing its generation. The schema upgrade fixture preserves existing timed definitions, executions, and output. The Ubuntu test job in run 45117810911 passed at `a6e4f870`, including `forced_owner_death_cleans_and_restarts_enabled_service`: it kills only the owner and checks native cleanup, restart, `enabled=1`, and zero notices. That run did not exercise macOS or Windows; forced owner death was not part of the local macOS checks listed here.

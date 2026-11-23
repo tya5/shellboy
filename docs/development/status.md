@@ -1,5 +1,12 @@
 # Development status
 
+## Core v0.15.0 release preparation
+
+The version-only candidate on Core main source `a19b80c` sets the package to
+`0.15.0` without changing features, protocol, or schema. The release is not
+published by this commit: tag only the landed exact commit after the release
+gates pass. The `0.16.0-dev` bump belongs after that tag.
+
 Core [v0.14.0](https://github.com/tya5/shellboy/releases/tag/v0.14.0) was published on 2026-11-23 from tag commit `b644b3c`; see the [release notes](release-v0.14.0-draft.md).
 - #377: skip unreadable common instruction files with typed Run warnings; hash-checked config edits reconcile stale live values without rewriting unchanged files.
 

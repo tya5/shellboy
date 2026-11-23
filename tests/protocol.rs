@@ -1319,7 +1319,7 @@ fn welcome_owner_version_is_optional_and_additive() {
             .is_none()
     );
 
-    let exact = format!("0.13.1 {}", "a".repeat(40));
+    let exact = format!("{} {}", env!("CARGO_PKG_VERSION"), "a".repeat(40));
     let current = json!({"protocol_version": 7, "instance_id": "current", "owner_version": exact});
     #[derive(serde::Deserialize)]
     struct PriorWelcome {
