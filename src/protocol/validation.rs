@@ -64,6 +64,34 @@ fn validate_recipient_name(name: &str) -> Result<(), ApiError> {
 impl ThreadListArgs {
     fn validate(&self) -> Result<(), ApiError> {
         limit(self.limit, MAX_LIST_LIMIT)?;
+        if let Some(ids) = &self.thread_ids {
+            if ids.len() > MAX_LIST_LIMIT as usize {
+                return Err(ApiError::new(
+                    ErrorCode::InputLimit,
+                    format!("thread_ids accepts at most {MAX_LIST_LIMIT} IDs"),
+                ));
+            }
+            if self.cursor.is_some()
+                || !self.order.is_updated()
+                || self.query.is_some()
+                || self.awaiting.is_some()
+                || self.archived != ArchivedFilter::Exclude
+                || !self.tags.is_empty()
+                || self.cwd.is_some()
+            {
+                return Err(invalid(
+                    "thread_ids cannot be combined with a cursor, order, or list filters",
+                ));
+            }
+            let mut seen = std::collections::HashSet::with_capacity(ids.len());
+            for id in ids {
+                nonempty(id, "thread ID")?;
+                if !seen.insert(id) {
+                    return Err(invalid("thread_ids must not contain duplicates"));
+                }
+            }
+            return Ok(());
+        }
         optional_nonempty(self.cursor.as_deref(), "cursor")?;
         optional_nonempty(self.cwd.as_deref(), "cwd")?;
         if self.order == ThreadListOrder::Created
@@ -1016,4 +1044,64 @@ fn validate_dimensions(dimensions: Option<usize>) -> Result<(), ApiError> {
         return Err(invalid("dimensions must be in 1..=8192"));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod thread_list_id_tests {
+    use super::*;
+
+    #[test]
+    fn exact_thread_list_validates_one_page_of_unique_ids() {
+        let command = |ids| {
+            Command::ThreadList(ThreadListArgs {
+                thread_ids: Some(ids),
+                ..Default::default()
+            })
+        };
+        let mut full_page: Vec<_> = (0..MAX_LIST_LIMIT).map(|n| format!("t-{n}")).collect();
+        assert!(command(full_page.clone()).validate().is_ok());
+        full_page.push("extra".into());
+        assert_eq!(
+            command(full_page).validate().unwrap_err().code,
+            ErrorCode::InputLimit
+        );
+        assert_eq!(
+            command(vec!["same".into(), "same".into()])
+                .validate()
+                .unwrap_err()
+                .code,
+            ErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            command(vec![String::new()]).validate().unwrap_err().code,
+            ErrorCode::InvalidArgument
+        );
+        for args in [
+            ThreadListArgs {
+                cursor: Some("cursor".into()),
+                ..Default::default()
+            },
+            ThreadListArgs {
+                order: ThreadListOrder::Created,
+                ..Default::default()
+            },
+        ] {
+            assert_eq!(
+                Command::ThreadList(ThreadListArgs {
+                    thread_ids: Some(vec!["t".into()]),
+                    ..args
+                })
+                .validate()
+                .unwrap_err()
+                .code,
+                ErrorCode::InvalidArgument
+            );
+        }
+        assert!(
+            serde_json::to_value(ThreadListArgs::default())
+                .unwrap()
+                .get("thread_ids")
+                .is_none()
+        );
+    }
 }

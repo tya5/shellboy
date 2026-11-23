@@ -1237,6 +1237,7 @@ mod frame_delivery_tests {
             client,
             endpoint(),
             Command::ThreadList(crate::protocol::ThreadListArgs {
+                thread_ids: None,
                 order: Default::default(),
                 limit: 1,
                 cursor: None,

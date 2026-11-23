@@ -96,6 +96,7 @@ async fn list(
     run(
         store,
         Command::ThreadList(ThreadListArgs {
+            thread_ids: None,
             order: Default::default(),
             limit,
             cursor,
@@ -418,6 +419,7 @@ async fn archived_threads_stay_readable_countable_and_can_receive_messages() {
     let found = run(
         &store,
         Command::ThreadList(ThreadListArgs {
+            thread_ids: None,
             order: Default::default(),
             limit: 10,
             cursor: None,

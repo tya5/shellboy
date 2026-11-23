@@ -10242,6 +10242,15 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "thread_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
         }
       },
       "type": "object"

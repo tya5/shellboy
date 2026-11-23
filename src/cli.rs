@@ -1754,6 +1754,7 @@ impl Cli {
                     document: crate::thread_import::read_file(&input)?,
                 }),
                 ThreadCommand::List(a) => C::ThreadList(wire::ThreadListArgs {
+                    thread_ids: None,
                     order: a.order,
                     limit: a.limit,
                     cursor: a.cursor,

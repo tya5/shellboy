@@ -3435,6 +3435,7 @@ mod thread_list_plan_tests {
         for late in [0, 100, 2_000] {
             let db = setup(late);
             let args = |cursor| ThreadListArgs {
+                thread_ids: None,
                 order: Default::default(),
                 limit: 1,
                 cursor,
@@ -3498,6 +3499,7 @@ mod thread_list_plan_tests {
         let page = thread_list_awaiting_human(
             &db,
             &ThreadListArgs {
+                thread_ids: None,
                 order: Default::default(),
                 limit: 1,
                 cursor: None,
@@ -3556,6 +3558,7 @@ mod thread_list_plan_tests {
             db.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,result_json) VALUES(?1,?1,'{}',?2,?3,'applied','now','{\"reply\":{\"state\":\"pending\"},\"ask_name\":\"human\",\"to_human\":true}')", params![format!("r{id}"), id, node]).unwrap();
         }
         let args = |cursor| ThreadListArgs {
+            thread_ids: None,
             order: Default::default(),
             limit: 1,
             cursor,
@@ -3596,6 +3599,7 @@ mod thread_list_plan_tests {
             thread_list_awaiting_human(
                 db,
                 &ThreadListArgs {
+                    thread_ids: None,
                     order: Default::default(),
                     limit: 1,
                     cursor: None,
@@ -3632,6 +3636,7 @@ mod thread_list_plan_tests {
             db.execute(insert, params![id, thread, node, id]).unwrap();
         }
         let args = |cursor, archived| ThreadListArgs {
+            thread_ids: None,
             order: Default::default(),
             limit: 1,
             cursor,
@@ -4268,6 +4273,7 @@ mod activity_list_tests {
             let page = thread_list(
                 &db,
                 &ThreadListArgs {
+                    thread_ids: None,
                     order: Default::default(),
                     limit: 50,
                     cursor,

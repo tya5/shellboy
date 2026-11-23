@@ -636,6 +636,7 @@ async fn list_watermark_and_query_cursor_are_bounded_and_filter_bound() {
     let first = execute(
         &store,
         Command::ThreadList(ThreadListArgs {
+            thread_ids: None,
             order: Default::default(),
             limit: 1,
             cursor: None,
@@ -653,6 +654,7 @@ async fn list_watermark_and_query_cursor_are_bounded_and_filter_bound() {
     let second = execute(
         &store,
         Command::ThreadList(ThreadListArgs {
+            thread_ids: None,
             order: Default::default(),
             limit: 200,
             cursor: first.next_cursor.clone(),
@@ -673,6 +675,7 @@ async fn list_watermark_and_query_cursor_are_bounded_and_filter_bound() {
     let wrong = store
         .execute(
             request(Command::ThreadList(ThreadListArgs {
+                thread_ids: None,
                 order: Default::default(),
                 limit: 1,
                 cursor: first.next_cursor,
@@ -754,6 +757,7 @@ async fn thread_list_awaiting_human_pages_only_human_waits_with_oldest_timestamp
     let first = execute(
         &store,
         Command::ThreadList(ThreadListArgs {
+            thread_ids: None,
             order: Default::default(),
             limit: 1,
             cursor: None,
@@ -788,6 +792,7 @@ async fn thread_list_awaiting_human_pages_only_human_waits_with_oldest_timestamp
     let all = execute(
         &store,
         Command::ThreadList(ThreadListArgs {
+            thread_ids: None,
             order: Default::default(),
             limit: 20,
             cursor: None,

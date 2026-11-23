@@ -135,6 +135,7 @@ async fn performance_native_wait_and_thread_page_indexes() {
             let page = request(
                 &control,
                 Command::ThreadList(ThreadListArgs {
+                    thread_ids: None,
                     order: Default::default(),
                     limit: 50,
                     cursor: None,

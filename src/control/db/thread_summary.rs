@@ -305,10 +305,12 @@ pub(crate) fn read_ids_tx(
     db: &Connection,
     ids: &[String],
 ) -> Result<Vec<RawSummary>, StorageError> {
-    if ids.len() > 128 {
-        return Err(
-            ApiError::new(ErrorCode::InputLimit, "Thread summary scope exceeds128 IDs").into(),
-        );
+    if ids.len() > crate::protocol::MAX_LIST_LIMIT as usize {
+        return Err(ApiError::new(
+            ErrorCode::InputLimit,
+            "Thread summary scope exceeds one page",
+        )
+        .into());
     }
     if ids.is_empty() {
         return Ok(Vec::new());
@@ -490,7 +492,13 @@ mod tests {
         assert!(after <= before + 100, "{before}->{after}");
         let trace = Statements::new(&db);
         assert!(read_ids_tx(&db, &[]).unwrap().is_empty());
-        assert!(read_ids_tx(&db, &vec!["t".into(); 129]).is_err());
+        assert!(
+            read_ids_tx(
+                &db,
+                &vec!["t".into(); crate::protocol::MAX_LIST_LIMIT as usize + 1]
+            )
+            .is_err()
+        );
         assert_eq!(trace.count(), 0);
     }
     #[test]

@@ -22,6 +22,13 @@ pub(crate) fn thread_list(
     connection: &Connection,
     args: &ThreadListArgs,
 ) -> Result<Page<ThreadSummary>> {
+    if let Some(ids) = &args.thread_ids {
+        let items = summaries_by_id(connection, ids)?;
+        return Ok(Page {
+            items,
+            next_cursor: None,
+        });
+    }
     if args.awaiting.is_some() {
         return thread_list_awaiting_human(connection, args);
     }
@@ -117,12 +124,7 @@ pub(crate) fn thread_list(
         if !thread_summary::matches_filter(id, &title, &raw.cwd, filter) {
             continue;
         }
-        let excerpt = thread_excerpt(connection, id)?;
-        let mut summary = thread_summary::prepare(raw, title, excerpt);
-        summary.last_end_message =
-            crate::thread_observation::last_end_message(connection, &summary.thread_id)?;
-        summary.last_input = crate::thread_observation::last_input(connection, &summary.thread_id)?;
-        items.push(summary);
+        items.push(complete_summary(connection, raw, title)?);
         if items.len() > args.limit as usize {
             break;
         }
@@ -152,13 +154,41 @@ pub(crate) fn thread_list(
     } else {
         None
     };
-    // One statement for the whole page: bounded by the page, not by the stored Threads.
-    let ids: Vec<String> = items.iter().map(|item| item.thread_id.clone()).collect();
+    attach_tags(connection, &mut items)?;
+    Ok(Page { items, next_cursor })
+}
+
+fn complete_summary(
+    connection: &Connection,
+    raw: thread_summary::RawSummary,
+    title: String,
+) -> Result<ThreadSummary> {
+    let excerpt = thread_excerpt(connection, &raw.thread_id)?;
+    let mut summary = thread_summary::prepare(raw, title, excerpt);
+    summary.last_end_message =
+        crate::thread_observation::last_end_message(connection, &summary.thread_id)?;
+    summary.last_input = crate::thread_observation::last_input(connection, &summary.thread_id)?;
+    Ok(summary)
+}
+
+fn attach_tags(connection: &Connection, items: &mut [ThreadSummary]) -> Result<()> {
+    let ids: Vec<_> = items.iter().map(|item| item.thread_id.clone()).collect();
     let mut tagged = tags::for_threads(connection, &ids)?;
-    for item in &mut items {
+    for item in items {
         item.tags = tagged.remove(&item.thread_id).unwrap_or_default();
     }
-    Ok(Page { items, next_cursor })
+    Ok(())
+}
+
+fn summaries_by_id(connection: &Connection, ids: &[String]) -> Result<Vec<ThreadSummary>> {
+    let raw = thread_summary::read_ids_tx(connection, ids).map_err(storage_error)?;
+    let mut items = Vec::with_capacity(raw.len());
+    for raw in raw {
+        let title = thread_display_title(connection, &raw.thread_id, &raw.stored_title)?;
+        items.push(complete_summary(connection, raw, title)?);
+    }
+    attach_tags(connection, &mut items)?;
+    Ok(items)
 }
 
 /// Enumerate only target Threads present in the partial pending-reply index.
@@ -204,17 +234,7 @@ pub(super) fn thread_list_awaiting_human(
         }
         visible_ids.push(id.clone());
     }
-    let raw = thread_summary::read_ids_tx(connection, &visible_ids).map_err(storage_error)?;
-    let mut items = Vec::with_capacity(raw.len());
-    for raw in raw {
-        let id = raw.thread_id.clone();
-        let title = thread_display_title(connection, &id, &raw.stored_title)?;
-        let excerpt = thread_excerpt(connection, &id)?;
-        let mut item = thread_summary::prepare(raw, title, excerpt);
-        item.last_end_message = crate::thread_observation::last_end_message(connection, &id)?;
-        item.last_input = crate::thread_observation::last_input(connection, &id)?;
-        items.push(item);
-    }
+    let mut items = summaries_by_id(connection, &visible_ids)?;
     for item in &mut items {
         if let Some((_, counts)) = candidates.iter().find(|(id, _)| id == &item.thread_id) {
             item.awaiting_named_count = counts.count;
@@ -223,10 +243,6 @@ pub(super) fn thread_list_awaiting_human(
         }
     }
     items.retain(|item| item.awaiting_named_count > 0);
-    let mut tagged = tags::for_threads(connection, &visible_ids)?;
-    for item in &mut items {
-        item.tags = tagged.remove(&item.thread_id).unwrap_or_default();
-    }
     let next_cursor = if has_more {
         let last = examined.last().expect("continued page has candidates");
         Some(
@@ -331,4 +347,58 @@ fn list_cursor_filter(query: &str, tags: &[String], cwd: Option<&str>) -> String
         "{query}\u{0}{}",
         hash(json!({"tags": sorted, "cwd": cwd}).to_string().as_bytes())
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn exact_thread_list_returns_existing_summaries_without_paging() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        db.execute_batch("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at,archived_at,deleted_at) VALUES
+            ('wanted','Wanted','/','','p','m','1','2',NULL),
+            ('other','Other','/','','p','m','3',NULL,NULL),
+            ('deleted','Deleted','/','','p','m','1',NULL,'2');
+            INSERT INTO thread_tag(thread_id,tag) VALUES('wanted','saved');").unwrap();
+        let ordinary = thread_list(
+            &db,
+            &ThreadListArgs {
+                archived: ArchivedFilter::Include,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let expected = ordinary
+            .items
+            .iter()
+            .find(|item| item.thread_id == "wanted")
+            .unwrap();
+        let mut ids = vec!["wanted".into(), "deleted".into()];
+        ids.extend((2..crate::protocol::MAX_LIST_LIMIT).map(|i| format!("missing-{i}")));
+        let exact = thread_list(
+            &db,
+            &ThreadListArgs {
+                thread_ids: Some(ids),
+                limit: 1,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert!(exact.next_cursor.is_none());
+        assert_eq!(
+            serde_json::to_value(exact.items).unwrap(),
+            json!([expected])
+        );
+        let empty = thread_list(
+            &db,
+            &ThreadListArgs {
+                thread_ids: Some(Vec::new()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert!(empty.items.is_empty() && empty.next_cursor.is_none());
+    }
 }

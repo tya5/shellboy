@@ -61,6 +61,7 @@ async fn list(
         execute(
             store,
             Command::ThreadList(ThreadListArgs {
+                thread_ids: None,
                 order: Default::default(),
                 limit,
                 cursor,
@@ -357,6 +358,7 @@ async fn displayed_title_search_paginates_matches_and_retains_query_watermark() 
     let changed = store
         .execute(
             request(Command::ThreadList(ThreadListArgs {
+                thread_ids: None,
                 order: Default::default(),
                 limit: 2,
                 cursor: first.next_cursor,
