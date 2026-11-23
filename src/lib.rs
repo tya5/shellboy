@@ -46,6 +46,8 @@ pub mod status;
 pub mod storage;
 pub mod terminal_links;
 pub mod thread_export;
+pub mod thread_import;
+
 pub(crate) mod tool_description;
 #[doc(hidden)]
 pub mod trace_slot;
