@@ -394,6 +394,8 @@ the sent body by source, or null), and ungrouped scoped `usage get` returns
 `latest_request` (the scope's newest admitted attempt with `usage` and
 `input_bytes`, or null); see [input byte accounting](input-byte-accounting.md).
 
+The [Protocol 12 `output_limit` field](events-and-external-protocol.md#protocol-12-attempt-output-limit-evidence-354) contains `stop`, `sent_max_tokens` (integer or null), `source` (`thread_override`, `connection`, `default`, `extra_body`, or null), and `connection`; the field is null if the attempt did not stop at the output limit or predates this evidence, and is never inferred.
+
 ## Explicit Reply Commands (#194)
 
 Use `message ask --thread T --text TEXT` (or `--to NAME` for a named recipient,
