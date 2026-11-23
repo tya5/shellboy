@@ -362,15 +362,27 @@ fn collected_source_lookup_uses_existing_index_without_unrelated_relation_scan()
     };
     let small = measure(&db);
     let tx = db.transaction().unwrap();
-    for n in 0..10_000 {
-        let id = format!("unrelated-{n}");
-        tx.execute("INSERT INTO node(id,turn_id,kind,created_at,payload_json)VALUES(?1,'u','tool_result','now',NULL)",[&id]).unwrap();
-        tx.execute("INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state)VALUES('g',?1,?2,'shell','{}','completed')",rusqlite::params![id,100_000+n]).unwrap();
-        tx.execute(
-            "INSERT INTO tool_result(group_id,call_id,node_id,status)VALUES('g',?1,?1,'exited')",
-            [&id],
-        )
-        .unwrap();
+    // Recovery triggers inspect the completed calls in each group on result
+    // insertion. Grow the selected group by 500 to catch a group-wide scan,
+    // then spread the other 9,500 relations across small groups.
+    for group in 0..=190 {
+        let (group_id, ordinals) = if group == 0 {
+            ("g".to_owned(), 100_000..100_500)
+        } else {
+            let id = format!("unrelated-group-{group}");
+            tx.execute("INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES(?1,'other-a','u','completed','now')", [&id]).unwrap();
+            (id, 0..50)
+        };
+        for ordinal in ordinals {
+            let id = format!("unrelated-{group}-{ordinal}");
+            tx.execute("INSERT INTO node(id,turn_id,kind,created_at,payload_json)VALUES(?1,'u','tool_result','now',NULL)",[&id]).unwrap();
+            tx.execute("INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state)VALUES(?1,?2,?3,'shell','{}','completed')",rusqlite::params![group_id,id,ordinal]).unwrap();
+            tx.execute(
+                "INSERT INTO tool_result(group_id,call_id,node_id,status)VALUES(?1,?2,?2,'exited')",
+                rusqlite::params![group_id, id],
+            )
+            .unwrap();
+        }
     }
     tx.commit().unwrap();
     let large = measure(&db);

@@ -227,7 +227,7 @@ jobs:
       - name: Tests
         run: python scripts/test-timings.py --output .local/ci-timings
       - name: Verify integration DB observation build
-        run: cargo test --locked --features test-db-observation --test integration db_observation_feature::integration_worker_samples_fast_statements -- --exact
+        run: cargo test --locked --features test-db-observation --test db_observation_feature
       - name: Verify real CLI against fallback Unix namespace
         if: runner.os != 'Windows'
         shell: bash

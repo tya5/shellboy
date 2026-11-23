@@ -21,6 +21,13 @@ path = "src/main.rs"
 name = "integration"
 path = "tests/integration/main.rs"
 
+# The feature-only witness must link the production library with instrumentation,
+# but does not need a second link of the full integration suite.
+[[test]]
+name = "db_observation_feature"
+path = "tests/db_observation_feature.rs"
+required-features = ["test-db-observation"]
+
 [[test]]
 name = "termination_signals"
 path = "tests/termination_signals.rs"
