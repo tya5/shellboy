@@ -17,24 +17,7 @@ fn column_exists(db: &Connection) -> bool {
 }
 
 fn v46_database() -> Connection {
-    let db = fresh();
-    db.execute_batch(include_str!(
-        "../../tests/fixtures/rewind-schedule-schema.sql"
-    ))
-    .unwrap();
-    db.execute_batch(
-        "DROP INDEX IF EXISTS attachment_page_order; DELETE FROM schema_migration WHERE version>46;
-         DROP INDEX IF EXISTS attachment_page_order; DELETE FROM schema_migration WHERE version=40;
-         DROP TRIGGER selection_thread_conflict;
-         PRAGMA user_version=39;",
-    )
-    .unwrap();
-    db.execute_batch(include_str!(
-        "../../migrations/0040_selection_nonappend_generation.sql"
-    ))
-    .unwrap();
-    db.execute_batch("PRAGMA user_version=46;").unwrap();
-    db
+    super::historical_memory(46)
 }
 
 fn trigger_names(db: &Connection) -> Vec<String> {

@@ -294,22 +294,12 @@ async fn schema40_upgrade_preserves_receipts_and_matches_fresh_indexes() {
             |r| r.get(0),
         )
         .unwrap();
-    // Reconstruct the exact index-only predecessor without rewriting saved table data.
-    db.execute_batch(crate::schema42_fixture::REWIND_CURRENT_TO_42)
-        .unwrap();
-    db.execute_batch("DROP INDEX node_notification_event; ALTER TABLE node DROP COLUMN notification_event_id; ALTER TABLE event DROP COLUMN semantic_json; DROP INDEX receipt_reply_node_lookup; DROP INDEX IF EXISTS attachment_page_order; DELETE FROM schema_migration WHERE version>=41; PRAGMA user_version=40;").unwrap();
-    // The historical schema-40 shape still has migration 40's generation column.
-    db.execute_batch("DROP INDEX IF EXISTS attachment_page_order;")
-        .unwrap();
-    db.execute("DELETE FROM schema_migration WHERE version=40", [])
-        .unwrap();
-    db.execute_batch(include_str!(
-        "../migrations/0040_selection_nonappend_generation.sql"
-    ))
-    .unwrap();
-    db.execute_batch("DROP INDEX IF EXISTS attachment_page_order; DELETE FROM schema_migration WHERE version>40; PRAGMA user_version=40;")
-        .unwrap();
     drop(db);
+    crate::legacy_rows::seed(
+        &path,
+        40,
+        &["thread", "run", "turn", "node", "thread_path", "receipt"],
+    );
     let worker = DbWorker::open(&path).await.unwrap();
     worker.shutdown().await.unwrap();
     let upgraded = rusqlite::Connection::open(&path).unwrap();

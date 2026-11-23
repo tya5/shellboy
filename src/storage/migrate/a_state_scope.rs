@@ -275,20 +275,7 @@ mod tests {
     }
 
     fn schema45_with_generation_column() -> Connection {
-        let db = Connection::open_in_memory().unwrap();
-        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
-        db.execute_batch(include_str!(
-            "../../../tests/fixtures/rewind-schedule-schema.sql"
-        ))
-        .unwrap();
-        db.execute_batch("DROP INDEX IF EXISTS attachment_page_order; DELETE FROM schema_migration WHERE version=40;")
-            .unwrap();
-        db.execute_batch(include_str!(
-            "../../../migrations/0040_selection_nonappend_generation.sql"
-        ))
-        .unwrap();
-        db.execute_batch("DROP INDEX IF EXISTS attachment_page_order; DELETE FROM schema_migration WHERE version>45; PRAGMA user_version=45;")
-            .unwrap();
+        let db = crate::storage::historical_memory(45);
         db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('t','/','','p','m','now')",[]).unwrap();
         db.execute(
             "INSERT INTO app_meta VALUES('compact.a_state.t',?1)",

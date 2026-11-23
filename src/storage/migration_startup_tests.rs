@@ -1,28 +1,6 @@
 use super::*;
 use migration_integrity::{Check, pending, persist};
 
-fn downgrade_copy(db: &Connection, version: i64) {
-    db.execute_batch(crate::storage::REWIND_CURRENT_TO_42)
-        .unwrap();
-    db.execute_batch("DROP INDEX node_notification_event; ALTER TABLE node DROP COLUMN notification_event_id; ALTER TABLE event DROP COLUMN semantic_json; DROP INDEX receipt_reply_node_lookup;")
-        .unwrap();
-    db.execute_batch("DROP INDEX IF EXISTS receipt_human_reply_pending; DROP INDEX IF EXISTS jobs_running_recovery; ALTER TABLE thread DROP COLUMN auto_compact_at; ALTER TABLE thread DROP COLUMN segment_chars; ALTER TABLE thread DROP COLUMN reduce_rounds; DROP INDEX IF EXISTS threads_visible_updated; DROP INDEX IF EXISTS threads_archived_updated; DROP TABLE thread_tag; DROP INDEX threads_cwd_updated; DROP TRIGGER logical_index_embedding_chunk_insert; DROP TRIGGER logical_index_embedding_chunk_delete; DROP TRIGGER logical_index_embedding_chunk_update; DROP TRIGGER logical_index_space_insert; DROP TRIGGER logical_index_space_delete; DROP TRIGGER logical_index_space_update; DROP INDEX chunks_job; ALTER TABLE index_space DROP COLUMN int8_scale; ALTER TABLE thread DROP COLUMN archived_at;")
-        .unwrap();
-    if version < 26 {
-        db.execute_batch("DROP INDEX IF EXISTS receipt_reply_pending;")
-            .unwrap();
-    }
-    if version < 25 {
-        db.execute_batch("DROP INDEX IF EXISTS history_tool_group_attempt;")
-            .unwrap();
-    }
-    db.execute_batch("DROP INDEX IF EXISTS attachment_page_order;")
-        .unwrap();
-    db.execute("DELETE FROM schema_migration WHERE version>?1", [version])
-        .unwrap();
-    db.pragma_update(None, "user_version", version).unwrap();
-}
-
 fn orphan(db: &Connection) {
     db.execute_batch("PRAGMA foreign_keys=OFF; INSERT INTO run(id,thread_id,state,created_at) VALUES('orphan','missing','completed','now');").unwrap();
 }
@@ -31,8 +9,8 @@ fn orphan(db: &Connection) {
 fn run_rebuild_upgrade_requires_full_scan_and_preserves_pending_on_corruption() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("db");
-    let db = open_connection(&path, None, None, true).unwrap();
-    downgrade_copy(&db, 26);
+    let mut db = Connection::open(&path).unwrap();
+    build_historical_schema(&mut db, 26);
     orphan(&db);
     drop(db);
     assert!(open_connection(&path, None, None, true).is_err());
@@ -45,8 +23,8 @@ fn run_rebuild_upgrade_requires_full_scan_and_preserves_pending_on_corruption() 
 fn real_upgrade_without_metadata_checks_full_and_keeps_pending_on_failure() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("db");
-    let db = open_connection(&path, None, None, true).unwrap();
-    downgrade_copy(&db, 23); // Migration24 has no impact metadata.
+    let mut db = Connection::open(&path).unwrap();
+    build_historical_schema(&mut db, 23); // Migration24 has no impact metadata.
     orphan(&db);
     drop(db);
     assert!(open_connection(&path, None, None, true).is_err());
@@ -107,8 +85,8 @@ fn scoped_pending_survives_current_version_reopen_and_checks_only_its_tables() {
 fn interrupted_upgrade_and_later_integrity_error_both_keep_pending() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("db");
-    let db = open_connection(&path, None, None, true).unwrap();
-    downgrade_copy(&db, 26);
+    let mut db = Connection::open(&path).unwrap();
+    build_historical_schema(&mut db, 26);
     db.execute_batch("CREATE TABLE jobs_running_recovery(id INTEGER);")
         .unwrap();
     drop(db);
@@ -134,7 +112,7 @@ fn interrupted_upgrade_and_later_integrity_error_both_keep_pending() {
 async fn measure_startup_on_snapshot_copies() {
     let source = std::path::PathBuf::from(
         std::env::var_os("SHELLBOY_STARTUP_SNAPSHOT")
-            .expect("provide a closed VACUUM INTO snapshot"),
+            .expect("provide a closed schema-24 VACUUM INTO snapshot"),
     );
     for repetition in 1..=3 {
         for baseline in [true, false] {
@@ -142,8 +120,7 @@ async fn measure_startup_on_snapshot_copies() {
             let path = temp.path().join("copy.db");
             std::fs::copy(&source, &path).unwrap();
             let db = Connection::open(&path).unwrap();
-            assert_eq!(schema_version(&db).unwrap(), SCHEMA_VERSION);
-            downgrade_copy(&db, 24);
+            assert_eq!(schema_version(&db).unwrap(), 24);
             if baseline {
                 // Preserve the previous full-check policy, with otherwise
                 // identical migration/startup code and the same snapshot.

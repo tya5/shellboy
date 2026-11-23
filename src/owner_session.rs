@@ -332,15 +332,18 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn cancellation_at_database_preparation_finishes_migration_before_releasing_owner() {
-        let (_root, config, data) = fixture().await;
+        let _root = tempfile::tempdir().unwrap();
+        let config = _root.path().join("config.toml");
+        std::fs::write(&config, "").unwrap();
+        let data = _root.path().join("data");
+        std::fs::create_dir(&data).unwrap();
         let path = data.join("shellboy.db");
         tokio::task::spawn_blocking(move || {
-            let db = rusqlite::Connection::open(path).unwrap();
-            // Prepare an older supported fixture before startup. No second
-            // writer remains to race the production 2-second busy timeout.
-            db.execute_batch(crate::storage::REWIND_CURRENT_TO_42).unwrap();
-            db.execute_batch("BEGIN IMMEDIATE; DROP INDEX thread_parent; DROP INDEX wait_run_state; DROP INDEX wait_recovery_thread; DROP INDEX thread_answer_latest; DROP INDEX receipt_thread_order; DROP INDEX shell_started_readback; DROP INDEX shell_owner_started_readback; DROP INDEX compact_operation_thread; DROP INDEX automatic_compaction_turn; DROP INDEX node_turn; DROP INDEX IF EXISTS receipt_turn_source; DROP INDEX shell_active_owner; DROP INDEX run_thread_created; DROP INDEX shell_terminal_time; DROP INDEX draft_state_thread_updated; DROP INDEX draft_submitted_source_revision; ALTER TABLE turn DROP COLUMN interrupt_requested_at; ALTER TABLE receipt DROP COLUMN path_admission; DROP INDEX IF EXISTS node_event_retention; DROP INDEX IF EXISTS delivery_event_state; DROP INDEX IF EXISTS receipt_run_completion; DROP INDEX IF EXISTS attempts_completed_scope; DROP INDEX IF EXISTS receipt_reply_pending; DROP INDEX IF EXISTS history_tool_group_attempt; DROP INDEX IF EXISTS jobs_running_recovery; ALTER TABLE thread DROP COLUMN auto_compact_at; ALTER TABLE thread DROP COLUMN segment_chars; ALTER TABLE thread DROP COLUMN reduce_rounds; DROP INDEX IF EXISTS threads_visible_updated; DROP INDEX IF EXISTS threads_archived_updated; DROP TABLE thread_tag; DROP INDEX threads_cwd_updated; DROP TRIGGER logical_index_embedding_chunk_insert; DROP TRIGGER logical_index_embedding_chunk_delete; DROP TRIGGER logical_index_embedding_chunk_update; DROP TRIGGER logical_index_space_insert; DROP TRIGGER logical_index_space_delete; DROP TRIGGER logical_index_space_update; DROP INDEX chunks_job; ALTER TABLE index_space DROP COLUMN int8_scale; ALTER TABLE thread DROP COLUMN archived_at; DROP INDEX node_notification_event; ALTER TABLE node DROP COLUMN notification_event_id; ALTER TABLE event DROP COLUMN semantic_json; DROP INDEX receipt_reply_node_lookup; DROP INDEX IF EXISTS attachment_page_order; DELETE FROM schema_migration WHERE version>=8; DROP INDEX IF EXISTS receipt_human_reply_pending; PRAGMA user_version=7; COMMIT;").unwrap();
-        }).await.unwrap();
+            let mut db = rusqlite::Connection::open(path).unwrap();
+            crate::storage::build_historical_schema(&mut db, 7);
+        })
+        .await
+        .unwrap();
         let token = CancellationToken::new();
         let cancel = token.clone();
         let initializing_data = data.clone();

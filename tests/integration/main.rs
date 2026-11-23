@@ -227,6 +227,8 @@ mod exec_client;
 #[path = "../support/watchdog.rs"]
 pub(crate) mod test_watchdog;
 
+#[path = "../support/legacy_rows.rs"]
+pub(crate) mod legacy_rows;
 #[path = "../support/schema42_fixture.rs"]
 pub(crate) mod schema42_fixture;
 #[path = "../support/schema42_integration_migrations.rs"]

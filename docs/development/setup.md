@@ -232,10 +232,9 @@ these four places, each next to the name:
 
 Everything else names the migration, never its number: docs say ``migration
 `next_<slug>` ``, and Rust code or tests that need the number look it up by name
-in `crate::storage::MIGRATION_NAMES`. Tests that rewind `current.sql` past the
-new migration (`tests/fixtures/rewind-schedule-schema.sql` and the rewind tests
-in `storage::migrate`) fail until they also undo it; add its inverse there,
-deleting the ledger row `WHERE name='next_<slug>'`. A migration that rebuilds tables with
+in `crate::storage::MIGRATION_NAMES`. Historical upgrade fixtures build forward
+to a pinned schema before inserting test rows. New migrations do not add inverse
+DDL to these fixtures. A migration that rebuilds tables with
 foreign keys off starts with the line `-- rebuild: foreign keys off`;
 `storage::migrate` and `scripts/check-release-upgrade.py` read that marker, and
 the release-upgrade and error-catalogue scripts take the current schema from
@@ -476,12 +475,11 @@ run it through `rust-slot` so the shared binary cannot change during a repeat.
 
 The ignored unit test `storage::migration_startup_tests::measure_startup_on_snapshot_copies`
 measures database startup stages on disposable filesystem copies of an explicitly
-provided, closed `VACUUM INTO` snapshot. Set `SHELLBOY_STARTUP_SNAPSHOT` to that
+provided, closed schema-24 `VACUUM INTO` snapshot. Set `SHELLBOY_STARTUP_SNAPSHOT` to that
 snapshot and run `cargo test --locked --lib
 storage::migration_startup_tests::measure_startup_on_snapshot_copies -- --ignored
 --exact --nocapture` (through `rust-slot` in the sandbox). Never pass a live WAL
-file as the snapshot. The source is only copied, never modified; each disposable
-copy is reset to schema24 by removing migrations25-27's indexes and ledger entries.
+file as the snapshot. The source is only copied, never modified.
 No owner, model/provider or recovery worker is started. Output contains only
 numeric stage observations, not stored records.
 

@@ -147,7 +147,14 @@ mod migration_startup_tests;
 pub(crate) mod statement_observation;
 pub(crate) const CURRENT_SCHEMA: &str = include_str!("storage/current.sql");
 #[cfg(test)]
-pub(crate) use schema42_test_fixture::REWIND_CURRENT_TO_42;
+pub(crate) use schema42_test_fixture::build_historical_schema;
+
+#[cfg(test)]
+pub(crate) fn historical_memory(version: usize) -> Connection {
+    let mut db = Connection::open_in_memory().unwrap();
+    build_historical_schema(&mut db, version);
+    db
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum StorageError {
@@ -2220,24 +2227,7 @@ mod schema_validation_tests {
         let db = Connection::open_in_memory().unwrap();
         db.execute_batch(CURRENT_SCHEMA).unwrap();
         assert_eq!(validate_schema(&db).unwrap(), SCHEMA_VERSION);
-        db.execute_batch(
-            "DROP INDEX threads_created;
-             ALTER TABLE thread DROP COLUMN created_at;
-             DROP INDEX IF EXISTS attachment_page_order; DELETE FROM schema_migration WHERE version=46;
-             ALTER TABLE thread DROP COLUMN spill_override;
-             DROP INDEX IF EXISTS attachment_page_order; DELETE FROM schema_migration WHERE version=45;
-             ALTER TABLE thread DROP COLUMN max_tokens;
-             DROP INDEX IF EXISTS attachment_page_order; DELETE FROM schema_migration WHERE version=44;
-             ALTER TABLE thread DROP COLUMN summary_max_chars;
-             ALTER TABLE thread DROP COLUMN auto_compact_target_percent;
-             ALTER TABLE thread ADD COLUMN segment_chars INTEGER CHECK(segment_chars IS NULL OR segment_chars BETWEEN 2000 AND 1000000);
-             ALTER TABLE thread ADD COLUMN reduce_rounds INTEGER CHECK(reduce_rounds IS NULL OR reduce_rounds BETWEEN 1 AND 16);
-             DROP INDEX IF EXISTS attachment_page_order; DELETE FROM schema_migration WHERE version=43;
-             PRAGMA user_version=42;",
-        )
-        .unwrap();
-        db.execute_batch("DROP INDEX IF EXISTS node_event_retention; DROP INDEX IF EXISTS delivery_event_state; DROP INDEX IF EXISTS receipt_run_completion; DROP INDEX IF EXISTS attempts_completed_scope; DROP INDEX IF EXISTS receipt_reply_pending; DROP INDEX IF EXISTS history_tool_group_attempt; DROP INDEX IF EXISTS jobs_running_recovery; ALTER TABLE thread DROP COLUMN auto_compact_at; ALTER TABLE thread DROP COLUMN segment_chars; ALTER TABLE thread DROP COLUMN reduce_rounds; DROP INDEX IF EXISTS threads_visible_updated; DROP INDEX IF EXISTS threads_archived_updated; DROP TABLE thread_tag; DROP INDEX threads_cwd_updated; DROP TRIGGER logical_index_embedding_chunk_insert; DROP TRIGGER logical_index_embedding_chunk_delete; DROP TRIGGER logical_index_embedding_chunk_update; DROP TRIGGER logical_index_space_insert; DROP TRIGGER logical_index_space_delete; DROP TRIGGER logical_index_space_update; DROP INDEX chunks_job; ALTER TABLE index_space DROP COLUMN int8_scale; ALTER TABLE thread DROP COLUMN archived_at; DROP INDEX node_notification_event; ALTER TABLE node DROP COLUMN notification_event_id; ALTER TABLE event DROP COLUMN semantic_json; DROP INDEX receipt_reply_node_lookup; DROP INDEX IF EXISTS attachment_page_order; DELETE FROM schema_migration WHERE version>=10; DROP INDEX IF EXISTS receipt_human_reply_pending; PRAGMA user_version=9;")
-            .unwrap();
+        let db = historical_memory(9);
         assert!(
             matches!(validate_schema(&db), Err(StorageError::Schema(message)) if message.contains("current writer"))
         );

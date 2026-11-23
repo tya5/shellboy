@@ -1405,11 +1405,18 @@ async fn schema49_migrated_legacy_summary_reopens_as_user_before_newer_user_in_o
     initial_owner.shutdown().await.unwrap();
     {
         let path = root.path().join("data/shellboy.db");
-        let db = rusqlite::Connection::open(path).unwrap();
-        db.execute_batch(include_str!("fixtures/rewind-schedule-schema.sql"))
-            .unwrap();
-        db.execute_batch("DROP INDEX IF EXISTS attachment_page_order; DELETE FROM schema_migration WHERE version>=49; PRAGMA user_version=48;")
-            .unwrap();
+        crate::legacy_rows::seed(
+            &path,
+            48,
+            &[
+                "thread",
+                "node",
+                "thread_path",
+                "replacement",
+                "replacement_source",
+                "thread_replacement",
+            ],
+        );
     }
     let reopened_owner = owner(root.path(), &url).await;
     let control = Control::new(&reopened_owner, root.path().into());
