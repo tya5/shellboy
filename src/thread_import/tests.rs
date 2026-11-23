@@ -43,5 +43,23 @@ fn thread_import_refuses_unresolved_internal_references() {
         r#"{"type":"tombstone","role":"current","node":{"id":"first","order":1,"current_ordinal":0,"provenance":{"kind":"user","created_at":"now","source_revision":0}},"relations":{"previous":[{"id":"absent","scope":"internal"}],"next":[],"replacement_groups":[],"replaced_by":[]},"reason":"pruned"}"#,
         "\n"
     ));
-    assert!(validate(&archive).is_err());
+    assert!(
+        validate(&archive)
+            .err()
+            .unwrap()
+            .message
+            .contains("graph metadata")
+    );
+}
+
+#[test]
+fn thread_import_matching_epoch_disables_opaque_replay_even_when_kept() {
+    let input = serde_json::json!({"reasoning_epoch":0,"output":[{"type":"reasoning","encrypted_content":"secret"},{"type":"provider_opaque","dialect":"anthropic_messages","kind":"thinking","block":{"thinking":"readable","signature":"signed"}},{"type":"message","role":"assistant","content":[]}]});
+    assert_eq!(
+        crate::control::replay::convert_source(input.clone(), 0, true, false).len(),
+        3
+    );
+    let actual = crate::control::replay::convert_source(input.clone(), 0, true, true);
+    assert_eq!(actual, vec![input["output"][2].clone()]);
+    assert_eq!(input["output"][0]["encrypted_content"], "secret");
 }
