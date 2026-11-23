@@ -599,12 +599,36 @@ pub(crate) fn staged_capture_threads(db: &Connection) -> rusqlite::Result<Vec<St
     statement.query_map([], |row| row.get(0))?.collect()
 }
 
+pub(super) fn discard_staged_captures(tx: &Transaction<'_>, thread: &str) -> rusqlite::Result<()> {
+    tx.execute(
+        "DELETE FROM event WHERE target_thread_id=?1 AND kind='context_changed'
+         AND json_extract(payload_ref_json,'$.kind') IN ('interruption_capture_header','interruption_capture_row')",
+        [thread],
+    )?;
+    Ok(())
+}
+
 /// Consume a complete saved capture atomically for this Thread after unwind.
 pub(crate) fn consume_staged_captures(
     tx: &Transaction<'_>,
     thread: &str,
     at: &str,
 ) -> Result<(), StorageError> {
+    let (deleted, appendable): (bool, bool) = tx.query_row(
+        "SELECT deleted_at IS NOT NULL, cursor_node_id IS
+         (SELECT node_id FROM thread_path WHERE thread_id=?1 ORDER BY ordinal DESC LIMIT 1)
+         FROM thread WHERE id=?1",
+        [thread],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    if deleted {
+        discard_staged_captures(tx, thread)?;
+        return Ok(());
+    }
+    if !appendable {
+        return Ok(());
+    }
+
     let headers: Vec<(String, String, String, String)> = tx
         .prepare("SELECT id,source_json,payload_ref_json,created_at FROM event WHERE target_thread_id=?1 AND kind='context_changed' AND json_extract(payload_ref_json,'$.kind')='interruption_capture_header' ORDER BY created_at,id")?
         .query_map([thread], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?)))?
@@ -647,17 +671,6 @@ pub(crate) fn consume_staged_captures(
                 "capture header provenance mismatch".into(),
             ));
         }
-        let target_exists: bool = tx.query_row(
-            "SELECT EXISTS(SELECT 1 FROM thread WHERE id=?1 AND deleted_at IS NULL)",
-            [thread],
-            |row| row.get(0),
-        )?;
-        if !target_exists {
-            return Err(StorageError::Schema(
-                "capture target Thread is unavailable".into(),
-            ));
-        }
-
         let prefix = format!("ic:{capture_id}:");
         let upper = format!("ic:{capture_id};");
         let expected_final_text = final_payload.to_string();
@@ -850,6 +863,84 @@ pub(crate) fn consume_staged_captures(
 #[cfg(test)]
 mod tool_snapshot_tests {
     use super::*;
+
+    #[test]
+    fn staged_captures_follow_thread_deletion_and_cursor_recovery() {
+        for disposition in ["delete", "tombstone", "repair"] {
+            let mut db = Connection::open_in_memory().unwrap();
+            db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+            db.execute_batch("INSERT INTO node(id,kind,created_at,payload_json) VALUES('off-path','user','now','{}');
+                INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at,cursor_node_id) VALUES('t','/','/','p','m','now','off-path');
+                INSERT INTO run(id,thread_id,state,created_at) VALUES('r','t','live','now');
+                INSERT INTO event(id,kind,source_json,target_thread_id,payload_ref_json,created_at) VALUES('published','context_changed','{}','t','{}','now');").unwrap();
+            let tx = db.transaction().unwrap();
+            capture_interrupted_context(&tx, "capture", "app_shutdown", "shutdown").unwrap();
+            tx.execute(
+                "UPDATE run SET state='stopped',ended_at='now' WHERE id='r'",
+                [],
+            )
+            .unwrap();
+            tx.commit().unwrap();
+            let staged = |db: &Connection| {
+                db.query_row("SELECT count(*) FROM event WHERE id GLOB 'ic:*'", [], |r| {
+                    r.get::<_, i64>(0)
+                })
+                .unwrap()
+            };
+            let initial = staged(&db);
+            assert!(initial > 1);
+            let tx = db.transaction().unwrap();
+            match disposition {
+                "delete" => {
+                    super::super::db::delete_thread(
+                        &tx,
+                        &crate::protocol::ThreadDeleteArgs {
+                            thread_id: "t".into(),
+                            descendants: false,
+                            preview_marker: None,
+                        },
+                        "deleted",
+                    )
+                    .unwrap();
+                }
+                "tombstone" => {
+                    // Existing tombstones must discard staging before validating the cursor.
+                    tx.execute("UPDATE thread SET deleted_at='deleted' WHERE id='t'", [])
+                        .unwrap();
+                    consume_staged_captures(&tx, "t", "startup").unwrap();
+                }
+                "repair" => {
+                    consume_staged_captures(&tx, "t", "startup").unwrap();
+                    assert_eq!(staged(&tx), initial);
+                    capture_interrupted_context(&tx, "again", "app_shutdown", "shutdown").unwrap();
+                    assert_eq!(staged(&tx), initial, "an existing capture is not replaced");
+                    tx.execute("UPDATE thread SET cursor_node_id=NULL WHERE id='t'", [])
+                        .unwrap();
+                    consume_staged_captures(&tx, "t", "repaired").unwrap();
+                }
+                _ => unreachable!(),
+            }
+            assert_eq!(staged(&tx), 0);
+            assert_eq!(
+                tx.query_row(
+                    "SELECT count(*) FROM node WHERE kind='interruption_context'",
+                    [],
+                    |r| r.get::<_, u32>(0)
+                )
+                .unwrap(),
+                u32::from(disposition == "repair")
+            );
+            assert!(
+                tx.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM event WHERE id='published')",
+                    [],
+                    |r| r.get::<_, bool>(0)
+                )
+                .unwrap()
+            );
+            tx.commit().unwrap();
+        }
+    }
 
     #[test]
     fn terminal_turn_pending_calls_are_recorded_separately_from_actual_shells() {
