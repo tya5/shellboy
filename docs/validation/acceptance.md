@@ -12200,3 +12200,14 @@ Purpose checks cover typed replies for owner-side failures, clean EOF without a 
 ## Core #327 attachment list pages (verification pending)
 
 Purpose coverage adds a multi-page attachment list assertion for first-page and cursor continuation order, plus a direct observation counter assertion equal to the returned page length. On this candidate, paging/CLI/index-plan integration selectors passed 3/3, observation count passed 1/1, schema snapshot passed 1/1, and clippy `--all-targets -- -D warnings` passed. The full suite was not run; same-SHA hosted CI remains pending.
+
+## #377 - Common instruction file warnings and live config edits
+
+- A missing or invalid common file does not prevent capturing other configured
+  files in order. `status` Run items and `thread get` surface a typed warning;
+  same-Turn replay keeps the captured prompt and warning without re-reading it.
+- With an owner still using an old list and a newer list already on disk,
+  hash-checked `config set` returns `written: false` and
+  `applied_to_running_owner: true`. A repeat against the adopted value is a
+  true no-op. A real-machine live-owner follow-up is separate from the
+  temporary-store witness; no installed-owner test is claimed.

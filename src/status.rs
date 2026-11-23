@@ -55,6 +55,8 @@ pub struct WorkItem {
     pub attempt_connection: Option<String>,
     pub attempt_model: Option<String>,
     pub reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub instruction_warnings: Vec<InstructionWarning>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub compaction_outcome: Option<crate::compaction::discard::CompactionOutcomeFact>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -479,6 +481,7 @@ fn work_item(row: &rusqlite::Row<'_>, kind: WorkKind, state: String) -> Result<P
             .get::<_, Option<String>>(14)
             .map_err(sql)?
             .map(|s| short(s, 256)),
+        instruction_warnings: Vec::new(),
         compaction_outcome: None,
         reason: row
             .get::<_, Option<String>>(15)
@@ -611,8 +614,32 @@ pub fn snapshot(db: &Connection, args: &StatusArgs, instance: &str) -> Result<St
         .iter()
         .map(|b| format!("{b:02x}"))
         .collect::<String>();
-    let next_cursor = if selected.len() > args.limit as usize {
-        selected.pop();
+    // A page can hold many Runs; bound the added warning bytes without hiding
+    // any Run's warnings. The ordinary cursor resumes at the first deferred row.
+    let mut remaining_warning_bytes = 256_usize * 1024;
+    let mut page_len = 0;
+    for projected in selected.iter_mut().take(args.limit as usize) {
+        if projected.item.kind == "run" {
+            let warnings: Option<String> = db
+                .query_row(
+                    "SELECT instruction_warnings_json FROM run WHERE id=?1",
+                    [&projected.item.id],
+                    |r| r.get(0),
+                )
+                .map_err(sql)?;
+            if let Some(warnings) = warnings {
+                let Some(remaining) = remaining_warning_bytes.checked_sub(warnings.len()) else {
+                    break;
+                };
+                remaining_warning_bytes = remaining;
+                projected.item.instruction_warnings =
+                    crate::instructions::decode_warnings(Some(&warnings));
+            }
+        }
+        page_len += 1;
+    }
+    let next_cursor = if selected.len() > page_len {
+        selected.truncate(page_len);
         let last = &selected.last().expect("nonzero page").item;
         Some(encode_cursor(&Cursor {
             version: 2,

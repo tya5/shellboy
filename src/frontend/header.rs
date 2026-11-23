@@ -150,6 +150,7 @@ pub(super) fn read_tx(db: &Connection, thread: &str) -> Result<RawHeader, Storag
     }
     let details = ThreadDetails {
         instruction_sources: None,
+        instruction_warnings: Vec::new(),
         archived_at: None,
         tags: Vec::new(),
         auto_compact_at: row.get::<_, Option<i64>>(14)?.map(|v| v as u64),

@@ -68,10 +68,12 @@ at most 4096 bytes each; at most eight entries are accepted. Each file must be r
 of captured content, including an empty file. This bounds extra content to 64 KiB. Symlinks to regular files follow
 the ordinary file-read rules. These files are trusted user configuration, not a sandbox or a secret store.
 
-At new-Turn preparation, the existing bounded control-file lane reads the current adopted list and all file bodies.
-Missing, unreadable, nonregular, invalid-UTF-8 or oversized configured files fail preparation visibly; nothing is
-silently excluded and no partially assembled request is sent. Existing recovery/retry reporting surfaces the error
-and path. Unlike optional Thread AGENTS absence, explicitly registered common-file absence is an error.
+At new-Turn preparation, the existing bounded control-file lane reads the current adopted list. Each missing,
+unreadable, nonregular, invalid-UTF-8 or oversized common file is omitted, while other common files still apply
+in order. Its typed path and reason are saved on the Run in the snapshot transaction. `status` reads the warnings
+on Run items; `thread get` reads the latest Run's warnings. A successful later preparation in the same Run replaces
+the previous observation, including clearing it when no files are skipped. This does not relax per-Thread AGENTS
+handling, invalid cwd handling, or the shared control-file worker deadline. There is no watcher or path removal.
 
 Built-in instructions remain first, then each common file in configured order as a separate developer item, then
 Thread AGENTS if present. Headers identify the source path; body text does not gain timestamps or changing metadata.

@@ -84,7 +84,7 @@ impl Control {
                 let _guard = guard;
                 let applied = crate::config_edit::apply_live(&path, &args.expected_hash, &args.changes, &config, &clients)?;
                 // Publish under the write guard even if the caller has stopped waiting.
-                if applied.written {
+                if applied.written || applied.applied_to_running_owner {
                     change_clock.record_config_changed();
                 }
                 Ok(applied)
@@ -105,7 +105,7 @@ impl Control {
                 "Config edit result is not an object",
             ));
         };
-        if applied.written {
+        if applied.written || applied.applied_to_running_owner {
             let ids = caller.map_or_else(crate::diagnostics::DiagnosticIds::default, |origin| {
                 crate::diagnostics::DiagnosticIds {
                     attempt_id: None,

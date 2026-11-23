@@ -970,36 +970,21 @@ extra_instructions = ["/absolute/path/to/studio-guide.md", "/absolute/path/to/us
 ```
 
 Only listed files apply. The default is an empty list. Use absolute UTF-8 paths (maximum 4096 bytes each), at most
-eight files and 8192 UTF-8 bytes per file. Missing/unreadable/nonregular/oversized/invalid-UTF-8 files stop the next
-Turn's preparation with a visible error; they are not silently skipped. Fix the file or remove the registration and
-retry. This is user instruction text sent to the selected provider; do not register secrets.
+eight files and 8192 UTF-8 bytes per file. On a new Turn, an unreadable, missing, nonregular, oversized or
+invalid-UTF-8 file is skipped. Other readable common files still apply in order, before the Thread's AGENTS.md.
+These files are developer instructions sent to the selected provider; do not register secrets.
 
-After obtaining the user's confirmation, an external component can use `config get` and then `config set` with its
-expected hash to update `extra_instructions` as a JSON array of paths. Preserve existing entries and ordering;
-registration is not automatic and the API does not itself assert that consent was obtained. The running owner
-adopts this field immediately, but already prepared Turns keep their saved bodies. The next new Turn observes the
-list and file edits. Direct configuration-file edits still require restart. Common files precede per-Thread AGENTS
-as separate developer items; placing a file in a directory or linking it in prose does not activate it.
+After obtaining the user's confirmation, use `config get` and hash-checked `config set` to update
+`extra_instructions` as a JSON array of paths. Preserve other entries and ordering. A live edit affects the next
+new Turn, not an already prepared Turn. If the file was edited by hand, use its current `file.content_hash` and
+submit the desired value with `config set` to bring the running owner up to date. It can report `written: false`
+and `applied_to_running_owner: true` together. There is no file watcher; restart-only settings are unchanged.
 
-Inspect registered paths with `config get`, captured sources with `thread get`, and request item/content accounting
-with `thread request` (add `--body` only when you intend to display instruction content).
-
-### Recovering from a broken common instruction file
-
-A bad registered file blocks new unprepared Turns across Threads; already prepared Turns retain their captured
-instructions. The configuration/control CLI remains usable without a model request. Repair that file (valid UTF-8,
-regular readable file, at most 8192 bytes), then explicitly resume/retry the affected Run. If the file is no longer
-wanted, run `shellboy config get`, take its current `file.content_hash`, and use hash-checked `config set` to replace
-`extra_instructions` with the remaining absolute paths in their original order. An empty array disables all common
-registrations. Follow `shellboy config set --help` for the JSON changes syntax; preserve unrelated entries and never
-blindly overwrite another component's registration. A successful live change does not require owner restart.
-
-After repair/removal, explicitly resume the failed Run (including `--resume-recovery` for nonhuman message delivery
-where required) or submit a new human Turn, then inspect `thread get`/`thread request`. Preparation that failed before
-saving a snapshot will observe the repaired list; a Turn that already saved its snapshot intentionally keeps it.
-This fail-closed policy is retained after review: silently omitting an explicit instruction file would hide a change
-to the user's chosen guidance. Registration, repair and inspection do not require the blocked model to run.
-
+`status --run RUN_ID` shows `instruction_warnings` on the Run item, and `thread get --thread THREAD_ID` shows
+warnings for the latest Run. Each warning identifies the skipped path and its reason, not its contents.
+Use `config get` for registrations, `thread get` for captured sources, and `thread request` for saved request
+accounting. Repair the named file or explicitly remove the registration. The next new Turn rechecks the files;
+a retry/tool continuation of a prepared Turn keeps its snapshot. No paths are removed automatically.
 
 ### Output Token Limit
 

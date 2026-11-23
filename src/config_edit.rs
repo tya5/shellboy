@@ -557,6 +557,7 @@ fn changed_names(before: &BTreeMap<String, Leaf>, after: &BTreeMap<String, Leaf>
 pub struct Applied {
     pub result: Value,
     pub written: bool,
+    pub applied_to_running_owner: bool,
     pub fields: Vec<String>,
 }
 /// Blocking. Reads, compares the hash, validates the whole result, then replaces the file.
@@ -662,17 +663,47 @@ fn apply_runtime(
         }
     }
     let before = parse_file(&state.bytes, path).ok();
-    let written = edited != text;
+    // A value already present in TOML does not need rewriting just to adopt
+    // it live (for example, if a hand edit used different quoting).
+    let written = edited != text
+        && (runtime.is_none()
+            || toml::from_str::<toml::Value>(text).ok()
+                != toml::from_str::<toml::Value>(&edited).ok());
+    let edited = if written { edited.as_str() } else { text };
     let after_fields = fields(&after);
     let before_fields = before.as_ref().map(fields);
     let empty = BTreeMap::new();
-    let names = changed_names(before_fields.as_ref().unwrap_or(&empty), &after_fields);
+    let mut names = changed_names(before_fields.as_ref().unwrap_or(&empty), &after_fields);
+    let owner_fields = runtime.map(|(loaded, clients)| {
+        let snapshot = clients.snapshot();
+        let mut owner = loaded.clone();
+        owner.connections = snapshot.connections.clone();
+        owner.default_connection = snapshot.default_connection.clone();
+        owner.default_model = snapshot.default_model.clone();
+        owner.extra_instructions = snapshot.extra_instructions.clone();
+        fields(&owner)
+    });
+    let live_names: Vec<_> = match (runtime, &owner_fields) {
+        (Some((loaded, _)), Some(owner_fields)) => changed_names(owner_fields, &after_fields)
+            .into_iter()
+            .filter(|name| live_field(name, loaded.embedding.connection.as_deref()))
+            .collect(),
+        _ => Vec::new(),
+    };
+    let disk_names = names.clone();
+    names.extend(live_names.iter().cloned());
+    names.sort();
+    names.dedup();
     let entries: Vec<Value> = names
         .iter()
         .map(|name| {
             change_entry(
                 name,
-                before_fields.as_ref().map(|all| all.get(name)),
+                if disk_names.binary_search(name).is_ok() {
+                    before_fields.as_ref().map(|all| all.get(name))
+                } else {
+                    owner_fields.as_ref().map(|all| all.get(name))
+                },
                 after_fields.get(name),
             )
         })
@@ -692,8 +723,11 @@ fn apply_runtime(
         for entry in entries.iter_mut() {
             let field = entry["field"].as_str().expect("field name");
             let live = live_field(field, loaded.embedding.connection.as_deref());
+            let applied = live_names
+                .binary_search_by(|name| name.as_str().cmp(field))
+                .is_ok();
             entry["restart_required"] = json!(!live);
-            entry["applied_to_running_owner"] = json!(live);
+            entry["applied_to_running_owner"] = json!(applied);
         }
         let restart = entries.iter().any(|e| e["restart_required"] == true);
         let live = entries
@@ -723,12 +757,21 @@ fn apply_runtime(
     {
         result["warning"] = json!(warning);
     }
-    if let Some((loaded, clients)) = runtime {
+    if let Some((loaded, clients)) = runtime
+        && !live_names.is_empty()
+    {
+        if !written {
+            let current = read_state(path)?;
+            if current.hash != state.hash {
+                return Err(conflict(&state.hash, &current.hash));
+            }
+        }
         clients.adopt(&after, loaded.embedding.connection.as_deref());
     }
     Ok(Applied {
         result,
         written,
+        applied_to_running_owner: !live_names.is_empty(),
         fields: names,
     })
 }

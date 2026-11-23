@@ -4311,6 +4311,32 @@
       ],
       "type": "string"
     },
+    "InstructionWarning": {
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "reason": {
+          "$ref": "#/definitions/InstructionWarningReason"
+        }
+      },
+      "required": [
+        "path",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "InstructionWarningReason": {
+      "enum": [
+        "not_found",
+        "permission_denied",
+        "io_failed",
+        "not_regular_file",
+        "input_limit",
+        "invalid_utf8"
+      ],
+      "type": "string"
+    },
     "IpcAdmissionClass": {
       "properties": {
         "limit": {
@@ -10163,6 +10189,12 @@
           ]
         },
         "instruction_sources": true,
+        "instruction_warnings": {
+          "items": {
+            "$ref": "#/definitions/InstructionWarning"
+          },
+          "type": "array"
+        },
         "last_compaction": true,
         "last_end_message": {
           "default": null
@@ -12042,6 +12074,12 @@
         "id": {
           "type": "string"
         },
+        "instruction_warnings": {
+          "items": {
+            "$ref": "#/definitions/InstructionWarning"
+          },
+          "type": "array"
+        },
         "kind": {
           "type": "string"
         },
@@ -13809,6 +13847,12 @@
           ]
         },
         "instruction_sources": true,
+        "instruction_warnings": {
+          "items": {
+            "$ref": "#/definitions/InstructionWarning"
+          },
+          "type": "array"
+        },
         "last_compaction": true,
         "last_end_message": {
           "default": null
@@ -14052,6 +14096,12 @@
           ]
         },
         "instruction_sources": true,
+        "instruction_warnings": {
+          "items": {
+            "$ref": "#/definitions/InstructionWarning"
+          },
+          "type": "array"
+        },
         "last_compaction": true,
         "last_end_message": {
           "default": null

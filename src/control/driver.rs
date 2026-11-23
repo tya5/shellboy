@@ -612,7 +612,7 @@ async fn turn_instructions(
     if let Some((body, size, hash)) = saved {
         return Ok(size.map(|_| Arc::from(crate::instructions::saved_body(body, &hash))));
     }
-    let prepared = control
+    let (prepared, warnings) = control
         .instructions
         .prepare_with_extra(
             snapshot.cwd.clone(),
@@ -644,7 +644,11 @@ async fn turn_instructions(
             super::context::record_fact(&tx,&thread,"instructions_observed",json!({"kind":"shellboy","run_id":run}),json!({"before":previous.map(|(path,hash,size)|json!({"path":path,"hash":hash,"present":size.is_some()})),"after":{"path":path,"hash":hash,"present":size.is_some()}}),&now(),Fact::InstructionsObserved{observation})?;
         }
         tx.execute("INSERT INTO instruction_snapshot(id,source_path,content_hash,body,observed_size,observed_mtime,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7)",params![snapshot_id,path,hash,body,size,modified,now()])?;
-        tx.execute("UPDATE turn SET instruction_snapshot_id=?2 WHERE id=?1 AND instruction_snapshot_id IS NULL",params![turn,snapshot_id])?;
+        let saved = tx.execute("UPDATE turn SET instruction_snapshot_id=?2 WHERE id=?1 AND instruction_snapshot_id IS NULL",params![turn,snapshot_id])?;
+        if saved != 0 {
+            let warnings = (!warnings.is_empty()).then(|| json!(warnings).to_string());
+            tx.execute("UPDATE run SET instruction_warnings_json=?2 WHERE id=?1", params![run,warnings])?;
+        }
         tx.commit()?;
         Ok(())
     }).await.map_err(storage_error)?;

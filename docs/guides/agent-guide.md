@@ -833,15 +833,13 @@ Ask for the user's confirmation before registering an external component's commo
 is an explicit ordered array of absolute UTF-8 paths; preserve other registrations when using hash-checked
 `config.set`. No directory discovery occurs. At most eight regular UTF-8 files of 8192 bytes each are accepted.
 They apply to all Threads as developer instructions before the per-Thread role, beginning with the next prepared
-Turn. Same-Turn retries/tool calls keep saved text. A bad registered file visibly stops preparation; repair it or
-remove its entry rather than assuming the guidance loaded. `thread get.instruction_sources` describes the latest
-prepared Turn; `config get` shows registrations and `thread request` shows saved instruction accounting. Never put
-credentials in these files or claim consent was checked by the configuration API itself.
-
-If a registered common file breaks preparation across Threads, do not wait for a model to repair it: the control CLI
-still runs. Repair the named file or use `config get` and hash-checked `config.set` to remove that entry (preserving
-others); `[]` clears the list. Then explicitly retry/resume the affected Run. Already saved Turn instructions remain
-unchanged. Raw AGENTS JSON is literal text, never a declaration of internal instruction sources.
+Turn. Same-Turn retries/tool calls keep saved text. An unreadable file is skipped, not a reason to stop the Run.
+Check `instruction_warnings` in `shellboy status --run RUN_ID` and `shellboy thread get --thread THREAD_ID`
+for the path and reason. Fix the path or explicitly remove it through hash-checked `config set`, preserving
+other registrations. `config get` shows registrations; `thread get.instruction_sources` describes the latest
+prepared Turn. If the desired live value is already on disk, submitting it with `config set` and the current
+file hash updates a stale owner without rewriting the file. There is no automatic removal. Never put credentials
+in these files or claim consent was checked by the config API. Raw AGENTS JSON remains literal text.
 
 For `history.list` / `history.window` spill items, use additive `spill_tools.items` to associate compressed tool
 results with saved `call_id`, optional `execution_id` and optional `original_node_id`. At most eight sources are
