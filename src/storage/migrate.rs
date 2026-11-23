@@ -329,7 +329,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     },
     Migration {
         version: 62,
-        sql: include_str!("../../migrations/next_instruction_warnings.sql"),
+        sql: include_str!("../../migrations/0062_instruction_warnings.sql"),
         foreign_keys: None,
     },
 ];
