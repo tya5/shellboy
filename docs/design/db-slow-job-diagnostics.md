@@ -24,7 +24,9 @@ every completed statement. Integration tests normally link the production librar
 so the explicit `test-db-observation` feature is required to sample every statement
 in that library and its DB worker; normal integration runs retain production
 sampling. The feature is test-only and must not be enabled for release binaries.
-The standard checks exercise an integration worker with this feature. Separate
+The standard checks exercise an integration worker in a dedicated feature-only
+`db_observation_feature` target so they do not link the full integration suite
+a second time. Separate
 exhaustive observation checks indexed hot reads independently of the threshold.
 
 The existing progress handler captures at most one backtrace on the executing

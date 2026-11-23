@@ -5,6 +5,15 @@
 A model ask addressed to its own Thread is refused with `invalid_argument`
 and a hint to omit `--thread` when asking a person. Ordinary sends and named
 questions keep their routing. CLI help and the Agent Guide explain the distinction.
+## Core #376 CI check speed
+
+The standard checks run the same feature-only DB observation test in a small
+external harness instead of linking the full integration suite again. The
+collected-source query test still adds 10,000 unrelated relations to the real
+schema and checks the same VM-step bound and index; its seed uses bounded tool
+groups to avoid quadratic recovery-trigger work. No tests were skipped and no timeouts changed.
+Hosted before/after timing awaits the next green all-OS landing run.
+
 
 ## Core #309 pending message tests
 
