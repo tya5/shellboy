@@ -518,8 +518,9 @@ mod tests {
             )
             .unwrap();
             let candidate = std::sync::Mutex::new(None);
+            let wakes = Wakes::default();
             assert!((0..64).any(|_| {
-                history_step(db, job, BATCH, &candidate, None)
+                history_step(db, job, BATCH, &candidate, None, &wakes)
                     .unwrap()
                     .complete
             }));
