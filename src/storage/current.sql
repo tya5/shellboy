@@ -839,3 +839,6 @@ CREATE INDEX receipt_pending_to ON receipt(json_extract(result_json,'$.ask_name'
  WHERE json_extract(result_json,'$.reply.state')='pending';
 INSERT INTO schema_migration(version,name) VALUES(56,'0056_directional_reply_pending');
 PRAGMA user_version=56;
+ALTER TABLE node ADD COLUMN import_origin_json TEXT;
+INSERT INTO schema_migration(version,name) VALUES(57,'next_thread_import_origin');
+PRAGMA user_version=57;

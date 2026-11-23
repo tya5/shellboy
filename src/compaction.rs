@@ -158,6 +158,7 @@ pub struct Compactor {
 }
 #[derive(Clone, Debug)]
 struct Source {
+    imported: bool,
     id: String,
     turn: Option<String>,
     revision: i64,
@@ -474,11 +475,11 @@ impl Compactor {
             if stopping{return Err(StorageError::from(discard::rejected(discard::RejectionReason::RunStopped,"Compaction cancelled: Run is stopping")));}
             let latest_complete_turn=db.query_row("SELECT id FROM turn WHERE thread_id=?1 AND state='completed' ORDER BY rowid DESC LIMIT 1",[&thread],|r|r.get::<_,String>(0)).optional()?;
             let protected=db.prepare("SELECT message_node_id FROM receipt WHERE target_thread_id=?1 AND state IN ('accepted','held')")?.query_map(params![thread],|r|r.get::<_,String>(0))?.collect::<Result<HashSet<_>,_>>()?;
-            let rows=db.prepare("SELECT n.id,n.turn_id,n.payload_revision,n.payload_json,n.deleted_reason FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 ORDER BY p.ordinal")?.query_map([&thread],|r|Ok((r.get::<_,String>(0)?,r.get::<_,Option<String>>(1)?,r.get::<_,i64>(2)?,r.get::<_,Option<String>>(3)?,r.get::<_,Option<String>>(4)?)))?.collect::<Result<Vec<_>,_>>()?;
+            let rows=db.prepare("SELECT n.id,n.turn_id,n.payload_revision,n.payload_json,n.deleted_reason,n.import_origin_json IS NOT NULL FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 ORDER BY p.ordinal")?.query_map([&thread],|r|Ok((r.get::<_,String>(0)?,r.get::<_,Option<String>>(1)?,r.get::<_,i64>(2)?,r.get::<_,Option<String>>(3)?,r.get::<_,Option<String>>(4)?,r.get::<_,bool>(5)?)))?.collect::<Result<Vec<_>,_>>()?;
             let mut sources=Vec::new();
             let mut completed=HashSet::new();
             let mut seen=HashSet::new();
-            for (id,turn,revision,body,deleted) in rows {
+            for (id,turn,revision,body,deleted,imported) in rows {
                 let payload:Value=if let Some(body)=body {serde_json::from_str(&body).map_err(|e|StorageError::Schema(e.to_string()))?}else{json!({"role":"developer","content":[{"type":"input_text","text":format!("Original node {id} is unavailable: {}",deleted.unwrap_or_else(||"missing payload".into()))}]})};
                 if let Some(group)=payload.get("group_id").and_then(Value::as_str) && seen.insert(group.to_owned()) {
                     let complete:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM tool_group g WHERE g.id=?1 AND g.state='completed' AND NOT EXISTS(SELECT 1 FROM tool_call c WHERE c.group_id=g.id AND (c.state!='completed' OR NOT EXISTS(SELECT 1 FROM tool_result r WHERE r.group_id=c.group_id AND r.call_id=c.call_id))))",[group],|r|r.get(0))?;
@@ -486,7 +487,7 @@ impl Compactor {
                 }
                 let hash=key(&(revision,&payload));
                 let attachments=db.prepare("SELECT a.id,a.absolute_path,a.input_kind,COALESCE(s.state,'not_selected'),s.reason FROM attachment_ref a LEFT JOIN attachment_selection s ON s.attachment_id=a.id AND s.thread_id=?2 WHERE a.source_node_id=?1 ORDER BY a.created_at,a.id")?.query_map(params![id,thread],|r|Ok(json!({"id":r.get::<_,String>(0)?,"path":r.get::<_,String>(1)?,"kind":r.get::<_,String>(2)?,"state":r.get::<_,String>(3)?,"reason":r.get::<_,Option<String>>(4)?})))?.collect::<Result<Vec<_>,_>>()?;
-                sources.push(Source{id,turn,revision,hash,payload,attachments});
+                sources.push(Source{id,turn,revision,hash,payload,attachments,imported});
             }
             let groups=source_groups(sources,&completed);
             let mut turn_boundaries=HashMap::new();
@@ -530,7 +531,13 @@ impl Compactor {
                 let before = group
                     .sources
                     .iter()
-                    .map(|source| edit::projection_characters(&source.payload, snapshot.epoch))
+                    .map(|source| {
+                        edit::source_projection_characters(
+                            &source.payload,
+                            snapshot.epoch,
+                            source.imported,
+                        )
+                    })
                     .fold(0u64, u64::saturating_add);
                 spill_payload(group).is_some_and(|payload| {
                     let after = edit::projection_characters(&payload, snapshot.epoch);
@@ -597,7 +604,13 @@ impl Compactor {
                 let before = snapshot.groups[*i]
                     .sources
                     .iter()
-                    .map(|source| edit::projection_characters(&source.payload, snapshot.epoch))
+                    .map(|source| {
+                        edit::source_projection_characters(
+                            &source.payload,
+                            snapshot.epoch,
+                            source.imported,
+                        )
+                    })
                     .fold(0u64, u64::saturating_add);
                 before.saturating_sub(edit::projection_characters(payload, snapshot.epoch))
             })
@@ -1035,6 +1048,7 @@ pub(crate) fn test_spill_reduces(sources: &[(String, Value)], epoch: i64) -> boo
         sources: sources
             .iter()
             .map(|(id, payload)| Source {
+                imported: false,
                 id: id.clone(),
                 turn: None,
                 payload: payload.clone(),
@@ -1058,25 +1072,29 @@ pub(crate) fn test_spill_reduces(sources: &[(String, Value)], epoch: i64) -> boo
 fn spill_payload(group: &Group) -> Option<Value> {
     let mut output = Vec::new();
     for source in &group.sources {
-        if let Some(items) = source.payload.get("output").and_then(Value::as_array) {
+        let mut projected;
+        let payload = if source.imported {
+            projected = source.payload.clone();
+            crate::thread_import::scrub_provider_metadata(&mut projected);
+            &projected
+        } else {
+            &source.payload
+        };
+        if let Some(items) = payload.get("output").and_then(Value::as_array) {
             output.extend(items.clone());
         }
         // A whole span can contain a normal input accepted while the
         // tool ran. Preserve its replay projection after its receipt
         // has been consumed; source references alone are not its text.
-        if source
-            .payload
-            .get("output")
-            .and_then(Value::as_array)
-            .is_none()
-            && source.payload.get("item").is_none()
-            && source.payload.get("role").is_some()
+        if payload.get("output").and_then(Value::as_array).is_none()
+            && payload.get("item").is_none()
+            && payload.get("role").is_some()
         {
-            let mut message = source.payload.clone();
+            let mut message = payload.clone();
             message.as_object_mut().unwrap().remove("event_id");
             output.push(message);
         }
-        if let Some(item) = source.payload.get("item") {
+        if let Some(item) = payload.get("item") {
             if item.get("type").and_then(Value::as_str) == Some("function_call_output") {
                 let call = item.get("call_id").and_then(Value::as_str).unwrap_or("");
                 let body = item
@@ -1478,6 +1496,7 @@ mod tests {
     use super::*;
     pub(super) fn source(id: &str, turn: Option<&str>, payload: Value) -> Source {
         Source {
+            imported: false,
             id: id.into(),
             turn: turn.map(str::to_owned),
             revision: 0,

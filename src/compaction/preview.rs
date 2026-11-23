@@ -49,10 +49,10 @@ fn json_ids(ids: impl IntoIterator<Item = String>) -> String {
 }
 
 const PATH_SQL: &str =
-    "SELECT n.id,n.turn_id,n.payload_revision,n.payload_json,n.deleted_reason,n.kind
+    "SELECT n.id,n.turn_id,n.payload_revision,n.payload_json,n.deleted_reason,n.kind,n.import_origin_json IS NOT NULL
  FROM (SELECT node_id,ordinal FROM thread_path WHERE thread_id=?1 ORDER BY ordinal LIMIT 4097) p
  JOIN node n ON n.id=p.node_id ORDER BY p.ordinal";
-const HIDDEN_SQL: &str = "SELECT n.id,n.turn_id,n.payload_revision,n.payload_json,NULL,n.kind,s.source_revision,s.source_hash
+const HIDDEN_SQL: &str = "SELECT n.id,n.turn_id,n.payload_revision,n.payload_json,NULL,n.kind,s.source_revision,s.source_hash,n.import_origin_json IS NOT NULL
  FROM replacement r JOIN replacement_source s ON s.replacement_id=r.id JOIN node n ON n.id=s.source_node_id
  WHERE r.output_node_id=?1 AND r.state='completed' ORDER BY s.ordinal LIMIT 4097";
 const GROUP_SQL: &str = "SELECT g.id,g.state,c.state,r.node_id FROM json_each(?1) q
@@ -158,6 +158,7 @@ fn read_sources(
         }
         kinds.insert(id.clone(), kind);
         result.push(Source {
+            imported: row.get(if hidden { 8 } else { 6 })?,
             id,
             turn,
             revision,
@@ -537,7 +538,12 @@ fn boundaries(
 fn message_counts(snapshot: &Snapshot) -> (usize, usize) {
     let mut counts = (0, 0);
     for source in snapshot.groups.iter().flat_map(|g| &g.sources) {
-        for item in crate::control::replay::convert(source.payload.clone(), snapshot.epoch) {
+        for item in crate::control::replay::convert_source(
+            source.payload.clone(),
+            snapshot.epoch,
+            false,
+            source.imported,
+        ) {
             match item.get("role").and_then(Value::as_str) {
                 Some("user") => counts.0 += 1,
                 Some("assistant") => counts.1 += 1,
@@ -578,6 +584,7 @@ fn spill(snapshot: &Snapshot, ranges: Vec<Range<usize>>) -> Result<SpillProjecti
             original.insert(virtual_id.clone(), ids);
             count += 1;
             let source = Source {
+                imported: false,
                 id: virtual_id,
                 turn: None,
                 revision: 0,

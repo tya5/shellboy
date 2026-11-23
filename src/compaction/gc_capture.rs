@@ -625,7 +625,7 @@ fn capture_gc_plan_and_sources(
         }
         let current = &mut groups[group_index];
         let mut payload_statement =
-            tx.prepare("SELECT payload_json FROM node WHERE id=?1 AND payload_revision=?2")?;
+            tx.prepare("SELECT payload_json, import_origin_json IS NOT NULL FROM node WHERE id=?1 AND payload_revision=?2")?;
         let mut payload_rows = payload_statement.query(params![row.id, row.revision])?;
         let payload_row = payload_rows
             .next()?
@@ -640,10 +640,12 @@ fn capture_gc_plan_and_sources(
             }
             _ => return Err(StorageError::Schema("node payload_json is not text".into())),
         };
+        let imported = payload_row.get::<_, bool>(1)?;
         drop(payload_rows);
         drop(payload_statement);
         let marker_adapter = super::summary_marker_item(&payload).is_some();
-        let projection = super::edit::projection_characters(&payload, thread_facts.2);
+        let projection =
+            super::edit::source_projection_characters(&payload, thread_facts.2, imported);
         current.projection_weight = current
             .projection_weight
             .checked_add(u128::from(projection))

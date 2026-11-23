@@ -611,6 +611,9 @@ async fn call_stream_requiring_capability<S: AsyncRead + AsyncWrite + Unpin>(
     request.validate()?;
     let expected = request.operation_id.clone();
     let encoded = encode_frame(&request).map_err(|mut error| {
+        if matches!(request.command, Command::ThreadImport(_)) && error.code == ErrorCode::InputLimit {
+            error = crate::thread_import::too_large();
+        }
         error.hint = Some("The request was not sent. Reduce the input so the complete JSON request fits the frame limit, then retry".into());
         error.details = Some(serde_json::json!({
             "operation_id": expected,

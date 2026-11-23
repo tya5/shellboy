@@ -836,6 +836,13 @@ impl Command {
             }
             Self::ContextEdit(a) => a.validate(),
             Self::CompactPreview(a) => a.validate(),
+            Self::ThreadImport(a) => {
+                if a.document.len() > MAX_FRAME_BYTES {
+                    Err(crate::thread_import::too_large())
+                } else {
+                    Ok(())
+                }
+            }
             Self::ThreadCreate(a) => a.validate(),
             Self::ThreadFork(a) => a.validate(),
             Self::ThreadPrune(a) => a.validate(),

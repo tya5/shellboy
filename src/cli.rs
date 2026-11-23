@@ -365,6 +365,11 @@ pub enum ThreadCommand {
     Get(ThreadOptions),
     /// Save retained conversation history as a JSONL file.
     Export(crate::thread_export::ExportOptions),
+    /// Create a new Thread from a verified JSONL export.
+    Import {
+        #[arg(long = "in")]
+        input: PathBuf,
+    },
     /// Create a saved Thread; send a message separately to start work.
     #[command(
         after_help = "Delegate from a parent model shell:\n  shellboy thread create --parent THREAD_ID\n  shellboy message send --thread CHILD_THREAD_ID --text 'Read-only audit; return findings and evidence'\n\nRead result.thread_id from create, then track the separate message_id/run_id/turn_id from send. Guide: shellboy docs get --id shellboy/delegation"
@@ -1653,6 +1658,9 @@ impl Cli {
             }),
             CliCommand::Thread { command } => match command {
                 ThreadCommand::Request(_) | ThreadCommand::Export(_) => return Ok(None),
+                ThreadCommand::Import { input } => C::ThreadImport(wire::ThreadImportArgs {
+                    document: crate::thread_import::read_file(&input)?,
+                }),
                 ThreadCommand::List(a) => C::ThreadList(wire::ThreadListArgs {
                     order: a.order,
                     limit: a.limit,

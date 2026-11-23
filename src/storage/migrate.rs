@@ -302,6 +302,11 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         sql: include_str!("../../migrations/0056_directional_reply_pending.sql"),
         foreign_keys: None,
     },
+    Migration {
+        version: 57,
+        sql: include_str!("../../migrations/next_thread_import_origin.sql"),
+        foreign_keys: None,
+    },
 ];
 
 pub(super) fn run(

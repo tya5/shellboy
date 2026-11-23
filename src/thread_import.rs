@@ -64,6 +64,9 @@ pub fn read_file(path: &Path) -> Result<String, ApiError> {
         .take(MAX_FRAME_BYTES as u64 + 1)
         .read_to_end(&mut bytes)
         .map_err(io_error)?;
+    if bytes.len() > MAX_FRAME_BYTES {
+        return Err(too_large());
+    }
     let document = String::from_utf8(bytes).map_err(|_| invalid("Thread import is not UTF-8"))?;
     validate(&document)?;
     Ok(document)
@@ -295,3 +298,34 @@ fn validate_graph(records: &[HistoryExportRecord]) -> Result<(), ApiError> {
 
 #[cfg(test)]
 mod tests;
+
+/// Drop signed/private provider material from an outbound copy only.
+pub(crate) fn scrub_provider_metadata(value: &mut serde_json::Value) {
+    use serde_json::Value;
+    fn opaque(value: &Value) -> bool {
+        crate::model::opaque::is_opaque(value)
+            || value.get("type").and_then(Value::as_str) == Some("redacted_thinking")
+    }
+    if opaque(value) {
+        *value = Value::Null;
+        return;
+    }
+    match value {
+        Value::Object(fields) => {
+            for key in ["encrypted_content", "signature", "redacted_content"] {
+                fields.remove(key);
+            }
+            fields.retain(|_, value| !opaque(value));
+            for child in fields.values_mut() {
+                scrub_provider_metadata(child);
+            }
+        }
+        Value::Array(items) => {
+            items.retain(|item| !opaque(item));
+            for item in items {
+                scrub_provider_metadata(item);
+            }
+        }
+        _ => {}
+    }
+}

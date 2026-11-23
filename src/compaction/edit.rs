@@ -18,7 +18,9 @@ pub struct ContextEditResult {
     pub warnings: Vec<String>,
 }
 mod measure;
-pub(super) use measure::{history_characters, projection_characters, suffix_characters};
+pub(super) use measure::{
+    history_characters, projection_characters, source_projection_characters, suffix_characters,
+};
 fn required_endpoint(value: Option<&str>) -> Result<&str, ApiError> {
     value.ok_or_else(|| edit_error("Context edit requires complete node endpoints"))
 }
@@ -189,7 +191,7 @@ impl Compactor {
         let thread = snapshot.thread.clone();
         self.database.call(move|db| {
             ensure_not_pruned(db,&marker)?;
-            let rows=db.prepare("SELECT n.id,n.turn_id,n.payload_revision,n.payload_json,s.source_revision,s.source_hash FROM replacement r JOIN replacement_source s ON s.replacement_id=r.id JOIN node n ON n.id=s.source_node_id WHERE r.output_node_id=?1 AND r.state='completed' ORDER BY s.ordinal LIMIT ?2")?.query_map(params![marker,(TURN_BOUNDARY_IDS+1) as i64],|row|Ok((row.get::<_,String>(0)?,row.get::<_,Option<String>>(1)?,row.get::<_,i64>(2)?,row.get::<_,Option<String>>(3)?,row.get::<_,i64>(4)?,row.get::<_,String>(5)?)))?.collect::<Result<Vec<_>,_>>()?;
+            let rows=db.prepare("SELECT n.id,n.turn_id,n.payload_revision,n.payload_json,s.source_revision,s.source_hash,n.import_origin_json IS NOT NULL FROM replacement r JOIN replacement_source s ON s.replacement_id=r.id JOIN node n ON n.id=s.source_node_id WHERE r.output_node_id=?1 AND r.state='completed' ORDER BY s.ordinal LIMIT ?2")?.query_map(params![marker,(TURN_BOUNDARY_IDS+1) as i64],|row|Ok((row.get::<_,String>(0)?,row.get::<_,Option<String>>(1)?,row.get::<_,i64>(2)?,row.get::<_,Option<String>>(3)?,row.get::<_,i64>(4)?,row.get::<_,String>(5)?,row.get::<_,bool>(6)?)))?.collect::<Result<Vec<_>,_>>()?;
             if rows.is_empty()||rows.len()>TURN_BOUNDARY_IDS {return Err(StorageError::from(invalid("Context marker source list is unavailable or exceeds the bounded provenance budget")));}
             let mut sources=Vec::new();let mut completed=HashSet::new();let mut seen=HashSet::new();
             for (id,turn,revision,body,saved_revision,saved_hash) in rows {
@@ -201,7 +203,7 @@ impl Compactor {
                     if complete {completed.insert(group.to_owned());}
                 }
                 let attachments=db.prepare("SELECT a.id,a.absolute_path,a.input_kind,COALESCE(s.state,'not_selected'),s.reason FROM attachment_ref a LEFT JOIN attachment_selection s ON s.attachment_id=a.id AND s.thread_id=?2 WHERE a.source_node_id=?1 ORDER BY a.created_at,a.id")?.query_map(params![id,thread],|row|Ok(json!({"id":row.get::<_,String>(0)?,"path":row.get::<_,String>(1)?,"kind":row.get::<_,String>(2)?,"state":row.get::<_,String>(3)?,"reason":row.get::<_,Option<String>>(4)?})))?.collect::<Result<Vec<_>,_>>()?;
-                sources.push(Source{id,turn,revision,hash,payload,attachments});
+                sources.push(Source{id,turn,revision,hash,payload,attachments,imported});
             }
             Ok((sources,completed))
         }).await.map_err(storage_error)
