@@ -279,3 +279,6 @@ pub(crate) fn copy_thread(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests;

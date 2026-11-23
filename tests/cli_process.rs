@@ -1059,6 +1059,7 @@ async fn artifact_cli_round_trip_through_owner_changes_and_restart() {
         let out = tokio::process::Command::new(env!("CARGO_BIN_EXE_shellboy"))
             .arg("--data-dir")
             .arg(&owner.loaded.data_dir)
+            .current_dir(owner.loaded.data_dir.parent().unwrap().join("cli-cwd"))
             .env_remove("SHELLBOY_SOCKET")
             .env_remove("SHELLBOY_INSTANCE_ID")
             .args(args)
@@ -1085,11 +1086,15 @@ async fn artifact_cli_round_trip_through_owner_changes_and_restart() {
     }
     let root = tempfile::tempdir().unwrap();
     std::fs::write(root.path().join("config.toml"), "default_connection='fixture'\ndefault_model='fixture'\n[connections.fixture]\nbase_url='http://127.0.0.1:1/v1'\n").unwrap();
+    let cwd = root.path().join("cli-cwd");
+    std::fs::create_dir(&cwd).unwrap();
+    let cwd = cwd.canonicalize().unwrap();
     let (owner, control, local, serving) = start(root.path()).await;
     let created = cli(&owner, &["thread", "create"]).await;
     let thread = created["thread_id"].as_str().unwrap();
     let at = hint(&owner, thread, None).await;
-    let uri = "new+client:opaque value/%2F";
+    let uri = "missing/../output.txt";
+    let absolute = cwd.join(uri);
     let added = cli(
         &owner,
         &[
@@ -1109,19 +1114,22 @@ async fn artifact_cli_round_trip_through_owner_changes_and_restart() {
     let id = added["artifact_id"].as_str().unwrap();
     let at = hint(&owner, thread, Some(&at)).await;
     let list = cli(&owner, &["artifact", "list", "--thread", thread]).await;
-    assert_eq!(list["items"][0]["latest"]["uri"], uri);
+    assert_eq!(list["items"][0]["latest"]["uri"], absolute.to_str().unwrap());
     let v1 = cli(
         &owner,
         &["artifact", "get", "--artifact", id, "--version", "1"],
     )
     .await;
     assert_eq!(v1["version"]["mime"], "text/plain");
-    let next = "other:missing";
-    cli(
-        &owner,
-        &["artifact", "update", "--artifact", id, "--uri", next],
-    )
-    .await;
+    let relative = "versions/../next.txt";
+    let resolved = cli(&owner, &["artifact", "update", "--artifact", id, "--uri", relative]).await;
+    assert_eq!(resolved["version"]["uri"], cwd.join(relative).to_str().unwrap());
+    let next = "new+client:opaque value/%2F";
+    let unix = "/already/../absolute";
+    for uri in [unix, r"C:\missing\..\output.txt", r"\\server\share\output.txt", "https://example.test/a%2Fb", next] {
+        let updated = cli(&owner, &["artifact", "update", "--artifact", id, "--uri", uri]).await;
+        assert_eq!(updated["version"]["uri"], uri);
+    }
     hint(&owner, thread, Some(&at)).await;
     local.shutdown().await.unwrap();
     serving.abort();
@@ -1143,7 +1151,7 @@ async fn artifact_cli_round_trip_through_owner_changes_and_restart() {
         &["artifact", "get", "--artifact", id, "--cursor", cursor],
     )
     .await;
-    assert_eq!(older["versions"]["items"][0]["version"], 1);
+    assert_eq!(older["versions"]["items"][0]["version"], 6);
     let saved = cli(
         &owner,
         &["artifact", "get", "--artifact", id, "--version", "1"],
