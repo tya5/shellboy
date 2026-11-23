@@ -62,7 +62,7 @@ fn valid_owner_version(value: &str) -> bool {
     version.parse::<semver::Version>().is_ok() && sha.is_none_or(valid_build_sha)
 }
 
-fn decode_owner_version<'de, D: serde::Deserializer<'de>>(
+pub(crate) fn decode_owner_version<'de, D: serde::Deserializer<'de>>(
     input: D,
 ) -> Result<Option<String>, D::Error> {
     // Optional metadata must not prevent an otherwise compatible connection.
@@ -80,6 +80,10 @@ fn build_owner_version(sha: Option<&str>) -> Option<String> {
     };
     valid_owner_version(&value).then_some(value)
 }
+pub(crate) fn current_owner_version() -> Option<String> {
+    build_owner_version(option_env!("SHELLBOY_BUILD_GIT_SHA"))
+}
+
 pub struct Invocation {
     pub request: Request,
     pub reply: oneshot::Sender<Response<Value>>,
@@ -178,7 +182,7 @@ async fn serve_connection<S: AsyncRead + AsyncWrite + Unpin>(
         write_frame(
             &mut stream,
             &Welcome {
-                owner_version: build_owner_version(option_env!("SHELLBOY_BUILD_GIT_SHA")),
+                owner_version: current_owner_version(),
                 protocol_version: PROTOCOL_VERSION,
                 capabilities: crate::protocol::PROTOCOL_CAPABILITIES
                     .iter()
@@ -375,6 +379,7 @@ fn environment_endpoint(data_dir: &Path) -> Result<Option<Endpoint>, ApiError> {
             return Err(endpoint_mismatch());
         }
         Ok(Some(Endpoint {
+            owner_version: None,
             protocol_version: PROTOCOL_VERSION,
             instance_id,
             transport: "unix".into(),
@@ -437,10 +442,13 @@ async fn connect_with_capability(
     required_capability: Option<&str>,
 ) -> Result<Response<Value>, ApiError> {
     if endpoint.protocol_version != PROTOCOL_VERSION {
-        return Err(protocol_mismatch(
-            PROTOCOL_VERSION,
-            endpoint.protocol_version,
-        ));
+        let mut error = protocol_mismatch(PROTOCOL_VERSION, endpoint.protocol_version);
+        if let Some(version) = endpoint.owner_version
+            && let Some(details) = error.details.as_mut()
+        {
+            details["owner_version"] = Value::String(version);
+        }
+        return Err(error);
     }
     #[cfg(unix)]
     {
@@ -657,6 +665,7 @@ mod frame_delivery_tests {
 
     fn endpoint() -> Endpoint {
         Endpoint {
+            owner_version: None,
             protocol_version: PROTOCOL_VERSION,
             instance_id: "instance".into(),
             transport: "fixture".into(),
@@ -943,14 +952,36 @@ mod frame_delivery_tests {
 
     #[tokio::test]
     async fn mismatched_endpoint_protocol_is_rejected_before_transport_connection() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("endpoint.json");
         let mut saved = endpoint();
         saved.protocol_version = PROTOCOL_VERSION - 1;
-        // The fixture has neither a valid transport nor an address. Version
-        // rejection must precede either transport validation or connection I/O.
-        let error = connect(saved, Command::Status(Default::default()), None, None)
-            .await
-            .unwrap_err();
-        assert_version_mismatch(&error, PROTOCOL_VERSION - 1);
+        let version = "1.2.3 0123456789abcdef0123456789abcdef01234567";
+        // The fixture has no valid transport or address: no Hello or command can be sent.
+        for (advertised, expected) in [
+            (Some(version), Some(version)),
+            (None, None),
+            (Some("invalid"), None),
+        ] {
+            saved.owner_version = advertised.map(str::to_owned);
+            let wire = serde_json::to_value(&saved).unwrap();
+            assert_eq!(
+                wire.get("owner_version").and_then(Value::as_str),
+                advertised
+            );
+            assert_eq!(wire.get("owner_version").is_some(), advertised.is_some());
+            std::fs::write(&path, serde_json::to_vec(&wire).unwrap()).unwrap();
+            let error = call(dir.path(), Command::Status(Default::default()), None, None)
+                .await
+                .unwrap_err();
+            assert_version_mismatch(&error, PROTOCOL_VERSION - 1);
+            let details = error.details.as_ref().unwrap();
+            assert_eq!(
+                details.get("owner_version").and_then(Value::as_str),
+                expected
+            );
+            assert_eq!(details.get("owner_version").is_some(), expected.is_some());
+        }
     }
 
     #[tokio::test]

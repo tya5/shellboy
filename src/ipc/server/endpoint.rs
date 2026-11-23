@@ -290,6 +290,7 @@ async fn bind_unix_with(
     let mut diagnostics = plan.diagnostics;
     for (kind, folder) in plan.folders {
         let endpoint = Endpoint {
+            owner_version: None,
             protocol_version: crate::protocol::PROTOCOL_VERSION,
             instance_id: instance.clone(),
             transport: "unix".into(),

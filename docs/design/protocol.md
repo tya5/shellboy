@@ -1056,3 +1056,12 @@ counts rather than the mixed list. Each `message.list` item returns `message_id`
 (`MessageSender`), including for owner CLI asks. `asked_by` is nullable and
 identifies only a model Thread; `--asked-by` filters on that same model identity,
 not a sender label. Schema 56 backfills legacy named asks.
+
+## Protocol next (#361)
+
+`endpoint.json` may include `owner_version`, the same self-reported software
+version as `Welcome` (#294). It is optional and omitted when unavailable. An
+invalid or absent value is treated as unknown. A client that refuses the
+advertised protocol before connecting includes the valid value in its local
+`protocol_mismatch` error details when present. No additional handshake or
+request is sent, and the version is not used for compatibility or peer checks.

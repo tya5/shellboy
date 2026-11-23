@@ -297,6 +297,7 @@ impl LocalServer {
                     connected: false,
                 },
                 Endpoint {
+                    owner_version: None,
                     protocol_version: PROTOCOL_VERSION,
                     instance_id: instance.clone(),
                     transport: "pipe".into(),

@@ -59,6 +59,7 @@ impl Fixture {
         #[cfg(windows)]
         let address = String::new();
         let endpoint = Endpoint {
+            owner_version: None,
             protocol_version: PROTOCOL_VERSION,
             instance_id: instance.into(),
             transport: "fixture".into(),

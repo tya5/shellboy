@@ -128,6 +128,13 @@ impl OwnerLock {
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Endpoint {
     pub protocol_version: u32,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::ipc::decode_owner_version"
+    )]
+    #[schemars(length(max = 128))]
+    pub owner_version: Option<String>,
     pub instance_id: String,
     pub transport: String,
     pub address: String,
@@ -318,7 +325,7 @@ impl DataOwner {
         })
     }
 
-    pub async fn publish_endpoint(&self, endpoint: Endpoint) -> Result<(), ApiError> {
+    pub async fn publish_endpoint(&self, mut endpoint: Endpoint) -> Result<(), ApiError> {
         if endpoint.instance_id != self.instance_id || endpoint.protocol_version != PROTOCOL_VERSION
         {
             return Err(ApiError::new(
@@ -327,6 +334,7 @@ impl DataOwner {
             ));
         }
         let dir = self.loaded.data_dir.clone();
+        endpoint.owner_version = crate::ipc::current_owner_version();
         let published = endpoint.clone();
         tokio::task::spawn_blocking(move || {
             let temporary = dir.join(format!("endpoint-{}.tmp", endpoint.instance_id));

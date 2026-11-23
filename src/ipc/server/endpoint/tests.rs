@@ -226,6 +226,7 @@ async fn data_directory_locator_is_reclaimed_only_after_identity_validation() {
     drop(tokio::net::UnixListener::bind(&socket).unwrap());
     owner
         .publish_endpoint(Endpoint {
+            owner_version: None,
             protocol_version: crate::protocol::PROTOCOL_VERSION,
             instance_id: owner.instance_id.clone(),
             transport: "unix".into(),
@@ -364,6 +365,7 @@ async fn untrusted_metadata_preserves_arbitrary_directories_and_symlinks() {
     symlink(&foreign, &alias).unwrap();
     for folder in [&foreign, &alias] {
         let forged = Endpoint {
+            owner_version: None,
             protocol_version: crate::protocol::PROTOCOL_VERSION,
             instance_id: "untrusted".into(),
             transport: "unix".into(),
@@ -394,6 +396,7 @@ async fn recognized_namespace_with_unexpected_contents_is_preserved() {
     let keep = folder.join("keep");
     std::fs::write(&keep, b"unchanged").unwrap();
     let forged = Endpoint {
+        owner_version: None,
         protocol_version: crate::protocol::PROTOCOL_VERSION,
         instance_id: "untrusted".into(),
         transport: "unix".into(),
@@ -599,6 +602,7 @@ async fn recognized_namespace_socket_impostors_are_preserved() {
             std::fs::write(&socket, b"not a socket").unwrap();
         }
         let forged = Endpoint {
+            owner_version: None,
             protocol_version: crate::protocol::PROTOCOL_VERSION,
             instance_id: "untrusted".into(),
             transport: "unix".into(),
@@ -634,6 +638,7 @@ async fn crash_during_socket_preparation_retains_a_locator_and_reclaims_empty_di
             .unwrap()
             .remove(0);
         let planned = Endpoint {
+            owner_version: None,
             protocol_version: crate::protocol::PROTOCOL_VERSION,
             instance_id: first.instance_id.clone(),
             transport: "unix".into(),
