@@ -410,8 +410,7 @@ East Asian Neutral rather than ASCII; arbitrary terminal behavior is unverified.
 
 Public names only, no behaviour change, no aliases, no migration (internal
 column `turn.answer_node_id` keeps its name): Run/Turn details, wait Turn
-snapshot, `status` items, `child_turn_completed`/`child_run_ended` payloads,
-interruption context and exec diagnostics now say `end_message_node_id`;
+snapshot, `status` items, interruption context and exec diagnostics now say `end_message_node_id`;
 ThreadList/Get say `last_end_message`; `history get --end-message-only`
 (`HistoryGetArgs.end_message_only`, cursor scope `history.get.end_message`).
 The F6 field label is `終了メッセージnode ID`; the `回答` row label is unchanged.
@@ -5693,8 +5692,7 @@ East Asian Neutral rather than ASCII; arbitrary terminal behavior is unverified.
 
 Public names only, no behaviour change, no aliases, no migration (internal
 column `turn.answer_node_id` keeps its name): Run/Turn details, wait Turn
-snapshot, `status` items, `child_turn_completed`/`child_run_ended` payloads,
-interruption context and exec diagnostics now say `end_message_node_id`;
+snapshot, `status` items, interruption context and exec diagnostics now say `end_message_node_id`;
 ThreadList/Get say `last_end_message`; `history get --end-message-only`
 (`HistoryGetArgs.end_message_only`, cursor scope `history.get.end_message`).
 The F6 field label is `終了メッセージnode ID`; the `回答` row label is unchanged.

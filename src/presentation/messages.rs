@@ -910,10 +910,7 @@ pub fn event_title(kind: &str, language: UiLanguage) -> &str {
         "context_changed" => "State change",
         "child_recovery_wait" => "Child awaiting recovery",
         "recovery_wait" => "Awaiting recovery",
-        "child_turn_completed" => "Child answer",
-        "child_run_ended" => "Child run ended",
         "shell_ended" => "Command ended",
-        "child_report" => "Child progress report",
         _ => "Other state change",
     }
 }
@@ -1204,10 +1201,7 @@ pub(super) fn event_messages(
         .get("event_id")
         .and_then(Value::as_str)
         .is_some_and(|id| !id.trim().is_empty())
-        && matches!(
-            kind,
-            "shell_ended" | "child_turn_completed" | "child_run_ended" | "child_report"
-        )
+        && matches!(kind, "shell_ended")
     {
         body.push(Message::Text(Text::Delivered));
     }

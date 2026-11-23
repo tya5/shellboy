@@ -2713,8 +2713,7 @@ New mechanical coverage includes:
   authenticated self registration, direct-parent authority/replacement/receipt
   replay, and rejection of unrelated/non-direct or forged callers. The child
   scenario routes real session headers rather than assuming cross-Thread HTTP
-  arrival order, and requires child Revisit completion before child_run_ended and
-  parent Revisit. Controlled completion/set races accept only their valid serial
+  arrival order, and requires child Revisit completion before the parent Revisit boundary. Controlled completion/set races accept only their valid serial
   outcomes; queued input and cancellation keep the same Run without premature
   firing. Restart capture/drop, next actual-Turn observation and deletion are
   separate durable checks.

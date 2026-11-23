@@ -388,7 +388,7 @@ Other notices:
 |---|---|---|
 | Run-end reminder | new kind `reply_reminder`, delivered to the completing Run | yes, by construction (it is the reason the Run continues). Payload: IDs, sender kinds and times only, no bodies |
 | Sender cancelled an admitted message | `context_changed` with payload kind `reply_cancelled` | no; delivered at the recipient's next request boundary (existing rule) |
-| `ignored` / `recipient_deleted` to a model sender | new kind `reply_outcome`, delivered to the sender Thread's live Run | yes, like `child_run_ended`. With no live Run it is a `context_changed` notice seen at the next Turn and does not start a Run (decision Q6) |
+| `ignored` / `recipient_deleted` to a model sender | new kind `reply_outcome`, delivered to the sender Thread's live Run | yes, as a `reply_outcome` event. With no live Run it is a `context_changed` notice seen at the next Turn and does not start a Run (decision Q6) |
 
 New event kinds `reply_reminder` and `reply_outcome` are bounded per message
 (at most one reminder entry and one outcome each), owned by the existing event
@@ -421,7 +421,6 @@ contracts from "answer" to "end message" so it is no longer read as a reply:
 | `wait` turn snapshot `answer_node_id` | `end_message_node_id` |
 | `thread list/get` `last_answer` | `last_end_message` (same fields: `node_id`, `turn_id`, `at`, `excerpt`, `body_available`) |
 | `status` item `answer_node_id` | run/turn/attempt items: `end_message_node_id`; message items: `reply_node_id` (from the receipt, no longer the Turn's answer) |
-| `child_turn_completed` / `child_run_ended` payload `answer_node_id` | `end_message_node_id` |
 | interruption context `answer_node_id` | `end_message_node_id` |
 | `message get` `answer_node_id` | removed; see `reply` |
 | `history get --final-answer-only` / `HistoryGetArgs.final_answer_only` / cursor scope `history.get.final_answer` | `--end-message-only` / `end_message_only` / `history.get.end_message` (same projection; see [Decisions](#decisions) Q12) |
@@ -650,7 +649,7 @@ decided here without an explicit user answer (see [Decisions](#decisions)).
 | G30 | Wait `interrupted` from an arriving receipt | Design | `satisfied` wins when the arriving receipt is the awaited reply |
 | G31 | Wait cycles | Design | Thread → live Run edge, as in `thread_settled` |
 | G32 | Model asking its own Thread | Decided | allowed, superseded Q16 (#259) |
-| G33 | `child_turn_completed` wake plus reply message | Design | both still arrive; they usually land in one parent Turn. Not changed here |
+| G33 | Child completion before Revisit boundary | Superseded by #302 | Child lifecycle events no longer wake a parent Run. Completion is handled by owner state, independently of user messages. |
 | G34 | Thread title derived from first user body | Design | a reply node on a sender Thread is a user node like any message; no special case |
 | G35 | `thread request` debug command | Decided | unchanged; it shows the new notice nodes in rebuilt requests (Q1) |
 | G36 | `history get --final-answer-only` | Judgement | kept and renamed `--end-message-only`, because `exec --result turn-end\|run-end` needs it (see Q12) |
@@ -671,8 +670,7 @@ owner, as with #187). The internal column `turn.answer_node_id` keeps its name.
 ### Step 1 — Rename "answer" to "end message" (no behaviour change)
 
 Public names only: `answer_node_id` → `end_message_node_id` on Run, Turn, wait
-turn snapshot, `status` run/turn/attempt items, `child_turn_completed` /
-`child_run_ended` payloads, interruption context; `last_answer` →
+turn snapshot, `status` run/turn/attempt items, interruption context; `last_answer` →
 `last_end_message`; `history get --final-answer-only` → `--end-message-only`
 (`HistoryGetArgs.end_message_only`, cursor scope `history.get.end_message`);
 exec diagnostics `answer_node_id` → `end_message_node_id` and its probe/refusal

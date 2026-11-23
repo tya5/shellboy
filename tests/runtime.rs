@@ -2054,30 +2054,10 @@ async fn real_shell_cli_starts_independent_child_without_parent_retention_or_lif
         .ok()
         .unwrap();
     state(&control, "run", &child_run, "completed").await;
-    let run = parent.run_id.clone().unwrap();
     assert!(
         requests.try_recv().is_err(),
         "child completion must not synthesize a parent request"
     );
-    control
-        .store
-        .database
-        .call(move |db| {
-            let turn_events: i64 = db.query_row(
-                "SELECT count(*) FROM event WHERE target_run_id=?1 AND kind='child_turn_completed'",
-                [&run],
-                |row| row.get(0),
-            )?;
-            let run_events: i64 = db.query_row(
-                "SELECT count(*) FROM event WHERE target_run_id=?1 AND kind='child_run_ended'",
-                [run],
-                |row| row.get(0),
-            )?;
-            assert_eq!((turn_events, run_events), (0, 0));
-            Ok(())
-        })
-        .await
-        .unwrap();
     local.shutdown().await.unwrap();
     serving.abort();
     close(control, owner, server).await;

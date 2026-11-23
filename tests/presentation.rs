@@ -45,41 +45,25 @@ fn trim_markers_remain_visible_replacement_notices_with_immutable_source_text() 
 }
 
 #[test]
-fn persisted_result_notifications_explain_continuation_and_keep_the_original_evidence() {
-    for (kind, expected) in [
-        (
-            "shell_ended",
-            "shell 終了 | source-execution | 結果未記録 | モデルに渡した | Enter 参照先",
-        ),
-        (
-            "child_turn_completed",
-            "子の回答 | source-thread | モデルに渡した | Enter 参照先",
-        ),
-        (
-            "child_run_ended",
-            "子の作業終了 | source-thread | 結果未記録 | モデルに渡した | Enter 参照先",
-        ),
-        (
-            "child_report",
-            "子の途中報告 | source-thread | モデルに渡した | Enter 参照先",
-        ),
-    ] {
-        let event = json!({"event_id":"saved-notification","kind":kind,"payload":{"execution_id":"source-execution","thread_id":"source-thread"}});
+fn saved_removed_child_events_fall_back_to_generic_event_display() {
+    for kind in ["child_turn_completed", "child_run_ended", "child_report"] {
+        let event = json!({"event_id":"legacy-event","kind":kind,"payload":{"thread_id":"child"}});
         let payload =
             json!({"content":[{"type":"input_text","text":format!("Shellboy event v1: {event}")}]});
-        let original = payload.clone();
-        let p = project("event", &payload, &text_of_payload(&payload), 0);
-        assert_eq!(p.title, expected, "{kind}");
+        let projected = project("event", &payload, &text_of_payload(&payload), 0);
+        assert_eq!(projected.kind, PresentationKind::Event, "{kind}");
+        assert_eq!(projected.title, "その他の状態変更", "{kind}");
         assert!(
-            p.fields
+            projected
+                .fields
                 .iter()
-                .any(|field| field.key == "/event_id" && field.value == "saved-notification")
+                .any(|field| field.key == "/kind" && field.value == kind)
         );
-        assert_eq!(payload, original);
-        let user = project("user", &payload, &text_of_payload(&payload), 0);
         assert!(
-            !user.title.contains("続行"),
-            "ordinary user text is not a notification"
+            projected
+                .fields
+                .iter()
+                .any(|field| field.key == "/payload/thread_id" && field.value == "child")
         );
     }
 }

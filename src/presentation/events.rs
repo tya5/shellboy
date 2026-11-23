@@ -21,10 +21,7 @@ pub(super) fn event_title(kind: &str) -> &str {
         "context_changed" => "状態変更",
         "child_recovery_wait" => "子の作業が復旧待ち",
         "recovery_wait" => "復旧待ち",
-        "child_turn_completed" => "子の回答",
-        "child_run_ended" => "子の作業終了",
         "shell_ended" => "コマンド終了",
-        "child_report" => "子からの途中報告",
         _ => "その他の状態変更",
     }
 }
@@ -82,9 +79,6 @@ pub(super) fn index_pause_notice_ja(event: &serde_json::Value) -> Option<(String
 // Named copy keys for #35; facts and identity are supplied separately.
 enum NoticeText {
     ShellEnded,
-    ChildAnswer,
-    ChildEnded,
-    ChildReport,
     Delivered,
     UnknownResult,
 }
@@ -92,9 +86,6 @@ impl NoticeText {
     fn text(self) -> &'static str {
         match self {
             Self::ShellEnded => "shell 終了",
-            Self::ChildAnswer => "子の回答",
-            Self::ChildEnded => "子の作業終了",
-            Self::ChildReport => "子の途中報告",
             Self::Delivered => crate::ui::text_width::glyphs::select(
                 "モデルに渡した · Enter 参照先",
                 "モデルに渡した | Enter 参照先",
@@ -106,18 +97,11 @@ impl NoticeText {
 fn continuation_title(kind: &str, event: &serde_json::Value) -> Option<String> {
     let key = match kind {
         "shell_ended" => NoticeText::ShellEnded,
-        "child_turn_completed" => NoticeText::ChildAnswer,
-        "child_run_ended" => NoticeText::ChildEnded,
-        "child_report" => NoticeText::ChildReport,
         _ => return None,
     };
     let payload = event.get("payload").unwrap_or(event);
     let identity = payload
-        .get(if kind == "shell_ended" {
-            "execution_id"
-        } else {
-            "thread_id"
-        })
+        .get("execution_id")
         .and_then(serde_json::Value::as_str)
         .map(|id| super::sanitize_plain(&id.chars().take(16).collect::<String>(), 0).0)
         .unwrap_or_else(|| "対象未記録".into());
@@ -144,7 +128,7 @@ fn continuation_title(kind: &str, event: &serde_json::Value) -> Option<String> {
         parts.push(format!("終了 {code}"));
     } else if let Some(state) = payload.get("state").and_then(serde_json::Value::as_str) {
         parts.push(super::sanitize_plain(&short(state, 24), 0).0);
-    } else if kind == "shell_ended" || kind == "child_run_ended" {
+    } else if kind == "shell_ended" {
         parts.push(NoticeText::UnknownResult.text().into());
     }
     if let Some(ms) = payload

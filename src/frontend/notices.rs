@@ -220,22 +220,9 @@ mod tests {
           INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at)VALUES('exec','parent-run','u','exec','exited','/','{}','UTF-8','UTF-8','closed','now'),('other-exec','child-run','v','other-exec','exited','/','{}','UTF-8','UTF-8','closed','now');
           INSERT INTO node(id,turn_id,kind,created_at,payload_json)VALUES('source','u','tool_result','now','{\"text\":\"RAW_OUTPUT_MUST_NOT_BE_FETCHED\"}'),('wrong','v','tool_result','now','{}');
           INSERT INTO tool_result(group_id,call_id,node_id,status)VALUES('g','same','source','exited'),('other','same','wrong','exited');").unwrap();
-        for (id, kind, payload) in [
-            ("shell", "shell_ended", json!({"execution_id":"exec"})),
-            (
-                "child-notice",
-                "child_run_ended",
-                json!({"run_id":"child-run"}),
-            ),
-            (
-                "missing",
-                "child_report",
-                json!({"thread_id":"missing-thread"}),
-            ),
-        ] {
-            db.execute("INSERT INTO event(id,kind,source_json,target_thread_id,payload_ref_json,created_at)VALUES(?1,?2,'{}','parent',?3,'now')",rusqlite::params![id,kind,payload.to_string()]).unwrap();
-            db.execute("INSERT INTO node(id,turn_id,kind,created_at,payload_json)VALUES(?1,'u','event','now',?2)",rusqlite::params![format!("node-{id}"),json!({"event_id":id}).to_string()]).unwrap();
-        }
+        let (id, kind, payload) = ("shell", "shell_ended", json!({"execution_id":"exec"}));
+        db.execute("INSERT INTO event(id,kind,source_json,target_thread_id,payload_ref_json,created_at)VALUES(?1,?2,'{}','parent',?3,'now')",rusqlite::params![id,kind,payload.to_string()]).unwrap();
+        db.execute("INSERT INTO node(id,turn_id,kind,created_at,payload_json)VALUES(?1,'u','event','now',?2)",rusqlite::params![format!("node-{id}"),json!({"event_id":id}).to_string()]).unwrap();
         db
     }
     fn node(id: &str) -> UiNode {

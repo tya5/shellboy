@@ -37,7 +37,7 @@ attachments and owned shells/children are absent, it assigns every waiting
 `complete` message of the Thread, in receipt order, to one new Turn of the
 completing Run (`accepted`, with `delivery_context.reason='run_completion'`).
 The existing receipt admission then appends them like any message and the Run
-continues. A child therefore reports `child_run_ended` only after that work.
+continues. The child completion remains an owner-side lifecycle fact; no child event is delivered to the parent.
 A human Turn interruption (Esc) is no exception: when the Run would then
 complete, the waiting messages are delivered the same way.
 

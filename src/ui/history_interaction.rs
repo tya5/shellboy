@@ -900,7 +900,7 @@ mod tests {
         ui = fixture();
         let mut child = notice;
         child.presentation.fields = crate::presentation::fields_of_value(
-            &serde_json::json!({"kind":"child_turn_completed","payload":{"thread_id":"child"}}),
+            &serde_json::json!({"kind":"legacy_child_event","payload":{"thread_id":"child"}}),
         );
         apply(&mut ui, vec![child], 4);
         key(&mut ui, KeyCode::Tab);
