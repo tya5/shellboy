@@ -23,6 +23,10 @@ database, and no watchdog or platform gate changes.
 Hosted before/after timing awaits the next green all-OS landing run.
 
 
+Hosted Unix checks reuse the real CLI built by the normal test suite for
+fallback-namespace verification before running the separate DB-observation
+feature build. Hosted timing savings are not yet verified.
+
 ## Core #309 pending message tests
 
 Cancellation ID validation and the send request's default delivery mode are
