@@ -409,6 +409,11 @@ includes Anthropic `model_context_window_exceeded`, refusals, filter outcomes,
 unknown reasons and transport/EOF failures without the matching terminal fact.
 They retain their existing classification and partial-output handling.
 
+At admission, the executor records the output-limit value and source from the
+final merged wire body and the connection that prepared it. It sends that same
+body; no reader recomputes the limit. The only passthrough key inspected for
+this fact is the dialect's native limit key.
+
 ### Common cache hint (#127)
 
 A tier-1 common concept (promotion condition (a): placing it correctly needs

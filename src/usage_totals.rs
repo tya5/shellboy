@@ -703,13 +703,23 @@ pub(crate) fn read_attempt(db: &Connection, attempt: &str) -> Result<Value, ApiE
              CASE WHEN json_type(a.input_manifest_json,'$.prompt_cache_diagnostics')='object'
                   AND octet_length(json_extract(a.input_manifest_json,'$.prompt_cache_diagnostics'))<=2048
              THEN json_extract(a.input_manifest_json,'$.prompt_cache_diagnostics') END END,
-         {INPUT_BYTES_SQL}
+         {INPUT_BYTES_SQL},
+         CASE WHEN json_valid(a.error_json) AND json_valid(a.input_manifest_json) THEN
+             CASE WHEN json_extract(a.error_json,'$.error.kind')='output_limit'
+                  AND json_type(a.input_manifest_json,'$.output_limit')='object'
+             THEN json_extract(a.input_manifest_json,'$.output_limit') END END
          FROM model_attempt a JOIN turn u ON u.id=a.turn_id WHERE a.id=?1",
         usage::sql_projection("a.usage_json")
     );
     db.query_row(&sql, [attempt], |row| {
         let saved: Option<String> = row.get(10)?;
         let input_bytes = saved_input_bytes(row.get(11)?);
+        let output_limit = row
+            .get::<_, Option<String>>(12)?
+            .and_then(|saved| {
+                serde_json::from_str::<crate::model::request_path::AdmittedOutputLimit>(&saved).ok()
+            })
+            .map(crate::model::request_path::AdmittedOutputLimit::stopped);
         let diagnostic = saved
             .and_then(|text| serde_json::from_str::<Value>(&text).ok())
             .and_then(|value| crate::model::cache_diagnostics::bounded(&value));
@@ -721,7 +731,8 @@ pub(crate) fn read_attempt(db: &Connection, attempt: &str) -> Result<Value, ApiE
             "state":row.get::<_,String>(4)?,
             "usage":usage::StandardUsage::read(row,5)?.to_value(),
             "prompt_cache_diagnostics":diagnostic,
-            "input_bytes":input_bytes
+            "input_bytes":input_bytes,
+            "output_limit":output_limit
         }))
     })
     .optional()

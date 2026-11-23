@@ -5,6 +5,13 @@ use crate::config::Api;
 use crate::model::{MAX_RESPONSE_BYTES, ModelResponse, ResponseStream, dialect};
 use futures_util::StreamExt;
 use std::collections::BTreeMap;
+pub(crate) struct PreparedResponse {
+    body: Value,
+    session_header: Option<HeaderValue>,
+    tools_enabled: bool,
+    pub(crate) output_limit: ResolvedOutputLimit,
+}
+
 const TERMINAL_DRAIN_BYTES: usize = 64 * 1024;
 const TERMINAL_DRAIN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
 
@@ -132,8 +139,13 @@ impl HttpModelClient {
             _ if cancel.is_cancelled() => Err(cancelled().into()),
             RateAdmission::QuotaBlocked(fact) => Err(fact.error().into()),
             RateAdmission::Lease(_) => {
-                self.response_inner(request, cancel, events, thread, None)
-                    .await
+                self.response_inner(
+                    || self.prepare_response(request, thread),
+                    cancel,
+                    events,
+                    None,
+                )
+                .await
             }
         };
         match &mut result {
@@ -161,17 +173,15 @@ impl HttpModelClient {
     #[allow(clippy::result_large_err)]
     pub(crate) async fn response_observed(
         &self,
-        thread: &str,
-        request: Value,
+        prepared: Result<PreparedResponse, ModelError>,
         cancel: CancellationToken,
         events: Option<mpsc::Sender<ObservedEvent>>,
         bypass_usage_limit: Option<crate::model::usage_limit::UsageLimit>,
     ) -> Result<ModelResponse, AttemptFailure> {
         self.response_inner(
-            request,
+            || prepared,
             cancel,
             events.map(Events::Observed),
-            Some(thread),
             bypass_usage_limit,
         )
         .await
@@ -179,10 +189,9 @@ impl HttpModelClient {
     #[allow(clippy::result_large_err)]
     async fn response_inner(
         &self,
-        request: Value,
+        prepare: impl FnOnce() -> Result<PreparedResponse, ModelError> + Send,
         cancel: CancellationToken,
         events: Option<Events>,
-        thread: Option<&str>,
         bypass_usage_limit: Option<crate::model::usage_limit::UsageLimit>,
     ) -> Result<ModelResponse, AttemptFailure> {
         if cancel.is_cancelled() {
@@ -205,14 +214,15 @@ impl HttpModelClient {
             &self.connection_name,
         )?;
         let mut facts = ResponseFacts::default();
-        let tools_enabled = request
-            .get("tools")
-            .and_then(Value::as_array)
-            .is_some_and(|tools| !tools.is_empty());
-        let (request, session_header) = self.wire_request(request, thread)?;
+        let PreparedResponse {
+            body,
+            session_header,
+            tools_enabled,
+            ..
+        } = prepare()?;
         let result = self
             .response_attempt(
-                request,
+                body,
                 tools_enabled,
                 RequestContext {
                     cancel: &cancel,
@@ -319,7 +329,15 @@ impl HttpModelClient {
         thread: Option<&str>,
     ) -> Result<(Value, Option<HeaderValue>), ModelError> {
         self.wire_request_tagged(request, thread, None)
-            .map(|(wire, header, _)| (wire, header))
+            .map(|(prepared, _)| (prepared.body, prepared.session_header))
+    }
+    pub(crate) fn prepare_response(
+        &self,
+        request: Value,
+        thread: Option<&str>,
+    ) -> Result<PreparedResponse, ModelError> {
+        self.wire_request_tagged(request, thread, None)
+            .map(|(prepared, _)| prepared)
     }
     /// Measured UTF-8 bytes of the body [`Self::wire_request`] builds for this
     /// request, partitioned by the source of each input item (#186). `tags`
@@ -334,30 +352,28 @@ impl HttpModelClient {
         if request["input"].as_array().map(Vec::len) != Some(tags.len()) {
             return Ok(None);
         }
-        let (wire, _, labels) = self.wire_request_tagged(request, thread, Some(tags))?;
-        Ok(crate::model::wire_bytes::measure(&wire, &labels))
+        let (prepared, labels) = self.wire_request_tagged(request, thread, Some(tags))?;
+        Ok(crate::model::wire_bytes::measure(&prepared.body, &labels))
     }
-    #[allow(clippy::type_complexity)]
     fn wire_request_tagged(
         &self,
         mut request: Value,
         thread: Option<&str>,
         tags: Option<&[crate::model::wire_bytes::ItemTag]>,
-    ) -> Result<(Value, Option<HeaderValue>, crate::model::wire_bytes::Labels), ModelError> {
-        // A Thread override arrives in the canonical (Responses-shaped) field
-        // and replaces the connection value; the dialect maps it below.
-        let thread_limit = match request
-            .as_object_mut()
-            .and_then(|object| object.remove(crate::model::THREAD_OUTPUT_LIMIT_FIELD))
-        {
-            None => None,
-            Some(value) => Some(value.as_u64().filter(|limit| *limit > 0).ok_or_else(|| {
-                ModelError::new("protocol", "Thread max_tokens must be a positive integer")
-            })?),
-        };
-        let limit = thread_limit.or(self.connection.max_tokens);
+    ) -> Result<(PreparedResponse, crate::model::wire_bytes::Labels), ModelError> {
+        let tools_enabled = request
+            .get("tools")
+            .and_then(Value::as_array)
+            .is_some_and(|tools| !tools.is_empty());
+        let resolved = self.request_output_limit(&request)?;
+        if let Some(object) = request.as_object_mut() {
+            object.remove(crate::model::THREAD_OUTPUT_LIMIT_FIELD);
+        }
+        let limit = resolved.max_tokens;
         if let Some(key) = self.connection.output_limit_collision_key_for(limit) {
-            let message = if thread_limit.is_some() {
+            let message = if resolved.source
+                == Some(crate::protocol::OutputLimitSource::ThreadOverride)
+            {
                 format!(
                     "extra_body.{key} duplicates this Thread's max_tokens; clear the Thread value (thread set --max-tokens '') or remove the extra_body key"
                 )
@@ -395,7 +411,24 @@ impl HttpModelClient {
                 object.entry(key.clone()).or_insert_with(|| value.clone());
             }
         }
-        Ok((request, session_header, labels))
+        let max_tokens = request[dialect::output_limit_key(self.connection.api)].as_u64();
+        let output_limit = ResolvedOutputLimit {
+            max_tokens,
+            source: max_tokens.map(|_| {
+                resolved
+                    .source
+                    .unwrap_or(crate::protocol::OutputLimitSource::ExtraBody)
+            }),
+        };
+        Ok((
+            PreparedResponse {
+                body: request,
+                session_header,
+                tools_enabled,
+                output_limit,
+            },
+            labels,
+        ))
     }
     // Keep the existing bounded recovery payload intact across body parsing.
     #[allow(clippy::result_large_err)]

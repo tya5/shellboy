@@ -259,6 +259,7 @@ impl ChangeClock {
         thread: &str,
         attempt: &str,
         outcome: EventAttemptOutcome,
+        output_limit: Option<crate::protocol::AttemptOutputLimit>,
     ) {
         let mut inner = self.lock();
         inner.seq += 1;
@@ -276,6 +277,7 @@ impl ChangeClock {
             thread_id: thread.into(),
             attempt_id: attempt.into(),
             outcome,
+            output_limit,
             seq,
         });
         let old_floor = inner.attempt_end_floor;
@@ -646,9 +648,9 @@ mod tests {
         for n in 0..MAX_EVENT_CHANGES {
             clock.record(&format!("hint-{n}"));
         }
-        clock.record_attempt_end("t", "first", EventAttemptOutcome::Adopted);
+        clock.record_attempt_end("t", "first", EventAttemptOutcome::Adopted, None);
         clock.record("next-page");
-        clock.record_attempt_end("t", "second", EventAttemptOutcome::NotAdopted);
+        clock.record_attempt_end("t", "second", EventAttemptOutcome::NotAdopted, None);
         let Some(Poll::Ready {
             cursor,
             more: true,
@@ -672,7 +674,12 @@ mod tests {
         );
         assert!(attempt_ends[0].seq < attempt_ends[1].seq);
         for n in 0..MAX_ATTEMPT_ENDS {
-            clock.record_attempt_end("t", &format!("a-{n}"), EventAttemptOutcome::NotAdopted);
+            clock.record_attempt_end(
+                "t",
+                &format!("a-{n}"),
+                EventAttemptOutcome::NotAdopted,
+                None,
+            );
         }
         assert!(matches!(
             clock.poll(cursor, &[], true, false),

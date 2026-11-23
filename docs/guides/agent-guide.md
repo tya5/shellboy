@@ -279,6 +279,7 @@ the provider-reported input and cached token totals. Bytes and tokens are
 different units; do not convert one into the other. Compare `input_bytes`
 between attempts (`usage get --attempt ID`) to see which source grows within a
 Turn, then spill or summarize that range. Null means not recorded, not zero.
+`usage get --attempt ID` also reports saved `output_limit` evidence for a provider output-limit stop.
 Model/shell starts and Run creation select whole lifetimes, not prorated overlap.
 Use `usage get --group-by day|hour|thread` to compare ordinary model-attempt
 usage with the separate summary/compaction section and their combined token total.

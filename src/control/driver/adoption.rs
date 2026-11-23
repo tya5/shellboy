@@ -71,7 +71,7 @@ pub(super) async fn adopt_response(
             Ok(Some(EventAttemptOutcome::Adopted))
         }).await.map_err(storage_error)?;
     if let Some(outcome) = adoption {
-        control.record_attempt_end(&snapshot.thread, attempt, outcome);
+        control.record_attempt_end(&snapshot.thread, attempt, outcome, None);
     }
     control.index.wake();
     control.changed(&snapshot.thread);

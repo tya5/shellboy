@@ -99,7 +99,56 @@ pub struct HttpModelClient {
     rate_gate: rate_gate::RateGate,
     diagnostics: Arc<std::sync::OnceLock<crate::diagnostics::Diagnostics>>,
 }
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
+pub(crate) struct ResolvedOutputLimit {
+    pub max_tokens: Option<u64>,
+    pub source: Option<crate::protocol::OutputLimitSource>,
+}
+
 impl HttpModelClient {
+    pub(crate) fn resolve_output_limit(
+        connection: &Connection,
+        thread: Option<u64>,
+    ) -> ResolvedOutputLimit {
+        use crate::protocol::OutputLimitSource;
+        let limit = thread
+            .map(|n| (n, OutputLimitSource::ThreadOverride))
+            .or_else(|| {
+                connection
+                    .max_tokens
+                    .map(|n| (n, OutputLimitSource::Connection))
+            })
+            .or_else(|| {
+                (connection.api == crate::config::Api::AnthropicMessages).then_some((
+                    crate::config::DEFAULT_MESSAGES_MAX_TOKENS,
+                    OutputLimitSource::Default,
+                ))
+            });
+        ResolvedOutputLimit {
+            max_tokens: limit.map(|(n, _)| n),
+            source: limit.map(|(_, source)| source),
+        }
+    }
+
+    pub(crate) fn request_output_limit(
+        &self,
+        request: &Value,
+    ) -> Result<ResolvedOutputLimit, ModelError> {
+        let thread = request
+            .get(crate::model::THREAD_OUTPUT_LIMIT_FIELD)
+            .map(|value| {
+                value.as_u64().filter(|n| *n > 0).ok_or_else(|| {
+                    ModelError::new("protocol", "Thread max_tokens must be a positive integer")
+                })
+            })
+            .transpose()?;
+        Ok(Self::resolve_output_limit(&self.connection, thread))
+    }
+
+    pub(crate) fn output_limit_connection(&self) -> &str {
+        &self.connection_name
+    }
+
     /// The manifest witness belongs to this client's immutable definition.
     pub(crate) fn extra_digest(&self) -> Option<String> {
         self.connection.extra_digest()
@@ -109,17 +158,14 @@ impl HttpModelClient {
         if self.connection.api == crate::config::Api::Responses {
             return Ok(request["input"].to_string().chars().count() as u64);
         }
-        let wire = crate::model::dialect::encode_with(
+        let (wire, _) = crate::model::dialect::encode_tagged(
             self.connection.api,
             request.clone(),
-            self.messages_max_tokens(),
+            self.request_output_limit(request)?.max_tokens,
+            None,
+            None,
         )?;
         Ok(wire["messages"].to_string().chars().count() as u64)
-    }
-    fn messages_max_tokens(&self) -> u64 {
-        self.connection
-            .max_tokens
-            .unwrap_or(crate::config::DEFAULT_MESSAGES_MAX_TOKENS)
     }
     pub fn new(connection: Connection) -> Result<Self, ModelError> {
         Self::for_connection("selected", connection)
@@ -912,7 +958,7 @@ mod observation_tests {
             });
             let (send, mut receive) = mpsc::channel(4);
             let response = tokio::spawn(async move {
-                client.response_observed("fixture-thread", json!({"model":"fixture"}), CancellationToken::new(), Some(send), None).await
+                client.response_observed(client.prepare_response(json!({"model":"fixture"}), Some("fixture-thread")), CancellationToken::new(), Some(send), None).await
             });
             // Headers and the first partial error-body bytes are distinct
             // transport facts, even though neither is an assistant delta.

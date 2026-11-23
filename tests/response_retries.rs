@@ -152,6 +152,13 @@ struct Fixture {
     accepted: MessageAccepted,
 }
 
+#[derive(Default)]
+struct FixtureSettings {
+    auto_retry: Option<bool>,
+    connection: &'static str,
+    max_tokens: Option<u64>,
+}
+
 impl Fixture {
     async fn new(retries: u32, max_delay_ms: u64, idle_ms: u64) -> Self {
         Self::with_history(
@@ -180,7 +187,7 @@ impl Fixture {
             trim_enabled,
             seed_chars,
             text,
-            None,
+            FixtureSettings::default(),
         )
         .await
     }
@@ -192,19 +199,19 @@ impl Fixture {
         trim_enabled: bool,
         seed_chars: Option<usize>,
         text: &str,
-        auto_retry: Option<bool>,
+        settings: FixtureSettings,
     ) -> Self {
         let root = tempfile::tempdir().unwrap();
         let (url, requests, server) = proxy(root.path().join("requests.jsonl")).await;
         let config = root.path().join("config.toml");
         let trim_settings = format!("auto_trim_on_disconnect={trim_enabled}\n");
-        let recovery_settings = auto_retry.map_or_else(String::new, |enabled| {
+        let recovery_settings = settings.auto_retry.map_or_else(String::new, |enabled| {
             format!("[recovery]\nauto_retry_usage_limit={enabled}\n")
         });
         std::fs::write(
             &config,
             format!(
-                "default_connection=\"fixture\"\ndefault_model=\"fixture\"\n[connections.fixture]\nbase_url={url:?}\nresponse_max_retries={retries}\nresponse_retry_max_delay_ms={max_delay_ms}\nstream_idle_timeout_ms={idle_ms}\nresponse_header_timeout_ms={idle_ms}\n{trim_settings}{recovery_settings}"
+                "default_connection=\"fixture\"\ndefault_model=\"fixture\"\n[connections.fixture]\nbase_url={url:?}\nresponse_max_retries={retries}\nresponse_retry_max_delay_ms={max_delay_ms}\nstream_idle_timeout_ms={idle_ms}\nresponse_header_timeout_ms={idle_ms}\n{trim_settings}{}{recovery_settings}", settings.connection
             ),
         )
         .unwrap();
@@ -231,6 +238,17 @@ impl Fixture {
             .as_str()
             .unwrap()
             .to_owned();
+        if let Some(max_tokens) = settings.max_tokens {
+            request(
+                &control,
+                Command::ThreadSet(Box::new(ThreadSetArgs {
+                    thread_id: Some(thread.clone()),
+                    max_tokens: Some(max_tokens.to_string()),
+                    ..Default::default()
+                })),
+            )
+            .await;
+        }
         if let Some(seed_chars) = seed_chars {
             let target = thread.clone();
             control.store.database.call(move |db| {
@@ -2851,6 +2869,146 @@ async fn successful_connection_probe_releases_queued_threads_without_serializing
     fixture.close().await;
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn output_limit_stop_matches_wire_in_live_ends_and_saved_usage() {
+    let responses = |reason: &str| {
+        json!({"type":"response.incomplete","response":{
+            "id":"limited","status":"incomplete","output":[],"incomplete_details":{"reason":reason}
+        }})
+    };
+    let messages = concat!(
+        r#"data: {"type":"message_start","message":{"id":"limited","content":[],"usage":{"input_tokens":5}}}"#,
+        "\n\n",
+        r#"data: {"type":"message_delta","delta":{"stop_reason":"max_tokens"},"usage":{"output_tokens":1}}"#,
+        "\n\n",
+        r#"data: {"type":"message_stop"}"#,
+        "\n\n",
+    );
+    for (connection, thread_limit, key, wire_limit, source, reason) in [
+        (
+            "max_tokens=5678\n",
+            Some(1234),
+            "max_output_tokens",
+            json!(1234),
+            Some("thread_override"),
+            "max_output_tokens",
+        ),
+        (
+            "api='anthropic_messages'\n",
+            None,
+            "max_tokens",
+            json!(32768),
+            Some("default"),
+            "max_tokens",
+        ),
+        (
+            "",
+            None,
+            "max_output_tokens",
+            Value::Null,
+            None,
+            "max_output_tokens",
+        ),
+        (
+            "max_tokens=5678\n",
+            None,
+            "max_output_tokens",
+            json!(5678),
+            Some("connection"),
+            "content_filter",
+        ),
+        (
+            "extra_body={max_output_tokens=777}\n",
+            None,
+            "max_output_tokens",
+            json!(777),
+            Some("extra_body"),
+            "max_output_tokens",
+        ),
+        (
+            "extra_body={max_output_tokens='opaque'}\n",
+            None,
+            "max_output_tokens",
+            json!("opaque"),
+            None,
+            "max_output_tokens",
+        ),
+    ] {
+        let settings = FixtureSettings {
+            connection,
+            max_tokens: thread_limit,
+            ..Default::default()
+        };
+        let mut fixture =
+            Fixture::configured(0, 10, 5_000, false, None, "output limit", settings).await;
+        let incoming = fixture.incoming().await;
+        assert_eq!(incoming.body[key], wire_limit);
+        let events = |after| {
+            Command::EventsWait(EventsWaitArgs {
+                after,
+                thread_ids: vec![fixture.accepted.thread_id.clone()],
+                timeout_ms: 0,
+                include_text: true,
+                include_reasoning_activity: false,
+            })
+        };
+        let cursor = request(&fixture.control, events(None)).await["cursor"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let body = if key == "max_tokens" {
+            messages.to_owned()
+        } else {
+            format!("data: {}\n\n", responses(reason))
+        };
+        incoming
+            .reply
+            .send(Reply::http(200, "text/event-stream", &body, ""))
+            .ok()
+            .unwrap();
+        assert_eq!(fixture.settled().await, "recovery_wait");
+        let result = request(&fixture.control, events(Some(cursor))).await;
+        let ends = result["attempt_ends"].as_array().unwrap();
+        assert_eq!(ends.len(), 1, "{result}");
+        let end = &ends[0];
+        let attempt = end["attempt_id"].as_str().unwrap();
+        let usage = request(
+            &fixture.control,
+            Command::UsageGet(UsageGetArgs {
+                attempt_id: Some(attempt.into()),
+                ..Default::default()
+            }),
+        )
+        .await;
+        if reason == "content_filter" {
+            assert!(end.get("output_limit").is_none());
+            assert_eq!(usage["output_limit"], Value::Null);
+        } else {
+            let expected = json!({"stop":true,"sent_max_tokens":wire_limit.as_u64(),"source":source,"connection":"fixture"});
+            assert_eq!(end["output_limit"], expected);
+            assert_eq!(usage["output_limit"], expected);
+        }
+        if thread_limit.is_some() {
+            // A historical row cannot reconstruct facts from the override or current configuration.
+            let attempt = attempt.to_owned();
+            fixture.control.store.database.call({ let attempt = attempt.clone(); move |db| {
+                db.execute("UPDATE model_attempt SET input_manifest_json=json_remove(input_manifest_json,'$.output_limit') WHERE id=?1", [&attempt])?;
+                Ok(())
+            }}).await.unwrap();
+            let old = request(
+                &fixture.control,
+                Command::UsageGet(UsageGetArgs {
+                    attempt_id: Some(attempt.into()),
+                    ..Default::default()
+                }),
+            )
+            .await;
+            assert_eq!(old["output_limit"], Value::Null);
+        }
+        fixture.close().await;
+    }
+}
+
 const TERMINAL_SSE_500: &str = r#"{"error":{"code":"500","message":"fixture"}}"#;
 
 fn terminal_sse(prefix: &str, event: &str, headers: &str) -> Reply {
@@ -3447,7 +3605,10 @@ async fn owner_with_usage_limit_retry_disabled_stays_parked_past_reset() {
         true,
         None,
         "synthetic opt-out",
-        Some(false),
+        FixtureSettings {
+            auto_retry: Some(false),
+            ..Default::default()
+        },
     )
     .await;
     f.control.start().await.unwrap();
