@@ -30,7 +30,7 @@ lower stack; section 6 is the outline for the on-site part.
 | Change following | Core + CLI | `events.wait` / `events wait` | Exists (#243) |
 | Stable external contract | Core + docs | Protocol policy, `shellboy protocol schema` | Protocol 4, strict requests, tolerant result records, `events.reasoning_activity` capability and generated schema (#244/#275) |
 | Model asks a human | Core + CLI + TUI | `message ask`, unified per-Thread reply inbox (#262) | Landed on main; 128 shared pending-reply cap, default `awaiting_human_rows=1` |
-| No caller-based refusals | Core | #256 and #259 | Stop/retry/shell authority and the separately identified non-boundary message/exec restrictions are removed; this is not an OS permission boundary |
+| No caller-based refusals | Core | #256 and #259 | Stop/retry/shell authority and the separately identified non-boundary message/exec restrictions are removed; this is not an OS permission boundary. #370 checks ask argument validity, not caller authority |
 | Disk guard | Core | Logical data cap and free-disk floor (#261) | 50 GiB default data cap, 40 GiB warning, 5 GiB free-space minimum; running-command writes are not stopped |
 | Thread cleanup | Core + CLI | `thread archive` (#222 stage 1) | Exists |
 | Tags, re-parent | Core + CLI | #222 stages 2-3 | Archive, re-parent, tags, `thread cwds`, and list cwd filter landed on main |
@@ -53,7 +53,7 @@ The owner has no TCP listener: its IPC is a Unix socket or a named pipe
 | D2 | No automatic mail sending. The secretary creates drafts, the human sends from their mail client, it gets no send credential | Limit in section 4, R3 |
 | D3 | A model asks a human through #262: reply-expected messages addressed to a human, because set-and-clear tags leave a cleanup problem | Questions can accumulate. No automatic expiry |
 | D4 | TUI shows questions in a region under the common region spec, scoped to the displayed Thread only; the Thread list shows a pending count. Answer via CLI `message reply` or TUI | No global cross-Thread list. A Web inbox is built from the per-Thread counts |
-| D5 | No caller-based authority: stop, retry, shell operations, message cancel, reply and delete do not refuse based on who calls (#256, #259). Origin only records who acted | State-integrity conditions stay (below) |
+| D5 | No caller-based authority: stop, retry, shell operations, message cancel, reply and delete do not refuse based on who calls (#256, #259). Origin only records who acted | State-integrity conditions stay (below). #370 rejects asking your own Thread as an invalid argument, not an authority check |
 | D6 | Disk guard #261: hold new work when volume free space falls below a floor (default 5 GiB, settable); logical limit default 50 GiB | Commands a model's shell is already running are not stopped |
 | D7 | Index: API-free int8 (#253); auto-index targets default to user messages and summaries (#254) | Tool output is indexed only by explicit request |
 | D8 | TUI stays available as the light option. #247 is not a prerequisite; re-prioritize if Web memory measurement says so | One owner per data directory until then (section 3) |
@@ -241,7 +241,7 @@ binary. Until the last row below lands, hand it to the on-site Shellboy as a fil
 
 | When | Add to guides |
 |---|---|
-| #259 | Landed in this branch: guides now state that any model can reply and self-target expected replies are accepted | Branch CI and handoff pending |
+| #259 | Historical: allowed any model to reply and accepted self-asks. #370 supersedes only the self-ask rule | Branch CI and handoff pending |
 | #261 lands | [Storage and resources](../guides/agent-guide.md#storage-and-resources): floor, 50 GiB, running commands' writes not stopped. New defaults in `configuration.md`; hold and retry in `recovery-and-storage.md` |
 | #262 lands | Agent Guide section "when a human decision is needed"; region and count in `tui.md` |
 | #253, #254 land | History and index text: defaults, explicit backfill, `scope_status`, keyword fallback |

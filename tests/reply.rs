@@ -486,7 +486,7 @@ async fn cancellation_releases_duty_and_lists_no_longer_awaiting() {
 }
 
 #[tokio::test]
-async fn models_can_request_and_reply_across_threads_including_their_own() {
+async fn models_can_request_and_reply_across_threads() {
     let (_root, store) = fixture().await;
     let origin = Origin {
         instance_id: "fixture".into(),
@@ -496,16 +496,12 @@ async fn models_can_request_and_reply_across_threads_including_their_own() {
         execution_id: "shell".into(),
         token: "synthetic".into(),
     };
-    let mut self_send = match send(true) {
-        Command::MessageAsk(args) => args,
-        _ => unreachable!(),
+    let recipient = Origin {
+        thread_id: "recipient".into(),
+        ..origin.clone()
     };
-    self_send.thread_id = Some("sender".into());
     let accepted = store
-        .execute(
-            request(Command::MessageAsk(self_send)),
-            Some(origin.clone()),
-        )
+        .execute(request(send(true)), Some(origin.clone()))
         .await
         .unwrap()
         .result;
@@ -529,7 +525,6 @@ async fn models_can_request_and_reply_across_threads_including_their_own() {
     let Command::MessageAsk(mut external) = send(true) else {
         unreachable!();
     };
-    external.thread_id = Some("sender".into());
     external.sender_label = Some("external-tool".into());
     let external = store
         .execute(request(Command::MessageAsk(external)), None)
@@ -537,22 +532,23 @@ async fn models_can_request_and_reply_across_threads_including_their_own() {
         .unwrap()
         .result;
     let external_id = external["message_id"].as_str().unwrap();
-    let details = store
-        .execute(
-            request(Command::ThreadGet(ThreadTarget {
-                thread_id: Some("sender".into()),
-            })),
-            None,
-        )
-        .await
-        .unwrap()
-        .result;
-    assert!(details.get("awaiting_replies").is_none());
-    assert_eq!(details["pending_replies"]["owed_by"]["count"], 2);
-    assert_eq!(details["pending_replies"]["asked_by"]["count"], 2);
+    for (thread, direction) in [("recipient", "owed_by"), ("sender", "asked_by")] {
+        let details = store
+            .execute(
+                request(Command::ThreadGet(ThreadTarget {
+                    thread_id: Some(thread.into()),
+                })),
+                None,
+            )
+            .await
+            .unwrap()
+            .result;
+        assert!(details.get("awaiting_replies").is_none());
+        assert_eq!(details["pending_replies"][direction]["count"], 2);
+    }
     for (owed_by, asked_by, to, expected) in [
         (
-            Some("sender"),
+            Some("recipient"),
             None,
             None,
             vec![message_id.as_str(), external_id],
@@ -618,10 +614,10 @@ async fn models_can_request_and_reply_across_threads_including_their_own() {
         .execute(
             request(Command::MessageReply(MessageReplyArgs {
                 message_id: message_id.clone(),
-                text: "self".into(),
+                text: "too early".into(),
                 sender_label: None,
             })),
-            Some(origin.clone()),
+            Some(recipient.clone()),
         )
         .await
         .unwrap_err();
@@ -631,10 +627,10 @@ async fn models_can_request_and_reply_across_threads_including_their_own() {
         .execute(
             request(Command::MessageReply(MessageReplyArgs {
                 message_id: message_id.clone(),
-                text: "self reply".into(),
+                text: "recipient reply".into(),
                 sender_label: None,
             })),
-            Some(origin.clone()),
+            Some(recipient),
         )
         .await
         .unwrap();
