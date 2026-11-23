@@ -1,5 +1,9 @@
 # Development status
 
+## Core #309 compaction fault tests
+
+Removed duplicate cancellation and deletion witnesses and retired-write assertions. The existing fault matrix covers all four cancellation stages; production code and shared fixtures are unchanged.
+
 ## Core #359 migration numbers at landing
 
 Branch `task/core359-land-migrations` (on #356) extends
