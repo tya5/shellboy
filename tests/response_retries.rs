@@ -3719,9 +3719,6 @@ async fn model_filter_changes_catalog_not_direct_model_execution() {
             r#"
         default_connection = 'gpt'
         default_model = 'gpt-4'
-        [embedding]
-        connection = 'gpt'
-        model = 'embed-test'
         [connections.gpt]
         base_url = {url:?}
         models.include = ['gpt-*']
