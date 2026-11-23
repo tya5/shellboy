@@ -197,8 +197,8 @@ Saved title, state, additions and deletions update the open list automatically w
 Each Thread retains its own draft and reading position. Switching does not stop execution. Shells in the previous Thread continue. Background work may keep a Run live after its Turn's answer completes. See [Delegation](delegation.md) for the Thread/Run/Turn distinction.
 
 `thread list --order created` returns newest Threads first without reordering
-when their activity changes. It works with `--archived`; query, tag, cwd, and
-awaiting filters keep their existing list order and cannot be combined with
+when their activity changes. It works with `--archived`; query, tag, cwd, awaiting, and
+state filters keep their existing list order and cannot be combined with
 `--order created`. Continue paging with the same order and archive selection.
 Every summary carries `created_at`; for Threads created before schema 54,
 created_at is the earliest recorded activity. If none was recorded, it is null.

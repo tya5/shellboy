@@ -318,10 +318,13 @@ conversation footer. In particular, `state: "completed"` can coexist with
 `background` requires an active shell owned by the Run; `continuing` does
 not assert such work. Exit markers and Revisit are independent of activity.
 
+The optional `state` filter matches the row's `state`, not `activity`, and
+requires updated order. The cursor is bound to the state filter.
+
 ### Cross-Thread human waiting list
 
 `thread.list` accepts optional `awaiting: "human"` (exclusive with `query`,
-`tags`, and `cwd`; it composes with `archived`, `limit`, and `cursor`). The CLI
+`tags`, `cwd`, and `state`; it composes with `archived`, `limit`, and `cursor`). The CLI
 spelling is `shellboy thread list --awaiting human`. This returns a keyset
 page of only Threads with pending human-directed reply receipts. Items carry
 `awaiting_named_count` and `awaiting_named_count_exact`: through 16 the count is

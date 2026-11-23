@@ -1001,7 +1001,7 @@ the cursor advances by the last examined key, so exclusions cannot cause an
 unbounded search. The cursor is live, not a snapshot: v2 is scoped to the human
 inbox and archived mode; v1 snapshot cursors are rejected. Keys arriving before
 the cursor are deferred to a fresh listing; future keys may be seen in the
-current traversal. The filter is exclusive with query, tags, and cwd. Stress
+current traversal. The filter is exclusive with query, tags, cwd, and state. Stress
 fixtures pin candidate-query VM steps with many late-arrival Threads and exercise
 state churn.
 

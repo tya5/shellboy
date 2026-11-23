@@ -709,7 +709,7 @@ pub enum StorageCommand {
 
 #[derive(Debug, Clone, Args)]
 pub struct ListOptions {
-    /// Sort by updated (default) or created (newest first; only with archive selection, not query, tag, cwd, or awaiting filters).
+    /// Sort by updated (default) or created (newest first; only with archive selection, not query, tag, cwd, awaiting, or state filters).
     /// Created pages are live: refresh page 1 for Threads above the cursor. A new Thread below the cursor, for example after a clock rollback, can appear once on a later page.
     #[arg(long, value_enum, default_value = "updated")]
     pub order: wire::ThreadListOrder,
@@ -719,7 +719,7 @@ pub struct ListOptions {
     pub cursor: Option<String>,
     #[arg(long)]
     pub query: Option<String>,
-    /// Only Threads with an unanswered question for this recipient name.
+    /// Only Threads with an unanswered question for this recipient name; cannot be combined with --query, --tag, --cwd, or --state.
     #[arg(long)]
     pub awaiting: Option<String>,
     /// Only Threads whose current list state matches (updated order only).
