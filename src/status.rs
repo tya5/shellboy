@@ -591,6 +591,7 @@ pub fn snapshot(db: &Connection, args: &StatusArgs, instance: &str) -> Result<St
             "NULL",
         ),
     ];
+    let pending_only = scope.states.is_empty() && !args.all;
     let mut sources_sql = Vec::new();
     for (kind, (alias, id, from, thread, run, created, ended, updated)) in
         kinds.into_iter().zip(sources)
@@ -606,7 +607,7 @@ pub fn snapshot(db: &Connection, args: &StatusArgs, instance: &str) -> Result<St
             predicate.push_str(&format!(
                 " AND {alias}.state IN (SELECT value FROM json_each(:states))"
             ));
-        } else if !args.all {
+        } else if pending_only {
             predicate.push_str(&format!(
                 " AND {alias}.state NOT IN ({})",
                 kind.terminal_states()
@@ -616,6 +617,19 @@ pub fn snapshot(db: &Connection, args: &StatusArgs, instance: &str) -> Result<St
                     .join(",")
             ));
         }
+        // Start at the partial index. Driving through the owner/Turn join first
+        // would still walk terminal Runs and Turns before reaching pending work.
+        let from = if pending_only {
+            let (table, related) = from.split_once(" JOIN ").unwrap_or((from, ""));
+            let mut indexed = format!("{table} INDEXED BY status_{}_pending", kind.as_str());
+            if !related.is_empty() {
+                indexed.push_str(" CROSS JOIN ");
+                indexed.push_str(related);
+            }
+            indexed
+        } else {
+            from.to_owned()
+        };
         let source = format!("status_time_key({created})");
         let activity = format!("max({source},status_time_key({ended}),status_time_key({updated}))");
         sources_sql.push(format!("SELECT '{}' kind,{id} id,{alias}.rowid rid,{source} source,{activity} activity FROM {from} WHERE 1{predicate}", kind.as_str()));
@@ -815,6 +829,70 @@ mod response_node_tests {
         assert_eq!(next.items.len(), 1);
         assert_eq!(next.items[0].id, "older");
         assert_eq!(next.items[0].reason.as_deref(), Some("changed off page"));
+    }
+
+    #[test]
+    fn default_status_work_does_not_grow_with_terminal_history() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('current','/','','p','m','2026-11-24T00:00:00Z');
+            INSERT INTO run(id,thread_id,state,created_at) VALUES('pending','current','live','2026-11-24T00:00:00Z');").unwrap();
+        let steps = Arc::new(AtomicUsize::new(0));
+        let measure = |args: &StatusArgs| {
+            let observed = steps.clone();
+            steps.store(0, Ordering::Relaxed);
+            db.progress_handler(
+                1,
+                Some(move || {
+                    observed.fetch_add(1, Ordering::Relaxed);
+                    false
+                }),
+            )
+            .unwrap();
+            let result = snapshot(&db, args, "fixture").unwrap();
+            db.progress_handler(0, None::<fn() -> bool>).unwrap();
+            assert_eq!(
+                result
+                    .items
+                    .iter()
+                    .map(|item| item.id.as_str())
+                    .collect::<Vec<_>>(),
+                ["pending"]
+            );
+            assert!(result.next_cursor.is_none());
+            steps.load(Ordering::Relaxed)
+        };
+        let global = StatusArgs::default();
+        let scoped = StatusArgs {
+            thread_id: Some("current".into()),
+            ..Default::default()
+        };
+        let before = [measure(&global), measure(&scoped)];
+        db.execute_batch("CREATE TEMP TABLE history_fixture AS
+            WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<2000)
+            SELECT printf('history-%05d',i) id, CASE WHEN i%2=0 THEN 'current' ELSE printf('unrelated-%05d',i) END thread_id, '2026-11-23T00:00:00Z' at FROM n;
+            INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)
+                SELECT thread_id,'/','','p','m',at FROM history_fixture WHERE thread_id<>'current';
+            INSERT INTO run(id,thread_id,state,created_at) SELECT id,thread_id,'completed',at FROM history_fixture;
+            INSERT INTO turn(id,thread_id,run_id,state,created_at) SELECT id,thread_id,id,'completed',at FROM history_fixture;
+            INSERT INTO model_attempt(id,turn_id,kind,thread_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)
+                SELECT id,id,'conversation',thread_id,0,0,'p','m',0,'completed','{}',at FROM history_fixture;
+            INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at)
+                SELECT id,id,id,id,'exited','/','{}','UTF-8','UTF-8','closed',at FROM history_fixture;
+            INSERT INTO node(id,kind,created_at,payload_json) SELECT id,'user',at,'{}' FROM history_fixture;
+            INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at)
+                SELECT id,id,'null',thread_id,id,'applied',at FROM history_fixture;").unwrap();
+        let after = [measure(&global), measure(&scoped)];
+        for (before, after) in before.into_iter().zip(after) {
+            assert!(
+                after <= before + 32,
+                "VM steps grew with terminal history: {before} -> {after}"
+            );
+        }
     }
 
     #[test]

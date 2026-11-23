@@ -6,6 +6,10 @@ Local `cargo check --tests --locked`, test layout, and classified language
 audit passed. Synthetic witnesses check sparse state continuation, receipt
 category work, and page-scoped status. Hosted checks and a matched Studio
 pair are not established by the local gates.
+The default `status` view is checked with a SQLite VM-step witness as terminal
+history and unrelated Threads grow. `--all` and terminal `--state` still scan
+ordering keys in proportion to matching work; revisit if `status --all` is slow
+on a real workload.
 
 ## Core #379 CLI and guide audit fixes
 

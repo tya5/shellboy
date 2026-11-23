@@ -16,3 +16,7 @@ Previous state-filter cursors expire; other Thread list cursors are unchanged.
 rows. Its fingerprint identifies the normalized query and the durable rows
 actually returned on the page. It does not describe other pages or include
 read-time shell observations. Old `status` cursors expire.
+
+The default `status` key scan uses one pending-work partial index per source.
+`--all` and terminal `--state` still scan matching keys. No stored time key
+is added. Landing numbers `next_thread_reply_summary`.
