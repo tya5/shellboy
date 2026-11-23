@@ -216,9 +216,10 @@ mod tests {
                 "duplicate exemption"
             );
         }
+        assert!(Kind::HistoryExport.read_lane());
         assert_eq!(
             Kind::ALL.len(),
-            72,
+            73,
             "classify new kinds and update this ratchet"
         );
     }

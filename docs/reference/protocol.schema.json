@@ -970,6 +970,22 @@
         {
           "properties": {
             "args": {
+              "$ref": "#/definitions/HistoryExportArgs"
+            },
+            "command": {
+              "const": "history.export",
+              "type": "string"
+            }
+          },
+          "required": [
+            "command",
+            "args"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "args": {
               "$ref": "#/definitions/HistoryRelationsArgs"
             },
             "command": {
@@ -2573,6 +2589,151 @@
         "command_truncated"
       ],
       "type": "object"
+    },
+    "HistoryExportArgs": {
+      "additionalProperties": false,
+      "properties": {
+        "cursor": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "limit": {
+          "default": 50,
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "thread_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "thread_id"
+      ],
+      "type": "object"
+    },
+    "HistoryExportNode": {
+      "properties": {
+        "current_ordinal": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "order": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "payload_json": {
+          "type": "string"
+        },
+        "provenance": {
+          "$ref": "#/definitions/NodeProvenance"
+        }
+      },
+      "required": [
+        "id",
+        "order",
+        "payload_json",
+        "provenance"
+      ],
+      "type": "object"
+    },
+    "HistoryExportRecord": {
+      "oneOf": [
+        {
+          "properties": {
+            "node": {
+              "$ref": "#/definitions/HistoryExportNode"
+            },
+            "owner_thread_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "relations": {
+              "$ref": "#/definitions/HistoryExportRelations"
+            },
+            "role": {
+              "$ref": "#/definitions/HistoryExportRole"
+            },
+            "type": {
+              "const": "node",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "role",
+            "node",
+            "relations"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "reason": {
+              "type": "string"
+            },
+            "type": {
+              "const": "tombstone",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "reason"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "HistoryExportRelations": {
+      "properties": {
+        "previous": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "replaced_by": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "replaces": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "previous",
+        "replaces",
+        "replaced_by"
+      ],
+      "type": "object"
+    },
+    "HistoryExportRole": {
+      "enum": [
+        "current",
+        "replaced_source"
+      ],
+      "type": "string"
     },
     "HistoryGetArgs": {
       "additionalProperties": false,
@@ -6450,6 +6611,35 @@
             },
             "command": {
               "const": "history.search",
+              "type": "string"
+            },
+            "operation_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "origin": true,
+            "protocol_version": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "args",
+            "command",
+            "operation_id",
+            "protocol_version"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "args": {
+              "$ref": "#/definitions/HistoryExportArgs"
+            },
+            "command": {
+              "const": "history.export",
               "type": "string"
             },
             "operation_id": {
@@ -11082,6 +11272,34 @@
         "config_changed"
       ],
       "title": "EventsWaitResult",
+      "type": "object"
+    },
+    "history.export": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "change_position": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/definitions/HistoryExportRecord"
+          },
+          "type": "array"
+        },
+        "next_cursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "items",
+        "change_position"
+      ],
+      "title": "HistoryExportPage",
       "type": "object"
     },
     "history.get": {
