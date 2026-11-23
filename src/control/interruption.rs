@@ -193,7 +193,6 @@ AND NOT EXISTS (
 ORDER BY o.created_at, o.operation_id";
 
 const APPEND_CONTEXT_EVENT: &str = r"INSERT INTO event(id, kind, source_json, target_thread_id, payload_ref_json, created_at) VALUES(?1, 'context_changed', ?2, ?3, ?4, ?5)";
-const APPEND_CAPTURE_EVENT: &str = r"INSERT INTO event(id, kind, source_json, target_thread_id, payload_ref_json, created_at) VALUES(?1, 'context_changed', ?2, ?3, ?4, ?5)";
 
 struct CaptureStager<'a, 'db> {
     tx: &'a rusqlite::Transaction<'db>,
@@ -242,7 +241,7 @@ impl<'a, 'db> CaptureStager<'a, 'db> {
                 "payload_bytes":payload_json.len(),"body_hash":body_hash}
         });
         self.tx.execute(
-            APPEND_CAPTURE_EVENT,
+            APPEND_CONTEXT_EVENT,
             rusqlite::params![
                 event_id,
                 self.actor_json,
@@ -270,7 +269,7 @@ impl<'a, 'db> CaptureStager<'a, 'db> {
             "source":final_payload["actor"]["source"],
         });
         self.tx.execute(
-            APPEND_CAPTURE_EVENT,
+            APPEND_CONTEXT_EVENT,
             rusqlite::params![
                 header_id,
                 self.actor_json,
