@@ -623,6 +623,34 @@ async fn models_can_request_and_reply_across_threads() {
         .unwrap_err();
     assert_eq!(not_applied.code, ErrorCode::InvalidState);
     store.database.call({ let id = message_id.clone(); move |db| { db.execute("UPDATE receipt SET state='applied',path_admission='admitted' WHERE message_node_id=?1", [&id])?; Ok(()) } }).await.unwrap();
+    for id in [
+        message_id.as_str(),
+        human_ask["message_id"].as_str().unwrap(),
+    ] {
+        let error = store
+            .execute(
+                request(Command::MessageReply(MessageReplyArgs {
+                    message_id: id.into(),
+                    text: "not my answer".into(),
+                    sender_label: None,
+                })),
+                Some(origin.clone()),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, ErrorCode::InvalidArgument);
+        let saved = store
+            .execute(
+                request(Command::MessageGet(MessageTarget {
+                    message_id: id.into(),
+                })),
+                None,
+            )
+            .await
+            .unwrap()
+            .result;
+        assert_eq!(saved["reply"]["state"], "pending");
+    }
     let reply = store
         .execute(
             request(Command::MessageReply(MessageReplyArgs {
@@ -655,8 +683,12 @@ async fn models_can_request_and_reply_across_threads() {
             }),
         )
         .await
-        .unwrap();
-    assert_eq!(cross_thread.result["reply_to"], foreign_id);
+        .unwrap_err();
+    assert_eq!(cross_thread.code, ErrorCode::TargetUnavailable);
+    assert_eq!(
+        cross_thread.details.unwrap()["pending_duty_ids"],
+        serde_json::json!([])
+    );
     store.database.shutdown().await.unwrap();
 }
 
@@ -1082,6 +1114,20 @@ async fn missing_reply_target_lists_only_calling_threads_pending_duties() {
         execution_id: "caller-shell".into(),
         token: "synthetic-origin".into(),
     };
+    store
+        .execute(
+            request(Command::MessageAsk(MessageAskArgs {
+                human: false,
+                sender_label: None,
+                thread_id: None,
+                to: None,
+                deliver: Deliver::Next,
+                text: "question I asked, not a duty I owe".into(),
+            })),
+            Some(caller.clone()),
+        )
+        .await
+        .unwrap();
     let resolve_error = store
         .execute(
             request(Command::IdResolve(IdResolveArgs {

@@ -189,7 +189,7 @@ Connection precedence: explicit `--connection` > explicit Thread > authenticated
 
 | Operation and all specific flags | Main result and conditions |
 |---|---|
-| `thread list [--order updated\|created] [--limit N] [--cursor C] [--query TEXT] [--awaiting NAME] [--archived exclude\|include\|only] [--tag TAG]... [--cwd PATH]` | `items` (thread_id/title/cwd/parent_id/state/latest_run_stop_reason/optional revisit/created_at/updated_at/optional `archived_at`/optional `tags`/excerpt/`last_end_message`/`last_input`/`awaiting_named_count`/`awaiting_named_count_exact`/optional `awaiting_named_oldest_at`/`awaiting_thread_count`), optional `next_cursor`; default 50, range 1–200. `--awaiting NAME` pages only Threads with pending replies to NAME; each item reports counts through 16 exactly; count 17 with `awaiting_named_count_exact=false` means 17 or more. Legacy receipts are retained and read with a 17-row bound. `awaiting_named_oldest_at` is the minimum saved timestamp only for exact counts; it is absent for 17-or-more. Its live Thread-ID keyset cursor is scoped to filter and archived mode, is not a snapshot, may include late-arriving Threads after the current key, and rejects older snapshot cursors (restart without a cursor). It cannot be combined with `--query`, `--tag` or `--cwd`. Archived Threads are hidden by default (`--archived exclude`); `include` lists both and `only` lists just the archived ones. A cursor is bound to its archived mode: using it with another `--archived` value fails with `cursor_expired`. Order is unchanged (`updated_at` then ID), and archiving does not change `updated_at`. `--tag TAG` keeps only Threads that carry the tag; repeat it to require every tag (AND, at most 64). `--cwd PATH` keeps only Threads whose saved working directory is PATH after the same lexical cleanup as saved cwds (`.`, `..`, trailing `/`; no symlink resolution). The CLI resolves a relative PATH against the current directory; a wire client must send an absolute path (a relative one is `invalid_argument`). A parent directory does not match. Both combine with `--query` and `--archived`, and a cursor is bound to the whole filter (`cursor_expired` if it changes). A tag filter reads the members of the first tag, so a very large first tag costs more than a small one: put the narrowest tag first. With `--query` every member of the first tag is read, because the text match runs after the SQL page |
+| `thread list [--order updated\|created] [--limit N] [--cursor C] [--query TEXT] [--awaiting NAME] [--archived exclude\|include\|only] [--tag TAG]... [--cwd PATH]` | `items` (thread_id/title/cwd/parent_id/state/latest_run_stop_reason/optional revisit/created_at/updated_at/optional `archived_at`/optional `tags`/excerpt/`last_end_message`/`last_input`/`awaiting_named_count`/`awaiting_named_count_exact`/optional `awaiting_named_oldest_at`/`awaiting_thread_count`; legacy fields `awaiting_reply`, `awaiting_thread_replies`, `awaiting_replies` are still emitted), optional `next_cursor`; default 50, range 1–200. `--awaiting NAME` pages only Threads with pending replies to NAME; each item reports counts through 16 exactly; count 17 with `awaiting_named_count_exact=false` means 17 or more. Legacy receipts are retained and read with a 17-row bound. `awaiting_named_oldest_at` is the minimum saved timestamp only for exact counts; it is absent for 17-or-more. Its live Thread-ID keyset cursor is scoped to filter and archived mode, is not a snapshot, may include late-arriving Threads after the current key, and rejects older snapshot cursors (restart without a cursor). It cannot be combined with `--query`, `--tag` or `--cwd`. Archived Threads are hidden by default (`--archived exclude`); `include` lists both and `only` lists just the archived ones. A cursor is bound to its archived mode: using it with another `--archived` value fails with `cursor_expired`. Order is unchanged (`updated_at` then ID), and archiving does not change `updated_at`. `--tag TAG` keeps only Threads that carry the tag; repeat it to require every tag (AND, at most 64). `--cwd PATH` keeps only Threads whose saved working directory is PATH after the same lexical cleanup as saved cwds (`.`, `..`, trailing `/`; no symlink resolution). The CLI resolves a relative PATH against the current directory; a wire client must send an absolute path (a relative one is `invalid_argument`). A parent directory does not match. Both combine with `--query` and `--archived`, and a cursor is bound to the whole filter (`cursor_expired` if it changes). A tag filter reads the members of the first tag, so a very large first tag costs more than a small one: put the narrowest tag first. With `--query` every member of the first tag is read, because the text match runs after the SQL page |
 | `thread get [--thread THREAD]` | thread_id/title/cwd/connection/model/effort/parent_id, optional `archived_at`, optional `tags` (sorted), `auto_compact_at` (this Thread's own compaction threshold, null if none) and `effective_auto_compact_at` (the value in use), current run_id/turn_id, `summarizing` (boolean; automatic compaction witnessed for the current live Run and Turn), shells_count, recovery_reason, `last_end_message`, `last_input`, and `pending_replies` `{owed_by, asked_by}`, each `{count, exact}` (exact through 16; list the items with `message list --awaiting`) |
 | `thread create [--agents PATH] [--cwd PATH] [--connection NAME] [--model ID] [--effort VALUE] [--parent THREAD]` | New Thread details, without starting instructions or a Run. Parent establishes Thread ancestry only, not execution ownership. Normally inherits parent settings |
 | `thread fork --thread THREAD --node NODE [--agents PATH] [--cwd PATH]` | New Thread sharing the selected path through NODE inclusive, without changing the original; invalid boundaries such as incomplete tool groups rejected |
@@ -235,7 +235,7 @@ Root cwd defaults to owner startup cwd; child cwd to the parent's. Relative cwd 
 | `message cancel --message MESSAGE [--message MESSAGE ...]` | Cancel 1..128 fixed message IDs. Queued input can be archived; an admitted pending reply duty returns `reply_cancelled` without removing history. Other outcomes are `cancelled`/`already_cancelled`/`already_admitted`/`not_found`/`forbidden`/`unavailable`. Does not wake the model |
 | `operation get --operation ID` | operation_id/state/outcome, instance_id/created_at/current_instance, result_uncertain/result_expired/replay_policy/targets, target-dependent downstream. Global `--operation-id` identifies this query; `--operation` identifies its target |
 
-For an admitted Thread-to-Thread reply duty, the receipt-derived developer preamble immediately before the body includes the exact `shellboy message reply --message ID` command. A reply preamble gives the original `Reply to` ID. No separate admission notice is stored. The Run-end reminder lists pending IDs. A model sender receives a `reply_outcome` notice if the recipient ignores the request or its Thread is deleted; without a live Run it is seen at the next Turn and does not start a Run.
+For an admitted Thread-to-Thread reply duty, the receipt-derived developer preamble immediately before the body includes the exact `shellboy message reply --message ID` command. A reply preamble gives the original `Reply to` ID. No separate admission notice is stored. The Run-end reminder lists pending IDs. A model sender receives a `reply_outcome` notice if the recipient ignores the request or its Thread is deleted; if the sender Thread is idle, it starts a Run there unless that Thread is stopping.
 
 
 `--deliver complete` waits while the recipient Run is live. At normal completion,
@@ -1086,14 +1086,14 @@ effectiveness.
 ## Explicit Reply Core (#194)
 
 `message ask --thread` records a reply duty on the accepted message;
-there can be at most 16 pending duties per recipient Thread. The 17th send/ask is rejected as `reply_limit`; details include the limit and current count. Reply to a completed request or cancel an obsolete one before retrying. A recipient model
+there can be at most 16 pending duties per recipient Thread. The 17th ask is rejected as `reply_limit`; details include the limit and current count. Your unanswered human questions count toward your Thread's limit. Withdraw requests you sent with `message cancel` or wait for a reply; never reply to your own requests. A recipient model
 (or human) replies with `message reply --message MESSAGE_ID --text TEXT` or
 `--text-stdin`. It must be applied and still pending. `message get` exposes
 `expect_reply`, `reply` (state and optional timestamp, node, sender), or
 `reply_to` for a delivered reply; it no longer borrows a Turn's end message.
 Use `history get --node REPLY_NODE_ID` for the body. If `message reply` gets
-`target_unavailable` for an unknown ID, `error.details.pending_duty_ids` lists
-up to 16 duties in the caller Thread (when the CLI has Thread context).
+`target_unavailable` for an unknown or unavailable ID, `error.details.pending_duty_ids` lists
+up to 16 duties the caller Thread owes, excluding questions it sent.
 
 `wait reply_received` uses a JSON condition
 `{"type":"reply_received","message_id":"MESSAGE_ID"}`. Example:
@@ -1115,9 +1115,11 @@ storage status for logical index bytes. Reclamation resumes after restart.
 
 ## Message Ask
 
-`message ask --text TEXT` saves a question for the human. The answer arrives as
-input in the current Thread and starts a Run if needed. The question is available
-in `message list --awaiting` (and counted in `thread get` → `pending_replies`); answer with `message reply`.
+Omit `--thread` to ask a person. They answer in Studio or the TUI; the answer
+arrives in this Thread with `reply_to` and starts a Run if needed. Your questions
+are listed by `message list --awaiting --to human` and counted in
+`thread get` under `pending_replies.asked_by`. Never reply to your own question;
+withdraw it with `message cancel`.
 
 ### Spill tool sources (#274)
 

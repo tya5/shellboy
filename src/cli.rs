@@ -143,7 +143,7 @@ pub enum CliCommand {
         #[command(subcommand)]
         command: AttachmentCommand,
     },
-    /// Attach a path; shorthand for attachment add --path PATH.
+    /// Attach a path; shorthand for attachment add --path PATH --kind KIND (image or file).
     Attach(AttachOptions),
     /// Request compaction at the next safe boundary.
     Compact(CompactOptions),
@@ -394,7 +394,7 @@ pub enum ThreadCommand {
     Prune(ThreadPruneOptions),
     /// Cut this Thread's selected path back to a node; the removed part stays as a child Thread.
     #[command(
-        after_help = "Same Thread, same ID and title; the path now ends at NODE:\n  shellboy thread rewind --thread THREAD_ID --node NODE_ID\n\nThe removed part is kept as a new child Thread (branch_thread_id in the result); opening it undoes the rewind. There is no in-place forward. NODE is a node on the selected path, or an original inside a summary this Thread holds (not after `thread prune`). Conversation only: shell executions and child Threads started after NODE are listed, not undone. Refused while the Thread has a live Run or queued messages, so a model cannot rewind the Thread it is running in; it can rewind another idle Thread. `--run RUN_ID` instead atomically stops that exact recovery_wait Run and rewinds, refusing retained owners without cancelling them. It requires `--thread`; no Run is inferred. Attachments whose message leaves the path are not sent. `--dry-run` reports the same facts (removed range, what is not undone) without changing anything."
+        after_help = "Same Thread, same ID and title; the path now ends at NODE:\n  shellboy thread rewind --thread THREAD_ID --node NODE_ID\n\nThe removed part is kept as a new child Thread (branch_thread_id in the result); opening it undoes the rewind. There is no in-place forward. NODE is a node on the selected path, or an original inside a summary this Thread holds (not after `thread prune`). Conversation only: shell executions and child Threads started after NODE are listed, not undone. Refused while the Thread has a live Run or messages with unknown path admission, so a model cannot rewind the Thread it is running in; it can rewind another idle Thread. `--run RUN_ID` instead atomically stops that exact recovery_wait Run and rewinds, refusing retained owners without cancelling them. It requires `--thread`; no Run is inferred. Attachments whose message leaves the path are not sent. `--dry-run` reports the same facts (removed range, what is not undone) without changing anything."
     )]
     Rewind(ThreadRewindOptions),
     /// Show the branch tree: Threads forked, edited or rewound from this one, and where they diverge.
@@ -1018,12 +1018,16 @@ pub struct MessageSendOptions {
 }
 #[derive(Debug, Clone, Args)]
 pub struct MessageListOptions {
+    /// List pending reply duties.
     #[arg(long, required = true)]
     pub awaiting: bool,
+    /// Requests that this Thread must answer (excludes named questions).
     #[arg(long, conflicts_with_all = ["asked_by", "to"])]
     pub owed_by: Option<String>,
+    /// Requests this model Thread sent, including its human questions.
     #[arg(long, conflicts_with = "to")]
     pub asked_by: Option<String>,
+    /// Questions addressed to this named recipient.
     #[arg(long)]
     pub to: Option<String>,
     #[arg(long, default_value_t = wire::DEFAULT_LIST_LIMIT)]
@@ -1046,6 +1050,7 @@ pub struct MessageAskOptions {
 }
 #[derive(Debug, Clone, Args)]
 pub struct MessageReplyOptions {
+    /// ID from a received message's `Reply expected` preamble. Withdraw your own requests with message cancel.
     #[arg(long = "message")]
     pub message_id: String,
     #[arg(long)]

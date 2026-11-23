@@ -120,48 +120,21 @@ pub(super) fn list_pending(
     })
 }
 
-pub(crate) fn awaiting_replies_tx(
+pub(crate) fn pending_duty_ids(
     db: &Connection,
-    thread: &str,
-    human_only: Option<bool>,
-) -> rusqlite::Result<Vec<Value>> {
-    let mut statement = db.prepare("SELECT r.message_node_id,r.sender_json,r.target_thread_id,r.created_at,r.state,r.result_json,n.payload_json,CAST((julianday('now')-julianday(r.created_at))*86400000 AS INTEGER) FROM receipt r INDEXED BY receipt_reply_pending JOIN node n ON n.id=r.message_node_id WHERE r.target_thread_id=?1 AND json_extract(r.result_json,'$.reply.state')='pending' AND (?2 IS NULL OR COALESCE(json_extract(r.result_json,'$.to_human'),0)=?2) ORDER BY r.created_at,r.rowid LIMIT ?3")?;
-    statement
-        .query_map(
-            rusqlite::params![
-                thread,
-                human_only.map(i64::from),
-                (crate::protocol::MAX_PENDING_REPLY_DUTIES + 1) as i64
-            ],
-            |r| {
-                let saved: String = r.get(5)?;
-                let saved: Value = serde_json::from_str(&saved)
-                    .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
-                let sender: String = r.get(1)?;
-                let payload: Option<String> = r.get(6)?;
-                let excerpt = payload
-                    .and_then(|body| serde_json::from_str::<Value>(&body).ok())
-                    .map(|value| crate::history::conversation_excerpt(&value, 512))
-                    .unwrap_or_default();
-                let excerpt =
-                    crate::presentation::sanitize_plain(excerpt.lines().next().unwrap_or(""), 0)
-                        .0
-                        .chars()
-                        .take(512)
-                        .collect::<String>();
-                Ok(json!({
-                    "message_id":r.get::<_,String>(0)?,
-                    "recipient_kind":if saved["to_human"] == true {"human"} else {"thread"},
-                    "recipient_thread_id":r.get::<_,String>(2)?,
-                    "sender":crate::protocol::MessageSender::from_saved(Some(&sender)),
-                    "created_at":r.get::<_,String>(3)?,
-                    "elapsed_ms":r.get::<_,i64>(7)?.max(0),
-                    "delivery_status":r.get::<_,String>(4)?,
-                    "excerpt":excerpt.lines().next().unwrap_or(""),
-                    "reminded":saved["reply"].get("reminded_at").is_some()
-                }))
-            },
-        )?
+    caller: Option<&crate::protocol::Origin>,
+) -> rusqlite::Result<Vec<String>> {
+    let Some(origin) = caller else {
+        return Ok(Vec::new());
+    };
+    db.prepare("SELECT r.message_node_id FROM receipt r INDEXED BY receipt_reply_pending
+        JOIN node n ON n.id=r.message_node_id
+        WHERE r.target_thread_id=?1 AND json_extract(r.result_json,'$.reply.state')='pending'
+          AND json_extract(r.result_json,'$.ask_name') IS NULL
+          AND json_extract(r.result_json,'$.to_human') IS NOT 1
+          AND NOT (json_extract(r.sender_json,'$.kind') IS 'model' AND json_extract(r.sender_json,'$.thread_id') IS ?1)
+        ORDER BY r.created_at,r.rowid LIMIT ?2")?
+        .query_map(params![origin.thread_id, crate::protocol::MAX_PENDING_REPLY_DUTIES as i64], |row| row.get(0))?
         .collect()
 }
 
@@ -234,31 +207,42 @@ impl super::db::Store {
             )
             .optional()
             .map_err(sql)?;
-        let Some(row) = row else {
-            let pending_duty_ids = caller
-                .map(|origin| {
-                    awaiting_replies_tx(tx, &origin.thread_id, None)
-                        .map(|items| {
-                            items
-                                .into_iter()
-                                .take(crate::protocol::MAX_PENDING_REPLY_DUTIES as usize)
-                                .filter_map(|item| item["message_id"].as_str().map(str::to_owned))
-                                .collect::<Vec<_>>()
-                        })
-                        .map_err(sql)
+        let unavailable = || {
+            pending_duty_ids(tx, caller)
+                .map(|ids| {
+                    ApiError::new(
+                        ErrorCode::TargetUnavailable,
+                        "message not found or not owed by this Thread",
+                    )
+                    .details(json!({"pending_duty_ids": ids}))
                 })
-                .transpose()?
-                .unwrap_or_default();
-            return Err(
-                ApiError::new(ErrorCode::TargetUnavailable, "message not found")
-                    .details(json!({"pending_duty_ids":pending_duty_ids})),
-            );
+                .map_err(sql)
+        };
+        let Some(row) = row else {
+            return Err(unavailable()?);
         };
         let saved: Value = row
             .3
             .as_deref()
             .and_then(|s| serde_json::from_str(s).ok())
             .unwrap_or_else(|| json!({}));
+        let sender = MessageSender::from_saved(Some(&row.4));
+        let target = model_thread_identity(&sender);
+        if let Some(origin) = caller {
+            if target == Some(origin.thread_id.as_str()) {
+                return Err(ApiError::new(
+                    ErrorCode::InvalidArgument,
+                    "cannot reply to a request you sent",
+                )
+                .hint("To withdraw your request, use message cancel"));
+            }
+            if origin.thread_id != row.0
+                || saved["to_human"] == true
+                || saved["ask_name"].is_string()
+            {
+                return Err(unavailable()?);
+            }
+        }
         if saved["expect_reply"] != true {
             return Err(ApiError::new(
                 ErrorCode::InvalidArgument,
@@ -289,11 +273,6 @@ impl super::db::Store {
             ));
         }
         let by = MessageSender::recorded(caller, args.sender_label.clone(), caller.is_none());
-        let sender = MessageSender::from_saved(Some(&row.4));
-        let target = sender
-            .thread_id
-            .as_deref()
-            .filter(|_| sender.kind == SenderKind::Model);
         if let Some(sender_thread) = target
             && tx
                 .query_row(

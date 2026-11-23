@@ -2151,9 +2151,9 @@ impl Store {
             if pending >= limit as i64 {
                 return Err(ApiError::new(
                     ErrorCode::ReplyLimit,
-                    format!("target Thread has {pending} pending reply duties (limit {limit}); reply to or cancel one before sending another"),
+                    format!("target Thread has {pending} pending reply duties (limit {limit})"),
                 ).details(json!({"limit":limit,"current_count":pending}))
-                 .hint("Reply to or cancel an outstanding request in the target Thread, then retry; the rejected message was not accepted"));
+                 .hint("Withdraw an outstanding request you sent, or wait for a reply before asking again. This request was not accepted"));
             }
         }
         let MessageAssignment {

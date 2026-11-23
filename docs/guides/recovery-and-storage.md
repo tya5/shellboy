@@ -78,7 +78,7 @@ shellboy run get --run RUN_ID
 | Run `live` | Execution lifetime continues | Includes waiting for owned background work after answering |
 | Turn `recovery_wait` | Failure reason saved, awaiting an explicit decision | Time or configuration changes alone do not resume it |
 
-For a reply-expected request, inspect `message get` and retrieve `reply.node_id` when `reply.state` is `replied`. For a Turn or Run end message use its `end_message_node_id`. Follow `next_cursor` for long bodies. A stopped or Esc-ended Turn may have no end message; do not invent a result. A stopped Run leaves an outstanding reply pending until a reply, cancellation, or another terminal reply state.
+For a reply-expected request, inspect `message get` and retrieve `reply.node_id` when `reply.state` is `replied`. For a Turn or Run end message use its `end_message_node_id`. Follow `next_cursor` for long bodies. A stopped or Esc-ended Turn may have no end message; do not invent a result. Stopping the recipient Run resolves applied pending duties as `ignored`; `recovery_wait` leaves them pending.
 
 In the TUI, start via F8 `待機 | 条件を観測` and cancel only observation with lowercase w in management or `/cancel-wait`. Esc closes the display without stopping the target. Ctrl+C interrupts the current Thread instead; see [wait controls](tui.md#cancelling-observation-versus-interrupting-its-target).
 
@@ -422,7 +422,7 @@ Even when logical capacity stops new indexing, semantic searches of existing ind
 | `cursor_expired` / `cursor_encoding_mismatch` | Restart list/body retrieval without cursor; do not reuse for another target/encoding |
 | `output_expired` | Raw reclaimed; separately inspect saved quotes/answers, never invent source |
 | `input_limit` | Reported body/attachment/frame limit and target; no silent truncation |
-| `reply_limit` | Target Thread already has 16 pending reply duties (`details.limit`, `details.current_count`); reply to completed requests or cancel obsolete ones, then retry |
+| `reply_limit` | Target Thread already has 16 pending reply duties (`details.limit`, `details.current_count`); your own unanswered human questions count toward your Thread's limit. Withdraw requests you sent with `message cancel`, or wait for a reply; never reply to your own question |
 | `storage_limit` | Inspect usage, reclaim according to retention or revise configuration, explicitly retry |
 | `save_failed` / `io_failed` | Free space, permissions, destination/reference state; distinguish unsaved input from saved acceptance |
 | Search unavailable / few results | Embedding settings, selected space, index status; explicitly choose historical backfill |

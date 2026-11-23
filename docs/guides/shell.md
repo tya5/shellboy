@@ -6,11 +6,12 @@ The model uses the `shell` tool for external work. The `shellboy shell ...` CLI 
 
 ## Model tool arguments
 
-These are JSON arguments to a tool call, not JSON to pass directly to the CLI. Unknown fields are rejected. Only `command` is required.
+These are JSON arguments to a tool call, not JSON to pass directly to the CLI. Unknown fields are ignored with a warning. `command` is required; `description` is also required when `[shell] describe_calls = true` (the default).
 
 ```json
 {
   "command": "printf '%s\\n' 'hello'",
+  "description": "Print a greeting",
   "background": false,
   "stdin_open": false,
   "initial_stdin": "",
@@ -22,6 +23,7 @@ These are JSON arguments to a tool call, not JSON to pass directly to the CLI. U
 | Field | Default | Meaning |
 |---|---|---|
 | `command` | Required | String executed by the configured Bash/PowerShell |
+| `description` | Required by default | Brief summary of the shell call |
 | `background` | `false` | When `true`, return an execution ID after startup so the model can continue |
 | `stdin_open` | `false` | Keep stdin open after initial input; otherwise send EOF after that input |
 | `initial_stdin` | None | Startup input string, written before later CLI writes |

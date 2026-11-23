@@ -30,7 +30,7 @@ Use `shellboy message get --message MESSAGE_ID` to inspect the saved sender;
 A verified model sender has originating instance/Thread/Run/Turn/execution IDs,
 not merely the receiving Run's starter. A `label` is self-asserted and grants no
 authority; `external_cli` does not prove human input, and legacy missing evidence
-stays `unknown`. When sending across data directories, use `--sender-label` to
+stays `unknown`. With `message send` or `message reply` across data directories, use `--sender-label` to
 name yourself: Origin is stripped and the receiver sees an external CLI plus
 that unverified name.
 
@@ -51,7 +51,7 @@ reply state and `reply.node_id`, including while assignment remains pending; do 
 For an external observer, explicit `wait` with `reply_received` remains an inspection option, not the delegation
 lifecycle. Ordinary progress updates use `message send`; there are no automatic child lifecycle notifications.
 
-Any model or human caller may reply once the message is applied:
+The recipient Thread replies once the message is applied. A person may also answer in Studio or the TUI; the asking model cannot reply on the recipient's behalf:
 
 ```bash
 shellboy message reply --message CHILD_MESSAGE_ID --text 'Findings, evidence, and remaining work.'
@@ -60,8 +60,7 @@ shellboy message reply --message CHILD_MESSAGE_ID --text 'Findings, evidence, an
 A model reply is also delivered to the sender's conversation; an external CLI
 sender reads the original receipt and reply node. If the recipient ends without
 replying (`ignored`), or its Thread is deleted (`recipient_deleted`), a model
-sender receives a `reply_outcome` notice in its live Run. Without a live Run,
-the notice is available at the next Turn and does not start a Run. If an admitted
+sender receives a `reply_outcome` notice in its live Run. If the sender Thread is idle, the notice starts a Run there unless that Thread is stopping. If an admitted
 duty is cancelled, the recipient receives `reply_cancelled` at its next request
 boundary, including ordinary activation after its previous Run ends. Progress reports remain ordinary
 messages. `satisfied` is not necessarily success: inspect the reply snapshot's

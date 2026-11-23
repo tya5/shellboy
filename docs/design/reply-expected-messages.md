@@ -389,7 +389,7 @@ Other notices:
 |---|---|---|
 | Run-end reminder | new kind `reply_reminder`, delivered to the completing Run | yes, by construction (it is the reason the Run continues). Payload: IDs, sender kinds and times only, no bodies |
 | Sender cancelled an admitted message | `context_changed` with payload kind `reply_cancelled` | no; delivered at the recipient's next request boundary (existing rule) |
-| `ignored` / `recipient_deleted` to a model sender | new kind `reply_outcome`, delivered to the sender Thread's live Run | yes, as a `reply_outcome` event. With no live Run it is a `context_changed` notice seen at the next Turn and does not start a Run (decision Q6) |
+| `ignored` / `recipient_deleted` to a model sender | new kind `reply_outcome`, delivered to the sender Thread's live Run | yes, as a `reply_outcome` event. If the sender Thread is idle, it starts a Run there unless the Thread is stopping (Q6) |
 
 New event kinds `reply_reminder` and `reply_outcome` are bounded per message
 (at most one reminder entry and one outcome each), owned by the existing event
@@ -569,7 +569,7 @@ for callers that want it.
 | Action | Model caller | Human / external CLI (no Origin) |
 |---|---|---|
 | `message ask` | ordinary send authority; cannot ask its own Thread (#370) | ordinary send authority |
-| `message reply` | only when its Thread is the original's target Thread (any Run of it). A parent cannot reply for its child; a fork cannot reply for its source | any message |
+| `message reply` | only for a Thread-directed request received by its Thread (any Run of it), never a request it sent. A parent cannot reply for its child; a fork cannot reply for its source | any message |
 | cancel the pending reply | only messages its own Thread sent (existing rule) | any message |
 | `wait reply_received` | any message, cycle-checked | any message |
 
@@ -747,7 +747,7 @@ The reminder/`ignored` rule in the completion branch after
 `revisit::release_tx`; event kinds `reply_reminder` and `reply_outcome`
 (rendered as wake/notice rows, the reminder visibly, Q11); `recipient_deleted`
 and sender-deletion `cancelled` in the Thread deletion transaction (Q4);
-`reply_outcome` as a `context_changed` notice when the sender has no live Run
+`reply_outcome` starts a Run when the sender is idle and not stopping
 (Q6); retention of the new events by the existing #170 rules.
 
 - Core: `src/control/reply.rs`, `src/control/driver.rs`,
@@ -862,7 +862,7 @@ the memo gave no single recommendation, the choice made here is marked
 | Q3 | Late reply after `ignored` / `cancelled` | Rejected with `details.reply_state`; the model can send an ordinary message instead |
 | Q4 | Sender's Thread deleted | Its pending messages become `cancelled` (`cancel_reason: sender_deleted`) and recipients that already received them are notified |
 | Q5 | Who may reply | Only the receiving Thread's model, or a human. A parent cannot reply for its child |
-| Q6 | `ignored` when the asking model is idle | Notice only; it is seen at the asker's next Turn and starts no work |
+| Q6 | `ignored` when the asking model is idle | Start a Run in the asking Thread unless it is stopping |
 | Q7 | TUI reply mode | Included in this issue (`/replies`, composer reply mode). **Judgement:** the memo asked "now or later" without a recommendation; the mode is in scope but lands last (step 6), after the CLI path that humans can already use |
 | Q8 | Attachments | Replies are text only |
 | Q9 | Reminder count | Once per message for its whole life, not per Run |

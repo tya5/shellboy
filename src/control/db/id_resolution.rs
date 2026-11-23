@@ -90,20 +90,8 @@ fn not_found(
 ) -> Result<ApiError> {
     let mut details = json!({"kind":kind,"reason":"not_found"});
     if include_pending_duties && kind == IdKind::Message {
-        let pending_duty_ids = caller
-            .map(|origin| {
-                crate::control::reply::awaiting_replies_tx(db, &origin.thread_id, None)
-                    .map(|items| {
-                        items
-                            .into_iter()
-                            .take(crate::protocol::MAX_PENDING_REPLY_DUTIES as usize)
-                            .filter_map(|item| item["message_id"].as_str().map(str::to_owned))
-                            .collect::<Vec<_>>()
-                    })
-                    .map_err(super::sql_error)
-            })
-            .transpose()?
-            .unwrap_or_default();
+        let pending_duty_ids =
+            crate::control::reply::pending_duty_ids(db, caller).map_err(super::sql_error)?;
         details["pending_duty_ids"] = json!(pending_duty_ids);
     }
     Ok(super::error(ErrorCode::NotFound, "No ID matches this prefix").details(details))
