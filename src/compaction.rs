@@ -3939,6 +3939,78 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn thread_import_summary_keeps_readable_thinking_without_opaque_data() {
+        let (url, server) = summary_proxy_capturing_checked(vec![json!({
+            "id":"summary","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"A retained summary"}]}]
+        })], |request| {
+            let text = request.to_string();
+            assert!(text.contains("Readable thinking"));
+            for hidden in ["provider_opaque", "IMPORTED_SIGNATURE", "IMPORTED_CIPHERTEXT"] {
+                assert!(!text.contains(hidden), "{hidden} leaked");
+            }
+        }).await;
+        let (_root, db) = database().await;
+        let body = json!({"reasoning_epoch":0,"output":[
+            {"type":"reasoning","encrypted_content":"IMPORTED_CIPHERTEXT","summary":[]},
+            crate::model::opaque::wrap("anthropic_messages","thinking",json!({"type":"thinking","thinking":"Readable thinking","signature":"IMPORTED_SIGNATURE"})),
+            {"type":"message","role":"assistant","content":[{"type":"output_text","text":"Retained reply"}]}
+        ]});
+        let stored = body.to_string();
+        let expected = stored.clone();
+        db.call(move |db| {
+            let tx = db.transaction()?;
+            history::append_node(&tx, "t", "imported", None, "message", &body, "now")?;
+            tx.execute(
+                "UPDATE node SET import_origin_json='[]' WHERE id='imported'",
+                [],
+            )?;
+            history::append_node(
+                &tx,
+                "t",
+                "next",
+                None,
+                "message",
+                &json!({"role":"user","content":"next"}),
+                "now",
+            )?;
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        let compactor = Compactor::new(db.clone(), Arc::new(summary_config(url)));
+        let snapshot = compactor.snapshot("t", true).await.unwrap();
+        assert_eq!(snapshot.epoch, 0);
+        let source = snapshot
+            .groups
+            .iter()
+            .flat_map(|g| &g.sources)
+            .find(|s| s.id == "imported")
+            .unwrap();
+        assert!(source.imported);
+        assert!(
+            edit::source_projection_characters(&source.payload, 0, source.imported)
+                < edit::projection_characters(&source.payload, 0)
+        );
+        compactor
+            .summarize("t", false, CancellationToken::new())
+            .await
+            .unwrap();
+        assert_eq!(server.await.unwrap().len(), 1);
+        db.call(move |db| {
+            let actual: String = db.query_row(
+                "SELECT payload_json FROM node WHERE id='imported'",
+                [],
+                |r| r.get(0),
+            )?;
+            assert_eq!(actual, expected);
+            Ok(())
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
     async fn successful_summary_uses_current_request_and_adopts_atomically_without_losing_originals()
      {
         let(url,server)=summary_proxy(vec![json!({"id":"summary","status":"completed","usage":{"input_tokens":100,"input_tokens_details":{"cached_tokens":80,"extra":"x".repeat(128*1024)},"output_tokens":10,"attribution":"x".repeat(128*1024)},"output":[
