@@ -157,82 +157,67 @@
   "src/presentation/events.rs:ada8b376f754ec68:1": {
     "category": "a",
     "reason": "event_title: Japanese branch consumed by messages::event_title when locale is Ja; English titles are separately keyed there",
-    "source_tokens_sha256": "160b584c745f960830f8c68df69b02c71cd98fbb714df83ba51d95c7c5684e57"
+    "source_tokens_sha256": "eb00cadc6af4932ad2839e28b6126955b4f25ed0023cfc9990dff6b474e2e4a5"
   },
   "src/presentation/events.rs:112f436c64513522:1": {
     "category": "a",
     "reason": "event_title: Japanese branch consumed by messages::event_title when locale is Ja; English titles are separately keyed there",
-    "source_tokens_sha256": "160b584c745f960830f8c68df69b02c71cd98fbb714df83ba51d95c7c5684e57"
+    "source_tokens_sha256": "eb00cadc6af4932ad2839e28b6126955b4f25ed0023cfc9990dff6b474e2e4a5"
   },
   "src/presentation/events.rs:8616fa9256185981:1": {
     "category": "a",
     "reason": "event_title: Japanese branch consumed by messages::event_title when locale is Ja; English titles are separately keyed there",
-    "source_tokens_sha256": "160b584c745f960830f8c68df69b02c71cd98fbb714df83ba51d95c7c5684e57"
+    "source_tokens_sha256": "eb00cadc6af4932ad2839e28b6126955b4f25ed0023cfc9990dff6b474e2e4a5"
   },
   "src/presentation/events.rs:44b22b26e9b2c135:1": {
     "category": "a",
     "reason": "event_title: Japanese branch consumed by messages::event_title when locale is Ja; English titles are separately keyed there",
-    "source_tokens_sha256": "160b584c745f960830f8c68df69b02c71cd98fbb714df83ba51d95c7c5684e57"
+    "source_tokens_sha256": "eb00cadc6af4932ad2839e28b6126955b4f25ed0023cfc9990dff6b474e2e4a5"
   },
   "src/presentation/events.rs:e9dcbe03b96ad9eb:1": {
     "category": "a",
     "reason": "event_title: Japanese branch consumed by messages::event_title when locale is Ja; English titles are separately keyed there",
-    "source_tokens_sha256": "160b584c745f960830f8c68df69b02c71cd98fbb714df83ba51d95c7c5684e57"
+    "source_tokens_sha256": "eb00cadc6af4932ad2839e28b6126955b4f25ed0023cfc9990dff6b474e2e4a5"
   },
   "src/presentation/events.rs:f8a1a79c0f9cd0ed:1": {
     "category": "a",
     "reason": "event_title: Japanese branch consumed by messages::event_title when locale is Ja; English titles are separately keyed there",
-    "source_tokens_sha256": "160b584c745f960830f8c68df69b02c71cd98fbb714df83ba51d95c7c5684e57"
+    "source_tokens_sha256": "eb00cadc6af4932ad2839e28b6126955b4f25ed0023cfc9990dff6b474e2e4a5"
   },
   "src/presentation/events.rs:13f5916b1a55a6ae:1": {
     "category": "a",
     "reason": "event_title: Japanese branch consumed by messages::event_title when locale is Ja; English titles are separately keyed there",
-    "source_tokens_sha256": "160b584c745f960830f8c68df69b02c71cd98fbb714df83ba51d95c7c5684e57"
+    "source_tokens_sha256": "eb00cadc6af4932ad2839e28b6126955b4f25ed0023cfc9990dff6b474e2e4a5"
   },
   "src/presentation/events.rs:2057a96bed26f392:1": {
     "category": "a",
     "reason": "event_title: Japanese branch consumed by messages::event_title when locale is Ja; English titles are separately keyed there",
-    "source_tokens_sha256": "160b584c745f960830f8c68df69b02c71cd98fbb714df83ba51d95c7c5684e57"
+    "source_tokens_sha256": "eb00cadc6af4932ad2839e28b6126955b4f25ed0023cfc9990dff6b474e2e4a5"
   },
   "src/presentation/events.rs:c3e7115095a225cc:1": {
     "category": "a",
     "reason": "event_title: Japanese branch consumed by messages::event_title when locale is Ja; English titles are separately keyed there",
-    "source_tokens_sha256": "160b584c745f960830f8c68df69b02c71cd98fbb714df83ba51d95c7c5684e57"
+    "source_tokens_sha256": "eb00cadc6af4932ad2839e28b6126955b4f25ed0023cfc9990dff6b474e2e4a5"
   },
   "src/presentation/events.rs:64891fe89e96183e:1": {
     "category": "a",
     "reason": "event_title: Japanese branch consumed by messages::event_title when locale is Ja; English titles are separately keyed there",
-    "source_tokens_sha256": "160b584c745f960830f8c68df69b02c71cd98fbb714df83ba51d95c7c5684e57"
+    "source_tokens_sha256": "eb00cadc6af4932ad2839e28b6126955b4f25ed0023cfc9990dff6b474e2e4a5"
   },
   "src/presentation/events.rs:b0e5347b4b659922:1": {
     "category": "a",
     "reason": "event_title: Japanese branch consumed by messages::event_title when locale is Ja; English titles are separately keyed there",
-    "source_tokens_sha256": "160b584c745f960830f8c68df69b02c71cd98fbb714df83ba51d95c7c5684e57"
-  },
-  "src/presentation/events.rs:72d7a2429570c6ba:1": {
-    "category": "a",
-    "reason": "event_title: Japanese branch consumed by messages::event_title when locale is Ja; English titles are separately keyed there",
-    "source_tokens_sha256": "160b584c745f960830f8c68df69b02c71cd98fbb714df83ba51d95c7c5684e57"
-  },
-  "src/presentation/events.rs:70080e45f7282d03:1": {
-    "category": "a",
-    "reason": "event_title: Japanese branch consumed by messages::event_title when locale is Ja; English titles are separately keyed there",
-    "source_tokens_sha256": "160b584c745f960830f8c68df69b02c71cd98fbb714df83ba51d95c7c5684e57"
+    "source_tokens_sha256": "eb00cadc6af4932ad2839e28b6126955b4f25ed0023cfc9990dff6b474e2e4a5"
   },
   "src/presentation/events.rs:f27ff0993479551f:1": {
     "category": "a",
     "reason": "event_title: Japanese branch consumed by messages::event_title when locale is Ja; English titles are separately keyed there",
-    "source_tokens_sha256": "160b584c745f960830f8c68df69b02c71cd98fbb714df83ba51d95c7c5684e57"
-  },
-  "src/presentation/events.rs:de3da5375eedcba4:1": {
-    "category": "a",
-    "reason": "event_title: Japanese branch consumed by messages::event_title when locale is Ja; English titles are separately keyed there",
-    "source_tokens_sha256": "160b584c745f960830f8c68df69b02c71cd98fbb714df83ba51d95c7c5684e57"
+    "source_tokens_sha256": "eb00cadc6af4932ad2839e28b6126955b4f25ed0023cfc9990dff6b474e2e4a5"
   },
   "src/presentation/events.rs:fbdc72ace73d5480:1": {
     "category": "a",
     "reason": "event_title: Japanese branch consumed by messages::event_title when locale is Ja; English titles are separately keyed there",
-    "source_tokens_sha256": "160b584c745f960830f8c68df69b02c71cd98fbb714df83ba51d95c7c5684e57"
+    "source_tokens_sha256": "eb00cadc6af4932ad2839e28b6126955b4f25ed0023cfc9990dff6b474e2e4a5"
   },
   "src/presentation/events.rs:62a142b415a31d33:1": {
     "category": "a",
@@ -277,47 +262,32 @@
   "src/presentation/events.rs:3b732c2983ebea4a:1": {
     "category": "a",
     "reason": "continuation_title/title_ja: Japanese legacy projection; English UI constructs EventIdentity, EventTitle, CommandNotice and ThreadNotice from structured source facts",
-    "source_tokens_sha256": "b852752f8ab4e0c63892f3df43a30bf5a4237236eb02d740de7f7f81d79768dd"
-  },
-  "src/presentation/events.rs:72d7a2429570c6ba:2": {
-    "category": "a",
-    "reason": "continuation_title/title_ja: Japanese legacy projection; English UI constructs EventIdentity, EventTitle, CommandNotice and ThreadNotice from structured source facts",
-    "source_tokens_sha256": "b852752f8ab4e0c63892f3df43a30bf5a4237236eb02d740de7f7f81d79768dd"
-  },
-  "src/presentation/events.rs:70080e45f7282d03:2": {
-    "category": "a",
-    "reason": "continuation_title/title_ja: Japanese legacy projection; English UI constructs EventIdentity, EventTitle, CommandNotice and ThreadNotice from structured source facts",
-    "source_tokens_sha256": "b852752f8ab4e0c63892f3df43a30bf5a4237236eb02d740de7f7f81d79768dd"
-  },
-  "src/presentation/events.rs:fbf9020478164e9d:1": {
-    "category": "a",
-    "reason": "continuation_title/title_ja: Japanese legacy projection; English UI constructs EventIdentity, EventTitle, CommandNotice and ThreadNotice from structured source facts",
-    "source_tokens_sha256": "b852752f8ab4e0c63892f3df43a30bf5a4237236eb02d740de7f7f81d79768dd"
+    "source_tokens_sha256": "a4c8dcc59713070973c460a63568650e0b92ec824ec65fdb6a9cf2164a0de512"
   },
   "src/presentation/events.rs:0116f480c5739a86:1": {
     "category": "a",
     "reason": "continuation_title/title_ja: Japanese legacy projection; English UI constructs EventIdentity, EventTitle, CommandNotice and ThreadNotice from structured source facts",
-    "source_tokens_sha256": "b852752f8ab4e0c63892f3df43a30bf5a4237236eb02d740de7f7f81d79768dd"
+    "source_tokens_sha256": "a4c8dcc59713070973c460a63568650e0b92ec824ec65fdb6a9cf2164a0de512"
   },
   "src/presentation/events.rs:4f77c56b8e225af9:1": {
     "category": "a",
     "reason": "continuation_title/title_ja: Japanese legacy projection; English UI constructs EventIdentity, EventTitle, CommandNotice and ThreadNotice from structured source facts",
-    "source_tokens_sha256": "b852752f8ab4e0c63892f3df43a30bf5a4237236eb02d740de7f7f81d79768dd"
+    "source_tokens_sha256": "a4c8dcc59713070973c460a63568650e0b92ec824ec65fdb6a9cf2164a0de512"
   },
   "src/presentation/events.rs:8ab539976f97e56f:1": {
     "category": "a",
     "reason": "continuation_title/title_ja: Japanese legacy projection; English UI constructs EventIdentity, EventTitle, CommandNotice and ThreadNotice from structured source facts",
-    "source_tokens_sha256": "b852752f8ab4e0c63892f3df43a30bf5a4237236eb02d740de7f7f81d79768dd"
+    "source_tokens_sha256": "a4c8dcc59713070973c460a63568650e0b92ec824ec65fdb6a9cf2164a0de512"
   },
   "src/presentation/events.rs:e72f5bf706ea69a7:1": {
     "category": "a",
     "reason": "continuation_title/title_ja: Japanese legacy projection; English UI constructs EventIdentity, EventTitle, CommandNotice and ThreadNotice from structured source facts",
-    "source_tokens_sha256": "bf2f6509d248304e484e9539ba9a6d3fabc039a9e8405b635c1a10d69c20882d"
+    "source_tokens_sha256": "6f27cdfd367e306125257f5721d1bfcb0d27f27f93b55fcc177715ecff86f243"
   },
   "src/presentation/events.rs:66389b2695f5dccb:1": {
     "category": "a",
     "reason": "continuation_title/title_ja: Japanese legacy projection; English UI constructs EventIdentity, EventTitle, CommandNotice and ThreadNotice from structured source facts",
-    "source_tokens_sha256": "bf2f6509d248304e484e9539ba9a6d3fabc039a9e8405b635c1a10d69c20882d"
+    "source_tokens_sha256": "6f27cdfd367e306125257f5721d1bfcb0d27f27f93b55fcc177715ecff86f243"
   },
   "src/presentation/events.rs:fabe43d04e73bfdd:1": {
     "category": "a",
@@ -6302,12 +6272,12 @@
   "src/presentation/events.rs:7346b96eb637e521:1": {
     "category": "a",
     "reason": "Japanese event_title source copy; presentation::messages::event_title has an explicit English arm for reply_reminder. Event kind/wire value is unchanged.",
-    "source_tokens_sha256": "160b584c745f960830f8c68df69b02c71cd98fbb714df83ba51d95c7c5684e57"
+    "source_tokens_sha256": "eb00cadc6af4932ad2839e28b6126955b4f25ed0023cfc9990dff6b474e2e4a5"
   },
   "src/presentation/events.rs:18ad5b1c390631ed:1": {
     "category": "a",
     "reason": "Japanese event_title source copy; presentation::messages::event_title has an explicit English arm for reply_outcome. Event kind/wire value is unchanged.",
-    "source_tokens_sha256": "160b584c745f960830f8c68df69b02c71cd98fbb714df83ba51d95c7c5684e57"
+    "source_tokens_sha256": "eb00cadc6af4932ad2839e28b6126955b4f25ed0023cfc9990dff6b474e2e4a5"
   },
   "src/presentation/messages.rs:63826ef0a65930b5:1": {
     "category": "a",
@@ -6955,7 +6925,7 @@
   "src/presentation/events.rs:a34d8382cdc112cb:1": {
     "category": "a",
     "reason": "event_title: Japanese branch consumed by messages::event_title when locale is Ja; English titles are separately keyed there",
-    "source_tokens_sha256": "160b584c745f960830f8c68df69b02c71cd98fbb714df83ba51d95c7c5684e57"
+    "source_tokens_sha256": "eb00cadc6af4932ad2839e28b6126955b4f25ed0023cfc9990dff6b474e2e4a5"
   },
   "src/operations.rs:631f9fc08a1bd0fe:1": {
     "category": "a",
