@@ -11,11 +11,10 @@ fields), a next file exists, or a docs heading says `Protocol next`:
 PROTOCOL_VERSION and the schema `$id`/`title`/`protocol_version` become
 BASE + 1 by exact text replacement. Every next file is merged, in issue order,
 into docs/design/protocol-versions/N.md headed `# Protocol N (#a, #b)` and
-deleted. A `Protocol next` heading section inside another doc (the form used
-before the per-version files) is moved into N.md the same way. Links to the
-merged files or to `#protocol-next-` anchors are pointed at N.md, and any other
-`Protocol next` under docs/ becomes `Protocol N` (mentions inside code, such as
-`Protocol next`, are left alone).
+deleted. Links to those files point at N.md, preserving subsection fragments
+but dropping title fragments. An in-file `Protocol next` heading is numbered
+in place, not moved; its issue numbers go into the commit subject. Other
+`Protocol next` prose under docs/ becomes `Protocol N`; code is left alone.
 
 Migrations (#359): a patch adds `migrations/next_<slug>.sql` and registers it
 under the name `next_<slug>` with a provisional number. In batch commit order
