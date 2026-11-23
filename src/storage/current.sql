@@ -843,3 +843,7 @@ PRAGMA user_version=56;
 ALTER TABLE node ADD COLUMN output_limit_attempt_id TEXT REFERENCES model_attempt(id);
 INSERT INTO schema_migration(version,name) VALUES(57,'0057_answer_output_limit');
 PRAGMA user_version=57;
+
+ALTER TABLE node ADD COLUMN import_origin_json TEXT;
+INSERT INTO schema_migration(version,name) VALUES(58,'next_thread_import_origin');
+PRAGMA user_version=58;

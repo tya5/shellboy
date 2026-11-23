@@ -307,6 +307,11 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         sql: include_str!("../../migrations/0057_answer_output_limit.sql"),
         foreign_keys: None,
     },
+    Migration {
+        version: 58,
+        sql: include_str!("../../migrations/next_thread_import_origin.sql"),
+        foreign_keys: None,
+    },
 ];
 
 pub(super) fn run(
@@ -1366,6 +1371,7 @@ mod activity_migration_tests {
     fn rebuild_fk_violation_rejects_commit_preserves_old_rows_and_restores_enforcement() {
         let mut db = Connection::open_in_memory().unwrap();
         db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        db.execute_batch("ALTER TABLE node DROP COLUMN import_origin_json; DELETE FROM schema_migration WHERE name='next_thread_import_origin';").unwrap();
         db.pragma_update(None, "foreign_keys", false).unwrap();
         db.execute_batch("ALTER TABLE run ADD COLUMN owner_run_id TEXT REFERENCES run(id); CREATE INDEX runs_by_owner ON run(owner_run_id,state); CREATE TABLE synthetic_reference(run_id TEXT REFERENCES run(id)); INSERT INTO synthetic_reference VALUES('missing'); DROP INDEX IF EXISTS attachment_page_order; DELETE FROM schema_migration WHERE version=39; PRAGMA user_version=38;").unwrap();
         db.pragma_update(None, "foreign_keys", true).unwrap();
@@ -1477,6 +1483,7 @@ mod activity_migration_tests {
     fn failed_run_rebuild_rolls_back_and_restores_foreign_keys() {
         let mut db = Connection::open_in_memory().unwrap();
         db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        db.execute_batch("ALTER TABLE node DROP COLUMN import_origin_json; DELETE FROM schema_migration WHERE name='next_thread_import_origin';").unwrap();
         db.pragma_update(None, "foreign_keys", true).unwrap();
         // Inject a collision after FK checks are disabled, before any Run copy.
         db.execute_batch("CREATE TABLE independent_run(collision INTEGER); DROP INDEX IF EXISTS attachment_page_order; DELETE FROM schema_migration WHERE version=39; PRAGMA user_version=38;").unwrap();
@@ -2452,6 +2459,7 @@ mod thread_creation_migration_tests {
     fn schema54_backfills_earliest_owned_activity_without_inherited_path_or_updates() {
         let mut db = Connection::open_in_memory().unwrap();
         db.execute_batch(super::super::CURRENT_SCHEMA).unwrap();
+        db.execute_batch("ALTER TABLE node DROP COLUMN import_origin_json; DELETE FROM schema_migration WHERE name='next_thread_import_origin';").unwrap();
         db.execute_batch("DROP INDEX receipt_named_reply_pending;
             DROP INDEX receipt_pending_by_time;
             DROP INDEX receipt_pending_owed;
@@ -2493,6 +2501,7 @@ mod automatic_compaction_migration_tests {
     fn automatic_compaction_migration_preserves_known_list_facts() {
         let mut db = Connection::open_in_memory().unwrap();
         db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        db.execute_batch("ALTER TABLE node DROP COLUMN import_origin_json; DELETE FROM schema_migration WHERE name='next_thread_import_origin';").unwrap();
         db.execute_batch("DROP INDEX receipt_named_reply_pending;
             DROP INDEX receipt_pending_by_time;
             DROP INDEX receipt_pending_owed;

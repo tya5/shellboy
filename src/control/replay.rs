@@ -51,6 +51,7 @@ struct Stamp {
     revision: i64,
     tombstone: bool,
     kind: String,
+    imported: bool,
     preamble: Option<String>,
 }
 impl Stamp {
@@ -478,7 +479,7 @@ impl ReplayCache {
         let context=db.query_row("SELECT selection_revision,profile_revision,profile_id,model_id,reasoning_epoch FROM thread WHERE id=?1 AND deleted_at IS NULL",[thread],|row|Ok(Context{thread:thread.into(),selection:row.get(0)?,profile_revision:row.get(1)?,profile:row.get(2)?,model:row.get(3)?,epoch:row.get(4)?,adapter_version:ADAPTER_VERSION,tool_schema_version:TOOL_SCHEMA_VERSION}))?;
         // Bound to `context.epoch`, so the epoch check below also covers it.
         let keep = crate::history::reasoning_keep(db, thread, context.epoch)?;
-        let mut stamps=db.prepare("SELECT n.id,n.payload_revision,n.deleted_reason IS NOT NULL OR n.payload_json IS NULL,n.kind FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 ORDER BY p.ordinal")?.query_map([thread],|row|Ok(Stamp{id:row.get(0)?,revision:row.get(1)?,tombstone:row.get(2)?,kind:row.get(3)?,preamble:None}))?.collect::<rusqlite::Result<Vec<_>>>()?;
+        let mut stamps=db.prepare("SELECT n.id,n.payload_revision,n.deleted_reason IS NOT NULL OR n.payload_json IS NULL,n.kind,n.import_origin_json IS NOT NULL FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 ORDER BY p.ordinal")?.query_map([thread],|row|Ok(Stamp{id:row.get(0)?,revision:row.get(1)?,tombstone:row.get(2)?,kind:row.get(3)?,imported:row.get(4)?,preamble:None}))?.collect::<rusqlite::Result<Vec<_>>>()?;
         for stamp in &mut stamps {
             stamp.read_admission(db, thread)?;
         }
@@ -585,11 +586,21 @@ impl ReplayCache {
     }
 }
 pub(crate) fn convert(value: Value, epoch: i64) -> Vec<Value> {
-    convert_kept(value, epoch, false)
+    convert_source(value, epoch, false, false)
 }
 /// `kept`: the node lies before an earlier edit point and its reasoning was
 /// sendable then, so its prefix is unchanged and it replays as saved (#182).
-pub(crate) fn convert_kept(mut value: Value, epoch: i64, kept: bool) -> Vec<Value> {
+#[cfg(test)]
+pub(crate) fn convert_kept(value: Value, epoch: i64, kept: bool) -> Vec<Value> {
+    convert_source(value, epoch, kept, false)
+}
+
+pub(crate) fn convert_source(
+    mut value: Value,
+    epoch: i64,
+    kept: bool,
+    imported: bool,
+) -> Vec<Value> {
     let stored_epoch = value.get("reasoning_epoch").and_then(Value::as_i64);
     if let Some(output) = value.get_mut("output").and_then(Value::as_array_mut) {
         return std::mem::take(output)
@@ -599,8 +610,7 @@ pub(crate) fn convert_kept(mut value: Value, epoch: i64, kept: bool) -> Vec<Valu
                 // model; resend them only while the epoch is unchanged.
                 (item.get("type").and_then(Value::as_str) != Some("reasoning")
                     && !crate::model::opaque::is_opaque(item))
-                    || stored_epoch == Some(epoch)
-                    || kept
+                    || (!imported && (stored_epoch == Some(epoch) || kept))
             })
             .map(outbound_item)
             .collect();
@@ -745,7 +755,7 @@ fn decode_frame_checked(
                     (safe, result)
                 }
             }
-            let items = convert_kept(value, epoch, keep.contains(&stamp.id));
+            let items = convert_source(value, epoch, keep.contains(&stamp.id), stamp.imported);
             (
                 group,
                 if spill {
@@ -844,7 +854,7 @@ fn load_uncached_mode(
     let limit = nodes.map_or(-1, |n| i64::try_from(n).unwrap_or(i64::MAX));
     let ledger = Arc::new(Ledger::default());
     let keep = crate::history::reasoning_keep(db, thread, epoch)?;
-    let mut statement = db.prepare("SELECT n.id,n.payload_revision,n.deleted_reason IS NOT NULL OR n.payload_json IS NULL,n.payload_json,n.kind FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 ORDER BY p.ordinal LIMIT ?2")?;
+    let mut statement = db.prepare("SELECT n.id,n.payload_revision,n.deleted_reason IS NOT NULL OR n.payload_json IS NULL,n.payload_json,n.kind,n.import_origin_json IS NOT NULL FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 ORDER BY p.ordinal LIMIT ?2")?;
     let mut rows = statement.query(rusqlite::params![thread, limit])?;
     let mut frames = Vec::new();
     let mut decode_fault = false;
@@ -855,6 +865,7 @@ fn load_uncached_mode(
             tombstone: row.get(2)?,
             kind: row.get(4)?,
             preamble: None,
+            imported: row.get(5)?,
         };
         stamp.read_admission(db, thread)?;
         let body: Option<String> = if stamp.tombstone { None } else { row.get(3)? };
@@ -960,6 +971,7 @@ mod tests {
                     tombstone: false,
                     kind: "fixture".into(),
                     preamble: None,
+                    imported: false,
                 },
                 items: vec![item],
                 group: group.map(str::to_owned),
@@ -1111,6 +1123,7 @@ mod tests {
                                     tombstone: false,
                                     kind: "fixture".into(),
                                     preamble: None,
+                                    imported: false,
                                 },
                                 Some(payload.to_string()),
                                 0,
@@ -1160,6 +1173,7 @@ mod tests {
                             tombstone: false,
                             kind: "fixture".into(),
                             preamble: None,
+                            imported: false,
                         },
                         Some(payload.to_string()),
                         0,

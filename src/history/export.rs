@@ -130,9 +130,9 @@ fn read_node(
     order: i64,
     current_ordinal: Option<i64>,
 ) -> Result<HistoryExportRecord, ApiError> {
-    let (len, payload_json, reason): (Option<i64>, Option<String>, Option<String>) = db.query_row(
-        "SELECT octet_length(payload_json),CASE WHEN octet_length(payload_json)<=?2 THEN payload_json END,deleted_reason FROM node WHERE id=?1",
-        params![id, MAX_FRAME_BYTES as i64], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?)),
+    let (len, payload_json, reason, origin): (Option<i64>, Option<String>, Option<String>, Option<String>) = db.query_row(
+        "SELECT octet_length(payload_json),CASE WHEN octet_length(payload_json)<=?2 THEN payload_json END,deleted_reason,import_origin_json FROM node WHERE id=?1",
+        params![id, MAX_FRAME_BYTES as i64], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)),
     ).map_err(sql_error)?;
     if payload_json.is_none() && len.is_some() {
         return Err(oversized(id));
@@ -143,7 +143,12 @@ fn read_node(
         db,
         thread,
         id,
-        remaining: MAX_FRAME_BYTES - payload_json.as_ref().map_or(0, String::len),
+        remaining: MAX_FRAME_BYTES
+            .checked_sub(
+                payload_json.as_ref().map_or(0, String::len)
+                    + origin.as_ref().map_or(0, String::len),
+            )
+            .ok_or_else(|| oversized(id))?,
     };
     let relations = graph.relations()?;
     let role = if current_ordinal.is_some() {
@@ -156,6 +161,12 @@ fn read_node(
         order,
         current_ordinal,
         payload_json,
+        import_origins: origin
+            .as_deref()
+            .map(serde_json::from_str)
+            .transpose()
+            .map_err(|_| ApiError::new(ErrorCode::InvalidState, "invalid saved import origin"))?
+            .unwrap_or_default(),
         provenance,
     });
     Ok(if node.payload_json.is_some() {

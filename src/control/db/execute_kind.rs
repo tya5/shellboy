@@ -61,7 +61,7 @@ named_jobs! {
     ThreadList => thread_list, ThreadGet => thread_get, ThreadBranches => thread_branches, UsageGet => usage_get,
     ScheduleAdd => schedule_add, ScheduleSet => schedule_set, ScheduleEnable => schedule_enable, ScheduleDisable => schedule_disable, ScheduleRemove => schedule_remove,  ScheduleList => schedule_list,
     CompactList => compact_list, CompactPreview => compact_preview, ShellList => shell_list,
-    ThreadCreate => thread_create, ThreadFork => thread_fork, ThreadDelete => thread_delete,
+    ThreadImport => thread_import, ThreadCreate => thread_create, ThreadFork => thread_fork, ThreadDelete => thread_delete,
     ThreadDeletePreview => thread_delete_preview, ThreadPrune => thread_prune, ThreadRewind => thread_rewind, ThreadArchive => thread_archive,
     ThreadUnarchive => thread_unarchive, ThreadTag => thread_tag, ThreadTags => thread_tags, ThreadCwds => thread_cwds, ThreadSet => thread_set,
     MessageSend => message_send, MessageAsk => message_ask, MessageReply => message_reply, MessageCancel => message_cancel, MessageGet => message_get, MessageList => message_list, IdResolve => id_resolve,
@@ -144,7 +144,8 @@ impl Kind {
             | Kind::ThreadRewind
             | Kind::ThreadArchive
             | Kind::ThreadUnarchive
-            | Kind::ThreadTag => MutationDeclaredBound,
+            | Kind::ThreadTag
+            | Kind::ThreadImport => MutationDeclaredBound,
             Kind::OwnerShutdown
             | Kind::ThreadCreate
             | Kind::ThreadFork
@@ -219,7 +220,7 @@ mod tests {
         assert!(Kind::HistoryExport.read_lane());
         assert_eq!(
             Kind::ALL.len(),
-            73,
+            74,
             "classify new kinds and update this ratchet"
         );
     }

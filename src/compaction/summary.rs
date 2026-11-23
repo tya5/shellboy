@@ -64,21 +64,18 @@ pub(super) fn current_r_sources(
     let ids_json =
         serde_json::to_string(&ids).map_err(|error| StorageError::Schema(error.to_string()))?;
     let mut statement = tx.prepare(
-        "WITH wanted AS (SELECT CAST(key AS INTEGER) AS position,value AS id FROM json_each(?2))
+        concat!("WITH wanted AS (SELECT CAST(key AS INTEGER) AS position,value AS id FROM json_each(?2))
          SELECT wanted.position,n.id,n.payload_revision,n.turn_id,
             json_extract(n.payload_json,'$.group_id'),
             EXISTS(SELECT 1 FROM receipt q WHERE q.target_thread_id=?1 AND q.message_node_id=n.id AND q.state IN ('accepted','held')),
-            CASE WHEN json_extract(n.payload_json,'$.group_id') IS NULL THEN 1 ELSE EXISTS(
-              SELECT 1 FROM tool_group g WHERE g.id=json_extract(n.payload_json,'$.group_id') AND g.state='completed'
-              AND NOT EXISTS(SELECT 1 FROM tool_call c WHERE c.group_id=g.id AND
-                (c.state!='completed' OR NOT EXISTS(SELECT 1 FROM tool_result r WHERE r.group_id=c.group_id AND r.call_id=c.call_id)))) END,
+            ", saved_tool_group_complete!(), ",
             json_type(n.payload_json,'$.summary_format') IS NOT NULL,
             COALESCE((SELECT json_group_array(json_object('id',a.id,'path',a.absolute_path,'kind',a.input_kind,'state',COALESCE(a.state,'not_selected'),'reason',a.reason))
               FROM (SELECT ar.id,ar.absolute_path,ar.input_kind,ar.created_at,se.state,se.reason FROM attachment_ref ar
                 LEFT JOIN attachment_selection se ON se.attachment_id=ar.id AND se.thread_id=?1
                 WHERE ar.source_node_id=n.id ORDER BY ar.created_at,ar.id) a),'[]'),
             n.payload_json,n.deleted_reason
-         FROM wanted LEFT JOIN node n ON n.id=wanted.id ORDER BY wanted.position",
+         FROM wanted LEFT JOIN node n ON n.id=wanted.id ORDER BY wanted.position"),
     )?;
     let rows = statement.query_map(rusqlite::params![thread, ids_json], |row| {
         Ok((

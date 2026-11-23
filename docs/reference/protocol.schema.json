@@ -410,6 +410,22 @@
         {
           "properties": {
             "args": {
+              "$ref": "#/definitions/ThreadImportArgs"
+            },
+            "command": {
+              "const": "thread.import",
+              "type": "string"
+            }
+          },
+          "required": [
+            "command",
+            "args"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "args": {
               "$ref": "#/definitions/ThreadForkArgs"
             },
             "command": {
@@ -2669,6 +2685,12 @@
         "id": {
           "type": "string"
         },
+        "import_origins": {
+          "items": {
+            "$ref": "#/definitions/ImportOrigin"
+          },
+          "type": "array"
+        },
         "order": {
           "format": "int64",
           "type": "integer"
@@ -3421,6 +3443,29 @@
       "required": [
         "kind",
         "prefix"
+      ],
+      "type": "object"
+    },
+    "ImportOrigin": {
+      "properties": {
+        "source_graph": {
+          "$ref": "#/definitions/HistoryExportRelations"
+        },
+        "source_node_id": {
+          "type": "string"
+        },
+        "source_provenance": {
+          "$ref": "#/definitions/NodeProvenance"
+        },
+        "source_thread_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_thread_id",
+        "source_node_id",
+        "source_provenance",
+        "source_graph"
       ],
       "type": "object"
     },
@@ -5710,6 +5755,35 @@
             },
             "command": {
               "const": "thread.create",
+              "type": "string"
+            },
+            "operation_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "origin": true,
+            "protocol_version": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "args",
+            "command",
+            "operation_id",
+            "protocol_version"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "args": {
+              "$ref": "#/definitions/ThreadImportArgs"
+            },
+            "command": {
+              "const": "thread.import",
               "type": "string"
             },
             "operation_id": {
@@ -9270,6 +9344,18 @@
       ],
       "type": "object"
     },
+    "ThreadImportArgs": {
+      "additionalProperties": false,
+      "properties": {
+        "document": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "document"
+      ],
+      "type": "object"
+    },
     "ThreadListArgs": {
       "additionalProperties": false,
       "properties": {
@@ -12679,6 +12765,19 @@
         "shells_count"
       ],
       "title": "ThreadDetails",
+      "type": "object"
+    },
+    "thread.import": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "thread_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "thread_id"
+      ],
+      "title": "ThreadImportResult",
       "type": "object"
     },
     "thread.list": {

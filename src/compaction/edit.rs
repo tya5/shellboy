@@ -18,7 +18,9 @@ pub struct ContextEditResult {
     pub warnings: Vec<String>,
 }
 mod measure;
-pub(super) use measure::{history_characters, projection_characters, suffix_characters};
+pub(super) use measure::{
+    history_characters, projection_characters, source_projection_characters, suffix_characters,
+};
 fn required_endpoint(value: Option<&str>) -> Result<&str, ApiError> {
     value.ok_or_else(|| edit_error("Context edit requires complete node endpoints"))
 }
@@ -189,19 +191,19 @@ impl Compactor {
         let thread = snapshot.thread.clone();
         self.database.call(move|db| {
             ensure_not_pruned(db,&marker)?;
-            let rows=db.prepare("SELECT n.id,n.turn_id,n.payload_revision,n.payload_json,s.source_revision,s.source_hash FROM replacement r JOIN replacement_source s ON s.replacement_id=r.id JOIN node n ON n.id=s.source_node_id WHERE r.output_node_id=?1 AND r.state='completed' ORDER BY s.ordinal LIMIT ?2")?.query_map(params![marker,(TURN_BOUNDARY_IDS+1) as i64],|row|Ok((row.get::<_,String>(0)?,row.get::<_,Option<String>>(1)?,row.get::<_,i64>(2)?,row.get::<_,Option<String>>(3)?,row.get::<_,i64>(4)?,row.get::<_,String>(5)?)))?.collect::<Result<Vec<_>,_>>()?;
+            let rows=db.prepare("SELECT n.id,n.turn_id,n.payload_revision,n.payload_json,s.source_revision,s.source_hash,n.import_origin_json IS NOT NULL FROM replacement r JOIN replacement_source s ON s.replacement_id=r.id JOIN node n ON n.id=s.source_node_id WHERE r.output_node_id=?1 AND r.state='completed' ORDER BY s.ordinal LIMIT ?2")?.query_map(params![marker,(TURN_BOUNDARY_IDS+1) as i64],|row|Ok((row.get::<_,String>(0)?,row.get::<_,Option<String>>(1)?,row.get::<_,i64>(2)?,row.get::<_,Option<String>>(3)?,row.get::<_,i64>(4)?,row.get::<_,Option<String>>(5)?,row.get::<_,bool>(6)?)))?.collect::<Result<Vec<_>,_>>()?;
             if rows.is_empty()||rows.len()>TURN_BOUNDARY_IDS {return Err(StorageError::from(invalid("Context marker source list is unavailable or exceeds the bounded provenance budget")));}
             let mut sources=Vec::new();let mut completed=HashSet::new();let mut seen=HashSet::new();
-            for (id,turn,revision,body,saved_revision,saved_hash) in rows {
+            for (id,turn,revision,body,saved_revision,saved_hash,imported) in rows {
                 let payload:Value=body.and_then(|body|serde_json::from_str(&body).ok()).ok_or_else(||StorageError::from(invalid("A context marker source is unavailable; selected path retained")))?;
                 let hash=key(&(revision,&payload));
-                if revision!=saved_revision||hash!=saved_hash {return Err(StorageError::from(invalid("A context marker source changed; selected path retained")));}
-                if let Some(group)=payload.get("group_id").and_then(Value::as_str)&&seen.insert(group.to_owned()) {
-                    let complete:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM tool_group g WHERE g.id=?1 AND g.state='completed' AND NOT EXISTS(SELECT 1 FROM tool_call c WHERE c.group_id=g.id AND (c.state!='completed' OR NOT EXISTS(SELECT 1 FROM tool_result r WHERE r.group_id=c.group_id AND r.call_id=c.call_id))))",[group],|row|row.get(0))?;
+                if revision!=saved_revision||Some(&hash)!=saved_hash.as_ref() {return Err(StorageError::from(invalid("A context marker source changed; selected path retained")));}
+                if let Some(group)=payload.get("group_id").and_then(Value::as_str)&&!imported&&seen.insert(group.to_owned()) {
+                    let complete:bool=db.query_row(concat!("SELECT ", local_tool_group_complete!("?1")),[group],|row|row.get(0))?;
                     if complete {completed.insert(group.to_owned());}
                 }
                 let attachments=db.prepare("SELECT a.id,a.absolute_path,a.input_kind,COALESCE(s.state,'not_selected'),s.reason FROM attachment_ref a LEFT JOIN attachment_selection s ON s.attachment_id=a.id AND s.thread_id=?2 WHERE a.source_node_id=?1 ORDER BY a.created_at,a.id")?.query_map(params![id,thread],|row|Ok(json!({"id":row.get::<_,String>(0)?,"path":row.get::<_,String>(1)?,"kind":row.get::<_,String>(2)?,"state":row.get::<_,String>(3)?,"reason":row.get::<_,Option<String>>(4)?})))?.collect::<Result<Vec<_>,_>>()?;
-                sources.push(Source{id,turn,revision,hash,payload,attachments});
+                sources.push(Source{id,turn,revision,hash,payload,attachments,imported});
             }
             Ok((sources,completed))
         }).await.map_err(storage_error)
@@ -356,14 +358,23 @@ impl Compactor {
                 "No selected context marker matches the restore request",
             ));
         };
+        let metadata = marker_metadata(&marker)
+            .ok_or_else(|| invalid("Selected node is not a context marker"))?;
+        if marker.imported
+            && ["first_node_id", "original_order", "retained_node_ids"]
+                .iter()
+                .any(|field| metadata.get(field).is_some())
+        {
+            return Err(edit_error(
+                "Cannot restore an imported marker with source-local anchors; selected path retained",
+            ));
+        }
         range::validate(
             &snapshot,
             std::slice::from_ref(&(index..index + 1)),
             range::RangeMode::Summary,
         )?;
         let (originals, completed) = self.replacement_sources(&snapshot, &marker).await?;
-        let metadata = marker_metadata(&marker)
-            .ok_or_else(|| invalid("Selected node is not a context marker"))?;
         let original_order = if metadata.get("original_order").is_some() {
             node_ids(metadata, "original_order")?
         } else {
@@ -473,11 +484,12 @@ impl Compactor {
             .map(|source| {
                 summary::final_r_source(
                     source,
-                    source
-                        .payload
-                        .get("group_id")
-                        .and_then(Value::as_str)
-                        .is_none_or(|group| final_completed.contains(group)),
+                    source.imported
+                        || source
+                            .payload
+                            .get("group_id")
+                            .and_then(Value::as_str)
+                            .is_none_or(|group| final_completed.contains(group)),
                     snapshot.protected.contains(&source.id),
                 )
             })

@@ -10,6 +10,7 @@
 shellboy thread list [--limit 50] [--cursor TOKEN] [--query TEXT] [--archived exclude|include|only] [--tag TAG]... [--cwd PATH]
 shellboy thread get [--thread ID]
 shellboy thread export --thread ID --out PATH
+shellboy thread import --in PATH
 shellboy thread create [--cwd PATH] [--connection PROFILE] [--model ID] [--effort TEXT] [--parent ID]
 shellboy thread fork --thread ID --node ID [--cwd PATH]
 shellboy thread delete-preview --thread ID [--descendants]

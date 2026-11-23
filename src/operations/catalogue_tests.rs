@@ -81,7 +81,7 @@ fn fresh_clap_executable_paths_and_every_option_match_the_catalogue_bindings() {
     parser.build();
     let mut leaves = BTreeMap::new();
     executable_commands(&parser, &mut vec![], &mut leaves);
-    assert_eq!(leaves.len(), 94, "track new CLI lifecycle paths explicitly");
+    assert_eq!(leaves.len(), 95, "track new CLI lifecycle paths explicitly");
     for name in ["serve", "shutdown", "storage check"] {
         let lifecycle = leaves
             .remove(name)
@@ -191,6 +191,14 @@ fn fresh_clap_executable_paths_and_every_option_match_the_catalogue_bindings() {
             .iter()
             .any(|binding| binding.path == ["thread", "request"]),
         "the debug client must not be offered as a TUI form"
+    );
+    let import = leaves
+        .remove("thread import")
+        .expect("tracked import CLI path");
+    assert!(
+        import
+            .get_arguments()
+            .any(|arg| arg.get_long() == Some("in") && arg.is_required_set())
     );
     let export = leaves
         .remove("thread export")

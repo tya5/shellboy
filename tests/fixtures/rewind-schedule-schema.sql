@@ -1,3 +1,5 @@
+ALTER TABLE node DROP COLUMN import_origin_json;
+DELETE FROM schema_migration WHERE name='next_thread_import_origin';
 -- Test-only inverse through schema 50 for fixtures made by a current owner.
 ALTER TABLE node DROP COLUMN output_limit_attempt_id;
 DELETE FROM schema_migration WHERE name='0057_answer_output_limit';

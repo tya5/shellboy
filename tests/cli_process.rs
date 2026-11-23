@@ -1147,3 +1147,243 @@ async fn thread_export_streams_saved_sources_and_tombstone() {
     owner.shutdown().await.unwrap();
     task.await.unwrap();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn thread_import_validates_and_atomically_round_trips_saved_history() {
+    use crate::runtime_features::{
+        answer, incoming_ordinary, owner, proxy, request, send, settled,
+    };
+    use shellboy::protocol::{
+        Command, CompactPreviewArgs, ContextEditAction, ContextEditArgs, OperationTarget,
+    };
+    let root = tempfile::tempdir().unwrap();
+    let (url, mut provider, proxy_task) = proxy().await;
+    let owner = owner(root.path(), &url).await;
+    std::fs::write(root.path().join("AGENTS.md"), "import fixture").unwrap();
+    let source = "aaaaaaaa-0000-4000-8000-000000000002";
+    let saved = r#"{ "reasoning_epoch":0, "output":[{"type":"reasoning","encrypted_content":"opaque-secret"},{"type":"message","role":"assistant","content":[{"type":"output_text","text":"retained reply"}]}] }"#;
+    owner.db.call(move |db| {
+        db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES(?1,'/','/a','fixture','fixture','now')", [source])?;
+        db.execute("INSERT INTO node(id,kind,created_at,payload_json,deleted_reason) VALUES('original','assistant','now',?1,NULL),('old','message','now',NULL,'pruned_unreachable')",[saved])?;
+        db.execute_batch(r#"
+          INSERT INTO node(id,kind,created_at,payload_json) VALUES
+            ('summary','summary','now','{"summary_format":"context-trim-v1","context_trim":{},"item":{"role":"developer","content":[{"type":"input_text","text":"selected summary"}]}}'),
+            ('anchored','summary','now','{"context_trim":{"first_node_id":"anchored-source","original_order":["anchored-source","original"],"retained_node_ids":["original"]},"item":{"role":"developer","content":[{"type":"input_text","text":"anchored context notice"}]}}'),
+            ('anchored-source','message','now','{"role":"user","content":[{"type":"input_text","text":"anchored original"}]}'),
+            ('inner','summary','now','{"item":{"role":"developer","content":[{"type":"input_text","text":"nested source"}]}}'),
+            ('call','assistant','now','{"group_id":"imported-group","reasoning_epoch":0,"output":[{"type":"reasoning","id":"bare-opaque","encrypted_content":"spill-secret"},{"type":"function_call","name":"shell","call_id":"import-call","arguments":"{}"}]}'),
+            ('result','tool_result','now','{"group_id":"imported-group","item":{"type":"function_call_output","call_id":"import-call","output":"tool-result"}}');
+          INSERT INTO replacement VALUES('original-group','inner','source-key','f','p','pruned','now'),('top-group','summary','top-key','f','p','completed','now'),('anchored-group','anchored','anchor-key','f','p','completed','now');
+          INSERT INTO replacement_source VALUES('original-group',7,'old',0,NULL),('top-group',0,'inner',0,NULL),('top-group',1,'call',0,NULL),('top-group',2,'result',0,NULL),('anchored-group',0,'anchored-source',0,NULL);
+          INSERT INTO edge VALUES('old','inner'),('inner','summary'),('call','summary'),('result','summary'),('summary','anchored'),('anchored-source','anchored'),('anchored','original');
+        "#)?;
+        db.execute("INSERT INTO thread_path VALUES(?1,0,'summary'),(?1,1,'anchored'),(?1,2,'original')",[source])?;
+        db.execute("INSERT INTO thread_replacement VALUES(?1,'original-group'),(?1,'top-group'),(?1,'anchored-group')",[source])?;
+        Ok(())
+    }).await.unwrap();
+    let control = Control::new(&owner, root.path().into());
+    let (ipc_send, receive) = tokio::sync::mpsc::channel(16);
+    let server = LocalServer::bind(&owner, ipc_send).await.unwrap();
+    let task = tokio::spawn(control.clone().serve(receive));
+    let file = root.path().join("archive.jsonl");
+    let data_dir = &owner.loaded.data_dir;
+    let invoke = |args: Vec<String>| async move {
+        let output = crate::test_watchdog::watchdog(
+            "Thread import CLI",
+            tokio::process::Command::new(env!("CARGO_BIN_EXE_shellboy"))
+                .kill_on_drop(true)
+                .env_remove("SHELLBOY_SOCKET")
+                .arg("--data-dir")
+                .arg(data_dir)
+                .arg("thread")
+                .args(args)
+                .output(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        serde_json::from_slice::<Value>(&output.stdout)
+            .unwrap_or_else(|error| panic!("{error}: {output:?}"))
+    };
+    let export = |thread: &str| {
+        vec![
+            "export".into(),
+            "--thread".into(),
+            thread.into(),
+            "--out".into(),
+            file.to_string_lossy().into_owned(),
+        ]
+    };
+    let import = || {
+        vec![
+            "import".into(),
+            "--in".into(),
+            file.to_string_lossy().into_owned(),
+        ]
+    };
+    assert_eq!(invoke(export(source)).await["ok"], true);
+    let mut bytes = std::fs::read(&file).unwrap();
+    bytes[1] ^= 1;
+    std::fs::write(&file, &bytes).unwrap();
+    let rejected = invoke(import()).await;
+    assert_eq!(rejected["error"]["code"], "invalid_argument", "{rejected}");
+    std::fs::write(&file, vec![b'x'; shellboy::protocol::MAX_FRAME_BYTES + 1]).unwrap();
+    let rejected = invoke(import()).await;
+    assert_eq!(rejected["error"]["code"], "input_limit", "{rejected}");
+    let untouched = owner
+        .db
+        .call(|db| {
+            Ok(db.query_row("SELECT count(*) FROM thread", [], |row| {
+                row.get::<_, i64>(0)
+            })?)
+        })
+        .await
+        .unwrap();
+    assert_eq!(untouched, 1);
+    assert_eq!(invoke(export(source)).await["ok"], true);
+    let response = invoke(import()).await;
+    assert_eq!(response["ok"], true, "{response}");
+    let imported = response["result"]["thread_id"].as_str().unwrap().to_owned();
+    assert_ne!(source, imported);
+    assert_eq!(invoke(export(&imported)).await["ok"], true);
+    let response = invoke(import()).await;
+    assert_eq!(response["ok"], true, "{response}");
+    let second = response["result"]["thread_id"].as_str().unwrap().to_owned();
+    let witness_thread = second.clone();
+    let (marker, anchored) = owner.db.call(move |db| {
+        let second = witness_thread;
+        let row = db.query_row("SELECT n.id,n.payload_json,n.turn_id,n.import_origin_json,t.reasoning_epoch FROM thread_path p JOIN thread t ON t.id=p.thread_id JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND p.ordinal=2", [&second], |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,Option<String>>(2)?,r.get::<_,String>(3)?,r.get::<_,i64>(4)?)))?;
+        assert_ne!(row.0, "original");
+        assert_eq!(row.1,saved);
+        assert!(row.2.is_none());
+        assert_eq!(row.4, 0);
+        let origins: Value = serde_json::from_str(&row.3).unwrap();
+        assert_eq!(origins.as_array().unwrap().len(),2);
+        assert_eq!(origins[0]["source_thread_id"], source);
+        assert_eq!(origins[1]["source_thread_id"], imported);
+        let graph = db.query_row("SELECT r.id,s.ordinal,n.id,n.deleted_reason FROM thread_replacement tr JOIN replacement r ON r.id=tr.replacement_id JOIN replacement_source s ON s.replacement_id=r.id JOIN node n ON n.id=s.source_node_id JOIN edge e ON e.src=n.id AND e.dst=r.output_node_id WHERE tr.thread_id=?1 AND r.state='pruned'",[&second],|r|Ok((r.get::<_,String>(0)?,r.get::<_,i64>(1)?,r.get::<_,String>(2)?,r.get::<_,String>(3)?)))?;
+        assert_ne!(graph.0,"original-group");
+        assert_eq!(graph.1,7);
+        assert_ne!(graph.2,"old");
+        assert_eq!(graph.3,"pruned_unreachable");
+        assert_eq!(db.query_row("SELECT (SELECT count(*) FROM run)+(SELECT count(*) FROM turn)",[],|r|r.get::<_,i64>(0))?,0);
+        assert_eq!(db.query_row("SELECT count(*) FROM thread WHERE id=?1",[source],|r|r.get::<_, i64>(0))?,1);
+        Ok(db.query_row("SELECT a.node_id,b.node_id FROM thread_path a JOIN thread_path b ON b.thread_id=a.thread_id AND b.ordinal=1 WHERE a.thread_id=?1 AND a.ordinal=0", [&second], |r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?)))?)
+    }).await.unwrap();
+    let preview = request(
+        &control,
+        Command::CompactPreview(Box::new(CompactPreviewArgs {
+            thread_id: Some(second.clone()),
+            action: Some(ContextEditAction::Summary),
+            from_node_id: Some(marker.clone()),
+            to_node_id: Some(marker.clone()),
+            ..Default::default()
+        })),
+    )
+    .await;
+    assert!(!preview.is_null());
+    send(&control, &second, "new imported turn").await;
+    let outbound = incoming_ordinary(&control, &mut provider).await;
+    let input = outbound.body["input"].to_string();
+    for text in ["selected summary", "retained reply", "new imported turn"] {
+        assert!(input.contains(text), "{input}");
+    }
+    for text in [
+        "opaque-secret",
+        "spill-secret",
+        "tool-result",
+        "nested source",
+    ] {
+        assert!(!input.contains(text), "{input}");
+    }
+    outbound
+        .reply
+        .send((200, answer("ordinary imported answer")))
+        .unwrap();
+    settled(&control, &second).await;
+    for (target, source_local) in [(anchored.clone(), true), (marker, false)] {
+        let mut events = control.subscribe();
+        let restore = request(
+            &control,
+            Command::ContextEdit(ContextEditArgs::for_range(
+                ContextEditAction::Restore,
+                Some(second.clone()),
+                Some(target),
+                None,
+            )),
+        )
+        .await;
+        let operation_id = restore["operation_id"].as_str().unwrap().to_owned();
+        crate::test_watchdog::watchdog("imported marker restore", async {
+            loop {
+                let status = request(
+                    &control,
+                    Command::OperationGet(OperationTarget {
+                        operation_id: operation_id.clone(),
+                    }),
+                )
+                .await;
+                match status["downstream"]["state"].as_str() {
+                    Some("completed") => {
+                        assert!(!source_local, "{status}");
+                        break;
+                    }
+                    Some("failed") => {
+                        assert!(source_local, "{status}");
+                        assert!(
+                            status["downstream"]["outcome"]["error"]["message"]
+                                .as_str()
+                                .unwrap()
+                                .contains("imported marker with source-local anchors"),
+                            "{status}"
+                        );
+                        break;
+                    }
+                    _ => match events.recv().await {
+                        Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                        Err(error) => panic!("{error}"),
+                    },
+                }
+            }
+        })
+        .await
+        .unwrap();
+    }
+    let witness_thread = second.clone();
+    assert!(
+        owner
+            .db
+            .call(move |db| Ok(db.query_row(
+                "SELECT EXISTS(SELECT 1 FROM thread_path WHERE thread_id=?1 AND node_id=?2)",
+                [&witness_thread, &anchored],
+                |r| r.get::<_, bool>(0)
+            )?))
+            .await
+            .unwrap()
+    );
+    let config = std::sync::Arc::new(owner.loaded.config.clone());
+    let spill = shellboy::compaction::Compactor::new(owner.db.clone(), config)
+        .spill(&second, true)
+        .await
+        .unwrap();
+    assert!(spill.spilled_groups > 0);
+    send(&control, &second, "continue after spill").await;
+    let outbound = incoming_ordinary(&control, &mut provider).await;
+    let input = outbound.body["input"].to_string();
+    for text in ["nested source", "import-call", "continue after spill"] {
+        assert!(input.contains(text), "{input}");
+    }
+    for text in ["bare-opaque", "opaque-secret", "spill-secret"] {
+        assert!(!input.contains(text), "{input}");
+    }
+    outbound
+        .reply
+        .send((200, answer("ordinary spilled answer")))
+        .unwrap();
+    settled(&control, &second).await;
+    server.shutdown().await.unwrap();
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+    task.await.unwrap();
+    proxy_task.abort();
+}

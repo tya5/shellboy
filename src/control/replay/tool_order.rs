@@ -184,6 +184,7 @@ mod tests {
                 tombstone: false,
                 kind: "fixture".into(),
                 preamble: None,
+                imported: false,
             },
             group: group.map(str::to_owned),
             items,

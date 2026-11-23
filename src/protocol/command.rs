@@ -28,6 +28,7 @@ impl Command {
             Self::CompactList(_) => ("compact.list", CommandRoute::Database),
             Self::CompactPreview(_) => ("compact.preview", CommandRoute::Database),
             Self::ShellList(_) => ("shell.list", CommandRoute::Database),
+            Self::ThreadImport(_) => ("thread.import", CommandRoute::Database),
             Self::ThreadCreate(_) => ("thread.create", CommandRoute::Database),
             Self::ThreadFork(_) => ("thread.fork", CommandRoute::Database),
             Self::ThreadDelete(_) => ("thread.delete", CommandRoute::Runtime),
@@ -141,6 +142,7 @@ impl Command {
             | Self::CompactPreview(_)
             | Self::ShellList(_)
             | Self::UsageGet(_)
+            | Self::ThreadImport(_)
             | Self::ThreadCreate(_)
             | Self::ThreadFork(_)
             | Self::ThreadDelete(_)
@@ -205,6 +207,7 @@ impl Command {
             | Self::CompactPreview(_)
             | Self::ShellList(_)
             | Self::UsageGet(_)
+            | Self::ThreadImport(_)
             | Self::ThreadCreate(_)
             | Self::ThreadFork(_)
             | Self::ThreadDelete(_)
@@ -268,7 +271,8 @@ impl Command {
             | Self::ScheduleEnable(_)
             | Self::ScheduleDisable(_)
             | Self::ScheduleRemove(_) => false,
-            Self::ThreadCreate(_)
+            Self::ThreadImport(_)
+            | Self::ThreadCreate(_)
             | Self::ThreadFork(_)
             | Self::ThreadDelete(_)
             | Self::ThreadSet(_)
@@ -381,6 +385,7 @@ impl Command {
             | Self::ConnectionTest(_)
             | Self::ConfigGet(_) => true,
             Self::OwnerShutdown(_)
+            | Self::ThreadImport(_)
             | Self::ThreadCreate(_)
             | Self::ThreadFork(_)
             | Self::ThreadDelete(_)

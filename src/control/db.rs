@@ -1269,6 +1269,27 @@ impl Store {
             Command::IdResolve(args) => {
                 MutationResult::value(id_resolution::resolve_id(tx, args, caller)?)
             }
+            Command::ThreadImport(args) => {
+                let import = crate::thread_import::validate(&args.document)?;
+                let id = self.create_thread(
+                    tx,
+                    &ThreadCreateArgs {
+                        agents: None,
+                        connection: None,
+                        cwd: None,
+                        model: None,
+                        effort: None,
+                        parent_id: None,
+                    },
+                    now,
+                )?;
+                history::import::write(tx, &id, import)?;
+                let mut result = MutationResult::value(ThreadImportResult {
+                    thread_id: id.clone(),
+                })?;
+                result.changed_threads.push(id);
+                Ok(result)
+            }
             Command::ThreadCreate(args) => {
                 let mut defaults = args.clone();
                 defaults.agents = None;

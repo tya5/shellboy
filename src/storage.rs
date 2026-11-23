@@ -80,6 +80,7 @@ pub(crate) const MIGRATION_NAMES: &[(i64, &str)] = &[
     (55, "0055_automatic_compaction"),
     (56, "0056_directional_reply_pending"),
     (57, "0057_answer_output_limit"),
+    (58, "next_thread_import_origin"),
 ];
 pub const SCHEMA_VERSION: i64 = MIGRATION_NAMES.len() as i64;
 pub const DEFAULT_QUEUE_CAPACITY: usize = 128;

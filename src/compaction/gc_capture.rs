@@ -123,12 +123,12 @@ fn plan_gc_prefix_tx(
     // Stream scalar path metadata. Only merged group fences are retained for
     // the whole path; node identities are copied only for the resulting R.
     let mut statement = tx.prepare(
-        "SELECT p.ordinal,n.id,n.turn_id,json_extract(n.payload_json,'$.group_id'),
+        concat!("SELECT p.ordinal,n.id,n.turn_id,json_extract(n.payload_json,'$.group_id'),
             json_type(n.payload_json,'$.summary_format') IS NOT NULL,
             EXISTS(SELECT 1 FROM receipt q WHERE q.target_thread_id=?1 AND q.message_node_id=n.id AND q.state IN ('accepted','held')),
             CASE WHEN json_extract(n.payload_json,'$.group_id') IS NULL THEN p.ordinal ELSE max(p.ordinal) OVER (PARTITION BY json_extract(n.payload_json,'$.group_id')) END,
-            CASE WHEN json_extract(n.payload_json,'$.group_id') IS NULL THEN 1 ELSE EXISTS(SELECT 1 FROM tool_group g WHERE g.id=json_extract(n.payload_json,'$.group_id') AND g.state='completed' AND NOT EXISTS(SELECT 1 FROM tool_call c WHERE c.group_id=g.id AND (c.state!='completed' OR NOT EXISTS(SELECT 1 FROM tool_result r WHERE r.group_id=c.group_id AND r.call_id=c.call_id)))) END
-         FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 ORDER BY p.ordinal",
+            ", saved_tool_group_complete!(), "
+         FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 ORDER BY p.ordinal"),
     )?;
     let mut rows = statement.query([thread])?;
     let mut groups: Vec<(Range<usize>, bool, bool, bool, bool)> = Vec::new();
@@ -210,12 +210,12 @@ fn plan_gc_prefix_tx(
     let mut sources = Vec::new();
     sources.try_reserve_exact(end).map_err(|_| overflow())?;
     let mut selected=tx.prepare(
-        "SELECT p.ordinal,n.id,n.payload_revision,n.turn_id,json_extract(n.payload_json,'$.group_id'),
+        concat!("SELECT p.ordinal,n.id,n.payload_revision,n.turn_id,json_extract(n.payload_json,'$.group_id'),
             EXISTS(SELECT 1 FROM receipt q WHERE q.target_thread_id=?1 AND q.message_node_id=n.id AND q.state IN ('accepted','held')),
-            CASE WHEN json_extract(n.payload_json,'$.group_id') IS NULL THEN 1 ELSE EXISTS(SELECT 1 FROM tool_group g WHERE g.id=json_extract(n.payload_json,'$.group_id') AND g.state='completed' AND NOT EXISTS(SELECT 1 FROM tool_call c WHERE c.group_id=g.id AND (c.state!='completed' OR NOT EXISTS(SELECT 1 FROM tool_result r WHERE r.group_id=c.group_id AND r.call_id=c.call_id)))) END,
+            ", saved_tool_group_complete!(), ",
             json_type(n.payload_json,'$.summary_format') IS NOT NULL,
             CASE WHEN n.payload_json IS NULL OR json_type(n.payload_json,'$.output') IS NOT NULL THEN 0 WHEN n.turn_id IS ?3 AND (json_extract(n.payload_json,'$.role')='user' OR json_extract(n.payload_json,'$.item.role')='user') THEN 1 ELSE 0 END
-         FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND p.ordinal<?2 ORDER BY p.ordinal",
+         FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND p.ordinal<?2 ORDER BY p.ordinal"),
     )?;
     let selected_rows = selected.query_map(
         params![
@@ -309,7 +309,7 @@ pub(super) fn plan_gc_active_turn_tx(
         .transpose()?
         .flatten();
     let mut statement=tx.prepare(
-        "SELECT p.ordinal,n.id,n.turn_id,json_extract(n.payload_json,'$.group_id'),EXISTS(SELECT 1 FROM receipt q WHERE q.target_thread_id=?1 AND q.message_node_id=n.id AND q.state IN ('accepted','held')),CASE WHEN json_extract(n.payload_json,'$.group_id') IS NULL THEN p.ordinal ELSE max(p.ordinal) OVER (PARTITION BY json_extract(n.payload_json,'$.group_id')) END,CASE WHEN json_extract(n.payload_json,'$.group_id') IS NULL THEN 1 ELSE EXISTS(SELECT 1 FROM tool_group g WHERE g.id=json_extract(n.payload_json,'$.group_id') AND g.state='completed' AND NOT EXISTS(SELECT 1 FROM tool_call c WHERE c.group_id=g.id AND (c.state!='completed' OR NOT EXISTS(SELECT 1 FROM tool_result r WHERE r.group_id=c.group_id AND r.call_id=c.call_id)))) END,CASE WHEN n.payload_json IS NULL OR json_type(n.payload_json,'$.output') IS NOT NULL THEN 0 WHEN n.turn_id IS ?2 AND (json_extract(n.payload_json,'$.role')='user' OR json_extract(n.payload_json,'$.item.role')='user') THEN 1 ELSE 0 END,json_type(n.payload_json,'$.spill_version') IS NOT NULL,json_type(n.payload_json,'$.summary_scope') IS NOT NULL,json_type(n.payload_json,'$.context_trim') IS NOT NULL FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 ORDER BY p.ordinal")?;
+        concat!("SELECT p.ordinal,n.id,n.turn_id,json_extract(n.payload_json,'$.group_id'),EXISTS(SELECT 1 FROM receipt q WHERE q.target_thread_id=?1 AND q.message_node_id=n.id AND q.state IN ('accepted','held')),CASE WHEN json_extract(n.payload_json,'$.group_id') IS NULL THEN p.ordinal ELSE max(p.ordinal) OVER (PARTITION BY json_extract(n.payload_json,'$.group_id')) END,", saved_tool_group_complete!(), ",CASE WHEN n.payload_json IS NULL OR json_type(n.payload_json,'$.output') IS NOT NULL THEN 0 WHEN n.turn_id IS ?2 AND (json_extract(n.payload_json,'$.role')='user' OR json_extract(n.payload_json,'$.item.role')='user') THEN 1 ELSE 0 END,json_type(n.payload_json,'$.spill_version') IS NOT NULL,json_type(n.payload_json,'$.summary_scope') IS NOT NULL,json_type(n.payload_json,'$.context_trim') IS NOT NULL FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 ORDER BY p.ordinal"))?;
     let mut rows = statement.query(params![thread, current_turn])?;
     let mut groups: Vec<ActiveGroupFacts> = Vec::new();
     let mut merger = SourceGroupRangeMerger::new();
@@ -424,7 +424,7 @@ pub(super) fn plan_gc_active_turn_tx(
     sources
         .try_reserve_exact(range.end - range.start)
         .map_err(|_| overflow())?;
-    let mut selected=tx.prepare("SELECT p.ordinal,n.id,n.payload_revision,n.turn_id,json_extract(n.payload_json,'$.group_id'),EXISTS(SELECT 1 FROM receipt q WHERE q.target_thread_id=?1 AND q.message_node_id=n.id AND q.state IN ('accepted','held')),CASE WHEN json_extract(n.payload_json,'$.group_id') IS NULL THEN 1 ELSE EXISTS(SELECT 1 FROM tool_group g WHERE g.id=json_extract(n.payload_json,'$.group_id') AND g.state='completed' AND NOT EXISTS(SELECT 1 FROM tool_call c WHERE c.group_id=g.id AND (c.state!='completed' OR NOT EXISTS(SELECT 1 FROM tool_result r WHERE r.group_id=c.group_id AND r.call_id=c.call_id)))) END,json_type(n.payload_json,'$.summary_format') IS NOT NULL,CASE WHEN n.payload_json IS NULL OR json_type(n.payload_json,'$.output') IS NOT NULL THEN 0 WHEN n.turn_id IS ?3 AND (json_extract(n.payload_json,'$.role')='user' OR json_extract(n.payload_json,'$.item.role')='user') THEN 1 ELSE 0 END FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND p.ordinal>=?2 AND p.ordinal<?4 ORDER BY p.ordinal")?;
+    let mut selected=tx.prepare(concat!("SELECT p.ordinal,n.id,n.payload_revision,n.turn_id,json_extract(n.payload_json,'$.group_id'),EXISTS(SELECT 1 FROM receipt q WHERE q.target_thread_id=?1 AND q.message_node_id=n.id AND q.state IN ('accepted','held')),", saved_tool_group_complete!(), ",json_type(n.payload_json,'$.summary_format') IS NOT NULL,CASE WHEN n.payload_json IS NULL OR json_type(n.payload_json,'$.output') IS NOT NULL THEN 0 WHEN n.turn_id IS ?3 AND (json_extract(n.payload_json,'$.role')='user' OR json_extract(n.payload_json,'$.item.role')='user') THEN 1 ELSE 0 END FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND p.ordinal>=?2 AND p.ordinal<?4 ORDER BY p.ordinal"))?;
     let stop = i64::try_from(range.end).map_err(|_| overflow())?;
     let begin = i64::try_from(range.start).map_err(|_| overflow())?;
     let facts = selected.query_map(params![thread, begin, current_turn, stop], |r| {
@@ -625,7 +625,7 @@ fn capture_gc_plan_and_sources(
         }
         let current = &mut groups[group_index];
         let mut payload_statement =
-            tx.prepare("SELECT payload_json FROM node WHERE id=?1 AND payload_revision=?2")?;
+            tx.prepare("SELECT payload_json, import_origin_json IS NOT NULL FROM node WHERE id=?1 AND payload_revision=?2")?;
         let mut payload_rows = payload_statement.query(params![row.id, row.revision])?;
         let payload_row = payload_rows
             .next()?
@@ -640,10 +640,12 @@ fn capture_gc_plan_and_sources(
             }
             _ => return Err(StorageError::Schema("node payload_json is not text".into())),
         };
+        let imported = payload_row.get::<_, bool>(1)?;
         drop(payload_rows);
         drop(payload_statement);
         let marker_adapter = super::summary_marker_item(&payload).is_some();
-        let projection = super::edit::projection_characters(&payload, thread_facts.2);
+        let projection =
+            super::edit::source_projection_characters(&payload, thread_facts.2, imported);
         current.projection_weight = current
             .projection_weight
             .checked_add(u128::from(projection))
@@ -790,7 +792,7 @@ pub(super) fn selected_source_facts(
     thread: &str,
     range: Range<i64>,
 ) -> Result<Vec<GcSourceFacts>, rusqlite::Error> {
-    let mut statement=db.prepare("SELECT p.ordinal,n.id,n.payload_revision,n.turn_id,json_extract(n.payload_json,'$.group_id'),EXISTS(SELECT 1 FROM receipt q WHERE q.target_thread_id=?1 AND q.message_node_id=n.id AND q.state IN ('accepted','held')),CASE WHEN json_extract(n.payload_json,'$.group_id') IS NULL THEN 1 ELSE EXISTS(SELECT 1 FROM tool_group g WHERE g.id=json_extract(n.payload_json,'$.group_id') AND g.state='completed' AND NOT EXISTS(SELECT 1 FROM tool_call c WHERE c.group_id=g.id AND (c.state!='completed' OR NOT EXISTS(SELECT 1 FROM tool_result r WHERE r.group_id=c.group_id AND r.call_id=c.call_id)))) END,json_type(n.payload_json,'$.summary_format') IS NOT NULL,COALESCE((SELECT json_group_array(json_object('id',a.id,'path',a.absolute_path,'kind',a.input_kind,'state',COALESCE(a.state,'not_selected'),'reason',a.reason)) FROM (SELECT ar.id,ar.absolute_path,ar.input_kind,ar.created_at,se.state,se.reason FROM attachment_ref ar LEFT JOIN attachment_selection se ON se.attachment_id=ar.id AND se.thread_id=?1 WHERE ar.source_node_id=n.id ORDER BY ar.created_at,ar.id) a),'[]') FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND p.ordinal>=?2 AND p.ordinal<?3 ORDER BY p.ordinal")?;
+    let mut statement=db.prepare(concat!("SELECT p.ordinal,n.id,n.payload_revision,n.turn_id,json_extract(n.payload_json,'$.group_id'),EXISTS(SELECT 1 FROM receipt q WHERE q.target_thread_id=?1 AND q.message_node_id=n.id AND q.state IN ('accepted','held')),", saved_tool_group_complete!(), ",json_type(n.payload_json,'$.summary_format') IS NOT NULL,COALESCE((SELECT json_group_array(json_object('id',a.id,'path',a.absolute_path,'kind',a.input_kind,'state',COALESCE(a.state,'not_selected'),'reason',a.reason)) FROM (SELECT ar.id,ar.absolute_path,ar.input_kind,ar.created_at,se.state,se.reason FROM attachment_ref ar LEFT JOIN attachment_selection se ON se.attachment_id=ar.id AND se.thread_id=?1 WHERE ar.source_node_id=n.id ORDER BY ar.created_at,ar.id) a),'[]') FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND p.ordinal>=?2 AND p.ordinal<?3 ORDER BY p.ordinal"))?;
     let rows = statement.query_map(params![thread, range.start, range.end], |row| {
         Ok((
             row.get::<_, i64>(0)?,

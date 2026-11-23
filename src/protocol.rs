@@ -58,6 +58,7 @@ fn operation_result_schemas(
     opaque!("compact.list");
     result!("shell.list", ShellListResult);
     opaque!("thread.create");
+    result!("thread.import", ThreadImportResult);
     opaque!("thread.fork");
     opaque!("thread.delete");
     opaque!("thread.delete_preview");
@@ -819,6 +820,8 @@ args!(#[derive(Default)] CompactPreviewArgs {
 });
 args!(ModelListArgs { #[serde(default)] connection: Option<String>, #[serde(default)] thread_id: Option<String> });
 record!(ModelListResult { connection: String, models: Vec<String>, api: String, unavailable_features: Vec<String> });
+args!(ThreadImportArgs { document: String });
+record!(ThreadImportResult { thread_id: String });
 args!(ThreadCreateArgs { #[serde(default, skip_serializing_if = "Option::is_none")] agents: Option<String>, #[serde(default)] connection: Option<String>, #[serde(default)] cwd: Option<String>, #[serde(default)] model: Option<String>, #[serde(default)] effort: Option<String>, #[serde(default)] parent_id: Option<String> });
 args!(ThreadForkArgs { #[serde(default, skip_serializing_if = "Option::is_none")] agents: Option<String>, thread_id: String, node_id: String, #[serde(default)] cwd: Option<String> });
 args!(DeletionPreviewMarker {
@@ -1118,7 +1121,13 @@ states!(HistoryRelation {
 });
 args!(HistoryExportArgs {thread_id: String, #[serde(default = "list_limit")] limit: u32, #[serde(default)] cursor: Option<String> });
 record!(HistoryExportPage {items: Vec<HistoryExportRecord>, next_cursor: Option<String>, change_position: u64});
-record!(HistoryExportNode {id: String, order: i64, current_ordinal: Option<i64>, #[serde(skip_serializing_if = "Option::is_none")] payload_json: Option<String>, provenance: NodeProvenance});
+record!(HistoryExportNode {id: String, order: i64, current_ordinal: Option<i64>, #[serde(skip_serializing_if = "Option::is_none")] payload_json: Option<String>, #[serde(default, skip_serializing_if = "Vec::is_empty")] import_origins: Vec<ImportOrigin>, provenance: NodeProvenance});
+record!(ImportOrigin {
+    source_thread_id: String,
+    source_node_id: String,
+    source_provenance: NodeProvenance,
+    source_graph: HistoryExportRelations
+});
 record!(HistoryExportRelations {previous: Vec<HistoryExportReference>, next: Vec<HistoryExportReference>, replacement_groups: Vec<HistoryExportGroup>, replaced_by: Vec<HistoryExportMembership>});
 record!(HistoryExportReference {
     id: String,
@@ -1408,6 +1417,8 @@ pub enum Command {
     ShellList(ShellListArgs),
     #[serde(rename = "thread.create")]
     ThreadCreate(ThreadCreateArgs),
+    #[serde(rename = "thread.import")]
+    ThreadImport(ThreadImportArgs),
     #[serde(rename = "thread.fork")]
     ThreadFork(ThreadForkArgs),
     #[serde(rename = "thread.delete")]
@@ -2560,6 +2571,7 @@ mod message_acknowledgement_tests {
             "history.search",
             "history.relations",
             "history.export",
+            "thread.import",
             "shell.get",
             "shell.read",
             "shell.write",
@@ -2599,7 +2611,7 @@ mod message_acknowledgement_tests {
                 "missing result schema for {name}"
             );
         }
-        assert_eq!(results.len(), 72);
+        assert_eq!(results.len(), 73);
         for name in ["thread.create", "connection.test"] {
             assert_eq!(
                 results[name],

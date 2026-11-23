@@ -406,9 +406,12 @@ impl Compactor {
             let mut bytes = 0u64;
             if let Some(group) = index.and_then(|i| snapshot.groups.get(i)) {
                 for source in &group.sources {
-                    for item in
-                        crate::control::replay::convert(source.payload.clone(), snapshot.epoch)
-                    {
+                    for item in crate::control::replay::convert_source(
+                        source.payload.clone(),
+                        snapshot.epoch,
+                        false,
+                        source.imported,
+                    ) {
                         let body = item.to_string();
                         chars = chars.saturating_add(body.chars().count() as u64);
                         bytes = bytes.saturating_add(body.len() as u64);
