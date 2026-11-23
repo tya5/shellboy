@@ -351,10 +351,7 @@ Use indexed meaning rather than exact wording when you need to:
 
 In `history window`, `execution_count_exact: false` means the count is only a
 lower bound, even when no execution links were shown. A source-budget excerpt
-placeholder does not mean the body is empty; fetch by node ID as needed. If
-`history get` returns `body_unavailable_reason: "prune_indeterminate"`, retain
-the node ID and treat the body as unverified, not empty or proven pruned. Do not
-poll the same read; use a retained summary or other evidence if available.
+placeholder does not mean the body is empty; fetch by node ID as needed.
 
 If the node ID is known, use `history get`; for facts already visible in the current Turn, no search is needed. `history search` sends one query-embedding API request per search (may incur cost); keyword RAG retrieval does not use embeddings. `indexing.auto_history=false` can leave newer conversation nodes unindexed; heed `degraded` / `scope_status` and use keyword retrieval or authorized backfill for gaps. Semantic search requires configured embeddings and indexed coverage; configuration alone does not prove that a source is indexed.
 
@@ -594,7 +591,7 @@ Original source nodes remain available through history and restore operations.
 
 ## Large paths and long indexing tasks
 
-Before range editing, use `shellboy history list --thread THREAD_ID --excerpt-chars 0 --limit 20` to retrieve node IDs, kind, `selection.ordinal`, and `payload_chars`, then get only necessary bodies. payload_chars counts characters of stored JSON, not tokens; reclaimed content is null. Keep the same excerpt-chars on continuation pages.
+Before range editing, use `shellboy history list --thread THREAD_ID --excerpt-chars 0 --limit 20` to retrieve node IDs, kind, `selection.ordinal`, and `payload_chars`, then get only necessary bodies. payload_chars counts characters of stored JSON, not tokens; reclaimed content is null. Keep the same excerpt-chars on continuation pages. In `history window`, size can also be null because the source was not loaded (zero excerpt length or more than 1 MiB); a requested excerpt over the source budget is a placeholder.
 
 For a long `rag index`, pass a fixed index command to the shell tool with `background:true`, and retain the work execution ID returned by that tool. Wait with `shellboy wait --conditions-json '[{"type":"shell_ended","execution_id":"WORK_EXECUTION_ID"}]' --timeout-ms 30000`, then retrieve the result with `shellboy shell read --execution WORK_EXECUTION_ID --encoding UTF-8 --limit-bytes 65536`. Read the RAG JSON in `result.text` and inspect success/partial failure and failure_count/failures. Do not read a different execution that ran wait or message send. Continue partial/large output using the read cursor. For later per-source state, last scan/content-change times, and failures, use `rag status`; inspect a document with `rag inspect --id ID`. See [RAG](rag.md).
 

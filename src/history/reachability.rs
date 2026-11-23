@@ -21,14 +21,6 @@ pub(crate) fn released_by_prune(db: &rusqlite::Connection, id: &str) -> rusqlite
     db.prepare_cached(&sql)?.query_row([id], |row| row.get(0))
 }
 
-/// Bounded read-side check only; GC still uses the exact predicate above.
-pub(super) fn bounded_prune_check(
-    db: &rusqlite::Connection,
-    id: &str,
-) -> rusqlite::Result<Option<bool>> {
-    crate::storage::bounded_read(db, 32, || released_by_prune(db, id))
-}
-
 const CONSUMERS: &str = "WITH RECURSIVE consumers(id) AS(SELECT ?1 UNION SELECT r.output_node_id FROM consumers c JOIN replacement_source s ON s.source_node_id=c.id JOIN replacement r ON r.id=s.replacement_id AND r.state<>'pruned')";
 
 /// Current roots only, without the ownerless-history visibility fallback.
@@ -160,45 +152,5 @@ mod tests {
             }
         }
         assert!(yes > 50 && no > 50, "both outcomes covered: {yes}/{no}");
-    }
-}
-
-#[cfg(test)]
-mod prune_budget_tests {
-    #[test]
-    fn history_bounds_prune_work_without_failing_the_read_snapshot() {
-        use crate::protocol::HistoryBodyUnavailableReason::PruneIndeterminate;
-        let db = rusqlite::Connection::open_in_memory().unwrap();
-        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
-        db.execute_batch("INSERT INTO node(id,kind,created_at,payload_json) VALUES('n','user','t','{\"text\":\"hidden\"}'),('out','summary','t',NULL),('ordinary','user','t','{\"text\":\"visible\"}');
-        INSERT INTO replacement(id,output_node_id,input_key,format_version,prompt_version,state,created_at) VALUES('pruned','out','k','f','p','pruned','t');
-        INSERT INTO replacement_source(replacement_id,ordinal,source_node_id,source_revision) VALUES('pruned',0,'n',0);
-        WITH RECURSIVE seq(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM seq WHERE i<10000)
-        INSERT INTO replacement(id,output_node_id,input_key,format_version,prompt_version,state,created_at) SELECT 'r'||i,'out','k','f','p','completed','t' FROM seq;
-        INSERT INTO replacement_source(replacement_id,ordinal,source_node_id,source_revision) SELECT id,0,'n',0 FROM replacement WHERE state='completed';").unwrap();
-        let tx = db.unchecked_transaction().unwrap();
-        let args = |node: &str| crate::protocol::HistoryGetArgs {
-            node_id: node.into(),
-            limit_bytes: 16,
-            encoding: "UTF-8".into(),
-            cursor: None,
-            parts: false,
-            end_message_only: false,
-        };
-        let bounded = crate::history::get_node(&tx, &args("n")).unwrap();
-        assert_eq!(bounded.body_unavailable_reason, Some(PruneIndeterminate));
-        assert!(
-            bounded.text.is_empty()
-                && bounded.next_cursor.is_none()
-                && bounded.tombstone_reason.is_none()
-        );
-        assert_eq!(
-            crate::history::get_node(&tx, &args("ordinary"))
-                .unwrap()
-                .text,
-            "visible"
-        );
-        assert!(super::released_by_prune(&tx, "n").unwrap());
-        tx.commit().unwrap();
     }
 }

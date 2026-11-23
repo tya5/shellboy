@@ -956,7 +956,6 @@ and adds no list field, event or polling path.
 
 `history.get` reads `incomplete_response` and `model_stream_observation` as a byte range of the saved JSON via SQLite incremental I/O. The byte cursor remains bound to node, revision, encoding, and projection, and pages end at UTF-8 character boundaries. Ordinary decoded text (including the end-message projection) and summary parts still rebuild text before slicing: their decoded offsets do not correspond to byte offsets in the canonical JSON, and parts are mutable cache records. There is no new stored projection.
 
-If the bounded prune-readability check cannot finish, `history.get` returns a successful metadata-only result with `body_unavailable_reason: "prune_indeterminate"`, empty `text`, and no `next_cursor` or tombstone. This is not proof of pruning, emptiness, or readability. Proven pruning still refuses the body. Live selected-path window rows already have a live path root, so the bound cannot suppress another row in the window. GC still uses the exact check.
 
 ## #274 spill-to-tool provenance
 

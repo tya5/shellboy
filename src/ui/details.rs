@@ -143,12 +143,7 @@ pub(super) fn original_page_lines_for(
     if let Some(sender) = &body.provenance.sender {
         lines.extend(sender_lines_for(sender, language));
     }
-    if body.body_unavailable_reason.is_some() {
-        lines.push(Line::from(match language {
-            UiLanguage::Ja => "原文の保持状態を確認できませんでした",
-            UiLanguage::En => "Could not verify whether the original is retained",
-        }));
-    }
+
     if let Some(reason) = &body.tombstone_reason {
         let reason = safe(reason);
         lines.push(Line::from(match language {
@@ -2068,7 +2063,7 @@ mod tests {
                     source_revision: 0, turn_id: None, run_id: None, origin_thread_id: None,
                 },
                 source_node_ids: vec!["source-id".into()], previous_node_ids: vec!["prev-id".into()],
-                next_node_ids: vec!["next-id".into()], next_cursor: None, tombstone_reason: None, body_unavailable_reason: None,
+                next_node_ids: vec!["next-id".into()], next_cursor: None, tombstone_reason: None,
             };
             let mut details = Details::for_node(ui.view(), "node-fixture".into(), false);
             details.mode = Mode::Original;
@@ -2151,7 +2146,7 @@ mod tests {
             previous_node_ids: vec!["previous-id".into()],
             next_node_ids: vec!["next-id".into()],
             next_cursor: None,
-            tombstone_reason: Some("OPAQUE-REASON".into()), body_unavailable_reason: None,
+            tombstone_reason: Some("OPAQUE-REASON".into()),
         };
         for (language, heading) in [
             (UiLanguage::En, "Original reclaimed"),
@@ -3344,7 +3339,7 @@ mod tests {
             previous_node_ids: vec![],
             next_node_ids: vec![],
             next_cursor: None,
-            tombstone_reason: None, body_unavailable_reason: None,
+            tombstone_reason: None,
         };
         details.accept(next + 1, body.clone(), original_page_lines(&body));
         assert!(details.original.is_none());
@@ -3567,7 +3562,7 @@ mod tests {
             previous_node_ids: vec![],
             next_node_ids: vec![],
             next_cursor: Some("next".into()),
-            tombstone_reason: None, body_unavailable_reason: None,
+            tombstone_reason: None,
         };
         let display = original_page_lines(&body);
         assert!(

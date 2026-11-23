@@ -770,14 +770,10 @@ fn read_node(
         .ok_or_else(|| ApiError::new(ErrorCode::TargetUnavailable, "history node not found"))?;
     // Released by `thread prune` and not held elsewhere: not retained, even
     // before the history GC has removed the body (#235).
-    let prune_check = if deleted_reason.as_deref() == Some(prune::PRUNED_REASON) {
-        Some(true)
-    } else if has_payload {
-        reachability::bounded_prune_check(connection, &args.node_id).map_err(sql_error)?
-    } else {
-        Some(false)
-    };
-    if prune_check == Some(true) {
+    if deleted_reason.as_deref() == Some(prune::PRUNED_REASON)
+        || has_payload
+            && reachability::released_by_prune(connection, &args.node_id).map_err(sql_error)?
+    {
         return Err(ApiError::new(
             ErrorCode::TargetUnavailable,
             "node was pruned (thread prune) and is not retained",
@@ -832,17 +828,13 @@ fn read_node(
             "conversation JSON text is UTF-8; use shell.read for raw re-decoding",
         ));
     }
-    let indeterminate = prune_check.is_none();
     let mut parts_info = None;
     let limit = args.limit_bytes as usize;
-    let (text, total_bytes) = if indeterminate {
-        (String::new(), 0)
-    } else if has_payload
+    let (text, total_bytes) = if has_payload
         && matches!(
             kind.as_str(),
             "incomplete_response" | "model_stream_observation"
-        )
-    {
+        ) {
         body_page::saved_json(connection, rowid, start, limit)?
     } else {
         let payload = if has_payload {
@@ -935,8 +927,6 @@ fn read_node(
         previous_node_ids: previous,
         next_node_ids: next,
         next_cursor,
-        body_unavailable_reason: indeterminate
-            .then_some(crate::protocol::HistoryBodyUnavailableReason::PruneIndeterminate),
         tombstone_reason: if !has_payload {
             Some(deleted_reason.unwrap_or_else(|| "body unavailable".into()))
         } else {

@@ -1,5 +1,12 @@
 # Validation record
 
+## Core #381 history reads
+
+Item 8 keeps the exact pre-GC refusal: only prune sources can incur the
+O(consumer graph) reachability check; ordinary nodes do not traverse it. A
+retained source still returns its body. Revisit only after a real slow
+`history get` on a prune source. No stored projection or migration.
+
 ## Core #379 CLI and guide audit fixes
 
 On macOS the temporary-owner service integration test failed before the fix with `target_unavailable` and passed after it (one test). It observes saved output while the service still runs, then observes termination after an explicit stop, without a Run. The compiled CLI help was checked for the distinct cursor rules and dotted-key quoting. No installed-owner or other-OS verification.
