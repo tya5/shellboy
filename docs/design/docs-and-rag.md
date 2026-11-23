@@ -32,7 +32,7 @@ driverのsystem promptには `shellboy docs list` と `shellboy docs search --qu
 
 ## 文書store
 
-独立SQLite schema 4。Readers and dry-run require the current schema; only the writer owns schema preparation.metaにUUID/schema/generation、sourcesに絶対root/名前/種別、
+独立SQLite schema 5。Readers and dry-run require the current schema; only the writer owns schema preparation.metaにUUID/schema/generation、sourcesに絶対root/名前/種別、
 documentsにsource/key/active_revision/status、revisionsにcontent/extractor hashと
 原本/派生provenance、blocksに本文/位置、chunksにUTF-8範囲、embedding spaceに
 endpoint/profile/model/dimension/splitter fingerprint、vectorsと処理状態を保存する。
@@ -141,7 +141,7 @@ RAGはUTF-8 text/Markdownと登録・出典管理へ絞る。PDF/Office固有bac
 
 ### 独立RAGのhot query索引（Issue #26）
 
-`embeddings(space_id,vec_rowid)`はMAX行IDの割当てと削除、`chunks(hash)`は孤立embedding回収のNOT EXISTSに使用する。EXPLAINと同一fixture比較で旧走査を確認した2本だけを追加し、新しい表は作らない。新規schema 3と既存schema 1/2のwriter移行で同じ索引を作り、移行は単一transactionでschema番号まで確定する。readonly/dry-runは旧schemaを変更しない。会話DB migrationとは独立する。
+`embeddings(space_id,vec_rowid)`はMAX行IDの割当てと削除、`chunks(hash)`は従来の索引で、schema 5 の明示削除は `source_chunk_hashes` で所有元を照合する。EXPLAINと同一fixture比較で旧走査を確認した2本だけを追加し、新しい表は作らない。新規schema 3と既存schema 1/2のwriter移行で同じ索引を作り、移行は単一transactionでschema番号まで確定する。readonly/dry-runは旧schemaを変更しない。会話DB migrationとは独立する。
 
 
 ### Reopened Issue #20: source identity and exclusion boundaries
@@ -165,7 +165,7 @@ Scoped history hits expose `thread_scope` with `thread_id` and `on_current_path`
 
 ### Explicit upgrade result (#33 follow-up)
 
-`rag init` returns `schema_version: 4` and nullable `migrated_from_schema` in its
+`rag init` returns `schema_version: 5` and nullable `migrated_from_schema` in its
 existing result. The latter is the pre-upgrade version only when this call
 actually upgraded an existing store; fresh creation and reopening a current
 store return null. Existing-source identities/counts remain unchanged and no
@@ -281,3 +281,15 @@ Reproduce the unlinked, linked global and Thread samples with:
 `cargo test --lib rag::history::measurement::history_keyword_work_budget -- --ignored --nocapture`.
 The test generates a disposable on-disk database and uses a test-only SQLite
 progress handler; it does not inspect the real owner or database.
+
+### Source ownership for retained RAG vectors (schema 5)
+
+`source_chunk_hashes` records `(source_id, hash)` because published chunks no
+longer record the hashes of retired revisions. Explicit source removal uses
+this ownership and the `source_chunk_hashes_by_hash` index to keep hashes shared
+with other sources. `prepare` is the sole runtime writer of new associations;
+upgrade backfills existing chunk associations without guessing ownership of
+unlinked vectors. The table grows with the number of distinct pairs ever
+prepared, which is unbounded under repeated edits; keyword-only preparation can
+also add pairs with no vector. Explicit source removal ends that source's
+ownership. Sync does not delete associations or embeddings.

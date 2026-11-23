@@ -188,7 +188,7 @@ Result provenance identifies origin and current original-content revision. Span 
 
 Raw-output expiry, decoding changes and history source retirement make stale vectors ineligible for search without deleting purchased vectors. Raw output and removed history cannot be reconstructed from those vectors. Removing a retained inactive history index requires `index remove --space ID`.
 
-Which of these are indexed automatically depends on `indexing.auto_kinds` (below). Model replies are indexed as separate answer and displayable-reasoning bodies, and tool results (with retained shell raw output) as their own kind; each can be searched once its kind is indexed, and all of them by keyword search. Attachment binaries and encrypted opaque data are not sent to embedding. Reclaiming raw output also invalidates its derived vectors; late results cannot revive reclaimed content.
+Which of these are indexed automatically depends on `indexing.auto_kinds` (below). Model replies are indexed as separate answer and displayable-reasoning bodies, and tool results (with retained shell raw output) as their own kind; each can be searched once its kind is indexed, and all of them by keyword search. Attachment binaries and encrypted opaque data are not sent to embedding. Reclaiming raw output also makes its retained derived vectors ineligible for search; late results cannot revive reclaimed content.
 
 ## Index management and cost previews
 

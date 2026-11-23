@@ -17,7 +17,7 @@ async fn call(root: &Path, command: RagCommand) -> Value {
 async fn init(root: &Path) {
     let result = call(root, RagCommand::Init).await;
     assert_eq!(result["ok"], true, "{result}");
-    assert_eq!(result["result"]["schema_version"], 4);
+    assert_eq!(result["result"]["schema_version"], 5);
     assert_eq!(result["result"]["migrated_from_schema"], Value::Null);
 }
 async fn add(root: &Path, path: &str, exclude: &[&str], clear: bool) -> Value {
@@ -521,9 +521,10 @@ async fn version_one_readers_reject_without_writes_then_writer_migrates_existing
     let registered = add(root, "materials", &[], false).await;
     assert_eq!(registered["ok"], true, "{registered}");
     let original = registered["result"]["source_id"].clone();
+    assert_eq!(index(root, false, IndexMode::Keyword).await["ok"], true);
     {
         let db = rusqlite::Connection::open(root.join("rag.db")).unwrap();
-        db.execute_batch("DROP INDEX embeddings_vec_rowid; DROP INDEX chunks_hash; ALTER TABLE sources DROP COLUMN exclude_json; PRAGMA user_version=1; PRAGMA wal_checkpoint(TRUNCATE);").unwrap();
+        db.execute_batch("DROP TABLE source_chunk_hashes; DROP INDEX embeddings_vec_rowid; DROP INDEX chunks_hash; ALTER TABLE sources DROP COLUMN exclude_json; PRAGMA user_version=1; PRAGMA wal_checkpoint(TRUNCATE);").unwrap();
     }
     let before = std::fs::read(root.join("rag.db")).unwrap();
     for result in [
@@ -551,11 +552,11 @@ async fn version_one_readers_reject_without_writes_then_writer_migrates_existing
     let migrated = call(root, RagCommand::Init).await;
     assert_eq!(migrated["ok"], true, "{migrated}");
     assert_eq!(migrated["result"]["already_initialized"], true);
-    assert_eq!(migrated["result"]["schema_version"], 4);
+    assert_eq!(migrated["result"]["schema_version"], 5);
     assert_eq!(migrated["result"]["migrated_from_schema"], 1);
     let reopened = call(root, RagCommand::Init).await;
     assert_eq!(reopened["result"]["migrated_from_schema"], Value::Null);
-    assert_eq!(reopened["result"]["schema_version"], 4);
+    assert_eq!(reopened["result"]["schema_version"], 5);
     let listed = call(
         root,
         RagCommand::Source {
@@ -569,8 +570,9 @@ async fn version_one_readers_reject_without_writes_then_writer_migrates_existing
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
             .unwrap(),
-        4
+        5
     );
+    assert_eq!(db.query_row("SELECT COUNT(*) FROM source_chunk_hashes o JOIN chunks c ON c.hash=o.hash WHERE o.source_id=?1", [original.as_str().unwrap()], |r| r.get::<_, i64>(0)).unwrap(), 1);
     assert_eq!(db.query_row("SELECT count(*) FROM sqlite_schema WHERE type='index' AND name IN ('embeddings_vec_rowid','chunks_hash')", [], |row| row.get::<_,i64>(0)).unwrap(), 2);
     assert_eq!(
         db.query_row(
@@ -685,6 +687,10 @@ async fn version_two_migration_adds_same_hot_indexes_as_fresh_store_without_touc
     let root = tempfile::tempdir().unwrap();
     let root = root.path();
     init(root).await;
+    std::fs::write(root.join("note.md"), "Version two ownership").unwrap();
+    let registered = add(root, "note.md", &[], false).await;
+    assert_eq!(registered["ok"], true);
+    assert_eq!(index(root, false, IndexMode::Keyword).await["ok"], true);
     let path = root.join("rag.db");
     let indexes = |db: &rusqlite::Connection| -> Vec<(String, String)> {
         db.prepare("SELECT name,sql FROM sqlite_schema WHERE type='index' AND name IN ('embeddings_vec_rowid','chunks_hash') ORDER BY name").unwrap().query_map([],|row|Ok((row.get(0)?,row.get(1)?))).unwrap().collect::<rusqlite::Result<Vec<_>>>().unwrap()
@@ -695,7 +701,7 @@ async fn version_two_migration_adds_same_hot_indexes_as_fresh_store_without_touc
         .query_row("SELECT count(*) FROM sources", [], |r| r.get(0))
         .unwrap();
     assert_eq!(expected.len(), 2);
-    db.execute_batch("DROP INDEX embeddings_vec_rowid; DROP INDEX chunks_hash; PRAGMA user_version=2; PRAGMA wal_checkpoint(TRUNCATE);").unwrap();
+    db.execute_batch("DROP TABLE source_chunk_hashes; DROP INDEX embeddings_vec_rowid; DROP INDEX chunks_hash; PRAGMA user_version=2; PRAGMA wal_checkpoint(TRUNCATE);").unwrap();
     drop(db);
     let before = std::fs::read(&path).unwrap();
     let rejected = call(root, RagCommand::Status).await;
@@ -705,7 +711,7 @@ async fn version_two_migration_adds_same_hot_indexes_as_fresh_store_without_touc
     let migrated = call(root, RagCommand::Init).await;
     assert_eq!(migrated["ok"], true, "{migrated}");
     assert_eq!(migrated["result"]["migrated_from_schema"], 2);
-    assert_eq!(migrated["result"]["schema_version"], 4);
+    assert_eq!(migrated["result"]["schema_version"], 5);
     let db = rusqlite::Connection::open(&path).unwrap();
     assert_eq!(
         db.query_row("SELECT count(*) FROM sources", [], |r| r.get::<_, i64>(0))
@@ -715,8 +721,9 @@ async fn version_two_migration_adds_same_hot_indexes_as_fresh_store_without_touc
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
             .unwrap(),
-        4
+        5
     );
+    assert_eq!(db.query_row("SELECT COUNT(*) FROM source_chunk_hashes o JOIN chunks c ON c.hash=o.hash WHERE o.source_id=?1", [registered["result"]["source_id"].as_str().unwrap()], |r| r.get::<_, i64>(0)).unwrap(), 1);
     assert_eq!(indexes(&db), expected);
 }
 

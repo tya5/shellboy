@@ -4,7 +4,7 @@
 
 `shellboy rag` is a search CLI that works without starting the conversation application. It does not generate answers to questions. Start with `shellboy docs search --query 'search'` to find operation guides. The bundled guides are English. Queries are not translated automatically.
 
-The standalone RAG store uses schema 4. Readers and dry-run require the current schema and do not migrate it. The writer owns schema preparation; the general schema-version/ledger mechanism is separate from a promise to support older releases. The standalone store does not modify the conversation DB.
+The standalone RAG store uses schema 5. Readers and dry-run require the current schema and do not migrate it. The writer owns schema preparation; the general schema-version/ledger mechanism is separate from a promise to support older releases. The standalone store does not modify the conversation DB.
 
 ## Register documents
 
