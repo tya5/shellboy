@@ -301,17 +301,36 @@ async fn deltas_arrive_in_order_with_offsets_then_the_attempt_ends_and_saved_out
             // Offsets count Unicode scalar values, not bytes: 5 ASCII then 3 kana and an emoji.
             provider.delta(" こんに😀");
             read_text(&control, &mut at, &t, 5, " こんに😀").await;
+            // Wait for a subscriber that opted in to observe the reasoning delta
+            // before checking the view that must not advance for that delta.
+            let reasoning_wait = |after| {
+                wait_request(
+                    &control,
+                    Command::EventsWait(EventsWaitArgs {
+                        after,
+                        thread_ids: vec![t.clone()],
+                        timeout_ms: 30_000,
+                        include_text: false,
+                        include_reasoning_activity: true,
+                    }),
+                )
+            };
+            let baseline = control.request(reasoning_wait(None)).await.result.unwrap();
             provider.reasoning("hmm");
-            let value = poll(&control, Some(&at), &[&t], 30_000).await;
-            assert_eq!(value["status"], "timeout");
-            assert_eq!(entry(&value, &t).unwrap()["deltas"], json!([]));
-            assert_eq!(attempts(&control, &t).await, std::slice::from_ref(&attempt));
-            at = cursor(&value);
-            // Nothing new: the attempt stays listed with no text at timeout.
+            let progress = control
+                .request(reasoning_wait(Some(cursor(&baseline))))
+                .await
+                .result
+                .unwrap();
+            assert_eq!(progress["status"], "text");
+            assert_eq!(progress["reasoning_activity"][0]["attempt_id"], attempt);
+            assert_eq!(progress["reasoning_activity"][0]["received_bytes"], 3);
             let idle = poll(&control, Some(&at), &[&t], 0).await;
             assert_eq!(idle["status"], "timeout");
             assert_eq!(entry(&idle, &t).unwrap()["deltas"], json!([]));
             assert_eq!(entry(&idle, &t).unwrap()["attempt_id"], attempt);
+            assert_eq!(attempts(&control, &t).await, std::slice::from_ref(&attempt));
+            at = cursor(&idle);
 
             // A late joiner gets the retained text at once, complete from offset 0.
             let late = poll(&control, None, &[&t], 0).await;
