@@ -1078,7 +1078,7 @@ Item-projected history windows report retired admission notice ordinals as
 `kind: "model_context"` with `items: []`. Raw history retains the original
 node kind and body.
 
-## Protocol next (#355)
+## Protocol 15 (#355)
 
 For output-limited adopted answers, history provenance may include `output_limit`
 with the [saved attempt evidence](events-and-external-protocol.md#output-limit-adoption).
