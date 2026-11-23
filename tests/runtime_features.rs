@@ -4043,14 +4043,10 @@ pub(super) async fn finish_proactive_trace(
                                 &trace.report_owners,
                                 TriggerOwner { run_id: request_run, turn_id: request_turn.clone() },
                             ).await;
-                            let summary_scope = (admitted.trigger.run_id.clone(), admitted.trigger.turn_id.clone());
                             if !trace.admitted_summaries.iter().any(|known| known.report.attempt_id == admitted.report.attempt_id) {
                                 trace.admitted_summaries.push(admitted);
                             }
                             trace.summary_requests += 1;
-                            if !trace.summary_scopes.contains(&summary_scope) {
-                                trace.summary_scopes.push(summary_scope);
-                            }
                             trace.summary_bodies.push(incoming.body.clone());
                             incoming.reply.send(summary_reply.clone()).unwrap();
                         }
@@ -5127,11 +5123,9 @@ async fn ax_growing_turn_summary_requests(
 #[derive(Default)]
 pub(super) struct ProactiveTrace {
     summary_requests: usize,
-    summary_scopes: Vec<(String, String)>,
     summary_bodies: Vec<Value>,
     report_owners: Vec<ReportOwner>,
     admitted_summaries: Vec<ReportBoundary>,
-    admission_report: Option<Value>,
 }
 
 async fn proactive_third_turn(
@@ -5141,32 +5135,24 @@ async fn proactive_third_turn(
     second: u64,
     summary_reply: (u16, Value),
 ) -> usize {
-    proactive_third_turn_after_run(control, receive, thread, second, summary_reply, None)
+    proactive_third_turn_trace(control, receive, thread, second, summary_reply)
         .await
         .summary_requests
 }
 
-async fn proactive_third_turn_after_run(
+async fn proactive_third_turn_trace(
     control: &Arc<Control>,
     receive: &mut ProxyInbox,
     thread: &str,
     second: u64,
     summary_reply: (u16, Value),
-    prior_scope: Option<(&str, &str)>,
 ) -> ProactiveTrace {
     let mut trace = ProactiveTrace::default();
-    let first_report = if prior_scope.is_some() { 150 } else { 50 };
-    let mut task_accepts = Vec::new();
-    for (n, tokens) in [(0, first_report), (1, second)] {
+    for (n, tokens) in [(0, 50), (1, second)] {
         let text = format!("task {n}");
         let accepted = send_accepted(control, thread, &text).await;
         let run_id = accepted.run_id.clone().expect("accepted warmup Run");
         let turn_id = accepted.turn_id.clone().expect("accepted warmup Turn");
-        if let Some((prior_run, prior_turn)) = prior_scope {
-            assert_ne!(run_id, prior_run, "accepted warmup Run is distinct");
-            assert_ne!(turn_id, prior_turn, "accepted warmup Turn is distinct");
-        }
-        task_accepts.push((run_id, turn_id.clone()));
         loop {
             let next = incoming(control, receive).await;
             if next.kind() == ProviderRequestKind::Summary {
@@ -5174,7 +5160,7 @@ async fn proactive_third_turn_after_run(
                     control,
                     &trace.report_owners,
                     TriggerOwner {
-                        run_id: task_accepts.last().unwrap().0.clone(),
+                        run_id: run_id.clone(),
                         turn_id: turn_id.clone(),
                     },
                 )
@@ -5184,10 +5170,6 @@ async fn proactive_third_turn_after_run(
                     .iter()
                     .any(|known| known.report.attempt_id == admitted.report.attempt_id)
                 {
-                    trace.summary_scopes.push((
-                        admitted.trigger.run_id.clone(),
-                        admitted.trigger.turn_id.clone(),
-                    ));
                     trace.admitted_summaries.push(admitted);
                 }
                 trace.summary_requests += 1;
@@ -5217,59 +5199,10 @@ async fn proactive_third_turn_after_run(
         }
         settled(control, thread).await;
     }
-    if let Some((prior_run, _)) = prior_scope {
-        let report = trace
-            .report_owners
-            .iter()
-            .find(|r| r.row_turn_id == task_accepts[1].1)
-            .expect("captured report for the accepted second warmup Turn");
-        let attempt_id = report.attempt_id.clone();
-        let expected_run = task_accepts[1].0.clone();
-        trace.admission_report = Some(control.store.database.call(move |db| {
-            let result: (String,String,String,Option<i64>,bool,bool) = db.query_row(
-                "SELECT u.run_id,a.turn_id,a.state,json_extract(a.usage_json,'$.input_tokens'),EXISTS(SELECT 1 FROM automatic_compaction c WHERE c.attempt_id=a.id),
-                 ((EXISTS(SELECT 1 FROM thread_replacement tr JOIN replacement r ON r.id=tr.replacement_id WHERE tr.thread_id=u.thread_id AND r.created_at>a.started_at))
-                   OR (EXISTS(SELECT 1 FROM output_item o WHERE o.attempt_id=a.id) AND NOT EXISTS(SELECT 1 FROM output_item o JOIN thread_path p ON p.thread_id=u.thread_id AND p.node_id=o.node_id WHERE o.attempt_id=a.id)))
-                 FROM model_attempt a JOIN turn u ON u.id=a.turn_id WHERE a.id=?1",
-                [attempt_id], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?)))?;
-            assert_eq!(result.0, expected_run, "named report row belongs to its accepted Run");
-            Ok(json!({"run_id":result.0,"turn_id":result.1,"attempt_state":result.2,"input_tokens":result.3,
-                "automatic_trim_attempt_present":result.4,"next_request_pending":result.5}))
-        }).await.unwrap());
-        let report = trace.admission_report.as_ref().unwrap();
-        assert_ne!(
-            report["run_id"], prior_run,
-            "accepted second warmup belongs to a different Run"
-        );
-        assert!(
-            report["input_tokens"]
-                .as_i64()
-                .is_some_and(|tokens| tokens >= 100),
-            "fresh report meets threshold: {report:#?}"
-        );
-        assert_eq!(
-            report["next_request_pending"], false,
-            "named report has no newer replacement: {report:#?}"
-        );
-        assert_eq!(
-            report["automatic_trim_attempt_present"], false,
-            "named report is not already consumed: {report:#?}"
-        );
-    }
     let current_text = "current task";
     let current = send_accepted(control, thread, current_text).await;
     let current_run = current.run_id.clone().expect("accepted current Run");
     let current_turn = current.turn_id.clone().expect("accepted current Turn");
-    if let Some((prior_run, prior_turn)) = prior_scope {
-        assert_ne!(
-            current_run, prior_run,
-            "accepted candidate Run differs from prior Run"
-        );
-        assert_ne!(
-            current_turn, prior_turn,
-            "accepted candidate Turn differs from prior Turn"
-        );
-    }
     loop {
         let next = incoming(control, receive).await;
         if next.kind() == ProviderRequestKind::Summary {
@@ -5287,10 +5220,6 @@ async fn proactive_third_turn_after_run(
                 .iter()
                 .any(|known| known.report.attempt_id == admitted.report.attempt_id)
             {
-                trace.summary_scopes.push((
-                    admitted.trigger.run_id.clone(),
-                    admitted.trigger.turn_id.clone(),
-                ));
                 trace.admitted_summaries.push(admitted);
             }
             trace.summary_requests += 1;
@@ -5503,15 +5432,9 @@ async fn compact_list_records_the_summary_parameters_in_effect() {
     )
     .await;
     let summary_reply = (200, answer("## 目的\nSummarized earlier turns"));
-    let mut trace = proactive_third_turn_after_run(
-        &control,
-        &mut receive,
-        &thread,
-        150,
-        summary_reply.clone(),
-        None,
-    )
-    .await;
+    let mut trace =
+        proactive_third_turn_trace(&control, &mut receive, &thread, 150, summary_reply.clone())
+            .await;
     let attempts = finish_proactive_trace(&control, &mut receive, &mut trace, &summary_reply).await;
     assert_eq!(trace.summary_requests, 1);
     assert_eq!(attempts.len(), 1);

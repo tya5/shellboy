@@ -4,6 +4,13 @@
 
 Removed duplicate cancellation and deletion witnesses and retired-write assertions. The existing fault matrix covers all four cancellation stages; production code and shared fixtures are unchanged.
 
+## Core #309 compaction failure tests
+
+The former runtime new-Run failure-memory witness is superseded by the direct
+compaction test with real persisted Run and Turn boundaries. Existing provider
+classification, retry, and same-scope suppression witnesses remain; older
+validation records naming the removed runtime test are historical.
+
 ## Core #359 migration numbers at landing
 
 Branch `task/core359-land-migrations` (on #356) extends
