@@ -56,6 +56,21 @@ class PublicUpgradeArguments(unittest.TestCase):
         self.assertTrue((ROOT / 'migrations/0045_thread_spill_override.sql').is_file())
         self.assertTrue((ROOT / 'migrations/0039_independent_runs.sql').is_file())
 
+    def test_receipt_lane_migration_defaults_all_existing_receipts_to_normal(self):
+        db = sqlite3.connect(':memory:')
+        db.executescript((ROOT / 'tests/fixtures/storage-current-schema43.sql').read_text())
+        lane_version = next(version for version, path in upgrade.MIGRATION_FILES.items()
+                            if path.stem == "next_operation_receipt_lane")
+        upgrade.prepare_schema(db, lane_version - 1)
+        for state, result, reserved in [('pending', None, 8388608), ('completed', '{}', 0), ('failed', '{}', 0)]:
+            db.execute("INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,result_ref_json,created_at,reserved_bytes) VALUES(?,'owner','null',?, ?, ?,'now',?)", (state, 'hash-' + state, state, result, reserved))
+        db.commit()
+        before = db.execute('SELECT * FROM operation_receipt ORDER BY operation_id').fetchall()
+        upgrade.apply_migration(db, lane_version)
+        self.assertEqual(db.execute('SELECT * FROM operation_receipt ORDER BY operation_id').fetchall(), [row + ('normal',) for row in before])
+        with self.assertRaises(sqlite3.IntegrityError):
+            db.execute("UPDATE operation_receipt SET lane='other'")
+
     def test_schedule_retirement_migration_preserves_spent_rows_and_output(self):
         db = sqlite3.connect(':memory:')
         db.executescript((ROOT / 'tests/fixtures/storage-current-schema43.sql').read_text())

@@ -512,7 +512,12 @@ async fn run_owner(cli: Cli, cwd: &Path) -> ExitCode {
             )
         })
         .await?;
-        ipc::call(&data_dir, resolved, cli.operation_id.clone(), caller_origin).await
+        match resolved {
+            shellboy::protocol::Command::Wait(args) => {
+                ipc::call_cli_wait(&data_dir, args, cli.operation_id.clone(), caller_origin).await
+            }
+            other => ipc::call(&data_dir, other, cli.operation_id.clone(), caller_origin).await,
+        }
     }
     .await;
     match result {

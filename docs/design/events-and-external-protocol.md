@@ -1,8 +1,7 @@
 # Event subscription and the external RPC contract (#243, #244)
 
 Status: the #243 event-wait stages A1, B, C and E3 plan A, the #244 external-contract stages A1, A2 and D, and #275 reasoning-activity support are implemented on main at `482e7ead`. The current handshake in this #262 branch is protocol 5; it adds bounded reply-count exactness to `ThreadSummary` (the previous main handshake was protocol 4). exact-tip standard/all-OS validation for #275 is still pending in the main status record. Current transport, compatibility and generated-schema behavior is specified in [protocol.md](protocol.md) and `docs/reference/protocol.schema.json`. Proposal-era alternatives below are historical context, not the current contract. The persistent multi-frame stream (E2), persistent digest (E1), durable change log (E4), and E3 plan B remain deferred.
-User decisions on stage B (#243): long-polls share the ordinary request slots (Q6), models
-may use `events.wait` (Q3), no change record is persisted (Q8), name `events.wait` (Q7).
+User decisions on stage B (#243): models may use `events.wait` (Q3), no change record is persisted (Q8), name `events.wait` (Q7).
 Live text deltas (E3) move ahead of stage B's successors: plan A (same long-poll, unsaved),
 implemented in 2.5. Plan B (a persistent streaming response) is built only if A proves not smooth enough.
 
@@ -62,11 +61,7 @@ pass writes a `wait.pending.<id>` row to `app_meta` (`wait.rs:212-217`).
   is unknown. A package version without a SHA carries no revision information.
   Do not substitute the bridge, desktop or installed CLI version, the protocol
   number, binary metadata, or startup logs. No additional owner read is needed.
-- Admission: 32 connections; 29 work permits across four classes: ordinary 24,
-  control (stop and shutdown) 2, plain `status` 2, and `status --memory` 1.
-  See `src/ipc/server.rs` (`WorkAdmission`). A long `wait` holds one ordinary permit for
-  its whole duration. The 5 s read deadline covers only the request frame, not
-  the processing time, so long-held responses are already supported.
+- Admission: see the [IPC admission budget](protocol.md#ipc-admission).
 
 Consequence: a long-poll operation (block until there is something after the
 cursor, or timeout) fits the current transport with **no** transport change,
@@ -213,7 +208,7 @@ Properties:
 - Auth: identical to other read operations (peer-uid check on Unix, optional
   Origin). No new authority. A model Origin is not given ownership edges and
   does not enter Turn `waiting`; models may use it (user decision, Q3).
-- Admission: ordinary IPC permit, like `wait` (24 shared). A bridge must
+- Admission: see the [IPC admission budget](protocol.md#ipc-admission). A bridge must
   multiplex one long-poll for all browser tabs.
 - No receipt, no `app_meta` row: it is an observation (fresh re-observation on
   lost reply, protocol.md Issue #3), unlike `wait`.
@@ -265,7 +260,7 @@ It is an in-memory, lossy preview:
 never saved, never a source of truth. Saved output is what stays.
 
 Extending `events.wait` rather than adding an operation: a client wanting changes, answer text or activity needs
-one poll and one cursor, so it holds one of the 24 shared slots, not two, and a hint cannot be
+one poll and one cursor, so it holds one [wait permit](protocol.md#ipc-admission), not two, and a hint cannot be
 delayed by a text wait or the reverse. Requested text and changes are computed in one lock, so
 the pair is consistent.
 
@@ -311,7 +306,7 @@ Client rule, complete:
 6. Start with a baseline that asks for text. A cursor from a plain poll returns only text after that position, with no
    `gap`, so an attempt already under way would seem to begin at a later offset.
 7. "Local IPC work capacity is busy" (`invalid_state`, `request_may_have_been_applied:false`) can come back at
-   once when the ordinary slots are full (`src/ipc/server.rs`). It is routine for a looping client: nothing was
+   once when the wait pool is full (`src/ipc/server.rs`). It is routine for a looping client: nothing was
    applied, so keep the preview and poll again with the same cursor.
 
 Cursor: unchanged, opaque, one position. Each delta takes the next value of the clock's `seq`, without
@@ -347,8 +342,8 @@ ends a waiting text poll, so a client's request rate follows the model's delta r
 round trip at a time; deltas arriving meanwhile merge. A bridge may pace itself.
 
 A reader that stops reading costs the server, not the driver. Reply writes have no deadline (`src/ipc.rs`,
-true of every operation), so a client that never reads a reply larger than its socket buffer holds one of the
-32 connection slots until it disconnects or the owner stops; its ordinary permit is released when the request
+true of every operation), so a client that never reads a reply larger than its socket buffer holds one [connection slot](protocol.md#ipc-admission)
+until it disconnects or the owner stops; its wait permit is released when the request
 finishes. Text makes such replies more common, up to about 6 MiB at worst. Not changed here; recheck if a stalled client
 is seen in practice.
 
@@ -513,9 +508,7 @@ A2 and D landed before external clients depend on the RPC. #275 later advanced t
   one separate permit so background durable status reads cannot consume the
   memory card's admission capacity. Saturation in either lane still refuses
   without queuing, and stop and shutdown keep their existing reserve.
-- Long-polls share the 24 ordinary permits with `wait` and mutations; many
-  chats plus a bridge reduce capacity. A dedicated small class would change the
-  documented 29-permit budget; decide after measurement (Q6, answered for now: shared slots).
+- Long-polls use a dedicated wait pool; see the [IPC admission budget](protocol.md#ipc-admission).
 - Coalescing hides intermediate states; documented, durable facts remain.
 - E3's preview is lossy by design (2.5): attempts past the first 16 show no text until one ends, and a reader behind by
   more than 64 KiB counted sees a gap. Polling per delta costs a connection per reply on the current transport.
@@ -538,7 +531,7 @@ are recorded in D-243-1, D-244-2 and D-275-1 and the adopted behavior in [protoc
 5. How should `shellboy-studio` obtain types: generate from the JSON Schema,
    depend on this crate by git (pulls the TUI stack), or split a small
    protocol crate?
-6. Long-polls on the ordinary permit pool (simplest) or a dedicated class?
+6. Long-poll admission (answered by #352): `events.wait` and `wait` use a dedicated class, not the ordinary permit pool.
 7. Name: `events.wait` (describes long-poll semantics) or `events.subscribe`
    as in the issue?
 8. Is a durable typed change log (E4, new column/table) ever wanted, or are

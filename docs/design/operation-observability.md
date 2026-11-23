@@ -68,7 +68,7 @@ DB側は同ID再送でMutationResultのeffectsを復元せず、wake/停止等�
 
 変更操作とwaitはreceiptを維持する。waitは呼出元のTurn待機/解除結果を保存し、副作用のない照会ではない。DB変更と成功/失敗outcomeは同じtransaction、runtimeはintent保存→外部操作→outcome確定の順を維持する。同ID・同要求・同callerは保全中の結果、別要求はoperation_conflict、pendingは二重実行の許可ではない。
 
-保存outcomeは1件8MiB、通常receipt予算256MiB、停止専用の固定余白を同じ表・counterへ算入する。ID/origin/hash/時刻/本文と512bytesの管理費、current pendingの未使用予約を計上する。これはSQLite物理サイズの上限ではない。変更操作とwaitは実行前に8MiBの最大結果とmetadataを予約するため、短いackでも同時pendingは空fixtureで最大31件であり、既存結果/metadataで減る。観測はこの予約を消費しない。
+保存outcomeは1件8MiB、通常receipt予算256MiB、停止専用の固定余白を同じ表・counterへ算入する。ID/origin/hash/時刻/本文と512bytesの管理費、current pendingの未使用予約を計上する。これはSQLite物理サイズの上限ではない。変更操作は実行前に8MiBの最大結果とmetadataを予約するため、通常の同時pendingは空fixtureで最大31件であり、既存結果/metadataで減る。`wait` の現ownerのpendingは通常・停止枠とは別会計で、上限は [IPCのwait枠](protocol.md#ipc-admission) × 最大結果とmetadataの予約上限。完了した結果と旧ownerのmetadataは共有予算に残る。これは会計上の予約であり、メモリ割当ではない。`events.wait` などの観測は予約を消費しない。
 
 現instanceのcompleted/failed結果は、created_atから24時間経過後の既存GC保守、又は予算圧迫時に回収対象とする。24時間は完了後の保証期間ではなく、長時間pendingを解放した直後に対象となる場合もある。pending、accepted/held message、未反映attachment、queued/inflight compactから参照される結果は保護する。時刻/圧迫だけで未確定の副作用を失効させない。
 

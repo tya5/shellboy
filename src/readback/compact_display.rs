@@ -141,7 +141,7 @@ mod tests {
         .unwrap();
         for i in 1..5 {
             let id = format!("op{i}");
-            db.execute("INSERT INTO operation_receipt SELECT ?1,instance_id,origin_json,request_hash,state,result_ref_json,created_at,reserved_bytes FROM operation_receipt WHERE operation_id='op'",[&id]).unwrap();
+            db.execute("INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,result_ref_json,created_at,reserved_bytes) SELECT ?1,instance_id,origin_json,request_hash,state,result_ref_json,created_at,reserved_bytes FROM operation_receipt WHERE operation_id='op'",[&id]).unwrap();
             db.execute(
                 "INSERT INTO app_meta(key,value)VALUES(?1,?2)",
                 params![format!("compact.result.{id}"), meta],

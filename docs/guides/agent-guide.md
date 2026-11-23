@@ -142,7 +142,11 @@ would also stop correct long commands.
 - Wait for a shell with `shellboy wait` and `shell_ended` for its
   `execution_id` (or `shell_output` to resume reading), not with a loop you
   write such as `until grep ...; do sleep 1; done`. The wait is saved, has a
-  timeout, and a timeout leaves the shell running.
+  timeout, and a timeout leaves the shell running. The timeout includes time
+  waiting for admission: the CLI retries capacity refusals itself and reports
+  `admission_wait_ms` and `admission_refusals` in the result. If the deadline
+  expires before admission, the snapshot is empty and `cursor` stays at the
+  supplied `--after` position.
 - Do not wait for other work (another process, a build, a child) by polling
   `pgrep`, `ps`, or similar. Wait on the Shellboy target: the shell's
   `execution_id`. For child requests, end your Turn and await normal reply delivery.

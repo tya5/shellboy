@@ -317,6 +317,11 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         sql: include_str!("../../migrations/next_thread_artifacts.sql"),
         foreign_keys: None,
     },
+    Migration {
+        version: 60,
+        sql: include_str!("../../migrations/next_operation_receipt_lane.sql"),
+        foreign_keys: None,
+    },
 ];
 
 pub(super) fn run(
@@ -2466,7 +2471,9 @@ mod thread_creation_migration_tests {
         db.execute_batch(super::super::CURRENT_SCHEMA).unwrap();
         db.execute_batch("DROP TABLE artifact_version; DROP TABLE artifact; DELETE FROM schema_migration WHERE name='next_thread_artifacts';").unwrap();
         db.execute_batch("ALTER TABLE node DROP COLUMN import_origin_json; DELETE FROM schema_migration WHERE name='next_thread_import_origin';").unwrap();
-        db.execute_batch("DROP INDEX receipt_named_reply_pending;
+        db.execute_batch("ALTER TABLE operation_receipt DROP COLUMN lane;
+            DELETE FROM schema_migration WHERE name='next_operation_receipt_lane';
+            DROP INDEX receipt_named_reply_pending;
             DROP INDEX receipt_pending_by_time;
             DROP INDEX receipt_pending_owed;
             DROP INDEX receipt_pending_asked;
@@ -2509,7 +2516,9 @@ mod automatic_compaction_migration_tests {
         db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
         db.execute_batch("DROP TABLE artifact_version; DROP TABLE artifact; DELETE FROM schema_migration WHERE name='next_thread_artifacts';").unwrap();
         db.execute_batch("ALTER TABLE node DROP COLUMN import_origin_json; DELETE FROM schema_migration WHERE name='next_thread_import_origin';").unwrap();
-        db.execute_batch("DROP INDEX receipt_named_reply_pending;
+        db.execute_batch("ALTER TABLE operation_receipt DROP COLUMN lane;
+            DELETE FROM schema_migration WHERE name='next_operation_receipt_lane';
+            DROP INDEX receipt_named_reply_pending;
             DROP INDEX receipt_pending_by_time;
             DROP INDEX receipt_pending_owed;
             DROP INDEX receipt_pending_asked;

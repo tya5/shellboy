@@ -89,7 +89,13 @@ async fn denied_temporary_bases_use_data_directory_and_cli_locator() {
         instance: owner.instance_id.clone(),
         socket,
     };
-    let server = LocalServer::start(listener, owner.instance_id.clone(), send, files);
+    let server = LocalServer::start(
+        listener,
+        owner.instance_id.clone(),
+        send,
+        files,
+        owner.ipc_refusals.clone(),
+    );
     let data_dir = owner.loaded.data_dir.clone();
     let client = tokio::spawn(async move {
         if let Some(binary) = std::env::var_os("SHELLBOY_TEST_CLI_BINARY") {

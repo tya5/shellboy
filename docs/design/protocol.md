@@ -203,22 +203,34 @@ frameの8MiB上限を先に検証し、payloadはTokioの長さ制限付きreade
 広告された長さだけで8MiBを先にzero-fillしない。宣言byte数に満たないEOFはJSON解析前に
 拒否し、次frameのbyteを取り込まない。上限変更や公開timeout設定は追加しない。
 
+<a id="ipc-admission"></a>
+
 ### IPC接続と受付済みworkの資源所有（P1/P6）
 
-接続上限は当初候補128から32へ下げる。対話用のCLI並列・待機の余地を残しながら、
-最大frameを同時に受ける負荷を4分の1にし、他のDB/socket/shell用fdも残す内部既定値である。
-32接続の受信payload合計は最大256MiBだが、Vec容量・JSON展開・返信・結果・その他の
-cache/queueを含むプロセス総メモリの上限ではない。prefixだけの接続にはこの全量を確保しない。
+接続枠と処理枠を分ける（#352）。待機（`wait` / `events.wait`）32、通常work 24、停止操作
+（RunStop/ShellStop/OwnerShutdown）2、Status観測2、メモリ観測1の独立した有限permitを持つ。
+待機は終了まで待機枠だけを使い、他の処理枠を借りない。接続上限は処理枠合計61 + handshake/拒否応答用8 = 69。
+待機32件が保持されていても、他の処理29件と一時接続8件が入る。slow frameの5秒期限は変えず、
+分類前の接続による意図的な占有を防ぐ仕組みではない。
 
-接続枠と処理枠を分ける（PR1-2採用差分）。通常workは24、停止操作（RunStop/ShellStop）は2、Status観測は2の独立した有限permitとし、32接続中4枠以上をhandshake/拒否応答へ
-残す。長時間waitは通常枠を使い、通常処理の満杯だけでは停止/Statusのtransport受付を塞がない。
-32接続/受信payload予算は増やさず、常時保持するIPC workは合計28以下とする。slow frameの
-接続も従来の5秒期限に従う。同ユーザーによる全接続枠への意図的な占有を防ぐpermission engine
-ではなく、各分類の上限到達はあり得る。
+69接続の受信payload合計は最大552 MiB（69 × 8 MiB）。Vec容量・JSON展開・返信・結果・cache/queueを
+含むプロセス総メモリの上限ではない。prefixだけの接続にはこの全量を確保しない。
+Unix ownerは起動時、soft `RLIMIT_NOFILE` が1,024未満ならhard limitの範囲で引き上げる。
+現在値を下げず、hard limitは変更しない。再読込で1,024に届かない場合は診断を記録する。
+接続69とlistener 1、SQLite（writerと2 inspection）に最大9、owner lockとlogに各1を見込み、
+ほかにshellごとに定常時最大5 fdと起動時の付加分が必要なため、soft 256を前提にしない。
+無制限のshell等の負荷に対して受付を保証するものではない。
+owner全体の通常 `status` は `ipc_admission` に接続上限 `max_connections` と各分類の `limit` /
+`refused` を返す。`refused` はowner起動以降のpermit拒否の累計で、handshake失敗や受付後の
+拒否は数えない。永続化・拒否ごとのlog・頻度制御は行わない。
+CLIの `wait` だけは、未適用と明示されたadmission拒否を同じ操作IDで再試行する。接続を閉じ、
+50 msから倍増し最大1秒を待つ。待機の期限に達したら通常のtimeoutを返し、未観測の条件は
+空のsnapshotとなる。受付後の待機には残り時間を渡す。結果は `admission_wait_ms` と
+`admission_refusals` を含む。他のエラーや `events.wait` は自動再試行しない。
 
 要求の構文/instance検証後に対応permitをtry取得し、満杯ならControlへ渡さず `invalid_state` と
 `request_may_have_been_applied=false` を返す。待機queueや満杯待ちtaskを追加せず、同じIDでの
-後の再試行を案内する。正当なhandshake応答の版不一致と無応答timeoutを区別し、後者は要求未送信の
+後の再試行を案内する。待機枠の拒否は応答を書いたらpeerのEOFを待たず接続を閉じる。正当なhandshake応答の版不一致と無応答timeoutを区別し、後者は要求未送信の
 I/Oエラーとする。受信済みrequestの未知操作や版互換そのものは別の契約である。
 
 取得したpermitは`Invocation`内部fieldへ所有を移し、`Control::serve`の評価・副作用反映の終了まで
@@ -226,9 +238,9 @@ I/Oエラーとする。受信済みrequestの未知操作や版互換そのも�
 未完workを無制限spawn」回帰を維持する。transport上の停止/観測枠はreceipt予算や認証を迂回せず、
 操作自体の容量拒否は別に返す。UI直接操作やmodel/shell自体をこのIPC予算に含めない。
 
-内部の3 semaphore所有・分類だけを既存IPC moduleへ集約し、新worker/queue/core event/永続型を
+内部の5 semaphore所有・分類だけを既存IPC moduleへ集約し、新worker/queue/core event/永続型を
 加えない。各分類の許可済work、接続、受信frameを別に数え、満杯の通常work下で停止/Statusが進むことと、
-切断済mutationが処理完了まで枠を保持することを障害注入fixtureで検証する。
+待機32件の保持中に通常workと停止が進むこと、切断済mutationが処理完了まで枠を保持することを検証する。
 
 ### Unix socketの専用namespaceと残存物（Issue #2）
 
@@ -672,7 +684,7 @@ true `cursor` is the last returned seq; otherwise it is the clock head read in t
 The clock lives in `Control` (`src/control/change_clock.rs`): one sequence number per
 `Control::changed` call, latest sequence kept per Thread, at most 4096 Threads (oldest
 evicted, raising the floor). Memory only; it dies with `Control`, has no task or queue, and
-the owner keeps nothing per client. The call is admitted in an ordinary request slot,
+the owner keeps nothing per client. The call holds one [wait permit](#ipc-admission),
 returns on a matching change, timeout, caller disconnect or owner shutdown, and is
 cancellable by the shared runtime-observation wrapper. Models may call it.
 
@@ -772,7 +784,7 @@ Absent unless asked. `status` gains `text`, returned when text is new and no cha
 that attempt, including reasoning and refusal in the model stream; `live_text` omits reasoning deltas. The offset
 restarts with each attempt, and a retry has a new `attempt_id`. `gap:true` means text after the caller's position was lost. A Thread missing from
 `live_text` holds no text: its attempt ended, or 16 others hold text and it enters later with `gap:true`. Start with a baseline.
-A looping client can get "work capacity is busy" at once when ordinary slots are full; nothing was applied, so poll again with the same cursor. The text is never saved, not a position in saved output and not part of any
+A looping client can get "work capacity is busy" at once when all [wait permits](#ipc-admission) are in use; nothing was applied, so poll again with the same cursor. The text is never saved, not a position in saved output and not part of any
 receipt; retained text is limited to 64 KiB per attempt, counting 40 bytes per delta, and 16 attempts, and all of it
 fits one frame. Those limits are not a memory bound; the measured heap is in the validation record. Client rule
 and state record: [events-and-external-protocol](events-and-external-protocol.md) 2.5.

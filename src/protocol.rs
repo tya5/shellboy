@@ -1643,7 +1643,10 @@ pub struct Page<T> {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub next_cursor: Option<String>,
 }
-record!(WaitResult { status: WaitStatus, matched: Vec<WaitCondition>, snapshot: Value, #[serde(default, skip_serializing_if = "Option::is_none")] cursor: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] reason: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] hint: Option<String> });
+record!(WaitResult { status: WaitStatus, matched: Vec<WaitCondition>, snapshot: Value, #[serde(default, skip_serializing_if = "Option::is_none")] cursor: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] reason: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] hint: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] admission_wait_ms: Option<u64>, #[serde(default, skip_serializing_if = "Option::is_none")] admission_refusals: Option<u64> });
+pub(crate) fn wait_timeout_reason(timeout_ms: u64) -> String {
+    format!("wait reached its {timeout_ms} ms deadline; targets continue")
+}
 
 /// Versioned opaque page cursor. Scope, filters, and revision bind it to one query.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

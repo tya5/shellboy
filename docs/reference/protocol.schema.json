@@ -4199,6 +4199,59 @@
       ],
       "type": "string"
     },
+    "IpcAdmissionClass": {
+      "properties": {
+        "limit": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "refused": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "limit",
+        "refused"
+      ],
+      "type": "object"
+    },
+    "IpcAdmissionStatus": {
+      "description": "Cumulative transport refusals and the corresponding owner budget.",
+      "properties": {
+        "max_connections": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "memory": {
+          "$ref": "#/definitions/IpcAdmissionClass"
+        },
+        "ordinary": {
+          "$ref": "#/definitions/IpcAdmissionClass"
+        },
+        "status": {
+          "$ref": "#/definitions/IpcAdmissionClass"
+        },
+        "stop": {
+          "$ref": "#/definitions/IpcAdmissionClass"
+        },
+        "wait": {
+          "$ref": "#/definitions/IpcAdmissionClass"
+        }
+      },
+      "required": [
+        "max_connections",
+        "wait",
+        "ordinary",
+        "stop",
+        "status",
+        "memory"
+      ],
+      "type": "object"
+    },
     "KeySource": {
       "description": "Where a connection's API key comes from (#269). Never the value or its length.",
       "enum": [
@@ -9314,6 +9367,16 @@
         "instance_id": {
           "type": "string"
         },
+        "ipc_admission": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/IpcAdmissionStatus"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "items": {
           "items": {
             "$ref": "#/definitions/WorkItem"
@@ -11353,6 +11416,22 @@
     "WaitResult": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
+        "admission_refusals": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "admission_wait_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "cursor": {
           "type": [
             "string",
@@ -13698,6 +13777,22 @@
     "wait": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
+        "admission_refusals": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "admission_wait_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "cursor": {
           "type": [
             "string",

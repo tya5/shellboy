@@ -6,6 +6,8 @@ DELETE FROM schema_migration WHERE name='0057_answer_output_limit';
 DROP TABLE artifact_version;
 DROP TABLE artifact;
 DELETE FROM schema_migration WHERE name='next_thread_artifacts';
+ALTER TABLE operation_receipt DROP COLUMN lane;
+DELETE FROM schema_migration WHERE name='next_operation_receipt_lane';
 DROP INDEX receipt_named_reply_pending;
 DROP INDEX receipt_pending_by_time;
 DROP INDEX receipt_pending_owed;

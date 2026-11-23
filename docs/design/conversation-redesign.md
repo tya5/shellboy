@@ -960,7 +960,7 @@ conversation schema remains14 and no new index/migration is adopted.
 
 Before the activity DB read, copy at most 128 existing WaitRegistry entries as
 (operation ID, source shell execution ID), without credentials or new registry
-fields. CLI transport admits at most24 ordinary requests, but direct Control
+fields. See the [IPC admission budget](protocol.md#ipc-admission) for the ordinary CLI ceiling, but direct Control
 callers are not globally limited by that semaphore: an over128 snapshot is
 explicitly unavailable, never a truncated global prefix. Resolve exact saved
 shell ownership and wait.pending operation keys inside the same activity read

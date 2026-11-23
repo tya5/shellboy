@@ -23,7 +23,7 @@ async fn real_ipc_waiters_leave_status_and_run_stop_available() {
     let server = crate::ipc::LocalServer::bind(&owner, send).await.unwrap();
     let dispatcher = tokio::spawn(control.clone().serve(receive));
     let mut clients = Vec::new();
-    for number in 0..24 {
+    for number in 0..32 {
         let data = owner.loaded.data_dir.clone();
         let operation = format!("{}:wait-{number}", owner.instance_id);
         clients.push(tokio::spawn(async move {
@@ -57,9 +57,13 @@ async fn real_ipc_waiters_leave_status_and_run_stop_available() {
                     })
                     .await
                     .unwrap();
-                if count == 24 {
+                if count == 32 {
                     break;
                 }
+                assert!(
+                    clients.iter().all(|client| !client.is_finished()),
+                    "a wait returned before all 32 parked"
+                );
                 tokio::task::yield_now().await;
             }
         },
@@ -79,6 +83,17 @@ async fn real_ipc_waiters_leave_status_and_run_stop_available() {
     .unwrap()
     .unwrap();
     assert!(status.ok, "{status:?}");
+    assert_eq!(
+        status.result.unwrap()["ipc_admission"],
+        serde_json::json!({
+            "max_connections": 69,
+            "wait": {"limit": 32, "refused": 0},
+            "ordinary": {"limit": 24, "refused": 0},
+            "stop": {"limit": 2, "refused": 0},
+            "status": {"limit": 2, "refused": 0},
+            "memory": {"limit": 1, "refused": 0}
+        })
+    );
     let still_pending = owner
         .db
         .call(|db| {
@@ -91,9 +106,26 @@ async fn real_ipc_waiters_leave_status_and_run_stop_available() {
         .await
         .unwrap();
     assert_eq!(
-        still_pending, 24,
+        still_pending, 32,
         "status must bypass live waiters, not wait for their expiry"
     );
+    let mutation = crate::test_watchdog::watchdog(
+        "src/control/ipc_admission_tests.rs: ordinary mutation with 32 parked waits",
+        crate::ipc::call(
+            &owner.loaded.data_dir,
+            Command::ThreadTag(crate::protocol::ThreadTagArgs {
+                thread_ids: vec!["thread".into()],
+                add: vec!["admission-witness".into()],
+                remove: Vec::new(),
+            }),
+            None,
+            None,
+        ),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(mutation.ok, "{mutation:?}");
     let stopped = crate::test_watchdog::watchdog(
         "src/control/ipc_admission_tests.rs: real_ipc_waiters_leave_status_and_run_stop_available",
         crate::ipc::call(

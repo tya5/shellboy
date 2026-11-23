@@ -3830,7 +3830,7 @@ Termination: a pending call ends on match, timeout, disconnect (observation wrap
 owner stop; nothing outlives the request. Memory is two small map nodes plus one Thread ID
 per entry; bytes were not measured. Hint completeness is checked by one test per mutation
 family in `tests/events_wait.rs`. Recheck when: measurement shows follow-up reads dominate
-(per-Thread digest, study E1), or long-polls crowd out the 24 ordinary permits (study Q6).
+(per-Thread digest, study E1), or long-polls crowd out ordinary permits (the historical concern in Q6, resolved by [#352](../design/protocol.md#ipc-admission)).
 Hint-completeness findings (fixed in the same change): `message.send` that is queued or held
 (no wake), `thread.prune` (non-dry-run) and `attachment.add` that is not delivered live
 committed without `changed()`; each now reports its Thread in `changed_threads`.
@@ -3954,7 +3954,7 @@ was not built; it follows only if A proves not smooth enough.
 Why this shape, smallest first:
 
 - Same operation, not a new one: a client wanting changes and text otherwise needs two long-polls and
-  two of the 24 shared slots, or loses hints while waiting for text. One lock makes the pair consistent.
+  two separate permits, or loses hints while waiting for text. One lock makes the pair consistent.
 - Deltas take clock sequence numbers, so the existing one cursor positions both, with no per-Thread
   positions in the cursor or request, no client-side offset bookkeeping and no cursor version change.
 - A separate `text_changed` Notify, because `changed` wakes every `wait` loop, and each one runs a database
