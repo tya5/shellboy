@@ -1057,7 +1057,7 @@ counts rather than the mixed list. Each `message.list` item returns `message_id`
 identifies only a model Thread; `--asked-by` filters on that same model identity,
 not a sender label. Schema 56 backfills legacy named asks.
 
-## Protocol next (#361)
+## Protocol 13 (#361)
 
 `endpoint.json` may include `owner_version`, the same self-reported software
 version as `Welcome` (#294). It is optional and omitted when unavailable. An
