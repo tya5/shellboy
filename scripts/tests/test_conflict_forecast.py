@@ -77,6 +77,24 @@ class ForecastTests(unittest.TestCase):
         tree = raw.stdout.splitlines()[0]
         self.assertEqual(self.git('show', tree + ':plain.txt').stdout, 'a\nb\n')
 
+    def test_union_keeps_both_appended_sections_on_merge_and_cherry_pick(self):
+        base = '# Log\n\n'
+        left = '## Left\n\nLeft record.\n'
+        right = '## Right\n\nRight record.\n'
+        self.write('.gitattributes', 'log.md merge=union\n')
+        self.write('log.md', base)
+        self.git('add', '.gitattributes', 'log.md')
+        self.git('commit', '-qm', 'append-only log')
+        self.branch('left', {'log.md': base + left})
+        self.branch('right', {'log.md': base + right})
+
+        for command in ('merge', 'cherry-pick'):
+            with self.subTest(command=command):
+                self.git('checkout', '-qb', 'fixture-' + command, 'left')
+                self.git(command, '--no-edit', 'right')
+                saved = self.git('show', 'HEAD:log.md').stdout
+                self.assertIn(saved, (base + left + right, base + right + left))
+
     def test_default_discovery_excludes_main_symref_and_merged(self):
         self.branch('a', {'a.txt': 'a\n'}); self.branch('b', {'b.txt': 'b\n'})
         self.git('symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main')
