@@ -1052,11 +1052,13 @@ async fn thread_export_streams_saved_sources_and_tombstone() {
         db.execute("INSERT INTO node(id,kind,created_at,payload_json,deleted_reason) VALUES
             ('one','reasoning','now',?1,NULL),('two','user','now','{}',NULL),
             ('three','user','now','{}',NULL),('collected','reasoning','now',NULL,'pruned_unreachable'),
-            ('summary','summary','now','{}',NULL)",[raw])?;
+            ('summary','summary','now','{}',NULL),('external','user','now','{}',NULL)",[raw])?;
         db.execute("INSERT INTO thread_path VALUES(?1,0,'summary')",[thread])?;
         db.execute_batch("INSERT INTO replacement VALUES('rep','summary','k','f','p','pruned','now');
             INSERT INTO replacement_source VALUES('rep',0,'one',0,NULL),('rep',1,'two',0,NULL),('rep',2,'three',0,NULL),('rep',3,'collected',0,NULL);
-            INSERT INTO edge VALUES('one','two');")?;
+            INSERT INTO replacement VALUES('rep-second','summary','k2','f','p','completed','now');
+            INSERT INTO replacement_source VALUES('rep-second',7,'collected',0,NULL),('rep-second',12,'one',0,NULL);
+            INSERT INTO edge VALUES('one','two'),('two','collected'),('external','collected');")?;
         db.execute("INSERT INTO thread_replacement VALUES(?1,'rep')",[thread])?;
         Ok(())
     }).await.unwrap();
@@ -1092,24 +1094,40 @@ async fn thread_export_streams_saved_sources_and_tombstone() {
     for (record, id) in records[1..4].iter().zip(["one", "two", "three"]) {
         assert_eq!(record["role"], "replaced_source");
         assert_eq!(record["node"]["id"], id);
-        assert_eq!(
-            record["relations"]["replaced_by"],
-            serde_json::json!(["summary"])
-        );
     }
+    let internal = |id: &str| serde_json::json!({"id":id,"scope":"internal"});
     assert_eq!(records[1]["node"]["payload_json"], raw);
     assert_eq!(
         records[2]["relations"]["previous"],
-        serde_json::json!(["one"])
+        serde_json::json!([internal("one")])
+    );
+    let tombstone = &records[4];
+    assert_eq!(tombstone["type"], "tombstone");
+    assert_eq!(tombstone["node"]["id"], "collected");
+    assert_eq!(tombstone["node"]["provenance"]["kind"], "reasoning");
+    assert!(tombstone["node"].get("payload_json").is_none());
+    assert_eq!(tombstone["role"], "replaced_source");
+    assert_eq!(tombstone["reason"], "pruned_unreachable");
+    assert_eq!(
+        tombstone["relations"]["previous"],
+        serde_json::json!([{"id":"external","scope":"external"}, internal("two")])
     );
     assert_eq!(
-        records[4],
-        serde_json::json!({"type":"tombstone","id":"collected","reason":"pruned_unreachable"})
+        tombstone["relations"]["replaced_by"],
+        serde_json::json!([
+            {"group_id":"rep","ordinal":3,"output":internal("summary")},
+            {"group_id":"rep-second","ordinal":7,"output":internal("summary")}
+        ])
     );
+    let source = |ordinal, id| serde_json::json!({"ordinal":ordinal,"node":internal(id)});
     assert_eq!(records[5]["role"], "current");
+    assert_eq!(records[5]["node"]["current_ordinal"], 0);
     assert_eq!(
-        records[5]["relations"]["replaces"],
-        serde_json::json!(["one", "two", "three", "collected"])
+        records[5]["relations"]["replacement_groups"],
+        serde_json::json!([
+            {"id":"rep","state":"pruned","sources":[source(0,"one"),source(1,"two"),source(2,"three"),source(3,"collected")]},
+            {"id":"rep-second","state":"completed","sources":[source(7,"collected"),source(12,"one")]}
+        ])
     );
     let trailer = &records[6];
     assert_eq!(trailer["lines"], 6);

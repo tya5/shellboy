@@ -1118,8 +1118,23 @@ states!(HistoryRelation {
 });
 args!(HistoryExportArgs {thread_id: String, #[serde(default = "list_limit")] limit: u32, #[serde(default)] cursor: Option<String> });
 record!(HistoryExportPage {items: Vec<HistoryExportRecord>, next_cursor: Option<String>, change_position: u64});
-record!(HistoryExportNode {id: String, order: i64, current_ordinal: Option<i64>, payload_json: String, provenance: NodeProvenance});
-record!(HistoryExportRelations {previous: Vec<String>, replaces: Vec<String>, replaced_by: Vec<String>});
+record!(HistoryExportNode {id: String, order: i64, current_ordinal: Option<i64>, #[serde(skip_serializing_if = "Option::is_none")] payload_json: Option<String>, provenance: NodeProvenance});
+record!(HistoryExportRelations {previous: Vec<HistoryExportReference>, next: Vec<HistoryExportReference>, replacement_groups: Vec<HistoryExportGroup>, replaced_by: Vec<HistoryExportMembership>});
+record!(HistoryExportReference {
+    id: String,
+    scope: HistoryExportReferenceScope
+});
+states!(HistoryExportReferenceScope { Internal => "internal", External => "external", Missing => "missing" });
+record!(HistoryExportGroup {id: String, state: String, sources: Vec<HistoryExportSource>});
+record!(HistoryExportSource {
+    ordinal: i64,
+    node: HistoryExportReference
+});
+record!(HistoryExportMembership {
+    group_id: String,
+    ordinal: i64,
+    output: HistoryExportReference
+});
 states!(HistoryExportRole { Current => "current", ReplacedSource => "replaced_source" });
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -1131,7 +1146,10 @@ pub enum HistoryExportRecord {
         owner_thread_id: Option<String>,
     },
     Tombstone {
-        id: String,
+        role: HistoryExportRole,
+        node: Box<HistoryExportNode>,
+        relations: HistoryExportRelations,
+        owner_thread_id: Option<String>,
         reason: String,
     },
 }

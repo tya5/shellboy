@@ -81,6 +81,7 @@ pub(crate) fn read(
         let id: String = row.get(1).map_err(sql_error)?;
         let record = read_node(
             db,
+            &args.thread_id,
             &id,
             row.get(0).map_err(sql_error)?,
             row.get(2).map_err(sql_error)?,
@@ -124,76 +125,173 @@ fn oversized(id: &str) -> ApiError {
 
 fn read_node(
     db: &Connection,
+    thread: &str,
     id: &str,
     order: i64,
     current_ordinal: Option<i64>,
 ) -> Result<HistoryExportRecord, ApiError> {
-    let (len, payload, reason): (Option<i64>, Option<String>, Option<String>) = db.query_row(
+    let (len, payload_json, reason): (Option<i64>, Option<String>, Option<String>) = db.query_row(
         "SELECT octet_length(payload_json),CASE WHEN octet_length(payload_json)<=?2 THEN payload_json END,deleted_reason FROM node WHERE id=?1",
         params![id, MAX_FRAME_BYTES as i64], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?)),
     ).map_err(sql_error)?;
-    let payload_json = match payload {
-        Some(value) => value,
-        None if len.is_some() => return Err(oversized(id)),
-        None => {
-            return Ok(HistoryExportRecord::Tombstone {
-                id: id.into(),
-                reason: reason.unwrap_or_else(|| "body unavailable".into()),
-            });
-        }
-    };
+    if payload_json.is_none() && len.is_some() {
+        return Err(oversized(id));
+    }
     let provenance = relations::projected_provenance(db, id, None)?;
-    let mut remaining = MAX_FRAME_BYTES - payload_json.len();
-    let mut read_ids = |sql| relation_ids(db, sql, id, &mut remaining);
-    let previous = read_ids("SELECT src FROM edge WHERE dst=?1 ORDER BY src")?;
-    let replaces = read_ids(
-        "SELECT s.source_node_id FROM replacement r JOIN replacement_source s ON s.replacement_id=r.id WHERE r.output_node_id=?1 AND r.state IN ('completed','pruned') ORDER BY r.rowid,s.ordinal",
-    )?;
-    let replaced_by = read_ids(
-        "SELECT DISTINCT r.output_node_id FROM replacement_source s JOIN replacement r ON r.id=s.replacement_id WHERE s.source_node_id=?1 AND r.state IN ('completed','pruned') ORDER BY r.output_node_id",
-    )?;
-    Ok(HistoryExportRecord::Node {
-        role: if current_ordinal.is_some() {
-            HistoryExportRole::Current
-        } else {
-            HistoryExportRole::ReplacedSource
-        },
-        owner_thread_id: provenance.origin_thread_id.clone(),
-        node: Box::new(HistoryExportNode {
-            id: id.into(),
-            order,
-            current_ordinal,
-            payload_json,
-            provenance,
-        }),
-        relations: HistoryExportRelations {
-            previous,
-            replaces,
-            replaced_by,
-        },
+    let owner_thread_id = provenance.origin_thread_id.clone();
+    let mut graph = GraphReader {
+        db,
+        thread,
+        id,
+        remaining: MAX_FRAME_BYTES - payload_json.as_ref().map_or(0, String::len),
+    };
+    let relations = graph.relations()?;
+    let role = if current_ordinal.is_some() {
+        HistoryExportRole::Current
+    } else {
+        HistoryExportRole::ReplacedSource
+    };
+    let node = Box::new(HistoryExportNode {
+        id: id.into(),
+        order,
+        current_ordinal,
+        payload_json,
+        provenance,
+    });
+    Ok(if node.payload_json.is_some() {
+        HistoryExportRecord::Node {
+            role,
+            node,
+            relations,
+            owner_thread_id,
+        }
+    } else {
+        HistoryExportRecord::Tombstone {
+            role,
+            node,
+            relations,
+            owner_thread_id,
+            reason: reason.unwrap_or_else(|| "body unavailable".into()),
+        }
     })
 }
 
-fn relation_ids(
-    db: &Connection,
-    sql: &str,
-    id: &str,
-    remaining: &mut usize,
-) -> Result<Vec<String>, ApiError> {
-    let mut stmt = db.prepare(sql).map_err(sql_error)?;
-    let mut rows = stmt.query([id]).map_err(sql_error)?;
-    let mut result = Vec::new();
-    while let Some(row) = rows.next().map_err(sql_error)? {
-        let bytes =
-            row.get_ref(0).map_err(sql_error)?.as_str().map_err(|_| {
-                ApiError::new(ErrorCode::InvalidState, "invalid history relation ID")
-            })?;
-        *remaining = remaining
-            .checked_sub(bytes.len() + 2)
-            .ok_or_else(|| oversized(id))?;
-        result.push(bytes.to_owned());
+struct GraphReader<'a> {
+    db: &'a Connection,
+    thread: &'a str,
+    id: &'a str,
+    remaining: usize,
+}
+
+impl GraphReader<'_> {
+    fn relations(&mut self) -> Result<HistoryExportRelations, ApiError> {
+        let previous = self.read(
+            "SELECT src AS target FROM edge WHERE dst=?2",
+            "g.target",
+            |_, target| Ok(target),
+        )?;
+        let next = self.read(
+            "SELECT dst AS target FROM edge WHERE src=?2",
+            "g.target",
+            |_, target| Ok(target),
+        )?;
+        let rows = self.read(
+            "SELECT r.id,r.state,s.ordinal,s.source_node_id AS target FROM replacement r
+             LEFT JOIN replacement_source s ON s.replacement_id=r.id
+             WHERE r.output_node_id=?2 AND r.state IN ('completed','pruned')",
+            "g.id,g.ordinal",
+            |row, target| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<i64>>(2)?,
+                    target,
+                ))
+            },
+        )?;
+        let mut replacement_groups: Vec<HistoryExportGroup> = Vec::new();
+        for (id, state, ordinal, node) in rows {
+            if replacement_groups.last().is_none_or(|group| group.id != id) {
+                replacement_groups.push(HistoryExportGroup {
+                    id,
+                    state,
+                    sources: Vec::new(),
+                });
+            }
+            if let Some(ordinal) = ordinal {
+                replacement_groups
+                    .last_mut()
+                    .expect("group was added")
+                    .sources
+                    .push(HistoryExportSource {
+                        ordinal,
+                        node: node.expect("source id is non-null"),
+                    });
+            }
+        }
+        let replaced_by = self.read(
+            "SELECT r.id,s.ordinal,r.output_node_id AS target FROM replacement_source s
+             JOIN replacement r ON r.id=s.replacement_id WHERE s.source_node_id=?2 AND r.state IN ('completed','pruned')",
+            "g.id,g.ordinal", |row, output| Ok(HistoryExportMembership { group_id: row.get(0)?, ordinal: row.get(1)?, output: output.expect("output id is non-null") }),
+        )?;
+        Ok(HistoryExportRelations {
+            previous: previous.into_iter().flatten().collect(),
+            next: next.into_iter().flatten().collect(),
+            replacement_groups,
+            replaced_by,
+        })
     }
-    Ok(result)
+
+    fn read<T>(
+        &mut self,
+        query: &str,
+        order_by: &str,
+        mut project: impl FnMut(
+            &rusqlite::Row<'_>,
+            Option<HistoryExportReference>,
+        ) -> rusqlite::Result<T>,
+    ) -> Result<Vec<T>, ApiError> {
+        let mut stmt = self
+            .db
+            .prepare(&format!(
+                "{MEMBERS}, graph AS ({query})
+            SELECT g.*, CASE WHEN n.id IS NULL THEN 0 WHEN m.id IS NULL THEN 1 ELSE 2 END
+            FROM graph g LEFT JOIN node n ON n.id=g.target LEFT JOIN members m ON m.id=g.target
+            ORDER BY {order_by}"
+            ))
+            .map_err(sql_error)?;
+        let column_count = stmt.column_count();
+        let mut rows = stmt
+            .query(params![self.thread, self.id])
+            .map_err(sql_error)?;
+        let mut result = Vec::new();
+        while let Some(row) = rows.next().map_err(sql_error)? {
+            // Bound retained relation rows before allocating them; exact frame fitting follows.
+            let mut bytes = 16;
+            for column in 0..column_count - 1 {
+                if let rusqlite::types::ValueRef::Text(value) =
+                    row.get_ref(column).map_err(sql_error)?
+                {
+                    bytes += value.len();
+                }
+            }
+            self.remaining = self
+                .remaining
+                .checked_sub(bytes)
+                .ok_or_else(|| oversized(self.id))?;
+            let scope = match row.get::<_, i64>(column_count - 1).map_err(sql_error)? {
+                0 => HistoryExportReferenceScope::Missing,
+                1 => HistoryExportReferenceScope::External,
+                _ => HistoryExportReferenceScope::Internal,
+            };
+            let target = row
+                .get::<_, Option<String>>(column_count - 2)
+                .map_err(sql_error)?
+                .map(|id| HistoryExportReference { id, scope });
+            result.push(project(row, target).map_err(sql_error)?);
+        }
+        Ok(result)
+    }
 }
 
 #[cfg(test)]

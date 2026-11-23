@@ -2615,6 +2615,48 @@
       ],
       "type": "object"
     },
+    "HistoryExportGroup": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/definitions/HistoryExportSource"
+          },
+          "type": "array"
+        },
+        "state": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "state",
+        "sources"
+      ],
+      "type": "object"
+    },
+    "HistoryExportMembership": {
+      "properties": {
+        "group_id": {
+          "type": "string"
+        },
+        "ordinal": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "output": {
+          "$ref": "#/definitions/HistoryExportReference"
+        }
+      },
+      "required": [
+        "group_id",
+        "ordinal",
+        "output"
+      ],
+      "type": "object"
+    },
     "HistoryExportNode": {
       "properties": {
         "current_ordinal": {
@@ -2632,7 +2674,10 @@
           "type": "integer"
         },
         "payload_json": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "provenance": {
           "$ref": "#/definitions/NodeProvenance"
@@ -2641,7 +2686,6 @@
       "required": [
         "id",
         "order",
-        "payload_json",
         "provenance"
       ],
       "type": "object"
@@ -2680,11 +2724,23 @@
         },
         {
           "properties": {
-            "id": {
-              "type": "string"
+            "node": {
+              "$ref": "#/definitions/HistoryExportNode"
+            },
+            "owner_thread_id": {
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "reason": {
               "type": "string"
+            },
+            "relations": {
+              "$ref": "#/definitions/HistoryExportRelations"
+            },
+            "role": {
+              "$ref": "#/definitions/HistoryExportRole"
             },
             "type": {
               "const": "tombstone",
@@ -2693,37 +2749,69 @@
           },
           "required": [
             "type",
-            "id",
+            "role",
+            "node",
+            "relations",
             "reason"
           ],
           "type": "object"
         }
       ]
     },
+    "HistoryExportReference": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "scope": {
+          "$ref": "#/definitions/HistoryExportReferenceScope"
+        }
+      },
+      "required": [
+        "id",
+        "scope"
+      ],
+      "type": "object"
+    },
+    "HistoryExportReferenceScope": {
+      "enum": [
+        "internal",
+        "external",
+        "missing"
+      ],
+      "type": "string"
+    },
     "HistoryExportRelations": {
       "properties": {
+        "next": {
+          "items": {
+            "$ref": "#/definitions/HistoryExportReference"
+          },
+          "type": "array"
+        },
         "previous": {
           "items": {
-            "type": "string"
+            "$ref": "#/definitions/HistoryExportReference"
           },
           "type": "array"
         },
         "replaced_by": {
           "items": {
-            "type": "string"
+            "$ref": "#/definitions/HistoryExportMembership"
           },
           "type": "array"
         },
-        "replaces": {
+        "replacement_groups": {
           "items": {
-            "type": "string"
+            "$ref": "#/definitions/HistoryExportGroup"
           },
           "type": "array"
         }
       },
       "required": [
         "previous",
-        "replaces",
+        "next",
+        "replacement_groups",
         "replaced_by"
       ],
       "type": "object"
@@ -2734,6 +2822,22 @@
         "replaced_source"
       ],
       "type": "string"
+    },
+    "HistoryExportSource": {
+      "properties": {
+        "node": {
+          "$ref": "#/definitions/HistoryExportReference"
+        },
+        "ordinal": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "ordinal",
+        "node"
+      ],
+      "type": "object"
     },
     "HistoryGetArgs": {
       "additionalProperties": false,
