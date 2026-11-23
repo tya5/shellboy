@@ -1602,7 +1602,7 @@ fn typed_conversation_has_inline_markers_and_details_copy_full_urls_without_chan
         previous_node_ids: vec![],
         next_node_ids: vec![],
         next_cursor: Some("next".into()),
-        tombstone_reason: None, body_unavailable_reason: None,
+        tombstone_reason: None,
     };
     for (language, heading) in [
         (shellboy::config::UiLanguage::En, "Original reclaimed"),
