@@ -851,7 +851,7 @@ CREATE TABLE artifact_version (
  artifact_id TEXT NOT NULL REFERENCES artifact(id) ON DELETE CASCADE,
  version INTEGER NOT NULL CHECK(version>=1),
  uri TEXT NOT NULL CHECK(length(CAST(uri AS BLOB)) BETWEEN 1 AND 2048),
- title TEXT NOT NULL CHECK(length(CAST(title AS BLOB)) BETWEEN 1 AND 257),
+ title TEXT NOT NULL CHECK(length(CAST(title AS BLOB)) BETWEEN 1 AND 256),
  mime TEXT CHECK(length(CAST(mime AS BLOB))<=128),
  created_at TEXT NOT NULL,
  PRIMARY KEY(artifact_id,version)
