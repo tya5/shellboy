@@ -695,6 +695,23 @@ pub(crate) fn read_period_logged(
     Ok(value)
 }
 
+/// Project only the admission evidence, not the full manifest or failure body.
+pub(crate) const SAVED_OUTPUT_LIMIT_SQL: &str =
+    "CASE WHEN json_valid(a.error_json) AND json_valid(a.input_manifest_json) THEN
+             CASE WHEN json_extract(a.error_json,'$.error.kind')='output_limit'
+                  AND json_type(a.input_manifest_json,'$.output_limit')='object'
+             THEN json_extract(a.input_manifest_json,'$.output_limit') END END";
+
+pub(crate) fn decode_saved_output_limit(
+    saved: Option<String>,
+) -> Option<crate::protocol::AttemptOutputLimit> {
+    saved
+        .and_then(|saved| {
+            serde_json::from_str::<crate::model::request_path::AdmittedOutputLimit>(&saved).ok()
+        })
+        .map(crate::model::request_path::AdmittedOutputLimit::stopped)
+}
+
 /// Explicit single-attempt inspection; aggregate/UI refresh reads stay unchanged.
 pub(crate) fn read_attempt(db: &Connection, attempt: &str) -> Result<Value, ApiError> {
     let sql = format!(
@@ -704,22 +721,14 @@ pub(crate) fn read_attempt(db: &Connection, attempt: &str) -> Result<Value, ApiE
                   AND octet_length(json_extract(a.input_manifest_json,'$.prompt_cache_diagnostics'))<=2048
              THEN json_extract(a.input_manifest_json,'$.prompt_cache_diagnostics') END END,
          {INPUT_BYTES_SQL},
-         CASE WHEN json_valid(a.error_json) AND json_valid(a.input_manifest_json) THEN
-             CASE WHEN json_extract(a.error_json,'$.error.kind')='output_limit'
-                  AND json_type(a.input_manifest_json,'$.output_limit')='object'
-             THEN json_extract(a.input_manifest_json,'$.output_limit') END END
+         {SAVED_OUTPUT_LIMIT_SQL}
          FROM model_attempt a JOIN turn u ON u.id=a.turn_id WHERE a.id=?1",
         usage::sql_projection("a.usage_json")
     );
     db.query_row(&sql, [attempt], |row| {
         let saved: Option<String> = row.get(10)?;
         let input_bytes = saved_input_bytes(row.get(11)?);
-        let output_limit = row
-            .get::<_, Option<String>>(12)?
-            .and_then(|saved| {
-                serde_json::from_str::<crate::model::request_path::AdmittedOutputLimit>(&saved).ok()
-            })
-            .map(crate::model::request_path::AdmittedOutputLimit::stopped);
+        let output_limit = decode_saved_output_limit(row.get(12)?);
         let diagnostic = saved
             .and_then(|text| serde_json::from_str::<Value>(&text).ok())
             .and_then(|value| crate::model::cache_diagnostics::bounded(&value));

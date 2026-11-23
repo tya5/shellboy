@@ -930,9 +930,11 @@ still choose a value the endpoint/model supports.
 `output_limit` means a provider supplied the exact terminal evidence that its
 output cap was reached: Responses `incomplete_details.reason = max_output_tokens`,
 Chat Completions `finish_reason = length`, or Anthropic Messages
-`stop_reason = max_tokens` on an incomplete response. Shellboy keeps the result
-incomplete, retains available partial text and provider details, and does not
-automatically retry it. Do not diagnose context-window limits, filters, other
+`stop_reason = max_tokens` on an incomplete response. The model attempt remains incomplete and is not automatically retried. In a
+Conversation, the Turn completes with the saved cut text and an output-limit
+notice. No tool call from that reply runs, and the next Turn sees the saved
+text without a marker. If you need more output, raise `max_tokens` within the
+endpoint's supported range. Do not diagnose context-window limits, filters, other
 incomplete reasons, unknown stop reasons or connection/EOF failures as output
 limits by guesswork.
 
@@ -972,6 +974,3 @@ and cursor-ordered `attempt_ends`. Only a matching `not_adopted` proves that
 attempt was not saved. Keep adopted previews until saved history arrives;
 a resync is not evidence of discard. Order live previews by the saved input
 boundary, not by when the preview or a sent message arrived.
-
-A reply cut off by the provider output limit becomes the Turn's answer; no
-tool call from it runs. Your next Turn sees the saved cut text without a marker.

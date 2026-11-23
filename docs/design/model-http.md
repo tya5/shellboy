@@ -367,7 +367,8 @@ models) read on 2026-11-01; no real provider call has been made.
   opaque block unread. Unknown event types are skipped and counted. A stream is
   complete only after `message_stop`; EOF before it is `incomplete`.
 - `stop_reason`: `end_turn`, `stop_sequence` and `tool_use` complete the response;
-  `max_tokens` is an `output_limit` only when the response status is `incomplete`;
+  `max_tokens` is an `output_limit` only when the response status is `incomplete`
+  (see the Conversation adoption behavior below);
   `model_context_window_exceeded` remains generic `incomplete` (context limit);
   `pause_turn`, `refusal` and unknown values retain their existing failure kinds.
 - Usage: `input_tokens` plus `cache_creation_input_tokens` plus

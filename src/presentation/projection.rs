@@ -84,7 +84,6 @@ fn initial(kind: &str, payload: &Value) -> (NodePresentation, BlockKind) {
         },
     });
     p.fields = fields_of_value(payload);
-
     if matches!(kind, "spill" | "context_trim")
         && payload.get("context_trim").is_some_and(Value::is_object)
     {

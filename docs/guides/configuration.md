@@ -1040,10 +1040,11 @@ Shellboy never chooses one of them.
 
 ### Provider output-limit completion
 
-When the provider explicitly reports an output cap, Shellboy returns an
-`output_limit` error and recommends raising `max_tokens` for the Thread
-(`thread set --max-tokens N`) or for the connection. The response remains incomplete: available partial output
-and provider response details are retained, and no automatic retry is made.
+When the provider explicitly reports an output cap, a Conversation Turn
+completes with the text received so far and a notice that the answer was cut
+off. The underlying model attempt remains incomplete with `output_limit` and
+is not retried. For longer answers, raise `max_tokens` for the Thread
+(`thread set --max-tokens N`) or for the connection.
 The exact signals are Responses `incomplete_details.reason = max_output_tokens`,
 Chat Completions `finish_reason = length`, and Anthropic Messages
 `stop_reason = max_tokens` on an incomplete response. Other incomplete reasons,

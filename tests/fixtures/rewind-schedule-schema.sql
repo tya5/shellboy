@@ -1,5 +1,4 @@
 -- Test-only inverse through schema 50 for fixtures made by a current owner.
-ALTER TABLE node DROP COLUMN output_limit_json;
 ALTER TABLE node DROP COLUMN output_limit_attempt_id;
 DELETE FROM schema_migration WHERE name='next_answer_output_limit';
 DROP INDEX receipt_named_reply_pending;

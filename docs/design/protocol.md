@@ -1063,14 +1063,6 @@ counts rather than the mixed list. Each `message.list` item returns `message_id`
 identifies only a model Thread; `--asked-by` filters on that same model identity,
 not a sender label. Schema 56 backfills legacy named asks.
 
-For output-limited adopted answers, history provenance may include `output_limit`
-with the [saved attempt evidence](events-and-external-protocol.md#output-limit-adoption).
-It is absent on ordinary answers and does not enter model replay.
-
-For output-limited adopted answers, history provenance may include `output_limit`
-with the [saved attempt evidence](events-and-external-protocol.md#output-limit-adoption).
-It is absent on ordinary answers and does not enter model replay.
-
 ## Protocol 13 (#361)
 
 `endpoint.json` may include `owner_version`, the same self-reported software
@@ -1085,3 +1077,9 @@ request is sent, and the version is not used for compatibility or peer checks.
 Item-projected history windows report retired admission notice ordinals as
 `kind: "model_context"` with `items: []`. Raw history retains the original
 node kind and body.
+
+## Protocol next (#355)
+
+For output-limited adopted answers, history provenance may include `output_limit`
+with the [saved attempt evidence](events-and-external-protocol.md#output-limit-adoption).
+It is absent on ordinary answers and does not enter model replay.

@@ -25,7 +25,7 @@ pub(super) async fn adopt_response(
     });
     let output = response.output.clone();
     let output_limit = response.output_limit.clone();
-    let node_limit = output_limit.clone();
+    let is_output_limited = output_limit.is_some();
     let group_id = group;
     let attempt_id = attempt.to_owned();
     let index = control.index.clone();
@@ -48,9 +48,8 @@ pub(super) async fn adopt_response(
             let node=id();
             let payload = json!({"output":output,"reasoning_epoch":current.epoch,"group_id":group_id});
             history::append_node(&tx,&current.thread,&node,Some(&current.turn),"assistant_response",&payload,&now())?;
-            if let Some(limit) = node_limit {
-                let facts = json!({"stop":limit.stop,"sent_max_tokens":limit.sent_max_tokens,"source":limit.source});
-                tx.execute("UPDATE node SET output_limit_attempt_id=?2,output_limit_json=?3 WHERE id=?1",params![node,attempt_id,facts.to_string()])?;
+            if is_output_limited {
+                tx.execute("UPDATE node SET output_limit_attempt_id=?2 WHERE id=?1",params![node,attempt_id])?;
             }
             index.authorize_new_tx(&tx,std::slice::from_ref(&node)).map_err(crate::storage::StorageError::from)?;
             // Same commit/root-revision boundary as the selected answer. This

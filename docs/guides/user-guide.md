@@ -375,9 +375,12 @@ A connection's optional positive `max_tokens` setting maps to Responses
 its existing 32768 default. This is not the context window. Only set values the
 chosen endpoint/model supports; Shellboy does not query a limit catalogue.
 
-An explicit provider output-limit stop is reported as `output_limit`, with a
-hint to configure this setting, rather than successful completion. Partial
-output remains recovery/audit data, not a completed answer. Other incomplete
+When the provider explicitly stops a Conversation reply at its output limit,
+Shellboy keeps the text received so far as the answer and completes the Turn.
+The answer is marked as cut off and stays in history. No tool call from that
+reply runs.
+If you need a longer answer, raise `max_tokens` for the Thread or connection.
+Other incomplete
 reasons and interrupted transport are not reclassified. Responses/Chat JSON and
 streaming stops are supported; Messages remains stream-only. Avoid setting the
 same native key in `extra_body` when `max_tokens` is configured: the duplicate
@@ -669,7 +672,3 @@ To send a message to the owning Thread only when a flag file exists (POSIX shell
 shellboy schedule add --thread THREAD --cron '0 * * * *' -- \
   'if test -f needs-review; then shellboy message send --thread "$SHELLBOY_THREAD_ID" --text "Review is needed"; fi'
 ```
-
-When the provider stops a reply at its output limit, Shellboy keeps the text
-received so far as the answer and marks it as cut off. The Turn completes, and
-no tool call from that reply runs. The text remains in history after reopening.

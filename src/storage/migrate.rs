@@ -2457,7 +2457,6 @@ mod thread_creation_migration_tests {
             DROP INDEX receipt_pending_owed;
             DROP INDEX receipt_pending_asked;
             DROP INDEX receipt_pending_to;
-            ALTER TABLE node DROP COLUMN output_limit_json;
             ALTER TABLE node DROP COLUMN output_limit_attempt_id;
             DELETE FROM schema_migration WHERE name='next_answer_output_limit';
             DELETE FROM schema_migration WHERE version=56;
@@ -2499,7 +2498,6 @@ mod automatic_compaction_migration_tests {
             DROP INDEX receipt_pending_owed;
             DROP INDEX receipt_pending_asked;
             DROP INDEX receipt_pending_to;
-            ALTER TABLE node DROP COLUMN output_limit_json;
             ALTER TABLE node DROP COLUMN output_limit_attempt_id;
             DELETE FROM schema_migration WHERE name='next_answer_output_limit';
             DELETE FROM schema_migration WHERE version=56;
