@@ -62,6 +62,8 @@ fn operation_result_schemas(
     opaque!("thread.fork");
     opaque!("thread.delete");
     opaque!("thread.delete_preview");
+    opaque!("thread.delete_set_preview");
+    result!("thread.delete_set", Accepted);
     opaque!("thread.prune");
     opaque!("thread.rewind");
     result!("thread.archive", ThreadArchiveResult);
@@ -448,7 +450,7 @@ impl ApiError {
             ErrorCode::OperationConflict => "Query the existing receipt with shellboy operation get --operation OPERATION_ID; do not change the ID to repeat the same side effect",
             ErrorCode::OperationExpired | ErrorCode::OperationNotFound => "Inspect saved target state and history; an unavailable receipt does not prove the mutation was never applied",
             ErrorCode::InvalidState => "Inspect the target with its get command; read shellboy docs get --id shellboy/recovery-and-storage before choosing retry or stop",
-            ErrorCode::PreviewStale => "Request thread.delete_preview again and explicitly confirm its new target marker; never retry deletion with the stale preview",
+            ErrorCode::PreviewStale => "Request the corresponding deletion preview again and explicitly confirm its new target marker; never retry deletion with the stale preview",
 
             ErrorCode::CursorExpired => "Restart the same list/read with its original target and filters, without the old cursor; previously returned items or bytes may repeat",
             ErrorCode::CursorEncodingMismatch => "Restart shell read without the old cursor and specify the desired encoding; previously read bytes may be returned again",
@@ -878,6 +880,8 @@ args!(ThreadDeleteArgs {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     preview_marker: Option<DeletionPreviewMarker>
 });
+args!(ThreadDeleteSetCommitArgs { thread_ids: Vec<String>, preview_marker: DeletionPreviewMarker });
+args!(ThreadDeleteSetArgs { thread_ids: Vec<String> });
 args!(ThreadPruneArgs {
     #[serde(default)]
     thread_id: Option<String>,
@@ -1471,6 +1475,10 @@ pub enum Command {
     ThreadDelete(ThreadDeleteArgs),
     #[serde(rename = "thread.delete_preview")]
     ThreadDeletePreview(ThreadDeleteArgs),
+    #[serde(rename = "thread.delete_set_preview")]
+    ThreadDeleteSetPreview(ThreadDeleteSetArgs),
+    #[serde(rename = "thread.delete_set")]
+    ThreadDeleteSet(ThreadDeleteSetCommitArgs),
     #[serde(rename = "thread.prune")]
     ThreadPrune(ThreadPruneArgs),
     #[serde(rename = "thread.rewind")]
@@ -2691,7 +2699,7 @@ mod message_acknowledgement_tests {
                 "missing result schema for {name}"
             );
         }
-        assert_eq!(results.len(), 78);
+        assert_eq!(results.len(), 80);
         for name in ["thread.create", "connection.test"] {
             assert_eq!(
                 results[name],

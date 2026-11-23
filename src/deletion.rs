@@ -6,6 +6,85 @@ use serde_json::{Value, json};
 use crate::protocol::{ApiError, ErrorCode, ThreadDeleteArgs};
 
 pub(crate) const MAX_PREVIEW_THREADS: u32 = observation::THREAD_LIMIT as u32 + 1;
+pub(crate) const MAX_DELETE_SET_THREADS: usize = observation::THREAD_LIMIT;
+
+/// Validate the exact bounded ID set before any SQL work.
+pub(crate) fn validate_set(ids: &[String]) -> Result<(), ApiError> {
+    if ids.is_empty() || ids.len() > MAX_DELETE_SET_THREADS {
+        return Err(ApiError::new(
+            ErrorCode::InvalidArgument,
+            "thread_ids must contain 1..=256 Threads",
+        ));
+    }
+    let unique = ids.iter().collect::<std::collections::BTreeSet<_>>();
+    if unique.len() != ids.len() || ids.iter().any(|id| id.is_empty() || id.len() > 256) {
+        return Err(ApiError::new(
+            ErrorCode::InvalidArgument,
+            "thread_ids must be distinct non-empty IDs of at most 256 bytes",
+        ));
+    }
+    Ok(())
+}
+
+/// Exact-set preview. It never expands parent/descendant relationships.
+pub(crate) fn preview_set(connection: &Connection, ids: &[String]) -> Result<Value, ApiError> {
+    let inspect = |db: &Connection| -> Result<Value, ApiError> {
+        let ids_json = serde_json::to_string(ids).expect("string IDs serialize");
+        let selected = {
+            let mut statement = db.prepare("SELECT j.value, count(r.id) FILTER (WHERE r.state='live'), count(r.id) FILTER (WHERE r.state='stopping') FROM json_each(?1) j JOIN thread t ON t.id=j.value AND t.deleted_at IS NULL LEFT JOIN run r ON r.thread_id=t.id AND r.state IN ('live','stopping') GROUP BY j.value ORDER BY j.value")
+                .map_err(sql_error)?;
+            statement
+                .query_map([&ids_json], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, i64>(2)?,
+                    ))
+                })
+                .map_err(sql_error)?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .map_err(sql_error)?
+        };
+        if selected.len() != ids.len() {
+            return Err(ApiError::new(
+                ErrorCode::ThreadNotFound,
+                "One or more Threads were not found",
+            ));
+        }
+        let mut targets = Vec::with_capacity(ids.len());
+        for (id, live, stopping) in selected {
+            let runs = db.prepare("SELECT id,state FROM run WHERE thread_id=?1 AND state IN ('live','stopping') ORDER BY id LIMIT 51")
+                .map_err(sql_error)?.query_map([id.as_str()], |row| Ok(json!({"id":row.get::<_,String>(0)?,"state":row.get::<_,String>(1)?})))
+                .map_err(sql_error)?.collect::<rusqlite::Result<Vec<_>>>().map_err(sql_error)?;
+            let scheduled = db.prepare("SELECT s.id FROM schedule q JOIN shell_execution s ON s.schedule_id=q.id WHERE q.thread_id=?1 AND s.state IN ('starting','running','stopping') ORDER BY s.id LIMIT 51")
+                .map_err(sql_error)?.query_map([id.as_str()], |row| row.get::<_,String>(0))
+                .map_err(sql_error)?.collect::<rusqlite::Result<Vec<_>>>().map_err(sql_error)?;
+            let scheduled_total: i64 = db.query_row(
+                "SELECT count(*) FROM schedule q JOIN shell_execution s ON s.schedule_id=q.id WHERE q.thread_id=?1 AND s.state IN ('starting','running','stopping')", [id.as_str()], |row| row.get(0),
+            ).map_err(sql_error)?;
+            targets.push(json!({"thread_id":id,"live_run_count":live,"stopping_run_count":stopping,
+                "runs":runs.iter().take(50).collect::<Vec<_>>(),"runs_more":runs.len()>50,
+                "scheduled_execution_ids":scheduled.iter().take(50).collect::<Vec<_>>(),"scheduled_execution_count":scheduled_total,"scheduled_executions_more":scheduled_total>50}));
+        }
+        let sorted = ids
+            .iter()
+            .map(String::as_str)
+            .collect::<std::collections::BTreeSet<_>>();
+        let marker = target_marker(sorted.iter().copied());
+        let deletable = targets
+            .iter()
+            .all(|t| t["live_run_count"] == 0 && t["stopping_run_count"] == 0);
+        Ok(
+            json!({"thread_ids":sorted,"targets":targets,"preview_marker":marker,"deletable_now":deletable}),
+        )
+    };
+    if connection.is_autocommit() {
+        let tx = connection.unchecked_transaction().map_err(sql_error)?;
+        inspect(&tx)
+    } else {
+        inspect(connection)
+    }
+}
 
 /// Canonical digest of a complete, bounded, sorted distinct target set.
 pub(crate) fn target_marker<'a>(

@@ -1510,6 +1510,9 @@ impl Store {
             Command::ThreadDeletePreview(args) => {
                 MutationResult::value(crate::deletion::preview(tx, args)?)
             }
+            Command::ThreadDeleteSetPreview(args) => {
+                MutationResult::value(crate::deletion::preview_set(tx, &args.thread_ids)?)
+            }
             Command::MessageReply(args) => self.reply(tx, args, caller, operation_id, now),
             Command::MessageSend(args) => self.send(tx, args, caller, operation_id, now),
             Command::MessageAsk(args) => self.ask(tx, args, caller, operation_id, now),
@@ -3070,19 +3073,42 @@ pub(super) fn delete_targets(tx: &Transaction<'_>, args: &ThreadDeleteArgs) -> R
     if args.preview_marker.is_some() {
         thread_details(tx, &args.thread_id)?;
     }
-    for id in &targets {
-        if count(
-            tx,
-            "SELECT count(*) FROM run WHERE thread_id=?1 AND state IN ('live','stopping')",
-            id,
-        )? > 0
-        {
-            return Err(error(
-                ErrorCode::InvalidState,
-                "stop every selected Thread before deleting it",
-            ));
+    ensure_no_live_runs(tx, &targets)?;
+    Ok(targets)
+}
+
+fn ensure_no_live_runs(tx: &Transaction<'_>, targets: &[String]) -> Result<()> {
+    for id in targets {
+        if tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM run WHERE thread_id=?1 AND state IN ('live','stopping'))",
+            [id], |row| row.get::<_, bool>(0),
+        ).map_err(sql_error)? {
+            return Err(error(ErrorCode::InvalidState, "stop every selected Thread before deleting it"));
         }
     }
+    Ok(())
+}
+
+pub(super) fn delete_set_targets(
+    tx: &Transaction<'_>,
+    args: &crate::protocol::ThreadDeleteSetCommitArgs,
+) -> Result<Vec<String>> {
+    let mut targets = args.thread_ids.clone();
+    targets.sort_unstable();
+    let requested = serde_json::to_string(&targets).expect("string IDs serialize");
+    let present: i64 = tx.query_row(
+        "SELECT count(*) FROM json_each(?1) j JOIN thread t ON t.id=j.value AND t.deleted_at IS NULL",
+        [requested], |row| row.get(0),
+    ).map_err(sql_error)?;
+    if present != targets.len() as i64
+        || crate::deletion::target_marker(targets.iter().map(String::as_str)) != args.preview_marker
+    {
+        return Err(error(
+            ErrorCode::PreviewStale,
+            "deletion preview target set changed; request a new preview",
+        ));
+    }
+    ensure_no_live_runs(tx, &targets)?;
     Ok(targets)
 }
 
@@ -3092,8 +3118,21 @@ pub(super) fn delete_thread(
     now: &str,
 ) -> Result<MutationResult> {
     let targets = delete_targets(tx, args)?;
-    for id in &targets {
+    delete_targets_effects(tx, &targets, now)
+}
+
+pub(super) fn delete_targets_effects(
+    tx: &Transaction<'_>,
+    targets: &[String],
+    now: &str,
+) -> Result<MutationResult> {
+    for id in targets {
         super::schedule::ensure_inactive(tx, id, true)?;
+    }
+    for id in targets {
+        tx.execute("UPDATE thread SET deleted_at=?2,revision=revision+1,selection_revision=selection_revision+1,cursor_node_id=NULL,updated_at=?2 WHERE id=?1",params![id,now]).map_err(sql_error)?;
+    }
+    for id in targets {
         tx.execute(
             "DELETE FROM shell_execution WHERE detached_thread_id=?1",
             [id],
@@ -3101,9 +3140,6 @@ pub(super) fn delete_thread(
         .map_err(sql_error)?;
         tx.execute("DELETE FROM schedule WHERE thread_id=?1", [id])
             .map_err(sql_error)?;
-    }
-    for id in &targets {
-        tx.execute("UPDATE thread SET deleted_at=?2,revision=revision+1,selection_revision=selection_revision+1,cursor_node_id=NULL,updated_at=?2 WHERE id=?1",params![id,now]).map_err(sql_error)?;
         super::interruption::discard_staged_captures(tx, id).map_err(sql_error)?;
         crate::compaction::a_state::cleanup_tx(tx, id).map_err(storage_error)?;
         // Retain the last path/replacement as ownership evidence until payload
@@ -3137,7 +3173,7 @@ pub(super) fn delete_thread(
     }
     let mut keys = Vec::new();
     let reply_wakes =
-        super::reply::deleted_threads_tx(tx, &targets, now, &mut keys).map_err(sql_error)?;
+        super::reply::deleted_threads_tx(tx, targets, now, &mut keys).map_err(sql_error)?;
     bump_roots(tx)?;
     let revision: i64 = tx
         .query_row(
@@ -3157,8 +3193,8 @@ pub(super) fn delete_thread(
             .cloned()
             .map(super::wait::wakes::Key::ThreadUnavailable),
     );
-    result.changed_threads = targets.clone();
-    result.deleted_threads = targets;
+    result.changed_threads = targets.to_vec();
+    result.deleted_threads = targets.to_vec();
     result.quiet_wake_threads = reply_wakes;
     Ok(result)
 }

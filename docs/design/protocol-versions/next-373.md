@@ -1,0 +1,5 @@
+# Protocol next (#373)
+
+`thread.delete_set_preview` previews an exact set of 1 to 256 distinct Thread IDs (up to 256 UTF-8 bytes each). It reports each target's live or stopping Runs and active scheduled executions that will be stopped, with at most 50 entries of each kind per Thread. Unknown or deleted targets are rejected. The preview marker binds the sorted set, irrespective of the request order.
+
+`thread.delete_set` requires the same IDs and `preview_marker`. The owner checks the marker and all targets before disabling schedules or stopping executions. Live or stopping Runs block the whole set. Otherwise the owner disables the selected Threads' schedules, requests their active executions to stop, and waits for them to finish. The owner then rechecks the marker and Runs before deleting the exact set in one transaction. A successful request returns `{ "accepted": true }`. Unlisted descendants are never deleted. There is no CLI or model-tool binding.

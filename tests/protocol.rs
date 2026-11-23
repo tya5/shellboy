@@ -115,6 +115,7 @@ fn all_public_commands_have_typed_roundtrip_fixtures() {
             "thread.delete_preview",
             json!({"thread_id":"t","descendants":true}),
         ),
+        ("thread.delete_set_preview", json!({"thread_ids":["a","b"]})),
         ("thread.set", json!({"thread_id":"t","effort":""})),
         (
             "message.send",
@@ -167,7 +168,7 @@ fn all_public_commands_have_typed_roundtrip_fixtures() {
         ("storage.status", json!({})),
         ("storage.collect", json!({})),
     ];
-    assert_eq!(fixtures.len(), 41);
+    assert_eq!(fixtures.len(), 42);
     for (command, args) in fixtures {
         let request = Request::from_value(json!({"protocol_version":PROTOCOL_VERSION,"operation_id":"instance:nonce","command":command,"args":args})).unwrap_or_else(|e| panic!("{command}: {e}"));
         assert_eq!(request.command.name(), command);
@@ -191,6 +192,12 @@ fn rejects_unknown_fields_and_invalid_limits_without_echoing_inputs() {
         json!({"protocol_version":PROTOCOL_VERSION,"operation_id":"op","command":"wait","args":{"conditions":[]}}),
         json!({"protocol_version":PROTOCOL_VERSION,"operation_id":"op","command":"index.backfill","args":{}}),
         json!({"protocol_version":PROTOCOL_VERSION,"operation_id":"op","command":"thread.set","args":{}}),
+        json!({"protocol_version":PROTOCOL_VERSION,"operation_id":"op","command":"thread.delete_set_preview","args":{"thread_ids":[]}}),
+        json!({"protocol_version":PROTOCOL_VERSION,"operation_id":"op","command":"thread.delete_set_preview","args":{"thread_ids":["a","a"]}}),
+        json!({"protocol_version":PROTOCOL_VERSION,"operation_id":"op","command":"thread.delete_set_preview","args":{"thread_ids":[""]}}),
+        json!({"protocol_version":PROTOCOL_VERSION,"operation_id":"op","command":"thread.delete_set_preview","args":{"thread_ids":["x".repeat(257)]}}),
+        json!({"protocol_version":PROTOCOL_VERSION,"operation_id":"op","command":"thread.delete_set_preview","args":{"thread_ids":vec!["x";257]}}),
+        json!({"protocol_version":PROTOCOL_VERSION,"operation_id":"op","command":"thread.delete_set_preview","args":{"thread_ids":["a"],"preview_marker":{"thread_count":1,"ids_hash":"0000000000000000000000000000000000000000000000000000000000000000"}}}),
     ] {
         let error = Request::from_value(value).unwrap_err();
         assert_eq!(error.code, ErrorCode::InvalidArgument);
@@ -1361,7 +1368,7 @@ fn protocol_v6_handshake_and_typed_results_cover_existing_wire_modes() {
         schema["capabilities"],
         serde_json::json!(["events.reasoning_activity", "id.resolve"])
     );
-    assert_eq!(schema["operation_results"].as_object().unwrap().len(), 78);
+    assert_eq!(schema["operation_results"].as_object().unwrap().len(), 80);
     assert_eq!(
         schema["operation_results"]["history.export"]["type"],
         "object"

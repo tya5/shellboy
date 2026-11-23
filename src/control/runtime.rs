@@ -167,6 +167,7 @@ impl Control {
                         if matches!(
                             request.command,
                             Command::ThreadDelete(_)
+                                | Command::ThreadDeleteSet(_)
                                 | Command::ScheduleRemove(_)
                                 | Command::ServiceRemove(_)
                                 | Command::ServiceStop(_)

@@ -896,6 +896,8 @@ impl Command {
             Self::ThreadTags(a) => a.validate(),
             Self::ThreadCwds(a) => a.validate(),
             Self::ThreadBranches(a) => a.validate(),
+            Self::ThreadDeleteSet(a) => crate::deletion::validate_set(&a.thread_ids),
+            Self::ThreadDeleteSetPreview(a) => crate::deletion::validate_set(&a.thread_ids),
             Self::ThreadDelete(a) | Self::ThreadDeletePreview(a) => {
                 nonempty(&a.thread_id, "thread_id")?;
                 if let Some(marker) = &a.preview_marker

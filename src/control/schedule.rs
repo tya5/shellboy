@@ -636,6 +636,9 @@ pub(super) async fn delete(
                     Command::ThreadDelete(args) => {
                         (super::db::delete_targets(&tx, args)?, true, true)
                     }
+                    Command::ThreadDeleteSet(args) => {
+                        (super::db::delete_set_targets(&tx, args)?, true, true)
+                    }
                     _ => {
                         let (id, kind, removing) =
                             shell_definition_command(&prepare).expect("definition operation");
@@ -686,6 +689,10 @@ pub(super) async fn delete(
                         ));
                     }
                     super::db::delete_thread(tx, &args, &super::state::now())
+                }
+                Command::ThreadDeleteSet(args) => {
+                    let current = super::db::delete_set_targets(tx, &args)?;
+                    super::db::delete_targets_effects(tx, &current, &super::state::now())
                 }
                 definition => {
                     let (id, kind, removing) = shell_definition_command(&definition).expect("definition operation");
@@ -1046,6 +1053,17 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn thread_delete_replays_without_stopping_or_deleting_twice() {
+        deletion_replay(false).await;
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn thread_delete_set_drains_selected_schedules_and_replays_once() {
+        deletion_replay(true).await;
+    }
+
+    #[cfg(unix)]
+    async fn deletion_replay(exact_set: bool) {
         let root = tempfile::tempdir().unwrap();
         let owner =
             crate::app::DataOwner::start(None, Some(root.path().join("data")), root.path().into())
@@ -1054,10 +1072,16 @@ mod tests {
         let control = Control::new(&owner, root.path().into());
         let cwd = root.path().to_string_lossy().into_owned();
         control.store.database.call(move |db| {
-            db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('target',?1,'','fixture','fixture','now')",[cwd])?;
+            db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('target',?1,'','fixture','fixture','now')",[&cwd])?;
+            if exact_set {
+                for id in ["selected", "omitted"] {
+                    db.execute("INSERT INTO thread(id,parent_thread_id,cwd,agents_path,profile_id,model_id,updated_at) VALUES(?1,'target',?2,'','fixture','fixture','now')", params![id, cwd])?;
+                }
+            }
             db.execute_batch("CREATE TEMP TABLE delete_witness(kind TEXT);
                 CREATE TEMP TRIGGER stop_witness AFTER UPDATE OF state ON main.shell_execution WHEN NEW.state='stopping' AND OLD.state<>'stopping' BEGIN INSERT INTO delete_witness VALUES('stop'); END;
                 CREATE TEMP TRIGGER delete_witness AFTER UPDATE OF deleted_at ON main.thread WHEN OLD.deleted_at IS NULL AND NEW.deleted_at IS NOT NULL BEGIN INSERT INTO delete_witness VALUES('delete'); END;
+                CREATE TEMP TRIGGER gc_witness AFTER INSERT ON main.gc_job WHEN NEW.kind='history' BEGIN INSERT INTO delete_witness VALUES('gc'); END;
                 CREATE TEMP TRIGGER receipt_witness BEFORE UPDATE OF state ON main.operation_receipt WHEN NEW.operation_id LIKE '%:delete' AND NEW.state='completed' BEGIN SELECT CASE WHEN (SELECT deleted_at FROM main.thread WHERE id='target') IS NULL OR EXISTS(SELECT 1 FROM main.schedule WHERE thread_id='target') THEN RAISE(ABORT,'delete receipt must match deletion') END; END;
                 CREATE TEMP TRIGGER deletion_after_receipt AFTER UPDATE OF deleted_at ON main.thread WHEN NEW.id='target' AND NEW.deleted_at IS NOT NULL BEGIN SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM main.operation_receipt WHERE operation_id LIKE '%:delete' AND state='pending') THEN RAISE(ABORT,'deletion needs pending receipt') END; END;")?;
             Ok(())
@@ -1090,11 +1114,77 @@ mod tests {
                 changed.await;
             }
         }).await.unwrap();
-        let command = Command::ThreadDelete(crate::protocol::ThreadDeleteArgs {
-            thread_id: "target".into(),
-            descendants: false,
-            preview_marker: None,
-        });
+        let command = if exact_set {
+            let ids = vec!["target".into(), "selected".into()];
+            let preview = control
+                .request(request(
+                    "preview",
+                    Command::ThreadDeleteSetPreview(crate::protocol::ThreadDeleteSetArgs {
+                        thread_ids: ids.clone(),
+                    }),
+                ))
+                .await;
+            assert!(preview.ok, "{:?}", preview.error);
+            let preview = preview.result.unwrap();
+            assert_eq!(preview["deletable_now"], true);
+            assert_eq!(preview["targets"][1]["scheduled_execution_count"], 1);
+            let marker: crate::protocol::DeletionPreviewMarker =
+                serde_json::from_value(preview["preview_marker"].clone()).unwrap();
+            let commit = |thread_ids| {
+                Command::ThreadDeleteSet(crate::protocol::ThreadDeleteSetCommitArgs {
+                    thread_ids,
+                    preview_marker: marker.clone(),
+                })
+            };
+            let stale = control
+                .request(request(
+                    "stale",
+                    commit(vec!["target".into(), "omitted".into()]),
+                ))
+                .await;
+            assert_eq!(
+                stale.error.unwrap().code,
+                crate::protocol::ErrorCode::PreviewStale
+            );
+            control.store.database.call(|db| {
+                db.execute("INSERT INTO run(id,thread_id,state,created_at) VALUES('block','selected','live','now')", [])?;
+                Ok(())
+            }).await.unwrap();
+            let blocked = control.request(request("blocked", commit(ids))).await;
+            assert_eq!(
+                blocked.error.unwrap().code,
+                crate::protocol::ErrorCode::InvalidState
+            );
+            control
+                .store
+                .database
+                .call(|db| {
+                    assert_eq!(
+                        db.query_row(
+                            "SELECT state FROM shell_execution WHERE schedule_id IS NOT NULL",
+                            [],
+                            |row| row.get::<_, String>(0)
+                        )?,
+                        "running"
+                    );
+                    assert_eq!(
+                        db.query_row("SELECT count(*) FROM delete_witness", [], |row| row
+                            .get::<_, i64>(0))?,
+                        0
+                    );
+                    db.execute("UPDATE run SET state='stopped' WHERE id='block'", [])?;
+                    Ok(())
+                })
+                .await
+                .unwrap();
+            commit(vec!["selected".into(), "target".into()])
+        } else {
+            Command::ThreadDelete(crate::protocol::ThreadDeleteArgs {
+                thread_id: "target".into(),
+                descendants: false,
+                preview_marker: None,
+            })
+        };
         let first = control.request(request("delete", command.clone())).await;
         let replay = control.request(request("delete", command)).await;
         assert!(first.ok, "{:?}", first.error);
@@ -1103,12 +1193,21 @@ mod tests {
         control
             .store
             .database
-            .call(|db| {
+            .call(move |db| {
                 let facts = db
                     .prepare("SELECT kind FROM delete_witness ORDER BY rowid")?
                     .query_map([], |r| r.get::<_, String>(0))?
                     .collect::<rusqlite::Result<Vec<_>>>()?;
-                assert_eq!(facts, ["stop", "delete"]);
+                if exact_set {
+                    assert_eq!(facts, ["stop", "delete", "delete", "gc"]);
+                    assert!(db.query_row(
+                        "SELECT deleted_at IS NULL FROM thread WHERE id='omitted'",
+                        [],
+                        |row| row.get::<_, bool>(0)
+                    )?);
+                } else {
+                    assert_eq!(facts, ["stop", "delete", "gc"]);
+                }
                 assert_eq!(
                     db.query_row(
                         "SELECT count(*) FROM shell_execution WHERE schedule_id IS NOT NULL",

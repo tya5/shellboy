@@ -2515,8 +2515,10 @@ impl OperationId {
             Command::UsageGet(_) => Self::UsageGet,
             Command::ThreadCreate(_) => Self::ThreadCreate,
             Command::ThreadFork(_) => Self::ThreadFork,
-            Command::ThreadDelete(_) => Self::ThreadDelete,
-            Command::ThreadDeletePreview(_) => Self::ThreadDeletePreview,
+            Command::ThreadDelete(_) | Command::ThreadDeleteSet(_) => Self::ThreadDelete,
+            Command::ThreadDeletePreview(_) | Command::ThreadDeleteSetPreview(_) => {
+                Self::ThreadDeletePreview
+            }
             Command::ThreadPrune(_) => Self::ThreadPrune,
             Command::ThreadRewind(_) => Self::ThreadRewind,
             Command::ThreadArchive(_) => Self::ThreadArchive,
