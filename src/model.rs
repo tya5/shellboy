@@ -279,6 +279,7 @@ pub struct ModelResponse {
     pub calls: Vec<ToolCall>,
     pub text: String,
     pub stream_observation: Option<StreamObservation>,
+    pub(crate) output_limit: Option<crate::protocol::AttemptOutputLimit>,
     pub http_observation: Option<http::HttpObservation>,
     /// HTTP metadata, including absent observations for requests not sent.
     pub response_facts: http::ResponseFacts,
@@ -419,6 +420,49 @@ fn output_limit_error(raw: &Value) -> Option<ModelError> {
 }
 
 impl ModelResponse {
+    pub(crate) fn truncated(
+        failure: http::AttemptFailure,
+        limit: crate::protocol::AttemptOutputLimit,
+    ) -> Self {
+        let raw = failure.raw_response.unwrap_or(Value::Null);
+        let mut output = Vec::new();
+        if let Some(items) = raw["output"].as_array() {
+            for item in items {
+                if item["type"] != "message" || item["role"] != "assistant" {
+                    continue;
+                }
+                let Some(content) = item["content"].as_array() else {
+                    continue;
+                };
+                let content: Vec<_> = content
+                    .iter()
+                    .filter(|part| matches!(part["type"].as_str(), Some("output_text" | "refusal")))
+                    .cloned()
+                    .collect();
+                if !content.is_empty() {
+                    let mut message = item.clone();
+                    message["content"] = json!(content);
+                    // Replay a valid completed text item, not the provider's unfinished item.
+                    message["status"] = json!("completed");
+                    output.push(message);
+                }
+            }
+        }
+        if output.is_empty() && !failure.partial_text.is_empty() {
+            output.push(json!({"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":failure.partial_text}]}));
+        }
+        Self {
+            raw,
+            output,
+            calls: Vec::new(),
+            text: failure.partial_text,
+            stream_observation: None,
+            output_limit: Some(limit),
+            http_observation: failure.facts.http_observation,
+            response_facts: failure.facts,
+        }
+    }
+
     pub fn completed(mut raw: Value, tools_enabled: bool) -> Result<Self, ModelError> {
         crate::usage::normalize_response(&mut raw);
         cache_diagnostics::normalize_response(&mut raw);
@@ -534,6 +578,7 @@ impl ModelResponse {
             calls,
             text,
             stream_observation: None,
+            output_limit: None,
             http_observation: None,
             response_facts: http::ResponseFacts::default(),
         })

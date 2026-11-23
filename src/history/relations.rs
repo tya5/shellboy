@@ -53,10 +53,15 @@ fn provenance_with_sender_evidence(
     include_operation_id: bool,
 ) -> Result<(NodeProvenance, Option<String>), ApiError> {
     let mut result=connection.query_row(
-        "SELECT n.kind,n.created_at,n.payload_revision,n.turn_id,t.run_id,COALESCE(t.thread_id,r.thread_id) FROM node n LEFT JOIN turn t ON t.id=n.turn_id LEFT JOIN run r ON r.id=t.run_id WHERE n.id=?1",[node_id],|row|Ok(NodeProvenance{ notification: None,message:None,sender:None,client_operation_id:None,attempt_id:None,kind:row.get(0)?,created_at:row.get(1)?,source_revision:row.get(2)?,turn_id:row.get(3)?,run_id:row.get(4)?,origin_thread_id:row.get(5)?})
+        "SELECT n.kind,n.created_at,n.payload_revision,n.turn_id,t.run_id,COALESCE(t.thread_id,r.thread_id) FROM node n LEFT JOIN turn t ON t.id=n.turn_id LEFT JOIN run r ON r.id=t.run_id WHERE n.id=?1",[node_id],|row|Ok(NodeProvenance{ output_limit: None, notification: None,message:None,sender:None,client_operation_id:None,attempt_id:None,kind:row.get(0)?,created_at:row.get(1)?,source_revision:row.get(2)?,turn_id:row.get(3)?,run_id:row.get(4)?,origin_thread_id:row.get(5)?})
     ).optional().map_err(sql_error)?.ok_or_else(||ApiError::new(ErrorCode::TargetUnavailable,"history node not found"))?;
     if result.kind == "assistant_response" {
         result.attempt_id = saved_attempt_id(connection, node_id)?;
+        let output_limit: Option<String> = connection.query_row(
+            "SELECT CASE WHEN json_valid(payload_json) AND json_type(payload_json,'$.output_limit')='object' THEN json_extract(payload_json,'$.output_limit') END FROM node WHERE id=?1",
+            [node_id], |row| row.get(0),
+        ).map_err(sql_error)?;
+        result.output_limit = output_limit.and_then(|value| serde_json::from_str(&value).ok());
     }
     let mut operation_id = None;
     if result.kind == "user" {

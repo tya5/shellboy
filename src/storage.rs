@@ -2666,6 +2666,7 @@ mod lane_budget_tests {
                 calls: Vec::new(),
                 text: "summary".into(),
                 stream_observation: None,
+                output_limit: None,
                 http_observation: None,
                 response_facts: crate::model::http::ResponseFacts::default(),
             },

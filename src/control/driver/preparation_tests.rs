@@ -2847,6 +2847,11 @@ async fn recovery_rewind_terminal_reply_creates_run_after_path_rewrite() {
 
 #[tokio::test]
 async fn received_attempt_is_not_adopted_after_interrupt_and_run_carries_next_turn() {
+    received_attempt_fence(false).await;
+    received_attempt_fence(true).await;
+}
+
+async fn received_attempt_fence(truncated: bool) {
     let (_root, owner, control, accepted) = fixture("http://127.0.0.1:1/v1").await;
     let snapshot = ready(&control, &accepted).await;
     let prepared = Arc::new(
@@ -2867,16 +2872,45 @@ async fn received_attempt_is_not_adopted_after_interrupt_and_run_carries_next_tu
             .await
             .unwrap()
     );
-    let response = model::ModelResponse::completed(json!({"id":"received","status":"completed","usage":{"input_tokens":17},"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"not selected"}]}]}), false).unwrap();
-    model::request_path::persist_received_attempt(
-        &control.store.database,
-        attempt,
-        model::request_path::AttemptKind::Conversation,
-        false,
-        &Ok(response.clone()),
-    )
-    .await
-    .unwrap();
+    let response = if truncated {
+        let raw =
+            json!({"id":"received","status":"incomplete","usage":{"input_tokens":17},"output":[]});
+        control
+            .store
+            .database
+            .call(move |db| {
+                model::request_path::incomplete_attempt(
+                    db,
+                    attempt,
+                    &json!({"error":{"kind":"output_limit"},"raw_response":raw}),
+                    &now(),
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        model::ModelResponse::truncated(
+            model::http::AttemptFailure::from(model::ModelError::new("output_limit", "fixture")),
+            crate::protocol::AttemptOutputLimit {
+                stop: true,
+                sent_max_tokens: Some(1234),
+                source: Some(crate::protocol::OutputLimitSource::ThreadOverride),
+                connection: "fixture".into(),
+            },
+        )
+    } else {
+        let response = model::ModelResponse::completed(json!({"id":"received","status":"completed","usage":{"input_tokens":17},"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"not selected"}]}]}), false).unwrap();
+        model::request_path::persist_received_attempt(
+            &control.store.database,
+            attempt,
+            model::request_path::AttemptKind::Conversation,
+            false,
+            &Ok(response.clone()),
+        )
+        .await
+        .unwrap();
+        response
+    };
     let queued = control
         .store
         .execute(
@@ -2924,7 +2958,7 @@ async fn received_attempt_is_not_adopted_after_interrupt_and_run_carries_next_tu
     let (old_turn, run) = (snapshot.turn.clone(), snapshot.run.clone());
     control.store.database.call(move |db| {
         let result = db.query_row("SELECT state,json_extract(input_manifest_json,'$.adoption.outcome'),json_extract(input_manifest_json,'$.adoption.reason'),ended_at FROM model_attempt WHERE id=?1",[attempt],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,String>(3)?)))?;
-        assert_eq!((&*result.0,&*result.1,&*result.2),("completed","not_adopted","turn_fenced"));
+        assert_eq!((&*result.0,&*result.1,&*result.2),(if truncated { "incomplete" } else { "completed" },"not_adopted","turn_fenced"));
         assert_eq!(db.query_row("SELECT response_id,json_extract(usage_json,'$.input_tokens') FROM model_attempt WHERE id=?1", [attempt], |r| Ok((r.get::<_,String>(0)?,r.get::<_,i64>(1)?)))?, ("received".into(),17));
         assert!(!result.3.is_empty());
         assert_eq!(db.query_row("SELECT count(*) FROM node WHERE turn_id=?1 AND kind IN ('assistant_response','incomplete_response')",[&old_turn],|r|r.get::<_,i64>(0))?,0);

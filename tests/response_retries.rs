@@ -2873,18 +2873,49 @@ async fn successful_connection_probe_releases_queued_threads_without_serializing
 async fn output_limit_stop_matches_wire_in_live_ends_and_saved_usage() {
     let responses = |reason: &str| {
         json!({"type":"response.incomplete","response":{
-            "id":"limited","status":"incomplete","output":[],"incomplete_details":{"reason":reason}
+            "id":"limited","status":"incomplete","output":[{"type":"message","role":"assistant","status":"incomplete","content":[{"type":"output_text","text":"abc"}]}],"incomplete_details":{"reason":reason}
         }})
     };
     let messages = concat!(
         r#"data: {"type":"message_start","message":{"id":"limited","content":[],"usage":{"input_tokens":5}}}"#,
+        "\n\n",
+        r#"data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":"abc"}}"#,
+        "\n\n",
+        r#"data: {"type":"content_block_stop","index":0}"#,
+        "\n\n",
+        r#"data: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"call","name":"shell","input":{}}}"#,
+        "\n\n",
+        r#"data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"command\":"}}"#,
         "\n\n",
         r#"data: {"type":"message_delta","delta":{"stop_reason":"max_tokens"},"usage":{"output_tokens":1}}"#,
         "\n\n",
         r#"data: {"type":"message_stop"}"#,
         "\n\n",
     );
+    let chat = concat!(
+        r#"data: {"id":"limited","choices":[{"index":0,"delta":{"role":"assistant","content":"abc","tool_calls":[{"index":0,"id":"call","type":"function","function":{"name":"shell","arguments":"{\"command\":"}}]},"finish_reason":null}]}"#,
+        "\n\n",
+        r#"data: {"id":"limited","choices":[{"index":0,"delta":{},"finish_reason":"length"}]}"#,
+        "\n\n",
+        "data: [DONE]\n\n",
+    );
     for (connection, thread_limit, key, wire_limit, source, reason) in [
+        (
+            "api='chat_completions'\nmax_tokens=500\n",
+            None,
+            "max_completion_tokens",
+            json!(500),
+            Some("connection"),
+            "length",
+        ),
+        (
+            "api='anthropic_messages'\n",
+            None,
+            "max_tokens",
+            json!(32768),
+            Some("default"),
+            "model_context_window_exceeded",
+        ),
         (
             "max_tokens=5678\n",
             Some(1234),
@@ -2933,6 +2964,7 @@ async fn output_limit_stop_matches_wire_in_live_ends_and_saved_usage() {
             None,
             "max_output_tokens",
         ),
+        ("", None, "max_output_tokens", Value::Null, None, "eof"),
     ] {
         let settings = FixtureSettings {
             connection,
@@ -2956,8 +2988,21 @@ async fn output_limit_stop_matches_wire_in_live_ends_and_saved_usage() {
             .as_str()
             .unwrap()
             .to_owned();
-        let body = if key == "max_tokens" {
-            messages.to_owned()
+        let body = if reason == "eof" {
+            "data: {\"type\":\"response.output_text.delta\",\"delta\":\"abc\"}\n\n".to_owned()
+        } else if key == "max_tokens" {
+            if reason == "max_tokens" {
+                messages.to_owned()
+            } else {
+                messages
+                    .split("\n\n")
+                    .filter(|event| !event.contains("\"index\":1"))
+                    .collect::<Vec<_>>()
+                    .join("\n\n")
+                    .replace("max_tokens", reason)
+            }
+        } else if key == "max_completion_tokens" {
+            chat.to_owned()
         } else {
             format!("data: {}\n\n", responses(reason))
         };
@@ -2966,8 +3011,34 @@ async fn output_limit_stop_matches_wire_in_live_ends_and_saved_usage() {
             .send(Reply::http(200, "text/event-stream", &body, ""))
             .ok()
             .unwrap();
-        assert_eq!(fixture.settled().await, "recovery_wait");
-        let result = request(&fixture.control, events(Some(cursor))).await;
+        let limited = matches!(reason, "max_output_tokens" | "max_tokens" | "length");
+        let settled = fixture.settled().await;
+        let expected_state = if limited {
+            "completed"
+        } else {
+            "recovery_wait"
+        };
+        assert_eq!(settled, expected_state, "{connection:?} / {reason}");
+        let result = crate::test_watchdog::watchdog("committed attempt end", async {
+            let mut cursor = cursor;
+            loop {
+                let mut command = events(Some(cursor));
+                if let Command::EventsWait(args) = &mut command {
+                    args.timeout_ms = 5_000;
+                }
+                let result = request(&fixture.control, command).await;
+                if result["attempt_ends"]
+                    .as_array()
+                    .is_some_and(|ends| !ends.is_empty())
+                {
+                    break result;
+                }
+                assert_ne!(result["status"], "resync_required");
+                cursor = result["cursor"].as_str().unwrap().to_owned();
+            }
+        })
+        .await
+        .unwrap();
         let ends = result["attempt_ends"].as_array().unwrap();
         assert_eq!(ends.len(), 1, "{result}");
         let end = &ends[0];
@@ -2980,12 +3051,37 @@ async fn output_limit_stop_matches_wire_in_live_ends_and_saved_usage() {
             }),
         )
         .await;
-        if reason == "content_filter" {
+        if !limited {
+            assert_eq!(end["outcome"], "not_adopted");
             assert!(end.get("output_limit").is_none());
             assert_eq!(usage["output_limit"], Value::Null);
         } else {
             let expected = json!({"stop":true,"sent_max_tokens":wire_limit.as_u64(),"source":source,"connection":"fixture"});
+            assert_eq!(end["outcome"], "adopted");
             assert_eq!(end["output_limit"], expected);
+            let turn = fixture.accepted.turn_id.clone().unwrap();
+            let node: String = fixture.control.store.database.call(move |db| {
+                let (node, tools, extra): (String, i64, i64) = db.query_row(
+                    "SELECT answer_node_id,(SELECT count(*) FROM tool_group WHERE turn_id=u.id), (SELECT count(*) FROM node WHERE turn_id=u.id AND kind='incomplete_response') FROM turn u WHERE id=?1",
+                    [turn], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+                )?;
+                assert_eq!((tools, extra), (0, 0));
+                Ok(node)
+            }).await.unwrap();
+            let history = request(
+                &fixture.control,
+                Command::HistoryGet(HistoryGetArgs {
+                    node_id: node,
+                    end_message_only: false,
+                    parts: false,
+                    limit_bytes: 4096,
+                    cursor: None,
+                    encoding: "utf-8".into(),
+                }),
+            )
+            .await;
+            assert_eq!(history["provenance"]["output_limit"], expected);
+            assert!(history.to_string().contains("abc"), "{history}");
             assert_eq!(usage["output_limit"], expected);
         }
         if thread_limit.is_some() {
@@ -3007,6 +3103,42 @@ async fn output_limit_stop_matches_wire_in_live_ends_and_saved_usage() {
         }
         fixture.close().await;
     }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn output_limit_does_not_adopt_a_summary() {
+    let mut fixture = Fixture::with_history(0, 10, 5_000, false, Some(1_000), "summary limit").await;
+    fixture.incoming().await.reply.send(Reply::success()).ok().unwrap();
+    assert_eq!(fixture.settled().await, "completed");
+    let operation = request(&fixture.control, Command::ContextEdit(ContextEditArgs {
+        thread_id: Some(fixture.accepted.thread_id.clone()),
+        action: ContextEditAction::Summary,
+        from_node_id: Some("old-large-context".into()),
+        to_node_id: Some("old-answer".into()),
+        max_chars: None,
+    })).await;
+    let operation_id = operation["operation_id"].as_str().unwrap().to_owned();
+    let cut = r#"{"type":"response.incomplete","response":{"id":"cut-summary","status":"incomplete","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"cut summary"}]}],"incomplete_details":{"reason":"max_output_tokens"}}}"#;
+    fixture.incoming().await.reply.send(terminal_sse("", cut, "")).ok().unwrap();
+    crate::test_watchdog::watchdog("cut Summary stays failed", async {
+        loop {
+            let result = request(&fixture.control, Command::OperationGet(OperationTarget { operation_id: operation_id.clone() })).await;
+            match result["downstream"]["state"].as_str() {
+                Some("failed") => break,
+                Some("completed") => panic!("cut Summary adopted: {result}"),
+                _ => tokio::task::yield_now().await,
+            }
+        }
+    }).await.unwrap();
+    let thread = fixture.accepted.thread_id.clone();
+    fixture.control.store.database.call(move |db| {
+        let rows = db.prepare("SELECT state,json_extract(error_json,'$.error.kind'),json_extract(input_manifest_json,'$.adoption') FROM model_attempt WHERE thread_id=?1 AND kind='summary'")?
+            .query_map([thread], |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,Option<String>>(2)?)))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        assert_eq!(rows, vec![("failed".into(), "output_limit".into(), None)]);
+        Ok(())
+    }).await.unwrap();
+    fixture.close().await;
 }
 
 const TERMINAL_SSE_500: &str = r#"{"error":{"code":"500","message":"fixture"}}"#;

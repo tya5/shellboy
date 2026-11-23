@@ -65,6 +65,7 @@ fn initial(kind: &str, payload: &Value) -> (NodePresentation, BlockKind) {
     let mut p = NodePresentation {
         kind: display_kind.clone(),
         title: title.into(),
+        output_limited: kind == "assistant_response" && payload["output_limit"]["stop"] == true,
         ..Default::default()
     };
     use super::messages::{Message, Text};
@@ -84,6 +85,10 @@ fn initial(kind: &str, payload: &Value) -> (NodePresentation, BlockKind) {
         },
     });
     p.fields = fields_of_value(payload);
+    if p.output_limited {
+        p.fields
+            .retain(|field| !field.key.starts_with("/output_limit"));
+    }
     if matches!(kind, "spill" | "context_trim")
         && payload.get("context_trim").is_some_and(Value::is_object)
     {

@@ -1124,6 +1124,7 @@ record!(MessageProvenance {
     #[serde(default, skip_serializing_if="Option::is_none")] reply_node_id: Option<String>
 });
 record!(NodeProvenance {
+    #[serde(default, skip_serializing_if = "Option::is_none")] output_limit: Option<AttemptOutputLimit>,
     #[serde(default, skip_serializing_if="Option::is_none")] notification: Option<NotificationDescriptor>,
     #[serde(default, skip_serializing_if="Option::is_none")] message: Option<MessageProvenance>,
     #[serde(default, skip_serializing_if = "Option::is_none")] sender: Option<MessageSender>,

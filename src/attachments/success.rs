@@ -20,7 +20,7 @@ pub(super) fn mark_success_rows_tx(
     attempt: &str,
     ids: &[String],
 ) -> Result<(), ApiError> {
-    let valid:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM model_attempt a JOIN turn u ON u.id=a.turn_id WHERE a.id=?1 AND a.state='completed' AND a.generation=u.generation AND u.thread_id=?2)",params![attempt,thread],|row|row.get(0)).map_err(sql_error)?;
+    let valid:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM model_attempt a JOIN turn u ON u.id=a.turn_id WHERE a.id=?1 AND (a.state='completed' OR (a.state='incomplete' AND json_extract(a.error_json,'$.error.kind')='output_limit' AND json_extract(a.input_manifest_json,'$.adoption.outcome')='adopted')) AND a.generation=u.generation AND u.thread_id=?2)",params![attempt,thread],|row|row.get(0)).map_err(sql_error)?;
     if !valid {
         return Err(stale());
     }

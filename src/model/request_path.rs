@@ -498,7 +498,7 @@ pub(crate) trait RequestCaller: Send {
     fn received(&mut self, _usage: StandardUsage) {}
     fn attempt_changed(&self) {}
     fn unsuccessful_attempt_committed(
-        &self,
+        &mut self,
         _attempt: &str,
         _output_limit: Option<crate::protocol::AttemptOutputLimit>,
     ) {

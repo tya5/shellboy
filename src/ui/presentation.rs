@@ -602,6 +602,15 @@ fn node_lines_inner(
 }
 fn omission_notices(language: UiLanguage, node: &UiNode) -> Vec<String> {
     let mut parts = Vec::new();
+    if node.presentation.output_limited {
+        parts.push(
+            match language {
+                UiLanguage::En => "Reply stopped at the output limit.",
+                UiLanguage::Ja => "出力上限に達したため、応答が途中で終わりました。",
+            }
+            .into(),
+        );
+    }
     let end = node
         .base_char_offset
         .saturating_add(node.text.chars().count())

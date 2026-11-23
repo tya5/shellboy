@@ -3963,6 +3963,7 @@ fn omitted_long_and_deep_metadata_use_the_complete_value_reader_for_copy() {
 
 fn shellboy_provenance_fixture() -> shellboy::protocol::NodeProvenance {
     shellboy::protocol::NodeProvenance {
+        output_limit: None,
         notification: None,
         message: None,
         sender: None,

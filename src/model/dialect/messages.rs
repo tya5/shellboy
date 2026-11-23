@@ -578,7 +578,9 @@ impl Messages {
                         return Err(protocol("Incomplete Messages tool identity"));
                     }
                     let arguments = if json.is_empty() { "{}" } else { json };
-                    if !serde_json::from_str::<Value>(arguments).is_ok_and(|v| v.is_object()) {
+                    if reason != "max_tokens"
+                        && !serde_json::from_str::<Value>(arguments).is_ok_and(|v| v.is_object())
+                    {
                         return Err(protocol("Messages tool arguments are not a JSON object"));
                     }
                     output.push(json!({"type":"function_call","status":status,"call_id":id,"name":name,"arguments":arguments}));

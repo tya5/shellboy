@@ -303,6 +303,7 @@ async fn drive_inner(
             client: &rate_client,
             snapshot: *snapshot,
             instruction: instructions.body(),
+            output_limit: None,
             boundary: crate::compaction::boundary::Boundary::new(&boundary, boundary_guard),
         };
         let mut partial_attempts = Vec::new();
@@ -320,6 +321,7 @@ async fn drive_inner(
             &mut partial_attempts,
         )
         .await;
+        let output_limit = caller.output_limit;
         let snapshot = caller.snapshot;
         let mut request_boundary = caller.boundary;
         let (attempt, outcome, prepared, adaptation, decision) = match result {
@@ -352,8 +354,8 @@ async fn drive_inner(
             }
         };
         if turn_binding.cancel.is_cancelled() || slot.stop.is_cancelled() {
-            match outcome {
-                Ok(_) => {
+            match (outcome, &output_limit) {
+                (Ok(_), _) | (Err(_), Some(_)) => {
                     let current = snapshot.clone();
                     let saved = attempt.clone();
                     let rejected = control
@@ -372,15 +374,15 @@ async fn drive_inner(
                             &snapshot.thread,
                             &attempt,
                             crate::protocol::EventAttemptOutcome::NotAdopted,
-                            None,
+                            output_limit.clone(),
                         );
                     }
                 }
-                Err(failure) if !slot.stop.is_cancelled() => {
+                (Err(failure), None) if !slot.stop.is_cancelled() => {
                     let body = json!({"reason":"human_turn_interrupted","attempt_id":attempt,"partial_text":failure.partial_text,"partial_reasoning":failure.partial_reasoning,"completed_items":failure.completed_items,"raw_response":failure.raw_response});
                     record_interrupted_outcome(&control, &snapshot, &body).await?;
                 }
-                Err(_) => {}
+                (Err(_), None) => {}
             }
             if slot.stop.is_cancelled() {
                 return drain_and_stop(&control, &slot.run_id, Some(&thread)).await;
@@ -388,8 +390,8 @@ async fn drive_inner(
             control.changed(&thread);
             continue;
         }
-        let response = match outcome {
-            Ok(value) => {
+        let response = match (outcome, output_limit) {
+            (Ok(value), _) => {
                 retry_budget.clear_usage_limit_retry_bypass();
                 if let Some(observation) = &value.stream_observation {
                     // Fixed, bounded classifications only. Adoption owns the received audit data.
@@ -422,7 +424,8 @@ async fn drive_inner(
                 }
                 value
             }
-            Err(failure) => {
+            (Err(failure), Some(limit)) => model::ModelResponse::truncated(failure, limit),
+            (Err(failure), None) => {
                 control.diagnostics.record_model_failure(
                     crate::diagnostics::DiagnosticIds {
                         attempt_id: None,
@@ -496,6 +499,7 @@ struct ConversationCaller<'a, 'b> {
     client: &'a HttpModelClient,
     snapshot: Snapshot,
     instruction: Option<&'a Arc<str>>,
+    output_limit: Option<crate::protocol::AttemptOutputLimit>,
     boundary: crate::compaction::boundary::Boundary<'b>,
 }
 
@@ -548,16 +552,20 @@ impl RequestCaller for ConversationCaller<'_, '_> {
     }
 
     fn unsuccessful_attempt_committed(
-        &self,
+        &mut self,
         attempt: &str,
         output_limit: Option<crate::protocol::AttemptOutputLimit>,
     ) {
-        self.control.record_attempt_end(
-            &self.snapshot.thread,
-            attempt,
-            crate::protocol::EventAttemptOutcome::NotAdopted,
-            output_limit,
-        );
+        if let Some(limit) = output_limit {
+            self.output_limit = Some(limit);
+        } else {
+            self.control.record_attempt_end(
+                &self.snapshot.thread,
+                attempt,
+                crate::protocol::EventAttemptOutcome::NotAdopted,
+                None,
+            );
+        }
     }
 
     fn attempt_changed(&self) {
@@ -834,7 +842,7 @@ fn reject_adoption(
     snapshot: &Snapshot,
     attempt: &str,
 ) -> rusqlite::Result<bool> {
-    Ok(tx.execute("UPDATE model_attempt SET input_manifest_json=json_set(input_manifest_json,'$.adoption',json_object('outcome','not_adopted','reason','turn_fenced')) WHERE id=?1 AND turn_id=?2 AND generation=?3 AND state IN ('completed','cancelled') AND json_type(input_manifest_json,'$.adoption') IS NULL",params![attempt,snapshot.turn,snapshot.generation])? == 1)
+    Ok(tx.execute("UPDATE model_attempt SET input_manifest_json=json_set(input_manifest_json,'$.adoption',json_object('outcome','not_adopted','reason','turn_fenced')) WHERE id=?1 AND turn_id=?2 AND generation=?3 AND (state IN ('completed','cancelled') OR (state='incomplete' AND json_extract(error_json,'$.error.kind')='output_limit')) AND json_type(input_manifest_json,'$.adoption') IS NULL",params![attempt,snapshot.turn,snapshot.generation])? == 1)
 }
 
 fn save_interrupted_outcome(

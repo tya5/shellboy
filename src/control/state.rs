@@ -114,15 +114,15 @@ pub(super) fn adopt_attempt(
     db: &Connection,
     attempt: &str,
 ) -> Result<AttemptTransition, StorageError> {
-    let changed = db.execute(
+    let adopted: Option<String> = db.query_row(
         "UPDATE model_attempt SET input_manifest_json=json_set(input_manifest_json,'$.adoption',json_object('outcome','adopted'))
-         WHERE id=?1 AND state='completed' AND json_type(input_manifest_json,'$.adoption') IS NULL
+         WHERE id=?1 AND kind='conversation' AND (state='completed' OR (state='incomplete' AND json_extract(error_json,'$.error.kind')='output_limit')) AND json_type(input_manifest_json,'$.adoption') IS NULL
          AND EXISTS(SELECT 1 FROM turn u JOIN run r ON r.id=u.run_id
                     WHERE u.id=model_attempt.turn_id AND u.generation=model_attempt.generation
-                    AND u.state='running' AND r.state='live')",
-        [attempt],
-    )?;
-    if changed == 1 {
+                    AND u.state='running' AND r.state='live') RETURNING state",
+        [attempt], |row| row.get(0),
+    ).optional()?;
+    if adopted.as_deref() == Some("completed") {
         let evidence:(String,String,String,Option<String>,Option<i64>)=db.query_row(
             "SELECT t.thread_id,a.profile_id,a.model_id,CASE WHEN json_type(a.input_manifest_json,'$.compaction_report_token') IS NULL THEN NULL WHEN json_type(a.input_manifest_json,'$.compaction_report_token')='object' THEN json_extract(a.input_manifest_json,'$.compaction_report_token') ELSE 'invalid-type' END, json_extract(a.usage_json,'$.input_tokens') FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE a.id=?1",
             [attempt],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?)))?;
@@ -143,7 +143,7 @@ pub(super) fn adopt_attempt(
             evidence.4.and_then(|input| u64::try_from(input).ok()),
         )?;
     }
-    if changed == 1 {
+    if adopted.is_some() {
         return Ok(AttemptTransition::Applied);
     }
     let row = db.query_row("SELECT a.state,a.generation,u.generation,u.state,r.state FROM model_attempt a JOIN turn u ON u.id=a.turn_id JOIN run r ON r.id=u.run_id WHERE a.id=?1", [attempt], |row| Ok((row.get::<_,String>(0)?,row.get::<_,i64>(1)?,row.get::<_,i64>(2)?,row.get::<_,String>(3)?,row.get::<_,String>(4)?))).optional()?;
