@@ -978,3 +978,7 @@ boundary, not by when the preview or a sent message arrived.
 To export a Thread for the user, run `shellboy thread export --thread ID --out PATH`. The file can include private conversation data and encrypted reasoning, so use the requested destination and do not share it without permission. This is a live export of retained history, not a snapshot or a recovery of deleted data.
 
 To import a retained-history JSONL export at the user's request, run `shellboy thread import --in PATH`. It creates a new Thread, does not resume execution, and does not replay the source provider's opaque reasoning.
+
+## Thread artifacts
+
+Register an output explicitly with `shellboy artifact add --thread "$SHELLBOY_THREAD_ID" --uri URI --title TITLE [--mime MIME]`. Use the URI format your client or system prompt specifies. For both `artifact add` and `artifact update`, you can pass a relative file path: the CLI joins it to your current directory before sending it, without checking that the target exists. Absolute paths and URIs with a scheme are sent unchanged. `shellboy artifact update --artifact A --uri URI` appends a version and retains the title unless replaced. Omitted MIME is not inherited. Use `artifact list --thread T`, `artifact get --artifact A [--version N]`, and `artifact remove --artifact A`. Pass `next_cursor` back as `--cursor` to continue list or version history.

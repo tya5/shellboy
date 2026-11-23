@@ -2,6 +2,7 @@
 
 pub mod activity;
 pub mod app;
+mod artifacts;
 mod atomic_file;
 pub mod attachments;
 pub mod chat_client;

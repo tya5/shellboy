@@ -68,6 +68,11 @@ fn operation_result_schemas(
     result!("thread.unarchive", ThreadUnarchiveResult);
     opaque!("thread.tag");
     opaque!("thread.tags");
+    result!("artifact.add", ArtifactSelected);
+    result!("artifact.update", ArtifactSelected);
+    result!("artifact.list", Page<ArtifactSummary>);
+    result!("artifact.get", ArtifactGetResult);
+    result!("artifact.remove", Accepted);
     opaque!("schedule.add");
     opaque!("schedule.list");
     opaque!("schedule.set");
@@ -768,6 +773,44 @@ macro_rules! record {
         pub struct $name { $($(#[$meta])* pub $field: $ty),* }
     };
 }
+pub const ARTIFACT_PAGE_LIMIT: u32 = 32;
+fn artifact_page_limit() -> u32 {
+    ARTIFACT_PAGE_LIMIT
+}
+args!(ArtifactAddArgs { thread_id: String, uri: String, title: String, #[serde(default)] mime: Option<String> });
+args!(ArtifactUpdateArgs { artifact_id: String, uri: String, #[serde(default)] title: Option<String>, #[serde(default)] mime: Option<String> });
+args!(ArtifactRemoveArgs {
+    artifact_id: String
+});
+args!(ArtifactListArgs { thread_id: String, #[serde(default)] cursor: Option<String>, #[serde(default="artifact_page_limit")] limit: u32 });
+args!(ArtifactGetArgs { artifact_id: String, #[serde(default)] version: Option<i64>, #[serde(default)] cursor: Option<String>, #[serde(default)] limit: Option<u32> });
+record!(ArtifactVersion { version: i64, uri: String, title: String, mime: Option<String>, created_at: String });
+record!(ArtifactVersionStamp {
+    version: i64,
+    created_at: String
+});
+record!(ArtifactSummary {
+    artifact_id: String,
+    thread_id: String,
+    created_at: String,
+    updated_at: String,
+    latest: ArtifactVersion
+});
+record!(ArtifactSelected {
+    artifact_id: String,
+    thread_id: String,
+    created_at: String,
+    updated_at: String,
+    version: ArtifactVersion
+});
+record!(ArtifactHistory { #[serde(flatten)] artifact: ArtifactSummary, versions: Page<ArtifactVersionStamp> });
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum ArtifactGetResult {
+    Selected(ArtifactSelected),
+    History(ArtifactHistory),
+}
+
 args!(ThreadTarget { #[serde(default)] thread_id: Option<String> });
 args!(AttachmentListArgs { #[serde(default)] thread_id: Option<String>, #[serde(default = "list_limit")] limit: u32, #[serde(default)] cursor: Option<String> });
 args!(#[derive(Default)] UsageGetArgs { #[serde(default)] attempt_id: Option<Box<str>>, #[serde(default)] since: Option<Box<str>>, #[serde(default)] since_node_id: Option<Box<str>>, #[serde(default)] until: Option<String>, #[serde(default)] thread_id: Option<Box<str>>, #[serde(default)] run_id: Option<String>, #[serde(default)] turn_id: Option<String>, #[serde(default)] include_children: bool, #[serde(default)] group_by: Option<Box<str>>, #[serde(default)] timezone: Option<Box<str>>, #[serde(default)] limit: Option<u32>, #[serde(default)] cursor: Option<Box<str>> });
@@ -1435,6 +1478,16 @@ pub enum Command {
     ThreadUnarchive(ThreadArchiveArgs),
     #[serde(rename = "thread.tag")]
     ThreadTag(ThreadTagArgs),
+    #[serde(rename = "artifact.add")]
+    ArtifactAdd(ArtifactAddArgs),
+    #[serde(rename = "artifact.update")]
+    ArtifactUpdate(ArtifactUpdateArgs),
+    #[serde(rename = "artifact.list")]
+    ArtifactList(ArtifactListArgs),
+    #[serde(rename = "artifact.get")]
+    ArtifactGet(ArtifactGetArgs),
+    #[serde(rename = "artifact.remove")]
+    ArtifactRemove(ArtifactRemoveArgs),
     #[serde(rename = "schedule.add")]
     ScheduleAdd(ScheduleAddArgs),
     #[serde(rename = "schedule.list")]
@@ -2533,6 +2586,11 @@ mod message_acknowledgement_tests {
         let schema = operation_result_schemas(&mut generator);
         let results = schema.as_object().unwrap();
         for name in [
+            "artifact.add",
+            "artifact.update",
+            "artifact.list",
+            "artifact.get",
+            "artifact.remove",
             "owner.shutdown",
             "status",
             "model.list",
@@ -2611,7 +2669,7 @@ mod message_acknowledgement_tests {
                 "missing result schema for {name}"
             );
         }
-        assert_eq!(results.len(), 73);
+        assert_eq!(results.len(), 78);
         for name in ["thread.create", "connection.test"] {
             assert_eq!(
                 results[name],

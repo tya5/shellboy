@@ -51,7 +51,7 @@ fn owner_forms_cover_every_owner_catalogue_identity_without_client_stubs() {
         .iter()
         .filter(|id| {
             id.spec().route == crate::operations::Route::Owner
-                && !crate::operations::catalogue_tests::CLI_ONLY_OPERATIONS.contains(id)
+                && !crate::operations::catalogue_tests::CLI_ONLY_OWNER_OPERATIONS.contains(id)
         })
         .copied()
         .collect::<std::collections::HashSet<_>>();

@@ -6,11 +6,25 @@ use crate::{
     protocol::{ApiError, ErrorCode, ThreadDeleteArgs},
     storage::StorageError,
 };
-use rusqlite::{Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 pub(super) const THREAD_LIMIT: usize = 256;
 const WITNESS_LIMIT: usize = 1024;
+const ARTIFACT_PREFIX_LIMIT: i64 = WITNESS_LIMIT as i64;
+// Cap rows before aggregation; CROSS JOIN keeps each artifact seek inside a selected Thread.
+const BLOCKERS_AND_COUNTS: &str = "WITH selected AS (SELECT value AS id FROM json_each(?1))
+         SELECT 0, NULL, NULL, NULL, count(*),
+                (SELECT count(*) FROM (
+                    SELECT 1 FROM selected s
+                    CROSS JOIN artifact a INDEXED BY artifact_thread_page ON a.thread_id=s.id
+                    LIMIT ?2
+                ))
+         FROM selected s CROSS JOIN schedule q INDEXED BY schedule_thread ON q.thread_id=s.id
+         UNION ALL
+         SELECT 1, r.id, r.thread_id, r.state, NULL, NULL
+         FROM selected s CROSS JOIN run r INDEXED BY one_live_run ON r.thread_id=s.id
+         WHERE r.state IN ('live','stopping') ORDER BY 1, 2";
 // Deleted physical children consume admission before exclusion, but unlike
 // Watch lineage they do NOT bridge traversal into their live grandchildren.
 const SCOPE: &str = r"
@@ -124,6 +138,7 @@ pub(crate) struct RawObservation {
     scope_truncated: bool,
     runs: Vec<Run>,
     schedule_count: i64,
+    artifact_prefix_count: i64,
     witnesses: Vec<Witness>,
     references_truncated: bool,
     replacement_threads: Vec<ReplacementThread>,
@@ -255,21 +270,12 @@ pub(crate) fn read_tx(
         );
     }
     let encoded = serde_json::to_string(&selected).expect("bounded Thread IDs serialize");
-    let mut statement = db.prepare(
-        "WITH selected AS (SELECT value AS id FROM json_each(?1))
-         SELECT 0, NULL, NULL, NULL, count(*)
-         FROM selected s CROSS JOIN schedule q INDEXED BY schedule_thread ON q.thread_id=s.id
-         UNION ALL
-         SELECT 1, r.id, r.thread_id, r.state, NULL
-         FROM selected s CROSS JOIN run r INDEXED BY one_live_run ON r.thread_id=s.id
-         WHERE r.state IN ('live','stopping') ORDER BY 1, 2",
-    )?;
-    let mut rows = statement.query([&encoded])?;
-    // The aggregate yields one row even when no Runs or schedules exist.
-    let schedule_count = rows
-        .next()?
-        .ok_or(rusqlite::Error::QueryReturnedNoRows)?
-        .get(4)?;
+    let mut statement = db.prepare(BLOCKERS_AND_COUNTS)?;
+    let mut rows = statement.query(params![encoded, ARTIFACT_PREFIX_LIMIT + 1])?;
+    // The aggregate yields one row even when no Runs or definitions exist.
+    let counts = rows.next()?.ok_or(rusqlite::Error::QueryReturnedNoRows)?;
+    let schedule_count = counts.get(4)?;
+    let artifact_prefix_count = counts.get(5)?;
     let mut runs = Vec::new();
     while let Some(row) = rows.next()? {
         runs.push(Run {
@@ -350,6 +356,7 @@ pub(crate) fn read_tx(
         scope_truncated,
         runs,
         schedule_count,
+        artifact_prefix_count,
         witnesses,
         references_truncated,
         replacement_threads,
@@ -431,9 +438,11 @@ pub(crate) fn prepare(raw: RawObservation) -> Value {
         .flat_map(|(_, nodes)| nodes.iter().cloned())
         .collect::<BTreeSet<_>>();
     let external = attachments.values().filter(|external| **external).count();
-    let observed = json!({"selected_path_nodes":nodes.len(),"shared_path_nodes":shared.len(),"surviving_path_thread_count":surviving_threads.len(),"completed_replacement_source_nodes":completed_sources.len(),"surviving_replacement_source_nodes":surviving_sources.len(),"attachment_reference_count":attachments.len(),"schedule_count":raw.schedule_count,"external_attachment_reference_count":external,"managed_attachment_reference_count":attachments.len()-external});
-    let references_complete =
-        selected_complete && !raw.references_truncated && raw.replacement_threads_complete;
+    let observed = json!({"selected_path_nodes":nodes.len(),"shared_path_nodes":shared.len(),"surviving_path_thread_count":surviving_threads.len(),"completed_replacement_source_nodes":completed_sources.len(),"surviving_replacement_source_nodes":surviving_sources.len(),"attachment_reference_count":attachments.len(),"schedule_count":raw.schedule_count,"artifact_count":raw.artifact_prefix_count.min(ARTIFACT_PREFIX_LIMIT),"external_attachment_reference_count":external,"managed_attachment_reference_count":attachments.len()-external});
+    let references_complete = selected_complete
+        && !raw.references_truncated
+        && raw.replacement_threads_complete
+        && raw.artifact_prefix_count <= ARTIFACT_PREFIX_LIMIT;
     let deletable = if live + stopping > 0 {
         Some(false)
     } else if selected_complete && references_complete {
@@ -479,7 +488,7 @@ pub(crate) fn prepare(raw: RawObservation) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rusqlite::{StatementStatus, params};
+    use rusqlite::StatementStatus;
     fn fixture() -> Connection {
         let db = Connection::open_in_memory().unwrap();
         db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
@@ -510,10 +519,10 @@ mod tests {
             descendants,
         }
     }
-    fn steps(db: &Connection, sql: &str, argument: &str) -> (i32, i32) {
+    fn steps(db: &Connection, sql: &str, arguments: impl rusqlite::Params) -> (i32, i32) {
         let mut statement = db.prepare(sql).unwrap();
         statement
-            .query_map([argument], |_| Ok(()))
+            .query_map(arguments, |_| Ok(()))
             .unwrap()
             .collect::<rusqlite::Result<Vec<_>>>()
             .unwrap();
@@ -556,6 +565,9 @@ mod tests {
         for id in ["root", "child", "grandchild", "outside"] {
             db.execute("INSERT INTO schedule(id,thread_id,once_at,next_at,enabled,cwd,command) VALUES(?1,?1,1,1,1,'/','echo fixture')", [id]).unwrap();
         }
+        for id in ["root", "child", "grandchild", "outside"] {
+            db.execute("INSERT INTO artifact(id,thread_id,created_at,updated_at) VALUES(?1,?1,'now','now')", [id]).unwrap();
+        }
         for descendants in [false, true] {
             let canonical = crate::deletion::preview(&db, &args(descendants)).unwrap();
             let trace = crate::frontend::sql_trace::Statements::new(&db);
@@ -567,6 +579,10 @@ mod tests {
             value.as_object_mut().unwrap().remove("observation");
             assert_eq!(value, canonical);
             assert_eq!(
+                value["references"]["artifact_count"],
+                if descendants { 2 } else { 1 }
+            );
+            assert_eq!(
                 value["references"]["schedule_count"],
                 if descendants { 2 } else { 1 }
             );
@@ -577,12 +593,62 @@ mod tests {
         }
     }
     #[test]
+    fn artifact_observation_bounds_indexed_work_and_reports_a_lower_bound() {
+        let db = fixture();
+        let add = |first: i64, last: i64| {
+            db.execute(
+                "WITH RECURSIVE ids(n) AS (VALUES(?1) UNION ALL SELECT n+1 FROM ids WHERE n<?2)
+                 INSERT INTO artifact(id,thread_id,created_at,updated_at)
+                 SELECT printf('root-%06d',n),'root','now','now' FROM ids",
+                params![first, last],
+            )
+            .unwrap();
+        };
+        add(1, ARTIFACT_PREFIX_LIMIT);
+        let args = args(false);
+        let exact_boundary = prepare(read_tx(&db, &args).unwrap());
+        assert_eq!(exact_boundary["observation"]["references_complete"], true);
+        assert_eq!(
+            exact_boundary["references"]["artifact_count"],
+            ARTIFACT_PREFIX_LIMIT
+        );
+        add(ARTIFACT_PREFIX_LIMIT + 1, ARTIFACT_PREFIX_LIMIT + 1);
+        let partial = prepare(read_tx(&db, &args).unwrap());
+        assert_eq!(partial["observation"]["references_complete"], false);
+        assert!(partial["references"]["artifact_count"].is_null());
+        assert!(partial["deletable_now"].is_null());
+        assert_eq!(
+            partial["observation"]["observed_lower_bounds"]["references"]["artifact_count"],
+            ARTIFACT_PREFIX_LIMIT
+        );
+        let artifact_steps = || {
+            steps(
+                &db,
+                BLOCKERS_AND_COUNTS,
+                params![r#"["root"]"#, ARTIFACT_PREFIX_LIMIT + 1],
+            )
+        };
+        let before = artifact_steps();
+        let total = ARTIFACT_PREFIX_LIMIT * 4;
+        add(ARTIFACT_PREFIX_LIMIT + 2, total);
+        assert_eq!(
+            artifact_steps(),
+            before,
+            "more artifacts must not increase observation work"
+        );
+        assert_eq!(prepare(read_tx(&db, &args).unwrap()), partial);
+        assert_eq!(
+            crate::deletion::preview(&db, &args).unwrap()["references"]["artifact_count"],
+            total
+        );
+    }
+    #[test]
     fn physical_deleted_fanout_is_bounded_before_exclusion_and_negative_evidence_stays_unknown() {
         let db = fixture();
         for i in 0..1500 {
             thread(&db, &format!("excluded-{i:05}"), Some("root"), true);
         }
-        let before = steps(&db, SCOPE, "root");
+        let before = steps(&db, SCOPE, ["root"]);
         let value = prepare(read_tx(&db, &args(true)).unwrap());
         assert_eq!(value["observation"]["descendant_physical_candidates"], 256);
         assert_eq!(value["observation"]["selected_scope_complete"], false);
@@ -593,7 +659,7 @@ mod tests {
             thread(&db, &format!("excluded-{i:05}"), Some("root"), true);
         }
         assert_eq!(
-            steps(&db, SCOPE, "root"),
+            steps(&db, SCOPE, ["root"]),
             before,
             "adding excluded siblings cannot increase traversal VM work"
         );
@@ -623,7 +689,7 @@ mod tests {
             path(&db, &id, "source", 0);
         }
         let encoded = r#"["root"]"#;
-        let before = steps(&db, REFERENCES, encoded);
+        let before = steps(&db, REFERENCES, [encoded]);
         let value = prepare(read_tx(&db, &args(false)).unwrap());
         assert_eq!(value["observation"]["reference_witnesses"], 1024);
         assert_eq!(value["observation"]["references_complete"], false);
@@ -635,7 +701,7 @@ mod tests {
             path(&db, &id, "source", 0);
         }
         assert_eq!(
-            steps(&db, REFERENCES, encoded),
+            steps(&db, REFERENCES, [encoded]),
             before,
             "excluded inverse memberships must not be skipped by an unbounded filter"
         );
@@ -655,14 +721,14 @@ mod tests {
         for i in 0..1500 {
             replacement(&db, &format!("pending-{i}"), "source", "pending");
         }
-        let before = steps(&db, REFERENCES, r#"["root"]"#);
+        let before = steps(&db, REFERENCES, [r#"["root"]"#]);
         let value = prepare(read_tx(&db, &args(false)).unwrap());
         assert!(value["references"]["completed_replacement_source_nodes"].is_null());
         assert_eq!(value["observation"]["reference_witnesses"], 1024);
         for i in 1500..3000 {
             replacement(&db, &format!("pending-{i}"), "source", "pending");
         }
-        assert_eq!(steps(&db, REFERENCES, r#"["root"]"#), before);
+        assert_eq!(steps(&db, REFERENCES, [r#"["root"]"#]), before);
     }
     #[test]
     fn unindexed_reverse_replacement_membership_uses_remaining_physical_prefix_and_explicit_unknown()

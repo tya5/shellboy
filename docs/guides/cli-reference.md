@@ -1181,3 +1181,11 @@ Recovery rewind is available as `shellboy thread rewind --thread THREAD_ID --nod
 `shellboy thread export --thread ID --out PATH` streams retained conversation history from a running owner to a JSONL file. Include the full ID or a unique Thread prefix. The file can contain private conversations and encrypted reasoning; share it only as intended. Export is live and does not recover data already removed. See [Thread export format](../design/thread-export.md).
 
 `shellboy thread import --in PATH` validates the export and creates a new Thread on the running owner in one transaction. It rejects files beyond the request or graph limits and does not restore Runs, Turns, or attachments. Restore refuses imported trim or spill markers with source-local anchors. Compaction treats imported tool spans as complete as saved, even if a live export captured a call before its result. See [Thread export and import](../design/thread-export.md).
+
+## Thread artifacts
+
+- `shellboy artifact add --thread THREAD_ID --uri URI --title TITLE [--mime MIME]` registers an artifact.
+- `shellboy artifact update --artifact ARTIFACT_ID --uri URI [--title TITLE] [--mime MIME]` appends a version.
+- `shellboy artifact list --thread THREAD_ID [--limit N] [--cursor CURSOR]` lists latest metadata, newest-updated first. Equal timestamps sort by artifact ID. Pass `next_cursor` to continue the same live list; start again without a cursor to see entries that moved ahead of it.
+
+On add and update, the CLI joins a relative file path to its own current working directory before sending it. It does not check file existence or normalize `..` beyond the path join. Absolute paths, URLs and custom-scheme URIs are left unchanged. The owner stores the resulting string without resolving it against its own working directory.
