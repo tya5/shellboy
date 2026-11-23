@@ -4583,6 +4583,7 @@ mod stream_tests {
                 updated_at: "2026-10-25T09:30:00Z".into(),
                 created_at: None,
                 excerpt: String::new(),
+                excerpt_complete: true,
             },
             ThreadSummary {
                 awaiting_reply: 0,
@@ -4609,6 +4610,7 @@ mod stream_tests {
                 updated_at: "unknown timezone/date".into(),
                 created_at: None,
                 excerpt: String::new(),
+                excerpt_complete: true,
             },
         ];
         let (worker_thread, times) =

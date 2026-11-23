@@ -3010,6 +3010,7 @@ fn dense_thread_rows_and_selected_preview_stay_compact() {
                 // Keep this density fixture in the supplied newest-first order.
                 updated_at: format!("2026-10-25T00:00:{:02}Z", 29 - i),
                 created_at: None,
+                excerpt_complete: true,
                 excerpt: format!(
                     "# 見出し\n\n**本文** {} HIDDEN_TAIL",
                     "e\u{301}".repeat(100)

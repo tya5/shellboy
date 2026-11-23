@@ -27,6 +27,7 @@ fn item(id: &str, parent: Option<&str>) -> ThreadSummary {
         updated_at: "2026-10-25T10:00:00Z".into(),
         created_at: None,
         excerpt: "# 見出し\n\n本文".into(),
+        excerpt_complete: true,
     }
 }
 fn key(ui: &mut UiState, code: KeyCode) -> Vec<UiAction> {

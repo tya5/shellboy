@@ -320,6 +320,11 @@ not assert such work. Exit markers and Revisit are independent of activity.
 
 The optional `state` filter matches the row's `state`, not `activity`, and
 requires updated order. The cursor is bound to the state filter.
+Ordinary updated-order `thread.list` seeks within the archive and optional cwd
+partition. It examines at most 200 candidate Threads plus one lookahead;
+`next_cursor` resumes after the last examined key, even when the page is empty.
+`ThreadSummary.excerpt_complete` is omitted when true. `false` means no prose
+was found in the latest 32 selected nodes and older nodes were not examined.
 
 ### Cross-Thread human waiting list
 

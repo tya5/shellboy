@@ -1,6 +1,6 @@
 use super::{
-    Result, error, normalize, sql_error, storage_error, tags, thread_display_title, thread_excerpt,
-    thread_summary, title_text,
+    Result, error, normalize, sql_error, storage_error, tags, thread_display_title, thread_summary,
+    title_text,
 };
 use crate::digest::sha256_hex as hash;
 use crate::protocol::{
@@ -33,7 +33,7 @@ pub(crate) fn thread_list(
         return thread_list_awaiting_human(connection, args);
     }
     let filter = args.query.as_deref().unwrap_or("");
-    let needle = title_text(filter).to_lowercase();
+    let has_query = !title_text(filter).is_empty();
     // Tags and cwd narrow in SQL; the cursor is bound to them through a digest.
     let tags = tags::normalize_all(&args.tags)?;
     // Same lexical rule as saved cwds (`normalize`): `/work/proj/` and `/work/./proj` find
@@ -98,83 +98,45 @@ pub(crate) fn thread_list(
         .and_then(|(time, _)| time.as_deref())
         .unwrap_or("");
     let last_id = position.as_ref().map_or("", |(_, id)| id.as_str());
-    // Filter against the same derived labels returned by ThreadGet/List. Keep
-    // candidates as a cursor: a filtered miss scans without collecting history.
-    let sql = match args.order {
-        ThreadListOrder::Updated if state.is_some() => {
-            thread_summary::state_candidate_sql(args.archived, position.is_some())
-        }
-        ThreadListOrder::Updated => {
-            thread_summary::page_sql(args.archived, tags.len(), cwd.is_some())
-        }
-        ThreadListOrder::Created => {
-            thread_summary::created_page_sql(args.archived, position.as_ref().map(|(time, _)| time))
-        }
-    };
-    let mut statement = connection.prepare(&sql).map_err(sql_error)?;
-    let page_limit = if needle.is_empty() {
-        i64::from(args.limit) + 1
-    } else {
-        -1
-    };
-    let candidate_limit = i64::from(crate::protocol::MAX_LIST_LIMIT) + 1;
-    let mut binds: Vec<&dyn rusqlite::ToSql> = match args.order {
-        ThreadListOrder::Updated if state.is_some() && position.is_some() => {
-            vec![&candidate_limit, &last_time, &last_id]
-        }
-        ThreadListOrder::Updated if state.is_some() => vec![&candidate_limit],
-        ThreadListOrder::Updated => vec![&watermark, &last_time, &last_id, &page_limit],
-        ThreadListOrder::Created => vec![&last_time, &last_id, &page_limit],
-    };
-    if state.is_none() {
-        binds.extend(tags.iter().map(|tag| tag as &dyn rusqlite::ToSql));
-        binds.extend(cwd.iter().map(|path| path as &dyn rusqlite::ToSql));
-    }
-    let mut rows = statement.query(binds.as_slice()).map_err(sql_error)?;
-    let mut items = Vec::new();
-    let mut scanned = 0;
-    let mut last_examined = None;
-    let mut continuation = None;
-    while let Some(row) = rows.next().map_err(sql_error)? {
-        let raw = thread_summary::decode(row).map_err(sql_error)?;
-        let id = &raw.thread_id;
-        if let Some(state) = state {
-            if scanned == crate::protocol::MAX_LIST_LIMIT || items.len() == args.limit as usize {
-                continuation = last_examined;
-                break;
-            }
-            scanned += 1;
-            last_examined = Some((Some(raw.updated_at.clone()), id.clone()));
-            if raw.state != state || cwd.is_some_and(|path| path != raw.cwd) {
-                continue;
-            }
-            if !tags.is_empty() {
-                let actual = super::tags::for_thread(connection, id)?;
-                if !tags.iter().all(|tag| actual.contains(tag)) {
-                    continue;
-                }
-            }
-        }
-        let title = thread_display_title(connection, id, &raw.stored_title)?;
-        if !thread_summary::matches_filter(id, &title, &raw.cwd, filter) {
-            continue;
-        }
-        items.push(complete_summary(connection, raw, title)?);
-        if items.len() > args.limit as usize {
-            break;
-        }
-    }
-    if items.len() > args.limit as usize {
-        items.pop();
-        let last = items.last().unwrap();
-        continuation = Some((
-            match args.order {
-                ThreadListOrder::Updated => Some(last.updated_at.clone()),
-                ThreadListOrder::Created => last.created_at.clone(),
+    let (mut items, continuation) = match args.order {
+        ThreadListOrder::Updated => updated_page(
+            connection,
+            args,
+            (last_time, last_id),
+            position.is_some(),
+            UpdatedFilter {
+                cwd,
+                tags: &tags,
+                state,
+                has_query,
+                watermark,
             },
-            last.thread_id.clone(),
-        ));
-    }
+        )?,
+        ThreadListOrder::Created => {
+            let sql = thread_summary::created_page_sql(
+                args.archived,
+                position.as_ref().map(|(time, _)| time),
+            );
+            let mut statement = connection.prepare(&sql).map_err(sql_error)?;
+            let mut rows = statement
+                .query(params![last_time, last_id, i64::from(args.limit) + 1])
+                .map_err(sql_error)?;
+            let mut items = Vec::new();
+            let mut continuation = None;
+            while let Some(row) = rows.next().map_err(sql_error)? {
+                if items.len() == args.limit as usize {
+                    continuation = items.last().map(|item: &ThreadSummary| {
+                        (item.created_at.clone(), item.thread_id.clone())
+                    });
+                    break;
+                }
+                let raw = thread_summary::decode(row).map_err(sql_error)?;
+                let title = thread_display_title(connection, &raw.thread_id, &raw.stored_title)?;
+                items.push(complete_summary(connection, raw, title)?);
+            }
+            (items, continuation)
+        }
+    };
     let next_cursor = continuation
         .map(|position| {
             PageCursor {
@@ -193,13 +155,158 @@ pub(crate) fn thread_list(
     Ok(Page { items, next_cursor })
 }
 
+type ListPosition = (Option<String>, String);
+
+struct UpdatedFilter<'a> {
+    cwd: Option<&'a str>,
+    tags: &'a [String],
+    state: Option<&'a str>,
+    has_query: bool,
+    watermark: i64,
+}
+
+fn updated_page(
+    connection: &Connection,
+    args: &ThreadListArgs,
+    (last_time, last_id): (&str, &str),
+    after: bool,
+    filter: UpdatedFilter<'_>,
+) -> Result<(Vec<ThreadSummary>, Option<ListPosition>)> {
+    let sql = thread_summary::updated_candidate_sql(args.archived, after, filter.cwd.is_some());
+    let mut statement = connection.prepare_cached(&sql).map_err(sql_error)?;
+    let limit = crate::protocol::MAX_LIST_LIMIT;
+    let candidate_limit = i64::from(limit) + 1;
+    let mut binds: Vec<&dyn rusqlite::ToSql> = vec![&candidate_limit];
+    if after {
+        binds.extend([&last_time as &dyn rusqlite::ToSql, &last_id]);
+    }
+    binds.extend(filter.cwd.iter().map(|cwd| cwd as &dyn rusqlite::ToSql));
+    let mut rows = statement.query(binds.as_slice()).map_err(sql_error)?;
+    let mut tag_probe = connection
+        .prepare_cached("SELECT EXISTS(SELECT 1 FROM thread_tag WHERE thread_id=?1 AND tag=?2)")
+        .map_err(sql_error)?;
+    let mut state_probe = connection
+        .prepare_cached(&thread_summary::state_sql())
+        .map_err(sql_error)?;
+    let mut ids = Vec::new();
+    let mut titles = std::collections::HashMap::new();
+    let mut last_examined = None;
+    let mut continuation = None;
+    'candidates: for scanned in 0..=limit {
+        let Some(row) = rows.next().map_err(sql_error)? else {
+            break;
+        };
+        if scanned == limit || ids.len() == args.limit as usize {
+            continuation = last_examined;
+            break;
+        }
+        let id: String = row.get(0).map_err(sql_error)?;
+        let updated_at: String = row.get(1).map_err(sql_error)?;
+        last_examined = Some((Some(updated_at), id.clone()));
+        let rowid: i64 = row.get(4).map_err(sql_error)?;
+        if filter.state.is_none() && rowid > filter.watermark {
+            continue;
+        }
+        for tag in filter.tags {
+            if !tag_probe
+                .query_row(params![id, tag], |r| r.get::<_, bool>(0))
+                .map_err(sql_error)?
+            {
+                continue 'candidates;
+            }
+        }
+        if let Some(state) = filter.state {
+            let actual: String = state_probe
+                .query_row([&id], |r| r.get(0))
+                .map_err(sql_error)?;
+            if actual != state {
+                continue;
+            }
+        }
+        if filter.has_query {
+            let stored: String = row.get(2).map_err(sql_error)?;
+            let cwd: String = row.get(3).map_err(sql_error)?;
+            let title = thread_display_title(connection, &id, &stored)?;
+            if !thread_summary::matches_filter(
+                &id,
+                &title,
+                &cwd,
+                args.query.as_deref().unwrap_or_default(),
+            ) {
+                continue;
+            }
+            titles.insert(id.clone(), title);
+        }
+        ids.push(id);
+    }
+    // Heavy summary, observations and excerpt reads run only for admitted IDs.
+    let mut by_id: std::collections::HashMap<_, _> = thread_summary::read_ids_tx(connection, &ids)
+        .map_err(storage_error)?
+        .into_iter()
+        .map(|raw| (raw.thread_id.clone(), raw))
+        .collect();
+    let mut items = Vec::with_capacity(ids.len());
+    for id in ids {
+        let raw = by_id.remove(&id).ok_or_else(|| {
+            error(
+                ErrorCode::InvalidState,
+                "Thread disappeared during list read",
+            )
+        })?;
+        let title = match titles.remove(&id) {
+            Some(title) => title,
+            None => thread_display_title(connection, &id, &raw.stored_title)?,
+        };
+        items.push(complete_summary(connection, raw, title)?);
+    }
+    Ok((items, continuation))
+}
+
+const EXCERPT_NODES: usize = 32;
+
+fn thread_excerpt(connection: &Connection, thread: &str) -> Result<(String, bool)> {
+    let mut suffix = connection
+        .prepare_cached(
+            "SELECT node_id FROM thread_path WHERE thread_id=?1 ORDER BY ordinal DESC LIMIT ?2",
+        )
+        .map_err(sql_error)?;
+    let mut prose = connection.prepare_cached(
+        "SELECT payload_json FROM node WHERE id=?1 AND kind IN ('user','user_message','message','assistant','assistant_response')"
+    ).map_err(sql_error)?;
+    let mut rows = suffix
+        .query(params![thread, EXCERPT_NODES as i64 + 1])
+        .map_err(sql_error)?;
+    for _ in 0..EXCERPT_NODES {
+        let Some(row) = rows.next().map_err(sql_error)? else {
+            return Ok((String::new(), true));
+        };
+        let id: String = row.get(0).map_err(sql_error)?;
+        let body: Option<String> = prose
+            .query_row([id], |r| r.get(0))
+            .optional()
+            .map_err(sql_error)?
+            .flatten();
+        let Some(payload) =
+            body.and_then(|body| serde_json::from_str::<serde_json::Value>(&body).ok())
+        else {
+            continue;
+        };
+        let excerpt = crate::history::conversation_excerpt(&payload, 512);
+        if !excerpt.trim().is_empty() {
+            return Ok((excerpt, true));
+        }
+    }
+    Ok((String::new(), rows.next().map_err(sql_error)?.is_none()))
+}
+
 fn complete_summary(
     connection: &Connection,
     raw: thread_summary::RawSummary,
     title: String,
 ) -> Result<ThreadSummary> {
-    let excerpt = thread_excerpt(connection, &raw.thread_id)?;
+    let (excerpt, excerpt_complete) = thread_excerpt(connection, &raw.thread_id)?;
     let mut summary = thread_summary::prepare(raw, title, excerpt);
+    summary.excerpt_complete = excerpt_complete;
     summary.last_end_message =
         crate::thread_observation::last_end_message(connection, &summary.thread_id)?;
     summary.last_input = crate::thread_observation::last_input(connection, &summary.thread_id)?;
@@ -436,6 +543,179 @@ mod tests {
         assert!(empty.items.is_empty() && empty.next_cursor.is_none());
     }
 
+    fn measured<T>(db: &Connection, work: impl FnOnce() -> T) -> (T, usize) {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        let count = Arc::new(AtomicUsize::new(0));
+        let observed = count.clone();
+        db.progress_handler(
+            1,
+            Some(move || {
+                observed.fetch_add(1, Ordering::Relaxed);
+                false
+            }),
+        )
+        .unwrap();
+        let result = work();
+        db.progress_handler(0, None::<fn() -> bool>).unwrap();
+        (result, count.load(Ordering::Relaxed))
+    }
+
+    #[test]
+    fn search_misses_do_not_read_summary_columns_and_continue_to_a_match() {
+        use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        db.execute_batch("WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<450)
+            INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at)
+            SELECT printf('t%06d',i),CASE WHEN i=250 THEN 'An exact Needle' ELSE 'Other' END,'/','','p','m','2026-11-24T00:00:00Z' FROM n;").unwrap();
+        db.authorizer(Some(|context: AuthContext<'_>| match context.action {
+            AuthAction::Read {
+                table_name: "receipt" | "node",
+                ..
+            } => Authorization::Deny,
+            _ => Authorization::Allow,
+        }))
+        .unwrap();
+        let args = ThreadListArgs {
+            query: Some("EXACT needle".into()),
+            limit: 1,
+            ..Default::default()
+        };
+        let first = thread_list(&db, &args).unwrap();
+        assert!(first.items.is_empty());
+        let cursor = first
+            .next_cursor
+            .expect("more may exist after an empty page");
+        db.authorizer(None::<fn(AuthContext<'_>) -> Authorization>)
+            .unwrap();
+        let next = thread_list(
+            &db,
+            &ThreadListArgs {
+                cursor: Some(cursor),
+                ..args
+            },
+        )
+        .unwrap();
+        assert_eq!(next.items[0].thread_id, "t000250");
+    }
+
+    #[test]
+    fn tag_pages_and_deep_cwd_pages_do_not_walk_unrelated_candidates() {
+        let measure = |growth| {
+            let db = Connection::open_in_memory().unwrap();
+            db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+            db.execute_batch(&format!("
+                WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<=500+{growth})
+                INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at,archived_at)
+                  SELECT printf('t%06d',i),'Title','/work','','p','m','2026-11-24T00:00:00Z',NULL FROM n;
+                WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<{growth})
+                INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at,archived_at)
+                  SELECT printf('z%06d',i),'Archive','/work','','p','m','2026-11-24T00:00:00Z','archived' FROM n;
+                INSERT INTO thread_tag(thread_id,tag) SELECT id,'common' FROM thread;
+                INSERT INTO thread_tag(thread_id,tag) VALUES('t000200','rare');")).unwrap();
+            let tag_args = ThreadListArgs {
+                tags: vec!["common".into(), "rare".into()],
+                ..Default::default()
+            };
+            let (tag_page, tag_steps) = measured(&db, || thread_list(&db, &tag_args).unwrap());
+            assert!(tag_page.items.is_empty() && tag_page.next_cursor.is_some());
+            // Continue at the same timestamp and ID, with thousands of rows above it.
+            let args = ThreadListArgs {
+                cwd: Some("/work".into()),
+                limit: 1,
+                ..Default::default()
+            };
+            let cursor = PageCursor {
+                version: 1,
+                scope: list_scope(args.archived).into(),
+                filter: list_cursor_filter("", &[], Some("/work")),
+                last_sort_key: serde_json::to_string(&(Some("2026-11-24T00:00:00Z"), "t000201"))
+                    .unwrap(),
+                watermark: 100_000,
+                revision: 0,
+                encoding: None,
+            }
+            .encode()
+            .unwrap();
+            let (page, cwd_steps) = measured(&db, || {
+                thread_list(
+                    &db,
+                    &ThreadListArgs {
+                        cursor: Some(cursor),
+                        ..args
+                    },
+                )
+                .unwrap()
+            });
+            assert_eq!(page.items[0].thread_id, "t000200");
+            // No preceding archive scan even when there are only archived candidates in the cwd.
+            db.execute(
+                "UPDATE thread SET cwd='/archive' WHERE archived_at IS NOT NULL",
+                [],
+            )
+            .unwrap();
+            let (page, archive_steps) = measured(&db, || {
+                thread_list(
+                    &db,
+                    &ThreadListArgs {
+                        cwd: Some("/archive".into()),
+                        ..Default::default()
+                    },
+                )
+                .unwrap()
+            });
+            assert!(page.items.is_empty() && page.next_cursor.is_none());
+            [tag_steps, cwd_steps, archive_steps]
+        };
+        let (few, many) = (measure(20), measure(5000));
+        for (few, many) in few.into_iter().zip(many) {
+            assert!(
+                many <= few + 64,
+                "VM work grew beyond the candidate budget: {few} -> {many}"
+            );
+        }
+    }
+
+    #[test]
+    fn excerpt_distinguishes_exhausted_history_from_an_unread_prefix() {
+        let measure = |count| {
+            let db = Connection::open_in_memory().unwrap();
+            db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+            db.execute_batch(&format!("
+                CREATE TEMP TABLE fixture AS WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<{count}) SELECT i,printf('n%06d',i) id FROM n;
+                INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at) VALUES('t','Title','/','','p','m','now');
+                INSERT INTO node(id,kind,created_at,payload_json) SELECT id,'tool_result','now','{{}}' FROM fixture;
+                INSERT INTO thread_path(thread_id,ordinal,node_id) SELECT 't',i,id FROM fixture;")).unwrap();
+            let ((excerpt, complete), steps) = measured(&db, || thread_excerpt(&db, "t").unwrap());
+            assert!(excerpt.is_empty());
+            assert_eq!(complete, count <= EXCERPT_NODES);
+            let page = thread_list(
+                &db,
+                &ThreadListArgs {
+                    thread_ids: Some(vec!["t".into()]),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            let row = serde_json::to_value(&page.items[0]).unwrap();
+            if complete {
+                assert!(row.get("excerpt_complete").is_none());
+            } else {
+                assert_eq!(row["excerpt_complete"], false);
+            }
+            steps
+        };
+        measure(EXCERPT_NODES);
+        let (few, many) = (measure(EXCERPT_NODES + 1), measure(5000));
+        assert!(
+            many <= few + 32,
+            "excerpt cost grew with older history: {few} -> {many}"
+        );
+    }
+
     #[test]
     fn sparse_state_page_continues_without_scanning_all_threads() {
         let measure = |num_threads| {
@@ -469,7 +749,7 @@ mod tests {
                 second.items[0].thread_id,
                 format!("t{:06}", num_threads - 200)
             );
-            let sql = thread_summary::state_candidate_sql(ArchivedFilter::Include, true);
+            let sql = thread_summary::updated_candidate_sql(ArchivedFilter::Include, true, false);
             let mut statement = db.prepare(&sql).unwrap();
             let rows = statement
                 .query_map(

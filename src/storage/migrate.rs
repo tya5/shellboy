@@ -337,6 +337,11 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         sql: include_str!("../../migrations/0063_thread_reply_summary.sql"),
         foreign_keys: None,
     },
+    Migration {
+        version: 64,
+        sql: include_str!("../../migrations/next_thread_cwd_partitions.sql"),
+        foreign_keys: None,
+    },
 ];
 
 pub(super) fn run(

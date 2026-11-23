@@ -123,98 +123,43 @@ pub(crate) struct SummaryIdentity {
     pub turn_generation: Option<u64>,
 }
 
-/// Every mode repeats its partial-index predicate literally so SQLite can use
-/// `threads_visible_updated` / `threads_archived_updated` (see the plan tests).
-pub(super) fn state_candidate_sql(mode: ArchivedFilter, after: bool) -> String {
-    let (index, archive) = match mode {
-        ArchivedFilter::Exclude => ("threads_visible_updated", " AND archived_at IS NULL"),
-        ArchivedFilter::Only => ("threads_archived_updated", " AND archived_at IS NOT NULL"),
-        ArchivedFilter::Include => ("threads_updated_seek", ""),
+/// Seek directly to the next key in the requested cwd/archive partition.
+pub(super) fn updated_candidate_sql(mode: ArchivedFilter, after: bool, cwd: bool) -> String {
+    let (index, archive) = match (mode, cwd) {
+        (ArchivedFilter::Exclude, false) => ("threads_visible_updated", " AND archived_at IS NULL"),
+        (ArchivedFilter::Only, false) => {
+            ("threads_archived_updated", " AND archived_at IS NOT NULL")
+        }
+        (ArchivedFilter::Include, false) => ("threads_updated_seek", ""),
+        (ArchivedFilter::Exclude, true) => {
+            ("threads_visible_cwd_updated", " AND archived_at IS NULL")
+        }
+        (ArchivedFilter::Only, true) => (
+            "threads_archived_cwd_updated",
+            " AND archived_at IS NOT NULL",
+        ),
+        (ArchivedFilter::Include, true) => ("threads_cwd_updated", ""),
     };
     let range = if after {
         " AND (updated_at,id)<(?2,?3)"
     } else {
         ""
     };
-    let candidates = format!(
-        "SELECT id FROM thread INDEXED BY {index} WHERE deleted_at IS NULL{archive}{range} ORDER BY updated_at DESC,id DESC LIMIT ?1"
-    );
-    let source =
-        format!("FROM ({candidates}) candidates CROSS JOIN thread t ON t.id=candidates.id ");
-    let projection = columns_from().replacen("FROM thread t ", &source, 1);
-    format!("{projection} ORDER BY t.updated_at DESC,t.id DESC")
+    let cwd = match (after, cwd) {
+        (true, true) => " AND cwd=?4",
+        (false, true) => " AND cwd=?2",
+        (_, false) => "",
+    };
+    format!(
+        "SELECT id,updated_at,title,cwd,rowid FROM thread INDEXED BY {index}
+        WHERE deleted_at IS NULL{archive}{cwd}{range} ORDER BY updated_at DESC,id DESC LIMIT ?1"
+    )
 }
 
-pub(super) fn page_sql(mode: ArchivedFilter, tags: usize, cwd: bool) -> String {
-    let columns_from = columns_from();
-    // INDEXED BY pins the partial index: without table statistics the planner
-    // prefers `threads_updated` plus a sort, which reads past every archived Thread.
-    let archived = match mode {
-        ArchivedFilter::Exclude => " AND t.archived_at IS NULL",
-        ArchivedFilter::Only => " AND t.archived_at IS NOT NULL",
-        ArchivedFilter::Include => "",
-    };
-    let (source, mut predicate) = if tags > 0 {
-        // Drive from the first tag's members (index `thread_tag_by_tag`); the cost is
-        // that tag's membership, never the number of unrelated Threads. The page is
-        // ordered by a bounded top-N sort; every further tag is a primary-key probe.
-        (
-            "FROM thread_tag g0 CROSS JOIN thread t ON t.id=g0.thread_id ".to_owned(),
-            "g0.tag=?5".to_owned(),
-        )
-    } else if cwd {
-        (
-            "FROM thread t INDEXED BY threads_cwd_updated ".to_owned(),
-            String::new(),
-        )
-    } else {
-        let index = match mode {
-            ArchivedFilter::Exclude => "INDEXED BY threads_visible_updated ",
-            ArchivedFilter::Only => "INDEXED BY threads_archived_updated ",
-            ArchivedFilter::Include => "",
-        };
-        (format!("FROM thread t {index}"), String::new())
-    };
-    let mut extra = |clause: String| {
-        if !predicate.is_empty() {
-            predicate.push_str(" AND ");
-        }
-        predicate.push_str(&clause);
-    };
-    for n in 1..tags {
-        extra(format!(
-            "EXISTS(SELECT 1 FROM thread_tag g{n} WHERE g{n}.thread_id=t.id AND g{n}.tag=?{})",
-            5 + n
-        ));
-    }
-    if cwd {
-        extra(format!("t.cwd=?{}", 5 + tags));
-    }
-    let window = "t.rowid<=?1
-      AND (?2='' OR t.updated_at<?2 OR (t.updated_at=?2 AND t.id<?3))
-      ORDER BY t.updated_at DESC,t.id DESC LIMIT ?4";
-    if tags > 0 {
-        // Choose the page from IDs and sort keys only, then read the summary columns
-        // (latest Run, Turn, activity subqueries) for just those rows: without this
-        // they would run for every member of the tag before the sort.
-        let inner = format!(
-            "SELECT t.id AS id {source} WHERE {predicate} AND t.deleted_at IS NULL{archived} AND {window}"
-        );
-        let columns_from = columns_from.replacen(
-            "FROM thread t ",
-            &format!("FROM ({inner}) p CROSS JOIN thread t ON t.id=p.id "),
-            1,
-        );
-        return format!("{columns_from}ORDER BY t.updated_at DESC,t.id DESC");
-    }
-    let predicate = if predicate.is_empty() {
-        String::new()
-    } else {
-        format!("{predicate} AND ")
-    };
-    let columns_from = columns_from.replacen("FROM thread t ", &source, 1);
-    format!("{columns_from}WHERE {predicate}t.deleted_at IS NULL{archived} AND {window}")
+pub(super) fn state_sql() -> String {
+    format!("SELECT {CURRENT_STATE} FROM thread t {RUN_TURN_JOINS} WHERE t.id=?1")
 }
+
 /// Each archive partition and nullable-key segment offers at most one page to
 /// the merge. Only those bounded IDs can reach the summary joins.
 pub(super) fn created_page_sql(mode: ArchivedFilter, after: Option<&Option<String>>) -> String {
@@ -326,6 +271,7 @@ pub(crate) fn prepare(raw: RawSummary, title: String, excerpt: String) -> Thread
         archived_at: raw.archived_at,
         tags: Vec::new(),
         excerpt,
+        excerpt_complete: true,
     }
 }
 pub(crate) fn read_ids_tx(
@@ -342,14 +288,17 @@ pub(crate) fn read_ids_tx(
     if ids.is_empty() {
         return Ok(Vec::new());
     }
-    let sql=columns_from().replace("FROM thread t", "FROM (SELECT DISTINCT value AS id FROM json_each(?1)) requested CROSS JOIN thread t ON t.id=requested.id");
-    let sql = format!("{sql}WHERE t.deleted_at IS NULL");
     let encoded = serde_json::to_string(ids).expect("Thread IDs serialize");
     let rows = db
-        .prepare(&sql)?
+        .prepare(&ids_summary_sql())?
         .query_map([encoded], decode)?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(rows)
+}
+
+fn ids_summary_sql() -> String {
+    let sql = columns_from().replace("FROM thread t", "FROM (SELECT DISTINCT value AS id FROM json_each(?1)) requested CROSS JOIN thread t ON t.id=requested.id");
+    format!("{sql}WHERE t.deleted_at IS NULL")
 }
 
 /// Same normalization policy for CLI filtering and browser patch membership.
@@ -374,6 +323,29 @@ mod tests {
             INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','t','r','recovery_wait','now');").unwrap();
         db
     }
+    #[test]
+    fn summary_reads_the_latest_run_without_walking_older_runs() {
+        let measure = |count| {
+            let db = Connection::open_in_memory().unwrap();
+            db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+            db.execute_batch(&format!("
+                INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('t','/','','p','m','now');
+                INSERT INTO run(id,thread_id,state,created_at) VALUES('latest','t','failed','2');
+                WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<{count})
+                INSERT INTO run(id,thread_id,state,created_at) SELECT 'old'||i,'t','completed','1' FROM n;")).unwrap();
+            let mut statement = db.prepare(&ids_summary_sql()).unwrap();
+            let row = statement.query_row([r#"["t"]"#], decode).unwrap();
+            assert_eq!(row.identity.run_id.as_deref(), Some("latest"));
+            assert_eq!(row.state, "failed");
+            statement.get_status(StatementStatus::VmStep)
+        };
+        let (few, many) = (measure(20), measure(5000));
+        assert!(
+            many <= few + 32,
+            "latest Run lookup grew with history: {few} -> {many}"
+        );
+    }
+
     #[test]
     fn exact_id_batch_is_one_statement_with_saved_activity_and_revisit_messages() {
         let db = fixture();

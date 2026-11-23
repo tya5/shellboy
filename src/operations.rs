@@ -949,7 +949,7 @@ pub(crate) const FIELD_SPECS: &[FieldSpec] = &[
         id: FieldId::Tags,
         default_origin: DefaultOrigin::None,
         label: "タグで絞り込み",
-        help: "指定したタグをすべて持つThreadだけを一覧します（AND）。CLIは--tagを繰り返し、フォームはコンマ区切りです（フォームではコンマを含むタグは指定できません）。最初のタグの所属Threadから読むため、最も絞れるタグを先に指定します。",
+        help: "指定したタグをすべて持つThreadだけを一覧します（AND）。CLIは--tagを繰り返し、フォームはコンマ区切りです（フォームではコンマを含むタグは指定できません）。",
         kind: FieldType::TextList,
         discovery: Discovery::None,
     },

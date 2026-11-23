@@ -56,6 +56,7 @@ fn list(ui: &mut UiState, ids: &[&str]) {
                 .unwrap()
                 .to_rfc3339(),
                 excerpt: String::new(),
+                excerpt_complete: true,
             })
             .collect(),
         display_times: vec![],
@@ -223,6 +224,7 @@ fn background_success_updates_the_list_and_invalidates_old_pages_without_switchi
             updated_at: "now".into(),
             created_at: None,
             excerpt: String::new(),
+            excerpt_complete: true,
         }],
         display_times: vec![],
         next_cursor: None,

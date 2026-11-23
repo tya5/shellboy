@@ -3488,6 +3488,7 @@ mod tests {
             updated_at: "2026-10-25T09:30:00Z".into(),
             created_at: None,
             excerpt: "**選択した会話の抜粋**".into(),
+            excerpt_complete: true,
         }
     }
 
@@ -4335,6 +4336,7 @@ mod tests {
             updated_at: String::new(),
             created_at: None,
             excerpt: String::new(),
+            excerpt_complete: true,
         };
         let mut tree = japanese_browser();
         for title in ["", " \n\t", "\u{1b}[31m\u{1b}[0m"] {
@@ -4590,6 +4592,7 @@ mod patch_tests {
             updated_at: at.into(),
             created_at: None,
             excerpt: format!("saved excerpt {id}"),
+            excerpt_complete: true,
         }
     }
     fn patch(
@@ -5330,6 +5333,7 @@ mod archive_tests {
             archived_at: archived.then(|| "2026-11-06T00:00:00Z".into()),
             tags: Vec::new(),
             excerpt: String::new(),
+            excerpt_complete: true,
         }
     }
     fn ctrl(ch: char) -> KeyEvent {
@@ -5646,6 +5650,7 @@ mod watch_integration_tests {
             updated_at: "saved".into(),
             created_at: None,
             excerpt: String::new(),
+            excerpt_complete: true,
         }
     }
     fn detail(
@@ -6377,6 +6382,7 @@ mod language_tests {
             updated_at: "saved".into(),
             created_at: None,
             excerpt: String::new(),
+            excerpt_complete: true,
         }
     }
     fn populate(ui: &mut UiState, watch: bool) {

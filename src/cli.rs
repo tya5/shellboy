@@ -731,7 +731,7 @@ pub struct ListOptions {
     /// Archived Threads: exclude (default, hidden), include, or only.
     #[arg(long, value_enum, default_value_t = wire::ArchivedFilter::Exclude)]
     pub archived: wire::ArchivedFilter,
-    /// Only Threads carrying this tag; repeat for AND (at most 64). Name the narrowest tag first: the page is read from the first tag's members.
+    /// Only Threads carrying this tag; repeat for AND (at most 64). Follow the cursor even if a filtered page is empty.
     #[arg(long = "tag")]
     pub tags: Vec<String>,
     /// Only Threads whose saved working directory is this path, compared after lexical cleanup (`.`, `..`, trailing `/`); a parent directory does not match. Relative paths resolve against the current directory.

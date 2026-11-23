@@ -10670,6 +10670,10 @@
         "excerpt": {
           "type": "string"
         },
+        "excerpt_complete": {
+          "description": "False if the excerpt scan ended before reaching older selected history.",
+          "type": "boolean"
+        },
         "last_end_message": {
           "default": null
         },

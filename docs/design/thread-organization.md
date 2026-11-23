@@ -448,15 +448,10 @@ belongs to #253, so this is `0034_thread_tags`.
   `changed_threads` is the Threads whose tags changed (nothing for a no-op or a replay). A replay with the same
   operation ID returns the first result and publishes nothing. No caller restriction (as archive and re-parent).
   Tags are not inherited by create, fork or rewind and are deleted with the Thread in the delete transaction.
-- Filter cost: without tags the list reads its partial index as before. With `--tag` the page starts from the
-  members of the first tag (`thread_tag_by_tag`), reaches each Thread by primary key, probes every further tag
-  by primary key and keeps the top `limit + 1` by `(updated_at, id)` in an inner query that selects IDs only; the
-  summary columns (latest Run, Turn, activity) are then read for that page alone. Cost is the first tag's
-  membership, not the number of Threads, so name the narrowest tag first (CLI `--help`, field help, cli-reference
-  and the Agent Guide say so). With `--query` the text match runs after the SQL page, so the page limit is
-  unbounded (-1) and every member of the first tag is materialized. With `--cwd` alone the page seeks `threads_cwd_updated`
-  in list order without a sort. The cursor scope is bound to a digest of the sorted tags and the cwd and to the
-  archived mode.
+- Filter cost: updated-order lists seek in the requested archive and optional cwd partition
+  and examine at most 200 candidates plus a lookahead. Each candidate uses primary-key tag
+  probes; filter order does not affect results. Only matches reach the summary projection.
+  A short or empty page can have `next_cursor`; continue with the same filters.
 - Item cost: tags of a page come from one statement over the page's IDs (bounded by 200 x 64 rows), tags of
   `thread get` from one primary-key range. Measurements: [validation](../validation/acceptance.md).
 - TUI: none beyond the operation palette forms (no browser filter, no new glyph); see

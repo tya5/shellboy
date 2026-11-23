@@ -1693,8 +1693,8 @@ fn field_help_for(id: FieldId, language: crate::config::UiLanguage) -> &'static 
         ),
         FieldId::Tags => local!(
             language,
-            "指定したタグをすべて持つThreadだけを一覧します（AND）。CLIは--tagを繰り返し、フォームはコンマ区切りです（フォームではコンマを含むタグは指定できません）。最初のタグの所属Threadから読むため、最も絞れるタグを先に指定します。",
-            "List only Threads that carry every given tag (AND). The CLI repeats --tag; the form takes a comma-separated list (a tag containing a comma cannot be entered in the form). The page is read from the first tag's members, so name the narrowest tag first."
+            "指定したタグをすべて持つThreadだけを一覧します（AND）。CLIは--tagを繰り返し、フォームはコンマ区切りです（フォームではコンマを含むタグは指定できません）。",
+            "List only Threads that carry every given tag (AND). The CLI repeats --tag; the form takes a comma-separated list (a tag containing a comma cannot be entered in the form)."
         ),
         FieldId::AddTags => local!(
             language,

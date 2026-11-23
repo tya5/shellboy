@@ -897,3 +897,8 @@ CREATE INDEX status_shell_pending ON shell_execution(owner_run_id) WHERE state N
 CREATE INDEX status_turn_pending ON turn(thread_id,run_id) WHERE state NOT IN ('completed','stopped','failed');
 INSERT INTO schema_migration(version,name) VALUES(63,'0063_thread_reply_summary');
 PRAGMA user_version=63;
+
+CREATE INDEX threads_visible_cwd_updated ON thread(cwd,updated_at DESC,id DESC) WHERE deleted_at IS NULL AND archived_at IS NULL;
+CREATE INDEX threads_archived_cwd_updated ON thread(cwd,updated_at DESC,id DESC) WHERE deleted_at IS NULL AND archived_at IS NOT NULL;
+INSERT INTO schema_migration(version,name) VALUES(64,'next_thread_cwd_partitions');
+PRAGMA user_version=64;

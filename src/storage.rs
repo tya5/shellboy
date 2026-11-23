@@ -86,6 +86,7 @@ pub(crate) const MIGRATION_NAMES: &[(i64, &str)] = &[
     (61, "0061_schedule_service_kind"),
     (62, "0062_instruction_warnings"),
     (63, "0063_thread_reply_summary"),
+    (64, "next_thread_cwd_partitions"),
 ];
 pub const SCHEMA_VERSION: i64 = MIGRATION_NAMES.len() as i64;
 pub const DEFAULT_QUEUE_CAPACITY: usize = 128;

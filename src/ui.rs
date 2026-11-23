@@ -4423,6 +4423,7 @@ impl UiState {
                 archived_at: None,
                 tags: Vec::new(),
                 excerpt: view.draft.text.chars().take(80).collect(),
+                excerpt_complete: true,
             })
             .filter(|thread| {
                 filter.is_empty()
