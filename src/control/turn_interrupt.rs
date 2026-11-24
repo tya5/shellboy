@@ -235,8 +235,7 @@ pub(super) async fn acknowledge(
                 let mut admitted_in_batch=0;
                 for (receipt,node) in &rows {
                     if plan.admitted_callers.contains(node) {
-                        let changed=tx.execute("UPDATE receipt SET state='applied',hold_reason='carried_after_turn_interruption',updated_at=?2,result_json=json_set(COALESCE(result_json,'{}'),'$.delivery_context',json(?3)) WHERE id=?1 AND state='held' AND path_admission='admitted' AND EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id=?4 AND p.node_id=?5)",params![receipt,at,json!({"run_id":run,"turn_id":new_turn,"reason":"carried_after_turn_interruption","interrupted_turn_id":turn,"admitted_at":at}).to_string(),thread,node])?;
-                        if changed!=1{return Err(crate::storage::StorageError::Schema("carried receipt was not admitted to the selected path".into()));}
+                        message_delivery::mark_interruption_carry_tx(&tx,(receipt,node),(&thread,&run,&turn,new_turn,&at))?;
                         admitted_count+=1;
                         admitted_in_batch+=1;
                         if admitted_ids.len()<128 {admitted_ids.push(node.clone());}

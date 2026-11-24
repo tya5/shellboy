@@ -43,6 +43,25 @@ pub(crate) fn mark_admitted_tx(
     Ok(())
 }
 
+/// Finalize one carried receipt after path admission, in the same transaction.
+pub(super) fn mark_interruption_carry_tx(
+    tx: &Transaction<'_>,
+    (receipt, node): (&str, &str),
+    (thread, run, turn, new_turn, at): (&str, &str, &str, &str, &str),
+) -> Result<(), StorageError> {
+    let context = json!({"run_id":run,"turn_id":new_turn,"reason":"carried_after_turn_interruption","interrupted_turn_id":turn,"admitted_at":at});
+    let changed = tx.execute(
+        "UPDATE receipt SET state='applied',hold_reason='carried_after_turn_interruption',updated_at=?2,result_json=json_set(COALESCE(result_json,'{}'),'$.delivery_context',json(?3)) WHERE id=?1 AND state='held' AND path_admission='admitted' AND EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id=?4 AND p.node_id=?5)",
+        params![receipt, at, context.to_string(), thread, node],
+    )?;
+    if changed != 1 {
+        return Err(StorageError::Schema(
+            "carried receipt was not admitted to the selected path".into(),
+        ));
+    }
+    Ok(())
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub(crate) struct AdmissionPlan {
     /// Complete selected path prefix, including any eligible staged questions.
