@@ -71,7 +71,17 @@ pub async fn execute(
     let trailer = file
         .publish(&options.out, page.change_position)
         .map_err(write_error)?;
-    Ok(json!({"lines":trailer.lines,"sha256":trailer.sha256}))
+    let result = json!({"lines":trailer.lines,"sha256":trailer.sha256});
+    #[cfg(windows)]
+    let result = match crate::atomic_file::privacy_warning(&options.out) {
+        Some(warning) => {
+            let mut result = result;
+            result["warning"] = json!(warning);
+            result
+        }
+        None => result,
+    };
+    Ok(result)
 }
 
 fn bad_response() -> ApiError {

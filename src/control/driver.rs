@@ -379,7 +379,7 @@ async fn drive_inner(
                     }
                 }
                 (Err(failure), None) if !slot.stop.is_cancelled() => {
-                    let body = json!({"reason":"human_turn_interrupted","attempt_id":attempt,"partial_text":failure.partial_text,"partial_reasoning":failure.partial_reasoning,"completed_items":failure.completed_items,"raw_response":failure.raw_response});
+                    let body = model::request_path::interrupted_failure_body(&attempt, &failure);
                     record_interrupted_outcome(&control, &snapshot, &body).await?;
                 }
                 (Err(_), None) => {}

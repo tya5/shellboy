@@ -643,3 +643,14 @@ create the clash, naming the key. Paths that do not go through `thread set`
 (a later configuration edit, or a child/fork created on another connection) are
 caught at send time with `invalid_config`, whose message names the key and
 `thread set --max-tokens ''`. Shellboy never picks one of the two values.
+
+### Failure evidence privacy
+
+The HTTP request tracks the values of its adopted headers, including extra
+headers. Error excerpts remove known values and parsed URL user-info and query
+before applying the display cap. A body cut at the wire limit uses a fixed marker
+rather than risking a partial credential at the boundary. The same failed
+response projection covers normal attempt persistence and user interruption,
+including nested response fields. This does not rewrite successful output,
+previously saved history, or lossless exports. Provider text is not a general
+share-safe diagnostic format.

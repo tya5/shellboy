@@ -393,12 +393,7 @@ impl HttpModelClient {
             })?;
             header.set_sensitive(true);
             headers.insert(name, header);
-            if !value.is_empty() {
-                secrets.push(value.clone());
-                if let Some(key) = value.strip_prefix("Bearer ") {
-                    secrets.push(key.into());
-                }
-            }
+            body::register_secret(&mut secrets, value);
         }
         secrets.push(self.connection.base_url.clone());
         Ok((headers, secrets))
@@ -431,10 +426,14 @@ impl HttpModelClient {
                 let name = HeaderName::from_bytes(name.as_bytes()).map_err(|_| {
                     ModelError::new("config_invalid", "Invalid configured extra header name")
                 })?;
-                let value = HeaderValue::from_str(value).map_err(|_| {
+                let mut header = HeaderValue::from_str(value).map_err(|_| {
                     ModelError::new("config_invalid", "Invalid configured extra header value")
                 })?;
-                headers.entry(name).or_insert(value);
+                if let reqwest::header::Entry::Vacant(entry) = headers.entry(name) {
+                    header.set_sensitive(true);
+                    entry.insert(header);
+                    body::register_secret(&mut secrets, value);
+                }
             }
         }
         if matches!(endpoint, ApiEndpoint::Responses)

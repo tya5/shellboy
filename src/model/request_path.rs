@@ -71,6 +71,15 @@ async fn send_attempt(
     outcome
 }
 
+pub(crate) fn interrupted_failure_body(attempt: &str, failure: &AttemptFailure) -> Value {
+    let mut body = failure_body(attempt, failure);
+    if let Some(object) = body.as_object_mut() {
+        object.remove("error");
+    }
+    body["reason"] = json!("human_turn_interrupted");
+    body
+}
+
 fn failure_body(attempt: &str, failure: &AttemptFailure) -> Value {
     let mut error = failure.error.clone();
     error.http_observation = None;
