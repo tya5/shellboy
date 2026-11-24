@@ -9,9 +9,10 @@ use crate::presentation::{NodePresentation, PresentationField};
 use crate::{
     config::Config,
     protocol::{
-        AttachmentListArgs, AttachmentRemoveArgs, Command, ContextEditAction, ContextEditArgs,
-        HistorySearchArgs, IndexArgs, IndexScope, StatusArgs, ThreadDeleteArgs, ThreadDetails,
-        ThreadForkArgs, ThreadRewindArgs, ThreadSetArgs, ThreadSummary, ThreadTarget,
+        ApiError, AttachmentListArgs, AttachmentRemoveArgs, Command, ContextEditAction,
+        ContextEditArgs, HistorySearchArgs, IndexArgs, IndexScope, StatusArgs, ThreadDeleteArgs,
+        ThreadDetails, ThreadForkArgs, ThreadRewindArgs, ThreadSetArgs, ThreadSummary,
+        ThreadTarget,
     },
 };
 
@@ -986,7 +987,7 @@ pub enum UiUpdate {
     },
     CommandOutcome {
         submission: CommandSubmission,
-        result: Result<(), String>,
+        result: Result<(), ApiError>,
     },
     DraftIndexPause {
         pause: Option<crate::index::PauseReason>,
@@ -3883,7 +3884,7 @@ impl UiState {
         // Navigation is consumed before the batch/individual retention boundary.
         self.dirty = true;
     }
-    fn command_outcome(&mut self, submission: CommandSubmission, result: Result<(), String>) {
+    fn command_outcome(&mut self, submission: CommandSubmission, result: Result<(), ApiError>) {
         let language = self.config.ui.language;
         let Some((key, view)) = self
             .views
@@ -3933,20 +3934,29 @@ impl UiState {
             }
             Err(error) => {
                 pending.status = ReceiptStatus::Failed;
-                pending.message = Some(error.clone());
-                if &view.draft == cleared {
+                pending.message = Some(error.message.clone());
+                let restoration = if &view.draft == cleared {
                     let next = view.draft.revision + 1;
                     view.draft = pending.snapshot.clone();
                     view.draft.revision = next;
-                    view.status = command_diagnostics::failed_operation(language, None, &error);
+                    None
                 } else {
-                    view.status = command_diagnostics::failed_operation(
-                        language,
-                        Some(submission.revision),
-                        &error,
-                    );
-                }
-                view.promote_status_notice(history_interaction::NoticeKind::Failure);
+                    Some(submission.revision)
+                };
+                let reason = error.message.lines().next().unwrap_or_default();
+                let details = i18n::local!(language, "F6 エラー詳細", "F6 Error details");
+                view.status = match restoration {
+                    Some(revision) => format!("{details} | /restore {revision}: {reason}"),
+                    None => format!(
+                        "{details}: {reason} | {}",
+                        i18n::local!(language, "入力を復元しました", "Input restored")
+                    ),
+                };
+                view.operation_notice = Some(history_interaction::OperationNotice {
+                    text: view.status.clone(),
+                    kind: history_interaction::NoticeKind::Failure,
+                    failure: Some(Box::new((restoration, error))),
+                });
             }
         }
         self.dirty = true;
@@ -4109,12 +4119,14 @@ impl UiState {
         if let UiAction::SubmittedCommand { submission, action } = action {
             self.command_outcome(
                 submission.clone(),
-                Err(i18n::local!(
-                    self.config.ui.language,
-                    "受付キューが満杯または終了済みです。再操作してください",
-                    "The request queue is full or closed. Try again"
-                )
-                .into()),
+                Err(ApiError::new(
+                    crate::protocol::ErrorCode::IoFailed,
+                    i18n::local!(
+                        self.config.ui.language,
+                        "受付キューが満杯または終了済みです。再操作してください",
+                        "The request queue is full or closed. Try again"
+                    ),
+                )),
             );
             if matches!(action.as_ref(), UiAction::ManagementIntent { action, .. } if matches!(action.as_ref(), UiAction::IndexPreview { .. }))
             {

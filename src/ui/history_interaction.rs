@@ -12,6 +12,7 @@ pub(super) enum NoticeKind {
 pub(super) struct OperationNotice {
     pub text: String,
     pub kind: NoticeKind,
+    pub failure: Option<Box<(Option<u64>, ApiError)>>,
 }
 
 pub(super) fn key_bytes(key: &ItemKey) -> usize {
@@ -119,6 +120,7 @@ impl ThreadView {
         self.operation_notice = Some(OperationNotice {
             text: self.status.clone(),
             kind,
+            failure: None,
         });
     }
 }
@@ -558,6 +560,31 @@ impl UiState {
                 self.deferred_actions.push(action);
             }
         }
+    }
+    pub(super) fn open_command_failure_details(&mut self) -> bool {
+        let Some((restoration, error)) = self
+            .view()
+            .operation_notice
+            .as_ref()
+            .and_then(|notice| notice.failure.as_deref())
+        else {
+            return false;
+        };
+        let language = self.config.ui.language;
+        let text = command_diagnostics::failed_operation(
+            language,
+            *restoration,
+            &crate::config_setup::tui_error_details(error),
+        );
+        self.active_view_mut().clear_operation_notice();
+        self.invalidate_management();
+        self.management.open_text(ManagementView {
+            title: i18n::local!(language, "エラー詳細", "Error details").into(),
+            text,
+            scroll: 0,
+        });
+        self.dirty = true;
+        true
     }
     pub(super) fn open_history_details(&mut self, links: bool, original: bool) -> Vec<UiAction> {
         let Some(item) = self.selected_history_item() else {

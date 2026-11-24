@@ -78,7 +78,12 @@ impl UiState {
             || matches!(&event, Event::Key(key) if key.kind != KeyEventKind::Release)
         {
             self.input_notice = None;
-            self.active_view_mut().clear_operation_notice();
+            // Let the composer F6 handler read the failure before dismissal.
+            if !matches!(&event, Event::Key(key) if key.code == KeyCode::F(6))
+                || !self.composer_active()
+            {
+                self.active_view_mut().clear_operation_notice();
+            }
         }
         let status_before = self.view().status.clone();
         let closes_management = matches!(&event,Event::Key(key) if key.code==KeyCode::Esc)
@@ -355,6 +360,12 @@ impl UiState {
                 .any(|binding| key_matches(binding, key))
         {
             return self.undo_rewind();
+        }
+        if key.code == KeyCode::F(6) && self.composer_active() {
+            if self.open_command_failure_details() {
+                return vec![];
+            }
+            self.active_view_mut().clear_operation_notice();
         }
         if let Some(actions) = self.region_key(key) {
             return actions;

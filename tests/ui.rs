@@ -2,6 +2,7 @@ use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{Terminal, backend::TestBackend};
 use shellboy::{
     config::{Config, Connection},
+    protocol::{ApiError, ErrorCode},
     ui::*,
 };
 use std::path::PathBuf;
@@ -3609,7 +3610,7 @@ fn late_slash_failure_preserves_new_text_and_clipboard_and_targets_its_own_view(
     let with_image = ui.view().draft.clone();
     ui.apply(UiUpdate::CommandOutcome {
         submission: submission.clone(),
-        result: Err("rejected".into()),
+        result: Err(ApiError::new(ErrorCode::IoFailed, "rejected")),
     });
     assert_eq!(ui.view().draft, with_image);
     assert!(
@@ -3633,7 +3634,7 @@ fn late_slash_failure_preserves_new_text_and_clipboard_and_targets_its_own_view(
     let other = ui.view().draft.clone();
     ui.apply(UiUpdate::CommandOutcome {
         submission,
-        result: Err("late first failure".into()),
+        result: Err(ApiError::new(ErrorCode::IoFailed, "late first failure")),
     });
     assert_eq!(ui.view().draft, other);
     assert_eq!(
@@ -3665,7 +3666,7 @@ fn successful_slash_ack_releases_recovery_and_late_duplicate_cannot_restore_it()
     assert!(!ui.view().pending.contains_key(&submission.revision));
     ui.apply(UiUpdate::CommandOutcome {
         submission,
-        result: Err("late".into()),
+        result: Err(ApiError::new(ErrorCode::IoFailed, "late")),
     });
     assert_eq!(ui.view().draft, newer);
 }

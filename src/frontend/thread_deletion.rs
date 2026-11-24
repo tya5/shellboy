@@ -973,7 +973,7 @@ mod tests {
                             submission,
                             result: Err(error),
                         } if submission.draft_id == "slash" => {
-                            assert!(error.contains("fixture capture failure"));
+                            assert!(error.message.contains("fixture capture failure"));
                             command_errors += 1;
                         }
                         UiUpdate::DraftStatus { draft_id, text }

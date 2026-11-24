@@ -269,6 +269,25 @@ pub fn tui_error(error: &ApiError) -> String {
         )
 }
 
+pub(crate) fn tui_error_details(error: &ApiError) -> String {
+    let message = tui_error(error);
+    let separator = "\n";
+    let mut shown = format!("{message}{separator}{:?}", error.code);
+    if let Some(hint) = &error.hint {
+        shown.push_str(separator);
+        shown.push_str(hint);
+    }
+    if let Some(id) = error
+        .details
+        .as_ref()
+        .and_then(|details| details["operation_id"].as_str())
+    {
+        shown.push_str(separator);
+        shown.push_str("operation_id: ");
+        shown.push_str(id);
+    }
+    shown
+}
 pub fn selected_path(
     path: Option<&Path>,
     cwd: &Path,

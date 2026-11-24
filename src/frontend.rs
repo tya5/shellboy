@@ -591,7 +591,7 @@ async fn command_outcome<T>(
             updates,
             UiUpdate::CommandOutcome {
                 submission,
-                result: result.as_ref().map(|_| ()).map_err(ToString::to_string),
+                result: result.as_ref().map(|_| ()).map_err(Clone::clone),
             },
         )
         .await;

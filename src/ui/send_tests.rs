@@ -766,13 +766,64 @@ fn reply_submit_is_text_only_preserves_slash_text_and_restores_failed_draft() {
     let submission = reply_action(&mut ui, "/literal reply");
     assert!(ui.view().draft.text.is_empty());
     assert!(ui.submit().is_empty());
-    ui.command_outcome(submission, Err("synthetic cancelled".into()));
+    ui.command_outcome(
+        submission,
+        Err(ApiError::new(
+            crate::protocol::ErrorCode::IoFailed,
+            "synthetic cancelled",
+        )),
+    );
     assert_eq!(ui.view().draft.text, "/literal reply");
     assert_eq!(
         ui.view().composer.reply.as_ref().unwrap().message_id,
         "original"
     );
 }
+#[test]
+fn composer_lost_reply_exposes_receipt_action_and_id_at_eighty_columns() {
+    let mut ui = ui();
+    ui.active_view_mut().composer.reply = Some(reply_target("original"));
+    let submission = reply_action(&mut ui, "keep this draft");
+    let reason = "The owner connection closed before the reply arrived";
+    let hint = "Look up the saved receipt before sending again";
+    let id = "owner:41aa9e0a-a797-45d1-af94-eb1a3099839d";
+    ui.apply(UiUpdate::CommandOutcome {
+        submission,
+        result: Err(ApiError::new(crate::protocol::ErrorCode::IoFailed, reason)
+            .hint(hint)
+            .details(
+                serde_json::json!({"operation_id": id, "private": "unrelated error metadata"}),
+            )),
+    });
+    let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+    let mut screen = |ui: &mut UiState| {
+        terminal.draw(|frame| draw(frame, ui)).unwrap();
+        terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>()
+    };
+    let footer = screen(&mut ui);
+    assert!(
+        footer.contains("F6 Error details") && footer.contains(reason),
+        "{footer}"
+    );
+    assert!(!footer.contains(hint) && !footer.contains(id), "{footer}");
+    assert!(
+        ui.event(Event::Key(KeyEvent::new(KeyCode::F(6), KeyModifiers::NONE)))
+            .is_empty()
+    );
+    let details = screen(&mut ui);
+    for part in ["IoFailed", hint, id] {
+        assert!(details.contains(part), "missing {part}: {details}");
+    }
+    assert!(!details.contains("unrelated error metadata"));
+    assert_eq!(ui.view().draft.text, "keep this draft");
+}
+
 #[test]
 fn reply_ack_does_not_clear_a_newer_target_or_draft() {
     let mut ui = ui();
@@ -883,7 +934,10 @@ fn reply_local_handoff_keeps_new_input_without_a_db_ack_for_success_or_failure()
                 if success {
                     Ok(())
                 } else {
-                    Err("synthetic failure".into())
+                    Err(ApiError::new(
+                        crate::protocol::ErrorCode::IoFailed,
+                        "synthetic failure",
+                    ))
                 },
             );
             assert_eq!(
