@@ -4,7 +4,8 @@ use super::{
 };
 use crate::digest::sha256_hex as hash;
 use crate::protocol::{
-    ArchivedFilter, ErrorCode, Page, PageCursor, ThreadListArgs, ThreadListOrder, ThreadSummary,
+    ArchivedFilter, ErrorCode, MAX_LIST_LIMIT, PageCursor, RecordPage, ThreadListArgs,
+    ThreadListFilters, ThreadListOrder, ThreadListPage, ThreadSummary,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::json;
@@ -21,13 +22,15 @@ fn list_scope(mode: ArchivedFilter) -> &'static str {
 pub(crate) fn thread_list(
     connection: &Connection,
     args: &ThreadListArgs,
-) -> Result<Page<ThreadSummary>> {
+) -> Result<ThreadListPage> {
     if let Some(ids) = &args.thread_ids {
         let items = summaries_by_id(connection, ids)?;
-        return Ok(Page {
+        return Ok(RecordPage::new(
+            MAX_LIST_LIMIT,
+            list_filters(args, false),
             items,
-            next_cursor: None,
-        });
+            None,
+        ));
     }
     if args.awaiting.is_some() {
         return thread_list_awaiting_human(connection, args);
@@ -152,7 +155,26 @@ pub(crate) fn thread_list(
         })
         .transpose()?;
     attach_tags(connection, &mut items)?;
-    Ok(Page { items, next_cursor })
+    Ok(RecordPage::new(
+        args.limit,
+        list_filters(args, has_query),
+        items,
+        next_cursor,
+    ))
+}
+
+fn list_filters(args: &ThreadListArgs, has_query: bool) -> ThreadListFilters {
+    let discovery = args.thread_ids.is_none();
+    ThreadListFilters {
+        order: (discovery && args.awaiting.is_none()).then_some(args.order),
+        archived: discovery.then_some(args.archived),
+        state: args.state,
+        thread_ids: args.thread_ids.clone(),
+        tags_omitted: !args.tags.is_empty(),
+        awaiting_omitted: args.awaiting.is_some(),
+        cwd_omitted: args.cwd.is_some(),
+        query_omitted: has_query,
+    }
 }
 
 type ListPosition = (Option<String>, String);
@@ -339,7 +361,7 @@ fn summaries_by_id(connection: &Connection, ids: &[String]) -> Result<Vec<Thread
 pub(super) fn thread_list_awaiting_human(
     connection: &Connection,
     args: &ThreadListArgs,
-) -> Result<Page<ThreadSummary>> {
+) -> Result<ThreadListPage> {
     const SCOPE: &str = "thread.list.awaiting_human.live.v2";
     let name = args.awaiting.as_deref().expect("awaiting filter");
     let archived_filter = format!("{name}:{}", args.archived.as_str());
@@ -403,7 +425,12 @@ pub(super) fn thread_list_awaiting_human(
     } else {
         None
     };
-    Ok(Page { items, next_cursor })
+    Ok(RecordPage::new(
+        args.limit,
+        list_filters(args, false),
+        items,
+        next_cursor,
+    ))
 }
 
 #[derive(Debug)]

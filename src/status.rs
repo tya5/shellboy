@@ -78,14 +78,11 @@ pub struct ResponseNodeRef {
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct StatusFilters {
-    pub memory: bool,
     pub thread_id: Option<String>,
     pub run_id: Option<String>,
     pub since: Option<String>,
     pub state: Vec<String>,
     pub all: bool,
-    pub limit: u32,
-    pub cursor: Option<String>,
     #[serde(default, flatten)]
     pub additional_properties: std::collections::BTreeMap<String, Value>,
 }
@@ -111,10 +108,8 @@ pub struct StatusSnapshot {
     pub scope: String,
     pub consistency: String,
     pub fingerprint: String,
-    pub filters: StatusFilters,
-    pub items: Vec<WorkItem>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub next_cursor: Option<String>,
+    #[serde(flatten)]
+    pub page: RecordPage<WorkItem, StatusFilters>,
     pub receipt_budget: crate::protocol::ReceiptBudget,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ipc_admission: Option<IpcAdmissionStatus>,
@@ -756,7 +751,18 @@ pub fn snapshot(db: &Connection, args: &StatusArgs, instance: &str) -> Result<St
     digest.update(scope.filter.as_bytes());
     digest.update(args.limit.to_le_bytes());
     for item in &selected {
-        let body = serde_json::to_vec(item).expect("work item");
+        let body = serde_json::to_vec(&serde_json::json!({
+            "kind": item.kind, "id": item.id, "state": item.state,
+            "thread_id": item.thread_id, "parent_thread_id": item.parent_thread_id,
+            "run_id": item.run_id, "owner_run_id": item.owner_run_id, "turn_id": item.turn_id,
+            "execution_id": item.execution_id, "message_id": item.message_id,
+            "attempt_id": item.attempt_id, "operation_id": item.operation_id,
+            "end_message_node_id": item.end_message_node_id, "reply_to": item.reply_to,
+            "expect_reply": item.expect_reply,
+            "created_at": item.created_at, "started_at": item.started_at,
+            "ended_at": item.ended_at, "updated_at": item.updated_at,
+            "response_nodes": item.response_nodes, "response_nodes_truncated": item.response_nodes_truncated,
+        })).expect("durable work facts");
         digest.update((body.len() as u64).to_le_bytes());
         digest.update(&body);
     }
@@ -766,14 +772,13 @@ pub fn snapshot(db: &Connection, args: &StatusArgs, instance: &str) -> Result<St
         .map(|byte| format!("{byte:02x}"))
         .collect();
     let filters = StatusFilters {
-        memory: args.memory,
         thread_id: args.thread_id.clone(),
         run_id: args.run_id.clone(),
-        since: args.since.clone(),
+        since: scope
+            .since
+            .map(|time| time.with_timezone(&chrono::Utc).to_rfc3339()),
         state: scope.states.clone(),
         all: args.all,
-        limit: args.limit,
-        cursor: None,
         additional_properties: Default::default(),
     };
     // Enrich only the bounded result page. Dynamic observations never enter
@@ -792,14 +797,12 @@ pub fn snapshot(db: &Connection, args: &StatusArgs, instance: &str) -> Result<St
         ipc_admission: None,
         receipt_budget: serde_json::from_value(crate::control::receipt::summary(db, instance)?)
             .map_err(|_| ApiError::new(ErrorCode::InvalidState, "invalid receipt summary"))?,
-        filters,
+        page: RecordPage::new(args.limit, filters, selected, next_cursor),
         instance_id: instance.into(),
         observed_at: observed.to_rfc3339(),
         scope: "durable_only".into(),
         consistency: "single_sqlite_read_transaction".into(),
         fingerprint,
-        items: selected,
-        next_cursor,
         additional_properties: Default::default(),
     })
 }
@@ -821,9 +824,9 @@ mod response_node_tests {
             ..Default::default()
         };
         let active = snapshot(&db, &args, "fixture").unwrap();
-        assert_eq!(active.items.len(), 1);
-        assert_eq!(active.items[0].id, "live");
-        assert!(active.next_cursor.is_none());
+        assert_eq!(active.page.items.len(), 1);
+        assert_eq!(active.page.items[0].id, "live");
+        assert!(active.page.next_cursor.is_none());
         let all = StatusArgs { all: true, ..args };
         let first = snapshot(&db, &all, "fixture").unwrap();
         db.execute(
@@ -831,20 +834,32 @@ mod response_node_tests {
             [],
         )
         .unwrap();
+        db.execute(
+            "UPDATE run SET stop_reason='on page but not hashed' WHERE id='live'",
+            [],
+        )
+        .unwrap();
         let unchanged = snapshot(&db, &all, "fixture").unwrap();
+        assert_eq!(
+            unchanged.page.items[0].reason.as_deref(),
+            Some("on page but not hashed")
+        );
         assert_eq!(unchanged.fingerprint, first.fingerprint);
         let next = snapshot(
             &db,
             &StatusArgs {
-                cursor: first.next_cursor,
+                cursor: first.page.next_cursor,
                 ..all
             },
             "fixture",
         )
         .unwrap();
-        assert_eq!(next.items.len(), 1);
-        assert_eq!(next.items[0].id, "older");
-        assert_eq!(next.items[0].reason.as_deref(), Some("changed off page"));
+        assert_eq!(next.page.items.len(), 1);
+        assert_eq!(next.page.items[0].id, "older");
+        assert_eq!(
+            next.page.items[0].reason.as_deref(),
+            Some("changed off page")
+        );
     }
 
     #[test]
@@ -873,13 +888,14 @@ mod response_node_tests {
             db.progress_handler(0, None::<fn() -> bool>).unwrap();
             assert_eq!(
                 result
+                    .page
                     .items
                     .iter()
                     .map(|item| item.id.as_str())
                     .collect::<Vec<_>>(),
                 ["pending"]
             );
-            assert!(result.next_cursor.is_none());
+            assert!(result.page.next_cursor.is_none());
             steps.load(Ordering::Relaxed)
         };
         let global = StatusArgs::default();

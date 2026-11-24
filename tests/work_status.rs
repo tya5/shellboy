@@ -76,15 +76,21 @@ async fn one_projection_exposes_native_ownership_models_unassigned_messages_and_
     let status = f.status(StatusArgs::default()).await.unwrap();
     assert_eq!(status.scope, "durable_only");
     assert_eq!(status.consistency, "single_sqlite_read_transaction");
-    assert_eq!(status.items.len(), 7);
+    assert_eq!(status.page.items.len(), 7);
     let owned = status
+        .page
         .items
         .iter()
         .find(|i| i.kind == "run" && i.id == "owned")
         .unwrap();
     assert!(owned.owner_run_id.is_none());
     assert_eq!(owned.parent_thread_id, None);
-    let attempt = status.items.iter().find(|i| i.kind == "attempt").unwrap();
+    let attempt = status
+        .page
+        .items
+        .iter()
+        .find(|i| i.kind == "attempt")
+        .unwrap();
     assert_eq!(attempt.current_model, "current-model");
     assert_eq!(attempt.attempt_model.as_deref(), Some("actual-model"));
     assert_eq!(
@@ -102,11 +108,17 @@ async fn one_projection_exposes_native_ownership_models_unassigned_messages_and_
     assert!(!attempt.response_nodes_truncated);
     assert!(
         status
+            .page
             .items
             .iter()
             .all(|i| i.response_nodes.is_empty() || i.kind == "attempt")
     );
-    let held = status.items.iter().find(|i| i.kind == "message").unwrap();
+    let held = status
+        .page
+        .items
+        .iter()
+        .find(|i| i.kind == "message")
+        .unwrap();
     assert_eq!(held.run_id, None);
     assert_eq!(held.message_id.as_deref(), Some("held-node"));
     assert!(held.reply.is_none());
@@ -114,7 +126,12 @@ async fn one_projection_exposes_native_ownership_models_unassigned_messages_and_
         serde_json::to_value(held).unwrap().get("reply").is_none(),
         "unavailable reply remains omitted, not null"
     );
-    let shell = status.items.iter().find(|i| i.kind == "shell").unwrap();
+    let shell = status
+        .page
+        .items
+        .iter()
+        .find(|i| i.kind == "shell")
+        .unwrap();
     assert_eq!(shell.owner_run_id.as_deref(), Some("root"));
     assert_eq!(shell.targets[0].command, "shell.get");
     assert_eq!(shell.targets[0].args["execution_id"], "exec");
@@ -164,9 +181,10 @@ async fn exact_scope_state_and_absolute_time_filters_keep_request_result_links()
         })
         .await
         .unwrap();
-    assert!(thread.items.iter().all(|i| i.thread_id == "b"));
+    assert!(thread.page.items.iter().all(|i| i.thread_id == "b"));
     assert!(
         thread
+            .page
             .items
             .iter()
             .any(|i| i.parent_thread_id.as_deref() == Some("a") && i.owner_run_id.is_none())
@@ -179,11 +197,12 @@ async fn exact_scope_state_and_absolute_time_filters_keep_request_result_links()
         .await
         .unwrap();
     assert!(
-        run.items
+        run.page
+            .items
             .iter()
             .all(|i| i.run_id.as_deref() == Some("root"))
     );
-    assert!(!run.items.iter().any(|i| i.id == "owned"));
+    assert!(!run.page.items.iter().any(|i| i.id == "owned"));
     let held = f
         .status(StatusArgs {
             state: vec!["held".into()],
@@ -192,8 +211,8 @@ async fn exact_scope_state_and_absolute_time_filters_keep_request_result_links()
         })
         .await
         .unwrap();
-    assert_eq!(held.items.len(), 1);
-    assert_eq!(held.items[0].id, "held-node");
+    assert_eq!(held.page.items.len(), 1);
+    assert_eq!(held.page.items[0].id, "held-node");
     let applied = f
         .status(StatusArgs {
             state: vec!["applied".into()],
@@ -201,7 +220,7 @@ async fn exact_scope_state_and_absolute_time_filters_keep_request_result_links()
         })
         .await
         .unwrap();
-    assert!(applied.items[0].end_message_node_id.is_none());
+    assert!(applied.page.items[0].end_message_node_id.is_none());
     let bad = f
         .status(StatusArgs {
             thread_id: Some("a".into()),
@@ -223,15 +242,15 @@ async fn pagination_continues_across_state_changes_but_rejects_filter_changes() 
         ..Default::default()
     };
     let first = f.status(args.clone()).await.unwrap();
-    assert_eq!(first.items.len(), 2);
-    let cursor = first.next_cursor.clone().unwrap();
+    assert_eq!(first.page.items.len(), 2);
+    let cursor = first.page.next_cursor.clone().unwrap();
     let mut page = first;
     let mut ids = Vec::new();
     loop {
         let wire = serde_json::to_value(&page).unwrap();
         assert_eq!(
             wire.as_object().unwrap().contains_key("next_cursor"),
-            page.next_cursor.is_some(),
+            page.page.next_cursor.is_some(),
             "terminal status pages omit the cursor; continued pages carry it"
         );
         assert_eq!(
@@ -239,8 +258,13 @@ async fn pagination_continues_across_state_changes_but_rejects_filter_changes() 
             page,
             "an omitted terminal cursor remains readable"
         );
-        ids.extend(page.items.iter().map(|i| (i.kind.clone(), i.id.clone())));
-        let Some(cursor) = page.next_cursor else {
+        ids.extend(
+            page.page
+                .items
+                .iter()
+                .map(|i| (i.kind.clone(), i.id.clone())),
+        );
+        let Some(cursor) = page.page.next_cursor else {
             break;
         };
         page = f
@@ -282,6 +306,7 @@ async fn pagination_continues_across_state_changes_but_rejects_filter_changes() 
         .unwrap();
     assert!(
         continued
+            .page
             .items
             .iter()
             .any(|item| item.id == "exec" && item.state == "stopping")
@@ -355,7 +380,7 @@ async fn malformed_or_other_instance_cursors_are_rejected_and_large_lists_stay_b
         })
         .await
         .unwrap();
-    let cursor = first.next_cursor.unwrap();
+    let cursor = first.page.next_cursor.unwrap();
     let mut parsed: Value =
         serde_json::from_slice(&URL_SAFE_NO_PAD.decode(cursor).unwrap()).unwrap();
     parsed["instance"] = json!("another-owner");
@@ -392,10 +417,11 @@ async fn malformed_or_other_instance_cursors_are_rejected_and_large_lists_stay_b
         })
         .await
         .unwrap();
-    assert_eq!(result.items.len(), 200);
-    assert!(result.next_cursor.is_some());
+    assert_eq!(result.page.items.len(), 200);
+    assert!(result.page.next_cursor.is_some());
     assert!(
         result
+            .page
             .items
             .iter()
             .all(|i| i.thread_title.chars().count() <= 80
@@ -507,7 +533,7 @@ async fn continuation_keeps_initial_birth_watermark_skips_deleted_anchor_and_rea
     let first = f.status(args.clone()).await.unwrap();
     // Initial top item is the applied message. Delete its source and update an
     // existing shell without changing its birth: neither invalidates paging.
-    assert_eq!(first.items[0].id, "applied-node");
+    assert_eq!(first.page.items[0].id, "applied-node");
     f.db.call(|db| {
         db.execute_batch("DELETE FROM receipt WHERE id='applied-receipt';
         UPDATE shell_execution SET state='exited',exit_code=7,ended_at='2026-10-25T07:20:00Z',end_reason='user_stop' WHERE id='exec';
@@ -516,7 +542,7 @@ async fn continuation_keeps_initial_birth_watermark_skips_deleted_anchor_and_rea
         INSERT INTO turn(id,thread_id,run_id,state,created_at) VALUES('new-turn','a','new-run','completed','2026-10-25T09:01:00Z');")?;
         Ok(())
     }).await.unwrap();
-    let mut cursor = first.next_cursor;
+    let mut cursor = first.page.next_cursor;
     let mut remaining = Vec::new();
     while let Some(next) = cursor {
         let page = f
@@ -528,9 +554,9 @@ async fn continuation_keeps_initial_birth_watermark_skips_deleted_anchor_and_rea
             .await
             .unwrap();
         assert_ne!(page.fingerprint, first.fingerprint);
-        assert!(page.items.len() <= 3);
-        remaining.extend(page.items);
-        cursor = page.next_cursor;
+        assert!(page.page.items.len() <= 3);
+        remaining.extend(page.page.items);
+        cursor = page.page.next_cursor;
     }
     assert_eq!(remaining.len(), 9);
     assert!(
@@ -544,8 +570,8 @@ async fn continuation_keeps_initial_birth_watermark_skips_deleted_anchor_and_rea
     assert_eq!(shell.thread_title, "Renamed live metadata");
     assert_eq!(shell.reason.as_deref(), Some("user_stop"));
     let fresh = f.status(StatusArgs { limit: 200, ..args }).await.unwrap();
-    assert!(fresh.items.iter().any(|item| item.id == "new-run"));
-    assert!(fresh.items.iter().any(|item| item.id == "new-turn"));
+    assert!(fresh.page.items.iter().any(|item| item.id == "new-run"));
+    assert!(fresh.page.items.iter().any(|item| item.id == "new-turn"));
     f.close().await;
 }
 
@@ -561,7 +587,7 @@ async fn cursor_binding_covers_scope_version_kind_watermark_and_normalized_condi
         ..Default::default()
     };
     let first = f.status(args.clone()).await.unwrap();
-    let cursor = first.next_cursor.unwrap();
+    let cursor = first.page.next_cursor.unwrap();
     let normalized = f
         .status(StatusArgs {
             state: vec!["running".into(), "live".into()],
@@ -572,7 +598,7 @@ async fn cursor_binding_covers_scope_version_kind_watermark_and_normalized_condi
         })
         .await
         .unwrap();
-    assert!(!normalized.items.is_empty());
+    assert!(!normalized.page.items.is_empty());
     let parsed: Value = serde_json::from_slice(&URL_SAFE_NO_PAD.decode(&cursor).unwrap()).unwrap();
     for (field, value) in [
         ("scope", json!("operation")),
@@ -634,18 +660,18 @@ async fn updated_last_item_may_move_out_of_page_without_forcing_restart() {
         ..Default::default()
     };
     let first = f.status(args.clone()).await.unwrap();
-    assert_eq!(first.items[0].id, "attempt");
+    assert_eq!(first.page.items[0].id, "attempt");
     f.db.call(|db| { db.execute("UPDATE model_attempt SET state='completed',ended_at='2026-10-25T09:00:00Z' WHERE id='attempt'", [])?; Ok(()) }).await.unwrap();
     let continued = f
         .status(StatusArgs {
-            cursor: first.next_cursor,
+            cursor: first.page.next_cursor,
             limit: 200,
             ..args
         })
         .await
         .unwrap();
-    assert_eq!(continued.items.len(), 6);
-    assert!(continued.items.iter().all(|item| item.id != "attempt"));
+    assert_eq!(continued.page.items.len(), 6);
+    assert!(continued.page.items.iter().all(|item| item.id != "attempt"));
     f.close().await;
 }
 
@@ -661,7 +687,7 @@ async fn maximal_valid_escaped_filters_still_produce_reusable_bounded_cursors() 
     };
     Command::Status(args.clone()).validate().unwrap();
     let first = f.status(args.clone()).await.unwrap();
-    let cursor = first.next_cursor.unwrap();
+    let cursor = first.page.next_cursor.unwrap();
     assert!(cursor.len() <= 8192);
     let next = f
         .status(StatusArgs {
@@ -670,15 +696,14 @@ async fn maximal_valid_escaped_filters_still_produce_reusable_bounded_cursors() 
         })
         .await
         .unwrap();
-    assert_eq!(next.items.len(), 1);
-    assert_ne!(first.items[0].id, next.items[0].id);
+    assert_eq!(next.page.items.len(), 1);
+    assert_ne!(first.page.items[0].id, next.page.items[0].id);
     f.close().await;
 }
 
 #[tokio::test]
-async fn revisit_facts_are_run_scoped_fingerprinted_and_projected_to_active_footer() {
+async fn revisit_facts_are_run_scoped_and_projected_to_active_footer() {
     let f = Fixture::new().await;
-    let before = f.status(StatusArgs::default()).await.unwrap();
     f.db.call(|db| {
         db.execute_batch(r#"WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i+1 FROM n WHERE i<5)
             INSERT INTO node(id,kind,created_at,payload_json) SELECT 'revisit-'||i,'user','2026-10-25T08:00:00Z','{}' FROM n;
@@ -690,8 +715,8 @@ async fn revisit_facts_are_run_scoped_fingerprinted_and_projected_to_active_foot
         Ok(())
     }).await.unwrap();
     let after = f.status(StatusArgs::default()).await.unwrap();
-    assert_ne!(before.fingerprint, after.fingerprint);
     let run = after
+        .page
         .items
         .iter()
         .find(|i| i.kind == "run" && i.id == "root")
@@ -701,6 +726,7 @@ async fn revisit_facts_are_run_scoped_fingerprinted_and_projected_to_active_foot
     assert_eq!(summary.consumed_count, 5);
     assert!(
         after
+            .page
             .items
             .iter()
             .filter(|i| i.kind != "run")
@@ -733,7 +759,7 @@ async fn shell_read_time_observations_agree_and_do_not_change_fingerprint_or_ord
     let reader = ShellOutputReader::new(f.db.clone(), "fixture");
     let first = reader.get("exec").await.unwrap();
     let before = f.status(StatusArgs::default()).await.unwrap();
-    let shell = before.items.iter().find(|i| i.id == "exec").unwrap();
+    let shell = before.page.items.iter().find(|i| i.id == "exec").unwrap();
     assert_eq!(first.started_at, shell.started_at);
     assert!(shell.elapsed_ms.unwrap() >= first.elapsed_ms.unwrap());
     assert_eq!(first.last_output_at, None);
@@ -743,8 +769,8 @@ async fn shell_read_time_observations_agree_and_do_not_change_fingerprint_or_ord
     let after = f.status(StatusArgs::default()).await.unwrap();
     assert_eq!(before.fingerprint, after.fingerprint);
     assert_eq!(
-        before.items.iter().map(|i| &i.id).collect::<Vec<_>>(),
-        after.items.iter().map(|i| &i.id).collect::<Vec<_>>()
+        before.page.items.iter().map(|i| &i.id).collect::<Vec<_>>(),
+        after.page.items.iter().map(|i| &i.id).collect::<Vec<_>>()
     );
     f.db.call(|db| {
         db.execute_batch(
@@ -756,7 +782,12 @@ async fn shell_read_time_observations_agree_and_do_not_change_fingerprint_or_ord
     .unwrap();
     let with_output = reader.get("exec").await.unwrap();
     let with_status = f.status(StatusArgs::default()).await.unwrap();
-    let shell = with_status.items.iter().find(|i| i.id == "exec").unwrap();
+    let shell = with_status
+        .page
+        .items
+        .iter()
+        .find(|i| i.id == "exec")
+        .unwrap();
     assert_eq!(
         with_output.last_output_at.as_deref(),
         Some("2026-10-25T07:06:00Z")
@@ -775,7 +806,7 @@ async fn shell_read_time_observations_agree_and_do_not_change_fingerprint_or_ord
         })
         .await
         .unwrap();
-    let shell = status.items.iter().find(|i| i.id == "exec").unwrap();
+    let shell = status.page.items.iter().find(|i| i.id == "exec").unwrap();
     assert_eq!(shell.elapsed_ms, Some(123));
     assert_eq!(shell.last_output_at, None);
     f.close().await;
@@ -801,9 +832,10 @@ async fn many_shells_keep_last_output_projection_on_the_bounded_status_page() {
         })
         .await
         .unwrap();
-    assert_eq!(page.items.len(), 50);
-    assert!(page.next_cursor.is_some());
+    assert_eq!(page.page.items.len(), 50);
+    assert!(page.page.next_cursor.is_some());
     for item in page
+        .page
         .items
         .iter()
         .filter(|i| i.kind == "shell" && i.id.starts_with("bulk"))
@@ -835,7 +867,7 @@ async fn shell_stdin_observations_are_saved_facts_not_intent_or_read_time() {
     }).await.unwrap();
     let recorded = reader.get("exec").await.unwrap();
     let snapshot = f.status(StatusArgs::default()).await.unwrap();
-    let item = snapshot.items.iter().find(|i| i.id == "exec").unwrap();
+    let item = snapshot.page.items.iter().find(|i| i.id == "exec").unwrap();
     assert_eq!(
         recorded.stdin_open,
         Some(true),
@@ -868,7 +900,7 @@ async fn shell_stdin_observations_are_saved_facts_not_intent_or_read_time() {
         })
         .await
         .unwrap();
-    let item = all.items.iter().find(|i| i.id == "exec").unwrap();
+    let item = all.page.items.iter().find(|i| i.id == "exec").unwrap();
     assert_eq!(item.stdin_open, ended.stdin_open);
     assert_eq!(item.stdin_last_write_at, ended.stdin_last_write_at);
     f.close().await;

@@ -43,7 +43,17 @@ fn artifact_list_seeks_across_equal_update_times() {
     assert_eq!(result.items.len(), 1);
     assert_eq!(result.items[0].artifact_id, "d");
     assert!(result.next_cursor.is_none());
-    let old = page(vec!["a", "b"], 1, "artifact.list", "t", |id| (*id).into()).unwrap();
+    let old = page(
+        vec!["a", "b"],
+        1,
+        "artifact.list",
+        "t",
+        ThreadScopeFilter {
+            thread_id: "t".into(),
+        },
+        |id| (*id).into(),
+    )
+    .unwrap();
     args.cursor = old.next_cursor;
     assert_eq!(list(&tx, &args).unwrap_err().code, ErrorCode::CursorExpired);
 }

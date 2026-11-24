@@ -1,8 +1,9 @@
 //! Metadata-only Thread artifacts. All mutations borrow the existing owner transaction.
 use crate::protocol::{
     ARTIFACT_PAGE_LIMIT, ApiError, ArtifactAddArgs, ArtifactGetArgs, ArtifactGetResult,
-    ArtifactHistory, ArtifactListArgs, ArtifactSelected, ArtifactSummary, ArtifactUpdateArgs,
-    ArtifactVersion, ArtifactVersionStamp, ErrorCode, Page, PageCursor,
+    ArtifactHistory, ArtifactListArgs, ArtifactScopeFilter, ArtifactSelected, ArtifactSummary,
+    ArtifactUpdateArgs, ArtifactVersion, ArtifactVersionStamp, ErrorCode, PageCursor, RecordPage,
+    ThreadScopeFilter,
 };
 use rusqlite::{OptionalExtension, Row, Transaction, params};
 
@@ -172,13 +173,14 @@ fn seek(token: Option<&str>, scope: &str, target: &str) -> Result<Option<String>
         .map(|s| PageCursor::decode(s, scope, target, 0, None).map(|c| c.last_sort_key))
         .transpose()
 }
-fn page<T>(
+fn page<T, F>(
     mut items: Vec<T>,
     limit: usize,
     scope: &str,
     target: &str,
+    filters: F,
     key: impl Fn(&T) -> String,
-) -> Result<Page<T>> {
+) -> Result<RecordPage<T, F>> {
     let next_cursor = if items.len() > limit {
         items.truncate(limit);
         Some(
@@ -196,9 +198,12 @@ fn page<T>(
     } else {
         None
     };
-    Ok(Page { items, next_cursor })
+    Ok(RecordPage::new(limit as u32, filters, items, next_cursor))
 }
-pub(crate) fn list(tx: &Transaction<'_>, a: &ArtifactListArgs) -> Result<Page<ArtifactSummary>> {
+pub(crate) fn list(
+    tx: &Transaction<'_>,
+    a: &ArtifactListArgs,
+) -> Result<RecordPage<ArtifactSummary, ThreadScopeFilter>> {
     let limit = page_limit(a.limit)?;
     let after = seek(a.cursor.as_deref(), LIST, &a.thread_id)?
         .map(|key| {
@@ -233,9 +238,16 @@ pub(crate) fn list(tx: &Transaction<'_>, a: &ArtifactListArgs) -> Result<Page<Ar
     } else {
         read("", &[])?;
     }
-    page(items, limit, LIST, &a.thread_id, |a| {
-        serde_json::json!([a.updated_at, a.artifact_id]).to_string()
-    })
+    page(
+        items,
+        limit,
+        LIST,
+        &a.thread_id,
+        ThreadScopeFilter {
+            thread_id: a.thread_id.clone(),
+        },
+        |a| serde_json::json!([a.updated_at, a.artifact_id]).to_string(),
+    )
 }
 pub(crate) fn get(tx: &Transaction<'_>, a: &ArtifactGetArgs) -> Result<ArtifactGetResult> {
     if let Some(n) = a.version {
@@ -270,9 +282,16 @@ pub(crate) fn get(tx: &Transaction<'_>, a: &ArtifactGetArgs) -> Result<ArtifactG
         .map_err(sql)?
         .collect::<rusqlite::Result<_>>()
         .map_err(sql)?;
-    let versions = page(items, limit, VERSIONS, &a.artifact_id, |v| {
-        v.version.to_string()
-    })?;
+    let versions = page(
+        items,
+        limit,
+        VERSIONS,
+        &a.artifact_id,
+        ArtifactScopeFilter {
+            artifact_id: a.artifact_id.clone(),
+        },
+        |v| v.version.to_string(),
+    )?;
     Ok(ArtifactGetResult::History(ArtifactHistory {
         artifact,
         versions,

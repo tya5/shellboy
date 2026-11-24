@@ -6,7 +6,8 @@
 use super::{MutationResult, error, sql_error, target};
 use crate::protocol::validation::{MAX_THREAD_TAGS, normalize_tag};
 use crate::protocol::{
-    ApiError, ErrorCode, Origin, Page, PageCursor, ThreadCwdsArgs, ThreadTagArgs, ThreadTagsArgs,
+    ApiError, ErrorCode, NoListFilters, Origin, PageCursor, RecordPage, ThreadCwdsArgs,
+    ThreadTagArgs, ThreadTagsArgs,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde_json::json;
@@ -158,7 +159,10 @@ pub(crate) fn for_thread(connection: &Connection, id: &str) -> super::Result<Vec
 
 /// Distinct names in byte order. Each name costs one index seek, never a scan of
 /// its members, so a page is at most `limit + 1` seeks however large a tag is.
-pub(crate) fn names(connection: &Connection, args: &ThreadTagsArgs) -> super::Result<Page<String>> {
+pub(crate) fn names(
+    connection: &Connection,
+    args: &ThreadTagsArgs,
+) -> super::Result<RecordPage<String, NoListFilters>> {
     distinct_page(
         connection,
         TAGS_SCOPE,
@@ -171,7 +175,10 @@ pub(crate) fn names(connection: &Connection, args: &ThreadTagsArgs) -> super::Re
 /// Distinct saved cwds of non-deleted Threads, archived ones included: the index
 /// `threads_cwd_updated` has no archive column, so excluding archived Threads would
 /// walk every archived entry of a directory. Same one-seek-per-name paging.
-pub(crate) fn cwds(connection: &Connection, args: &ThreadCwdsArgs) -> super::Result<Page<String>> {
+pub(crate) fn cwds(
+    connection: &Connection,
+    args: &ThreadCwdsArgs,
+) -> super::Result<RecordPage<String, NoListFilters>> {
     distinct_page(
         connection,
         CWDS_SCOPE,
@@ -187,7 +194,7 @@ fn distinct_page(
     next_sql: &str,
     limit: u32,
     cursor: Option<&str>,
-) -> super::Result<Page<String>> {
+) -> super::Result<RecordPage<String, NoListFilters>> {
     let mut after = match cursor {
         Some(token) => {
             let cursor = PageCursor::decode(token, scope, "", 0, None)?;
@@ -227,5 +234,5 @@ fn distinct_page(
     } else {
         None
     };
-    Ok(Page { items, next_cursor })
+    Ok(RecordPage::new(limit, NoListFilters {}, items, next_cursor))
 }

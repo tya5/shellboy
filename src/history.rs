@@ -57,8 +57,8 @@ pub(crate) use search_bodies::search_bodies;
 use crate::{
     protocol::{
         ApiError, ErrorCode, HistoryBody, HistoryExecutionLink, HistoryGetArgs, HistoryListArgs,
-        HistorySelection, HistorySnippet, MAX_BODY_BYTES, MAX_LIST_LIMIT, Page, PageCursor,
-        ThreadForkArgs,
+        HistoryListFilters, HistoryListPage, HistorySelection, HistorySnippet, MAX_BODY_BYTES,
+        MAX_LIST_LIMIT, PageCursor, RecordPage, ThreadForkArgs,
     },
     storage::{DbWorker, StorageError},
 };
@@ -87,7 +87,7 @@ impl History {
         Self { database }
     }
 
-    pub async fn list(&self, args: HistoryListArgs) -> Result<Page<HistorySnippet>, ApiError> {
+    pub async fn list(&self, args: HistoryListArgs) -> Result<HistoryListPage, ApiError> {
         self.database
             .call(move |connection| Ok(list_nodes(connection, &args)))
             .await
@@ -104,7 +104,7 @@ impl History {
     pub async fn relations(
         &self,
         args: crate::protocol::HistoryRelationsArgs,
-    ) -> Result<Page<crate::protocol::RelationItem>, ApiError> {
+    ) -> Result<crate::protocol::RelationListPage, ApiError> {
         self.database
             .call(move |connection| Ok(relations(connection, &args)))
             .await

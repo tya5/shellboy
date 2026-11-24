@@ -579,7 +579,20 @@ pub(crate) fn prepare(raw: RawCompactions) -> Result<Value, ApiError> {
     });
     let more = items.len() > limit;
     items.truncate(limit);
-    let mut value = json!({"items":items,"more":more,"period":window.json(),"coverage":{"source_candidate_limit":cap,"candidate_limit_reached":saturated,"retention":"retained facts only; missing legacy metrics are unknown; expired operation receipts can hide restores and operation associations","failure_count":"retained Turn failures, not an invented consecutive-failure counter"}});
+    let filters = crate::protocol::CompactListFilters {
+        thread_id: thread,
+        since: window.since.map(|t| t.to_rfc3339()),
+        until: window.until.map(|t| t.to_rfc3339()),
+    };
+    let mut value = json!(crate::protocol::RecordPage::new(
+        limit as u32,
+        filters,
+        items,
+        None
+    ));
+    value["more"] = json!(more);
+    value["period"] = window.json();
+    value["coverage"] = json!({"source_candidate_limit":cap,"candidate_limit_reached":saturated,"retention":"retained facts only; missing legacy metrics are unknown; expired operation receipts can hide restores and operation associations","failure_count":"retained Turn failures, not an invented consecutive-failure counter"});
     if let Some(complete) = display_latest_complete {
         value["coverage"]["latest_complete"] = json!(complete);
     }

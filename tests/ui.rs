@@ -2996,7 +2996,7 @@ fn dense_thread_rows_and_selected_preview_stay_compact() {
                 awaiting_named_count: 0,
                 awaiting_thread_count: 0,
                 awaiting_thread_count_exact: true,
-                awaiting_replies_exact: true,
+                awaiting_replies_count_exact: true,
                 awaiting_named_oldest_at: None,
                 awaiting_replies: 0,
                 archived_at: None,

@@ -1429,7 +1429,7 @@ fn typed_status_preserves_both_existing_modes_and_rejects_ambiguous_union_matche
     let activity: Value = serde_json::from_str(r###"{
         "instance_id":"i", "observed_at":"now", "scope":"durable_only",
         "consistency":"single_sqlite_read_transaction", "fingerprint":"f",
-        "filters":{"memory":false,"thread_id":null,"run_id":null,"since":null,"state":[],"all":false,"limit":50,"cursor":null,"future_filter":{"x":1}},
+        "limit":50,"filters":{"thread_id":null,"run_id":null,"since":null,"state":[],"all":false,"future_filter":{"x":1}},
         "items":[{"kind":"shell","id":"s","state":"running","thread_id":"t","thread_title":"title",
             "parent_thread_id":null,"current_connection":"c","current_model":"m","run_id":"r","owner_run_id":"r",
             "turn_id":null,"execution_id":"s","message_id":null,"attempt_id":null,"operation_id":null,
@@ -1446,8 +1446,8 @@ fn typed_status_preserves_both_existing_modes_and_rejects_ambiguous_union_matche
     let StatusResult::Activity(snapshot) = decoded else {
         panic!("activity shape misclassified")
     };
-    assert_eq!(snapshot.items[0].stdin_open, Some(true));
-    let Some(Some(StatusReply::Object(reply))) = snapshot.items[0].reply.as_ref() else {
+    assert_eq!(snapshot.page.items[0].stdin_open, Some(true));
+    let Some(Some(StatusReply::Object(reply))) = snapshot.page.items[0].reply.as_ref() else {
         panic!("structured reply shape misclassified");
     };
     assert_eq!(reply.delivered, Some(None));
@@ -1468,7 +1468,7 @@ fn typed_status_preserves_both_existing_modes_and_rejects_ambiguous_union_matche
     let StatusResult::Activity(snapshot) = decoded else {
         panic!("activity shape misclassified")
     };
-    assert_eq!(snapshot.items[0].reply, Some(None));
+    assert_eq!(snapshot.page.items[0].reply, Some(None));
     assert_eq!(
         serde_json::to_value(StatusResult::Activity(snapshot)).unwrap(),
         explicit_null
@@ -1479,14 +1479,14 @@ fn typed_status_preserves_both_existing_modes_and_rejects_ambiguous_union_matche
     let StatusResult::Activity(snapshot) = decoded else {
         panic!("activity shape misclassified")
     };
-    assert_eq!(snapshot.items[0].reply, None);
+    assert_eq!(snapshot.page.items[0].reply, None);
     assert!(
         serde_json::to_value(StatusResult::Activity(snapshot.clone())).unwrap()["items"][0]
             .get("reply")
             .is_none()
     );
     assert_eq!(
-        snapshot.filters.additional_properties["future_filter"],
+        snapshot.page.filters.additional_properties["future_filter"],
         json!({"x":1})
     );
 
@@ -1525,12 +1525,12 @@ fn typed_result_records_tolerate_open_leaves_and_pre_283_missing_fields() {
             "started_at":null,"ended_at":null,"state":"exited","exit_code":0,"command_excerpt":null,
             "command_characters":0,"command_excerpt_redacted":false,"command_excerpt_truncated":false,
             "started_at_known":false,"stdin_open":false,"stdin_last_write_at":null}],
-        "next_cursor":null,"scanned":1,"scan_limit":2000,"scan_budget_reached":false,
+        "limit":50,"filters":{},"next_cursor":null,"scanned":1,"scan_limit":2000,"scan_budget_reached":false,
         "period":{"since":null,"until":null,"bounds":"[since,until)","durations":"whole","unknown_starts":"excluded"},
         "ordering":"saved start","redaction":"conservative"
     })).unwrap();
-    assert_eq!(shell.items[0].stdin_open, Some(false));
-    assert_eq!(shell.items[0].stdin_last_write_at, None);
+    assert_eq!(shell.page.items[0].stdin_open, Some(false));
+    assert_eq!(shell.page.items[0].stdin_last_write_at, None);
     let encoded = serde_json::to_value(shell).unwrap();
     assert_eq!(encoded["items"][0]["stdin_open"], false);
 
@@ -1538,12 +1538,12 @@ fn typed_result_records_tolerate_open_leaves_and_pre_283_missing_fields() {
         "items":[{"execution_id":"e","run_id":"r","thread_id":"t","started_at":null,"ended_at":null,
             "state":"exited","exit_code":0,"command_excerpt":null,"command_characters":0,
             "command_excerpt_redacted":false,"command_excerpt_truncated":false,"started_at_known":false}],
-        "next_cursor":null,"scanned":0,"scan_limit":2000,"scan_budget_reached":false,
+        "limit":50,"filters":{},"next_cursor":null,"scanned":0,"scan_limit":2000,"scan_budget_reached":false,
         "period":{"since":null,"until":null,"bounds":"[since,until)","durations":"whole","unknown_starts":"excluded"},
         "ordering":"saved start","redaction":"conservative"
     })).unwrap();
     assert!(
-        old_shell.items[0].additional_properties.is_empty(),
+        old_shell.page.items[0].additional_properties.is_empty(),
         "pre-283 result remains decodable"
     );
 

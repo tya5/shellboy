@@ -246,7 +246,7 @@ pub(crate) fn prepare(raw: RawSummary, title: String, excerpt: String) -> Thread
         },
         awaiting_thread_replies: raw.awaiting_thread_replies,
         awaiting_replies: raw.awaiting_replies,
-        awaiting_replies_exact: reply_count_exact(raw.awaiting_replies),
+        awaiting_replies_count_exact: reply_count_exact(raw.awaiting_replies),
         awaiting_thread_count_exact: reply_count_exact(raw.awaiting_thread_replies),
         awaiting_named_count: if raw.awaiting_reply_exact {
             raw.awaiting_reply
@@ -415,7 +415,7 @@ mod tests {
             let (row, many) = measure();
             assert!(many <= few + 20, "{few} -> {many}");
             assert_eq!(
-                (row.awaiting_replies, row.awaiting_replies_exact),
+                (row.awaiting_replies, row.awaiting_replies_count_exact),
                 (17, false)
             );
             if to_human == 1 {

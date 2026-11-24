@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 use crate::protocol::{
     ApiError, ErrorCode, HistoryRelation, HistoryRelationsArgs, MAX_LIST_LIMIT, NodeProvenance,
-    Page, PageCursor, RelationItem,
+    PageCursor, RecordPage, RelationItem, RelationListFilters, RelationListPage,
 };
 
 use super::sql_error;
@@ -133,7 +133,7 @@ pub(super) fn projected_provenance(
 pub fn relations(
     connection: &Connection,
     args: &HistoryRelationsArgs,
-) -> Result<Page<RelationItem>, ApiError> {
+) -> Result<RelationListPage, ApiError> {
     if args.limit == 0 || args.limit > MAX_LIST_LIMIT {
         return Err(ApiError::new(
             ErrorCode::InvalidArgument,
@@ -259,7 +259,15 @@ pub fn relations(
     } else {
         None
     };
-    Ok(Page { items, next_cursor })
+    Ok(RecordPage::new(
+        args.limit,
+        RelationListFilters {
+            node_id: args.node_id.clone(),
+            relation: args.relation,
+        },
+        items,
+        next_cursor,
+    ))
 }
 
 fn invalid_cursor() -> ApiError {

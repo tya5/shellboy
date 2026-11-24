@@ -379,7 +379,7 @@ All list shapes, including exact IDs and awaiting lists, inspect the latest
 omitted when true. `false` means no prose was found and older nodes remain;
 this is a node bound, not a byte bound.
 
-`awaiting_replies_exact` describes the total, and `awaiting_thread_count_exact`
+`awaiting_replies_count_exact` describes the total, and `awaiting_thread_count_exact`
 describes the Thread-directed count (including `awaiting_thread_replies`).
 Each count is exact through 16. A saturated count is 17, with the corresponding
 flag false (a lower bound); an omitted flag means exact.

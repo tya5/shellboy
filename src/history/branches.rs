@@ -22,11 +22,15 @@
 use std::collections::HashSet;
 
 use rusqlite::{Connection, OptionalExtension, params};
+use schemars::JsonSchema;
 use serde::Serialize;
 use serde_json::Value;
 
 use super::sql_error;
-use crate::protocol::{ApiError, ErrorCode, MAX_LIST_LIMIT, Page, PageCursor, ThreadBranchesArgs};
+use crate::protocol::{
+    ApiError, ErrorCode, MAX_LIST_LIMIT, PageCursor, RecordPage, ThreadBranchesArgs,
+    ThreadScopeFilter,
+};
 
 /// Ancestors followed upward from the requested Thread.
 pub const ANCESTOR_LIMIT: usize = 32;
@@ -40,14 +44,14 @@ pub const SCAN_ROWS: i64 = 256;
 const PAYLOAD_BYTES: i64 = 65_536;
 const SCOPE: &str = "thread.branches";
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct Excerpt {
     pub node_id: String,
     /// None when the payload is collected, malformed or over the parse bound.
     pub text: Option<String>,
     pub truncated: bool,
 }
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct Divergence {
     pub node_id: String,
     /// Position of the last shared node in both selected paths.
@@ -56,13 +60,13 @@ pub struct Divergence {
     /// The parent has nodes after the divergence point.
     pub parent_continues: bool,
 }
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct Tip {
     pub node_id: String,
     pub at: String,
     pub last_request: Option<Excerpt>,
 }
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct Size {
     pub path_nodes: i64,
     /// Nodes after the divergence point; absent for a family root.
@@ -70,7 +74,7 @@ pub struct Size {
     /// Payload bytes are not summed: that is unbounded for long Threads.
     pub bytes: Option<u64>,
 }
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct BranchItem {
     pub thread_id: String,
     pub title: Option<String>,
@@ -88,6 +92,19 @@ pub struct BranchItem {
     pub divergence_unknown: Option<&'static str>,
     pub tip: Option<Tip>,
     pub size: Size,
+}
+
+#[derive(Serialize, JsonSchema)]
+pub(crate) struct BranchListResult {
+    #[serde(flatten)]
+    page: RecordPage<BranchItem, ThreadScopeFilter>,
+    thread_id: String,
+    root_thread_id: String,
+    family_threads: usize,
+    family_truncated: bool,
+    ancestors_truncated: bool,
+    root_parent_unavailable: bool,
+    limits: Value,
 }
 
 struct Member {
@@ -464,23 +481,31 @@ pub fn branches(
     } else {
         None
     };
-    let page = Page { items, next_cursor };
-    let mut value = serde_json::to_value(page)
-        .map_err(|_| ApiError::new(ErrorCode::InvalidState, "branches are not serializable"))?;
-    value["thread_id"] = requested.into();
-    value["root_thread_id"] = family.chain[0].clone().into();
-    value["family_threads"] = family.members.len().into();
-    value["family_truncated"] = family.family_truncated.into();
-    value["ancestors_truncated"] = family.ancestors_truncated.into();
-    value["root_parent_unavailable"] = family.root_parent_unavailable.into();
-    value["limits"] = serde_json::json!({
-        "family_threads": FAMILY_LIMIT,
-        "ancestors": ANCESTOR_LIMIT,
-        "request_scan_rows": SCAN_ROWS,
-        "excerpt_chars": EXCERPT_CHARS,
-        "bytes": "not_measured",
-    });
-    Ok(value)
+    let page = RecordPage::new(
+        args.limit,
+        ThreadScopeFilter {
+            thread_id: requested.into(),
+        },
+        items,
+        next_cursor,
+    );
+    serde_json::to_value(BranchListResult {
+        page,
+        thread_id: requested.into(),
+        root_thread_id: family.chain[0].clone(),
+        family_threads: family.members.len(),
+        family_truncated: family.family_truncated,
+        ancestors_truncated: family.ancestors_truncated,
+        root_parent_unavailable: family.root_parent_unavailable,
+        limits: serde_json::json!({
+            "family_threads": FAMILY_LIMIT,
+            "ancestors": ANCESTOR_LIMIT,
+            "request_scan_rows": SCAN_ROWS,
+            "excerpt_chars": EXCERPT_CHARS,
+            "bytes": "not_measured",
+        }),
+    })
+    .map_err(|_| ApiError::new(ErrorCode::InvalidState, "branches are not serializable"))
 }
 fn expired() -> ApiError {
     ApiError::new(

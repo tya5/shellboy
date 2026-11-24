@@ -740,6 +740,10 @@ async fn listing_excerpt_limits_bind_cursors_and_payload_sizes_include_unicode_a
     let default = history.list(listing("thread", 1, None)).await.unwrap();
     assert_eq!(default.items[0].excerpt.chars().count(), 512);
     assert_eq!(default.items[0].payload_chars, Some(expected));
+    assert!(default.items[0].excerpt_truncated);
+    assert!(!default.items[0].excerpt_omitted);
+    assert_eq!(default.items[0].execution_count, 0);
+    assert_eq!(default.items[0].execution_count_exact, Some(true));
     let mut small = listing("thread", 1, None);
     small.excerpt_chars = 3;
     let small = history.list(small).await.unwrap();
@@ -748,6 +752,8 @@ async fn listing_excerpt_limits_bind_cursors_and_payload_sizes_include_unicode_a
     zero.excerpt_chars = 0;
     let first = history.list(zero.clone()).await.unwrap();
     assert!(first.items[0].excerpt.is_empty());
+    assert!(first.items[0].excerpt_omitted);
+    assert!(!first.items[0].excerpt_truncated);
     assert_eq!(first.items[0].payload_chars, Some(expected));
     let cursor = first.next_cursor.unwrap();
     let mismatched = history

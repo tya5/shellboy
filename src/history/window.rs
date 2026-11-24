@@ -168,14 +168,14 @@ fn window_projected(
             } else {
                 (None, None)
             };
-            let excerpt_reason = if row.payload_bytes as u64 > items::NODE_SOURCE_BYTES as u64
-                && row.deleted_reason.is_none()
-            {
+            let source_omitted = row.payload_bytes as u64 > items::NODE_SOURCE_BYTES as u64
+                && row.deleted_reason.is_none();
+            let excerpt_reason = if source_omitted {
                 Some("excerpt exceeds source budget; use history get".into())
             } else {
                 row.deleted_reason
             };
-            window_items.push(list::history_snippet_with_items(
+            let mut snippet = list::history_snippet_with_items(
                 snapshot,
                 list::AdmittedSnippet {
                     thread_id: &args.thread_id,
@@ -190,7 +190,12 @@ fn window_projected(
                     item_projection: None,
                     links,
                 },
-            )?);
+            )?;
+            if source_omitted {
+                snippet.excerpt_omitted = true;
+                snippet.excerpt_truncated = false;
+            }
+            window_items.push(snippet);
             continue;
         }
         let mut body: Option<serde_json::Value> = None;

@@ -167,3 +167,90 @@ async fn local_handshake_reply_and_cancelled_observation() {
     .unwrap_err();
     assert_eq!(error.code, ErrorCode::AppNotRunning);
 }
+
+#[tokio::test]
+async fn record_page_contract_cli_and_native_ipc() {
+    let root = tempfile::tempdir().unwrap();
+    let owner = owner(root.path()).await;
+    let control = shellboy::control::Control::new(&owner, root.path().into());
+    control.start().await.unwrap();
+    owner.db.call(|db| {
+        db.execute_batch(r#"
+            INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at)
+            VALUES ('a','needle a','/','','p','m','2025-01-01T00:00:00Z'),
+                   ('b','needle b','/','','p','m','2025-01-02T00:00:00Z');
+            INSERT INTO node(id,kind,created_at,payload_json)
+            VALUES ('na','message','2025-01-01T00:00:00Z','{}'),
+                   ('nb','message','2025-01-02T00:00:00Z','{}');
+            INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,result_json)
+            VALUES ('ra','oa','{}','a','na','applied','2025-01-01T00:00:00Z','{"reply":{"state":"pending"},"ask_name":"human"}'),
+                   ('rb','ob','{}','b','nb','applied','2025-01-02T00:00:00Z','{"reply":{"state":"pending"},"ask_name":"human"}');
+        "#)?;
+        Ok(())
+    }).await.unwrap();
+    let (send, receive) = mpsc::channel(8);
+    let server = LocalServer::bind(&owner, send).await.unwrap();
+    let serving = tokio::spawn(control.clone().serve(receive));
+    let data = &owner.loaded.data_dir;
+    for (args, expected_filters, first, second) in [
+        (
+            &["thread", "list", "--query", "needle"][..],
+            json!({"order":"updated","archived":"exclude","query_omitted":true}),
+            "b",
+            "a",
+        ),
+        (
+            &["message", "list", "--awaiting", "--to", "human"][..],
+            json!({"to_omitted":true}),
+            "na",
+            "nb",
+        ),
+    ] {
+        let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_shellboy"))
+            .arg("--data-dir")
+            .arg(data)
+            .args(args)
+            .args(["--limit", "1"])
+            .env_remove("SHELLBOY_SOCKET")
+            .env_remove("SHELLBOY_INSTANCE_ID")
+            .output()
+            .await
+            .unwrap();
+        assert!(output.status.success(), "{:?}", output);
+        let response: Response<serde_json::Value> = serde_json::from_slice(&output.stdout).unwrap();
+        let page = response.result.unwrap();
+        assert_eq!(page["limit"], 1);
+        assert_eq!(page["filters"], expected_filters);
+        let cursor = page["next_cursor"].as_str().unwrap();
+        let (id_key, command) = if args[0] == "thread" {
+            assert_eq!(page["items"][0]["awaiting_thread_count"], 0);
+            assert_eq!(page["items"][0]["awaiting_thread_count_exact"], true);
+            (
+                "thread_id",
+                Command::ThreadList(
+                    serde_json::from_value(json!({"query":"needle","limit":1,"cursor":cursor}))
+                        .unwrap(),
+                ),
+            )
+        } else {
+            (
+                "message_id",
+                Command::MessageList(
+                    serde_json::from_value(json!({"to":"human","limit":1,"cursor":cursor}))
+                        .unwrap(),
+                ),
+            )
+        };
+        assert_eq!(page["items"][0][id_key], first);
+        let native = ipc::call(data, command, None, None).await.unwrap();
+        let page = native.result.unwrap();
+        assert_eq!(page["limit"], 1);
+        assert_eq!(page["filters"], expected_filters);
+        assert_eq!(page["items"][0][id_key], second);
+        assert!(page.get("next_cursor").is_none());
+    }
+    server.shutdown().await.unwrap();
+    serving.await.unwrap();
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+}

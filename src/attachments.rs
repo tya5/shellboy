@@ -864,8 +864,11 @@ pub(crate) fn saved_unavailable_reason(
 pub fn list_tx(
     db: &Connection,
     args: &crate::protocol::AttachmentListArgs,
-) -> Result<crate::protocol::Page<AttachmentDetails>, ApiError> {
-    use crate::protocol::{MAX_LIST_LIMIT, Page, PageCursor};
+) -> Result<
+    crate::protocol::RecordPage<AttachmentDetails, crate::protocol::ThreadScopeFilter>,
+    ApiError,
+> {
+    use crate::protocol::{MAX_LIST_LIMIT, PageCursor, RecordPage, ThreadScopeFilter};
     if args.limit == 0 || args.limit > MAX_LIST_LIMIT {
         return Err(ApiError::new(
             ErrorCode::InvalidArgument,
@@ -968,7 +971,14 @@ pub fn list_tx(
     } else {
         None
     };
-    Ok(Page { items, next_cursor })
+    Ok(RecordPage::new(
+        args.limit,
+        ThreadScopeFilter {
+            thread_id: thread_id.into(),
+        },
+        items,
+        next_cursor,
+    ))
 }
 
 pub fn remove_tx(

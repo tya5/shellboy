@@ -907,7 +907,7 @@ pub struct CompactListOptions {
     pub since: Option<String>,
     #[arg(long)]
     pub until: Option<String>,
-    #[arg(long, default_value_t = 50)]
+    #[arg(long, default_value_t = wire::DEFAULT_LIST_LIMIT)]
     pub limit: u32,
 }
 #[derive(Debug, Clone, Args)]
@@ -924,7 +924,7 @@ pub struct ShellListOptions {
     pub state: Option<String>,
     #[arg(long, allow_negative_numbers = true)]
     pub exit_code: Option<i32>,
-    #[arg(long, default_value_t = 50)]
+    #[arg(long, default_value_t = wire::DEFAULT_LIST_LIMIT)]
     pub limit: u32,
     #[arg(long)]
     pub cursor: Option<String>,

@@ -63,8 +63,8 @@ pub(super) fn pending_counts(
 pub(super) fn list_pending(
     db: &Connection,
     args: &crate::protocol::MessageListArgs,
-) -> Result<crate::protocol::Page<Value>, crate::protocol::ApiError> {
-    use crate::protocol::{ApiError, ErrorCode, Page, PageCursor};
+) -> Result<crate::protocol::MessageListPage, crate::protocol::ApiError> {
+    use crate::protocol::{ApiError, ErrorCode, MessageListFilters, PageCursor, RecordPage};
     let (index, predicate, key) = pending_direction(
         args.owed_by.as_deref(),
         args.asked_by.as_deref(),
@@ -114,10 +114,16 @@ pub(super) fn list_pending(
     } else {
         None
     };
-    Ok(Page {
-        items: rows.into_iter().map(|(_, _, item)| item).collect(),
+    Ok(RecordPage::new(
+        args.limit,
+        MessageListFilters {
+            owed_by_thread_id: args.owed_by.clone(),
+            asked_by_thread_id: args.asked_by.clone(),
+            to_omitted: args.to.is_some(),
+        },
+        rows.into_iter().map(|(_, _, item)| item).collect(),
         next_cursor,
-    })
+    ))
 }
 
 pub(crate) fn pending_duty_ids(

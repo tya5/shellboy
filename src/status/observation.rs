@@ -777,14 +777,14 @@ mod tests {
                 ..Default::default()
             };
             let canonical = super::super::snapshot(&db, &args, "fixture").unwrap();
-            assert_eq!(canonical.items.len(), 5);
+            assert_eq!(canonical.page.items.len(), 5);
             let mut budget = TextBudget::default();
             let raw = read_status_tx(&db, &retained_keys(), &mut budget).unwrap();
             assert_eq!(raw.statements, 5);
             assert!(raw.limited.is_empty());
             let prepared = prepare(raw);
             assert_eq!(prepared["items"].as_array().unwrap().len(), 5);
-            for expected in canonical.items {
+            for expected in canonical.page.items {
                 let actual = prepared["items"]
                     .as_array()
                     .unwrap()
@@ -827,7 +827,7 @@ mod tests {
             )
             .unwrap();
             let page = super::super::snapshot(&db, &args, "fixture").unwrap();
-            let turn = page.items.into_iter().find(|v| v.id == "t").unwrap();
+            let turn = page.page.items.into_iter().find(|v| v.id == "t").unwrap();
             assert_eq!(turn.reason.as_deref(), Some(reason));
             assert_eq!(turn.message.as_deref(), message);
             assert_eq!(turn.hint.as_deref(), hint);
@@ -866,7 +866,7 @@ mod tests {
             )
             .unwrap();
             let page = super::super::snapshot(&db, &args, "fixture").unwrap();
-            let expected = page.items.into_iter().find(|v| v.id == "a").unwrap();
+            let expected = page.page.items.into_iter().find(|v| v.id == "a").unwrap();
             assert_eq!(expected.compaction_outcome.is_some(), !extra);
             let prepared = prepare(
                 read_status_tx(
@@ -900,7 +900,8 @@ mod tests {
             .unwrap();
             let page = super::super::snapshot(&db, &args, "fixture").unwrap();
             assert!(
-                page.items
+                page.page
+                    .items
                     .iter()
                     .find(|v| v.id == "a")
                     .unwrap()

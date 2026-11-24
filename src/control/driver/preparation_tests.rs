@@ -3010,7 +3010,12 @@ async fn extra_instruction_warning_survives_snapshot_replay_and_live_config_reco
         thread.instruction_warnings[0].reason,
         InstructionWarningReason::NotFound
     );
-    let run = status.items.iter().find(|item| item.kind == "run").unwrap();
+    let run = status
+        .page
+        .items
+        .iter()
+        .find(|item| item.kind == "run")
+        .unwrap();
     assert_eq!(run.instruction_warnings, thread.instruction_warnings);
     assert!(thread.recovery_reason.is_none());
     assert_eq!(

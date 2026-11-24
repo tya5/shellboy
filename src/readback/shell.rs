@@ -1,5 +1,5 @@
 use super::*;
-use crate::protocol::PageCursor;
+use crate::protocol::{PageCursor, RecordPage, ShellListFilters};
 use sha2::{Digest, Sha256};
 pub(super) const SCAN_LIMIT: usize = 2000;
 fn command_sql() -> &'static str {
@@ -201,10 +201,26 @@ pub(crate) fn list(db: &Connection, a: &ShellListArgs, instance: &str) -> Result
             .encode()
         })
         .transpose()?;
-    Ok(
-        json!({"items":items,"next_cursor":next_cursor,"scanned":page["scanned"],"scan_limit":SCAN_LIMIT,"scan_budget_reached":candidate_more&&!more_matches,"period":window.json(),"ordering":"saved start instant descending, then execution ID; unknown starts last","redaction":"conservative obvious credential shapes only; not a security boundary"}),
-    )
+    let filters = ShellListFilters {
+        thread_id: a.thread_id.clone(),
+        since: window.since.map(|t| t.to_rfc3339()),
+        until: window.until.map(|t| t.to_rfc3339()),
+        state: a.state.clone(),
+        exit_code: a.exit_code,
+        command_contains_omitted: a.command_contains.is_some(),
+    };
+    let mut result = json!(RecordPage::new(a.limit, filters, items, next_cursor));
+    result["scanned"] = page["scanned"].clone();
+    result["scan_limit"] = json!(SCAN_LIMIT);
+    result["scan_budget_reached"] = json!(candidate_more && !more_matches);
+    result["period"] = window.json();
+    result["ordering"] =
+        json!("saved start instant descending, then execution ID; unknown starts last");
+    result["redaction"] =
+        json!("conservative obvious credential shapes only; not a security boundary");
+    Ok(result)
 }
+
 pub(super) fn snippet(raw: &str) -> (String, bool) {
     let cleaned:String=raw.chars().filter(|c|!c.is_control() && !matches!(c,'\u{200b}'..='\u{200f}'|'\u{2028}'..='\u{202e}'|'\u{2066}'..='\u{2069}'|'\u{feff}')).collect();
     let lower = cleaned.to_ascii_lowercase();

@@ -1,8 +1,7 @@
 //! Capture only immutable page identities; body retention stays with management.
 use crate::{
     protocol::{
-        ApiError, Command, ErrorCode, HistoryBody, HistoryGetArgs, HistorySnippet, HistoryWindow,
-        Page,
+        ApiError, Command, ErrorCode, HistoryBody, HistoryGetArgs, HistoryListPage, HistoryWindow,
     },
     ui::{HistorySourceScope, InspectionTarget},
 };
@@ -115,7 +114,7 @@ pub(super) async fn request(
                     super::presentation_work(move || serialize(report)).await?
                 }
                 command @ Command::HistoryList(_) => {
-                    let page: Page<HistorySnippet> = native_read(data_dir, command).await?;
+                    let page: HistoryListPage = native_read(data_dir, command).await?;
                     super::presentation_work(move || serialize(page)).await?
                 }
                 command @ Command::HistoryWindow(_) => {

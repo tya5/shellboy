@@ -717,7 +717,7 @@ impl<'a> NativeBrowser<'a> {
         &self,
         args: ThreadListArgs,
         stop: &CancellationToken,
-    ) -> Result<Page<ThreadSummary>, ApiError> {
+    ) -> Result<crate::protocol::ThreadListPage, ApiError> {
         let reply = tokio::select! { biased;
             _ = stop.cancelled() => return Err(observation_closed()),
             reply = crate::ipc::call_selected(self.data_dir, Command::ThreadList(args)) => reply?,
@@ -812,7 +812,14 @@ pub(super) async fn page(
     drop(_permit);
     presentation_work(move || {
         let times = thread_display_times(&page.items);
-        (page, times, sequence)
+        (
+            Page {
+                items: page.items,
+                next_cursor: page.next_cursor,
+            },
+            times,
+            sequence,
+        )
     })
     .await
 }

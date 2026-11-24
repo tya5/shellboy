@@ -55,12 +55,15 @@ fn operation_result_schemas(
     result!("draft.submit", MessageAccepted);
     result!("status", StatusResult);
     result!("model.list", ModelListResult);
-    result!("thread.list", Page<ThreadSummary>);
+    result!("thread.list", ThreadListPage);
     result!("history.export", HistoryExportPage);
     result!("thread.get", ThreadDetails);
-    opaque!("thread.branches");
+    result!(
+        "thread.branches",
+        crate::history::branches::BranchListResult
+    );
     result!("usage.get", UsageGetResult);
-    opaque!("compact.list");
+    result!("compact.list", CompactListResult);
     result!("shell.list", ShellListResult);
     opaque!("thread.create");
     result!("thread.import", ThreadImportResult);
@@ -74,10 +77,10 @@ fn operation_result_schemas(
     result!("thread.archive", ThreadArchiveResult);
     result!("thread.unarchive", ThreadUnarchiveResult);
     opaque!("thread.tag");
-    opaque!("thread.tags");
+    result!("thread.tags", RecordPage<String, NoListFilters>);
     result!("artifact.add", ArtifactSelected);
     result!("artifact.update", ArtifactSelected);
-    result!("artifact.list", Page<ArtifactSummary>);
+    result!("artifact.list", RecordPage<ArtifactSummary, ThreadScopeFilter>);
     result!("artifact.get", ArtifactGetResult);
     result!("artifact.remove", Accepted);
     opaque!("schedule.add");
@@ -87,13 +90,13 @@ fn operation_result_schemas(
     opaque!("schedule.disable");
     opaque!("schedule.remove");
 
-    opaque!("thread.cwds");
+    result!("thread.cwds", RecordPage<String, NoListFilters>);
     result!("thread.set", ThreadDetails);
     result!("id.resolve", IdResolveResult);
     result!("message.reply", MessageAccepted);
     result!("message.send", MessageAccepted);
     result!("message.get", MessageDetails);
-    opaque!("message.list");
+    result!("message.list", MessageListPage);
     result!("message.cancel", MessageCancelResult);
     opaque!("operation.get");
     result!("run.get", RunDetails);
@@ -103,13 +106,13 @@ fn operation_result_schemas(
     result!("turn.interrupt", TurnInterruptResult);
     result!("wait", WaitResult);
     result!("events.wait", EventsWaitResult);
-    result!("history.list", Page<HistorySnippet>);
+    result!("history.list", HistoryListPage);
     result!("history.window", HistoryWindow);
     result!("history.recall", HistoryRecallResult);
     result!("history.received", HistoryReceivedPage);
     result!("history.get", HistoryBody);
     result!("history.search", Page<SearchMatch>);
-    result!("history.relations", Page<RelationItem>);
+    result!("history.relations", RelationListPage);
     result!("shell.get", ShellDetails);
     result!("shell.read", ShellOutput);
     result!("shell.write", ShellWriteResult);
@@ -117,7 +120,7 @@ fn operation_result_schemas(
     result!("shell.background", ShellBackgroundResult);
     result!("shell.stop", ShellStopResult);
     result!("attachment.add", AttachmentDetails);
-    result!("attachment.list", Page<AttachmentDetails>);
+    result!("attachment.list", RecordPage<AttachmentDetails, ThreadScopeFilter>);
     result!("attachment.remove", AttachmentRemoveResult);
     opaque!("compact.preview");
     opaque!("compact");
@@ -235,7 +238,7 @@ pub fn schema_json() -> String {
     add_root!("ModelListResult", ModelListResult);
     add_root!("MessageAccepted", MessageAccepted);
     add_root!("MessageCancelResult", MessageCancelResult);
-    add_root!("Page", Page<ThreadSummary>);
+    add_root!("Page", ThreadListPage);
     add_root!("ThreadSummary", ThreadSummary);
     add_root!("ThreadDetails", ThreadDetails);
     add_root!("MessageDetails", MessageDetails);
@@ -844,7 +847,7 @@ record!(ArtifactSelected {
     updated_at: String,
     version: ArtifactVersion
 });
-record!(ArtifactHistory { #[serde(flatten)] artifact: ArtifactSummary, versions: Page<ArtifactVersionStamp> });
+record!(ArtifactHistory { #[serde(flatten)] artifact: ArtifactSummary, versions: RecordPage<ArtifactVersionStamp, ArtifactScopeFilter> });
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(untagged)]
 pub enum ArtifactGetResult {
@@ -870,12 +873,8 @@ pub enum ThreadTitleFallback {
 args!(ThreadTarget { #[serde(default)] thread_id: Option<String> });
 args!(AttachmentListArgs { #[serde(default)] thread_id: Option<String>, #[serde(default = "list_limit")] limit: u32, #[serde(default)] cursor: Option<String> });
 args!(#[derive(Default)] UsageGetArgs { #[serde(default)] attempt_id: Option<Box<str>>, #[serde(default)] since: Option<Box<str>>, #[serde(default)] since_node_id: Option<Box<str>>, #[serde(default)] until: Option<String>, #[serde(default)] thread_id: Option<Box<str>>, #[serde(default)] run_id: Option<String>, #[serde(default)] turn_id: Option<String>, #[serde(default)] include_children: bool, #[serde(default)] group_by: Option<Box<str>>, #[serde(default)] timezone: Option<Box<str>>, #[serde(default)] limit: Option<u32>, #[serde(default)] cursor: Option<Box<str>> });
-fn readback_default_limit() -> u32 {
-    50
-}
-
-args!(CompactListArgs { #[serde(default)] thread_id:Option<String>, #[serde(default)] since:Option<String>, #[serde(default)] until:Option<String>, #[serde(default="readback_default_limit")] limit:u32 });
-args!(ShellListArgs { #[serde(default)] thread_id:Option<String>, #[serde(default)] since:Option<String>, #[serde(default)] until:Option<String>, #[serde(default)] command_contains:Option<String>, #[serde(default)] state:Option<String>, #[serde(default)] exit_code:Option<i32>, #[serde(default="readback_default_limit")] limit:u32, #[serde(default)] cursor:Option<String> });
+args!(CompactListArgs { #[serde(default)] thread_id:Option<String>, #[serde(default)] since:Option<String>, #[serde(default)] until:Option<String>, #[serde(default="list_limit")] limit:u32 });
+args!(ShellListArgs { #[serde(default)] thread_id:Option<String>, #[serde(default)] since:Option<String>, #[serde(default)] until:Option<String>, #[serde(default)] command_contains:Option<String>, #[serde(default)] state:Option<String>, #[serde(default)] exit_code:Option<i32>, #[serde(default="list_limit")] limit:u32, #[serde(default)] cursor:Option<String> });
 states!(ContextEditAction {
     Spill,
     Summary,
@@ -1884,6 +1883,65 @@ pub struct Page<T> {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub next_cursor: Option<String>,
 }
+/// A resumable owner record list. Readers own selection and cursor issuance;
+/// this envelope owns the public page fields.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct RecordPage<T, F> {
+    pub items: Vec<T>,
+    pub limit: u32,
+    pub filters: F,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
+}
+impl<T, F> RecordPage<T, F> {
+    pub(crate) fn new(limit: u32, filters: F, items: Vec<T>, next_cursor: Option<String>) -> Self {
+        Self {
+            items,
+            limit,
+            filters,
+            next_cursor,
+        }
+    }
+}
+
+record!(ThreadListFilters {
+    #[serde(skip_serializing_if = "Option::is_none")] order: Option<ThreadListOrder>,
+    #[serde(skip_serializing_if = "Option::is_none")] archived: Option<ArchivedFilter>,
+    #[serde(skip_serializing_if = "Option::is_none")] state: Option<ThreadListState>,
+    #[serde(skip_serializing_if = "Option::is_none")] thread_ids: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")] tags_omitted: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")] awaiting_omitted: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")] cwd_omitted: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")] query_omitted: bool,
+});
+pub type ThreadListPage = RecordPage<ThreadSummary, ThreadListFilters>;
+
+record!(MessageListFilters {
+    #[serde(skip_serializing_if = "Option::is_none")] owed_by_thread_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")] asked_by_thread_id: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")] to_omitted: bool,
+});
+pub type MessageListPage = RecordPage<Value, MessageListFilters>;
+
+record!(NoListFilters {});
+record!(ThreadScopeFilter { thread_id: String });
+record!(ArtifactScopeFilter {
+    artifact_id: String
+});
+record!(RelationListFilters {
+    node_id: String,
+    relation: HistoryRelation
+});
+record!(HistoryListFilters {
+    thread_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")] run_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")] since: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")] state: Option<String>,
+    excerpt_chars: u32,
+});
+pub type HistoryListPage = RecordPage<HistorySnippet, HistoryListFilters>;
+pub type RelationListPage = RecordPage<RelationItem, RelationListFilters>;
+
 record!(WaitResult { status: WaitStatus, matched: Vec<WaitCondition>, snapshot: Value, #[serde(default, skip_serializing_if = "Option::is_none")] cursor: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] reason: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] hint: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] admission_wait_ms: Option<u64>, #[serde(default, skip_serializing_if = "Option::is_none")] admission_refusals: Option<u64> });
 pub(crate) fn wait_timeout_reason(timeout_ms: u64) -> String {
     format!("wait reached its {timeout_ms} ms deadline; targets continue")
@@ -2043,7 +2101,7 @@ record!(RevisitSummary {
     pending: bool,
     consumed_count: u64
 });
-record!(ThreadSummary { #[serde(default)] awaiting_reply: u64, #[serde(default)] awaiting_thread_replies: u64, #[serde(default)] awaiting_replies: u64, #[serde(default = "default_true", skip_serializing_if = "is_true")] awaiting_replies_exact: bool, #[serde(default = "default_true", skip_serializing_if = "is_true")] awaiting_thread_count_exact: bool, #[serde(default = "default_true", skip_serializing_if = "is_true")] awaiting_named_count_exact: bool, #[serde(default)] #[schemars(description = "Pending replies for the selected name (human by default): exact through 16; 17 with exact=false means 17 or more.")] awaiting_named_count: u64, #[serde(default, skip_serializing_if = "Option::is_none")] awaiting_named_oldest_at: Option<String>, #[serde(default)] awaiting_thread_count: u64, #[serde(default)] last_end_message: Option<Value>, #[serde(default)] last_input: Option<Value>, activity: crate::activity::ActivityPhase, thread_id: String, title: String, cwd: String, #[serde(default, skip_serializing_if = "Option::is_none")] parent_id: Option<String>, state: String, latest_run_stop_reason: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] revisit: Option<RevisitSummary>, updated_at: String, created_at: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] archived_at: Option<String>, #[serde(default, skip_serializing_if = "Vec::is_empty")] tags: Vec<String>, excerpt: String, #[serde(default = "default_true", skip_serializing_if = "is_true")] #[schemars(description = "False if the excerpt scan ended before reaching older selected history.")] excerpt_complete: bool });
+record!(ThreadSummary { #[serde(default)] awaiting_reply: u64, #[serde(default)] awaiting_thread_replies: u64, awaiting_replies: u64, awaiting_replies_count_exact: bool, awaiting_thread_count_exact: bool, awaiting_named_count_exact: bool, #[schemars(description = "Pending replies for the selected name (human by default): exact through 16; 17 with exact=false means 17 or more.")] awaiting_named_count: u64, #[serde(default, skip_serializing_if = "Option::is_none")] awaiting_named_oldest_at: Option<String>, awaiting_thread_count: u64, #[serde(default)] last_end_message: Option<Value>, #[serde(default)] last_input: Option<Value>, activity: crate::activity::ActivityPhase, thread_id: String, title: String, cwd: String, #[serde(default, skip_serializing_if = "Option::is_none")] parent_id: Option<String>, state: String, latest_run_stop_reason: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] revisit: Option<RevisitSummary>, updated_at: String, created_at: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] archived_at: Option<String>, #[serde(default, skip_serializing_if = "Vec::is_empty")] tags: Vec<String>, excerpt: String, #[serde(default = "default_true", skip_serializing_if = "is_true")] #[schemars(description = "False if the excerpt scan ended before reaching older selected history.")] excerpt_complete: bool });
 record!(PendingReplyCount {
     count: u64,
     exact: bool
@@ -2347,6 +2405,8 @@ record!(HistorySnippet {
     node_id: String,
     kind: String,
     excerpt: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")] excerpt_omitted: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")] excerpt_truncated: bool,
     provenance: NodeProvenance,
     context: crate::context::ExecutionContext,
     selection: HistorySelection,
@@ -2435,9 +2495,27 @@ record!(TimeWindowResult {
     unknown_starts: String,
     #[serde(default, flatten)] additional_properties: std::collections::BTreeMap<String, Value>
 });
+record!(ShellListFilters {
+    #[serde(skip_serializing_if = "Option::is_none")] thread_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")] since: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")] until: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")] state: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")] exit_code: Option<i32>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")] command_contains_omitted: bool,
+});
+record!(CompactListFilters {
+    thread_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")] since: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")] until: Option<String>,
+});
+record!(CompactListResult {
+    #[serde(flatten)] page: RecordPage<Value, CompactListFilters>,
+    more: bool,
+    period: TimeWindowResult,
+    coverage: Value,
+});
 record!(ShellListResult {
-    items: Vec<ShellListItem>,
-    next_cursor: Option<String>,
+    #[serde(flatten)] page: RecordPage<ShellListItem, ShellListFilters>,
     scanned: u64,
     scan_limit: u64,
     scan_budget_reached: bool,

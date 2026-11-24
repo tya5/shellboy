@@ -5,7 +5,7 @@ use sha2::{Digest, Sha256};
 pub fn list_nodes(
     connection: &Connection,
     args: &HistoryListArgs,
-) -> Result<Page<HistorySnippet>, ApiError> {
+) -> Result<HistoryListPage, ApiError> {
     let invalid = |message| ApiError::new(ErrorCode::InvalidArgument, message);
     if args.limit == 0 || args.limit > MAX_LIST_LIMIT {
         return Err(invalid("history limit must be in 1..=200"));
@@ -95,7 +95,18 @@ pub fn list_nodes(
     } else {
         None
     };
-    Ok(Page { items, next_cursor })
+    Ok(RecordPage::new(
+        args.limit,
+        HistoryListFilters {
+            thread_id: args.thread_id.clone(),
+            run_id: args.run_id.clone(),
+            since: since.map(|time| time.with_timezone(&chrono::Utc).to_rfc3339()),
+            state: args.state.clone(),
+            excerpt_chars: args.excerpt_chars,
+        },
+        items,
+        next_cursor,
+    ))
 }
 
 fn list_filter(
@@ -180,30 +191,19 @@ pub(super) fn history_snippet(
 ) -> Result<(HistorySnippet, u64), ApiError> {
     let node_id: String = row.get(0).map_err(sql_error)?;
     let body: Option<String> = row.get(2).map_err(sql_error)?;
-    let excerpt = if excerpt_chars == 0 {
-        String::new()
-    } else if let Some(body) = body {
-        let value: Value = serde_json::from_str(&body).map_err(|_| {
+    let payload = body
+        .as_deref()
+        .map(serde_json::from_str::<Value>)
+        .transpose()
+        .map_err(|_| {
             ApiError::new(
                 ErrorCode::InvalidState,
                 "stored history payload is malformed",
             )
         })?;
-        text_of_payload(&value)
-            .chars()
-            .take(excerpt_chars as usize)
-            .collect()
-    } else {
-        format!(
-            "[{}]",
-            row.get::<_, Option<String>>(3)
-                .map_err(sql_error)?
-                .unwrap_or_else(|| "body unavailable".into())
-        )
-        .chars()
-        .take(excerpt_chars as usize)
-        .collect()
-    };
+    let deleted_reason: Option<String> = row.get(3).map_err(sql_error)?;
+    let (excerpt, excerpt_omitted, excerpt_truncated) =
+        project_excerpt(payload.as_ref(), deleted_reason.as_deref(), excerpt_chars);
     let ordinal = row.get::<_, i64>(4).map_err(sql_error)? as u64;
     let (executions, execution_count) = execution_links(connection, &node_id)?;
     let item = HistorySnippet {
@@ -226,11 +226,13 @@ pub(super) fn history_snippet(
         },
         executions_truncated: execution_count > executions.len() as u64,
         execution_count,
-        execution_count_exact: None,
+        execution_count_exact: Some(true),
         executions,
         node_id,
         kind: row.get(1).map_err(sql_error)?,
         excerpt,
+        excerpt_omitted,
+        excerpt_truncated,
     };
     Ok((item, ordinal))
 }
@@ -268,22 +270,8 @@ pub(super) fn history_snippet_with_items(
         item_projection,
         links,
     } = admitted;
-    let excerpt = if excerpt_chars == 0 {
-        String::new()
-    } else if let Some(body) = body {
-        text_of_payload(body)
-            .chars()
-            .take(excerpt_chars as usize)
-            .collect()
-    } else {
-        format!(
-            "[{}]",
-            deleted_reason.as_deref().unwrap_or("body unavailable")
-        )
-        .chars()
-        .take(excerpt_chars as usize)
-        .collect()
-    };
+    let (excerpt, excerpt_omitted, excerpt_truncated) =
+        project_excerpt(body, deleted_reason.as_deref(), excerpt_chars);
     let spill_tools = if kind == "spill" {
         Some(super::spill_tools::load(connection, &node_id)?)
     } else {
@@ -308,5 +296,26 @@ pub(super) fn history_snippet_with_items(
         node_id,
         kind,
         excerpt,
+        excerpt_omitted,
+        excerpt_truncated,
     })
+}
+
+fn project_excerpt(
+    body: Option<&Value>,
+    deleted_reason: Option<&str>,
+    limit: u32,
+) -> (String, bool, bool) {
+    if limit == 0 {
+        return (String::new(), true, false);
+    }
+    let omitted = body.is_none() && deleted_reason.is_none();
+    let text = match body {
+        Some(body) => text_of_payload(body),
+        None => format!("[{}]", deleted_reason.unwrap_or("body unavailable")),
+    };
+    let mut chars = text.chars();
+    let excerpt = chars.by_ref().take(limit as usize).collect();
+    let truncated = chars.next().is_some() && !omitted;
+    (excerpt, omitted, truncated)
 }

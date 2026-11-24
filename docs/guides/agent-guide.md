@@ -44,6 +44,18 @@ Zero search hits or reading only one page is not proof of absence; check the com
 
 IDs have distinct roles even within the same task. `operation_id` identifies an operation receipt, `message_id` a request, `thread_id` a conversation, `run_id` execution ownership, `turn_id` a Turn interval, `end_message_node_id` the Turn's end message (its last saved assistant message), `reply.node_id` the requested reply, and `execution_id` one shell process. The shell ID that ran `message send` is not the recipient shell's ID. Store a launched command's returned ID as `WORK_EXECUTION_ID`, and recipient IDs separately as `CHILD_THREAD_ID` / `CHILD_MESSAGE_ID` / `CHILD_TURN_ID`. Do not assume local variables are automatically shared between shell tool calls.
 
+## Walk a record list
+
+Read `result.limit` and `result.filters` to check the effective selection.
+An `*_omitted: true` filter marker means the selector was applied but its text
+was not echoed. Pass `next_cursor` as `--cursor` on the same owner, with the
+same target and filters, even if `items` is empty; stop when the token is absent
+or null. On `cursor_expired`, start without a token. A page is not a snapshot.
+`*_count_exact: false` means a lower bound; an absent count pair is unknown.
+For `status`, the fingerprint compares only the saved page facts, not live
+output or health. For history snippets, `excerpt_omitted` is not an empty body;
+`excerpt_truncated` means clipping was observed. Use the exact node to read it.
+
 ## Check your context
 
 The only model-facing tool is `shell`. Invoke the `shellboy` CLI through it for conversation operations, child creation, waiting, history, and attachments. These examples use Bash:
@@ -821,9 +833,9 @@ Use `shellboy thread list --state failed --limit 50` (or `--state recovery_wait`
 with `next_cursor` means more matches may exist; continue until the cursor is
 absent. Rows can move as activity changes, so this is not a frozen snapshot.
 
-`awaiting_replies_exact` and `awaiting_thread_count_exact` describe the total
+`awaiting_replies_count_exact` and `awaiting_thread_count_exact` describe the total
 and Thread-directed pending counts, respectively. As with
-`awaiting_named_count_exact`, absent means exact and `false` means 17 or more,
+`awaiting_named_count_exact`, `true` means exact and `false` means 17 or more,
 not exactly 17.
 
 To find Threads waiting on a named recipient across the owner, pass the name to `--awaiting`. For the default recipient, use `shellboy thread list --awaiting human --limit 50` and continue with `--cursor NEXT_CURSOR`. Each item reports `awaiting_named_count` and `awaiting_named_count_exact`: counts through 16 are exact; count 17 with exact=false means 17 or more. Legacy pending receipts are retained and counted with a 17-row bound. `awaiting_named_oldest_at` is the minimum saved question time only when the count is exact; it is absent for 17-or-more. This is a paged read over pending replies for the selected name only; Thread-to-Thread reply duties are excluded. The `awaiting` filter is exclusive with query, tag, cwd, and state filters; archived mode remains available.

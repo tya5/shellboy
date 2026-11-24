@@ -161,7 +161,7 @@
           "type": "string"
         },
         "versions": {
-          "$ref": "#/definitions/Page"
+          "$ref": "#/definitions/RecordPage"
         }
       },
       "required": [
@@ -201,6 +201,17 @@
     },
     "ArtifactRemoveArgs": {
       "additionalProperties": false,
+      "properties": {
+        "artifact_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "artifact_id"
+      ],
+      "type": "object"
+    },
+    "ArtifactScopeFilter": {
       "properties": {
         "artifact_id": {
           "type": "string"
@@ -502,6 +513,85 @@
       "required": [
         "stop",
         "connection"
+      ],
+      "type": "object"
+    },
+    "BranchItem": {
+      "properties": {
+        "branch_kind": {
+          "description": "Persisted creation path; unknown for roots and pre-migration branches.",
+          "type": "string"
+        },
+        "depth": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "divergence": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Divergence"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "divergence_unknown": {
+          "description": "Why a child has no divergence point.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "parent_thread_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pruned_originals": {
+          "description": "The Thread holds a pruned replacement: those originals are gone.",
+          "type": "boolean"
+        },
+        "running": {
+          "type": "boolean"
+        },
+        "size": {
+          "$ref": "#/definitions/Size"
+        },
+        "state": {
+          "description": "`current` (the requested Thread), `ancestor`, or `branch`.",
+          "type": "string"
+        },
+        "thread_id": {
+          "type": "string"
+        },
+        "tip": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Tip"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "thread_id",
+        "branch_kind",
+        "depth",
+        "state",
+        "running",
+        "pruned_originals",
+        "size"
       ],
       "type": "object"
     },
@@ -2064,6 +2154,29 @@
       },
       "type": "object"
     },
+    "CompactListFilters": {
+      "properties": {
+        "since": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "thread_id": {
+          "type": "string"
+        },
+        "until": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "thread_id"
+      ],
+      "type": "object"
+    },
     "CompactPreviewArgs": {
       "additionalProperties": false,
       "properties": {
@@ -2586,6 +2699,38 @@
         "cancelled"
       ],
       "type": "string"
+    },
+    "Divergence": {
+      "properties": {
+        "node_id": {
+          "type": "string"
+        },
+        "ordinal": {
+          "description": "Position of the last shared node in both selected paths.",
+          "format": "int64",
+          "type": "integer"
+        },
+        "parent_continues": {
+          "description": "The parent has nodes after the divergence point.",
+          "type": "boolean"
+        },
+        "request": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Excerpt"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "node_id",
+        "ordinal",
+        "parent_continues"
+      ],
+      "type": "object"
     },
     "DraftGetArgs": {
       "additionalProperties": false,
@@ -3230,6 +3375,28 @@
         "resync_required"
       ],
       "type": "string"
+    },
+    "Excerpt": {
+      "properties": {
+        "node_id": {
+          "type": "string"
+        },
+        "text": {
+          "description": "None when the payload is collected, malformed or over the parse bound.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "node_id",
+        "truncated"
+      ],
+      "type": "object"
     },
     "ExecutionContext": {
       "additionalProperties": false,
@@ -4012,6 +4179,41 @@
       ],
       "type": "object"
     },
+    "HistoryListFilters": {
+      "properties": {
+        "excerpt_chars": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "run_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "since": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "thread_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "thread_id",
+        "excerpt_chars"
+      ],
+      "type": "object"
+    },
     "HistoryRecallAnchor": {
       "properties": {
         "node_id": {
@@ -4372,6 +4574,12 @@
         },
         "excerpt": {
           "type": "string"
+        },
+        "excerpt_omitted": {
+          "type": "boolean"
+        },
+        "excerpt_truncated": {
+          "type": "boolean"
         },
         "execution_count": {
           "format": "uint64",
@@ -5319,6 +5527,26 @@
       },
       "type": "object"
     },
+    "MessageListFilters": {
+      "properties": {
+        "asked_by_thread_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "owed_by_thread_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "to_omitted": {
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
     "MessageProvenance": {
       "properties": {
         "expect_reply": {
@@ -5531,6 +5759,9 @@
         "unavailable_features"
       ],
       "title": "ModelListResult",
+      "type": "object"
+    },
+    "NoListFilters": {
       "type": "object"
     },
     "NodeProvenance": {
@@ -6419,12 +6650,21 @@
     },
     "Page": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "description": "A resumable owner record list. Readers own selection and cursor issuance;\nthis envelope owns the public page fields.",
       "properties": {
+        "filters": {
+          "$ref": "#/definitions/ThreadListFilters"
+        },
         "items": {
           "items": {
             "$ref": "#/definitions/ThreadSummary"
           },
           "type": "array"
+        },
+        "limit": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
         },
         "next_cursor": {
           "type": [
@@ -6434,9 +6674,11 @@
         }
       },
       "required": [
-        "items"
+        "items",
+        "limit",
+        "filters"
       ],
-      "title": "Page",
+      "title": "RecordPage",
       "type": "object"
     },
     "PageCursor": {
@@ -6677,6 +6919,37 @@
       "title": "ReceiptBudget",
       "type": "object"
     },
+    "RecordPage": {
+      "description": "A resumable owner record list. Readers own selection and cursor issuance;\nthis envelope owns the public page fields.",
+      "properties": {
+        "filters": {
+          "$ref": "#/definitions/ArtifactScopeFilter"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/definitions/ArtifactVersionStamp"
+          },
+          "type": "array"
+        },
+        "limit": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "next_cursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "items",
+        "limit",
+        "filters"
+      ],
+      "type": "object"
+    },
     "RejectionReason": {
       "enum": [
         "cancelled",
@@ -6728,6 +7001,21 @@
         "provenance"
       ],
       "title": "RelationItem",
+      "type": "object"
+    },
+    "RelationListFilters": {
+      "properties": {
+        "node_id": {
+          "type": "string"
+        },
+        "relation": {
+          "$ref": "#/definitions/HistoryRelation"
+        }
+      },
+      "required": [
+        "node_id",
+        "relation"
+      ],
       "type": "object"
     },
     "Request": {
@@ -10096,6 +10384,45 @@
       },
       "type": "object"
     },
+    "ShellListFilters": {
+      "properties": {
+        "command_contains_omitted": {
+          "type": "boolean"
+        },
+        "exit_code": {
+          "format": "int32",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "since": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "thread_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "until": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "ShellListItem": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": true,
@@ -10195,12 +10522,21 @@
     "ShellListResult": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": true,
+      "description": "A resumable owner record list. Readers own selection and cursor issuance;\nthis envelope owns the public page fields.",
       "properties": {
+        "filters": {
+          "$ref": "#/definitions/ShellListFilters"
+        },
         "items": {
           "items": {
             "$ref": "#/definitions/ShellListItem"
           },
           "type": "array"
+        },
+        "limit": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
         },
         "next_cursor": {
           "type": [
@@ -10233,6 +10569,8 @@
       },
       "required": [
         "items",
+        "limit",
+        "filters",
         "scanned",
         "scan_limit",
         "scan_budget_reached",
@@ -10442,6 +10780,35 @@
       "title": "ShellWriteStatus",
       "type": "string"
     },
+    "Size": {
+      "properties": {
+        "bytes": {
+          "description": "Payload bytes are not summed: that is unbounded for long Threads.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "nodes_after_divergence": {
+          "description": "Nodes after the divergence point; absent for a family root.",
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "path_nodes": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "path_nodes"
+      ],
+      "type": "object"
+    },
     "SpillToolSource": {
       "properties": {
         "call_id": {
@@ -10549,20 +10916,6 @@
         "all": {
           "type": "boolean"
         },
-        "cursor": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "limit": {
-          "format": "uint32",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "memory": {
-          "type": "boolean"
-        },
         "run_id": {
           "type": [
             "string",
@@ -10589,10 +10942,8 @@
         }
       },
       "required": [
-        "memory",
         "state",
-        "all",
-        "limit"
+        "all"
       ],
       "title": "StatusFilters",
       "type": "object"
@@ -10829,6 +11180,7 @@
     "StatusSnapshot": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": true,
+      "description": "A resumable owner record list. Readers own selection and cursor issuance;\nthis envelope owns the public page fields.",
       "properties": {
         "consistency": {
           "type": "string"
@@ -10858,6 +11210,11 @@
           },
           "type": "array"
         },
+        "limit": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
         "next_cursor": {
           "type": [
             "string",
@@ -10880,8 +11237,9 @@
         "scope",
         "consistency",
         "fingerprint",
-        "filters",
         "items",
+        "limit",
+        "filters",
         "receipt_budget"
       ],
       "title": "StatusSnapshot",
@@ -11564,6 +11922,62 @@
       },
       "type": "object"
     },
+    "ThreadListFilters": {
+      "properties": {
+        "archived": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ArchivedFilter"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "awaiting_omitted": {
+          "type": "boolean"
+        },
+        "cwd_omitted": {
+          "type": "boolean"
+        },
+        "order": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ThreadListOrder"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "query_omitted": {
+          "type": "boolean"
+        },
+        "state": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ThreadListState"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "tags_omitted": {
+          "type": "boolean"
+        },
+        "thread_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "ThreadListOrder": {
       "description": "Ordering of the Thread list's unfiltered or archive-filtered rows.",
       "enum": [
@@ -11638,6 +12052,17 @@
       },
       "required": [
         "node_id"
+      ],
+      "type": "object"
+    },
+    "ThreadScopeFilter": {
+      "properties": {
+        "thread_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "thread_id"
       ],
       "type": "object"
     },
@@ -11743,7 +12168,6 @@
           ]
         },
         "awaiting_named_count": {
-          "default": 0,
           "description": "Pending replies for the selected name (human by default): exact through 16; 17 with exact=false means 17 or more.",
           "format": "uint64",
           "minimum": 0,
@@ -11759,12 +12183,11 @@
           ]
         },
         "awaiting_replies": {
-          "default": 0,
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
         },
-        "awaiting_replies_exact": {
+        "awaiting_replies_count_exact": {
           "type": "boolean"
         },
         "awaiting_reply": {
@@ -11774,7 +12197,6 @@
           "type": "integer"
         },
         "awaiting_thread_count": {
-          "default": 0,
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
@@ -11852,6 +12274,12 @@
         }
       },
       "required": [
+        "awaiting_replies",
+        "awaiting_replies_count_exact",
+        "awaiting_thread_count_exact",
+        "awaiting_named_count_exact",
+        "awaiting_named_count",
+        "awaiting_thread_count",
         "activity",
         "thread_id",
         "title",
@@ -11959,6 +12387,31 @@
         "unknown_starts"
       ],
       "title": "TimeWindowResult",
+      "type": "object"
+    },
+    "Tip": {
+      "properties": {
+        "at": {
+          "type": "string"
+        },
+        "last_request": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Excerpt"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "node_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "node_id",
+        "at"
+      ],
       "type": "object"
     },
     "ToolDescriptor": {
@@ -13500,12 +13953,21 @@
     },
     "artifact.list": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "description": "A resumable owner record list. Readers own selection and cursor issuance;\nthis envelope owns the public page fields.",
       "properties": {
+        "filters": {
+          "$ref": "#/definitions/ThreadScopeFilter"
+        },
         "items": {
           "items": {
             "$ref": "#/definitions/ArtifactSummary"
           },
           "type": "array"
+        },
+        "limit": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
         },
         "next_cursor": {
           "type": [
@@ -13515,9 +13977,11 @@
         }
       },
       "required": [
-        "items"
+        "items",
+        "limit",
+        "filters"
       ],
-      "title": "Page",
+      "title": "RecordPage",
       "type": "object"
     },
     "artifact.remove": {
@@ -13611,12 +14075,21 @@
     },
     "attachment.list": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "description": "A resumable owner record list. Readers own selection and cursor issuance;\nthis envelope owns the public page fields.",
       "properties": {
+        "filters": {
+          "$ref": "#/definitions/ThreadScopeFilter"
+        },
         "items": {
           "items": {
             "$ref": "#/definitions/AttachmentDetails"
           },
           "type": "array"
+        },
+        "limit": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
         },
         "next_cursor": {
           "type": [
@@ -13626,9 +14099,11 @@
         }
       },
       "required": [
-        "items"
+        "items",
+        "limit",
+        "filters"
       ],
-      "title": "Page",
+      "title": "RecordPage",
       "type": "object"
     },
     "attachment.remove": {
@@ -13649,7 +14124,47 @@
       "type": "object"
     },
     "compact": true,
-    "compact.list": true,
+    "compact.list": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "description": "A resumable owner record list. Readers own selection and cursor issuance;\nthis envelope owns the public page fields.",
+      "properties": {
+        "coverage": true,
+        "filters": {
+          "$ref": "#/definitions/CompactListFilters"
+        },
+        "items": {
+          "items": true,
+          "type": "array"
+        },
+        "limit": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "more": {
+          "type": "boolean"
+        },
+        "next_cursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "period": {
+          "$ref": "#/definitions/TimeWindowResult"
+        }
+      },
+      "required": [
+        "items",
+        "limit",
+        "filters",
+        "more",
+        "period",
+        "coverage"
+      ],
+      "title": "CompactListResult",
+      "type": "object"
+    },
     "compact.preview": true,
     "config.get": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -14186,12 +14701,21 @@
     },
     "history.list": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "description": "A resumable owner record list. Readers own selection and cursor issuance;\nthis envelope owns the public page fields.",
       "properties": {
+        "filters": {
+          "$ref": "#/definitions/HistoryListFilters"
+        },
         "items": {
           "items": {
             "$ref": "#/definitions/HistorySnippet"
           },
           "type": "array"
+        },
+        "limit": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
         },
         "next_cursor": {
           "type": [
@@ -14201,9 +14725,11 @@
         }
       },
       "required": [
-        "items"
+        "items",
+        "limit",
+        "filters"
       ],
-      "title": "Page",
+      "title": "RecordPage",
       "type": "object"
     },
     "history.recall": {
@@ -14286,12 +14812,21 @@
     },
     "history.relations": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "description": "A resumable owner record list. Readers own selection and cursor issuance;\nthis envelope owns the public page fields.",
       "properties": {
+        "filters": {
+          "$ref": "#/definitions/RelationListFilters"
+        },
         "items": {
           "items": {
             "$ref": "#/definitions/RelationItem"
           },
           "type": "array"
+        },
+        "limit": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
         },
         "next_cursor": {
           "type": [
@@ -14301,9 +14836,11 @@
         }
       },
       "required": [
-        "items"
+        "items",
+        "limit",
+        "filters"
       ],
-      "title": "Page",
+      "title": "RecordPage",
       "type": "object"
     },
     "history.search": {
@@ -14660,7 +15197,37 @@
       "title": "MessageDetails",
       "type": "object"
     },
-    "message.list": true,
+    "message.list": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "description": "A resumable owner record list. Readers own selection and cursor issuance;\nthis envelope owns the public page fields.",
+      "properties": {
+        "filters": {
+          "$ref": "#/definitions/MessageListFilters"
+        },
+        "items": {
+          "items": true,
+          "type": "array"
+        },
+        "limit": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "next_cursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "items",
+        "limit",
+        "filters"
+      ],
+      "title": "RecordPage",
+      "type": "object"
+    },
     "message.reply": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
@@ -15066,12 +15633,21 @@
     "shell.list": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": true,
+      "description": "A resumable owner record list. Readers own selection and cursor issuance;\nthis envelope owns the public page fields.",
       "properties": {
+        "filters": {
+          "$ref": "#/definitions/ShellListFilters"
+        },
         "items": {
           "items": {
             "$ref": "#/definitions/ShellListItem"
           },
           "type": "array"
+        },
+        "limit": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
         },
         "next_cursor": {
           "type": [
@@ -15104,6 +15680,8 @@
       },
       "required": [
         "items",
+        "limit",
+        "filters",
         "scanned",
         "scan_limit",
         "scan_budget_reached",
@@ -15344,9 +15922,101 @@
       "title": "ThreadArchiveResult",
       "type": "object"
     },
-    "thread.branches": true,
+    "thread.branches": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "description": "A resumable owner record list. Readers own selection and cursor issuance;\nthis envelope owns the public page fields.",
+      "properties": {
+        "ancestors_truncated": {
+          "type": "boolean"
+        },
+        "family_threads": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "family_truncated": {
+          "type": "boolean"
+        },
+        "filters": {
+          "$ref": "#/definitions/ThreadScopeFilter"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/definitions/BranchItem"
+          },
+          "type": "array"
+        },
+        "limit": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "limits": true,
+        "next_cursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "root_parent_unavailable": {
+          "type": "boolean"
+        },
+        "root_thread_id": {
+          "type": "string"
+        },
+        "thread_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "items",
+        "limit",
+        "filters",
+        "thread_id",
+        "root_thread_id",
+        "family_threads",
+        "family_truncated",
+        "ancestors_truncated",
+        "root_parent_unavailable",
+        "limits"
+      ],
+      "title": "BranchListResult",
+      "type": "object"
+    },
     "thread.create": true,
-    "thread.cwds": true,
+    "thread.cwds": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "description": "A resumable owner record list. Readers own selection and cursor issuance;\nthis envelope owns the public page fields.",
+      "properties": {
+        "filters": {
+          "$ref": "#/definitions/NoListFilters"
+        },
+        "items": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "limit": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "next_cursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "items",
+        "limit",
+        "filters"
+      ],
+      "title": "RecordPage",
+      "type": "object"
+    },
     "thread.delete": true,
     "thread.delete_preview": true,
     "thread.delete_set": {
@@ -15601,12 +16271,21 @@
     },
     "thread.list": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "description": "A resumable owner record list. Readers own selection and cursor issuance;\nthis envelope owns the public page fields.",
       "properties": {
+        "filters": {
+          "$ref": "#/definitions/ThreadListFilters"
+        },
         "items": {
           "items": {
             "$ref": "#/definitions/ThreadSummary"
           },
           "type": "array"
+        },
+        "limit": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
         },
         "next_cursor": {
           "type": [
@@ -15616,9 +16295,11 @@
         }
       },
       "required": [
-        "items"
+        "items",
+        "limit",
+        "filters"
       ],
-      "title": "Page",
+      "title": "RecordPage",
       "type": "object"
     },
     "thread.prune": true,
@@ -15846,7 +16527,39 @@
       "type": "object"
     },
     "thread.tag": true,
-    "thread.tags": true,
+    "thread.tags": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "description": "A resumable owner record list. Readers own selection and cursor issuance;\nthis envelope owns the public page fields.",
+      "properties": {
+        "filters": {
+          "$ref": "#/definitions/NoListFilters"
+        },
+        "items": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "limit": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "next_cursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "items",
+        "limit",
+        "filters"
+      ],
+      "title": "RecordPage",
+      "type": "object"
+    },
     "thread.unarchive": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": true,
