@@ -9529,6 +9529,9 @@
           "format": "uint32",
           "minimum": 0,
           "type": "integer"
+        },
+        "segments": {
+          "type": "boolean"
         }
       },
       "required": [
