@@ -539,9 +539,7 @@ impl DataOwner {
         let directory = self.loaded.data_dir.clone();
         tokio::task::spawn_blocking(move || {
             lock.finish_session()?;
-            if let Err(error) = startup_stage::clear(&directory) {
-                eprintln!("Could not clear owner startup stage: {error}");
-            }
+            let _ = startup_stage::clear(&directory);
             Ok(())
         })
         .await

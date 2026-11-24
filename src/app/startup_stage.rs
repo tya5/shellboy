@@ -16,7 +16,7 @@ pub(crate) struct DbProgress {
 // Only the lock holder calls this, including on the DB writer thread. A
 // snapshot failure must not change whether opening or migrating SQLite works.
 pub(crate) fn publish(directory: &Path, stage: StartupStage) {
-    let result = (|| -> io::Result<()> {
+    let _ = (|| -> io::Result<()> {
         let temporary = directory.join("startup-stage.tmp");
         remove_if_present(&temporary)?;
         let bytes = serde_json::to_vec(&stage)?;
@@ -24,9 +24,6 @@ pub(crate) fn publish(directory: &Path, stage: StartupStage) {
         output.file().write_all(&bytes)?;
         output.publish(&directory.join(FILE))
     })();
-    if let Err(error) = result {
-        eprintln!("Could not publish owner startup stage {stage:?}: {error}");
-    }
 }
 
 pub(super) fn clear(directory: &Path) -> io::Result<()> {

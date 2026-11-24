@@ -964,10 +964,11 @@ local, and bounded descendant counts may be lower bounds; neither establishes
 an exhaustive or durable work inventory. Thread ancestry differs from Run
 ownership. Recheck exact saved IDs/state before acting on a reported target.
 
-## Owner memory observation
-
+## When the owner is not reachable
 
 If `shellboy status` cannot reach the owner, check `error.details.last_startup_stage` before deciding what happened. `database_migration` means migration was the last observed stage, not that the owner is still running. Do not restart an owner or repeat a mutation based only on that field.
+
+## Owner memory observation
 
 Use `shellboy status --memory` for on-demand owner cache accounting and native
 process memory, without activity filters. It does not call a model or embedding

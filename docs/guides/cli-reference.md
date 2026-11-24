@@ -521,9 +521,9 @@ at read time from the saved start and wall clock, not a process-liveness
 check or monotonic measurement. For terminal shells it is the saved completion
 duration, if known. No output or reclaimed output gives last_output_at: null.
 
-When the owner is not reachable, `shellboy status` still exits unsuccessfully. If startup recorded a stage, the JSON error includes `error.details.last_startup_stage` (for example, `database_migration`). This is the last observed stage, not a liveness check or a time estimate. An interrupted startup can leave it behind; a successful owner response takes precedence.
-
 Status timing does not affect activity_at, sorting, cursor or fingerprint.
+
+When the owner is not reachable, `shellboy status` still exits unsuccessfully. If startup recorded a stage, the JSON error includes `error.details.last_startup_stage` (for example, `database_migration`). This is the last observed stage, not a liveness check or a time estimate. An owner that exits without a clean close can leave the stage behind even if it had reached readiness. A successful owner response takes precedence.
 
 ### Instruction reference selection
 
