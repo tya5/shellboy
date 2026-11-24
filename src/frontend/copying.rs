@@ -268,7 +268,7 @@ mod tests {
                 (rejected.code, rejected.message),
                 (expected.code, expected.message.clone())
             );
-            let rejected = source(&control, "plain".into(), 1, language)
+            let rejected = source(&owner.loaded.data_dir, "plain".into(), 1, language)
                 .await
                 .unwrap_err();
             assert_eq!(
