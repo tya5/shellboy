@@ -505,7 +505,7 @@ mod turn_input_tests {
             marker["item"]["content"][0]["text"]
                 .as_str()
                 .unwrap()
-                .contains("any messages delivered later in it")
+                .contains("Side effects remain; inspect before repeating work")
         );
     }
 }

@@ -1996,10 +1996,8 @@ mod tests {
                 payload["spill_tools"]["items"][0]["original_node_id"],
                 format!("result-{i}")
             );
-            assert_eq!(
-                placeholder["retrieve"],
-                "shellboy history get --node <original_node_id>"
-            );
+            assert!(placeholder.get("retrieve").is_none());
+            assert_eq!(placeholder["original_node_id"], format!("result-{i}"));
             assert_eq!(placeholder["output_bytes"], result.len());
             assert!(placeholder.get("command_arguments").is_none());
             current.extend(output.iter().cloned());

@@ -1118,7 +1118,19 @@ async fn committed_selection_witness(control: &Control, thread: &str) -> StageWi
                     .ok_or_else(||crate::storage::StorageError::Schema(format!("event node {} has no canonical event-v1 envelope",event.1)))?;
                 let envelope: Value = serde_json::from_str(text)
                     .map_err(|error|crate::storage::StorageError::Schema(error.to_string()))?;
-                if envelope["event_id"] != event_id || envelope["kind"] != event.4.as_deref().unwrap_or_default() || envelope["payload"] != payload_ref {
+                let kind = event.4.as_deref().unwrap_or_default();
+                let matches_projection = match (kind, payload_ref["kind"].as_str()) {
+                    ("context_changed", Some("run_started" | "turn_started" | "recovery_resumed")) => {
+                        envelope == json!({"event_id":event_id,"kind":payload_ref["kind"],"at":payload_ref["observed_at"],"timezone":payload_ref["timezone"],"change":payload_ref["change"]})
+                    }
+                    ("reply_reminder", _) => {
+                        let ids = payload_ref["messages"].as_array().into_iter().flatten()
+                            .map(|message| &message["message_id"]).collect::<Vec<_>>();
+                        envelope == json!({"event_id":event_id,"kind":kind,"message_ids":ids})
+                    }
+                    _ => envelope["event_id"] == event_id && envelope["kind"] == kind && envelope["payload"] == payload_ref,
+                };
+                if !matches_projection {
                     return Err(crate::storage::StorageError::Schema(format!("event row and selected envelope disagree at node {}",event.1)));
                 }
             }

@@ -56,13 +56,15 @@ shellboy turn get --turn "$SHELLBOY_TURN_ID"
 shellboy --help
 ```
 
-A `Shellboy context v1:` line in your conversation names your Thread, Run,
-Turn, cwd, connection, model, effort and AGENTS reference. It is saved in the
-conversation history: once at each Turn start, and again right after any of
-those values changes or after a compaction removed it. The latest such line is
-the current one; earlier lines describe earlier Turns or earlier settings. A
-`thread_settings` event before a new line states what changed. Your next shell
-call runs in the cwd of the latest line.
+A `Shellboy context v1:` line gives your Thread, cwd, connection, model,
+effort and AGENTS reference, plus the Run and Turn when it was recorded.
+Shellboy appends it when settings are first observed, when they change, or
+when the line is no longer on the selected path. Read the latest
+`turn_started` event for current Run and Turn IDs. A `thread_settings` event
+states what changed; your next shell call runs in the cwd of the latest line.
+Lifecycle events may be short records. A reply reminder's `message_ids`
+identify requests owed at recording time; check current receipt state before
+replying.
 
 A received message may have a sender or reply preamble. See [Recorded message sender](#recorded-message-sender); labels are not verified authority.
 
@@ -804,7 +806,7 @@ To find or group Threads, use tags rather than parents. `shellboy thread tag --t
 
 To see how conversations branch, run `shellboy thread branches` or target another conversation with `--thread THREAD`. A branch is a child Thread (made by `thread fork`, the user's `/edit`, or `thread rewind`) that shares the start of its parent's history. The result is a bounded, paged tree of the family (the topmost live ancestor and everything below it): each item gives `parent_thread_id`, `branch_kind` (`fork`, `rewind`, or `unknown`), `state` (`current`/`ancestor`/`branch`), `divergence.node_id` (the last node shared with the parent), the tip's last request excerpt and time, `size.path_nodes` (`bytes` is always null), `running`, and `pruned_originals`. Use it to find a rewound-away part (the child of the Thread you rewound), to choose a `thread fork --node` target, or to pick a branch to `thread get`/`history list`. Limits: 200 items per page, 256 Threads per family (`family_truncated`), 160-character excerpts; a cursor expires only when the tree changes (a family Thread is created or deleted).
 
-To release disk used by originals you no longer need, prune them explicitly. Read anything you still need first (`shellboy history get --node NODE`), then run `shellboy thread prune --before NODE --dry-run` (omitting `--thread` targets your own Thread), review `replacements.summaries`, `replacements.spills`, `shared_replacements_kept` and `source_nodes_on_other_live_paths`, and only then run `shellboy thread prune --before NODE`. The prune releases the originals of summaries and spills adopted before NODE; the existing GC reclaims them (to check immediately, run `shellboy storage collect --category history` and read its counts). It cannot be undone: a summary restore and a spill's `retrieve:` hint cannot recover originals no live consumer retains. `history get` refuses those originals immediately, even before GC; originals still held by live consumers remain readable. GC frees pages inside the database but does not shrink the file (no automatic VACUUM). The full flow is `thread prune` -> GC (`storage collect --category history`) -> `storage vacuum`; the last step is explicit, needs the owner stopped (so it is refused from inside Shellboy) and is the user's to run (`shellboy storage vacuum --dry-run` shows what it would return). Do this only when the task or user asks for it; nothing prunes automatically.
+To release disk used by originals you no longer need, prune them explicitly. Read anything you still need first (`shellboy history get --node NODE`), then run `shellboy thread prune --before NODE --dry-run` (omitting `--thread` targets your own Thread), review `replacements.summaries`, `replacements.spills`, `shared_replacements_kept` and `source_nodes_on_other_live_paths`, and only then run `shellboy thread prune --before NODE`. The prune releases the originals of summaries and spills adopted before NODE; the existing GC reclaims them (to check immediately, run `shellboy storage collect --category history` and read its counts). It cannot be undone: a summary restore and a spill's `original_node_id` lookup cannot recover originals no live consumer retains. `history get` refuses those originals immediately, even before GC; originals still held by live consumers remain readable. GC frees pages inside the database but does not shrink the file (no automatic VACUUM). The full flow is `thread prune` -> GC (`storage collect --category history`) -> `storage vacuum`; the last step is explicit, needs the owner stopped (so it is refused from inside Shellboy) and is the user's to run (`shellboy storage vacuum --dry-run` shows what it would return). Do this only when the task or user asks for it; nothing prunes automatically.
 
 Within an authorized deletion task, use `shellboy thread delete-preview --thread THREAD_ID` (add `--descendants` to include descendants) to inspect blocking Runs, targeted descendants, and direct sharing, source, and attachment references. This is neither deletion authorization nor a guarantee of GC capacity; `reclaimable_bytes` is null. Actual delete rechecks current state. See [Recovery and storage](recovery-and-storage.md) and [CLI reference](cli-reference.md).
 
@@ -884,6 +886,8 @@ search and `compact --restore`; a summary is not a replacement for original evid
 For other explicitly needed range edits, use `compact --spill --from NODE --to NODE` or `compact --summary --from NODE --to NODE`. `--omit --from NODE --to NODE` can omit a detour in the middle; `--trim --to NODE` omits the prefix through that node. Boundaries are inclusive, complete groups. Omitting the current request, an incomplete group, or the newest group is rejected. Inspect candidates and adjust the range.
 
 Acceptance is queued; check operation get through downstream completion. Repeating an operation ID does not edit twice. Changes apply to the next request, not one already in progress. Make infrequent, substantial edits. Do not repeatedly edit the path and unnecessarily invalidate caches.
+
+A spilled result gives `original_node_id`. Use `shellboy history get --node NODE --limit-bytes BYTES` to inspect retained output. An omission notice marks missing context, not undone side effects.
 
 The first/last original node IDs in an omission notification can also be used to summarize that range with `--summary --from ... --to ...`. Specify the whole omitted range of one marker. Prefer summarizing a range to rereading large amounts of original text and growing the input. Retrieve needed source text in small pieces with `history get --node NODE --limit-bytes BYTES`. `compact --restore` (optionally `--from MARKER`) restores the original range, while later conversation remains and previously excluded attachments do not automatically return. Check current state before repeating an already executed operation. See [Input size and range editing](history-and-search.md#input-size-and-range-editing).
 

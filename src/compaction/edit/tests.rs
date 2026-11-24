@@ -593,21 +593,9 @@ async fn marker_explicitly_reports_current_turn_work_after_the_retained_request(
         .unwrap();
     assert_eq!(payload["context_trim"]["after_current_request_nodes"], 1);
     let text = payload["item"]["content"][0]["text"].as_str().unwrap();
-    assert!(text.contains("1 source nodes AFTER the retained current user request"));
     assert!(text.contains("intermediate work in the current Turn was also omitted"));
-    assert!(
-        text.contains("have NOT been undone")
-            && text.contains("Inspect the current state before repeating")
-    );
-    assert!(text.contains("compact --restore --from old"));
-    assert!(text.contains("rag search --scope history:t --mode keyword"));
-    assert!(!text.contains("history search"));
-    assert!(!text.contains("--mode hybrid") && !text.contains("--mode semantic"));
-    assert!(text.contains("Original data is retained and can stay omitted"));
-    assert!(!text.contains("--max-chars") && !text.contains("--max-percent"));
-    assert!(text.contains(
-        "restoring or summarizing omitted history can enlarge context and reproduce the failure"
-    ));
+    assert!(text.contains("Side effects remain; inspect before repeating work"));
+    assert!(!text.contains("shellboy "));
     fixture.close().await;
 }
 
@@ -650,9 +638,9 @@ async fn middle_omission_attachment_notice_and_warning_only_describe_new_exclusi
             if active { 1 } else { 0 }
         );
         let text = payload["item"]["content"][0]["text"].as_str().unwrap();
-        assert!(text.contains("a middle range of the selected history was omitted"));
+        assert!(text.contains("nodes omitted ("));
         assert_eq!(
-            text.contains("active attachment references were excluded"),
+            text.contains("1 attachments excluded; restore does not reattach them"),
             active
         );
         if active {
@@ -933,9 +921,8 @@ async fn legacy_large_usage_feeds_context_and_baseline_without_rewriting_rows() 
 }
 
 #[tokio::test]
-async fn search_hints_follow_embedding_settings_for_explicit_and_maximal_omission() {
-    use clap::Parser;
-    crate::test_watchdog::watchdog("src/compaction/edit/tests.rs: search_hints_follow_embedding_settings_for_explicit_and_maximal_omission", async {
+async fn compact_notice_preserves_original_references_for_explicit_and_maximal_omission() {
+    crate::test_watchdog::watchdog("src/compaction/edit/tests.rs: compact_notice_preserves_original_references_for_explicit_and_maximal_omission", async {
         for embeddings in [false, true] {
             for maximal in [false, true] {
                 let mut fixture = Fixture::new().await;
@@ -957,22 +944,9 @@ async fn search_hints_follow_embedding_settings_for_explicit_and_maximal_omissio
                     Ok(serde_json::from_str::<Value>(&raw).unwrap())
                 }).await.unwrap();
                 let text = payload["item"]["content"][0]["text"].as_str().unwrap();
-                let keyword = "shellboy rag search --scope history:t --mode keyword --query TEXT";
-                let semantic = "shellboy history search --thread t --query TEXT";
-                assert!(text.contains(keyword));
-                assert_eq!(text.contains(semantic), embeddings);
-                assert_eq!(text.contains("query-embedding API request"), embeddings);
-                assert_eq!(text.contains("may incur cost"), embeddings);
-                assert_eq!(text.contains("do not guarantee index coverage"), embeddings);
-                assert!(!text.contains("--mode hybrid") && !text.contains("--mode semantic"));
-                for hint in [keyword, semantic] {
-                    if text.contains(hint) {
-                        crate::cli::Cli::try_parse_from(hint.split_whitespace()).unwrap();
-                    }
-                }
                 assert_eq!(payload["context_trim"]["first_node_id"], "old");
                 assert_eq!(payload["context_trim"]["last_node_id"], "old");
-                assert!(text.contains("have NOT been undone"));
+                assert_eq!(text, "Shellboy context notice: 1 nodes omitted (old through old). Side effects remain; inspect before repeating work.");
                 fixture.close().await;
             }
         }

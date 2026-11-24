@@ -1167,7 +1167,11 @@ pub(super) fn event_messages(
         }
     }
     if kind == "reply_reminder" {
-        if let Some(messages) = payload.get("messages").and_then(Value::as_array) {
+        if let Some(ids) = event.get("message_ids").and_then(Value::as_array) {
+            for id in ids.iter().take(128).filter_map(Value::as_str) {
+                body.push(Message::Raw { text: clipped(id) });
+            }
+        } else if let Some(messages) = payload.get("messages").and_then(Value::as_array) {
             for message in messages.iter().take(128) {
                 if let Some(id) = message["message_id"].as_str() {
                     body.push(Message::Raw {
@@ -1476,6 +1480,16 @@ mod tests {
         let rendered = format!("{body:?}");
         for text in ["request-one", "request-two", "fixture", "external_cli"] {
             assert!(rendered.contains(text), "{rendered}");
+        }
+    }
+
+    #[test]
+    fn compact_reply_reminders_show_every_request_id() {
+        let event = serde_json::json!({"kind":"reply_reminder","message_ids":["request-one","request-two"]});
+        let (_, body) = super::event_messages(&event, "event", false, &[]);
+        assert_eq!(body.len(), 2);
+        for (message, expected) in body.iter().zip(["request-one", "request-two"]) {
+            assert!(matches!(message, Message::Raw { text } if text == expected));
         }
     }
 
