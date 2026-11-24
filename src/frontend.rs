@@ -258,7 +258,10 @@ async fn management_request_trigger(
             Err(error) => Ok(serde_json::json!({"error":error})),
         };
     }
-    if matches!(command, Command::HistoryGet(_) | Command::HistoryList(_)) {
+    if matches!(
+        command,
+        Command::HistoryGet(_) | Command::HistoryList(_) | Command::HistoryWindow(_)
+    ) {
         return match inspection_history::request(control, command, cancel).await {
             Ok(value) => Ok(value),
             Err(error) => Ok(serde_json::json!({"error":error})),
