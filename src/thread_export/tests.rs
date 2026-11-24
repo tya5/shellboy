@@ -44,3 +44,27 @@ fn dropping_thread_export_leaves_destination_and_removes_temporary_file() {
     assert!(!temporary.exists());
     assert_eq!(std::fs::read(path).unwrap(), b"previous export");
 }
+
+#[cfg(windows)]
+#[test]
+fn busy_export_destination_keeps_previous_contents_and_reports_sharing_conflict() {
+    use std::os::windows::fs::OpenOptionsExt;
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("thread.jsonl");
+    std::fs::write(&path, b"previous export").unwrap();
+    let lock = std::fs::OpenOptions::new()
+        .read(true)
+        .share_mode(1)
+        .open(&path)
+        .unwrap();
+    let mut output = ExportFile::new(&path).unwrap();
+    output.line(&json!({"type":"header"})).unwrap();
+    let temporary = output.file.path().to_owned();
+    let Err(error) = output.publish(&path, 42).map_err(write_error) else {
+        panic!("Windows must reject replacement while target is held");
+    };
+    assert_eq!(error.details.unwrap()["reason"], "file_in_use");
+    assert!(!temporary.exists());
+    assert_eq!(std::fs::read(&path).unwrap(), b"previous export");
+    drop(lock);
+}

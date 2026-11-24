@@ -139,6 +139,12 @@ shellboy --config /path/to/config.toml --data-dir /path/to/shellboy-data
 
 Starting without a subcommand requires an interactive terminal. You cannot run two owners against the same data-dir. Subcommands from another terminal use the running owner; they do not start one automatically. Choose a different data-dir for an independent environment.
 
+On Windows, a redirected data folder is supported if it resolves to a local
+folder, including a locally stored OneDrive folder. Do not put the data directory
+on an SMB share or mapped network drive: SQLite WAL needs a local disk. If the
+owner reports `network_data_directory`, choose a local folder with `--data-dir`.
+The final data directory itself must not be a symbolic link.
+
 During startup, the screen shows current preparation such as configuration, DB migration, or cleanup of previously interrupted work. Conversation input becomes available after startup completes. Esc / Ctrl+C / Ctrl+Q request exit; initialization and persistence already started proceed to a safe boundary before closing. This does not roll back a migration or immediately release the lock. If startup fails, read the reason and close with Enter or Esc.
 
 The startup migration markers count schema upgrade steps, not the fraction of startup time or work completed. A long step can remain on the same marker; no remaining time is estimated. When there is not enough room for the markers, only the step count is shown.

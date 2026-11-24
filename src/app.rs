@@ -99,7 +99,11 @@ impl OwnerLock {
                     .map_err(io_error)?;
             }
         }
-        #[cfg(not(unix))]
+        #[cfg(windows)]
+        let resolved = windows_data_dir(data_dir)?;
+        #[cfg(windows)]
+        let data_dir = resolved.as_path();
+        #[cfg(not(any(unix, windows)))]
         std::fs::create_dir_all(data_dir).map_err(io_error)?;
         let file = OpenOptions::new()
             .create(true)
@@ -123,6 +127,63 @@ impl OwnerLock {
         }
         Ok(owner)
     }
+}
+
+#[cfg(windows)]
+fn windows_data_dir(path: &Path) -> Result<PathBuf, ApiError> {
+    use std::path::{Component, Prefix};
+    use windows_sys::Win32::Storage::FileSystem::GetDriveTypeW;
+
+    fn check_local(path: &Path) -> Result<(), ApiError> {
+        let remote = match path.components().next() {
+            Some(Component::Prefix(prefix)) => match prefix.kind() {
+                Prefix::UNC(..) | Prefix::VerbatimUNC(..) => true,
+                Prefix::Disk(drive) | Prefix::VerbatimDisk(drive) => {
+                    let root = [u16::from(drive), b':' as u16, b'\\' as u16, 0];
+                    // DRIVE_REMOTE (Win32): includes paths using mapped drive letters.
+                    unsafe { GetDriveTypeW(root.as_ptr()) == 4 }
+                }
+                _ => false,
+            },
+            _ => false,
+        };
+        if remote {
+            return Err(ApiError::new(
+                ErrorCode::InvalidArgument,
+                "SQLite WAL requires a local disk; a network data directory is not supported",
+            )
+            .hint("Choose a local folder with --data-dir")
+            .details(serde_json::json!({"reason":"network_data_directory"})));
+        }
+        Ok(())
+    }
+
+    // Check the existing ancestor too, before creating a directory behind a redirect.
+    check_local(path)?;
+    for ancestor in path.ancestors() {
+        match std::fs::canonicalize(ancestor) {
+            Ok(resolved) => {
+                check_local(&resolved)?;
+                break;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(io_error(error)),
+        }
+    }
+    std::fs::create_dir_all(path).map_err(io_error)?;
+    if std::fs::symlink_metadata(path)
+        .map_err(io_error)?
+        .file_type()
+        .is_symlink()
+    {
+        return Err(ApiError::new(
+            ErrorCode::IoFailed,
+            "The final data directory component must not be a symlink",
+        ));
+    }
+    let resolved = std::fs::canonicalize(path).map_err(io_error)?;
+    check_local(&resolved)?;
+    Ok(resolved)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
@@ -372,23 +433,10 @@ impl DataOwner {
             let data = serde_json::to_vec(&endpoint)
                 .map_err(|_| ApiError::new(ErrorCode::IoFailed, "Cannot serialize endpoint"))?;
             use std::io::Write;
-            let mut file = OpenOptions::new()
-                .create_new(true)
-                .write(true)
-                .open(&temporary)
-                .map_err(io_error)?;
-            file.write_all(&data)
-                .and_then(|_| file.sync_all())
-                .map_err(io_error)?;
-            drop(file);
-            // Windows rename does not replace existing files; owner lock prevents
-            // another writer while replacing stale endpoint metadata.
-            let target = dir.join("endpoint.json");
-            #[cfg(windows)]
-            if target.exists() {
-                std::fs::remove_file(&target).map_err(io_error)?;
-            }
-            std::fs::rename(temporary, target).map_err(io_error)
+            let mut file =
+                crate::atomic_file::AtomicFile::new(temporary, true).map_err(io_error)?;
+            file.file().write_all(&data).map_err(io_error)?;
+            file.publish(&dir.join("endpoint.json")).map_err(io_error)
         })
         .await
         .map_err(|_| ApiError::new(ErrorCode::IoFailed, "Endpoint worker failed"))??;
@@ -757,5 +805,76 @@ mod integrity_marker_tests {
         drop(lock);
         let lock = OwnerLock::acquire(root.path()).unwrap();
         assert!(!lock.begin_session().unwrap());
+    }
+}
+
+#[cfg(all(test, windows))]
+mod windows_owner_tests {
+    use super::*;
+    use std::os::windows::fs::OpenOptionsExt;
+
+    #[tokio::test]
+    async fn owner_starts_in_locally_redirected_directory_and_replaces_stale_endpoint() {
+        let root = tempfile::tempdir().unwrap();
+        let local = root.path().join("local target");
+        let redirect = root.path().join("redirect");
+        std::fs::create_dir(&local).unwrap();
+        let junction = std::process::Command::new("cmd.exe")
+            .args(["/D", "/C", "mklink", "/J"])
+            .arg(&redirect)
+            .arg(&local)
+            .output()
+            .unwrap();
+        assert!(junction.status.success(), "{junction:?}");
+        let data = redirect.join("data");
+        let config = root.path().join("config.toml");
+        std::fs::write(&config, "").unwrap();
+        let owner = DataOwner::start(Some(config), Some(data.clone()), root.path().to_owned())
+            .await
+            .unwrap();
+        assert_eq!(
+            windows_data_dir(&data).unwrap(),
+            local.join("data").canonicalize().unwrap()
+        );
+        assert!(local.join("data/shellboy.db").is_file());
+        let target = data.join("endpoint.json");
+        std::fs::write(&target, b"stale endpoint").unwrap();
+        let lock = OpenOptions::new()
+            .read(true)
+            .share_mode(1)
+            .open(&target)
+            .unwrap();
+        let endpoint = Endpoint {
+            protocol_version: PROTOCOL_VERSION,
+            owner_version: None,
+            instance_id: owner.instance_id.clone(),
+            transport: "test".into(),
+            address: "test".into(),
+        };
+        assert!(owner.publish_endpoint(endpoint.clone()).await.is_err());
+        assert_eq!(std::fs::read(&target).unwrap(), b"stale endpoint");
+        assert!(
+            !data
+                .join(format!("endpoint-{}.tmp", owner.instance_id))
+                .exists()
+        );
+        drop(lock);
+        owner.publish_endpoint(endpoint).await.unwrap();
+        let actual: Endpoint = serde_json::from_slice(&std::fs::read(&target).unwrap()).unwrap();
+        assert_eq!(actual.instance_id, owner.instance_id);
+        owner.shutdown().await.unwrap();
+    }
+
+    #[test]
+    fn owner_refuses_network_data_directory_without_contacting_server() {
+        for path in [
+            r"\\uncontacted.invalid\share\data",
+            r"\\?\UNC\uncontacted.invalid\share\data",
+        ] {
+            let Err(error) = OwnerLock::acquire(Path::new(path)) else {
+                panic!("expected network refusal")
+            };
+            assert_eq!(error.details.unwrap()["reason"], "network_data_directory");
+        }
     }
 }

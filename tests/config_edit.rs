@@ -1628,3 +1628,28 @@ fn config_get_warns_about_open_credentials_mode_without_changing_it() {
     std::fs::set_permissions(&credentials, std::fs::Permissions::from_mode(0o600)).unwrap();
     assert!(read(&config).unwrap()["credentials_file"]["warning"].is_null());
 }
+
+#[cfg(windows)]
+#[test]
+fn busy_settings_file_keeps_old_contents_and_reports_sharing_conflict() {
+    use std::os::windows::fs::OpenOptionsExt;
+    let (_dir, path, hash) = fixture(FULL);
+    let before = std::fs::read(&path).unwrap();
+    let lock = std::fs::OpenOptions::new()
+        .read(true)
+        .share_mode(1)
+        .open(&path)
+        .unwrap();
+    let result = apply(&path, &hash, &[change("ui.bell", json!(false))]);
+    let Err(error) = result else {
+        panic!("Windows must reject replacement while target is held")
+    };
+    assert_eq!(error.details.unwrap()["reason"], "file_in_use");
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+    drop(lock);
+    assert!(
+        apply(&path, &hash, &[change("ui.bell", json!(false))])
+            .unwrap()
+            .written
+    );
+}

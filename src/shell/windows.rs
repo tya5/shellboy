@@ -125,7 +125,18 @@ fn environment(config: &Config, extra: BTreeMap<String, String>) -> Result<Envir
         .chain(extra.iter())
         .map(|(k, v)| (k.encode_utf16().collect(), v.encode_utf16().collect()))
         .collect();
-    let entries = windows_command::merge_environment(inherited, overrides, compare_keys)?;
+    let mut entries = windows_command::merge_environment(inherited, overrides, compare_keys)?;
+    let path = env_value(&entries, "PATH")?.map(OsString::from_wide);
+    if let Some(path) = super::prepend_cli_path(path.as_deref()) {
+        entries = windows_command::merge_environment(
+            entries,
+            vec![(
+                "PATH".encode_utf16().collect(),
+                path.encode_wide().collect(),
+            )],
+            compare_keys,
+        )?;
+    }
     windows_command::environment_block(&entries)?; // Validate before OS creation.
     Ok(entries)
 }
@@ -606,5 +617,34 @@ impl ShellSupervisor {
             events: rx,
             completion: done_rx,
         })
+    }
+}
+
+#[cfg(test)]
+mod environment_tests {
+    use super::*;
+
+    #[test]
+    fn configured_mixed_case_path_is_used_after_the_core_bin_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let mut config = Config::default();
+        config
+            .shell
+            .env
+            .insert("Path".into(), root.path().to_str().unwrap().into());
+        let entries = environment(&config, BTreeMap::new()).unwrap();
+        let path = OsString::from_wide(env_value(&entries, "PATH").unwrap().unwrap());
+        let paths: Vec<_> = std::env::split_paths(&path).collect();
+        assert_eq!(
+            paths,
+            [
+                std::env::current_exe()
+                    .unwrap()
+                    .parent()
+                    .unwrap()
+                    .to_owned(),
+                root.path().to_owned()
+            ]
+        );
     }
 }

@@ -1264,6 +1264,9 @@ pub(crate) fn replace_atomically(
             _ => {
                 // Every other failure leaves both files under their own names.
                 let _ = std::fs::remove_file(&temporary);
+                if let Some(in_use) = crate::atomic_file::file_in_use(&error) {
+                    return Err(in_use);
+                }
                 return Err(file_error(
                     "Cannot replace the configuration file; it is unchanged",
                     path,

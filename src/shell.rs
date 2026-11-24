@@ -488,6 +488,12 @@ impl ShellSupervisor {
     ) -> Result<ShellExecution, ApiError> {
         use std::process::Stdio;
         let mut command = launch_command(&self.config, &args.command);
+        let path = env
+            .get("PATH")
+            .or_else(|| self.config.shell.env.get("PATH"))
+            .map(std::ffi::OsString::from)
+            .or_else(|| std::env::var_os("PATH"));
+        let path = prepend_cli_path(path.as_deref());
         command
             .current_dir(cwd)
             .envs(&self.config.shell.env)
@@ -497,6 +503,9 @@ impl ShellSupervisor {
             .stderr(Stdio::piped())
             .kill_on_drop(true)
             .process_group(0);
+        if let Some(path) = path {
+            command.env("PATH", path);
+        }
         let turn_gate = match &gate {
             Some(gate) => Some(gate.lock().await),
             None => None,
@@ -689,6 +698,17 @@ async fn finish_unix_shell(
 // time and of subsequent DB/consumer work. SQLite JSON integers are signed.
 fn completion_elapsed_ms(spawned_at: Instant) -> u64 {
     spawned_at.elapsed().as_millis().min(i64::MAX as u128) as u64
+}
+
+#[cfg(any(unix, windows))]
+fn prepend_cli_path(path: Option<&std::ffi::OsStr>) -> Option<std::ffi::OsString> {
+    let executable = std::env::current_exe().ok()?;
+    let parent = executable.parent()?;
+    let mut paths = vec![parent.to_path_buf()];
+    if let Some(path) = path {
+        paths.extend(std::env::split_paths(path));
+    }
+    std::env::join_paths(paths).ok()
 }
 
 // Shared by Unix Bash and the native Windows Git Bash argv adapter.

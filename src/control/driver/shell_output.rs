@@ -151,17 +151,6 @@ pub(in crate::control) fn cli_environment(
     }
     #[cfg(not(unix))]
     env.insert("SHELLBOY_SOCKET".into(), String::new());
-    if let Ok(executable) = std::env::current_exe()
-        && let Some(parent) = executable.parent()
-    {
-        let mut paths = vec![parent.to_path_buf()];
-        if let Some(path) = std::env::var_os("PATH") {
-            paths.extend(std::env::split_paths(&path));
-        }
-        if let Ok(path) = std::env::join_paths(paths) {
-            env.insert("PATH".into(), path.to_string_lossy().into_owned());
-        }
-    }
     env
 }
 

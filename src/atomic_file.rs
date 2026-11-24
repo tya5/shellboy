@@ -66,3 +66,23 @@ impl Drop for AtomicFile {
         }
     }
 }
+
+/// Keep the stable I/O error code and distinguish native sharing conflicts by reason.
+pub(crate) fn file_in_use(error: &io::Error) -> Option<crate::protocol::ApiError> {
+    #[cfg(windows)]
+    {
+        use crate::protocol::{ApiError, ErrorCode};
+        use windows_sys::Win32::Foundation::{ERROR_LOCK_VIOLATION, ERROR_SHARING_VIOLATION};
+        if error.raw_os_error().is_some_and(|code| {
+            matches!(code as u32, ERROR_LOCK_VIOLATION | ERROR_SHARING_VIOLATION)
+        }) {
+            return Some(
+                ApiError::new(ErrorCode::IoFailed, "File in use")
+                    .hint("Close programs using the file, then try again")
+                    .details(serde_json::json!({"reason":"file_in_use","written":false})),
+            );
+        }
+    }
+    let _ = error;
+    None
+}

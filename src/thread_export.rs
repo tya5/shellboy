@@ -91,6 +91,9 @@ fn bad_response() -> ApiError {
     )
 }
 fn write_error(error: io::Error) -> ApiError {
+    if let Some(in_use) = crate::atomic_file::file_in_use(&error) {
+        return in_use;
+    }
     ApiError::new(
         ErrorCode::IoFailed,
         format!("Cannot write Thread export: {error}"),
