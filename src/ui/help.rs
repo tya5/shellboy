@@ -632,6 +632,22 @@ impl Page {
             ),
         );
         page.entry(
+            "/schedule list",
+            local!(
+                config.ui.language,
+                "スケジュールを一覧する。サブコマンドとオプションはCLIと同じ",
+                "List schedules. Subcommands and flags match the CLI"
+            ),
+        );
+        page.entry(
+            "/service list",
+            local!(
+                config.ui.language,
+                "サービスを一覧する。サブコマンドとオプションはCLIと同じ",
+                "List services. Subcommands and flags match the CLI"
+            ),
+        );
+        page.entry(
             local!(config.ui.language, "/search 検索語", "/search QUERY"),
             local!(
                 config.ui.language,
