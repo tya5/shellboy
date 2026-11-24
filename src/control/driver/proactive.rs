@@ -392,7 +392,6 @@ struct SummaryStageOwner<'owner, 'boundary> {
     control: &'owner Arc<Control>,
     compactor: &'owner crate::compaction::Compactor,
     thread: &'owner str,
-    run: &'owner str,
     boundary: &'owner mut crate::compaction::boundary::Boundary<'boundary>,
     automatic: &'owner Automatic,
     run_stop: tokio_util::sync::CancellationToken,
@@ -414,13 +413,12 @@ struct SummaryStageOutcome {
 async fn summary_stage(
     owner: SummaryStageOwner<'_, '_>,
     mode: SummaryStageMode,
-    _slot: &DriverSlot,
+    slot: &DriverSlot,
 ) -> SummaryStageOutcome {
     let SummaryStageOwner {
         control,
         compactor,
         thread,
-        run,
         boundary,
         automatic,
         run_stop,
@@ -438,7 +436,7 @@ async fn summary_stage(
                     automatic.stage(closed_stage),
                     false,
                     automatic.turn.clone(),
-                    run.to_owned(),
+                    slot.run_id.clone(),
                     thread_boundary.clone(),
                     run_stop.clone(),
                 ),
@@ -494,7 +492,7 @@ async fn summary_stage(
                 }
                 #[cfg(test)]
                 if committed_active_spill.is_some()
-                    && let Err(error) = fault_tests::checkpoint(control, _slot, active_spill).await
+                    && let Err(error) = fault_tests::checkpoint(control, slot, active_spill).await
                 {
                     return SummaryStageOutcome {
                         summary: Err(error),
@@ -513,7 +511,7 @@ async fn summary_stage(
                             automatic.stage(active_stage),
                             true,
                             automatic.turn.clone(),
-                            run.to_owned(),
+                            slot.run_id.clone(),
                             thread_boundary,
                             run_stop,
                         ),
@@ -541,7 +539,7 @@ async fn summary_stage(
     };
     #[cfg(test)]
     if !summary.no_target
-        && let Err(error) = fault_tests::checkpoint(control, _slot, _stage).await
+        && let Err(error) = fault_tests::checkpoint(control, slot, _stage).await
     {
         return SummaryStageOutcome {
             summary: Err(error),
@@ -701,7 +699,6 @@ pub(super) async fn maybe_compact_with_run_stop(
                 control,
                 compactor: &compactor,
                 thread: &snapshot.thread,
-                run: &snapshot.run,
                 boundary,
                 automatic: &automatic,
                 run_stop: run_stop.clone(),
