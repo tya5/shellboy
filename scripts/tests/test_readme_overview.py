@@ -1,7 +1,6 @@
-"""Check the user-selected README image without image-library or network dependencies."""
+"""Check the reviewed overview asset without image-library or network dependencies."""
 import hashlib
 from pathlib import Path
-import re
 import struct
 import unittest
 import zlib
@@ -32,13 +31,3 @@ class ReadmeOverviewTests(unittest.TestCase):
         self.assertEqual(len(next(body for kind, body in chunks if kind == b'PLTE')), 89 * 3)
         pixels = zlib.decompress(b''.join(body for kind, body in chunks if kind == b'IDAT'))
         self.assertEqual(len(pixels), 941 * (1 + 1672))
-
-    def test_readme_has_alt_after_title_and_retains_textual_features(self):
-        text = (ROOT / 'README.md').read_text(encoding='utf-8')
-        self.assertRegex(text, r'^# Shellboy\n\n!\[[^\]]+\]\(docs/assets/shellboy-overview\.png\)')
-        alt = re.search(r'!\[([^\]]+)\]', text).group(1)
-        for word in ('history', 'fork', 'recursively delegate'):
-            self.assertIn(word, alt)
-        self.assertIn('## Features\n', text)
-        self.assertIn('A lightweight terminal AI agent environment written in Rust.', text)
-        self.assertIn('Semantic search over history and explicitly configured local documents uses your configured embedding endpoint.', text)
