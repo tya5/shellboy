@@ -314,6 +314,8 @@ F1で説明を確認できます。Enterは操作に応じて表示・実行・�
   `event=usage_totals_slow` を確認します。100ms以上の集計だけが出ます。
   更新やsnapshotの詳しい挙動は[画面操作](tui.md#saved-usage-details)にあります。
 
+設定が変わらなければ、Turn ごとに同じ設定をモデルへ送り直さず、作業状態の通知も短くします。保存済みの会話は変わりません。モデルへの入力や料金の上限ではありません。
+
 ## 4. 接続・モデルを変える
 
 `/model`だけで現在値を表示します。`/models`で現在の接続先のモデル一覧を取得できます。文字入力で絞込み、上下で選択、Enterで現在の会話のモデルを変更します。Escは閉じるだけです。別の接続先を見る場合は `/models CONNECTION` を使います。直接指定する場合は以下です。
@@ -400,6 +402,14 @@ Threadの`AGENTS.md`参照先は作業上の指示です。新しいルートThr
 端末から打った入力は人の送信として、パイプ入力は `external_cli` として記録されますが、
 どちらも打った人の証明ではありません。終了コードと `--json` の行形式は
 [CLIリファレンス](cli-reference.md#interactive-chat-client-242)を参照してください。
+
+新しい Run のモデル要求回数を制限するには、対象の Thread を指定します。既に Run が動いている場合、この送信は入力を保留せず拒否されます。
+
+```sh
+shellboy message send --thread THREAD_ID --max-model-requests 8 --text 'Review the inbox and report.'
+```
+
+回数の対象と停止理由は [CLI リファレンス](cli-reference.md#message--operation) を参照してください。料金の上限ではありません。
 
 ## 6. 中断・終了する
 
