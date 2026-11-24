@@ -1,0 +1,7 @@
+# Protocol next (#388)
+
+## Advisory credential file warning
+
+`config.get` includes a nullable `credentials_file.warning`. On Unix it reports
+unexpected ownership or broader permissions than `0600` on the opened file,
+without revealing credential values, changing file permissions, or refusing use.

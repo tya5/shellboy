@@ -80,35 +80,70 @@ fn parse(bytes: &[u8]) -> Result<Stored, StoreError> {
     })
 }
 
-/// Blocking. `None` when the file does not exist.
-fn read_bounded(path: &Path) -> Result<Option<Vec<u8>>, StoreError> {
+pub(crate) struct Inspection {
+    pub present: bool,
+    pub names: Result<BTreeSet<String>, StoreError>,
+    pub warning: Option<&'static str>,
+}
+
+/// Inspect the opened file, not a later lookup of the path. A mode warning is
+/// advisory even if parsing fails independently.
+pub(crate) fn inspect(path: &Path) -> Inspection {
     use std::io::Read;
     let file = match std::fs::File::open(path) {
         Ok(file) => file,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(_) => return Err(StoreError::Unreadable),
+        Err(error) => {
+            let missing = error.kind() == std::io::ErrorKind::NotFound;
+            return Inspection {
+                present: !missing && path.exists(),
+                names: if missing {
+                    Ok(BTreeSet::new())
+                } else {
+                    Err(StoreError::Unreadable)
+                },
+                warning: None,
+            };
+        }
     };
-    let mut bytes = Vec::new();
-    file.take(MAX_FILE_BYTES + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|_| StoreError::Unreadable)?;
-    if bytes.len() as u64 > MAX_FILE_BYTES {
-        return Err(StoreError::TooLarge);
+    #[cfg(unix)]
+    let warning = {
+        use std::os::unix::fs::MetadataExt;
+        file.metadata().ok().and_then(|meta| {
+            if meta.uid() != unsafe { libc::geteuid() } {
+                Some("credentials.toml is not owned by the owner process's user; check its owner and permissions")
+            } else if meta.mode() & 0o7177 != 0 {
+                Some("credentials.toml has permissions broader than 0600; restrict access if it should be private")
+            } else {
+                None
+            }
+        })
+    };
+    #[cfg(not(unix))]
+    let warning = None;
+    let names = (|| {
+        let mut bytes = Vec::new();
+        file.take(MAX_FILE_BYTES + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|_| StoreError::Unreadable)?;
+        if bytes.len() as u64 > MAX_FILE_BYTES {
+            return Err(StoreError::TooLarge);
+        }
+        Ok(parse(&bytes)?
+            .connections
+            .into_iter()
+            .filter(|(_, entry)| !entry.api_key.trim().is_empty())
+            .map(|(name, _)| name)
+            .collect())
+    })();
+    Inspection {
+        present: true,
+        names,
+        warning,
     }
-    Ok(Some(bytes))
 }
 
-/// Blocking. Names of connections with a non-blank stored key; none when absent.
 pub fn stored_names(path: &Path) -> Result<BTreeSet<String>, StoreError> {
-    let Some(bytes) = read_bounded(path)? else {
-        return Ok(BTreeSet::new());
-    };
-    Ok(parse(&bytes)?
-        .connections
-        .into_iter()
-        .filter(|(_, entry)| !entry.api_key.trim().is_empty())
-        .map(|(name, _)| name)
-        .collect())
+    inspect(path).names
 }
 
 /// The stored key of one connection, read when a request starts so a new key
