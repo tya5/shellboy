@@ -1124,6 +1124,12 @@ remains `target_unavailable`. Replaying an operation ID preserves its original
 receipt, not a second side effect. This intentionally changes the earlier
 successful closed-write/EOF behavior without adding a wire alias or version.
 Partial writes, timeouts and in-flight failures retain their typed write result;
+`shell.stop` remains idempotent. Its `ShellStopResult` is an untagged union: `{ "accepted": true }` when a stop is accepted, or the same `ShellDetails` as `shell.get` when the execution has already finished.
+
+`attachment.remove` returns `AttachmentRemoveResult`, containing `attachment_id` and `removed: true` on success. None of these result declarations changes the existing wire shape or protocol version.
+
+## Foreground intervention (#402)
+
 `shell.background {execution_id}` requests release of the exact running foreground
 execution awaited by a live Turn. It returns `{execution_id, requested: true}`
 when the live foreground slot accepts the request. The shell remains running;
@@ -1138,12 +1144,10 @@ stopping the Run. Its acknowledgment contains `thread_id`, `run_id`, `turn_id`,
 `requested`, `already_requested`, `state=interrupt_requested`, and
 `interrupt_requested_at`. Unknown Turns return `target_unavailable`
 (`turn_not_found`); finished Turns or stopping Runs return `invalid_state`
-(`already_finished` or `run_stopping`). Inspect `turn.get` and saved history
+(`already_finished` or `run_stopping`). A Turn on a deleted Thread returns
+`thread_not_found`. Inspect `turn.get` and saved history
 for the resulting state. Both operations use the existing runtime receipts.
 
-`shell.stop` remains idempotent. Its `ShellStopResult` is an untagged union: `{ "accepted": true }` when a stop is accepted, or the same `ShellDetails` as `shell.get` when the execution has already finished.
-
-`attachment.remove` returns `AttachmentRemoveResult`, containing `attachment_id` and `removed: true` on success. None of these result declarations changes the existing wire shape or protocol version.
 ## Model Admission Sender Identity (#285)
 
 Replay and request inspection derive one developer preamble immediately before
