@@ -42,6 +42,12 @@ instance; it is not read from disk or recomputed from a runtime checkout.
 
 `protocol schema` exports the handshake, envelope, per-operation args/results, capabilities, and version from Rust types to `docs/reference/protocol.schema.json`. Results still represented by `serde_json::Value` are explicitly opaque. The committed document is exact-compared with generated output in the existing test suite; it is a client aid, not a replacement for these behavioral rules.
 
+The generated schema contains the current wire version; [numbered protocol notes](protocol-versions/)
+record historical deltas. The generated schema marks `connection.test` as
+opaque because its result is still constructed as JSON, not a Rust wire record.
+The result contract is documented below; request-side constraints and omission
+rules in Rust still apply even where JSON Schema cannot express them.
+
 #### Typed operation results (#278)
 
 Type the four existing wire projections from the current Rust read paths: `status` activity and memory modes, `shell.list`, `usage.get`, and `config.get`. Keep operation names/order and protocol version unchanged. `status` is an untagged schema union for the existing activity snapshot and memory JSON shapes; it adds no discriminator, wrapper, or runtime behavior. Preserve open unknown response fields and nullable-versus-omitted behavior. `status.reply` exposes known object fields plus additive fields, with a raw-value fallback for unusual legacy shapes; absent/null replies remain omitted by the existing projection. Config settings and redaction values remain open JSON leaves; provider-specific usage details and group-key-dependent rows remain open only at their existing dynamic leaves. Shell commands are the post-redaction excerpt projection, never raw command text. Do not apply `deny_unknown_fields` to response records or invent defaults.
@@ -134,6 +140,22 @@ Thread tags (#222 stage 3) add `thread.tag` (`ThreadTagArgs {thread_ids: 0..=200
 RunDetails/TurnDetails/MessageDetails/HistoryBody require context. HistorySnippet requires provenance, context, and selection; HistoryBody also requires provenance. ThreadDetails may omit context for a fork. These records are not defaulted to empty values to accept older owners. Current ShellOutput.decode_errors, history execution_count/executions_truncated, and StatusSnapshot.receipt_budget are also required; payload_chars remains nullable for reclaimed bodies and an empty executions array may be omitted. 保存された時刻・所有・状態と構造化理由だけを返し、検索NodeProvenanceは拡大しない。lifetime_msの閉区間と未知値省略は[実行情報](execution-context.md)に従う。
 
 operation.getは既存state/outcomeへinstance_id/created_at/current_instance/result_uncertain/replay_policy/targets/downstreamを追加する。compactの受付receiptは不変とし、後続結果はdownstreamへ分離する。attachment.addの保存済み同ID照合は現在のファイル/Threadのpreflightに先行する。認証・構文・要求fingerprintは維持する。全mutationの境界は[operation観測](operation-observability.md)を参照。
+
+### Exact Thread-set deletion (#373)
+
+`thread.delete_set_preview` accepts 1 to 256 distinct `thread_ids`, each at
+most 256 UTF-8 bytes. It rejects unknown/deleted targets and binds the sorted
+set to `preview_marker`. The preview includes live/stopping Runs and active
+scheduled executions, with at most 50 entries of each kind per Thread.
+`thread.delete_set` requires the same IDs and marker. Live/stopping Runs block
+the whole set. Otherwise the owner disables the selected Threads' schedules,
+requests stops and waits, then rechecks the marker and Runs before deleting
+the exact set atomically. Success returns `{ "accepted": true }`; unlisted
+descendants are not deleted. Neither operation has a CLI or model-tool binding.
+
+The v16 additions for [artifacts, retained history export/Thread import, and
+Thread-owned services](protocol-versions/16.md) retain their individual cursor
+and ownership contracts.
 
 ## Originの認証と保存境界（P3/W6）
 
@@ -318,33 +340,55 @@ conversation footer. In particular, `state: "completed"` can coexist with
 `background` requires an active shell owned by the Run; `continuing` does
 not assert such work. Exit markers and Revisit are independent of activity.
 
-The optional `state` filter matches the row's `state`, not `activity`, and
-requires updated order. The cursor is bound to the state filter.
+`thread.list {thread_ids}` (#371) accepts up to 200 distinct nonempty IDs.
+It returns ordinary `ThreadSummary` items for the exact set in unspecified
+order, including archived Threads, omitting unknown/deleted IDs. An empty set
+returns no items. There is no continuation; `limit` is validated but does not
+truncate this result. Do not combine it with a cursor, nondefault order or
+list filters.
+
+The optional `state` filter (#378) matches the row's `state`, not `activity`:
+`idle`, `live`, `stopping`, `preparing`, `running`, `waiting`, `recovery_wait`,
+`completed`, `stopped`, or `failed`. It requires updated order, excludes
+`thread_ids` and `awaiting`, and binds the cursor to the state. Pre-v19
+state-filter cursors expire.
+
 Ordinary updated-order `thread.list` seeks within the archive and optional cwd
-partition. It examines at most 200 candidate Threads plus one lookahead;
+partition (#381). It examines at most 200 candidate Threads plus one lookahead;
 `next_cursor` resumes after the last examined key, even when the page is empty.
-`ThreadSummary.excerpt_complete` is omitted when true. `false` means no prose
-was found in the latest 32 selected nodes and older nodes were not examined.
+A cursor means unexamined candidates remain, not that another match is known.
+Continue with the same filters. Tags use indexed membership probes. Summary and
+excerpt reads follow admission; the untitled fallback is not newly bounded.
+All list shapes, including exact IDs and awaiting lists, inspect the latest
+32 selected nodes for excerpt prose. `ThreadSummary.excerpt_complete` is
+omitted when true. `false` means no prose was found and older nodes remain;
+this is a node bound, not a byte bound.
+
+`awaiting_replies_exact` describes the total, and `awaiting_thread_count_exact`
+describes the Thread-directed count (including `awaiting_thread_replies`).
+Each count is exact through 16. A saturated count is 17, with the corresponding
+flag false (a lower bound); an omitted flag means exact.
 
 ### Cross-Thread human waiting list
 
-`thread.list` accepts optional `awaiting: "human"` (exclusive with `query`,
-`tags`, `cwd`, and `state`; it composes with `archived`, `limit`, and `cursor`). The CLI
-spelling is `shellboy thread list --awaiting human`. This returns a keyset
-page of only Threads with pending human-directed reply receipts. Items carry
+`thread.list` accepts optional `awaiting: NAME` (exclusive with `query`,
+`tags`, `cwd`, `state`, `thread_ids`, and created order; it composes with
+`archived`, `limit`, and `cursor`). Use `shellboy thread list --awaiting NAME`.
+`human` is one possible recipient name, not a wildcard. This returns a keyset
+page of Threads with pending replies directed to that exact name. Items carry
 `awaiting_named_count` and `awaiting_named_count_exact`: through 16 the count is
 exact and the bool is omitted/default true; 17 with false means 17 or more.
 `awaiting_named_oldest_at` is the minimum `created_at` only when all pending
 receipts were observed (at most 16); it is null/absent when the bounded 17-row
 sample proves an overflow. Legacy receipts are preserved. Thread-directed
-reply duties do not qualify. Cursor v2 is scoped to this live Thread-ID keyset
-and archived mode, has no receipt watermark, and rejects the old snapshot cursor
+reply duties do not qualify. Cursor v2 is scoped to the recipient name, the live
+Thread-ID keyset and archived mode, has no receipt watermark, and rejects the old snapshot cursor
 (v1) with `cursor_expired`. The cursor is validated before its keyset is used;
 malformed, wrong-scope/filter, or older-version cursors never silently restart.
 It is not a snapshot: changes before the cursor require restarting without a
 cursor; additions after it may appear while paging. This neither promises a
 consistent snapshot nor hides same-Thread count/state changes between pages. The reader uses the
-schema-38 partial index `receipt_human_reply_pending(target_thread_id, created_at)` and hydrates summary
+partial index `receipt_named_reply_pending` and hydrates summary
 rows only for the returned page. Plan and SQLite VM-step counts are fixed by a
 regression test; no full Thread-table scan is permitted.
 
@@ -358,7 +402,10 @@ check or monotonic measurement. For terminal shells it is the saved completion
 duration, if known. No output or reclaimed output gives last_output_at: null.
 Status timing does not affect activity_at, sorting, cursor or fingerprint.
 The fingerprint describes the normalized query and durable rows on the returned
-page, not unreturned work.
+page, not unreturned work. Default `status` scans pending keys using partial
+indexes; `--all` and terminal-state filters still scan matching keys. This is
+live pagination: keep the filters when following `next_cursor`, even for an
+empty page. Pre-v19 `status` cursors expire.
 
 
 ## Index operation additions (#42/#43/#55)
@@ -861,8 +908,48 @@ The stored-key mutations return `CredentialsSetResult` and `CredentialsClearResu
 // config.get additions
 {"loaded": {"credential_source": {"proxy": "stored"} /* env | stored | none, per connection */, ...},
  "file":   {"credential_source": {"proxy": "stored"} /* null when the file is invalid */, ...},
- "credentials_file": {"path": "...", "present": true, "valid": true, "error": null}}
+ "credentials_file": {"path": "...", "present": true, "valid": true, "error": null, "warning": null}}
 ```
+
+`config.get.credentials_file.warning` (v22, #388) is a nullable advisory string.
+On Unix it describes unexpected ownership or permissions broader than `0600`
+on the opened file. It does not expose keys, change permissions, or refuse use.
+It is `null` when there is no warning. The independent `error` field describes
+read/parse failure, not the advisory.
+
+`connection.test.post_model` (v21, #386) is optional for either a saved
+connection or candidate. It must be a nonblank model ID of at most 256 UTF-8
+bytes with no control characters. Omit it for the catalog GET only. Once the
+catalog client is constructed, specifying it adds a `conversation` subresult
+with one potentially paid synthetic POST on a separate fresh client, with no
+retry driver. A catalog request failure does not alone suppress the probe;
+an invalid catalog URL or failed catalog client setup returns before it. All
+top-level fields including `request` and `ok` still describe only the GET.
+
+`conversation` has `sent`, `ok`, nullable `http_status` and nullable `failure`.
+`http_observation` may be null on an attempted path, and is absent on the early
+probe rejection paths. The usual failure classes apply, with an additional
+`probe_body_too_large` before sending when the configured extra body after
+removing the output limit exceeds 4096 serialized bytes. The request uses the
+normal conversation encoding, fixed text `Reply OK.`, and a 32-token output cap.
+
+A classified transport failure adds `transport_cause` and a `hint` to the
+failing GET or POST subresult. `transport_cause.kind` is `dns`,
+`connection_refused`, `connection_reset`, `unreachable`, `tls_unknown_issuer`,
+`tls_name_mismatch`, `tls_expired`, `tls`, `proxy_connect`, or `unknown`. Only a
+`proxy_connect` cause can carry `status`, omitted when unavailable (currently
+only 407 is preserved by the connector). Saved model attempt errors and Run
+recovery details may carry the same bounded cause, not the dependency error
+chain. A VPN/network hint is advice, not a detected VPN failure.
+
+`http_observation` reports `phase` (`before_body_source`,
+`upload_source_incomplete`, `awaiting_headers_delivery_unknown`, `body_receive`),
+`request_body_bytes`, `body_source_bytes_consumed`, nullable `header_elapsed_ms`,
+`pool_generation`, and `connection_reuse` (`fresh_pool`, `unknown`). Source
+consumption is not proof of peer delivery; `fresh_pool` is the first request
+issued from that pool, not a socket observation. For which HTTP failure data
+is sanitized and which conversation data remains intact, see
+[Failure evidence privacy](model-http.md#failure-evidence-privacy) (#388).
 
 Replay limit of `credentials.set`: its saved request fingerprint uses a digest of the key salted with a value that
 lives only as long as the owner process. Within one owner run the same ID and key replay the saved result and another key
@@ -932,7 +1019,10 @@ existing semantics. A hash-checked edit reconciles the loaded live values even i
 `written: false` with `applied_to_running_owner: true` means the owner changed without a disk write. Disk edits
 alone are not watched. Configuration success is not evidence that files exist or that consent was obtained.
 An unreadable or invalid common file is skipped, with `instruction_warnings: [{path,reason}]` on Run status
-items and on `thread.get` for the latest Run. Warnings contain no captured content.
+items and on `thread.get` for the latest Run (#377, v18). The field is omitted
+when empty, and warnings contain no captured content. `reason` is one of
+`not_found`, `permission_denied`, `io_failed`, `not_regular_file`, `input_limit`,
+or `invalid_utf8`. At most eight common files can be registered.
 
 `thread.get` optionally returns `instruction_sources: {extra: [{path,hash,bytes}],snapshot:"latest_prepared_turn"}`
 after preparing common instructions. It omits bodies and is historical, not live file/config state. `thread request`
