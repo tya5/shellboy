@@ -333,11 +333,13 @@ pub(super) fn complete_answer_turn(
     Ok(false)
 }
 
-/// Ownership has already been frozen, and every live handle has drained.
 pub(crate) const MODEL_REQUEST_CEILING_REACHED: &str = "model_request_ceiling_reached";
 
 pub(crate) enum RunStopAdmission<'a> {
-    Explicit { at: &'a str },
+    Explicit {
+        at: &'a str,
+    },
+    /// Ownership has already been frozen, and every live handle has drained.
     DriverDrain,
     ModelRequestCeilingReached,
 }

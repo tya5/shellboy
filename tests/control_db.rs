@@ -886,6 +886,75 @@ async fn thread_list_awaiting_human_pages_only_human_waits_with_oldest_timestamp
 }
 
 #[tokio::test]
+async fn model_request_ceiling_refuses_live_and_stopping_runs_without_assigning_input() {
+    let (_directory, store) = store().await;
+    let thread = create(&store, None).await;
+    let capped_send = |n, text: &str| {
+        Command::MessageSend(MessageSendArgs {
+            max_model_requests: std::num::NonZeroU32::new(n),
+            human: false,
+            resume_recovery: false,
+            sender_label: None,
+            deliver: Deliver::Next,
+            thread_id: Some(thread.thread_id.clone()),
+            text: text.into(),
+        })
+    };
+    let first = execute(&store, capped_send(3, "starts a capped Run"))
+        .await
+        .result;
+    let run_id = first["run_id"].as_str().unwrap().to_owned();
+    let target = || RunTarget {
+        run_id: run_id.clone(),
+    };
+    let fixture_run = run_id.clone();
+    store
+        .database
+        .call(move |db| {
+            db.execute(
+                "UPDATE run SET model_requests_used=1 WHERE id=?1",
+                [fixture_run],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let counts = |db: &mut rusqlite::Connection| {
+        Ok(db.query_row(
+            "SELECT (SELECT count(*) FROM receipt), (SELECT count(*) FROM node)",
+            [],
+            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+        )?)
+    };
+    for state in ["live", "stopping"] {
+        if state == "stopping" {
+            execute(&store, Command::RunStop(target())).await;
+        }
+        let before = execute(&store, Command::RunGet(target())).await.result;
+        assert_eq!(before["state"], state);
+        assert_eq!(
+            before["model_requests"],
+            serde_json::json!({"ceiling":3,"used":1})
+        );
+        let before_counts = store.database.call(counts).await.unwrap();
+        let error = store
+            .execute(request(capped_send(1, "must not be queued")), None)
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, ErrorCode::InvalidState);
+        let details = error.details.unwrap();
+        assert_eq!(details["reason"], "model_request_ceiling_requires_new_run");
+        assert_eq!(details["run_id"], run_id);
+        assert_eq!(store.database.call(counts).await.unwrap(), before_counts);
+        assert_eq!(
+            execute(&store, Command::RunGet(target())).await.result,
+            before
+        );
+    }
+    store.database.shutdown().await.unwrap();
+}
+
+#[tokio::test]
 async fn explicit_new_human_send_assigns_only_unassigned_stopping_messages_once() {
     let (_directory, store) = store().await;
     let thread = create(&store, None).await;
