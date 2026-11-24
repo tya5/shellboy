@@ -208,41 +208,41 @@ fn populate_requests(
     if items.is_empty() {
         return Ok(());
     }
-    // The current schema has no Turn-to-receipt index. Check one indexed
-    // Thread prefix for the entire page, not one receipt scan per Turn.
-    let candidates = db.prepare(r#"WITH prefix AS MATERIALIZED (
-      SELECT CASE WHEN octet_length(turn_id)<=512 THEN turn_id END AS turn_id,
-        CASE WHEN octet_length(message_node_id)<=512 THEN message_node_id END AS message_node_id,
-        CASE WHEN octet_length(created_at)<=128 THEN created_at END AS created_at,
-        COALESCE(octet_length(turn_id)>512,0) OR octet_length(message_node_id)>512 OR octet_length(created_at)>128 AS limited,
-        rowid FROM receipt INDEXED BY receipt_thread_order
-      WHERE target_thread_id=?1 ORDER BY rowid LIMIT 129
-    ) SELECT turn_id,message_node_id,limited FROM prefix ORDER BY created_at,rowid"#)?
-        .query_map([thread], |r| Ok((r.get::<_, Option<String>>(0)?, r.get::<_, Option<String>>(1)?, r.get::<_, bool>(2)?)))?
+    // Merge the four ordered ranges of the existing covering index. Fetch
+    // receipt rows only for the global chronological prefix, not its sentinel.
+    let keys = db.prepare(r#"
+        SELECT created_at, rowid AS receipt_row FROM receipt INDEXED BY receipt_target WHERE target_thread_id=?1 AND state='accepted'
+        UNION ALL SELECT created_at, rowid FROM receipt INDEXED BY receipt_target WHERE target_thread_id=?1 AND state='held'
+        UNION ALL SELECT created_at, rowid FROM receipt INDEXED BY receipt_target WHERE target_thread_id=?1 AND state='applied'
+        UNION ALL SELECT created_at, rowid FROM receipt INDEXED BY receipt_target WHERE target_thread_id=?1 AND state='cancelled'
+        ORDER BY created_at, receipt_row LIMIT 129
+    "#)?
+        .query_map([thread], |r| r.get::<_, i64>(1))?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    if candidates.len() > 128 || candidates.iter().any(|(_, _, limited)| *limited) {
-        for row in items {
-            row.request_limited = true;
-        }
-        return Ok(());
-    }
+    let has_more = keys.len() > 128;
+    let mut receipt = db.prepare("SELECT CASE WHEN octet_length(turn_id)<=512 THEN turn_id END, CASE WHEN octet_length(message_node_id)<=512 THEN message_node_id END FROM receipt WHERE rowid=?1")?;
     let mut excerpts = items
         .iter()
         .map(|row| (row.turn_id.clone(), None))
         .collect::<BTreeMap<_, _>>();
-    for (turn, message, _) in candidates {
-        let (Some(turn), Some(message)) = (turn, message) else {
-            continue;
-        };
-        if let Some(excerpt @ None) = excerpts.get_mut(&turn) {
-            // A tombstoned source is skipped, as in the previous list.
-            *excerpt = request_excerpt(db, &message)?;
+    for key in keys.into_iter().take(128) {
+        let (turn, message): (Option<String>, Option<String>) =
+            receipt.query_row([key], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        if let Some(excerpt @ None) = turn.and_then(|turn| excerpts.get_mut(&turn)) {
+            // A known tombstone is skipped. If the earlier identity cannot be
+            // read, do not substitute a later request for this Turn.
+            *excerpt = match message {
+                Some(message) => request_excerpt(db, &message)?,
+                None => Some((None, true)),
+            };
         }
     }
     for row in items {
         if let Some(Some((excerpt, limited))) = excerpts.get(&row.turn_id) {
             row.request.clone_from(excerpt);
             row.request_limited = *limited;
+        } else {
+            row.request_limited = has_more;
         }
     }
     Ok(())

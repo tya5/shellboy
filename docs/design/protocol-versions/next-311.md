@@ -37,9 +37,14 @@ snapshot. Its presence means there is more candidate coverage, not that a
 further matching record is already known. No global count or OFFSET scan.
 
 One request examines up to 32 Turns and 200 node candidates, with one lookahead
-per index seek, and returns up to 32 saved records. The entire page checks at most 128 Thread receipts plus a sentinel. If the
-existing Thread index cannot prove the earliest request in that coverage, the
-request excerpt is omitted; the saved response stays reachable. Before extracting either 80-character excerpt, the owner gates
+per index seek, and returns up to 32 saved records. The entire page checks at
+most 128 Thread receipt rows. The owner merges the four ordered state ranges
+of the existing `receipt_target` covering index by creation time and rowid,
+with one extra key as a sentinel and at most three other lookahead keys. A
+proven first eligible request is shown even when the prefix is incomplete.
+Unresolved Turns carry `request_limited`; their saved responses stay reachable.
+The full per-Turn seek is deferred to #412. Before extracting either
+80-character excerpt, the owner gates
 source JSON at 64 KiB and returns explicit limit flags. Raw provider payloads
 and received reasoning are not included. Open an exact returned node through
 the existing original-source reader. No new schema or maintained index.
