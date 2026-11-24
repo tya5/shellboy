@@ -793,7 +793,7 @@ impl StatusNotice {
     fn finish(mut self) -> Vec<Value> {
         if self.omitted > 0 {
             self.parts.push(json!({"type":"input_text","text":format!(
-                "Shellboy omitted {} attachment status notices; see attachment list for current details", self.omitted
+                "Shellboy omitted {} attachment status notices; inspect current details with shellboy attachment list --thread THREAD_ID", self.omitted
             )}));
         }
         self.parts

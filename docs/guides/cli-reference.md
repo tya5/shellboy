@@ -1246,7 +1246,7 @@ On add and update, the CLI joins a relative file path to its own current working
 
 ### Next actions for shell, attachment and search failures
 
-Read `error.hint` for the next action and `error.message` for diagnostic evidence. An OS launch error is not a child exit code: check `shell.executable` for an executable error or inspect the saved Thread cwd with `shellboy thread get --thread THREAD_ID`. When a shell execution ID is known, inspect its saved state with `shellboy shell get --execution EXECUTION_ID` before deciding whether to rerun.
+Read `error.hint` for the next action and `error.message` for diagnostic evidence. An OS launch error is not a child exit code: check `shell.executable` for an executable error or inspect the saved Thread cwd with `shellboy thread get --thread THREAD_ID`. When a shell execution ID is known, inspect its saved state with `shellboy shell get --execution EXECUTION_ID` before deciding whether to rerun. Without an execution ID, use `shellboy shell list --thread THREAD_ID --state failed` to inspect saved failures for the Thread.
 
 An unavailable or excluded attachment was not sent in that request. Inspect `shellboy attachment list --thread THREAD_ID` for current state; an earlier replay notice or accepted attachment command is not a delivery receipt.
 

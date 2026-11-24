@@ -535,13 +535,7 @@ impl ShellSupervisor {
         // observing EOF on the private launch acknowledgment.
         drop(command);
         let mut child = lifeline
-            .attached(child.map_err(|error| {
-                let action = match error.kind() {
-                    std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory => SHELL_CWD,
-                    _ => LAUNCH_INSPECT,
-                };
-                unix_launch_error("Shell spawn failed", error, action)
-            })?)
+            .attached(child.map_err(unix_spawn_error)?)
             .map_err(|error| {
                 let action = match error.kind() {
                     std::io::ErrorKind::NotFound | std::io::ErrorKind::PermissionDenied => {
@@ -730,7 +724,7 @@ fn bash_arguments(command: &str) -> [&str; 5] {
 }
 
 const LAUNCH_INSPECT: &str =
-    "Inspect the saved execution with shellboy shell get --execution EXECUTION_ID.";
+    "Inspect failed executions with shellboy shell list --thread THREAD_ID --state failed.";
 const SHELL_EXECUTABLE: &str =
     "Check the shell.executable setting for an installed executable for shell.kind.";
 const SHELL_CWD: &str =
@@ -739,6 +733,16 @@ const SHELL_CWD: &str =
 #[cfg(unix)]
 fn unix_launch_error(stage: &str, error: std::io::Error, action: &str) -> ApiError {
     ApiError::new(ErrorCode::IoFailed, format!("{stage}: {error}")).hint(action)
+}
+
+#[cfg(unix)]
+fn unix_spawn_error(error: std::io::Error) -> ApiError {
+    use std::io::ErrorKind;
+    let action = match error.kind() {
+        ErrorKind::NotFound | ErrorKind::NotADirectory | ErrorKind::PermissionDenied => SHELL_CWD,
+        _ => LAUNCH_INSPECT,
+    };
+    unix_launch_error("Shell spawn failed", error, action)
 }
 
 #[cfg(unix)]
@@ -1612,6 +1616,26 @@ mod stdin_fact_ack_tests {
 #[cfg(all(test, unix))]
 mod next_action_tests {
     use super::*;
+
+    #[test]
+    fn next_action_for_spawn_permission_and_unclassified_errors() {
+        assert_eq!(serde_json::to_value(ShellState::Failed).unwrap(), "failed");
+        for (errno, expected) in [
+            (libc::EACCES, SHELL_CWD),
+            (
+                libc::ENOMEM,
+                "Inspect failed executions with shellboy shell list --thread THREAD_ID --state failed.",
+            ),
+        ] {
+            let os = std::io::Error::from_raw_os_error(errno);
+            let evidence = format!("Shell spawn failed: {os}");
+            let error = unix_spawn_error(os);
+            assert_eq!(error.code, ErrorCode::IoFailed);
+            assert_eq!(error.message, evidence);
+            assert_eq!(error.hint.as_deref(), Some(expected));
+            assert!(error.details.is_none());
+        }
+    }
 
     #[tokio::test]
     async fn next_action_distinguishes_exec_from_cwd_failure() {
