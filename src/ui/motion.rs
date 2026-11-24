@@ -24,7 +24,9 @@ pub(super) enum MotionTarget {
 /// the model is awaited or received; else nothing. Background or released
 /// shells, stale saved rows and finished answers never spin. The winner is
 /// chosen before viewport filtering: an off-screen winner shows no spinner
-/// and never hands the slot to an older visible row.
+/// and never hands the slot to an older visible row. Background intervention
+/// uses the same exact foreground identity before viewport filtering; an
+/// answer or absent target cannot produce an intervention action.
 pub(super) fn select(view: &ThreadView) -> Option<MotionTarget> {
     let snapshot = view.activity.snapshot.as_ref()?;
     if !snapshot.turn_in_progress {
@@ -179,6 +181,62 @@ mod tests {
         Some(MotionTarget::Shell {
             execution_id: format!("exec-{id}"),
         })
+    }
+
+    #[test]
+    fn background_shortcut_and_command_target_only_the_current_foreground_execution() {
+        use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+
+        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+        *ui.view_mut() = view(
+            vec![
+                shell("old", "running_current", false),
+                shell("new", "running_current", false),
+                shell("released", "background_current", true),
+            ],
+            activity(ActivityPhase::Tools, true),
+        );
+        ui.view_mut().thread_id = Some("thread".into());
+        let press = |ui: &mut UiState, code, modifiers| {
+            ui.event(Event::Key(KeyEvent::new(code, modifiers)))
+        };
+        let ctrl_b = |ui: &mut UiState| press(ui, KeyCode::Char('b'), KeyModifiers::CONTROL);
+        let background = |ui: &mut UiState| {
+            let draft = &mut ui.view_mut().draft;
+            draft.text = "/background".into();
+            draft.typed_prefix = draft.text.len();
+            press(ui, KeyCode::Enter, KeyModifiers::NONE)
+        };
+        let Some(MotionTarget::Shell {
+            execution_id: expected,
+        }) = shell_target("new")
+        else {
+            panic!("expected shell target");
+        };
+        let assert_target = |action: &UiAction| {
+            assert!(
+                matches!(action, UiAction::Background { thread_id, execution_id }
+                if thread_id == "thread" && execution_id == &expected)
+            );
+        };
+        let shortcut = ctrl_b(&mut ui);
+        assert_eq!(shortcut.len(), 1);
+        assert_target(&shortcut[0]);
+        let submitted = background(&mut ui);
+        let [UiAction::SubmittedCommand { action, .. }] = submitted.as_slice() else {
+            panic!("background must submit the exact owner action");
+        };
+        assert_target(action);
+
+        ui.view_mut()
+            .activity
+            .accept(2, activity(ActivityPhase::Completed, false));
+        assert!(ctrl_b(&mut ui).is_empty());
+        let failure = ui.view().status.clone();
+        assert!(failure.contains("No foreground shell is visible"));
+        assert!(background(&mut ui).is_empty());
+        assert_eq!(ui.view().status, failure);
+        assert_eq!(ui.view().draft.text, "/background");
     }
 
     #[test]

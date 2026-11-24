@@ -117,7 +117,8 @@ The final source check is structural: no owner initialization, listener, supervi
 ### Embedded intervention migration (Unit 4)
 
 Ctrl+B and `/background` use only the most recent foreground execution in the
-current conversation projection. No observed execution means no mutation.
+current conversation projection. No observed execution means local failure
+feedback, restored slash input, and no owner request.
 Esc uses the displayed active Turn ID. These IDs go through the selected
 listener as receipt-backed `shell.background` and `turn.interrupt` commands.
 Neither a stale refusal nor a lost reply is retried against another identity.
