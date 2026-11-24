@@ -7494,13 +7494,36 @@ async fn proactive_attempt_runs_one_summary_operation_and_keeps_its_usage() {
         let control = Control::new(&owner, root.path().into());
         let target = thread(&control).await;
         for n in 0..2 {
-            send(&control, &target, &format!("old-{n} {}", "a".repeat(4000))).await;
+            let prior = request(
+                &control,
+                Command::MessageSend(MessageSendArgs {
+                    max_model_requests: None,
+                    resume_recovery: false,
+                    human: false,
+                    sender_label: None,
+                    deliver: Deliver::Next,
+                    thread_id: Some(target.clone()),
+                    text: format!("old-{n} {}", "a".repeat(4000)),
+                }),
+            )
+            .await;
+            let run_id = prior["run_id"].as_str().expect("prior Run ID").to_owned();
             incoming(&control, &mut receive)
                 .await
                 .reply
                 .send((200, answer_with_usage("old answer", 50_000)))
                 .unwrap();
-            settled(&control, &target).await;
+            // A finished Turn can still belong to a live Run, which rejects a capped send.
+            let ended = request(
+                &control,
+                Command::Wait(WaitArgs {
+                    after: None,
+                    conditions: vec![WaitCondition::RunEnded { run_id }],
+                    timeout_ms: 5_000,
+                }),
+            )
+            .await;
+            assert_eq!(ended["status"], "satisfied", "{ended}");
         }
         let accepted: MessageAccepted = serde_json::from_value(
             request(
