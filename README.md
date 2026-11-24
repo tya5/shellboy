@@ -1,132 +1,146 @@
 # Shellboy
 
-![Shellboy overview: models use one shell tool and the CLI to inspect and fork their history, search documents, and recursively delegate work.](docs/assets/shellboy-overview.png)
+Shellboy is a terminal AI assistant for working in a folder. Its conversations,
+called **Threads**, are saved locally so you can come back later, inspect what the
+assistant ran, and pick up where you left off. The assistant uses a shell to work
+with files and commands, and the same `shellboy` CLI you can use to inspect
+history and delegate work. Core is a single executable with local SQLite storage.
 
-Semantic search over history and explicitly configured local documents uses your configured embedding endpoint.
+[Shellboy Studio](https://github.com/tya5/shellboy-studio) is an optional browser
+UI that connects to a compatible Core.
 
-A browser UI is available as [Shellboy Studio](https://github.com/tya5/shellboy-studio): read and drive conversations from a desktop or phone browser.
+## Your first Thread in about five minutes
 
-A lightweight terminal AI agent environment written in Rust. Models have one tool: shell. Through the `shellboy` CLI, they can search and fork their own history and recursively delegate work to child agents. Shellboy runs as a single executable, stores data in SQLite, and connects using Responses (default), OpenAI-compatible Chat Completions, or Anthropic Messages, explicitly selected per connection.
+Five minutes is a target if you already have a compatible model endpoint, not a
+setup guarantee. You need its API root URL, a model ID, and a credential unless
+you are using a keyless local endpoint. Use the [download for your platform](#download)
+and open an interactive terminal with the downloaded `shellboy` on your PATH.
 
-The optional connection `max_tokens` setting maps to each API's native output-limit field. Unset values omit that limit for Responses and Chat Completions; Anthropic Messages retains its existing 32768 default.
+1. Run `shellboy config init` and open the file named by `config_path` in the JSON
+   result. Set `default_model` to your model ID and the selected connection's
+   `base_url` to its API root, not the URL of an individual request. The template
+   uses `default_connection = "proxy"` and `api_key_env = "SHELLBOY_API_KEY"`.
+   Keep the variable **name** in TOML, not the key. For a compatible keyless
+   local endpoint, remove `api_key_env` and skip the credential step. See
+   [Configuration](docs/guides/configuration.md) for endpoint choices and output limits.
+2. If using a credential, set the named variable in this terminal. These examples
+   prompt without putting the key itself in the command. Model-started shells can
+   inherit this environment, so use a key and workspace you trust the assistant with.
 
-## Features
+   Bash:
 
-- **One executable** for Windows x64, macOS Apple Silicon, and Linux x64. Conversations and indexes live in local SQLite databases; no separate service or database server is required.
-- **Shell is the only model tool.** History, messaging, child conversations, waiting, and attachments all use the same CLI. People can use it from another terminal too.
-- **Inspectable history.** A Thread is a conversation, a Run owns ongoing work, and a Turn lasts until one normal response. Models can search past messages and shell output by keyword or meaning, retrieve originals, and follow their relationships. Forks, summaries, and compaction preserve provenance instead of rewriting history.
-- **Recursive delegation.** Models can create child Threads, assign work, wait, and read the results. Thread lineage and Run ownership are tracked separately.
-- **Durable requests and recovery.** Accepted requests are saved before execution. Communication failures and invalid model responses retain the reason and enter recovery wait, where you can retry, give a new instruction, or stop.
+   ```bash
+   read -r -s -p 'API key: ' SHELLBOY_API_KEY
+   printf '\n'
+   export SHELLBOY_API_KEY
+   ```
 
-Start with the [User Guide](docs/guides/user-guide.md) ([Japanese](docs/guides/user-guide.ja.md)). Models working inside Shellboy should read the English-only [Agent Guide](docs/guides/agent-guide.md). The [guide index](docs/guides/README.md) covers configuration, history search, attachments, recovery, and the CLI.
+   PowerShell:
 
-English is the default documentation language; only the User Guide has a Japanese translation, `user-guide.ja.md`. The current TUI remains Japanese. UI language options are [evaluated here](docs/design/documentation-language.md); no UI language switch is implemented yet.
+   ```powershell
+   $key = Read-Host 'API key' -AsSecureString
+   $env:SHELLBOY_API_KEY = [System.Net.NetworkCredential]::new('', $key).Password
+   ```
+3. Run `shellboy config check`. It reads the configuration and makes a model
+   catalog GET, not a conversation request. Fix errors before continuing; a
+   successful check is not proof that the endpoint accepts conversation requests.
+4. In a sample directory with a `README.md` you are comfortable sending to the
+   endpoint, run `shellboy`. Type the prompt below and press Enter:
 
-The [development status](docs/development/status.md) and [verification record](docs/validation/acceptance.md) distinguish implemented behavior from the checks actually performed.
+   > Read this folder's README and summarize the project in three bullets. Do not change files.
+
+   This sends a model request and may incur provider charges. Once accepted, the
+   request appears in the saved conversation instead of the draft. That means it
+   was saved, not that the reply succeeded. Wait for the assistant's separate reply,
+   or inspect the reason shown if processing fails. On a later launch, press
+   Ctrl+T or type `/threads`, select the saved Thread, and press Enter to reopen it.
 
 ## Download
 
-One-line install:
+Use the [latest release](https://github.com/tya5/shellboy/releases/latest) for
+macOS Apple Silicon, Linux x64, or native Windows x64. The installers verify SHA-256
+and install without sudo. Download and read the script before running it:
 
-```sh
-# macOS Apple Silicon / Linux x64
-curl -fsSL https://github.com/tya5/shellboy/releases/latest/download/install.sh | sh
-```
+Bash (macOS or Linux):
 
-```powershell
-# Windows x64: Windows PowerShell 5.1 or PowerShell 7
-irm https://github.com/tya5/shellboy/releases/latest/download/install.ps1 | iex
-```
-
-The installer verifies SHA-256, installs without sudo, and keeps an existing
-binary as `.backup-<timestamp>-<suffix>`. The default directory is `~/.local/bin`
-on macOS/Linux and `%LOCALAPPDATA%\Programs\shellboy` on Windows. Override it
-with `SHELLBOY_INSTALL_DIR`. Set `SHELLBOY_VERSION` (for example, `v0.3.0`) to
-select an archive version, or replace `latest/download` in the script URL with
-`download/vX.Y.Z` to use that release's script and matching binary. v0.3.0 itself
-has archives but no installer assets. The installer does not edit PATH or shell
-profiles; it prints instructions when needed. Read [Upgrading](#upgrading) before
-replacing an existing installation.
-
-To inspect the script before running it, download and read it first:
-
-```sh
+```bash
 curl -fsSL https://github.com/tya5/shellboy/releases/latest/download/install.sh -o install.sh
 cat install.sh
 sh install.sh
+export PATH="$HOME/.local/bin:$PATH"
 ```
+
+Windows PowerShell 5.1 or PowerShell 7:
 
 ```powershell
 Invoke-WebRequest -UseBasicParsing https://github.com/tya5/shellboy/releases/latest/download/install.ps1 -OutFile install.ps1
 Get-Content .\install.ps1
 .\install.ps1
+$env:Path = "$env:LOCALAPPDATA\Programs\shellboy;$env:Path"
 ```
 
-### Manual Download
+These PATH changes apply to the current terminal. Adjust the directory if you
+used `SHELLBOY_INSTALL_DIR` or extracted the binary elsewhere. If PowerShell
+blocks the script, you can use the manual download instead of changing your
+execution policy. The shell launching Shellboy and the shell used for model
+commands are separate choices; see [native Windows and WSL setup](docs/guides/configuration.md#starting-on-each-platform).
+Inside WSL, use the Linux build.
 
-Download the archive for your OS and CPU from the [latest Release](https://github.com/tya5/shellboy/releases/latest).
-Windows x64, macOS Apple Silicon, and Linux x64 archives include the executable
-and offline documentation; `SHA256SUMS` lets you verify the download. Extract the
-archive before running `shellboy` (`shellboy.exe` on Windows).
-Download `SHA256SUMS` beside the archive and check it before extracting:
+For a manual install, download the matching archive and `SHA256SUMS` from the
+**same release**. Check the hash before extracting. In the examples, replace
+`VERSION` with the version in your downloaded filename and compare the result
+with that filename's line in `SHA256SUMS`:
 
-```sh
-# Linux; on macOS use: shasum -a 256 --ignore-missing -c SHA256SUMS
-sha256sum --ignore-missing -c SHA256SUMS
+```bash
+# macOS Apple Silicon
+shasum -a 256 shellboy-VERSION-aarch64-apple-darwin.tar.gz
+# Linux x64
+sha256sum shellboy-VERSION-x86_64-unknown-linux-gnu.tar.gz
 ```
 
 ```powershell
-Get-FileHash .\shellboy-vX.Y.Z-x86_64-pc-windows-msvc.zip -Algorithm SHA256
-# Compare with the matching filename's hash in SHA256SUMS.
+Get-FileHash .\shellboy-VERSION-x86_64-pc-windows-msvc.zip -Algorithm SHA256
 ```
 
-Set a connection and model as described in [configuration](docs/guides/configuration.md).
-See [known limitations](docs/development/known-limitations.md) for current limits.
+Extract the verified archive and put its executable directory on PATH. Check
+which binary the terminal finds with `shellboy --version`.
+
+## Use it again
+
+Open Shellboy with the same data directory to find your saved Threads. Use
+`/threads` or Ctrl+T to return to one, or `/new` to start a fresh draft. The
+interface defaults to English; [Configuration](docs/guides/configuration.md)
+explains `[ui] language` and how to select Japanese.
+
+- [User Guide](docs/guides/user-guide.md) ([Japanese](docs/guides/user-guide.ja.md)) for everyday tasks.
+- [Recovery and Storage](docs/guides/recovery-and-storage.md) if a request fails or you are unsure whether it was accepted.
+- [Guide index](docs/guides/README.md) and [CLI Reference](docs/guides/cli-reference.md) for commands and examples. `shellboy docs list` works offline without an owner.
+- [Agent Guide](docs/guides/agent-guide.md) for models working inside Shellboy.
+
+## Compatibility and upgrading
+
+Shellboy is pre-1.0. The [release notes](https://github.com/tya5/shellboy/releases)
+for the version you intend to run describe its supported behavior, configuration,
+protocol and storage-schema changes. See [known limitations](docs/development/known-limitations.md)
+for current limits and [verification records](docs/validation/acceptance.md) for
+what has actually been tested.
 
 ### Upgrading
 
-Stop the owner completely and take a consistent backup of the data-dir before
-upgrading. A write-capable first startup may automatically upgrade its databases;
-older binaries cannot open newer schemas. For rollback, restore the backup into
-a separate data directory rather than opening the upgraded store with an old
-binary. Read the target Release's notes for configuration changes and detailed
-upgrade instructions. Replacing the executable takes effect after owner restart.
+Before replacing an installation, read the target release notes, stop the owner
+completely, and take a consistent backup of the selected data directory. First
+write-capable startup can upgrade its databases. Do not open upgraded data with
+an older binary; to roll back, restore the pre-upgrade backup into a separate data
+directory. Check the executable version and intended data directory before
+starting the new owner. Replacing a file alone does not replace a running owner.
 
-## Build and run
+## Development
 
-Install Rustup and your OS's C/C++ build tools. The toolchain is pinned in `rust-toolchain.toml` and dependencies in `Cargo.lock`.
-
-```sh
-cargo build --locked
-cargo run --locked --bin shellboy -- --help
-cargo run --locked --bin shellboy -- --version
-```
-
-Copy [config.example.toml](config.example.toml) to your chosen configuration location and set the connection URL and model ID. Credentials come from the configured environment variable. Do not commit keys or real conversations.
-
-```sh
-cargo run --locked --bin shellboy -- --config /path/to/config.toml --data-dir /path/to/data
-```
-
-Launching without a subcommand requires an interactive terminal. Owner-dependent CLI commands connect to a running Shellboy instance using the same data directory. Read offline guides with `shellboy docs list`. The [terminal fixture](docs/validation/manual-terminal.md) supports checks without a model API.
-
-Run `sh scripts/check.sh` on macOS/Linux or `./scripts/check.ps1` in Windows PowerShell. See [development setup](docs/development/setup.md) for details.
-
-## Repository layout
-
-```text
-src/              Ordinary Rust modules and product entry points
-migrations/       Versioned SQLite migrations
-tests/            Integration tests and synthetic fixtures
-examples/         Local verification fixtures
-scripts/          Verification and terminal capture tools
-docs/guides/      User and model guides; English defaults; Japanese User Guide
-docs/design/      Adopted specifications and implementation designs
-docs/development/ Setup, status, and decision records
-docs/validation/  Verification procedures and observed results
-```
-
-The Cargo package and executable are both named `shellboy`. Start development from the [effective specification](docs/design/effective-spec.md); [AGENTS.md](AGENTS.md) defines development boundaries.
+To build from source, follow [development setup](docs/development/setup.md) for
+the pinned Rust toolchain, platform prerequisites, and checks. From the repository,
+`cargo build --locked` builds the executable. See the
+[effective specification](docs/design/effective-spec.md) and [AGENTS.md](AGENTS.md)
+before contributing.
 
 ## License
 
