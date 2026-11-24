@@ -5,12 +5,15 @@ use crate::protocol::{
     ErrorCode,
 };
 use base64::{Engine, engine::general_purpose::STANDARD};
-use std::{collections::HashMap, sync::Arc, time::Duration};
-use tokio::time::Instant;
+use std::{
+    collections::HashMap,
+    sync::{Arc, Weak},
+    time::Duration,
+};
+use tokio::{sync::Mutex, time::Instant};
 use tokio_util::sync::CancellationToken;
 
 const IDLE: Duration = Duration::from_secs(60);
-const MAX_PINNED: usize = 256;
 
 #[derive(Default)]
 pub(super) struct DraftImages {
@@ -25,6 +28,34 @@ struct Transfer {
     expires: Instant,
     _timer: tokio_util::sync::DropGuard,
 }
+async fn expire_transfer(
+    state: Weak<Mutex<DraftImages>>,
+    target: String,
+    timer: CancellationToken,
+    mut deadline: Instant,
+) {
+    loop {
+        tokio::select! {
+            _ = timer.cancelled() => return,
+            _ = tokio::time::sleep_until(deadline) => {}
+        }
+        let Some(state) = state.upgrade() else { return };
+        let mut state = state.lock().await;
+        let Some(transfer) = state
+            .transfer
+            .as_ref()
+            .filter(|transfer| transfer.id == target)
+        else {
+            return;
+        };
+        deadline = transfer.expires;
+        if deadline <= Instant::now() {
+            state.transfer = None;
+            return;
+        }
+    }
+}
+
 fn missing() -> ApiError {
     ApiError::new(
         ErrorCode::TargetUnavailable,
@@ -64,7 +95,11 @@ impl AttachmentService {
                         "Encoded image exceeds the upload limit",
                     ));
                 }
-                if state.transfer.is_some() {
+                if state
+                    .transfer
+                    .as_ref()
+                    .is_some_and(|transfer| transfer.draft != args.draft_id)
+                {
                     return Err(ApiError::new(
                         ErrorCode::InvalidState,
                         "An image upload is already in progress",
@@ -72,39 +107,21 @@ impl AttachmentService {
                 }
                 let upload_id = super::id();
                 let timer = stop.child_token();
+                let deadline = Instant::now() + IDLE;
                 state.transfer = Some(Transfer {
                     id: upload_id.clone(),
                     draft: args.draft_id,
                     expected: encoded_bytes as usize,
                     bytes: Vec::new(),
-                    expires: Instant::now() + IDLE,
+                    expires: deadline,
                     _timer: timer.clone().drop_guard(),
                 });
-                let weak = Arc::downgrade(&self.draft_images);
-                let target = upload_id.clone();
-                tokio::spawn(async move {
-                    let mut deadline = Instant::now() + IDLE;
-                    loop {
-                        tokio::select! {
-                            _ = timer.cancelled() => return,
-                            _ = tokio::time::sleep_until(deadline) => { }
-                        }
-                        let Some(state) = weak.upgrade() else { return };
-                        let mut state = state.lock().await;
-                        let Some(transfer) = state
-                            .transfer
-                            .as_ref()
-                            .filter(|transfer| transfer.id == target)
-                        else {
-                            return;
-                        };
-                        deadline = transfer.expires;
-                        if deadline <= Instant::now() {
-                            state.transfer = None;
-                            return;
-                        }
-                    }
-                });
+                tokio::spawn(expire_transfer(
+                    Arc::downgrade(&self.draft_images),
+                    upload_id.clone(),
+                    timer,
+                    deadline,
+                ));
                 Ok(DraftImageResult::Begun { upload_id })
             }
             DraftImageAction::Append {
@@ -156,12 +173,6 @@ impl AttachmentService {
                         "Image upload is incomplete",
                     ));
                 }
-                if state.pins.len() >= MAX_PINNED {
-                    return Err(ApiError::new(
-                        ErrorCode::InputLimit,
-                        "Too many draft images are pending adoption",
-                    ));
-                }
                 let mut transfer = state.transfer.take().expect("matched transfer");
                 let bytes = std::mem::take(&mut transfer.bytes);
                 drop(transfer);
@@ -177,10 +188,14 @@ impl AttachmentService {
                 if state
                     .pins
                     .get(&attachment_id)
-                    .is_some_and(|(draft, _)| *draft == args.draft_id)
+                    .is_some_and(|(draft, _)| *draft != args.draft_id)
                 {
-                    state.pins.remove(&attachment_id);
+                    return Err(ApiError::new(
+                        ErrorCode::TargetUnavailable,
+                        "Image is not pinned to this draft",
+                    ));
                 }
+                state.pins.remove(&attachment_id);
                 Ok(DraftImageResult::Released)
             }
         }
@@ -196,46 +211,32 @@ mod tests {
     use super::*;
     use crate::protocol::Command;
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn native_draft_image_disposes_abandoned_upload_at_idle_deadline() {
-        let (_root, owner, control, server) = crate::frontend::control_tests::fixture().await;
-        tokio::time::pause();
-        let begin = |instance_id| DraftImageArgs {
-            instance_id,
-            draft_id: "draft".into(),
-            action: DraftImageAction::Begin { encoded_bytes: 4 },
-        };
-        let stop = CancellationToken::new();
-        assert_eq!(
-            control
-                .attachments
-                .draft_image(begin("old".into()), stop.clone())
-                .await
-                .unwrap_err()
-                .code,
-            ErrorCode::ProtocolMismatch,
-        );
-        control
-            .attachments
-            .draft_image(begin(control.store.instance_id.clone()), stop)
-            .await
-            .unwrap();
-        tokio::task::yield_now().await;
-        tokio::time::advance(IDLE).await;
-        tokio::task::yield_now().await;
-        assert!(
-            control
-                .attachments
-                .draft_images
-                .lock()
-                .await
-                .transfer
-                .is_none()
-        );
-        tokio::time::resume();
-        server.shutdown().await.unwrap();
-        control.shutdown().await.unwrap();
-        owner.shutdown().await.unwrap();
+        let start = Instant::now();
+        let deadline = start + Duration::from_secs(1);
+        let timer = CancellationToken::new();
+        let id = "upload".to_owned();
+        let state = Arc::new(Mutex::new(DraftImages {
+            transfer: Some(Transfer {
+                id: id.clone(),
+                draft: "draft".into(),
+                expected: 4,
+                bytes: vec![1, 2],
+                expires: deadline,
+                _timer: timer.clone().drop_guard(),
+            }),
+            pins: HashMap::new(),
+        }));
+        crate::test_watchdog::watchdog(
+            "abandoned upload expiration",
+            expire_transfer(Arc::downgrade(&state), id, timer, deadline),
+        )
+        .await
+        .unwrap();
+        let expired_at = Instant::now();
+        assert!(expired_at >= deadline);
+        assert!(state.lock().await.transfer.is_none());
     }
 
     #[tokio::test]
@@ -243,6 +244,19 @@ mod tests {
         let (root, owner, control, server) = crate::frontend::control_tests::fixture().await;
         let data = root.path().join("data");
         let instance = control.store.instance_id.clone();
+        let stale_owner = crate::ipc::call(
+            &data,
+            Command::DraftImage(DraftImageArgs {
+                instance_id: "old".into(),
+                draft_id: "draft".into(),
+                action: DraftImageAction::Begin { encoded_bytes: 4 },
+            }),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(stale_owner.error.unwrap().code, ErrorCode::ProtocolMismatch);
         let call = |draft: &str, action, operation| {
             let command = Command::DraftImage(DraftImageArgs {
                 instance_id: instance.clone(),
@@ -258,20 +272,49 @@ mod tests {
         }
         .encode_png()
         .unwrap();
-        let begun = call(
-            "draft",
-            DraftImageAction::Begin {
-                encoded_bytes: png.len() as u64,
-            },
-            None,
-        )
-        .await
-        .unwrap();
-        let DraftImageResult::Begun { upload_id } =
-            serde_json::from_value(begun.result.unwrap()).unwrap()
+        let begin = || DraftImageAction::Begin {
+            encoded_bytes: png.len() as u64,
+        };
+        let DraftImageResult::Begun {
+            upload_id: abandoned,
+        } = serde_json::from_value(call("draft", begin(), None).await.unwrap().result.unwrap())
+            .unwrap()
         else {
             panic!("expected upload ID")
         };
+        assert_eq!(
+            call("other", begin(), None)
+                .await
+                .unwrap()
+                .error
+                .unwrap()
+                .code,
+            ErrorCode::InvalidState
+        );
+        let DraftImageResult::Begun { upload_id } =
+            serde_json::from_value(call("draft", begin(), None).await.unwrap().result.unwrap())
+                .unwrap()
+        else {
+            panic!("expected replacement upload ID")
+        };
+        assert_ne!(upload_id, abandoned);
+        assert_eq!(
+            call(
+                "draft",
+                DraftImageAction::Append {
+                    upload_id: abandoned,
+                    offset: 0,
+                    base64: STANDARD.encode(&png),
+                },
+                None
+            )
+            .await
+            .unwrap()
+            .error
+            .unwrap()
+            .code,
+            ErrorCode::TargetUnavailable
+        );
         let append = |offset| DraftImageAction::Append {
             upload_id: upload_id.clone(),
             offset,
@@ -318,6 +361,30 @@ mod tests {
         assert_eq!(pinned.pins.len(), 1);
         assert!(pinned.pins.contains_key(&attachment.id));
         drop(pinned);
+        assert_eq!(
+            call(
+                "other",
+                DraftImageAction::Release {
+                    attachment_id: attachment.id.clone(),
+                },
+                None
+            )
+            .await
+            .unwrap()
+            .error
+            .unwrap()
+            .code,
+            ErrorCode::TargetUnavailable
+        );
+        assert!(
+            control
+                .attachments
+                .draft_images
+                .lock()
+                .await
+                .pins
+                .contains_key(&attachment.id)
+        );
         assert!(
             call(
                 "draft",

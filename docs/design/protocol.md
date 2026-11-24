@@ -1204,11 +1204,16 @@ One unfinished transfer per owner is held in memory, bounded by the lesser of
 128 MiB and the configured single-attachment limit. After 60 seconds without
 an accepted chunk, the owner discards its buffer. Commit requires the declared
 length and validates the complete PNG and its 128 MiB decoded RGBA limit before
-writing via the managed attachment service. The owner keeps up to 256 committed
-pins until clients issue `release` with the matching draft and `attachment_id`
-after adoption or disposal. Shutdown discards the unfinished transfer and drops
-all owner-held pins. No transfer rows or staging files are created.
+writing via the managed attachment service. Each committed pin belongs to its
+owning draft. The client sends `release` with that draft and `attachment_id`
+after discarding or submitting the draft (Unit 3). A different draft receives
+a typed refusal and cannot release the pin. No production client uses this
+command before that lifecycle is wired. Shutdown discards the unfinished
+transfer and drops remaining pins. No transfer rows or staging files are created.
 
-Only commit has a durable operation receipt; after uncertain delivery, inspect
-that operation rather than replaying the upload. An old instance ID cannot
-start or modify a transfer on its replacement.
+All four actions are writes, but only commit has a durable operation receipt.
+After uncertain commit delivery, inspect that receipt rather than replaying the
+upload. After an uncertain begin or append, a new begin for the same draft
+replaces its own unfinished transfer. A different draft cannot replace it.
+Release can be repeated for an already released attachment; there is no receipt
+for it. An old instance ID cannot modify a transfer on its replacement.
