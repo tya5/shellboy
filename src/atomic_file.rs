@@ -3,6 +3,29 @@ use std::fs::{File, OpenOptions};
 use std::io;
 use std::path::{Path, PathBuf};
 
+#[cfg(windows)]
+mod windows;
+
+pub(crate) fn create_new(path: &Path, private: bool) -> io::Result<File> {
+    #[cfg(windows)]
+    if private {
+        return windows::private_create(path);
+    }
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    if private {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    options.open(path)
+}
+
+#[cfg(windows)]
+pub(crate) fn privacy_warning(path: &Path) -> Option<&'static str> {
+    windows::warning(path)
+}
+
 pub(crate) struct AtomicFile {
     temporary: PathBuf,
     file: Option<File>,
@@ -10,17 +33,8 @@ pub(crate) struct AtomicFile {
 
 impl AtomicFile {
     pub(crate) fn new(temporary: PathBuf, private: bool) -> io::Result<Self> {
-        let mut options = OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
-        if private {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
-        }
-        #[cfg(not(unix))]
-        let _ = private;
         Ok(Self {
-            file: Some(options.open(&temporary)?),
+            file: Some(create_new(&temporary, private)?),
             temporary,
         })
     }

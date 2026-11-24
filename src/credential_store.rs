@@ -273,6 +273,8 @@ fn write(
     // The replacement is 0600, so a loose file is corrected by the save itself.
     let warning = replace_atomically(path, state, edited.as_bytes(), before_replace, replace_file)
         .map_err(relabel)?;
+    #[cfg(windows)]
+    let warning = warning.or_else(|| crate::atomic_file::privacy_warning(path));
     Ok(Outcome {
         existed,
         written: true,

@@ -1309,14 +1309,7 @@ fn finish_interrupted_replace(
     })))
 }
 fn write_temporary(temporary: &Path, state: &FileState, bytes: &[u8]) -> std::io::Result<()> {
-    let mut options = std::fs::OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    let mut file = options.open(temporary)?;
+    let mut file = crate::atomic_file::create_new(temporary, cfg!(unix) || !state.inherit_mode)?;
     file.write_all(bytes)?;
     #[cfg(unix)]
     if state.present && state.inherit_mode {

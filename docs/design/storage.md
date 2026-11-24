@@ -778,3 +778,12 @@ minimum `created_at` only for exact counts. Archived/deleted filtering also
 stays within that page. The cursor is a live Thread-ID keyset, not a snapshot. This is distinct from
 the per-recipient `receipt_reply_pending` index used for bounded Thread inbox and
 lifecycle operations.
+
+### Private credential and export files on Windows
+
+New credentials and Thread export temporary files request a protected, private
+DACL at creation. If the destination does not support ACLs, the existing write
+workflow remains available. On completion, a broad or unverifiable file ACL is
+reported as a warning, including when replacement preserved an existing
+credential file's ACL. This does not modify the data directory or its existing
+ACLs, and does not make a lossless export safe to share.

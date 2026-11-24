@@ -65,6 +65,10 @@ async fn fake(
         api_key_env: None,
         default_effort: None,
         headers: BTreeMap::from([("Authorization".into(), "Bearer fake-private-key".into())]),
+        extra_headers: BTreeMap::from([(
+            "X-Proxy-Access".into(),
+            "Basic fake-extra-secret".into(),
+        )]),
         ..Default::default()
     };
     let (tx, rx) = oneshot::channel();
@@ -231,6 +235,52 @@ async fn error_body_is_bounded_and_secret_header_values_are_redacted() {
     assert!(failure.error.message.len() < 17_000);
     assert_eq!(server.await.unwrap(), 1);
 }
+#[tokio::test]
+async fn provider_failure_redacts_before_excerpt_and_sanitizes_retained_json() {
+    let url = "http://synthetic-user:synthetic-password@proxy.example.test/api?q=synthetic-query";
+    let raw = json!({"id":"fixture","status":"failed","error":{
+        "code":format!("{url} fake-extra-secret"),
+        "message":format!("{}fake-extra-secret", "a".repeat(16_380)),
+        "details":{"nested":["fake-private-key", url]}
+    }});
+    let (client, request, count) =
+        fake(200, "application/json", raw.to_string().into_bytes(), 4096).await;
+    let failure = client
+        .response(
+            response_request("fixture", vec![], None, false),
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .unwrap_err();
+    let seen = request.await.unwrap().head.to_ascii_lowercase();
+    assert!(seen.contains("x-proxy-access: basic fake-extra-secret"));
+    assert!(!failure.error.message.contains("fake"));
+    assert!(failure.error.message.contains("truncated"));
+    let serialized = format!("{:?}", failure);
+    for hidden in [
+        "fake-extra-secret",
+        "fake-private-key",
+        "synthetic-user",
+        "synthetic-password",
+        "synthetic-query",
+    ] {
+        assert!(
+            !serialized.contains(hidden),
+            "{hidden} survived failure projection"
+        );
+    }
+    assert!(
+        failure
+            .error
+            .provider_code
+            .unwrap()
+            .contains("proxy.example.test/api")
+    );
+    assert_eq!(failure.raw_response.unwrap()["id"], "fixture");
+    assert_eq!(count.await.unwrap(), 1);
+}
+
 #[tokio::test]
 async fn json_transport_normalization_and_unsupported_output_preservation() {
     let raw = final_response("JSON final");

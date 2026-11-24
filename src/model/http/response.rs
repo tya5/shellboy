@@ -1,5 +1,5 @@
 //! Responses reception preserves bounded recovery data and reports facts only.
-use super::body::{http_error_observed, read_json, redact};
+use super::body::{http_error_observed, read_json, redact_failure};
 use super::*;
 use crate::config::Api;
 use crate::model::{MAX_RESPONSE_BYTES, ModelResponse, ResponseStream, dialect};
@@ -541,10 +541,15 @@ impl HttpModelClient {
             )
             .into()),
         };
-        outcome.map(|mut response| {
-            response.http_observation = Some(observation);
-            response
-        })
+        outcome
+            .map(|mut response| {
+                response.http_observation = Some(observation);
+                response
+            })
+            .map_err(|mut failure| {
+                redact_failure(&mut failure, &secrets);
+                failure
+            })
     }
 }
 #[allow(clippy::result_large_err)]
@@ -645,11 +650,7 @@ async fn response_sse(
         let values = match pushed {
             Ok(values) => values,
             Err(error) => {
-                return Err(failure(
-                    redact(error, context.secrets),
-                    &parsed,
-                    raw_response,
-                ));
+                return Err(failure(error, &parsed, raw_response));
             }
         };
         for value in values {
@@ -684,7 +685,7 @@ async fn response_sse(
     let response = parsed
         .finish(tools_enabled)
         .map_err(|error| AttemptFailure {
-            error: redact(error, context.secrets),
+            error,
             partial_text: partial_text.clone(),
             partial_reasoning: partial_reasoning.clone(),
             completed_items: completed_items.clone(),

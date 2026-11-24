@@ -150,9 +150,7 @@ impl ModelError {
                 .and_then(Value::as_str)
                 .or_else(|| error.as_str())
                 .unwrap_or("Proxy returned an error without a message")
-                .chars()
-                .take(MAX_ERROR_MESSAGE_CHARS)
-                .collect(),
+                .to_owned(),
             provider_code: error.get("code").and_then(Value::as_str).map(str::to_owned),
             status,
             stream_provider_status: None,
