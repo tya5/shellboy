@@ -960,9 +960,17 @@ async fn run_with_delivery(
         cwd: cwd.clone(),
     };
     let ipc_failure = server.failures();
+    let stop_listener = server.stop_accepting();
+    let capture_control = control.clone();
+    let capture = async move {
+        // Control::shutdown returns the cached result after draining.
+        let _ = capture_control.prepare_shutdown().await;
+    };
     let owner_control = control.clone();
-    let owner_close =
-        async move { crate::owner_session::close(owner, Some(owner_control), Some(server)).await };
+    let close_runtime = async move {
+        let core = owner_control.shutdown().await;
+        server.shutdown().await.and(core)
+    };
     // Only the embedded launch composition owns this policy. Its completion
     // participates in the existing terminal grace and force-close UI.
     run_client(
@@ -974,7 +982,10 @@ async fn run_with_delivery(
         ipc_failure,
         clipboard,
         command_slots,
-        owner_close,
+        stop_listener,
+        capture,
+        close_runtime,
+        owner.shutdown(),
         #[cfg(test)]
         startup,
     )
@@ -991,7 +1002,10 @@ async fn run_client(
     mut ipc_failure: tokio::sync::watch::Receiver<Option<ApiError>>,
     clipboard: Arc<dyn ClipboardBackend>,
     command_slots: Arc<Semaphore>,
-    after_client_close: impl Future<Output = Result<(), ApiError>>,
+    before_client_drain: impl Future<Output = ()>,
+    before_control_task_drain: impl Future<Output = ()>,
+    before_worker_drain: impl Future<Output = Result<(), ApiError>>,
+    after_worker_drain: impl Future<Output = Result<(), ApiError>>,
     #[cfg(test)] startup: Option<receipt_delivery::Startup>,
 ) -> Result<(), ApiError> {
     let language = control.store.config.ui.language;
@@ -3923,6 +3937,7 @@ async fn run_client(
                 u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
             )
         };
+        before_client_drain.await;
         // Coalesced autosaves retain the newest snapshot per Thread; FIFO
         // database admission within each Thread is preserved on shutdown too.
         trace(Stage::DraftEnqueue, Edge::Begin);
@@ -3938,6 +3953,7 @@ async fn run_client(
             .map_err(|_| ApiError::new(ErrorCode::SaveFailed, "Draft save worker failed"))
             .and_then(|result| result);
         trace(Stage::DraftSave, Edge::End);
+        before_control_task_drain.await;
         trace(Stage::ControlTasks, Edge::Begin);
         while control_tasks.join_next().await.is_some() {}
         trace(Stage::ControlTasks, Edge::End);
@@ -3947,20 +3963,18 @@ async fn run_client(
         trace(Stage::Images, Edge::Begin);
         drop(images);
         trace(Stage::Images, Edge::End);
+        let runtime_result = before_worker_drain.await;
         trace(Stage::Workers, Edge::Begin);
         while workers.join_next().await.is_some() {}
         trace(Stage::Workers, Edge::End);
+        let owner_result = after_worker_drain.await;
         if let Some(value) = initialize {
             update(shutdown_updates, value).await;
         }
         receipt_batch.finish(&mut pending, shutdown_updates).await;
-        save_result
+        save_result.and(runtime_result).and(owner_result)
     };
-    let finish = async {
-        let result = shutdown.await;
-        result.and(after_client_close.await)
-    };
-    wait_for_shutdown_delivery_localized(&mut actions, &updates, grace, finish, language).await
+    wait_for_shutdown_delivery_localized(&mut actions, &updates, grace, shutdown, language).await
 }
 
 #[cfg(test)]

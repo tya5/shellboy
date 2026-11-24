@@ -4241,30 +4241,44 @@ mod tests {
         crate::test_watchdog::watchdog("independent serve browser", async {
             let root = tempfile::tempdir().unwrap();
             let data = root.path().join("selected-owner");
-            let unused = root.path().join("not-selected");
-            let prepared = crate::owner_session::initialize(
-                None, Some(data.clone()), CancellationToken::new(),
-                tokio::sync::watch::channel(crate::app::StartupStage::Configuration).0,
-            ).await.unwrap().unwrap();
-            let instance = prepared.owner.instance_id.clone();
-            prepared.owner.db.call(|db| {
-                db.execute("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at) VALUES('wire-thread','Independent owner thread','/','','p','m','2026-01-01T00:00:00Z')", [])?;
-                Ok(())
-            }).await.unwrap();
-            let (ready, mut events) = tokio::sync::mpsc::unbounded_channel();
-            let serve = tokio::spawn(async move {
-                crate::serve::run_prepared(prepared, std::future::pending(), move |event| ready.send(event.clone()).is_ok()).await
-            });
-            let event = events.recv().await.unwrap();
-            assert_eq!(event["event"], "ready");
-            assert_eq!(event["instance_id"], instance);
-            assert_eq!(event["data_dir"], serde_json::json!(data));
+            let other = root.path().join("other-owner");
+            async fn start(data: &std::path::Path, id: &'static str, title: &'static str) -> (
+                String,
+                tokio::sync::mpsc::UnboundedReceiver<serde_json::Value>,
+                tokio::task::JoinHandle<Result<bool, crate::protocol::ApiError>>,
+            ) {
+                let prepared = crate::owner_session::initialize(
+                    None, Some(data.to_owned()), CancellationToken::new(),
+                    tokio::sync::watch::channel(crate::app::StartupStage::Configuration).0,
+                ).await.unwrap().unwrap();
+                let instance = prepared.owner.instance_id.clone();
+                prepared.owner.db.call(move |db| {
+                    db.execute("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at) VALUES(?1,?2,'/','','p','m','2026-01-01T00:00:00Z')", rusqlite::params![id,title])?;
+                    Ok(())
+                }).await.unwrap();
+                let (ready, mut events) = tokio::sync::mpsc::unbounded_channel();
+                let serve = tokio::spawn(async move {
+                    crate::serve::run_prepared(prepared, std::future::pending(), move |event| ready.send(event.clone()).is_ok()).await
+                });
+                let event = events.recv().await.unwrap();
+                assert_eq!(event["event"], "ready");
+                assert_eq!(event["instance_id"], instance);
+                assert_eq!(event["data_dir"], serde_json::json!(data));
+                (instance, events, serve)
+            }
+            let (instance, mut events, serve) = start(&data, "wire-thread", "Independent owner thread").await;
+            let (other_instance, mut other_events, other_serve) = start(&other, "other-thread", "Other owner thread").await;
+            assert_ne!(instance, other_instance);
             let stop = CancellationToken::new();
-            assert!(NativeBrowser::new(&unused).list(Default::default(), &stop).await.is_err());
+            let other_stop = CancellationToken::new();
+            let other_browser = NativeBrowser::new(&other);
+            let page = other_browser.list(Default::default(), &other_stop).await.unwrap();
+            assert_eq!(page.items.iter().map(|row| row.thread_id.as_str()).collect::<Vec<_>>(), ["other-thread"]);
             {
                 let client = NativeBrowser::new(&data);
                 let page = client.list(ThreadListArgs::default(), &stop).await.unwrap();
-                let exact = client.exact(vec!["missing".into(), "wire-thread".into()], &stop).await.unwrap();
+                assert_eq!(page.items.iter().map(|row| row.thread_id.as_str()).collect::<Vec<_>>(), ["wire-thread"]);
+                let exact = client.exact(vec!["other-thread".into(), "wire-thread".into()], &stop).await.unwrap();
                 assert_eq!(exact.len(), 1);
                 assert_eq!(exact[0].thread_id, "wire-thread");
                 let mut browser = ThreadBrowser::default();
@@ -4286,6 +4300,14 @@ mod tests {
             assert_eq!(stopped["event"], "stopped");
             assert_eq!(stopped["instance_id"], instance);
             assert!(serve.await.unwrap().unwrap());
+            let other_after = other_browser.list(Default::default(), &other_stop).await.unwrap();
+            assert_eq!(other_after.items.iter().map(|row| row.thread_id.as_str()).collect::<Vec<_>>(), ["other-thread"]);
+            assert!(!other_serve.is_finished());
+            assert!(crate::ipc::shutdown_owner(&other, None).await.unwrap().ok);
+            let other_stopped = other_events.recv().await.unwrap();
+            assert_eq!(other_stopped["event"], "stopped");
+            assert_eq!(other_stopped["instance_id"], other_instance);
+            assert!(other_serve.await.unwrap().unwrap());
         }).await.unwrap();
     }
 
