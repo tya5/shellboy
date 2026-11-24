@@ -52,7 +52,10 @@ impl AtomicFile {
         let file = self.file.take().expect("temporary file is open");
         file.sync_all()?;
         drop(file);
-        std::fs::rename(&self.temporary, target)?;
+        let renamed = std::fs::rename(&self.temporary, target);
+        #[cfg(windows)]
+        let renamed = renamed.map_err(|error| windows::diagnose_rename_error(target, error));
+        renamed?;
         self.temporary.clear();
         Ok(())
     }

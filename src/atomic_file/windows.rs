@@ -1,15 +1,19 @@
 use std::{
-    fs::File,
+    fs::{File, OpenOptions},
     io,
     os::windows::{
         ffi::OsStrExt,
+        fs::OpenOptionsExt,
         io::{AsRawHandle, FromRawHandle},
     },
     path::Path,
     ptr::null_mut,
 };
 use windows_sys::Win32::{
-    Foundation::{ERROR_INVALID_FUNCTION, ERROR_NOT_SUPPORTED, INVALID_HANDLE_VALUE, LocalFree},
+    Foundation::{
+        ERROR_ACCESS_DENIED, ERROR_INVALID_FUNCTION, ERROR_LOCK_VIOLATION, ERROR_NOT_SUPPORTED,
+        ERROR_SHARING_VIOLATION, INVALID_HANDLE_VALUE, LocalFree,
+    },
     Security::{
         ACCESS_ALLOWED_ACE, ACE_HEADER,
         Authorization::{
@@ -20,8 +24,9 @@ use windows_sys::Win32::{
         WinCreatorOwnerRightsSid, WinLocalSystemSid,
     },
     Storage::FileSystem::{
-        CREATE_NEW, CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_GENERIC_WRITE, FILE_SHARE_DELETE,
-        FILE_SHARE_READ, FILE_SHARE_WRITE,
+        CREATE_NEW, CreateFileW, DELETE, FILE_ATTRIBUTE_NORMAL, FILE_FLAG_BACKUP_SEMANTICS,
+        FILE_FLAG_OPEN_REPARSE_POINT, FILE_GENERIC_WRITE, FILE_SHARE_DELETE, FILE_SHARE_READ,
+        FILE_SHARE_WRITE,
     },
 };
 
@@ -87,6 +92,28 @@ pub(super) fn private_create(path: &Path) -> io::Result<File> {
         return File::options().write(true).create_new(true).open(path);
     }
     Err(error)
+}
+
+pub(super) fn diagnose_rename_error(target: &Path, error: io::Error) -> io::Error {
+    if error.raw_os_error() != Some(ERROR_ACCESS_DENIED as i32) {
+        return error;
+    }
+    // Windows replacement can report access denied when the target denies delete
+    // sharing. Confirm it with a non-mutating open; do not relabel an ACL denial.
+    match OpenOptions::new()
+        .access_mode(DELETE)
+        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS)
+        .open(target)
+    {
+        Err(conflict)
+            if matches!(conflict.raw_os_error(), Some(code)
+            if code == ERROR_SHARING_VIOLATION as i32 || code == ERROR_LOCK_VIOLATION as i32) =>
+        {
+            conflict
+        }
+        _ => error,
+    }
 }
 
 pub(super) fn warning(path: &Path) -> Option<&'static str> {

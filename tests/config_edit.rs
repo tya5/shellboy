@@ -505,7 +505,7 @@ fn permissions_and_symbolic_links_are_kept() {
 
 #[cfg(windows)]
 #[test]
-fn the_windows_replace_keeps_the_target_and_refuses_when_it_is_open_exclusively() {
+fn windows_replace_preserves_settings_when_target_denies_delete_sharing() {
     use std::os::windows::fs::OpenOptionsExt;
     let (root, path, hash) = fixture(FULL);
     apply(&path, &hash, &[change("ui.bell", json!(false))]).unwrap();
@@ -526,12 +526,16 @@ fn the_windows_replace_keeps_the_target_and_refuses_when_it_is_open_exclusively(
         .unwrap();
     let error = apply(&path, &hash, &[change("ui.bell", json!(true))]).unwrap_err();
     assert_eq!(error.code, ErrorCode::IoFailed);
+    assert_eq!(
+        error.details.as_ref().expect("sharing conflict details")["reason"],
+        "file_in_use"
+    );
+    assert_eq!(error.details.as_ref().unwrap()["written"], false);
     assert!(
         error
-            .message
-            .contains("Cannot replace the configuration file"),
-        "{}",
-        error.message
+            .hint
+            .as_deref()
+            .is_some_and(|hint| hint.contains("Close programs"))
     );
     drop(held);
     assert_eq!(std::fs::read_to_string(&path).unwrap(), before);

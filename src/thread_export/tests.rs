@@ -63,7 +63,10 @@ fn busy_export_destination_keeps_previous_contents_and_reports_sharing_conflict(
     let Err(error) = output.publish(&path, 42).map_err(write_error) else {
         panic!("Windows must reject replacement while target is held");
     };
-    assert_eq!(error.details.unwrap()["reason"], "file_in_use");
+    assert_eq!(error.code, crate::protocol::ErrorCode::IoFailed);
+    let details = error.details.as_ref().unwrap_or_else(|| panic!("{error}"));
+    assert_eq!(details["reason"], "file_in_use");
+    assert_eq!(details["written"], false);
     assert!(!temporary.exists());
     assert_eq!(std::fs::read(&path).unwrap(), b"previous export");
     drop(lock);
