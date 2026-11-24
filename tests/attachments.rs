@@ -302,6 +302,11 @@ async fn protected_totals_reject_add_and_later_growth_holds_request() {
         .await
         .unwrap_err();
     assert_eq!(error.code, ErrorCode::InputLimit);
+    assert_eq!(
+        f.service.cache_stats().entries,
+        0,
+        "no encoding before protected admission"
+    );
     f.db.shutdown().await.unwrap();
 }
 #[tokio::test]
@@ -310,11 +315,19 @@ async fn oldest_past_attachments_excluded_only_at_admission_never_resurrect() {
     config.limits.attachment_file_bytes = 10;
     config.limits.attachment_request_bytes = 10;
     let f = Fixture::new(config).await;
-    let old = f.add("old", b"123456").await;
+    let old = f.add("old", b"x").await;
     drop(f.adopt(f.prepare().await, true).await);
+    let cached_old_bytes = f.service.cache_stats().retained_bytes;
+    std::fs::write(f.path.join("old"), b"123456").unwrap();
     f.add("new", b"123456").await;
     let prepared = f.prepare().await;
     assert_eq!(prepared.excluded_ids, vec![old.clone()]);
+    // The old encoding stays cached at its original size. Only the admitted
+    // new six-byte text file can add a new encoding (8 Base64 + hash + MIME).
+    assert_eq!(
+        f.service.cache_stats().retained_bytes,
+        cached_old_bytes + 8 + 64 + "text/plain".len()
+    );
     let before =
         f.db.call(|db| {
             Ok(list_tx(

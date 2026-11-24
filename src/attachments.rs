@@ -445,37 +445,36 @@ impl AttachmentService {
             ids: pin_ids,
         });
         let deadline = self.deadline();
-        let mut read: BTreeMap<PathBuf, Result<Arc<Encoded>, String>> = BTreeMap::new();
+        let mut sizes = BTreeMap::new();
+        let file_limit = self.config.limits.attachment_file_bytes;
         for selection in selected.iter().filter(|s| s.active) {
-            if read.contains_key(&selection.path) {
+            if sizes.contains_key(&selection.path) {
                 continue;
             }
             let path = selection.path.clone();
-            let cache = self.cache.clone();
-            let limit = self.config.limits.attachment_file_bytes;
             let pin = pins.clone();
             let result = self
                 .workers
                 .execute(deadline, cancel.clone(), move || {
                     let _pin = pin;
-                    read_encoded(&path, limit, force_reload, &cache)
+                    open_attachment(&path, file_limit).map(|(_, signature)| signature.bytes)
                 })
                 .await;
             if cancel.is_cancelled() {
                 return Err(cancelled());
             }
-            read.insert(selection.path.clone(), result.map_err(|e| e.message));
+            sizes.insert(selection.path.clone(), result.map_err(|e| e.message));
         }
         let mut protected = 0u64;
         let mut total = 0u64;
         for s in selected.iter().filter(|s| s.active) {
-            if let Some(Ok(content)) = read.get(&s.path) {
+            if let Some(Ok(bytes)) = sizes.get(&s.path) {
                 total = total
-                    .checked_add(content.raw_size)
+                    .checked_add(*bytes)
                     .ok_or_else(|| io_error("Attachment size overflow"))?;
                 if s.protected {
                     protected = protected
-                        .checked_add(content.raw_size)
+                        .checked_add(*bytes)
                         .ok_or_else(|| io_error("Attachment size overflow"))?;
                 }
             }
@@ -488,10 +487,42 @@ impl AttachmentService {
             if total <= self.config.limits.attachment_request_bytes {
                 break;
             }
-            if let Some(Ok(content)) = read.get(&s.path) {
-                total -= content.raw_size;
+            if let Some(Ok(bytes)) = sizes.get(&s.path) {
+                total -= *bytes;
                 excluded.push(s.id.clone());
             }
+        }
+        // Only admitted references can pin encoded content. Count repeated paths
+        // per reference even though they share a single read.
+        let excluded_set: HashSet<_> = excluded.iter().map(String::as_str).collect();
+        let mut read = BTreeMap::new();
+        for selection in selected
+            .iter()
+            .filter(|s| s.active && !excluded_set.contains(s.id.as_str()))
+        {
+            if read.contains_key(&selection.path) {
+                continue;
+            }
+            let result = match &sizes[&selection.path] {
+                Ok(bytes) => {
+                    let reserved = *bytes;
+                    let path = selection.path.clone();
+                    let cache = self.cache.clone();
+                    let pin = pins.clone();
+                    self.workers
+                        .execute(deadline, cancel.clone(), move || {
+                            let _pin = pin;
+                            read_encoded(&path, file_limit, reserved, force_reload, &cache)
+                        })
+                        .await
+                        .map_err(|e| e.message)
+                }
+                Err(error) => Err(error.clone()),
+            };
+            if cancel.is_cancelled() {
+                return Err(cancelled());
+            }
+            read.insert(selection.path.clone(), result);
         }
         let mut result = PreparedAttachments {
             thread_id: thread_id.into(),
@@ -533,9 +564,9 @@ impl AttachmentService {
                 changed: false,
                 error: None,
             };
-            if !s.active || excluded.contains(&s.id) {
+            if !s.active || excluded_set.contains(s.id.as_str()) {
                 manifest.state = "excluded".into();
-                let reason = if excluded.contains(&s.id) {
+                let reason = if excluded_set.contains(s.id.as_str()) {
                     "request raw-byte limit"
                 } else {
                     s.reason.as_deref().unwrap_or("previously excluded")
@@ -894,13 +925,13 @@ pub fn record_prepared_tx(
     Ok(())
 }
 
-fn read_encoded(
-    path: &Path,
-    limit: u64,
-    force: bool,
-    cache: &Mutex<Cache>,
-) -> Result<Arc<Encoded>, ApiError> {
+fn open_attachment(path: &Path, limit: u64) -> Result<(File, Signature), ApiError> {
     let meta = std::fs::metadata(path).map_err(|e| io_error(e.to_string()))?;
+    if !meta.is_file() {
+        return Err(io_error("Attachment path is not a regular file"));
+    }
+    let file = File::open(path).map_err(|e| io_error(e.to_string()))?;
+    let meta = file.metadata().map_err(|e| io_error(e.to_string()))?;
     if !meta.is_file() {
         return Err(io_error("Attachment path is not a regular file"));
     }
@@ -910,10 +941,29 @@ fn read_encoded(
             "Attachment exceeds the single-file raw-byte limit",
         ));
     }
-    let signature = Signature {
-        bytes: meta.len(),
-        modified: meta.modified().ok(),
-    };
+    Ok((
+        file,
+        Signature {
+            bytes: meta.len(),
+            modified: meta.modified().ok(),
+        },
+    ))
+}
+
+fn read_encoded(
+    path: &Path,
+    limit: u64,
+    reserved: u64,
+    force: bool,
+    cache: &Mutex<Cache>,
+) -> Result<Arc<Encoded>, ApiError> {
+    let (mut file, signature) = open_attachment(path, limit)?;
+    let grew = || io_error("Attachment grew beyond its reserved bytes during preparation");
+    if signature.bytes > reserved {
+        return Err(grew());
+    }
+    let capacity = usize::try_from(reserved)
+        .map_err(|_| io_error("Attachment reservation exceeds addressable memory"))?;
     {
         let mut cache = cache.lock().expect("attachment cache poisoned");
         cache.clock += 1;
@@ -926,22 +976,22 @@ fn read_encoded(
             return Ok(entry.content.clone());
         }
     }
-    let mut file = File::open(path).map_err(|e| io_error(e.to_string()))?;
     let mut bytes = Vec::new();
+    bytes
+        .try_reserve_exact(capacity)
+        .map_err(|_| io_error("Cannot allocate attachment reservation"))?;
     let mut hash = Sha256::new();
     let mut buffer = [0u8; 64 * 1024];
     loop {
+        let read_len = (capacity - bytes.len()).saturating_add(1).min(buffer.len());
         let count = file
-            .read(&mut buffer)
+            .read(&mut buffer[..read_len])
             .map_err(|e| io_error(e.to_string()))?;
         if count == 0 {
             break;
         }
-        if (bytes.len() as u64).saturating_add(count as u64) > limit {
-            return Err(ApiError::new(
-                ErrorCode::InputLimit,
-                "Attachment grew beyond its single-file limit during read",
-            ));
+        if count > capacity - bytes.len() {
+            return Err(grew());
         }
         hash.update(&buffer[..count]);
         bytes.extend_from_slice(&buffer[..count]);

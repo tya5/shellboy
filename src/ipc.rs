@@ -303,6 +303,7 @@ async fn serve_connection<S: AsyncRead + AsyncWrite + Unpin>(
         tokio::pin!(write);
         tokio::select! {
             result = &mut write => result?,
+            _ = tokio::time::sleep(FRAME_READ_TIMEOUT) => return Ok(()),
             _ = stop.cancelled() => {
                 // At the delivery cutoff, finish only what can complete now.
                 match futures_util::FutureExt::now_or_never(write) {
@@ -318,23 +319,28 @@ async fn serve_connection<S: AsyncRead + AsyncWrite + Unpin>(
     }
     // A successful write/flush does not prove the peer consumed the reply,
     // especially on a Windows named pipe. The client closes after reading it.
-    loop {
-        match stream.read(&mut byte).await {
-            Ok(0) => return Ok(()),
-            Ok(_) => {}
-            Err(error) => {
-                return Err(ipc_failure(
-                    ApiError::new(
-                        ErrorCode::IoFailed,
-                        format!("IPC peer close read failed: {}", error.kind()),
-                    ),
-                    "peer_close",
-                    "peer_read_error",
-                    false,
-                ));
+    let wait_for_close = async {
+        loop {
+            match stream.read(&mut byte).await {
+                Ok(0) => return Ok(()),
+                Ok(_) => {}
+                Err(error) => {
+                    return Err(ipc_failure(
+                        ApiError::new(
+                            ErrorCode::IoFailed,
+                            format!("IPC peer close read failed: {}", error.kind()),
+                        ),
+                        "peer_close",
+                        "peer_read_error",
+                        false,
+                    ));
+                }
             }
         }
-    }
+    };
+    tokio::time::timeout(FRAME_READ_TIMEOUT, wait_for_close)
+        .await
+        .unwrap_or(Ok(()))
 }
 
 pub async fn call(
@@ -1761,6 +1767,51 @@ mod frame_delivery_tests {
         })
         .await
         .unwrap();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn reply_delivery_releases_stalled_connections_at_deadline() {
+        for read_reply in [false, true] {
+            let (mut client, stream) = tokio::io::duplex(4096);
+            let (requests, mut incoming) = mpsc::channel(1);
+            let task = tokio::spawn(serve_connection(
+                stream,
+                "instance".into(),
+                requests,
+                CancellationToken::new(),
+                server::WorkAdmission::new(),
+            ));
+            send_test_frame(&mut client, &status_frame()).await;
+            let invocation = incoming.recv().await.unwrap();
+            invocation
+                .reply
+                .send(Response::success(
+                    invocation.request.operation_id,
+                    Value::String("x".repeat(8192)),
+                ))
+                .unwrap();
+            if read_reply {
+                assert!(
+                    read_frame::<_, Response<Value>>(&mut client)
+                        .await
+                        .unwrap()
+                        .unwrap()
+                        .ok
+                );
+            } else {
+                assert!(client.read_u32().await.unwrap() > 4096);
+            }
+            let started = tokio::time::Instant::now();
+            // Keep the peer alive while awaiting owner-side retirement.
+            tokio::select! {
+                result = task => result.unwrap().unwrap(),
+                _ = tokio::time::sleep(FRAME_READ_TIMEOUT + std::time::Duration::from_secs(1)) => {
+                    panic!("connection did not retire at the delivery deadline");
+                }
+            }
+            assert_eq!(started.elapsed(), FRAME_READ_TIMEOUT);
+            drop(client);
+        }
     }
 
     #[tokio::test]
