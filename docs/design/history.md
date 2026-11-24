@@ -186,3 +186,12 @@ limit. Omitted provenance and display fields are not replacement text. This
 reuses the public filter engine: its examined rows may span the selected path
 and its matching relations, even when the returned page is small. This route
 is for explicit list reports, not recurring viewport refresh.
+
+The explicit window report uses native `history.window`. It seeks one selected
+Thread at its tail or one anchor and returns that snapshot's path revision and
+ordinals. It has no cursor: use a fresh anchor, with expected node identity
+when continuing by ordinal. Existing limits are 200 rows, 4096 excerpt
+characters per row, 1 MiB of stored source JSON per admitted node, and the native
+frame limit. Source and response budget omission states are passed through;
+an omitted body is not an empty source. Execution link scan bounds are the
+existing `history.window` bounds, not a separate inspector query.

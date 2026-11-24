@@ -1,6 +1,9 @@
 //! Capture only immutable page identities; body retention stays with management.
 use crate::{
-    protocol::{ApiError, Command, ErrorCode, HistoryBody, HistoryGetArgs, HistorySnippet, Page},
+    protocol::{
+        ApiError, Command, ErrorCode, HistoryBody, HistoryGetArgs, HistorySnippet, HistoryWindow,
+        Page,
+    },
     ui::{HistorySourceScope, InspectionTarget},
 };
 use serde_json::Value;
@@ -48,7 +51,12 @@ async fn native_read<T: serde::de::DeserializeOwned>(
         .parent()
         .expect("owner database has a directory");
     let response = crate::ipc::call_selected(data_dir, command).await?;
-    let malformed = || ApiError::new(ErrorCode::ProtocolMismatch, "Invalid native history response");
+    let malformed = || {
+        ApiError::new(
+            ErrorCode::ProtocolMismatch,
+            "Invalid native history response",
+        )
+    };
     if !response.ok {
         return Err(response.error.unwrap_or_else(malformed));
     }
@@ -71,6 +79,10 @@ pub(super) async fn request(
                 command @ Command::HistoryList(_) => {
                     let page: Page<HistorySnippet> = native_read(control, command).await?;
                     super::presentation_work(move || serialize(page)).await?
+                }
+                command @ Command::HistoryWindow(_) => {
+                    let window: HistoryWindow = native_read(control, command).await?;
+                    super::presentation_work(move || serialize(window)).await?
                 }
                 _ => Err(ApiError::new(ErrorCode::InvalidArgument, "Not a retained history read")),
             }
@@ -177,6 +189,53 @@ mod tests {
             read(Some(cursor)).await.unwrap_err().code,
             ErrorCode::CursorExpired
         );
+        server.shutdown().await.unwrap();
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn native_window_report_keeps_source_budget_omission() {
+        let (_root, owner, control, server) = super::super::control_tests::fixture().await;
+        owner
+            .db
+            .call(|db| {
+                let tx = db.transaction()?;
+                crate::history::append_node(
+                    &tx,
+                    "thread",
+                    "omitted-source",
+                    None,
+                    "user",
+                    &json!({"role":"user","content":"x".repeat(1024 * 1024)}),
+                    "2026-11-24T00:00:00Z",
+                )?;
+                tx.commit()?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let report = request(
+            &control,
+            Command::HistoryWindow(crate::protocol::HistoryWindowArgs {
+                thread_id: "thread".into(),
+                ordinal: None,
+                node_id: Some("omitted-source".into()),
+                expect_node_id: None,
+                before: 0,
+                after: 0,
+                excerpt_chars: 0,
+                items: true,
+            }),
+            tokio_util::sync::CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+        let items = report["items"].as_array().unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0]["node_id"], "omitted-source");
+        assert_eq!(items[0]["items"][0]["reason"], "source_budget");
+        assert!(items[0]["payload_chars"].is_null());
         server.shutdown().await.unwrap();
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
