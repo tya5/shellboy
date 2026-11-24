@@ -2032,7 +2032,10 @@ fn open_connection(
         progress,
     });
     open_at_startup(path, &trace, clean_shutdown).map_err(|error| {
-        // The trace is the phase owner; do not infer failure stages from SQLite text.
+        // Only the owner startup reporting boundary projects storage errors onto the wire.
+        if diagnostics.is_none() {
+            return error;
+        }
         let mut error = error.into_api_error();
         error.hint = None;
         trace.borrow().stage.failure(error).into()
@@ -3368,7 +3371,8 @@ mod integrity_policy_tests {
         db.execute_batch("PRAGMA ignore_check_constraints=ON; INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,result_ref_json,created_at)VALUES('corrupt','fixture','{}','hash','failed','malformed','now');").unwrap();
         drop(db);
         assert!(open_connection(&path, None, None, true).is_ok());
-        let error = open_connection(&path, None, None, false)
+        let diagnostics = crate::diagnostics::Diagnostics::start(temp.path().join("logs"), crate::config::Logging::default());
+        let error = open_connection(&path, None, Some(&diagnostics), false)
             .unwrap_err()
             .into_api_error();
         assert!(error.message.contains("quick_check"));

@@ -284,14 +284,17 @@ mod tests {
                     assert_eq!(message, None, "the UI owns localized restore guidance");
                     ui.apply(update);
                     let displayed = ui.view().status.clone();
-                    assert!(
-                        displayed.contains(&format!("/restore {revision}")),
-                        "{displayed}"
-                    );
-                    assert_eq!(
-                        displayed.matches(&format!("/restore {revision}")).count(),
-                        1
-                    );
+                    let restore = format!("/restore {revision}");
+                    if edit_after_send {
+                        assert_eq!(displayed.matches(&restore).count(), 1, "{displayed}");
+                    } else {
+                        assert!(!displayed.contains(&restore), "{displayed}");
+                        let action = match language {
+                            UiLanguage::En => "edit the restored draft",
+                            UiLanguage::Ja => "復元した入力を編集してください",
+                        };
+                        assert!(displayed.contains(action), "{displayed}");
+                    }
                     assert_eq!(
                         ui.view().draft.text,
                         if edit_after_send { "next" } else { "draft" }

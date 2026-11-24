@@ -483,12 +483,12 @@ mod tests {
                     let palette = theme::Palette::from_capabilities(choice, no_color, true);
                     ui.active_view_mut().palette = palette;
                     ui.active_view_mut().held_input.active = selected;
-                    let buffer = screen(ui.view(), 80, UiLanguage::En);
+                    let buffer = screen(ui.view(), 160, UiLanguage::En);
                     let expected = item("a").region_metadata(UiLanguage::En);
-                    let line = (0..80).map(|x| buffer[(x, 2)].symbol()).collect::<String>();
+                    let line = (0..160).map(|x| buffer[(x, 2)].symbol()).collect::<String>();
                     assert!(line.contains(&expected), "{line}");
                     // The metadata is right-aligned; its final cell is always painted.
-                    let cell = &buffer[(79, 2)];
+                    let cell = &buffer[(159, 2)];
                     assert_eq!(cell.fg, palette.muted());
                     assert_eq!(
                         cell.modifier.contains(Modifier::REVERSED | Modifier::BOLD),
