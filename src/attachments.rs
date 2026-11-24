@@ -1581,8 +1581,7 @@ mod mime_tests {
         let path = directory.path().join("file.txt");
         std::fs::write(&path, b"binary\0data").unwrap();
         let error = read_encoded(&path, 64, 64, false, &Mutex::new(Cache::default()))
-            .err()
-            .expect("the attachment must be rejected");
+            .expect_err("the attachment must be rejected");
         assert_eq!(error.code, ErrorCode::InvalidArgument);
         assert_eq!(error.message, UNSUPPORTED_FORMAT_ERROR);
         assert_eq!(error.hint.as_deref(), Some(ATTACH_HELP));

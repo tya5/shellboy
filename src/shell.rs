@@ -1687,7 +1687,9 @@ mod next_action_tests {
                     BTreeMap::new(),
                 )
                 .await;
-            let error = result.err().expect("native launch must fail");
+            let Err(error) = result else {
+                panic!("native launch must fail");
+            };
             let saved = serde_json::to_value(error).unwrap();
             assert_eq!(saved["code"], "io_failed");
             assert_eq!(
