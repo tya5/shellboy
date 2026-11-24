@@ -714,7 +714,15 @@ async fn real_tui_accepts_text_renders_proxy_response_and_exits_cleanly() {
         .await
         .unwrap()
         .unwrap();
-    assert!(status.success());
+    let mut tail = [0; 2048];
+    if let Ok(count) = terminal.read(&mut tail) {
+        output.extend_from_slice(&tail[..count]);
+    }
+    assert!(
+        status.success(),
+        "{status}: {}",
+        String::from_utf8_lossy(&output[output.len().saturating_sub(2048)..])
+    );
     proxy.await.unwrap();
     let db = rusqlite::Connection::open(data.join("shellboy.db")).unwrap();
     let complete: i64 = db

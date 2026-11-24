@@ -26,6 +26,7 @@ impl DraftSaver {
         let (sender, mut receiver) = mpsc::channel::<Snapshot>(32);
         let worker = tokio::spawn(async move {
             let mut failure = None;
+            let mut refused_anchors = HashMap::new();
             while let Some((thread, draft, anchor, follow)) = receiver.recv().await {
                 let result = if disconnected.load(Ordering::Acquire) {
                     Err(ApiError::new(
@@ -35,13 +36,21 @@ impl DraftSaver {
                 } else {
                     save_draft(&control, thread.clone(), draft, anchor.clone(), follow).await
                 };
-                if let Err(error) = &result {
-                    if compose_transport_error(error) {
-                        disconnected.store(true, Ordering::Release);
+                match &result {
+                    Ok(()) => {
+                        // A later save for this Thread supersedes a refused view.
+                        refused_anchors.remove(&thread);
                     }
-                    // The deleted Thread cannot own a saved draft, but this
-                    // typed refusal still reaches the interactive client.
-                    if error.code != ErrorCode::TargetUnavailable {
+                    Err(error) if error.code == ErrorCode::CursorExpired => {
+                        refused_anchors.insert(thread.clone(), error.clone());
+                    }
+                    // A non-live Thread cannot own a saved draft. Its typed
+                    // refusal still reaches the interactive client.
+                    Err(error) if error.code == ErrorCode::TargetUnavailable => {}
+                    Err(error) => {
+                        if compose_transport_error(error) {
+                            disconnected.store(true, Ordering::Release);
+                        }
                         failure = Some(error.clone());
                     }
                 }
@@ -53,7 +62,9 @@ impl DraftSaver {
                     })
                     .await;
             }
-            failure.map_or(Ok(()), Err)
+            failure
+                .or_else(|| refused_anchors.into_values().next())
+                .map_or(Ok(()), Err)
         });
         Self {
             backlog: HashMap::new(),
@@ -453,6 +464,53 @@ mod tests {
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
     }
+    #[tokio::test]
+    async fn successful_same_thread_save_supersedes_refused_anchor_at_quit() {
+        let (_root, owner, control, server) = crate::frontend::control_tests::fixture().await;
+        let (results, mut incoming) = mpsc::channel(4);
+        let mut saver = DraftSaver::new(control.clone(), results, Default::default());
+        let mut draft = DraftSnapshot {
+            text: "retained input".into(),
+            ..Default::default()
+        };
+        assert!(saver.enqueue(
+            "thread".into(),
+            draft.clone(),
+            ViewAnchor {
+                node_id: Some("displaced".into()),
+                char_offset: 0
+            },
+            false,
+            false,
+        ));
+        assert!(saver.pump().is_none());
+        let refused = crate::test_watchdog::watchdog(
+            "draft worker reports displaced anchor",
+            incoming.recv(),
+        )
+        .await
+        .unwrap();
+        assert!(
+            matches!(refused, Some(BackgroundResult::DraftSaved { result: Err(error), .. }) if error.code == ErrorCode::CursorExpired)
+        );
+        draft.revision += 1;
+        assert!(saver.enqueue("thread".into(), draft, ViewAnchor::default(), true, true));
+        let joined = crate::test_watchdog::watchdog(
+            "draft worker joins after newer save",
+            saver.finish().await,
+        )
+        .await
+        .unwrap();
+        joined.unwrap().unwrap();
+        assert!(matches!(
+            incoming.try_recv(),
+            Ok(BackgroundResult::DraftSaved { result: Ok(()), .. })
+        ));
+        server.shutdown().await.unwrap();
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+    }
+
     #[tokio::test]
     async fn pumping_persists_backlog_while_ui_outbox_has_no_main_capacity() {
         let (_root, owner, control, server) = crate::frontend::control_tests::fixture().await;
