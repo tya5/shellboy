@@ -237,6 +237,12 @@ Stop's `accepted:true` means the request was accepted. Confirm terminal state be
 
 Run-owned shells stop at the raw output limit and record the reason and incompleteness. Thread-owned shells (timed schedules and services) instead rotate their oldest output at `shell_raw_bytes` without stopping the process or renumbering retained chunks. An evicted cursor returns `output_expired`; start without a cursor to read the retained window. Any caller, including a model, may write/EOF/stop any shell (no authority check; an unknown execution ID is still an error). Check the execution ID first so you do not disturb another Run's work. After an application restart, old PIDs are not used to stop processes.
 
+### Windows shell notes
+
+On Windows, Shellboy puts its own binary directory first on the model shell's
+effective `PATH`, including a configured `Path` override. This does not change
+your user or system `PATH`.
+
 On Windows, model shells use redirected pipes without a console window. A stop forces
 termination of the owned Job rather than sending a graceful Unix-style signal;
 child cleanup handlers and final output are not guaranteed. If process creation
