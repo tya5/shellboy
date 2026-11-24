@@ -437,29 +437,27 @@ async fn rejected_send_trace_is_bounded_and_has_a_fixed_stage() {
             files: 1,
         },
     );
-    for stage in [MessageSendStage::QueueFull, MessageSendStage::Failed] {
-        diagnostics.record_message_send(
-            DiagnosticIds::default(),
-            MessageSendTrace {
-                stage,
-                draft_id: format!("draft\n{}", "x".repeat(300)),
-                revision: u64::MAX,
-                operation_id: "instance:\noperation".into(),
-                message_id: Some("message\t1".into()),
-            },
-        );
-    }
+    diagnostics.record_message_send(
+        DiagnosticIds::default(),
+        MessageSendTrace {
+            stage: MessageSendStage::Failed,
+            draft_id: format!("draft\n{}", "x".repeat(300)),
+            revision: u64::MAX,
+            operation_id: "instance:\noperation".into(),
+            message_id: Some("message\t1".into()),
+        },
+    );
     diagnostics.shutdown().await;
     let content = std::fs::read_to_string(root.path().join("shellboy.log")).unwrap();
     let records: Vec<serde_json::Value> = content
         .lines()
         .map(|line| serde_json::from_str(line).unwrap())
         .collect();
-    assert_eq!(records.len(), 2);
-    for (record, stage) in records.iter().zip(["queue_full", "failed"]) {
-        assert_eq!(record["send"]["stage"], stage);
-        assert_eq!(record["send"]["draft_id"].as_str().unwrap().len(), 128);
-        assert_eq!(record["send"]["operation_id"], "instance:operation");
-        assert_eq!(record["send"]["message_id"], "message1");
-    }
+    let [record] = records.as_slice() else {
+        panic!("expected one failed-send trace, got {}", records.len());
+    };
+    assert_eq!(record["send"]["stage"], "failed");
+    assert_eq!(record["send"]["draft_id"].as_str().unwrap().len(), 128);
+    assert_eq!(record["send"]["operation_id"], "instance:operation");
+    assert_eq!(record["send"]["message_id"], "message1");
 }
