@@ -483,14 +483,14 @@ mod tests {
                     let palette = theme::Palette::from_capabilities(choice, no_color, true);
                     ui.active_view_mut().palette = palette;
                     ui.active_view_mut().held_input.active = selected;
-                    let buffer = screen(ui.view(), 160, UiLanguage::En);
+                    let buffer = screen(ui.view(), 80, UiLanguage::En);
                     let expected = item("a").region_metadata(UiLanguage::En);
-                    let line = (0..160)
+                    let line = (0..80)
                         .map(|x| buffer[(x, 2)].symbol())
                         .collect::<String>();
                     assert!(line.contains(&expected), "{line}");
                     // The metadata is right-aligned; its final cell is always painted.
-                    let cell = &buffer[(159, 2)];
+                    let cell = &buffer[(79, 2)];
                     assert_eq!(cell.fg, palette.muted());
                     assert_eq!(
                         cell.modifier.contains(Modifier::REVERSED | Modifier::BOLD),
@@ -498,6 +498,23 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+    #[test]
+    fn clipped_held_rows_keep_the_state_and_short_reason() {
+        for (reason, uncertain, expected) in [
+            ("recovery_wait", false, "Held | Waiting for recovery"),
+            ("uncertain_path_admission", true, "Delivery unknown | Not verified"),
+        ] {
+            let mut ui = ui();
+            let row = &mut ui.active_view_mut().pending_messages.items[0];
+            row.hold_reason = Some(reason.into());
+            row.uncertain = uncertain;
+            row.excerpt = "long message ".repeat(20);
+            let buffer = screen(ui.view(), 80, UiLanguage::En);
+            let line = (0..80).map(|x| buffer[(x, 2)].symbol()).collect::<String>();
+            assert!(line.contains(super::super::text_width::glyphs::ellipsis()), "{line}");
+            assert!(line.ends_with(expected), "{line}");
         }
     }
     #[test]

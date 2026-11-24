@@ -96,8 +96,8 @@ impl PendingMessage {
             ),
             "uncertain_path_admission" => i18n::local!(
                 language,
-                "反映状況不明。再送前に操作結果を確認してください",
-                "Delivery could not be verified; check the operation receipt before resending"
+                "反映を確認できず",
+                "Not verified"
             ),
             "previous_instance_interrupted" => i18n::local!(
                 language,
@@ -107,8 +107,8 @@ impl PendingMessage {
             "stopped" | "stopping" => i18n::local!(language, "停止", "Stopped"),
             "recovery_wait" => i18n::local!(
                 language,
-                "復旧待ち。保留中のターンを確認してください",
-                "Waiting for recovery; inspect the parked Turn"
+                "復旧待ち",
+                "Waiting for recovery"
             ),
             "run_completion" => i18n::local!(
                 language,
@@ -117,6 +117,21 @@ impl PendingMessage {
             ),
             _ => reason,
         })
+    }
+    fn action(&self, language: UiLanguage) -> Option<&'static str> {
+        match self.hold_reason.as_deref()? {
+            "uncertain_path_admission" => Some(i18n::local!(
+                language,
+                "再送前に操作結果を確認してください",
+                "Check the operation receipt before resending."
+            )),
+            "recovery_wait" => Some(i18n::local!(
+                language,
+                "保留中のターンを確認してください",
+                "Inspect the parked Turn."
+            )),
+            _ => None,
+        }
     }
     fn delivery_flags(&self, language: UiLanguage, label: &mut String) {
         let sep = crate::ui::text_width::glyphs::separator();
@@ -313,6 +328,12 @@ impl QueuePopup {
                         ],
                         body.width.saturating_sub(3).max(1),
                     );
+                    if let Some(action) = item.action(language) {
+                        lines.extend(presentation::indented_wrap(
+                            vec![Line::from(action)],
+                            body.width.saturating_sub(3),
+                        ));
+                    }
                     lines.extend(presentation::indented_wrap(
                         vec![Line::from(
                             crate::presentation::sanitize_plain(&item.excerpt, 0)
@@ -1485,6 +1506,21 @@ mod language_tests {
         item.sender_thread = Some("12345678-rest".into());
         item.uncertain = true;
         item.hold_reason = Some("terminal_before_path_admission".into());
+    }
+    #[test]
+    fn pending_popup_shows_the_full_action_in_both_languages() {
+        i18n::verify_screen(
+            |ui| {
+                pending(ui);
+                let row = &mut ui.view_mut().pending_messages.items[0];
+                row.uncertain = true;
+                row.hold_reason = Some("uncertain_path_admission".into());
+            },
+            |language| match language {
+                UiLanguage::En => &["Check the operation receipt before resending."],
+                UiLanguage::Ja => &["再送前に操作結果を確認してください"],
+            },
+        );
     }
     #[test]
     fn real_sender_and_recovery_facts_remain_visible_at_screen_boundaries() {
