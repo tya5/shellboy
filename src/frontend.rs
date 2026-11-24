@@ -1559,48 +1559,7 @@ async fn run_client(
                 match action {
                     UiAction::ReconnectCompose => {
                         if !compose_disconnected.load(Ordering::Acquire) { continue; }
-                        let result: Result<(), ApiError> = async {
-                            if compose_unknown.is_empty() {
-                                let _: Value = compose_call(&control, Command::Status(StatusArgs::default()), None).await?;
-                            }
-                            let operations: Vec<_> = compose_unknown.keys().cloned().collect();
-                            for operation in operations {
-                                let receipt: Value = compose_call(&control, Command::OperationGet(crate::protocol::OperationTarget { operation_id: operation.clone() }), None).await?;
-                                let outcome = match receipt["state"].as_str() {
-                                    Some("completed") => receipt["outcome"].get("result").cloned().map(Ok),
-                                    Some("failed") => receipt["outcome"].get("error").cloned().and_then(|error| serde_json::from_value::<ApiError>(error).ok()).map(Err),
-                                    _ => None,
-                                }.ok_or_else(|| ApiError::new(ErrorCode::InvalidState, format!("Operation {operation} is still unconfirmed")))?;
-                                match compose_unknown.remove(&operation).expect("known operation") {
-                                    UnknownCompose::Save => {},
-                                    UnknownCompose::Image { draft_id } => {
-                                        if let Ok(value) = outcome && let Ok(crate::protocol::DraftImageResult::Committed { attachment }) = serde_json::from_value(value) {
-                                            // A lost paste reply never inserted a chip into the composer.
-                                            images.reject(draft_id, attachment.id);
-                                        }
-                                    }
-                                    UnknownCompose::Send { draft_id, revision, generation, attachments } => {
-                                        images.end_send(&draft_id, &attachments);
-                                        match outcome {
-                                            Ok(value) => {
-                                                images.sent(&draft_id, &attachments);
-                                                if let Some(thread_id) = value["thread_id"].as_str() {
-                                                    update(&updates, UiUpdate::SavedMessagePending { draft_id: draft_id.clone(), revision, generation, thread_id: thread_id.into() }).await;
-                                                    if let Some(node_id) = value["message_id"].as_str() {
-                                                        update(&updates, UiUpdate::ReceiptSource { draft_id: draft_id.clone(), revision, node_id: node_id.into() }).await;
-                                                    }
-                                                    update(&updates, UiUpdate::Receipt { draft_id: draft_id.clone(), revision, thread_id: Some(thread_id.into()), status: ReceiptStatus::Accepted, message: None }).await;
-                                                    selection.sent(thread_id, &draft_id);
-                                                    dirty_threads.insert(thread_id.into());
-                                                }
-                                            }
-                                            Err(error) => update(&updates, UiUpdate::Receipt { draft_id, revision, thread_id: None, status: ReceiptStatus::Failed, message: Some(error.to_string()) }).await,
-                                        }
-                                    }
-                                }
-                            }
-                            Ok(())
-                        }.await;
+                        let result = reconcile_compose(&control, &updates, &mut compose_unknown, &mut images, &mut selection, &mut dirty_threads).await;
                         match result {
                             Ok(()) => {
                                 compose_disconnected.store(false, Ordering::Release);
@@ -3997,7 +3956,8 @@ async fn run_client(
     let grace = Duration::from_millis(control.store.config.io.shutdown_grace_ms);
     let shutdown_updates = &updates;
     let shutdown_diagnostics = control.diagnostics().clone();
-    let shutdown = async move {
+    // Keep the drain future heap-pinned across the nested shutdown waiters.
+    let shutdown = Box::pin(async move {
         use crate::diagnostics::{ShutdownBoundary as Edge, ShutdownScope, ShutdownStage as Stage};
         let started = std::time::Instant::now();
         let trace = |stage, boundary| {
@@ -4044,7 +4004,7 @@ async fn run_client(
         }
         receipt_batch.finish(&mut pending, shutdown_updates).await;
         save_result.and(runtime_result).and(owner_result)
-    };
+    });
     wait_for_shutdown_delivery_localized(&mut actions, &updates, grace, shutdown, language).await
 }
 
@@ -4212,6 +4172,124 @@ fn compose_disconnected_message(error: &ApiError) -> String {
         message.push_str(&format!(" ({operation})"));
     }
     message
+}
+
+// Keep receipt reconciliation out of the terminal loop's stack frame.
+fn reconcile_compose<'a>(
+    control: &'a Control,
+    updates: &'a BufferedUpdates,
+    compose_unknown: &'a mut HashMap<String, UnknownCompose>,
+    images: &'a mut draft_images::DraftImages,
+    selection: &'a mut selection::Selection,
+    dirty_threads: &'a mut HashSet<String>,
+) -> Pin<Box<impl Future<Output = Result<(), ApiError>> + Send + 'a>> {
+    Box::pin(async move {
+        if compose_unknown.is_empty() {
+            let _: Value =
+                compose_call(control, Command::Status(StatusArgs::default()), None).await?;
+        }
+        let operations: Vec<_> = compose_unknown.keys().cloned().collect();
+        for operation in operations {
+            let receipt: Value = compose_call(
+                control,
+                Command::OperationGet(crate::protocol::OperationTarget {
+                    operation_id: operation.clone(),
+                }),
+                None,
+            )
+            .await?;
+            let outcome = match receipt["state"].as_str() {
+                Some("completed") => receipt["outcome"].get("result").cloned().map(Ok),
+                Some("failed") => receipt["outcome"]
+                    .get("error")
+                    .cloned()
+                    .and_then(|error| serde_json::from_value::<ApiError>(error).ok())
+                    .map(Err),
+                _ => None,
+            }
+            .ok_or_else(|| {
+                ApiError::new(
+                    ErrorCode::InvalidState,
+                    format!("Operation {operation} is still unconfirmed"),
+                )
+            })?;
+            match compose_unknown.remove(&operation).expect("known operation") {
+                UnknownCompose::Save => {}
+                UnknownCompose::Image { draft_id } => {
+                    if let Ok(value) = outcome
+                        && let Ok(crate::protocol::DraftImageResult::Committed { attachment }) =
+                            serde_json::from_value(value)
+                    {
+                        // A lost paste reply never inserted a chip into the composer.
+                        images.reject(draft_id, attachment.id);
+                    }
+                }
+                UnknownCompose::Send {
+                    draft_id,
+                    revision,
+                    generation,
+                    attachments,
+                } => {
+                    images.end_send(&draft_id, &attachments);
+                    match outcome {
+                        Ok(value) => {
+                            images.sent(&draft_id, &attachments);
+                            if let Some(thread_id) = value["thread_id"].as_str() {
+                                update(
+                                    updates,
+                                    UiUpdate::SavedMessagePending {
+                                        draft_id: draft_id.clone(),
+                                        revision,
+                                        generation,
+                                        thread_id: thread_id.into(),
+                                    },
+                                )
+                                .await;
+                                if let Some(node_id) = value["message_id"].as_str() {
+                                    update(
+                                        updates,
+                                        UiUpdate::ReceiptSource {
+                                            draft_id: draft_id.clone(),
+                                            revision,
+                                            node_id: node_id.into(),
+                                        },
+                                    )
+                                    .await;
+                                }
+                                update(
+                                    updates,
+                                    UiUpdate::Receipt {
+                                        draft_id: draft_id.clone(),
+                                        revision,
+                                        thread_id: Some(thread_id.into()),
+                                        status: ReceiptStatus::Accepted,
+                                        message: None,
+                                    },
+                                )
+                                .await;
+                                selection.sent(thread_id, &draft_id);
+                                dirty_threads.insert(thread_id.into());
+                            }
+                        }
+                        Err(error) => {
+                            update(
+                                updates,
+                                UiUpdate::Receipt {
+                                    draft_id,
+                                    revision,
+                                    thread_id: None,
+                                    status: ReceiptStatus::Failed,
+                                    message: Some(error.to_string()),
+                                },
+                            )
+                            .await
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    })
 }
 
 async fn compose_call<T: serde::de::DeserializeOwned>(

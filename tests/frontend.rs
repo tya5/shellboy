@@ -1146,11 +1146,24 @@ async fn edit_adapter_loads_full_original_then_forks_before_first_request_and_di
         })
         .await
         .unwrap();
+    let selection_revision = observer
+        .store
+        .database
+        .call(|db| {
+            Ok(db.query_row(
+                "SELECT selection_revision FROM thread WHERE id='source'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )?)
+        })
+        .await
+        .unwrap();
+    let selection_revision = u64::try_from(selection_revision).unwrap();
     // A new Run can appear after loading the original. Consent is bound to its ID.
     observer.store.database.call(|db|{db.execute("INSERT INTO run(id,thread_id,state,created_at)VALUES('late-run','source','live','now')",[])?;Ok(())}).await.unwrap();
     send.send(UiAction::SendEdited {
         generation: 0,
-        selection_revision: 0,
+        selection_revision,
         now: false,
         snapshot: None,
         draft_id: "edited".into(),
@@ -1209,7 +1222,7 @@ async fn edit_adapter_loads_full_original_then_forks_before_first_request_and_di
         .unwrap();
     send.send(UiAction::SendEdited {
         generation: 0,
-        selection_revision: 0,
+        selection_revision,
         now: false,
         snapshot: None,
         draft_id: "edited".into(),
