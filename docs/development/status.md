@@ -3,12 +3,11 @@
 ## Core v0.16.0 release preparation
 
 The [release notes](../release-v0.16.0.md) describe the published main source
-used for the preparation branch. Refresh them against main after the remaining
-work lands; this branch does not tag or publish a release.
+used for the preparation branch. This branch does not tag or publish a release.
 
 ## Current main contract checkpoint
 
-Owner schema 65, standalone RAG schema 5, IPC 23. See the
+Owner schema 65, standalone RAG schema 5, IPC 26. See the
 [effective specification](../design/effective-spec.md) and numbered migrations.
 The #379 Guide pass landed; the numbered protocol notes remain canonical.
 

@@ -32,12 +32,15 @@ What each protocol version changed, from 5 on, is in [protocol-versions](protoco
 
 ### Core v0.16.0 upgrade from IPC 18
 
-Upgrade the owner, CLI, and RPC clients together: IPC **18 → 23**. The
+Upgrade the owner, CLI, and RPC clients together: IPC **18 → 26**. The
 numbered change records cover [19: status and reply counts](protocol-versions/19.md),
 [20: bounded history windows](protocol-versions/20.md),
 [21: Thread search and connection diagnostics](protocol-versions/21.md),
-[22: advisory credential-file warnings](protocol-versions/22.md), and
-[23: Run request ceiling and model recovery](protocol-versions/23.md). Restart
+[22: advisory credential-file warnings](protocol-versions/22.md),
+[23: Run request ceiling and model recovery](protocol-versions/23.md),
+[24: shell and Turn intervention](protocol-versions/24.md),
+[25: additional diagnostic hints and advisories](protocol-versions/25.md), and
+[26: opt-in shell stream ranges](protocol-versions/26.md). Restart
 reads with expired `status` or state-filtered `thread list` cursors without
 those cursors. See [release upgrade notes](../release-v0.16.0.md#upgrade-notes)
 for database, CLI, and configuration details.

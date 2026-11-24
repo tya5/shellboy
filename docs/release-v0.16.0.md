@@ -1,4 +1,4 @@
-- Core: `v0.15.0` → `v0.16.0` (main source `aea8b57e5c79ff68b6b336b3c43eb46a1c8f41b0`)
+- Core: `v0.15.0` → `v0.16.0` (main source `06894bff5015e43e4b7e07b5ff078bd487f46080`)
 
 ## 日本語
 
@@ -19,17 +19,24 @@
 
 - **Agent Guide（#379）:** 操作の順に構成し、返信義務と待機の確認手順を見つけやすくしました。
 
-- **Windows（#392）:** ローカルにリダイレクトされた NTFS フォルダーは利用でき、ネットワーク上のデータディレクトリは明示的に拒否します。共有違反の診断と、シェルの実効 PATH を改善しました。
+- **Windows（#392）:** ローカルにリダイレクトされた NTFS フォルダーは利用でき、ネットワーク上のデータディレクトリは明示的に拒否します。共有違反は待たずに `io_failed` / `file_in_use` として案内します。シェル起動時の実効 PATH と UTF-8 パイプも改善しました。
 
-- **要求の重複を削減（#393）:** 設定が変わらない Turn では設定行を再送せず、新しいライフサイクル通知と返信の通知を短くします。保存済み履歴は書き換えません。
-- **Run の要求回数上限（#399）:** 新しい Run には `message send --max-model-requests N` で上限を設定できます。再試行と Run に属する自動要約も数えます。料金の上限ではありません。
+- **要求の重複を削減（#393）:** 設定が変わらない Turn では設定行を再送せず、新しいライフサイクル通知、受付記録、返信の通知を短くします。保存済み履歴や16 Turn の文脈範囲は変わりません。
+- **Run の要求回数上限（#399）:** 新しい Run には `message send --max-model-requests N` で上限を設定できます。再試行と Run に属する自動要約も数えます。料金の上限ではありません。実行中の Run がある場合は、新しい上限を指定した送信は拒否されます。
 - **モデル障害（#400）:** 認証・要求の拒否・通信失敗を区別し、`status` などで診断と次の確認先を案内します。
+
+- **自動コンパクション（#301）:** DB の受付枠が埋まっている場合は、受理済みの処理を繰り返さず、拒否された取得段階だけを待機して再試行します。実際の受付拒否は一時的な `database_queue_full` として区別されます。
+- **内部整理（#395）:** 未使用の内部処理と保存項目を整理しました。利用者向けの操作や設定は変わりません。
+- **移行と起動（#397、#398）:** 対象が宣言された移行は、その範囲の外部キーを検査します。owner に接続できないとき、`shellboy status` の `error.details.last_startup_stage` は最後に記録された段階を示す場合があります。稼働中であることや残り時間は示さず、異常終了後は古い情報が残ることがあります。
+- **対処案（#400）:** 保留入力、再起動が必要な変更、スキップされた指示、起動・ストレージの問題、シェル起動や添付の問題について、診断と次の操作を区別して案内します。操作は自動で再実行されません。
+- **実行中のシェルと Turn（#402）:** `shell background --execution ID` はプロセスや標準入力を止めずに前景待機を解除します。`turn interrupt --turn TURN` は指定の Turn を中断しますが Run 自体は停止しません。受付応答は完了を示さないため、`shell get` や `turn get` で確認してください。
+- **出力のストリーム範囲（#405）:** `shell read --execution ID --segments` は、返されたテキスト内の `stdout` / `stderr` の範囲を UTF-8 バイト位置で返します。終了位置は範囲に含まれません。既定の応答、カーソル、生バイトの計数、モデル向けの抜粋は変更しません。
 
 ### アップグレード
 
 - **DB:** 更新前にデータディレクトリ全体をバックアップしてください。owner DB は **62 → 65**。`0063_thread_reply_summary` と `0064_thread_cwd_partitions`（#381）は索引を追加し、保存本文は変更しません。`0065_run_request_ceiling` は Run の上限と予約済み回数の列を追加します。独立 RAG DB は **4 → 5**（#383）。古い DB は `rag init` で更新できます。埋め込み API は呼び出しません。読み取り専用操作は自動更新しません。 #397 では、対象が宣言された移行の外部キー検査をその範囲に限定します。
-- **プロトコル:** **18 → 23**。19 は返信件数・状態一覧、20 は履歴ウィンドウ、21 は Thread 検索・抜粋と接続診断、22 は資格情報ファイルの警告、23 は Run の要求回数上限とモデル障害の診断です。owner、CLI、RPC クライアントは同じプロトコルのものに揃えてください。旧 `status` と旧状態フィルター用 `thread list` のカーソルは使えないため、カーソルなしで読み直してください。
-- **CLI・設定:** `connection test --post-model MODEL` と `message send --max-model-requests N` を追加。コマンド・既存フラグ・設定キーの削除や改名、新規設定キーはありません。Unix の `config get` に値を含まない `credentials_file.warning` が追加されます。`wait --after` と `config set --set` の構文は変更していません。
+- **プロトコル:** **18 → 26**。19 は返信件数・状態一覧、20 は履歴ウィンドウ、21 は Thread 検索・抜粋と接続診断、22 は資格情報ファイルの警告、23 は Run の要求回数上限とモデル障害、24 はシェルと Turn の操作、25 は追加の診断と対処案、26 はシェル出力のストリーム範囲です。owner、CLI、RPC クライアントは同じプロトコルのものに揃えてください。旧 `status` と旧状態フィルター用 `thread list` のカーソルは使えないため、カーソルなしで読み直してください。
+- **CLI・設定:** `connection test --post-model MODEL`、`message send --max-model-requests N`、`shell background --execution ID`、`turn interrupt --turn TURN`、および `shell read --execution ID --segments` のオプションを追加。コマンド・既存フラグ・設定キーの削除や改名、新規設定キーはありません。Unix の `config get` に値を含まない `credentials_file.warning` が追加されます。`wait --after` と `config set --set` の構文は変更していません。
 - **ロールバック:** 逆マイグレーションはありません。旧版に戻す場合は、更新前の owner DB と独立 RAG DB のバックアップを使ってください。回収済みのシェル出力は読み直しても戻りません。
 
 ## English
@@ -51,15 +58,22 @@
 
 - **Agent Guide (#379):** Reorganized around common operations, with clearer instructions for finding owed replies and waiting on work.
 
-- **Windows (#392):** The owner accepts locally redirected NTFS folders and explicitly refuses network data directories. The change also improves file-sharing diagnostics and the effective shell PATH.
+- **Windows (#392):** The owner accepts locally redirected NTFS folders and explicitly refuses network data directories. Sharing violations report `io_failed` / `file_in_use` without waiting for the lock. Shell launch reports the effective PATH and uses UTF-8 pipes.
 
-- **Less repeated request metadata (#393):** Unchanged settings are not re-emitted each Turn. New lifecycle records and reply reminders are shorter; saved history is unchanged.
-- **Run request ceiling (#399):** Use `message send --max-model-requests N` when starting a new Run. Retries and Run-owned automatic summaries count; this is not a spending limit.
+- **Less repeated request metadata (#393):** Unchanged settings are not re-emitted each Turn. New lifecycle records, admission records and reply reminders are shorter. Saved history and the 16-Turn context window are unchanged.
+- **Run request ceiling (#399):** Use `message send --max-model-requests N` when starting a new Run. Retries and Run-owned automatic summaries count; this is not a spending limit. A send that supplies a ceiling is rejected when a Run is already active.
 - **Model failures (#400):** Saved recovery distinguishes authentication, rejected requests, and failed requests. `status` can show diagnostic evidence and a next action.
+
+- **Automatic compaction (#301):** When database admission is full, automatic compaction backs off and retries only the refused capture stage, not work already accepted. An actual admission refusal is distinguishable as transient `database_queue_full`.
+- **Internal cleanup (#395):** Removed unused implementation paths and stopped persisting unused fields. No user-facing command or configuration change.
+- **Migration and startup (#397, #398):** Migrations with a declared scope check foreign keys in that scope. When the owner is unreachable, `shellboy status` may include `error.details.last_startup_stage`. It is the last observed stage, not liveness or an ETA, and may remain stale after an unclean exit.
+- **Next actions (#400):** Held input, restart-required changes, skipped instructions, startup and storage problems, shell launch and attachment failures now distinguish diagnostic evidence from a next action. Shellboy does not automatically rerun the operation.
+- **Shell and Turn intervention (#402):** `shell background --execution ID` releases the foreground wait without stopping the process or closing stdin. `turn interrupt --turn TURN` targets only the given Turn, not its Run. An acknowledgment is not completion; confirm with `shell get` or `turn get`.
+- **Shell stream ranges (#405):** `shell read --execution ID --segments` includes `stdout` / `stderr` ranges within the returned text as half-open UTF-8 byte ranges. Default output, read cursors, raw-byte accounting and model-visible excerpts are unchanged.
 
 ### Upgrade notes
 
 - **Database:** Back up the entire data directory before upgrading. Owner SQLite schema **62 → 65**. `0063_thread_reply_summary` and `0064_thread_cwd_partitions` (#381) add indexes without rewriting saved bodies. `0065_run_request_ceiling` adds Run ceiling and reservation-count columns. Standalone RAG schema **4 → 5** (#383); upgrade an old store with `rag init`, which makes no embedding request. Read-only operations do not migrate it. With #397, migrations with a declared scope validate foreign keys within that scope.
-- **Protocol:** **18 → 23**. Version 19 covers reply counts and state paging, 20 history windows, 21 Thread search/excerpts and connection diagnostics, 22 the credential-file warning, and 23 the Run request ceiling and model-failure diagnostics. Upgrade owner, CLI and RPC clients together. Old `status` cursors and old state-filtered `thread list` cursors expire; restart those reads without a cursor.
-- **CLI and configuration:** Adds `connection test --post-model MODEL` and `message send --max-model-requests N`. No command, existing flag or config key was removed or renamed, and no config key was added. `config get` adds the value-free `credentials_file.warning` field for the Unix advisory. The `wait --after` and `config set --set` syntax is unchanged.
+- **Protocol:** **18 → 26**. Version 19 covers reply counts and state paging, 20 history windows, 21 Thread search/excerpts and connection diagnostics, 22 the credential-file warning, 23 the Run request ceiling and model-failure diagnostics, 24 shell and Turn intervention, 25 additional diagnostic hints and advisories, and 26 opt-in shell stream ranges. Upgrade owner, CLI and RPC clients together. Old `status` cursors and old state-filtered `thread list` cursors expire; restart those reads without a cursor.
+- **CLI and configuration:** Adds `connection test --post-model MODEL`, `message send --max-model-requests N`, `shell background --execution ID`, `turn interrupt --turn TURN`, and the `--segments` option to `shell read --execution ID`. No command, existing flag or config key was removed or renamed, and no config key was added. `config get` adds the value-free `credentials_file.warning` field for the Unix advisory. The `wait --after` and `config set --set` syntax is unchanged.
 - **Rollback:** No reverse migrations. To use an older release, restore pre-upgrade backups of the owner and standalone RAG databases. Rereading cannot recover reclaimed shell output bytes.
