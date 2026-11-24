@@ -343,8 +343,9 @@ impl super::db::Store {
                 tx,
                 &MessageSendArgs {
                     max_model_requests: None,
-                    human: false,
-                    resume_recovery: caller.is_none(),
+                    // Preserve reply assignment independently of its recorded sender.
+                    human: caller.is_none(),
+                    resume_recovery: saved["to_human"] == true && caller.is_none(),
                     sender_label: None,
                     thread_id: Some(target.into()),
                     text: args.text.clone(),

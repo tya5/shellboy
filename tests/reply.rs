@@ -278,7 +278,7 @@ async fn reply_requires_applied_pending_and_is_idempotent() {
 
 #[tokio::test]
 async fn originless_thread_duty_reply_resumes_recovery_but_model_reply_does_not() {
-    for originless in [true, false] {
+    for (originless, backlog) in [(true, 0), (true, 129), (false, 0)] {
         let (_root, store) = fixture().await;
         let model = Origin {
             instance_id: "fixture".into(),
@@ -300,6 +300,23 @@ async fn originless_thread_duty_reply_resumes_recovery_but_model_reply_does_not(
             db.execute_batch("INSERT INTO run(id,thread_id,state,created_at)VALUES('sender-run','sender','live','now'); INSERT INTO turn(id,thread_id,run_id,state,created_at,recovery_reason_json)VALUES('sender-turn','sender','sender-run','recovery_wait','now','{}');")?;
             Ok(())
         }).await.unwrap();
+        for _ in 0..backlog {
+            let Command::MessageSend(input) = send(false) else {
+                unreachable!();
+            };
+            let held = store
+                .execute(
+                    request(Command::MessageSend(MessageSendArgs {
+                        thread_id: Some("sender".into()),
+                        ..input
+                    })),
+                    None,
+                )
+                .await
+                .unwrap()
+                .result;
+            assert_eq!(held["delivery_status"], "held");
+        }
         let caller = (!originless).then(|| Origin {
             thread_id: "recipient".into(),
             ..model
@@ -334,25 +351,29 @@ async fn originless_thread_duty_reply_resumes_recovery_but_model_reply_does_not(
             reply_message["sender"]["kind"],
             if originless { "external_cli" } else { "model" }
         );
-        let state = store
+        let (state, remaining) = store
             .database
             .call(|db| {
-                Ok(
-                    db.query_row("SELECT state FROM turn WHERE id='sender-turn'", [], |row| {
-                        row.get::<_, String>(0)
-                    })?,
-                )
+                let state: String = db.query_row(
+                    "SELECT state FROM turn WHERE id='sender-turn'", [], |row| row.get(0),
+                )?;
+                let remaining: u32 = db.query_row(
+                    "SELECT count(*) FROM receipt WHERE turn_id='sender-turn' AND state='held' AND hold_reason='recovery_wait'",
+                    [], |row| row.get(0),
+                )?;
+                Ok((state, remaining))
             })
             .await
             .unwrap();
         assert_eq!(
             state,
-            if originless {
+            if originless && backlog == 0 {
                 "preparing"
             } else {
                 "recovery_wait"
             }
         );
+        assert_eq!(remaining, u32::from(backlog > 0 || !originless));
         store.database.shutdown().await.unwrap();
     }
 }
