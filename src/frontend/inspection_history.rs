@@ -57,6 +57,50 @@ pub(super) async fn native_read<T: serde::de::DeserializeOwned>(
     serde_json::from_value(response.result.ok_or_else(malformed)?).map_err(|_| malformed())
 }
 
+// The report preserves owner-produced Summary parts; Copy only needs the body.
+#[derive(serde::Deserialize, serde::Serialize)]
+struct HistoryReport {
+    #[serde(flatten)]
+    body: HistoryBody,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    parts: Option<SummaryParts>,
+}
+
+#[derive(serde::Deserialize, serde::Serialize)]
+struct SummaryParts {
+    reduce_keys_recorded: bool,
+    items: Vec<SummaryPart>,
+}
+
+#[derive(serde::Deserialize, serde::Serialize)]
+struct SummaryPart {
+    key: String,
+    listed_as: String,
+    #[serde(flatten)]
+    state: SummaryPartState,
+}
+
+#[derive(serde::Deserialize, serde::Serialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+enum SummaryPartState {
+    Retained {
+        stage: Option<String>,
+        round: Option<u32>,
+        sources: Option<SummaryPartSources>,
+        characters: usize,
+        usage: Option<Value>,
+    },
+    NotRetained,
+    Unreadable,
+}
+
+#[derive(serde::Deserialize, serde::Serialize)]
+struct SummaryPartSources {
+    first: String,
+    last: String,
+    count: usize,
+}
+
 pub(super) async fn request(
     data_dir: &std::path::Path,
     command: Command,
@@ -66,9 +110,9 @@ pub(super) async fn request(
         _ = stop.cancelled() => Err(ApiError::new(ErrorCode::InvalidState, "Display snapshot observation closed")),
         result = async {
             match command {
-                Command::HistoryGet(args) => {
-                    let body = native_body(data_dir, args).await?;
-                    super::presentation_work(move || serialize(body)).await?
+                command @ Command::HistoryGet(_) => {
+                    let report: HistoryReport = native_read(data_dir, command).await?;
+                    super::presentation_work(move || serialize(report)).await?
                 }
                 command @ Command::HistoryList(_) => {
                     let page: Page<HistorySnippet> = native_read(data_dir, command).await?;
@@ -199,6 +243,67 @@ mod tests {
         assert_eq!(
             read(first).await.unwrap_err().code,
             ErrorCode::CursorExpired
+        );
+        server.shutdown().await.unwrap();
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn native_summary_report_preserves_part_states_and_body_cursor() {
+        let (_root, owner, control, server) = super::super::control_tests::fixture().await;
+        owner.db.call(|db| {
+            let tx = db.transaction()?;
+            crate::history::append_node(&tx, "thread", "summary", None, "summary",
+                &json!({"summary_part_keys":["kept-part","missing-part","unreadable-part"]}), "now")?;
+            tx.execute("INSERT INTO app_meta(key,value) VALUES('kept-part',?1),('unreadable-part','invalid')",
+                [json!({"text":"retained body beyond this page", "sources":["source-a","source-b"], "stage":"map"}).to_string()])?;
+            tx.commit()?;
+            Ok(())
+        }).await.unwrap();
+        let args = HistoryGetArgs {
+            node_id: "summary".into(),
+            cursor: None,
+            limit_bytes: 32,
+            encoding: "UTF-8".into(),
+            end_message_only: false,
+            parts: true,
+        };
+        let read = |args| {
+            request(
+                &owner.loaded.data_dir,
+                Command::HistoryGet(args),
+                tokio_util::sync::CancellationToken::new(),
+            )
+        };
+        let report = read(args.clone()).await.unwrap();
+        assert_eq!(
+            report["parts"],
+            json!({"reduce_keys_recorded":false,"items":[
+                {"key":"kept-part","listed_as":"map","state":"retained","stage":"map","round":null,
+                 "sources":{"first":"source-a","last":"source-b","count":2},"characters":30,"usage":null},
+                {"key":"missing-part","listed_as":"map","state":"not_retained"},
+                {"key":"unreadable-part","listed_as":"map","state":"unreadable"}
+            ]})
+        );
+        let cursor = report["next_cursor"].as_str().unwrap().to_owned();
+        let next = read(HistoryGetArgs {
+            cursor: Some(cursor),
+            ..args.clone()
+        })
+        .await
+        .unwrap();
+        assert_eq!(next["parts"], report["parts"]);
+        assert_ne!(next["text"], report["text"]);
+        assert!(
+            read(HistoryGetArgs {
+                parts: false,
+                ..args
+            })
+            .await
+            .unwrap()
+            .get("parts")
+            .is_none()
         );
         server.shutdown().await.unwrap();
         control.shutdown().await.unwrap();
