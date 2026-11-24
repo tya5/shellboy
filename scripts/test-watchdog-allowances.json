@@ -914,14 +914,6 @@
   {
     "file": "tests/tui_recovery.rs",
     "rule": "raw-timeout",
-    "fingerprint": "835622aa5ce1a29f51772ba2c1d4f651e7c4d06694873496e2fc67527330d6ad",
-    "function": "multiple_calls_keep_source_order_numbers_commands_background_and_cancel_reasons",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing multiple_calls_keep_source_order_numbers_commands_background_and_cancel_reasons test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "tests/tui_recovery.rs",
-    "rule": "raw-timeout",
     "fingerprint": "8d862e7cf245429a60f4127d839a3c57c46b9fc6ba1237c49c904a586a32df32",
     "function": "multiple_calls_keep_source_order_numbers_commands_background_and_cancel_reasons",
     "count": 1,

@@ -458,17 +458,17 @@ async fn multiple_calls_keep_source_order_numbers_commands_background_and_cancel
         ))
         .unwrap();
     // Wait for the second real process; the first result has already been saved.
-    let execution_id = timeout(Duration::from_secs(15),async {
+    let execution_id = crate::test_watchdog::watchdog("foreground shell execution becomes available", async {
         loop {
             while let Ok(update)=incoming.try_recv(){ui.apply(update);deliver(&sender,ui.take_deferred_actions());}
             let running=control.store.database.call(|db| {
                 use rusqlite::OptionalExtension;
                 Ok(db.query_row("SELECT s.id FROM tool_call c JOIN shell_execution s ON s.id=c.operation_id WHERE c.call_id='two' AND s.state='running'",[],|row|row.get::<_,String>(0)).optional()?)
-            }).await.unwrap();
+            }).await;
             if let Some(id)=running {break id;}
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
-    }).await.unwrap();
+    }).await;
     let thread = ui.view().thread_id.clone().unwrap();
     deliver(
         &sender,
