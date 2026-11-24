@@ -123,15 +123,22 @@ pub(super) async fn admit_locked(
             let Some((run,state,run_state,at,deleted))=row else{return Err(ApiError::new(ErrorCode::TargetUnavailable,"Turn does not belong to the requested Thread").into());};
             if deleted{return Err(ApiError::new(ErrorCode::ThreadNotFound,"Thread was deleted").into());}
             let active=matches!(state.as_str(),"preparing"|"running"|"waiting"|"recovery_wait");
-            let mut result=json!({"thread_id":saved_thread,"run_id":run,"turn_id":saved_turn,"requested":false,"already_requested":false,"state":"already_finished"});
-            if run_state!="live" {result["state"]=json!(if run_state=="stopping"{"run_stopping"}else{"already_finished"});return Ok(result);}
-            if !active{return Ok(result);}
-            if let Some(at)=at {result["already_requested"]=json!(true);result["interrupt_requested_at"]=json!(at);result["state"]=json!("interrupt_requested");return Ok(result);}
-            let at=state::now();
-            tx.execute("UPDATE turn SET interrupt_requested_at=?2,generation=generation+1 WHERE id=?1 AND interrupt_requested_at IS NULL",params![saved_turn,at])?;
-            tx.execute("UPDATE thread SET revision=revision+1,updated_at=?2 WHERE id=?1",params![saved_thread,at])?;
-            result["requested"]=json!(true);result["state"]=json!("interrupt_requested");result["interrupt_requested_at"]=json!(at);
-            tx.commit()?;Ok(result)
+            let refused = |state: &str| json!({"requested":false,"already_requested":false,"state":state});
+            if run_state!="live" {return Ok(refused(if run_state=="stopping"{"run_stopping"}else{"already_finished"}));}
+            if !active{return Ok(refused("already_finished"));}
+            let (at, requested) = if let Some(at)=at { (at, false) } else {
+                let at=state::now();
+                tx.execute("UPDATE turn SET interrupt_requested_at=?2,generation=generation+1 WHERE id=?1 AND interrupt_requested_at IS NULL",params![saved_turn,at])?;
+                tx.execute("UPDATE thread SET revision=revision+1,updated_at=?2 WHERE id=?1",params![saved_thread,at])?;
+                tx.commit()?;
+                (at, true)
+            };
+            Ok(json!(crate::protocol::TurnInterruptResult {
+                thread_id:saved_thread, run_id:run, turn_id:saved_turn,
+                requested, already_requested:!requested,
+                state:crate::protocol::TurnInterruptState::InterruptRequested,
+                interrupt_requested_at:at,
+            }))
         }).await.map_err(storage_error);
     if let Ok(result) = &outcome
         && (result["requested"] == true || result["already_requested"] == true)

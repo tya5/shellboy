@@ -266,7 +266,7 @@ fn fresh_clap_executable_paths_and_every_option_match_the_catalogue_bindings() {
     );
     assert_eq!(
         leaves.len(),
-        88,
+        90,
         "update executable-path inventory deliberately; UI launch/help/version are not operations"
     );
     let bindings = CLI_BINDINGS

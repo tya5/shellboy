@@ -714,7 +714,7 @@ mod tests {
         );
         assert_eq!(
             crate::operations::CLI_BINDINGS.len(),
-            88,
+            90,
             "attach is a CLI shorthand, not another operation"
         );
         let clients = OpKind::ALL

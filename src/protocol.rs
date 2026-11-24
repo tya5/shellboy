@@ -95,6 +95,7 @@ fn operation_result_schemas(
     opaque!("run.retry");
     opaque!("run.stop");
     result!("turn.get", TurnDetails);
+    result!("turn.interrupt", TurnInterruptResult);
     result!("wait", WaitResult);
     result!("events.wait", EventsWaitResult);
     result!("history.list", Page<HistorySnippet>);
@@ -106,6 +107,7 @@ fn operation_result_schemas(
     result!("shell.read", ShellOutput);
     result!("shell.write", ShellWriteResult);
     result!("shell.eof", Accepted);
+    result!("shell.background", ShellBackgroundResult);
     result!("shell.stop", ShellStopResult);
     result!("attachment.add", AttachmentDetails);
     result!("attachment.list", Page<AttachmentDetails>);
@@ -129,6 +131,29 @@ fn operation_result_schemas(
     result!("credentials.clear", CredentialsClearResult);
     opaque!("connection.test");
     serde_json::Value::Object(results)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ShellBackgroundResult {
+    pub execution_id: String,
+    pub requested: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct TurnInterruptResult {
+    pub thread_id: String,
+    pub run_id: String,
+    pub turn_id: String,
+    pub requested: bool,
+    pub already_requested: bool,
+    pub state: TurnInterruptState,
+    pub interrupt_requested_at: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TurnInterruptState {
+    InterruptRequested,
 }
 
 pub fn schema_json() -> String {
@@ -2786,7 +2811,7 @@ mod message_acknowledgement_tests {
                 "missing result schema for {name}"
             );
         }
-        assert_eq!(results.len(), 80);
+        assert_eq!(results.len(), 82);
         for name in ["thread.create", "connection.test"] {
             assert_eq!(
                 results[name],
@@ -2797,6 +2822,8 @@ mod message_acknowledgement_tests {
         for name in [
             "status",
             "shell.list",
+            "shell.background",
+            "turn.interrupt",
             "usage.get",
             "config.get",
             "config.set",
