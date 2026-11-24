@@ -2867,7 +2867,7 @@ async fn run_client(
                         before_node_id,
                         older,
                     } => {
-                        let control = control.clone();
+                        let data_dir = client_context.data_dir.clone();
                         let sender = updates.worker();
                         let target = thread_id.clone();
                         if !spawn_read(
@@ -2876,7 +2876,7 @@ async fn run_client(
                             &selection.cancel,
                             async move {
                                 let result = input_history::recall(
-                                    &control,
+                                    &data_dir,
                                     target.clone(),
                                     before_ordinal,
                                     before_node_id,

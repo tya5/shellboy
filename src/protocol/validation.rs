@@ -1024,6 +1024,20 @@ impl Command {
             Self::Wait(a) => a.validate(),
             Self::HistoryList(a) => a.validate(),
             Self::HistoryWindow(a) => a.validate(),
+            Self::HistoryRecall(a) => {
+                nonempty(&a.thread_id, "thread_id")?;
+                if a.thread_id.len() > 512
+                    || a.expected_revision.is_some() && a.anchor.is_none()
+                    || a.anchor.as_ref().is_some_and(|anchor| {
+                        anchor.node_id.is_empty()
+                            || anchor.node_id.len() > 512
+                            || i64::try_from(anchor.ordinal).is_err()
+                    })
+                {
+                    return Err(invalid("Invalid history recall scope or anchor"));
+                }
+                Ok(())
+            }
             Self::HistoryGet(a) => a.validate(),
             Self::HistorySearch(a) => a.validate(),
             Self::HistoryExport(a) => limit(a.limit, MAX_LIST_LIMIT),

@@ -101,6 +101,7 @@ fn operation_result_schemas(
     result!("events.wait", EventsWaitResult);
     result!("history.list", Page<HistorySnippet>);
     result!("history.window", HistoryWindow);
+    result!("history.recall", HistoryRecallResult);
     result!("history.get", HistoryBody);
     result!("history.search", Page<SearchMatch>);
     result!("history.relations", Page<RelationItem>);
@@ -238,6 +239,7 @@ pub fn schema_json() -> String {
     add_root!("WaitResult", WaitResult);
     add_root!("HistorySnippet", HistorySnippet);
     add_root!("HistoryWindow", HistoryWindow);
+    add_root!("HistoryRecallResult", HistoryRecallResult);
     add_root!("HistoryBody", HistoryBody);
     add_root!("SearchMatch", SearchMatch);
     add_root!("RelationItem", RelationItem);
@@ -1204,6 +1206,31 @@ args!(HistoryWindowArgs { thread_id: String,
 // ordinal; `revision` is the Thread's selected-path revision (it also advances
 // on append, which keeps every earlier position valid).
 record!(HistoryWindow { thread_id: String, revision: u64, total: u64, items: Vec<HistorySnippet> });
+args!(HistoryRecallArgs { thread_id: String, older: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")] anchor: Option<HistoryRecallAnchor>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] expected_revision: Option<u64>
+});
+record!(HistoryRecallAnchor {
+    ordinal: u64,
+    node_id: String
+});
+record!(HistoryRecalledInput {
+    ordinal: u64,
+    node_id: String,
+    text: String
+});
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum HistoryRecallResult {
+    Found {
+        input: HistoryRecalledInput,
+    },
+    NotInWindow {
+        boundary: HistoryRecallAnchor,
+        revision: u64,
+    },
+    End,
+}
 fn is_false(value: &bool) -> bool {
     !*value
 }
@@ -1685,6 +1712,8 @@ pub enum Command {
     HistoryList(HistoryListArgs),
     #[serde(rename = "history.window")]
     HistoryWindow(HistoryWindowArgs),
+    #[serde(rename = "history.recall")]
+    HistoryRecall(HistoryRecallArgs),
     #[serde(rename = "history.get")]
     HistoryGet(HistoryGetArgs),
     #[serde(rename = "history.search")]

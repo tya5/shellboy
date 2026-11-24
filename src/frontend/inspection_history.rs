@@ -40,7 +40,7 @@ pub(super) async fn native_body(
     native_read(data_dir, Command::HistoryGet(args)).await
 }
 
-async fn native_read<T: serde::de::DeserializeOwned>(
+pub(super) async fn native_read<T: serde::de::DeserializeOwned>(
     data_dir: &std::path::Path,
     command: Command,
 ) -> Result<T, ApiError> {
@@ -48,7 +48,7 @@ async fn native_read<T: serde::de::DeserializeOwned>(
     let malformed = || {
         ApiError::new(
             ErrorCode::ProtocolMismatch,
-            "Invalid native history response",
+            "Invalid native saved-read response",
         )
     };
     if !response.ok {
