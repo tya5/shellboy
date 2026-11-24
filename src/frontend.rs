@@ -890,6 +890,8 @@ async fn restore_snapshot(
     }.await;
     checked_storage(control, result).await
 }
+pub(crate) const COMMAND_CAPACITY: usize = 32;
+
 pub async fn run(
     control: Arc<Control>,
     actions: impl Into<crate::ui::actions::ActionReceiver>,
@@ -927,7 +929,7 @@ pub async fn run_with_clipboard(
         owner,
         server,
         clipboard,
-        Arc::new(Semaphore::new(32)),
+        Arc::new(Semaphore::new(COMMAND_CAPACITY)),
     )
     .await
 }

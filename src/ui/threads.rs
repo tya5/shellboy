@@ -19,7 +19,7 @@ use ratatui::{
 };
 use std::{
     cell::{OnceCell, RefCell},
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, VecDeque},
     time::{Duration, Instant},
 };
 use unicode_segmentation::UnicodeSegmentation;
@@ -678,7 +678,8 @@ pub(super) struct ThreadBrowser {
     patch_error: Option<String>,
     notice: Option<String>,
     notice_en: Option<String>,
-    unknown_archive_operation: Option<String>,
+    unknown_archive_operations: VecDeque<String>,
+    older_archive_operations_omitted: bool,
     notice_seen: std::cell::Cell<bool>,
     preferred: Option<String>,
     preferred_screen: Option<usize>,
@@ -892,6 +893,47 @@ impl ThreadBrowser {
     pub fn archived(&self) -> ArchivedFilter {
         self.archived
     }
+    fn retain_unknown_archive(&mut self, id: &str) {
+        if self
+            .unknown_archive_operations
+            .iter()
+            .any(|saved| saved == id)
+        {
+            return;
+        }
+        // Keep a full burst of command completions. Across bursts, disclose eviction.
+        if self.unknown_archive_operations.len() == crate::frontend::COMMAND_CAPACITY {
+            self.unknown_archive_operations.pop_front();
+            self.older_archive_operations_omitted = true;
+        }
+        self.unknown_archive_operations.push_back(id.to_owned());
+    }
+
+    fn archive_receipt_details(&self) -> Option<String> {
+        if self.unknown_archive_operations.is_empty() {
+            return None;
+        }
+        let mut details = super::i18n::local!(
+            self.language,
+            "未確認のアーカイブ操作: 再操作の前に照会してください",
+            "Unknown archive outcomes: look up each request before retrying"
+        )
+        .to_owned();
+        if self.older_archive_operations_omitted {
+            details.push('\n');
+            details.push_str(super::i18n::local!(
+                self.language,
+                "古い未確認の照会IDは表示上限により省略されています",
+                "Older unknown request IDs are omitted due to the display limit"
+            ));
+        }
+        for id in &self.unknown_archive_operations {
+            details.push('\n');
+            details.push_str(id);
+        }
+        Some(details)
+    }
+
     /// Localized outcome of an archive or unarchive key, shown as the list notice.
     pub fn archive_result(
         &mut self,
@@ -929,7 +971,7 @@ impl ThreadBrowser {
                     .as_ref()
                     .and_then(|details| details["operation_id"].as_str())
                 {
-                    self.unknown_archive_operation = Some(id.to_owned());
+                    self.retain_unknown_archive(id);
                 }
                 (
                     "結果は未確認です (F1で照会ID)".to_owned(),
@@ -2032,14 +2074,7 @@ impl ThreadBrowser {
             KeyCode::Esc => self.close(),
             KeyCode::F(1) => {
                 self.clear_preferred();
-                let receipt = self.unknown_archive_operation.as_ref().map(|id| {
-                    let heading = super::i18n::local!(
-                        self.language,
-                        "未確認のアーカイブ操作: 再操作の前に照会してください",
-                        "Unknown archive outcome: look up the request before retrying"
-                    );
-                    format!("{heading}\n{id}")
-                });
+                let receipt = self.archive_receipt_details();
                 if let Some(thread) = self.items.get(self.selected) {
                     let page = self
                         .watch_page_info
@@ -5725,13 +5760,11 @@ mod archive_tests {
     }
 
     #[test]
-    fn unknown_archive_receipt_is_visible_in_f1_details_at_eighty_columns() {
-        let id = "00000000-0000-4000-8000-000000000001:00000000-0000-4000-8000-000000000002";
-        let unknown =
-            crate::protocol::ApiError::new(crate::protocol::ErrorCode::IoFailed, "lost reply")
-                .details(
-                    serde_json::json!({"request_may_have_been_applied":true,"operation_id":id}),
-                );
+    fn unknown_archive_receipts_are_visible_in_f1_details_at_eighty_columns() {
+        let ids = [
+            "00000000-0000-4000-8000-000000000001:00000000-0000-4000-8000-000000000002",
+            "00000000-0000-4000-8000-000000000001:00000000-0000-4000-8000-000000000003",
+        ];
         for (language, notice) in [
             (UiLanguage::En, "Archive outcome unknown"),
             (UiLanguage::Ja, "結果は未確認"),
@@ -5741,10 +5774,19 @@ mod archive_tests {
             let mut ui = crate::ui::UiState::new(&config, std::path::PathBuf::new());
             // A committed archive can leave the list empty before the lost reply is reported.
             ui.thread_browser = opened(language, vec![]);
-            ui.thread_browser.archive_result(true, Err(unknown.clone()));
+            for (archive, id) in [(true, ids[0]), (false, ids[1])] {
+                let error = crate::protocol::ApiError::new(
+                    crate::protocol::ErrorCode::IoFailed,
+                    "lost reply",
+                )
+                .details(
+                    serde_json::json!({"request_may_have_been_applied":true,"operation_id":id}),
+                );
+                ui.thread_browser.archive_result(archive, Err(error));
+            }
             let screen = paint(&ui.thread_browser, 80, 24);
             assert!(screen.contains(notice) && screen.contains("F1"), "{screen}");
-            assert!(!screen.contains(id));
+            assert!(ids.iter().all(|id| !screen.contains(id)));
             ui.event(crossterm::event::Event::Key(KeyEvent::new(
                 KeyCode::F(1),
                 KeyModifiers::NONE,
@@ -5764,8 +5806,37 @@ mod archive_tests {
                     })
                 })
                 .collect();
-            assert!(visible.contains(id), "{screen}");
+            assert!(ids.iter().all(|id| visible.contains(id)), "{screen}");
         }
+    }
+
+    #[test]
+    fn unknown_archive_receipt_details_disclose_older_omissions() {
+        let mut browser = opened(UiLanguage::En, vec![]);
+        let capacity = crate::frontend::COMMAND_CAPACITY;
+        for index in 0..capacity {
+            browser.retain_unknown_archive(&format!("receipt-{index:04}"));
+        }
+        browser.retain_unknown_archive("receipt-0000");
+        let full = browser.archive_receipt_details().unwrap();
+        assert_eq!(
+            full.lines().filter(|line| *line == "receipt-0000").count(),
+            1
+        );
+        assert!(!full.contains("omitted"));
+        let newest = format!("receipt-{capacity:04}");
+        browser.retain_unknown_archive(&newest);
+        let overflow = browser.archive_receipt_details().unwrap();
+        assert!(overflow.contains("Older unknown request IDs are omitted"));
+        assert!(!overflow.contains("receipt-0000"));
+        assert_eq!(
+            overflow
+                .lines()
+                .filter(|line| line.starts_with("receipt-"))
+                .count(),
+            capacity
+        );
+        assert_eq!(overflow.lines().last(), Some(newest.as_str()));
     }
 
     #[test]
