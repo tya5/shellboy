@@ -246,9 +246,14 @@ mod tests {
             assert_eq!(kind.classification(), expected, "{kind:?}");
             assert!(!UNDECLARED_WRITER_BOUNDS.contains(&kind));
         }
+        let intervention_kinds = [Kind::ShellBackground, Kind::TurnInterrupt];
+        for kind in intervention_kinds {
+            assert_eq!(kind.classification(), Runtime, "{kind:?}");
+            assert!(!UNDECLARED_WRITER_BOUNDS.contains(&kind));
+        }
         assert_eq!(
             Kind::ALL.len(),
-            81 + service_kinds.len(),
+            81 + service_kinds.len() + intervention_kinds.len(),
             "classify new kinds and update this ratchet"
         );
     }

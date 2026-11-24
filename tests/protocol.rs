@@ -1373,12 +1373,14 @@ fn protocol_v6_handshake_and_typed_results_cover_existing_wire_modes() {
         schema["capabilities"],
         serde_json::json!(["events.reasoning_activity", "id.resolve"])
     );
-    assert_eq!(schema["operation_results"].as_object().unwrap().len(), 80);
+    assert_eq!(schema["operation_results"].as_object().unwrap().len(), 82);
     assert_eq!(
         schema["operation_results"]["history.export"]["type"],
         "object"
     );
-    for operation in ["status", "shell.list", "usage.get", "config.get"] {
+    for operation in [
+        "status", "shell.list", "usage.get", "config.get", "shell.background", "turn.interrupt",
+    ] {
         assert_ne!(schema["operation_results"][operation], Value::Bool(true));
     }
     assert!(schema["operation_results"]["status"]["anyOf"].is_array());
