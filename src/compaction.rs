@@ -922,6 +922,7 @@ impl Compactor {
         automatic: AutomaticStage,
         active: bool,
         turn_id: String,
+        request_run: String,
         thread_boundary: Arc<tokio::sync::Mutex<()>>,
         run_stop: CancellationToken,
     ) -> Result<CompactResult, ApiError> {
@@ -955,7 +956,7 @@ impl Compactor {
                 Err(error)=>Err(error.clone()),
                 Ok(setup) if failure_memory::blocks(&setup.observed,&setup.identity,setup.provider.as_deref())=>Err(discard::failed(discard::FailureReason::RetrySuppressed,discard::FailureOrigin::Preparation,"This summary range already failed for its captured source identity; original path retained")),
                 Ok(_)=>{
-                    let request=single_request::DispatchRequest{input:&material,request_run:captured.origin_run.as_deref(),owner:single_request::DispatchOwner::Gc,selected:0..material_groups.len(),limit:output_limit,cancel:&cancel,ledger:&mut ledger,eligible,
+                    let request=single_request::DispatchRequest{input:&material,request_run:Some(&request_run),owner:single_request::DispatchOwner::Gc,selected:0..material_groups.len(),limit:output_limit,cancel:&cancel,ledger:&mut ledger,eligible,
                     };
                     let dispatched_future=compactor.dispatch_single_summary(request);tokio::pin!(dispatched_future);
                     tokio::select!{biased;_=stop_for_job.cancelled()=>{cancel.cancel();dispatched_future.as_mut().await},result=dispatched_future.as_mut()=>result}

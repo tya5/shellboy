@@ -7502,12 +7502,23 @@ async fn proactive_attempt_runs_one_summary_operation_and_keeps_its_usage() {
                 .unwrap();
             settled(&control, &target).await;
         }
-        let accepted = send_accepted(
-            &control,
-            &target,
-            &format!("current {}", "b".repeat(40_000)),
+        let accepted: MessageAccepted = serde_json::from_value(
+            request(
+                &control,
+                Command::MessageSend(MessageSendArgs {
+                    max_model_requests: std::num::NonZeroU32::new(5),
+                    resume_recovery: false,
+                    human: false,
+                    sender_label: None,
+                    deliver: Deliver::Next,
+                    thread_id: Some(target.clone()),
+                    text: format!("current {}", "b".repeat(40_000)),
+                }),
+            )
+            .await,
         )
-        .await;
+        .unwrap();
+        let run_id = accepted.run_id.unwrap();
         let trigger_turn = accepted.turn_id.expect("current request Turn");
         for (n, tokens) in [(0, 50_000), (1, 50_000), (2, 201_061)] {
             incoming(&control, &mut receive)
@@ -7540,6 +7551,8 @@ async fn proactive_attempt_runs_one_summary_operation_and_keeps_its_usage() {
             .send((200, answer_with_usage("done", 100_000)))
             .unwrap();
         settled(&control, &target).await;
+        let run = request(&control, Command::RunGet(RunTarget { run_id })).await;
+        assert_eq!(run["model_requests"], json!({"ceiling":5,"used":5}));
         let terminal = automatic_attempts_finished_for_turns(&control, &[trigger_turn], 1).await;
         assert_eq!(
             terminal.len(),
