@@ -1,5 +1,6 @@
 //! Immutable Responses items with one byte-bounded LRU shared by all Threads.
 use crate::{
+    digest::{SHA256_HEX_BYTES, finish_sha256_hex},
     model::MAX_RESPONSE_BYTES,
     protocol::{ApiError, ErrorCode},
     storage::StorageError,
@@ -8,6 +9,7 @@ use rusqlite::Connection;
 use serde_json::Value;
 #[cfg(test)]
 use serde_json::json;
+use sha2::{Digest, Sha256};
 use std::{
     collections::{HashMap, VecDeque},
     mem::size_of,
@@ -133,26 +135,36 @@ pub struct PathWitness {
     pub sha256: String,
 }
 impl PathWitness {
-    fn append_stamp(framed: &mut String, id: &str, revision: i64, tombstone: bool) {
-        framed.push_str(&format!(
-            "{}\u{1f}{}\u{1f}{}\u{1e}",
-            id,
-            revision,
+    fn append_stamp(hash: &mut Sha256, id: &str, revision: i64, tombstone: bool) {
+        use std::fmt::{self, Write};
+        struct HashWriter<'a>(&'a mut Sha256);
+        impl Write for HashWriter<'_> {
+            fn write_str(&mut self, text: &str) -> fmt::Result {
+                self.0.update(text.as_bytes());
+                Ok(())
+            }
+        }
+        write!(
+            HashWriter(hash),
+            "{id}\u{1f}{revision}\u{1f}{}\u{1e}",
             u8::from(tombstone)
-        ));
+        )
+        .expect("SHA-256 writes are infallible");
     }
+
     fn of(frames: &[Arc<Frame>]) -> Self {
-        let mut framed = String::new();
+        let mut hash = Sha256::new();
         for frame in frames {
             let stamp = &frame.stamp;
-            Self::append_stamp(&mut framed, &stamp.id, stamp.revision, stamp.tombstone);
+            Self::append_stamp(&mut hash, &stamp.id, stamp.revision, stamp.tombstone);
         }
         Self {
             nodes: frames.len(),
-            sha256: crate::digest::sha256_hex(framed),
+            sha256: finish_sha256_hex(hash),
         }
     }
 }
+
 impl Drop for LeaseFrames {
     fn drop(&mut self) {
         for frame in &self.frames {
@@ -166,10 +178,21 @@ impl Drop for LeaseFrames {
 #[derive(Clone)]
 pub struct ReplayLease(Arc<LeaseFrames>);
 impl ReplayLease {
-    fn new(frames: Vec<Arc<Frame>>) -> Result<Self, StorageError> {
-        let witness = PathWitness::of(&frames);
-        let selected_tail = frames.last().map(|frame| frame.stamp.id.clone());
-        let frames = tool_order::ordered(frames)?;
+    fn new(frames: &[Arc<Frame>], work: Option<&AssemblyBudget>) -> Result<Self, StorageError> {
+        let ordering = tool_order::OrderingPlan::of(frames);
+        let tail = frames.last().map(|frame| frame.stamp.id.as_str());
+        if let Some(work) = work {
+            work.check(
+                ordering.bytes(frames.len())
+                    + size_of::<LeaseFrames>()
+                    + 2 * size_of::<usize>()
+                    + SHA256_HEX_BYTES
+                    + tail.map_or(0, str::len),
+            )?;
+        }
+        let witness = PathWitness::of(frames);
+        let selected_tail = tail.map(str::to_owned);
+        let frames = ordering.order(frames).map_err(StorageError::from)?;
         for frame in &frames {
             if frame.pins.fetch_add(1, Ordering::AcqRel) == 0 {
                 frame.ledger.pinned.fetch_add(frame.bytes, Ordering::AcqRel);
@@ -215,16 +238,9 @@ impl ReplayLease {
                 return false;
             };
             let stamp = &frame.stamp;
-            hash.update(stamp.id.as_bytes());
-            hash.update([0x1f]);
-            hash.update(stamp.revision.to_string().as_bytes());
-            hash.update([0x1f, b'0' + stamp.tombstone as u8, 0x1e]);
+            PathWitness::append_stamp(&mut hash, &stamp.id, stamp.revision, stamp.tombstone);
         }
-        hash.finalize()
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect::<String>()
-            == previous.sha256
+        finish_sha256_hex(hash) == previous.sha256
     }
     /// Prove that no older tool span can shrink, using a conservative lower
     /// bound for each replacement and at most 8 MiB of already-replayed JSON.
@@ -575,10 +591,11 @@ impl ReplayCache {
         } else {
             state.rebuilds += 1;
         }
+        work.charge(stamps.len() * size_of::<Arc<Frame>>())?;
         let mut frames = Vec::with_capacity(stamps.len());
         if let Some(previous) = reuse {
             for frame in &previous.frames {
-                work.charge(frame.bytes + size_of::<Arc<Frame>>())?;
+                work.charge(frame.bytes)?;
                 frames.push(frame.clone());
             }
         }
@@ -618,7 +635,7 @@ impl ReplayCache {
                     &keep,
                     &self.ledger,
                 )?;
-                work.charge(frame.bytes + size_of::<Arc<Frame>>())?;
+                work.charge(frame.bytes)?;
                 frames.push(Arc::new(frame));
                 offset += 1;
             }
@@ -631,8 +648,10 @@ impl ReplayCache {
         let overhead =
             context.bytes() + frames.capacity() * size_of::<Arc<Frame>>() + thread.len() * 2;
         let bytes = overhead.saturating_add(frames.iter().map(|frame| frame.bytes).sum::<usize>());
-        let lease = ReplayLease::new(frames.clone())?;
         drop(previous);
+        drop(stamps);
+        drop(keep);
+        let lease = ReplayLease::new(&frames, Some(&work))?;
         if self.budget > 0 && bytes <= self.budget {
             state.retained = state.retained.saturating_add(bytes);
             state.order.push_back(thread.into());
@@ -901,18 +920,18 @@ pub(crate) fn load_for_inspection(
             thread,
             i64::try_from(expected.nodes).unwrap_or(i64::MAX)
         ])?;
-        let mut framed = String::new();
+        let mut hash = Sha256::new();
         let mut count = 0;
         while let Some(row) = rows.next()? {
             PathWitness::append_stamp(
-                &mut framed,
-                &row.get::<_, String>(0)?,
+                &mut hash,
+                row_text(row, 0)?,
                 row.get::<_, i64>(1)?,
                 row.get::<_, bool>(2)?,
             );
             count += 1;
         }
-        if count != expected.nodes || crate::digest::sha256_hex(framed) != expected.sha256 {
+        if count != expected.nodes || finish_sha256_hex(hash) != expected.sha256 {
             return Ok(None);
         }
     }
@@ -959,10 +978,9 @@ fn load_uncached_mode(
             return Err(inspection::unassociated_fault());
         }
         inspection::validate(db, thread, &frames)?;
-        tool_order::ordered_checked(frames.clone())
-            .map_err(|_| inspection::unassociated_fault())?;
+        return ReplayLease::new(&frames, None).map_err(|_| inspection::unassociated_fault());
     }
-    ReplayLease::new(frames)
+    ReplayLease::new(&frames, None)
 }
 // serde_json::Value owns nested strings, Vec capacity and map allocations. The
 // per-map-entry allowance conservatively covers tree-node pointers/alignment.
@@ -1069,7 +1087,7 @@ mod tests {
             frame(0, "c1", Some("g1"), call("a")),
             frame(1, "r1", Some("g1"), output("a")),
         ];
-        let first_lease = ReplayLease::new(first.clone()).unwrap();
+        let first_lease = ReplayLease::new(&first, None).unwrap();
         let witness = first_lease.witness().clone();
         let protected = first_lease.old_tool_frontier();
         let mut appended = first.clone();
@@ -1079,7 +1097,7 @@ mod tests {
             None,
             json!({"type":"message","role":"assistant","content":[]}),
         ));
-        let appended_lease = ReplayLease::new(appended.clone()).unwrap();
+        let appended_lease = ReplayLease::new(&appended, None).unwrap();
         assert!(appended_lease.extends(&witness));
         assert_eq!(
             appended_lease.old_tool_frontier(),
@@ -1088,7 +1106,7 @@ mod tests {
         );
         appended.push(frame(3, "c2", Some("g2"), call("b")));
         appended.push(frame(4, "r2", Some("g2"), output("b")));
-        let later = ReplayLease::new(appended.clone()).unwrap();
+        let later = ReplayLease::new(&appended, None).unwrap();
         assert!(
             later.proves_no_reducing_older_tools(),
             "tiny old groups are not reducible"
@@ -1100,18 +1118,18 @@ mod tests {
             "the first group becomes older than the protected newest group"
         );
         appended[4] = frame(4, "r2-new", Some("g2"), output("b"));
-        let latest_changed = ReplayLease::new(appended).unwrap();
+        let latest_changed = ReplayLease::new(&appended, None).unwrap();
         assert_eq!(
             latest_changed.old_tool_frontier(),
             later.old_tool_frontier(),
             "changes to the latest protected group alone do not create a new target"
         );
-        let large = ReplayLease::new(vec![
+        let large = ReplayLease::new(&[
             frame(0,"large-c",Some("big"),call("big-call")),
             frame(1,"large-r",Some("big"),json!({"type":"function_call_output","call_id":"big-call","output":"x".repeat(50_000)})),
             frame(2,"new-c",Some("new"),call("new-call")),
             frame(3,"new-r",Some("new"),output("new-call")),
-        ]).unwrap();
+        ], None).unwrap();
         assert!(
             !large.proves_no_reducing_older_tools(),
             "a potentially useful older group is never suppressed"
@@ -1123,17 +1141,20 @@ mod tests {
             output("ambiguous-call"),
         );
         Arc::get_mut(&mut ambiguous).unwrap().spill_projection_safe = false;
-        let ambiguous = ReplayLease::new(vec![
-            frame(
-                0,
-                "ambiguous-call",
-                Some("ambiguous"),
-                call("ambiguous-call"),
-            ),
-            ambiguous,
-            frame(2, "last-call", Some("last"), call("last-call")),
-            frame(3, "last-result", Some("last"), output("last-call")),
-        ])
+        let ambiguous = ReplayLease::new(
+            &[
+                frame(
+                    0,
+                    "ambiguous-call",
+                    Some("ambiguous"),
+                    call("ambiguous-call"),
+                ),
+                ambiguous,
+                frame(2, "last-call", Some("last"), call("last-call")),
+                frame(3, "last-result", Some("last"), output("last-call")),
+            ],
+            None,
+        )
         .unwrap();
         assert!(
             !ambiguous.proves_no_reducing_older_tools(),
@@ -1146,7 +1167,7 @@ mod tests {
             Some(unicode.to_string().chars().count() as u64)
         );
         assert!(bounded_json_characters(&unicode, &mut 1usize).is_none());
-        let long = (0..4097)
+        let long: Vec<_> = (0..4097)
             .map(|index| {
                 frame(
                     index,
@@ -1157,17 +1178,20 @@ mod tests {
             })
             .collect();
         assert!(
-            ReplayLease::new(long)
+            ReplayLease::new(&long, None)
                 .unwrap()
                 .proves_no_reducing_older_tools(),
             "a long protected Turn with no tools needs no group scan"
         );
-        let rewritten = ReplayLease::new(vec![frame(
-            0,
-            "changed",
+        let rewritten = ReplayLease::new(
+            &[frame(
+                0,
+                "changed",
+                None,
+                json!({"role":"user","content":"synthetic"}),
+            )],
             None,
-            json!({"role":"user","content":"synthetic"}),
-        )])
+        )
         .unwrap();
         assert!(!rewritten.extends(&witness));
     }
@@ -1188,7 +1212,7 @@ mod tests {
                     ("later-result".to_owned(), later_output),
                 ];
                 let actual = crate::compaction::test_spill_reduces(&sources[..2], 0);
-                let frames = sources
+                let frames: Vec<_> = sources
                     .iter()
                     .enumerate()
                     .map(|(ordinal, (id, payload))| {
@@ -1212,7 +1236,7 @@ mod tests {
                         )
                     })
                     .collect();
-                let replay = ReplayLease::new(frames).unwrap();
+                let replay = ReplayLease::new(&frames, None).unwrap();
                 assert!(
                     !(actual && replay.proves_no_reducing_older_tools()),
                     "size={size} actual reducing spill must not be suppressed"
@@ -1238,7 +1262,7 @@ mod tests {
             ),
         ];
         assert!(!crate::compaction::test_spill_reduces(&sources[..2], 0));
-        let frames = sources
+        let frames: Vec<_> = sources
             .iter()
             .enumerate()
             .map(|(ordinal, (id, payload))| {
@@ -1262,7 +1286,8 @@ mod tests {
                 )
             })
             .collect();
-        let replay = ReplayLease::new(frames).unwrap();
+        let replay = ReplayLease::new(&frames, None).unwrap();
+        drop(frames);
         assert!(
             replay.proves_no_reducing_older_tools(),
             "an unchanged output-array group has a valid proof"

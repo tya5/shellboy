@@ -1,11 +1,21 @@
 //! Shared SHA-256 byte digest; domain framing and serialization stay at callers.
 use sha2::{Digest, Sha256};
 pub(crate) fn sha256_hex(bytes: impl AsRef<[u8]>) -> String {
-    Sha256::digest(bytes.as_ref())
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect()
+    let mut hash = Sha256::new();
+    hash.update(bytes.as_ref());
+    finish_sha256_hex(hash)
 }
+
+pub(crate) const SHA256_HEX_BYTES: usize = 64;
+pub(crate) fn finish_sha256_hex(hash: Sha256) -> String {
+    use std::fmt::Write;
+    let mut hex = String::with_capacity(SHA256_HEX_BYTES);
+    for byte in hash.finalize() {
+        write!(hex, "{byte:02x}").expect("formatting into a String is infallible");
+    }
+    hex
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

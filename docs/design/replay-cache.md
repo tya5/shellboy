@@ -21,11 +21,13 @@ DB transactionが失敗したcacheの一時entryに依存してHTTPを開始し�
 The selected-path loader owns a per-request working allowance independent of
 `cache.history_bytes`. It uses the existing `model::MAX_RESPONSE_BYTES` model
 I/O ceiling (64 MiB) for replay working weights: path stamps, reasoning keep
-metadata, and every cached or newly converted frame. SQLite does not project a source larger than the allowance at the start of
-suffix decoding. The loader checks each source against the current remaining
+metadata, and every cached or newly converted frame. SQLite does not project
+a source larger than the allowance at the start of suffix decoding. The loader checks each source against the current remaining
 allowance before decoding it, and charges each frame before adding it to the
-lease.
-The accounting is not an allocator RSS limit or a provider token limit.
+lease. The same allowance must cover the ordered pointer vector, borrowed
+ordering workspace, and final lease before any of those heap allocations or
+pins. The path witness streams the existing framing into SHA-256 without
+copying the selected path. The accounting is not an allocator RSS limit or a provider token limit.
 
 A request that exceeds the allowance fails before model admission with
 `input_limit`, `details.reason = "replay_assembly_limit"`, and

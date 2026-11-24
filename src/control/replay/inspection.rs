@@ -83,7 +83,7 @@ pub(super) fn validate(
             }
         }
     }
-    tool_order::ordered_checked(ungrouped).map_err(|_| invalid("metadata_unresolved"))?;
+    tool_order::ordered_checked(&ungrouped).map_err(|_| invalid("metadata_unresolved"))?;
     for group in groups.values() {
         if !group.outputs.is_subset(&group.calls) {
             return Err(invalid("orphan"));
