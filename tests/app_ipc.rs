@@ -183,8 +183,8 @@ async fn record_page_contract_cli_and_native_ipc() {
             VALUES ('na','message','2025-01-01T00:00:00Z','{}'),
                    ('nb','message','2025-01-02T00:00:00Z','{}');
             INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,result_json)
-            VALUES ('ra','oa','{}','a','na','applied','2025-01-01T00:00:00Z','{"reply":{"state":"pending"},"ask_name":"human"}'),
-                   ('rb','ob','{}','b','nb','applied','2025-01-02T00:00:00Z','{"reply":{"state":"pending"},"ask_name":"human"}');
+            VALUES ('ra','oa','{}','a','na','applied','2025-01-01T00:00:00Z','{"reply":{"state":"pending"},"ask_name":"human","to_human":true}'),
+                   ('rb','ob','{}','b','nb','applied','2025-01-02T00:00:00Z','{"reply":{"state":"pending"},"ask_name":"human","to_human":true}');
         "#)?;
         Ok(())
     }).await.unwrap();
