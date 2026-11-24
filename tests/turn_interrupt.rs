@@ -335,10 +335,7 @@ async fn interrupted_foreground_keeps_owned_work_and_carries_queued_input_in_sam
     )
     .await;
     let old_turn = accepted.turn_id.clone().unwrap();
-    let result = control
-        .interrupt_turn(old_turn.clone())
-        .await
-        .unwrap();
+    let result = control.interrupt_turn(old_turn.clone()).await.unwrap();
     assert_eq!(result["requested"], true);
     let next = incoming(&mut requests).await;
     let input = next.body["input"].as_array().unwrap();
@@ -426,15 +423,9 @@ async fn recovery_turn_interrupt_is_idempotent_and_stale_target_cannot_stop_repl
         .unwrap();
     let old_turn = accepted.turn_id.clone().unwrap();
     saved_state(&control, "turn", &old_turn, "recovery_wait").await;
-    let first = control
-        .interrupt_turn(old_turn.clone())
-        .await
-        .unwrap();
+    let first = control.interrupt_turn(old_turn.clone()).await.unwrap();
     assert_eq!(first["requested"], true);
-    let _ = control
-        .interrupt_turn(old_turn.clone())
-        .await
-        .unwrap();
+    let _ = control.interrupt_turn(old_turn.clone()).await.unwrap();
     saved_state(
         &control,
         "run",
@@ -457,10 +448,7 @@ async fn recovery_turn_interrupt_is_idempotent_and_stale_target_cannot_stop_repl
     )
     .await;
     let next = incoming(&mut requests).await;
-    let stale = control
-        .interrupt_turn(old_turn.clone())
-        .await
-        .unwrap();
+    let stale = control.interrupt_turn(old_turn.clone()).await.unwrap();
     assert_eq!(stale["requested"], false);
     let thread = accepted.thread_id;
     control.store.database.call(move|db|{
@@ -599,10 +587,7 @@ async fn background_completion_after_interruption_starts_new_turn_and_completes_
     .unwrap();
     let run = accepted.run_id.clone().unwrap();
     let old_turn = accepted.turn_id.clone().unwrap();
-    control
-        .interrupt_turn(old_turn.clone())
-        .await
-        .unwrap();
+    control.interrupt_turn(old_turn.clone()).await.unwrap();
     saved_state(&control, "turn", &old_turn, "stopped").await;
     let saved_run = run.clone();
     let saved_execution = execution.clone();
