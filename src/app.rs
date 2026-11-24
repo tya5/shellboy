@@ -23,6 +23,8 @@ fn io_error(error: std::io::Error) -> ApiError {
 /// actual writer have released it; cancelling an observer does not release early.
 pub struct OwnerLock {
     _file: File,
+    #[cfg(windows)]
+    directory: PathBuf,
 }
 impl Drop for OwnerLock {
     fn drop(&mut self) {
@@ -121,7 +123,11 @@ impl OwnerLock {
         })?;
         // Establish RAII ownership immediately after acquiring exclusion, so
         // a subsequent directory-setup failure also explicitly unlocks it.
-        let owner = Arc::new(Self { _file: file });
+        let owner = Arc::new(Self {
+            _file: file,
+            #[cfg(windows)]
+            directory: resolved.clone(),
+        });
         for relative in ["managed/clipboard", "tmp", "logs"] {
             std::fs::create_dir_all(data_dir.join(relative)).map_err(io_error)?;
         }
@@ -160,6 +166,12 @@ fn windows_data_dir(path: &Path) -> Result<PathBuf, ApiError> {
 
     // Check the existing ancestor too, before creating a directory behind a redirect.
     check_local(path)?;
+    if std::fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_symlink()) {
+        return Err(ApiError::new(
+            ErrorCode::IoFailed,
+            "The final data directory component must not be a symlink",
+        ));
+    }
     for ancestor in path.ancestors() {
         match std::fs::canonicalize(ancestor) {
             Ok(resolved) => {
@@ -331,6 +343,12 @@ impl DataOwner {
         let lock = tokio::task::spawn_blocking(move || OwnerLock::acquire(&directory))
             .await
             .map_err(|_| ApiError::new(ErrorCode::IoFailed, "Owner lock worker failed"))??;
+        // Keep database and endpoint I/O on the same resolved directory as the lock.
+        #[cfg(windows)]
+        let loaded = LoadedConfig {
+            data_dir: lock.directory.clone(),
+            ..loaded
+        };
         let marker_lock = lock.clone();
         let clean = tokio::task::spawn_blocking(move || marker_lock.begin_session())
             .await
@@ -833,7 +851,7 @@ mod windows_owner_tests {
             .await
             .unwrap();
         assert_eq!(
-            windows_data_dir(&data).unwrap(),
+            owner.loaded.data_dir,
             local.join("data").canonicalize().unwrap()
         );
         assert!(local.join("data/shellboy.db").is_file());
