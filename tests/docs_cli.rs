@@ -335,3 +335,30 @@ fn resource_usage_guide_is_bundled_searchable_and_offline() {
     );
     assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
 }
+
+#[test]
+fn startup_stage_status_keeps_unavailable_exit_and_prints_last_stage() {
+    let root = tempfile::tempdir().unwrap();
+    let status = || {
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_shellboy"))
+            .arg("--data-dir")
+            .arg(root.path())
+            .arg("status")
+            .env_remove("SHELLBOY_ENDPOINT")
+            .output()
+            .unwrap();
+        assert!(!output.status.success(), "{output:?}");
+        let envelope: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(envelope["error"]["code"], "app_not_running");
+        envelope["error"]["details"]["last_startup_stage"].clone()
+    };
+    assert!(status().is_null());
+    std::fs::write(
+        root.path().join("startup-stage.json"),
+        b"\"database_migration\"",
+    )
+    .unwrap();
+    assert_eq!(status(), "database_migration");
+    std::fs::write(root.path().join("startup-stage.json"), b"\"unknown\"").unwrap();
+    assert!(status().is_null());
+}

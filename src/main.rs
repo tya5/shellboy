@@ -494,29 +494,44 @@ async fn run_owner(cli: Cli, cwd: &Path) -> ExitCode {
         let data_dir =
             resolve_cli_data_dir(cli.data_dir.as_deref(), &PathEnvironment::current(), cwd)
                 .map_err(|e| ApiError::new(ErrorCode::ConfigInvalid, e.to_string()))?;
-        let caller_origin = origin(&data_dir);
-        let command = cli
-            .clone()
-            .into_command(cwd)
-            .await?
-            .ok_or_else(|| ApiError::new(ErrorCode::InvalidArgument, "Missing command"))?;
-        let include_pending_duties =
-            matches!(command, shellboy::protocol::Command::MessageReply(_));
-        let resolved = shellboy::cli::resolve_id_arguments(command, |kind, prefix| {
-            shellboy::cli::resolve_owner_prefix(
-                &data_dir,
-                caller_origin.as_ref(),
-                kind,
-                prefix,
-                include_pending_duties,
-            )
-        })
-        .await?;
-        match resolved {
-            shellboy::protocol::Command::Wait(args) => {
-                ipc::call_cli_wait(&data_dir, args, cli.operation_id.clone(), caller_origin).await
+        let result = async {
+            let caller_origin = origin(&data_dir);
+            let command = cli
+                .clone()
+                .into_command(cwd)
+                .await?
+                .ok_or_else(|| ApiError::new(ErrorCode::InvalidArgument, "Missing command"))?;
+            let include_pending_duties =
+                matches!(command, shellboy::protocol::Command::MessageReply(_));
+            let resolved = shellboy::cli::resolve_id_arguments(command, |kind, prefix| {
+                shellboy::cli::resolve_owner_prefix(
+                    &data_dir,
+                    caller_origin.as_ref(),
+                    kind,
+                    prefix,
+                    include_pending_duties,
+                )
+            })
+            .await?;
+            match resolved {
+                shellboy::protocol::Command::Wait(args) => {
+                    ipc::call_cli_wait(&data_dir, args, cli.operation_id.clone(), caller_origin)
+                        .await
+                }
+                other => ipc::call(&data_dir, other, cli.operation_id.clone(), caller_origin).await,
             }
-            other => ipc::call(&data_dir, other, cli.operation_id.clone(), caller_origin).await,
+        }
+        .await;
+        if let Err(mut error) = result {
+            if matches!(cli.command, Some(CliCommand::Status(_)))
+                && error.code == ErrorCode::AppNotRunning
+                && let Some(stage) = shellboy::app::startup_stage::read(&data_dir).await
+            {
+                error.details = Some(serde_json::json!({"last_startup_stage": stage}));
+            }
+            Err(error)
+        } else {
+            result
         }
     }
     .await;

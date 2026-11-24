@@ -118,14 +118,17 @@ async fn initialize_localized_reporting(
     let language = owner.loaded.config.ui.language;
     let motion = owner.loaded.config.ui.motion;
     if cancel.is_cancelled() {
+        owner.publish_startup_stage(StartupStage::Closing).await;
         progress(StartupStage::Closing, language, motion);
         owner.shutdown().await?;
         return Ok(None);
     }
     let control_started = std::time::Instant::now();
+    owner.publish_startup_stage(StartupStage::Control).await;
     progress(StartupStage::Control, language, motion);
     let control = Control::new(&owner, cwd.clone());
     if let Err(error) = control.start().await {
+        owner.publish_startup_stage(StartupStage::Closing).await;
         progress(StartupStage::Closing, language, motion);
         let _ = close(owner, Some(control), None).await;
         return Err(error);
@@ -134,16 +137,19 @@ async fn initialize_localized_reporting(
         .diagnostics
         .record_startup_stage(StartupStage::Control, control_started.elapsed(), None);
     if cancel.is_cancelled() {
+        owner.publish_startup_stage(StartupStage::Closing).await;
         progress(StartupStage::Closing, language, motion);
         close(owner, Some(control), None).await?;
         return Ok(None);
     }
     let endpoint_started = std::time::Instant::now();
+    owner.publish_startup_stage(StartupStage::Endpoint).await;
     progress(StartupStage::Endpoint, language, motion);
     let (send, requests) = async_mpsc::channel(128);
     let server = match LocalServer::bind(&owner, send).await {
         Ok(server) => server,
         Err(error) => {
+            owner.publish_startup_stage(StartupStage::Closing).await;
             progress(StartupStage::Closing, language, motion);
             let _ = close(owner, Some(control), None).await;
             return Err(error);
@@ -162,6 +168,10 @@ async fn initialize_localized_reporting(
         cwd,
     };
     if cancel.is_cancelled() {
+        prepared
+            .owner
+            .publish_startup_stage(StartupStage::Closing)
+            .await;
         progress(StartupStage::Closing, language, motion);
         prepared.shutdown().await?;
         return Ok(None);

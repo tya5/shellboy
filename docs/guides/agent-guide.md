@@ -966,6 +966,9 @@ ownership. Recheck exact saved IDs/state before acting on a reported target.
 
 ## Owner memory observation
 
+
+If `shellboy status` cannot reach the owner, check `error.details.last_startup_stage` before deciding what happened. `database_migration` means migration was the last observed stage, not that the owner is still running. Do not restart an owner or repeat a mutation based only on that field.
+
 Use `shellboy status --memory` for on-demand owner cache accounting and native
 process memory, without activity filters. It does not call a model or embedding
 endpoint. Inspect each value and unavailable_reason; null means unknown, not zero.

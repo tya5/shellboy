@@ -18,6 +18,9 @@ Control受付とDB commitを順序の基準にする。operation receiptを同tr
 
 ## 起動の進捗と取消し試験
 
+The startup path is the sole writer of `startup-stage.json` in the locked data directory. The DB worker publishes transitions from the same `StartupStage` producer used by the TUI watch. The CLI reads the bounded atomically replaced snapshot on `app_not_running`, without opening SQLite. A clean close clears it; an abrupt exit may leave the last observation. Configuration and lock acquisition remain local to the initiating UI; endpoint metadata is untouched.
+
+
 StartupStageは観測通知で、DatabaseはDB workerの受付前に通知される。watchは中間値をまとめ得るため、通知の受信をmigration途中の同期barrierとして扱わない。起動取消しはDataOwner初期化を途中dropせず、移行・回復の終了後に実DB closeを待って返す。外部SQLite writerとの競合は既存の有限busy timeoutで失敗し得る。
 
 試験では既存の進捗callbackを通すprivate helperを使い、Database通知の同じ呼出し内で取消す。移行完了、返却後のowner lock解放、endpoint未公開を確認する。受付済みDB処理が全呼出し元のdrop後もlockを保つことは、storageのchannel同期付き所有試験で別に確認する。時計・scheduler・外部writer待機に依存した2秒以内の操作順序は要求しない。新しい公開API・状態・global test hookは追加しない。

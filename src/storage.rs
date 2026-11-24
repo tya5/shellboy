@@ -740,7 +740,7 @@ impl DbWorker {
     pub(crate) async fn open_owned_reporting(
         path: impl AsRef<Path>,
         owner: Arc<dyn Send + Sync>,
-        progress: Option<tokio::sync::watch::Sender<crate::app::StartupProgress>>,
+        progress: crate::app::startup_stage::DbProgress,
         startup_diagnostics: crate::diagnostics::Diagnostics,
         clean_shutdown: bool,
     ) -> Result<Self, StorageError> {
@@ -748,7 +748,7 @@ impl DbWorker {
             path,
             DEFAULT_QUEUE_CAPACITY,
             Some(owner),
-            progress,
+            Some(progress),
             Some(startup_diagnostics),
             clean_shutdown,
         )
@@ -767,7 +767,7 @@ impl DbWorker {
         path: impl AsRef<Path>,
         capacity: usize,
         owner: Option<Arc<dyn Send + Sync>>,
-        progress: Option<tokio::sync::watch::Sender<crate::app::StartupProgress>>,
+        progress: Option<crate::app::startup_stage::DbProgress>,
         startup_diagnostics: Option<crate::diagnostics::Diagnostics>,
         clean_shutdown: bool,
     ) -> Result<Self, StorageError> {
@@ -1711,7 +1711,7 @@ fn run_worker(
     ready: oneshot::Sender<Result<(), StorageError>>,
     mut state: WorkerState,
     startup: (
-        Option<tokio::sync::watch::Sender<crate::app::StartupProgress>>,
+        Option<crate::app::startup_stage::DbProgress>,
         Option<crate::diagnostics::Diagnostics>,
         bool,
     ),
@@ -1935,7 +1935,7 @@ struct StartupDbTrace<'a> {
     start: Instant,
     version: Option<u32>,
     diagnostics: Option<&'a crate::diagnostics::Diagnostics>,
-    progress: Option<&'a tokio::sync::watch::Sender<crate::app::StartupProgress>>,
+    progress: Option<&'a crate::app::startup_stage::DbProgress>,
 }
 impl StartupDbTrace<'_> {
     fn next(
@@ -1947,10 +1947,15 @@ impl StartupDbTrace<'_> {
         if let Some(diagnostics) = self.diagnostics {
             diagnostics.record_startup_stage(self.stage, self.start.elapsed(), self.version);
         }
+        if let Some(progress) = self.progress
+            && stage != self.stage
+        {
+            crate::app::startup_stage::publish(&progress.directory, stage);
+        }
         self.stage = stage;
         self.version = version;
         self.start = Instant::now();
-        if let Some(progress) = self.progress {
+        if let Some(progress) = self.progress.and_then(|progress| progress.watch.as_ref()) {
             progress.send_modify(|state| {
                 state.stage = stage;
                 state.migration = migration;
@@ -1966,9 +1971,41 @@ impl Drop for StartupDbTrace<'_> {
     }
 }
 
+#[cfg(test)]
+#[tokio::test]
+async fn startup_stage_database_transitions_remain_readable_before_ready() {
+    use crate::app::{OwnerLock, StartupStage::*, startup_stage};
+    let directory = tempfile::tempdir().unwrap();
+    let _owner = OwnerLock::acquire(directory.path()).unwrap();
+    let progress = startup_stage::DbProgress {
+        directory: directory.path().to_owned(),
+        watch: None,
+    };
+    let mut trace = StartupDbTrace {
+        stage: Database,
+        start: Instant::now(),
+        version: None,
+        diagnostics: None,
+        progress: Some(&progress),
+    };
+    startup_stage::publish(directory.path(), Database);
+    assert_eq!(startup_stage::read(directory.path()).await, Some(Database));
+    for stage in [
+        DatabasePragmas,
+        DatabaseMigration,
+        DatabaseValidate,
+        DatabaseForeignKeys,
+        DatabaseQuickCheck,
+    ] {
+        trace.next(stage, None, None);
+        assert_eq!(startup_stage::read(directory.path()).await, Some(stage));
+        assert!(!directory.path().join("endpoint.json").exists());
+    }
+}
+
 fn open_connection(
     path: &Path,
-    progress: Option<&tokio::sync::watch::Sender<crate::app::StartupProgress>>,
+    progress: Option<&crate::app::startup_stage::DbProgress>,
     diagnostics: Option<&crate::diagnostics::Diagnostics>,
     clean_shutdown: bool,
 ) -> Result<Connection, StorageError> {

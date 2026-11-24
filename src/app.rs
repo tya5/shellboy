@@ -1,4 +1,6 @@
 //! Data-directory ownership and asynchronous startup/shutdown.
+pub mod startup_stage;
+
 use crate::{
     config::{Config, LoadedConfig, PathEnvironment},
     protocol::{ApiError, ErrorCode, PROTOCOL_VERSION},
@@ -213,8 +215,8 @@ pub struct Endpoint {
     pub address: String,
 }
 
-/// Ephemeral initialization observations, never persisted Core state/events.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+/// Initialization observations, never saved as database state or events.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StartupStage {
     Configuration,
@@ -350,9 +352,14 @@ impl DataOwner {
             ..loaded
         };
         let marker_lock = lock.clone();
-        let clean = tokio::task::spawn_blocking(move || marker_lock.begin_session())
-            .await
-            .map_err(|_| ApiError::new(ErrorCode::IoFailed, "Owner marker worker failed"))??;
+        let directory = loaded.data_dir.clone();
+        let clean = tokio::task::spawn_blocking(move || {
+            let clean = marker_lock.begin_session()?;
+            startup_stage::publish(&directory, StartupStage::Database);
+            Ok::<_, ApiError>(clean)
+        })
+        .await
+        .map_err(|_| ApiError::new(ErrorCode::IoFailed, "Owner marker worker failed"))??;
         let diagnostics = crate::diagnostics::Diagnostics::start(
             loaded.data_dir.join("logs"),
             loaded.config.logging.clone(),
@@ -368,7 +375,10 @@ impl DataOwner {
         let db = DbWorker::open_owned_reporting(
             loaded.data_dir.join("shellboy.db"),
             lock.clone(),
-            migration_progress,
+            startup_stage::DbProgress {
+                directory: loaded.data_dir.clone(),
+                watch: migration_progress,
+            },
             diagnostics.clone(),
             clean,
         )
@@ -381,6 +391,13 @@ impl DataOwner {
         );
         let now = chrono::Utc::now().to_rfc3339();
         let recovery_started = std::time::Instant::now();
+        let directory = loaded.data_dir.clone();
+        let stage_lock = lock.clone();
+        let _ = tokio::task::spawn_blocking(move || {
+            let _owner = stage_lock;
+            startup_stage::publish(&directory, StartupStage::InterruptedWork);
+        })
+        .await;
         progress(StartupStage::InterruptedWork, language, motion);
         let preserve_usage_waits = loaded.config.recovery.auto_retry_usage_limit;
         let recovery = db.call(move |connection| {
@@ -433,6 +450,16 @@ impl DataOwner {
             ipc_refusals: Arc::default(),
             _lock: lock,
         })
+    }
+
+    pub(crate) async fn publish_startup_stage(&self, stage: StartupStage) {
+        let directory = self.loaded.data_dir.clone();
+        let lock = self._lock.clone();
+        let _ = tokio::task::spawn_blocking(move || {
+            let _owner = lock;
+            startup_stage::publish(&directory, stage);
+        })
+        .await;
     }
 
     pub async fn publish_endpoint(&self, mut endpoint: Endpoint) -> Result<(), ApiError> {
@@ -509,9 +536,16 @@ impl DataOwner {
         let metadata_result = metadata_result?;
         database_result.and(metadata_result)?;
         let lock = self._lock.clone();
-        tokio::task::spawn_blocking(move || lock.finish_session())
-            .await
-            .map_err(|_| ApiError::new(ErrorCode::IoFailed, "Owner marker worker failed"))?
+        let directory = self.loaded.data_dir.clone();
+        tokio::task::spawn_blocking(move || {
+            lock.finish_session()?;
+            if let Err(error) = startup_stage::clear(&directory) {
+                eprintln!("Could not clear owner startup stage: {error}");
+            }
+            Ok(())
+        })
+        .await
+        .map_err(|_| ApiError::new(ErrorCode::IoFailed, "Owner marker worker failed"))?
     }
 }
 
