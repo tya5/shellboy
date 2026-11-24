@@ -725,8 +725,10 @@ fn bash_arguments(command: &str) -> [&str; 5] {
 
 const LAUNCH_INSPECT: &str =
     "Inspect failed executions with shellboy shell list --thread THREAD_ID --state failed.";
+#[cfg(unix)]
 const SHELL_EXECUTABLE: &str =
     "Check the shell.executable setting for an installed executable for shell.kind.";
+#[cfg(unix)]
 const SHELL_CWD: &str =
     "Inspect the working directory with shellboy thread get --thread THREAD_ID.";
 
