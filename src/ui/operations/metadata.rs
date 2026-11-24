@@ -659,6 +659,7 @@ fn operation_label_for(id: OperationId, language: crate::config::UiLanguage) -> 
         OperationId::RunGet => local!(language, "作業 · 詳細", "Run · Details"),
         OperationId::RunRetry => local!(language, "作業 · 復旧を再試行", "Run · Retry recovery"),
         OperationId::RunStop => local!(language, "作業 · 停止", "Run · Stop"),
+        OperationId::TurnInterrupt => local!(language, "応答処理 · 中断", "Turn · Interrupt"),
         OperationId::TurnGet => local!(language, "応答処理 · 詳細", "Turn · Details"),
         OperationId::Wait => local!(language, "待機 · 条件を観測", "Wait · Observe conditions"),
         OperationId::HistoryList => local!(language, "履歴 · 一覧", "History · List"),
@@ -669,6 +670,7 @@ fn operation_label_for(id: OperationId, language: crate::config::UiLanguage) -> 
         OperationId::ShellGet => local!(language, "shell · 詳細", "Shell · Details"),
         OperationId::ShellRead => local!(language, "shell · 保存出力", "Shell · Saved output"),
         OperationId::ShellWrite => local!(language, "shell · 入力", "Shell · Input"),
+        OperationId::ShellBackground => local!(language, "shell · 背景化", "Shell · Background"),
         OperationId::ShellEof => local!(language, "shell · 入力を閉じる", "Shell · Close input"),
         OperationId::ShellStop => local!(language, "shell · 停止", "Shell · Stop"),
         OperationId::AttachmentAdd => local!(language, "添付 · 追加", "Attachment · Add"),
@@ -965,6 +967,11 @@ fn operation_meaning_for(id: OperationId, language: crate::config::UiLanguage) -
             "指定Runとその所有作業の停止を要求します。保存状態で実際の終了を確認します。",
             "Request that the specified Run and its owned work stop. Check saved state for actual completion."
         ),
+        OperationId::TurnInterrupt => local!(
+            language,
+            "指定Turnだけを中断します。",
+            "Interrupt only the selected Turn."
+        ),
         OperationId::TurnGet => local!(
             language,
             "一つのTurnの保存状態と回答ノードIDを表示します。回答本文は履歴原文から参照できます。",
@@ -1014,6 +1021,11 @@ fn operation_meaning_for(id: OperationId, language: crate::config::UiLanguage) -
             language,
             "指定Executionのstdinへ入力を送ります。送信結果と相手の処理完了は別に確認します。",
             "Send input to the specified Execution's stdin. Sending and the receiver's completion are checked separately."
+        ),
+        OperationId::ShellBackground => local!(
+            language,
+            "指定Executionを停止せず前景待機を終了します。",
+            "Release the foreground wait without stopping the shell."
         ),
         OperationId::ShellEof => local!(
             language,

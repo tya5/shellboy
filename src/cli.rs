@@ -487,6 +487,8 @@ pub enum TurnCommand {
         after_help = "  shellboy turn get --turn TURN_ID\n  shellboy history get --node END_MESSAGE_NODE_ID\n\nFetch only a returned end_message_node_id; stopped/failed terminal states need not have an end message. Guide: shellboy docs get --id shellboy/delegation"
     )]
     Get(TurnOptions),
+    /// Interrupt this Turn without stopping the Run.
+    Interrupt(TurnOptions),
 }
 #[derive(Debug, Clone, Subcommand)]
 pub enum HistoryCommand {
@@ -664,6 +666,8 @@ pub enum ShellCommand {
     Read(ShellReadOptions),
     Write(ShellWriteOptions),
     Eof(ExecutionOptions),
+    /// Release the foreground wait without stopping the shell.
+    Background(ExecutionOptions),
     Stop(ExecutionOptions),
 }
 #[derive(Debug, Clone, Subcommand)]
@@ -1930,6 +1934,9 @@ impl Cli {
             CliCommand::Turn {
                 command: TurnCommand::Get(a),
             } => C::TurnGet(wire::TurnTarget { turn_id: a.turn_id }),
+            CliCommand::Turn {
+                command: TurnCommand::Interrupt(a),
+            } => C::TurnInterrupt(wire::TurnTarget { turn_id: a.turn_id }),
             CliCommand::Wait(a) => C::Wait(wire::WaitArgs {
                 conditions: serde_json::from_str(&a.conditions_json).map_err(|_| {
                     invalid("conditions-json must be an array of typed wait conditions")
@@ -2116,6 +2123,9 @@ impl Cli {
                     execution_id: a.execution_id,
                     text: read_text(a.text, stdin).await?,
                     encoding: a.encoding,
+                }),
+                ShellCommand::Background(a) => C::ShellBackground(wire::ExecutionTarget {
+                    execution_id: a.execution_id,
                 }),
                 ShellCommand::Eof(a) => C::ShellEof(wire::ExecutionTarget {
                     execution_id: a.execution_id,

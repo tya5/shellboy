@@ -1361,6 +1361,7 @@ async fn interrupted_unfinished_group_waits_for_pairs_instead_of_rechecking() {
 #[tokio::test]
 async fn a_reported_running_shell_can_be_backgrounded_immediately() {
     crate::test_watchdog::watchdog("running shell foreground publication", async {
+        for wire in [false, true] {
         let (_root, owner, control, accepted) = fixture("http://127.0.0.1:1/v1").await;
         let snapshot = ready(&control, &accepted).await;
         let turn = snapshot.turn.clone();
@@ -1369,7 +1370,7 @@ async fn a_reported_running_shell_can_be_backgrounded_immediately() {
             db.execute("INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES('publication-group','publication-attempt',?1,'running','now')", [turn])?;
             db.execute("INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state)VALUES('publication-group','publication-call',0,'shell','{}','pending')", [])?;
             Ok(())
-        }).await.unwrap();
+            }).await.unwrap();
         let slot = control.live.register_or_nudge_driver(
             &snapshot.thread, snapshot.run.clone(), &control.stop, false,
         ).await.unwrap();
@@ -1379,27 +1380,50 @@ async fn a_reported_running_shell_can_be_backgrounded_immediately() {
         let shell = run_shell(control.clone(), &snapshot, &slot,
             "publication-group", "publication-call", args);
         tokio::pin!(shell);
-        loop {
+        let execution = loop {
             assert!(futures_util::poll!(shell.as_mut()).is_pending());
             let running = control.store.database.call(|db| {
-                Ok(db.query_row("SELECT EXISTS(SELECT 1 FROM shell_execution WHERE state='running')", [], |row| row.get::<_, bool>(0))?)
-            }).await.unwrap();
-            if running { break; }
+                use rusqlite::OptionalExtension;
+                Ok(db.query_row("SELECT id FROM shell_execution WHERE state='running'", [], |row| row.get::<_, String>(0)).optional()?)
+                }).await.unwrap();
+            if let Some(id) = running { break id; }
             tokio::task::yield_now().await;
-        }
-        let accepted = control.background(&snapshot.thread).await;
+        };
+        let accepted = if wire {
+            let wrong = control.request(Request::new(format!("{}:stale", owner.instance_id), Command::ShellBackground(crate::protocol::ExecutionTarget { execution_id: "stale".into() }))).await;
+            assert_eq!(wrong.error.unwrap().details.unwrap()["reason"], "execution_not_found");
+            let request = Request::new(format!("{}:background", owner.instance_id), Command::ShellBackground(crate::protocol::ExecutionTarget { execution_id: execution.clone() }));
+            let response = control.request(request.clone()).await;
+            let replayed = control.request(request).await;
+            assert_eq!(replayed.result, response.result);
+            response.result.ok_or_else(|| response.error.unwrap())
+        } else {
+            control.background(&snapshot.thread, None).await
+        };
+        if let Ok(ack) = &accepted { assert_eq!(ack, &json!({"execution_id":execution,"requested":true})); }
         let first_admitted = accepted.is_ok();
         if !first_admitted {
             // Reap the deliberately exposed old boundary before reporting red.
             assert!(futures_util::poll!(shell.as_mut()).is_pending());
-            control.background(&snapshot.thread).await.unwrap();
+            control.background(&snapshot.thread, None).await.unwrap();
         }
         let (result, halt) = shell.await.unwrap();
         assert!(halt);
-        assert_eq!(result["reason"], "human_backgrounded");
+        assert_eq!(result, json!({"status":"running","execution_id":execution,"reason":"human_backgrounded","cancel_remaining_calls":true}));
+        save_tool_result(&control, &snapshot, "publication-group", "publication-call", result).await.unwrap();
+        control.store.database.call(move |db| {
+            let (body, shell): (String, String) = db.query_row("SELECT json_extract(n.payload_json,'$.item.output'),s.state FROM tool_result r JOIN node n ON n.id=r.node_id JOIN shell_execution s ON s.id=?1 WHERE r.group_id='publication-group' AND r.call_id='publication-call'", [&execution], |row| Ok((row.get(0)?,row.get(1)?)))?;
+            let saved: Value = serde_json::from_str(&body).unwrap();
+            assert_eq!(saved["reason"], "human_backgrounded");
+            assert_eq!(saved["status"], "running");
+            assert_eq!(saved["cancel_remaining_calls"], true);
+            assert_eq!(shell, "running");
+            Ok(())
+        }).await.unwrap();
         control.live.remove_driver_if_current(&snapshot.thread, &slot.id).await;
         close(control, owner).await;
         assert!(first_admitted, "running was published before foreground admission: {accepted:?}");
+        }
     }).await.unwrap();
 }
 

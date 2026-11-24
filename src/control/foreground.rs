@@ -20,10 +20,17 @@ impl ForegroundSlot {
         ForegroundReceiver(receiver)
     }
     pub(super) fn release(&self, reason: ForegroundRelease) -> bool {
+        self.release_matching(None, reason).is_some()
+    }
+    pub(super) fn release_matching(
+        &self,
+        execution: Option<&str>,
+        reason: ForegroundRelease,
+    ) -> Option<String> {
         let current = self.current.lock().expect("foreground slot poisoned");
-        let Some((_, sender)) = current.as_ref().filter(|(_, sender)| !sender.is_closed()) else {
-            return false;
-        };
+        let (id, sender) = current.as_ref().filter(|(id, sender)| {
+            !sender.is_closed() && execution.is_none_or(|expected| expected == id)
+        })?;
         sender.send_if_modified(|pending| {
             if *pending == Some(ForegroundRelease::Background) {
                 // A human action is sticky until this call ends. A stale input
@@ -36,7 +43,7 @@ impl ForegroundSlot {
                 true
             }
         });
-        true
+        Some(id.clone())
     }
 
     /// Serialize a short DB update with foreground release, without awaiting.

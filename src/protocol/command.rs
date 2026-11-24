@@ -72,6 +72,8 @@ impl Command {
             Self::RunGet(_) => ("run.get", CommandRoute::Database),
             Self::RunRetry(_) => ("run.retry", CommandRoute::Database),
             Self::RunStop(_) => ("run.stop", CommandRoute::Database),
+            Self::TurnInterrupt(_) => ("turn.interrupt", CommandRoute::Runtime),
+            Self::ShellBackground(_) => ("shell.background", CommandRoute::Runtime),
             Self::TurnGet(_) => ("turn.get", CommandRoute::Database),
             Self::Wait(_) => ("wait", CommandRoute::Runtime),
             Self::EventsWait(_) => ("events.wait", CommandRoute::Runtime),
@@ -152,6 +154,7 @@ impl Command {
             | Self::StorageCollect(_)
             | Self::ConnectionTest(_)
             | Self::ConfigGet(_) => true,
+            Self::TurnInterrupt(_) | Self::ShellBackground(_) => false,
             Self::OwnerShutdown(_)
             | Self::ThreadList(_)
             | Self::ThreadGet(_)
@@ -226,6 +229,7 @@ impl Command {
             | Self::ServiceStart(_)
             | Self::ServiceStop(_)
             | Self::ServiceRemove(_) => false,
+            Self::TurnInterrupt(_) | Self::ShellBackground(_) => false,
             Self::ShellEof(_) | Self::ShellStop(_) => true,
             Self::OwnerShutdown(_)
             | Self::Status(_)
@@ -316,6 +320,7 @@ impl Command {
             | Self::ServiceStart(_)
             | Self::ServiceStop(_)
             | Self::ServiceRemove(_) => false,
+            Self::TurnInterrupt(_) | Self::ShellBackground(_) => true,
             Self::ThreadImport(_)
             | Self::ThreadCreate(_)
             | Self::ThreadFork(_)
@@ -395,6 +400,7 @@ impl Command {
     /// Observes targets without changing their state; receipt metadata and API cost are separate.
     pub fn is_read_only(&self) -> bool {
         match self {
+            Self::TurnInterrupt(_) | Self::ShellBackground(_) => false,
             Self::ArtifactAdd(_)
             | Self::ArtifactUpdate(_)
             | Self::ArtifactRemove(_)

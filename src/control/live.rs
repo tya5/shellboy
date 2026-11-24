@@ -3,7 +3,7 @@
 use super::{DriverSlot, ForegroundRelease, ForegroundSlot, LiveShell};
 use crate::control::driver::proactive::ThreadJob;
 use crate::{
-    protocol::{ApiError, ErrorCode},
+    protocol::ApiError,
     shell::ShellHandle,
 };
 use std::{
@@ -342,18 +342,24 @@ impl LiveRegistry {
             .map(|slot| slot.foreground.clone())
     }
 
-    pub(super) async fn background(&self, thread: &str) -> Result<(), ApiError> {
+    pub(super) async fn background(
+        &self,
+        thread: &str,
+        target: Option<(&str, &str)>,
+    ) -> Result<String, ApiError> {
         let drivers = self.drivers.lock().await;
-        let slot = drivers.get(thread).ok_or_else(|| {
-            ApiError::new(ErrorCode::InvalidState, "No foreground work is running")
-        })?;
-        if !slot.foreground.release(ForegroundRelease::Background) {
-            return Err(ApiError::new(
-                ErrorCode::InvalidState,
-                "No foreground shell is being awaited",
-            ));
-        }
-        Ok(())
+        drivers
+            .get(thread)
+            .filter(|slot| {
+                !slot.stop.is_cancelled() && target.is_none_or(|(run, _)| slot.run_id == run)
+            })
+            .and_then(|slot| {
+                slot.foreground.release_matching(
+                    target.map(|(_, execution)| execution),
+                    ForegroundRelease::Background,
+                )
+            })
+            .ok_or_else(|| super::background_refusal("not_foreground"))
     }
 
     pub(super) async fn register_shell(&self, execution: String, shell: LiveShell) {
@@ -794,16 +800,16 @@ mod tests {
         let registry = LiveRegistry::default();
         let stop = CancellationToken::new();
         assert_eq!(
-            registry.background("missing").await.unwrap_err().code,
-            ErrorCode::InvalidState
+            registry.background("missing", None).await.unwrap_err().code,
+            crate::protocol::ErrorCode::InvalidState
         );
         let slot = registry
             .register_or_nudge_driver("thread", "run".into(), &stop, false)
             .await
             .unwrap();
         assert_eq!(
-            registry.background("thread").await.unwrap_err().code,
-            ErrorCode::InvalidState
+            registry.background("thread", None).await.unwrap_err().code,
+            crate::protocol::ErrorCode::InvalidState
         );
         let mut call = slot.foreground.register("execution");
         assert!(
@@ -833,7 +839,7 @@ mod tests {
                 .unwrap(),
             Some(ForegroundRelease::AdditionalInput)
         );
-        registry.background("thread").await.unwrap();
+        registry.background("thread", None).await.unwrap();
         assert_eq!(
             tokio::time::timeout(Duration::from_secs(1), call.recv())
                 .await

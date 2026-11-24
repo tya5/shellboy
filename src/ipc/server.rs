@@ -94,9 +94,11 @@ impl WorkAdmission {
 
     pub(super) fn try_acquire(&self, command: &Command) -> Result<OwnedSemaphorePermit, ApiError> {
         let (slots, refused) = match command {
-            Command::RunStop(_) | Command::ShellStop(_) | Command::OwnerShutdown(_) => {
-                (&self.control, &self.refused.stop)
-            }
+            Command::RunStop(_)
+            | Command::ShellStop(_)
+            | Command::TurnInterrupt(_)
+            | Command::ShellBackground(_)
+            | Command::OwnerShutdown(_) => (&self.control, &self.refused.stop),
             Command::Status(args) if args.memory => {
                 (&self.memory_observation, &self.refused.memory)
             }

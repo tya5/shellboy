@@ -247,6 +247,13 @@ waiting on an interactive prompt; it is not by itself proof. Stop it with
 `shellboy shell stop --execution ID`, then confirm the resulting state. See the
 [Shell guide](shell.md#finding-and-stopping-a-stalled-shell) for the procedure.
 
+Use `shellboy shell background --execution ID` to release a Turn’s foreground
+shell wait without stopping the process. The tool result remains `running` with
+reason `human_backgrounded`; later unexecuted calls in that group are cancelled.
+Use `shellboy turn interrupt --turn ID` for the same Turn-only interruption as
+Esc (`human_turn_interrupted`), not `run stop`. Confirm the saved outcome with
+`shell get`, `turn get`, or `history get`; acknowledgment is not completion.
+
 ### Wait for any change instead of polling
 
 When you supervise several Threads and want to know when to look again, one long-poll

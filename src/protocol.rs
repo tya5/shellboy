@@ -1606,6 +1606,8 @@ pub enum Command {
     RunStop(RunTarget),
     #[serde(rename = "turn.get")]
     TurnGet(TurnTarget),
+    #[serde(rename = "turn.interrupt")]
+    TurnInterrupt(TurnTarget),
     #[serde(rename = "wait")]
     Wait(WaitArgs),
     #[serde(rename = "events.wait")]
@@ -1630,6 +1632,8 @@ pub enum Command {
     ShellWrite(ShellWriteArgs),
     #[serde(rename = "shell.eof")]
     ShellEof(ExecutionTarget),
+    #[serde(rename = "shell.background")]
+    ShellBackground(ExecutionTarget),
     #[serde(rename = "shell.stop")]
     ShellStop(ExecutionTarget),
     #[serde(rename = "attachment.add")]
@@ -2733,6 +2737,7 @@ mod message_acknowledgement_tests {
             "run.retry",
             "run.stop",
             "turn.get",
+            "turn.interrupt",
             "wait",
             "history.list",
             "history.window",
@@ -2745,6 +2750,7 @@ mod message_acknowledgement_tests {
             "shell.read",
             "shell.write",
             "shell.eof",
+            "shell.background",
             "shell.stop",
             "attachment.add",
             "attachment.list",

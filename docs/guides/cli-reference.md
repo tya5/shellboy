@@ -334,7 +334,7 @@ shellboy message get --message MESSAGE
 
 PowerShell can use `--text '...'` or pipeline `--text-stdin`. Native stdin encoding and empty arguments depend on shell settings. UTF-8 files can help preserve quoting in complex JSON examples.
 
-### Run / Turn (4 operations)
+### Run / Turn (5 operations)
 
 | Operation and all specific flags | Main result and conditions |
 |---|---|
@@ -342,6 +342,7 @@ PowerShell can use `--text '...'` or pipeline `--text-stdin`. Native stdin encod
 | `run retry --run RUN` | Recovery Run/Turn references; release the oldest at most 128 recoverable held receipts per operation, retaining recovery_wait while more remain. Existing recovery_hint includes remaining_held; repeat with a new operation ID for the next unit. Once drained, reprepare the same Turn without blindly rerunning executed shells. Any caller may retry (no authority check); the owner Run still receives the recovery notice. Concurrent retries are safe: one resumes the Turn, the others fail with `invalid_state` |
 | `run stop --run RUN` | Confirmed stopping/Run state; stops the target Run and its owned shells without affecting independent Runs. Any caller may target any Run (no authority check; check the ID first). Check get/wait for completed resource cleanup |
 | `turn get --turn TURN` | turn_id/run_id/thread_id/state/end_message_node_id/recovery_hint. Background owned work may keep the Run live after answering |
+| `turn interrupt --turn TURN` | Request the same Turn-only interruption as Esc. The Run is not stopped. Confirm the outcome with `turn get`. |
 
 `run retry` returning `ok: true` is acceptance, not execution success. Follow the
 returned Run/Turn through `wait` and `turn get`; do not use Thread latest or invent
@@ -519,6 +520,8 @@ conversation footer. In particular, `state: "completed"` can coexist with
 not assert such work. Exit markers and Revisit are independent of activity.
 
 ### Observing long-running shells (Issue #45)
+
+`shell background --execution ID` releases the current foreground tool wait without stopping the process or closing stdin. It acknowledges the release request, not completion. Inspect the execution with `shell get` and the Turn tool result with `history get`.
 
 `shell get --execution ID` and shell entries in `status` expose saved
 `started_at`, nullable `last_output_at` (latest retained output sequence),

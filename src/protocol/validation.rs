@@ -993,7 +993,7 @@ impl Command {
             }
             Self::OperationGet(a) => nonempty(&a.operation_id, "operation_id"),
             Self::RunGet(a) | Self::RunRetry(a) | Self::RunStop(a) => nonempty(&a.run_id, "run_id"),
-            Self::TurnGet(a) => nonempty(&a.turn_id, "turn_id"),
+            Self::TurnGet(a) | Self::TurnInterrupt(a) => nonempty(&a.turn_id, "turn_id"),
             Self::Wait(a) => a.validate(),
             Self::HistoryList(a) => a.validate(),
             Self::HistoryWindow(a) => a.validate(),
@@ -1001,9 +1001,10 @@ impl Command {
             Self::HistorySearch(a) => a.validate(),
             Self::HistoryExport(a) => limit(a.limit, MAX_LIST_LIMIT),
             Self::HistoryRelations(a) => a.validate(),
-            Self::ShellGet(a) | Self::ShellEof(a) | Self::ShellStop(a) => {
-                nonempty(&a.execution_id, "execution_id")
-            }
+            Self::ShellGet(a)
+            | Self::ShellEof(a)
+            | Self::ShellStop(a)
+            | Self::ShellBackground(a) => nonempty(&a.execution_id, "execution_id"),
             Self::ShellRead(a) => a.validate(),
             Self::ShellWrite(a) => a.validate(),
             Self::AttachmentAdd(a) => a.validate(),

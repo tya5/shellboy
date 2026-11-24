@@ -1124,6 +1124,23 @@ remains `target_unavailable`. Replaying an operation ID preserves its original
 receipt, not a second side effect. This intentionally changes the earlier
 successful closed-write/EOF behavior without adding a wire alias or version.
 Partial writes, timeouts and in-flight failures retain their typed write result;
+`shell.background {execution_id}` requests release of the exact running foreground
+execution awaited by a live Turn. It returns `{execution_id, requested: true}`
+when the live foreground slot accepts the request. The shell remains running;
+the existing driver may record `human_backgrounded` and cancel remaining calls.
+The acknowledgment is not a saved tool outcome; shell completion or another
+release can win the race. Unknown executions return `target_unavailable`
+(`details.reason=execution_not_found`); known but ineligible executions return
+`invalid_state` (`not_running_foreground` or `not_foreground`).
+
+`turn.interrupt {turn_id}` requests the same exact-Turn fence as Esc without
+stopping the Run. Its acknowledgment contains `thread_id`, `run_id`, `turn_id`,
+`requested`, `already_requested`, `state=interrupt_requested`, and
+`interrupt_requested_at`. Unknown Turns return `target_unavailable`
+(`turn_not_found`); finished Turns or stopping Runs return `invalid_state`
+(`already_finished` or `run_stopping`). Inspect `turn.get` and saved history
+for the resulting state. Both operations use the existing runtime receipts.
+
 `shell.stop` remains idempotent. Its `ShellStopResult` is an untagged union: `{ "accepted": true }` when a stop is accepted, or the same `ShellDetails` as `shell.get` when the execution has already finished.
 
 `attachment.remove` returns `AttachmentRemoveResult`, containing `attachment_id` and `removed: true` on success. None of these result declarations changes the existing wire shape or protocol version.

@@ -304,6 +304,38 @@ impl Control {
             }
         }
         match request.command {
+            Command::ShellBackground(args) => {
+                use rusqlite::OptionalExtension;
+                let execution = args.execution_id;
+                let id = execution.clone();
+                let row = self.store.database.call(move |db| {
+                    Ok(db.query_row("SELECT r.thread_id,r.id,s.state,r.state,u.state FROM shell_execution s LEFT JOIN run r ON r.id=s.owner_run_id LEFT JOIN turn u ON u.id=s.turn_id WHERE s.id=?1", [id], |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, Option<String>>(1)?, row.get::<_, String>(2)?, row.get::<_, Option<String>>(3)?, row.get::<_, Option<String>>(4)?))).optional()?)
+                }).await.map_err(storage_error)?;
+                let Some((thread, run, state, run_state, turn_state)) = row else {
+                    return Err(ApiError::new(
+                        ErrorCode::TargetUnavailable,
+                        "Execution was not found",
+                    )
+                    .details(json!({"reason":"execution_not_found","execution_id":execution})));
+                };
+                match (
+                    thread,
+                    run,
+                    state.as_str(),
+                    run_state.as_deref(),
+                    turn_state.as_deref(),
+                ) {
+                    (
+                        Some(thread),
+                        Some(run),
+                        "running",
+                        Some("live"),
+                        Some("running" | "waiting"),
+                    ) => self.background(&thread, Some((&run, &execution))).await,
+                    _ => Err(super::background_refusal("not_running_foreground")),
+                }
+            }
+            Command::TurnInterrupt(args) => self.interrupt_turn(args.turn_id).await,
             Command::ModelList(args) => self.runtime_models(args, caller, disconnected).await,
             Command::StorageStatus(_) => encode_result(
                 self.gc.details().await?,

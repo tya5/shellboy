@@ -19,6 +19,14 @@ mod turn_interrupt;
 mod ui_events;
 mod usage_limit_retry;
 pub use foreground::ForegroundRelease;
+
+fn background_refusal(reason: &'static str) -> ApiError {
+    ApiError::new(
+        ErrorCode::InvalidState,
+        "Execution is not an active foreground shell",
+    )
+    .details(json!({"reason":reason}))
+}
 use foreground::ForegroundSlot;
 use live::LiveRegistry;
 use runtime::{RuntimeOperation, encode_result};
@@ -1380,8 +1388,14 @@ impl Control {
         });
         let _ = stop.await;
     }
-    pub async fn background(&self, thread_id: &str) -> Result<(), ApiError> {
-        self.live.background(thread_id).await
+    pub(crate) async fn background(
+        self: &Arc<Self>,
+        thread_id: &str,
+        target: Option<(&str, &str)>,
+    ) -> Result<Value, ApiError> {
+        let _admission = self.admit(true)?;
+        let execution = self.live.background(thread_id, target).await?;
+        Ok(json!({"execution_id":execution,"requested":true}))
     }
     fn kick(
         self: &Arc<Self>,

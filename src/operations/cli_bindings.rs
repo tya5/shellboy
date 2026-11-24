@@ -442,6 +442,12 @@ const MEANINGS: &[Meaning] = &[
         None,
     ),
     (
+        OperationId::TurnInterrupt,
+        &["turn", "interrupt"],
+        &[("turn_id", FieldId::Turn)],
+        None,
+    ),
+    (
         OperationId::TurnGet,
         &["turn", "get"],
         &[("turn_id", FieldId::Turn)],
@@ -549,6 +555,12 @@ const MEANINGS: &[Meaning] = &[
             ("text_stdin", FieldId::Text),
             ("encoding", FieldId::Encoding),
         ],
+        None,
+    ),
+    (
+        OperationId::ShellBackground,
+        &["shell", "background"],
+        &[("execution_id", FieldId::Execution)],
         None,
     ),
     (

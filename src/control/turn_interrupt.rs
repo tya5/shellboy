@@ -49,14 +49,10 @@ impl DriverSlot {
     }
 }
 impl Control {
-    /// Dedicated human frontend action. It is deliberately absent from model CLI/wire commands.
-    pub async fn interrupt_turn(
-        self: &Arc<Self>,
-        thread: String,
-        turn: String,
-    ) -> Result<Value, ApiError> {
+    /// Shared exact-Turn admission for TUI and runtime callers.
+    pub async fn interrupt_turn(self: &Arc<Self>, turn: String) -> Result<Value, ApiError> {
         let control = self.clone();
-        tokio::spawn(async move { control.interrupt_turn_inner(thread, turn).await })
+        tokio::spawn(async move { control.interrupt_turn_inner(turn).await })
             .await
             .map_err(|_| {
                 ApiError::new(
@@ -65,12 +61,25 @@ impl Control {
                 )
             })?
     }
-    async fn interrupt_turn_inner(
-        self: &Arc<Self>,
-        thread: String,
-        turn: String,
-    ) -> Result<Value, ApiError> {
+    async fn interrupt_turn_inner(self: &Arc<Self>, turn: String) -> Result<Value, ApiError> {
         let _admission = self.admit(true)?;
+        let id = turn.clone();
+        let thread = self
+            .store
+            .database
+            .call(move |db| {
+                Ok(db
+                    .query_row("SELECT thread_id FROM turn WHERE id=?1", [id], |r| {
+                        r.get::<_, String>(0)
+                    })
+                    .optional()?)
+            })
+            .await
+            .map_err(storage_error)?
+            .ok_or_else(|| {
+                ApiError::new(ErrorCode::TargetUnavailable, "Turn was not found")
+                    .details(json!({"reason":"turn_not_found","turn_id":turn}))
+            })?;
         let outcome = self.live.admit_turn_interrupt(self, &thread, &turn).await;
         if let Err(error) = &outcome
             && error.is_storage_failure()
@@ -81,6 +90,12 @@ impl Control {
         if result["requested"] == true || result["already_requested"] == true {
             self.changed(&thread);
             self.kick_quiet(thread).await;
+        }
+        if let Some(reason @ ("already_finished" | "run_stopping")) = result["state"].as_str() {
+            return Err(
+                ApiError::new(ErrorCode::InvalidState, "Turn is no longer interruptible")
+                    .details(json!({"reason":reason,"turn_id":turn})),
+            );
         }
         Ok(result)
     }
@@ -337,6 +352,37 @@ mod tests {
             accepted["run_id"].as_str().unwrap().into(),
             accepted["turn_id"].as_str().unwrap().into(),
         )
+    }
+
+    #[tokio::test]
+    async fn turn_interrupt_command_and_tui_save_the_same_turn_fence() {
+        for wire in [false, true] {
+            let (_root, owner, control, thread, run, turn) = fixture().await;
+            let slot = control.live.register_or_nudge_driver(&thread, run.clone(), &control.stop, false).await.unwrap();
+            let ack = if wire {
+                let request = Request::new(
+                    format!("{}:turn-interrupt", owner.instance_id),
+                    Command::TurnInterrupt(crate::protocol::TurnTarget {
+                        turn_id: turn.clone(),
+                    }),
+                );
+                let response = control.request(request.clone()).await;
+                assert_eq!(control.request(request).await.result, response.result);
+                response.result.unwrap()
+            } else {
+                control.interrupt_turn(turn.clone()).await.unwrap()
+            };
+            assert_eq!(ack["requested"], true);
+            let at = ack["interrupt_requested_at"].as_str().unwrap().to_owned();
+            control.store.database.call(move |db| {
+                let saved = db.query_row("SELECT u.interrupt_requested_at,u.generation,r.state FROM turn u JOIN run r ON r.id=u.run_id WHERE u.id=?1 AND r.id=?2", params![turn,run], |r| Ok((r.get::<_,String>(0)?,r.get::<_,i64>(1)?,r.get::<_,String>(2)?)))?;
+                assert_eq!(saved, (at, 1, "live".into()));
+                Ok(())
+            }).await.unwrap();
+            control.live.remove_driver_if_current(&thread, &slot.id).await;
+            control.shutdown().await.unwrap();
+            owner.shutdown().await.unwrap();
+        }
     }
 
     #[tokio::test]

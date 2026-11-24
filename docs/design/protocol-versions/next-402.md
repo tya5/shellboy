@@ -1,0 +1,6 @@
+# Foreground shell and Turn intervention (#402)
+
+Adds `shell.background {execution_id}` and `turn.interrupt {turn_id}` as runtime
+control requests. Both use the existing receipts and the same owner paths as
+the TUI. Neither adds a state or changes shell/Run ownership. Acknowledgment is
+not completion. See the protocol reference for typed refusals and readback.

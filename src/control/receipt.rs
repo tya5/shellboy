@@ -384,6 +384,8 @@ pub(super) fn runtime_preflight(request: &Request) -> Result<()> {
     if matches!(
         request.command,
         Command::ShellWrite(_)
+            | Command::TurnInterrupt(_)
+            | Command::ShellBackground(_)
             | Command::ShellEof(_)
             | Command::ShellStop(_)
             | Command::IndexBackfill(_)

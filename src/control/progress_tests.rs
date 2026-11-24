@@ -121,7 +121,7 @@ async fn completed_shell_cannot_be_backgrounded_while_excerpt_is_loading() {
     let boundary = crate::test_watchdog::watchdog("src/control/progress_tests.rs: completed_shell_cannot_be_backgrounded_while_excerpt_is_loading", observed_pin).await;
     // Always release the actor before asserting or awaiting shutdown.
     let background = if boundary.is_ok() {
-        Some(control.background(&thread).await)
+        Some(control.background(&thread, None).await)
     } else {
         None
     };

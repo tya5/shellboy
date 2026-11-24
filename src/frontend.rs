@@ -1546,7 +1546,7 @@ async fn run_with_delivery(
                     UiAction::InterruptTurn {thread_id,turn_id} => {
                         if !control_tasks.is_empty() {status(&updates,Some(thread_id),i18n::local!(language, "中断操作を処理中です。状態を確認して再操作してください", "An interrupt is being processed. Check its state, then try again")).await;continue;}
                         let control=control.clone();
-                        control_tasks.spawn(async move {let result=control.interrupt_turn(thread_id.clone(),turn_id).await.map(|_|());(thread_id,result)});
+                        control_tasks.spawn(async move {let result=control.interrupt_turn(turn_id).await.map(|_|());(thread_id,result)});
                     }
                     UiAction::CancelMessages {message_ids,target} => {
                         let Ok(permit)=command_slots.clone().try_acquire_owned() else {status(&updates,target.thread_id.clone(),i18n::local!(language, "取消キューが満杯です。未受付です", "The cancel queue is full. Request not accepted")).await;continue;};
@@ -3289,7 +3289,7 @@ async fn run_with_delivery(
                         let control = control.clone();
                         let updates = updates.worker();
                         spawn_work(&mut workers, permit, async move {
-                            let result = control.background(&thread_id).await;
+                            let result = control.background(&thread_id, None).await;
                             command_outcome(&updates, submission, &result).await;
                             if let Err(error) = result
                                 && !has_submission

@@ -68,7 +68,7 @@ named_jobs! {
     ThreadUnarchive => thread_unarchive, ThreadTag => thread_tag, ThreadTags => thread_tags, ThreadCwds => thread_cwds, ThreadSet => thread_set,
     MessageSend => message_send, MessageAsk => message_ask, MessageReply => message_reply, MessageCancel => message_cancel, MessageGet => message_get, MessageList => message_list, IdResolve => id_resolve,
     OperationGet => operation_get, RunGet => run_get, RunRetry => run_retry, RunStop => run_stop,
-    TurnGet => turn_get, Wait => wait, EventsWait => events_wait, HistoryList => history_list, HistoryWindow => history_window, HistoryGet => history_get,
+    TurnInterrupt => turn_interrupt, ShellBackground => shell_background, TurnGet => turn_get, Wait => wait, EventsWait => events_wait, HistoryList => history_list, HistoryWindow => history_window, HistoryGet => history_get,
     HistorySearch => history_search, HistoryRelations => history_relations, HistoryExport => history_export, ShellGet => shell_get,
     ShellRead => shell_read, ShellWrite => shell_write, ShellEof => shell_eof, ShellStop => shell_stop,
     AttachmentAdd => attachment_add, AttachmentList => attachment_list, AttachmentRemove => attachment_remove,
@@ -182,6 +182,8 @@ impl Kind {
             | Kind::ShellGet
             | Kind::ShellRead
             | Kind::ShellWrite
+            | Kind::TurnInterrupt
+            | Kind::ShellBackground
             | Kind::ShellEof
             | Kind::ShellStop
             | Kind::IndexStatus
