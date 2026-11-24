@@ -11078,6 +11078,12 @@
       "title": "TurnDetails",
       "type": "object"
     },
+    "TurnInterruptState": {
+      "enum": [
+        "interrupt_requested"
+      ],
+      "type": "string"
+    },
     "TurnState": {
       "enum": [
         "preparing",
@@ -13554,6 +13560,23 @@
     "schedule.list": true,
     "schedule.remove": true,
     "schedule.set": true,
+    "shell.background": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "execution_id": {
+          "type": "string"
+        },
+        "requested": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "execution_id",
+        "requested"
+      ],
+      "title": "ShellBackgroundResult",
+      "type": "object"
+    },
     "shell.eof": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
@@ -14518,6 +14541,43 @@
         "state"
       ],
       "title": "TurnDetails",
+      "type": "object"
+    },
+    "turn.interrupt": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "already_requested": {
+          "type": "boolean"
+        },
+        "interrupt_requested_at": {
+          "type": "string"
+        },
+        "requested": {
+          "type": "boolean"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/definitions/TurnInterruptState"
+        },
+        "thread_id": {
+          "type": "string"
+        },
+        "turn_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "thread_id",
+        "run_id",
+        "turn_id",
+        "requested",
+        "already_requested",
+        "state",
+        "interrupt_requested_at"
+      ],
+      "title": "TurnInterruptResult",
       "type": "object"
     },
     "usage.get": {

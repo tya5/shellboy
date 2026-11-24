@@ -1395,7 +1395,10 @@ impl Control {
     ) -> Result<Value, ApiError> {
         let _admission = self.admit(true)?;
         let execution = self.live.background(thread_id, target).await?;
-        Ok(json!(crate::protocol::ShellBackgroundResult { execution_id: execution, requested: true }))
+        Ok(json!(crate::protocol::ShellBackgroundResult {
+            execution_id: execution,
+            requested: true
+        }))
     }
     fn kick(
         self: &Arc<Self>,
