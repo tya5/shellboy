@@ -357,10 +357,23 @@ async fn human_chips_keep_source_positions_through_followups_edit_restore_and_ow
     })
     .await;
     assert_eq!(text, snapshot.text);
+    let selected_thread = thread.clone();
+    let selected_revision = observer
+        .store
+        .database
+        .call(move |db| {
+            Ok(db.query_row(
+                "SELECT selection_revision FROM thread WHERE id=?1",
+                [selected_thread],
+                |row| row.get::<_, i64>(0),
+            )?)
+        })
+        .await
+        .unwrap();
     actions
         .send(UiAction::SendEdited {
             generation: 0,
-            selection_revision: 0,
+            selection_revision: u64::try_from(selected_revision).unwrap(),
             now: false,
             snapshot: None,
             draft_id: "edit".into(),
@@ -419,7 +432,6 @@ async fn human_chips_keep_source_positions_through_followups_edit_restore_and_ow
     actions
         .send(UiAction::SaveDraft {
             thread_id: thread.clone(),
-            selection_revision: 0,
             draft: unsent.clone(),
             anchor: ViewAnchor::default(),
             follow: false,

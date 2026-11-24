@@ -149,7 +149,6 @@ async fn frontend_first_send_is_saved_and_later_draft_survives_shutdown() {
     actions_send
         .send(UiAction::SaveDraft {
             thread_id: thread.clone(),
-            selection_revision: 0,
             draft,
             anchor: ViewAnchor::default(),
             follow: false,
@@ -1586,7 +1585,6 @@ async fn draft_database_save_failure_stops_admission_and_owned_shell_but_retains
     .at();
     send.send(UiAction::SaveDraft {
         thread_id: thread,
-        selection_revision: 0,
         draft: ui.view().draft.clone(),
         anchor: ViewAnchor::default(),
         follow: true,
@@ -3158,8 +3156,9 @@ async fn quit_accepted_before_frontend_binding_still_drains_queued_send_and_late
         .as_str()
         .unwrap()
         .to_owned();
-    let (rpc, _) = tokio::sync::mpsc::channel(1);
+    let (rpc, requests) = tokio::sync::mpsc::channel(1);
     let server = LocalServer::bind(&owner, rpc).await.unwrap();
+    tokio::spawn(control.clone().serve(requests));
     let (send, receive) = shellboy::ui::actions::channel(2);
     send.try_send(UiAction::Send {
         generation: 0,
@@ -3179,7 +3178,6 @@ async fn quit_accepted_before_frontend_binding_still_drains_queued_send_and_late
     .unwrap();
     send.try_send(UiAction::SaveDraft {
         thread_id: thread.clone(),
-        selection_revision: 0,
         draft: DraftSnapshot {
             draft_id: "draft".into(),
             revision: 1,
@@ -3194,7 +3192,6 @@ async fn quit_accepted_before_frontend_binding_still_drains_queued_send_and_late
         send.try_send_batch(vec![
             UiAction::SaveDraft {
                 thread_id: thread.clone(),
-                selection_revision: 0,
                 draft: DraftSnapshot {
                     draft_id: "draft".into(),
                     revision: 2,

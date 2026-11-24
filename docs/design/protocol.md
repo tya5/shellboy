@@ -1234,3 +1234,13 @@ upload. After an uncertain begin or append, a new begin for the same draft
 replaces its own unfinished transfer. A different draft cannot replace it.
 Release can be repeated for an already released attachment; there is no receipt
 for it. An old instance ID cannot modify a transfer on its replacement.
+
+### Draft save and selected view
+
+`draft.save` checks the live Thread and editing draft revision, then commits
+the draft and view in one transaction. A history append does not invalidate
+a save. A follow-tail view needs no selected node; a named reading anchor
+must still occur on the selected path. A displaced anchor returns
+`cursor_expired` without changing either row. The client keeps input and uses
+the bounded history rebase to display a fresh anchor; it does not replay the
+refused write. `draft.submit` keeps its separate selected-revision fence.

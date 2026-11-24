@@ -211,6 +211,11 @@ impl CommandHint {
                 "foreground shellを背景化",
                 "Move foreground shell to background"
             ),
+            "/reconnect" => local!(
+                language,
+                "再接続して操作結果を確認",
+                "Reconnect and check operation receipts"
+            ),
             "/quit" => local!(language, "通常終了", "Exit normally"),
             "/replies" => local!(
                 language,
@@ -289,6 +294,7 @@ const COMMANDS: &[CommandHint] = &[
     CommandHint {
         name: "/background",
     },
+    CommandHint { name: "/reconnect" },
     CommandHint { name: "/quit" },
     CommandHint { name: "/queue" },
     CommandHint { name: "/replies" },

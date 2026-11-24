@@ -19,6 +19,7 @@ pub(crate) fn is_legacy_admission_node(id: &str, kind: &str) -> bool {
 }
 
 mod window;
+pub(crate) use window::NODE_SQL as SELECTED_NODE_ORDINAL_SQL;
 pub use window::{STATEMENTS_FOR_TESTS as WINDOW_STATEMENTS_FOR_TESTS, window};
 mod body_page;
 mod node_row;

@@ -19,6 +19,7 @@ use tokio_util::sync::CancellationToken;
 mod peer;
 mod server;
 pub use server::LocalServer;
+pub(crate) use server::MAX_IPC_WORK;
 #[cfg(test)]
 pub(crate) use server::tests::Fixture as TestServer;
 pub(crate) use server::{AdmissionRefusals, MAX_WAIT_WORK, is_wait};
@@ -1013,7 +1014,7 @@ mod frame_delivery_tests {
         let mut selected = endpoint();
         selected.instance_id.clone_from(&control.store.instance_id);
         let operation = format!("{}:lost-draft", selected.instance_id);
-        let submit = Command::DraftSubmit(crate::protocol::DraftSubmitArgs {
+        let submit = Command::DraftSubmit(Box::new(crate::protocol::DraftSubmitArgs {
             thread_id: None,
             selection_revision: None,
             create: crate::protocol::ThreadCreateArgs {
@@ -1030,7 +1031,7 @@ mod frame_delivery_tests {
                 ..Default::default()
             }),
             deliver: crate::protocol::Deliver::Next,
-        });
+        }));
         let (client, mut peer) = tokio::io::duplex(4096);
         let backend = control.clone();
         let server = tokio::spawn(async move {

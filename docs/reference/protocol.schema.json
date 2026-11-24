@@ -2742,18 +2742,12 @@
         "follow_tail": {
           "type": "boolean"
         },
-        "selection_revision": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        },
         "thread_id": {
           "type": "string"
         }
       },
       "required": [
         "thread_id",
-        "selection_revision",
         "draft",
         "anchor",
         "follow_tail"

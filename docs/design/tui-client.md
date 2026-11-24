@@ -124,3 +124,13 @@ listener as receipt-backed `shell.background` and `turn.interrupt` commands.
 Neither a stale refusal nor a lost reply is retried against another identity.
 The typed acknowledgment is not completion; saved readback still determines
 what happened to the shell or Turn.
+
+### Draft save and selected view
+
+`draft.save` checks the live Thread and editing draft revision, then commits
+the draft and view in one transaction. A history append does not invalidate
+a save. A follow-tail view needs no selected node; a named reading anchor
+must still occur on the selected path. A displaced anchor returns
+`cursor_expired` without changing either row. The client keeps input and uses
+the bounded history rebase to display a fresh anchor; it does not replay the
+refused write. `draft.submit` keeps its separate selected-revision fence.

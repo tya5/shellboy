@@ -582,7 +582,6 @@ mod tests {
         sender
             .try_send(UiAction::SaveDraft {
                 thread_id: "thread".into(),
-                selection_revision: 0,
                 draft: DraftSnapshot {
                     draft_id: "closing-draft".into(),
                     text: "saved with UI stopped".into(),

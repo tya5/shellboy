@@ -1637,7 +1637,6 @@ record!(DraftView {
 });
 args!(DraftSaveArgs {
     thread_id: String,
-    selection_revision: u64,
     draft: Box<crate::ui::DraftSnapshot>,
     anchor: crate::ui::ViewAnchor,
     follow_tail: bool,
@@ -1661,7 +1660,7 @@ pub enum Command {
     #[serde(rename = "draft.restore")]
     DraftRestore(DraftRestoreArgs),
     #[serde(rename = "draft.submit")]
-    DraftSubmit(DraftSubmitArgs),
+    DraftSubmit(Box<DraftSubmitArgs>),
     #[serde(rename = "status")]
     Status(StatusArgs),
     #[serde(rename = "model.list")]
