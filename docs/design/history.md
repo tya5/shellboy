@@ -177,3 +177,12 @@ Its continuation stays bound to the original source revision. A failed, stale,
 or tombstoned source cannot become a successful page of replacement text. The
 report may omit displayed text under its existing field budget; detail retains
 its separately bounded view of the captured page, not a fresh source lookup.
+
+Explicit history-list reports now use the existing native `history.list`.
+Each page is scoped to one selected Thread and the literal filter, with the
+path revision and watermark carried by the cursor. Existing limits apply:
+200 returned rows, 4096 excerpt characters per row, and the native frame
+limit. Omitted provenance and display fields are not replacement text. This
+reuses the public filter engine: its examined rows may span the selected path
+and its matching relations, even when the returned page is small. This route
+is for explicit list reports, not recurring viewport refresh.
