@@ -1366,6 +1366,8 @@ async fn a_reported_running_shell_can_be_backgrounded_immediately() {
         let snapshot = ready(&control, &accepted).await;
         let turn = snapshot.turn.clone();
         control.store.database.call(move |db| {
+            // The fixture publishes an adopted tool group without a model dispatch.
+            db.execute("UPDATE turn SET state='running' WHERE id=?1", [&turn])?;
             db.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id=?1),'publication-attempt',?1,0,0,'fixture','fixture',0,'completed','{}','now')", [&turn])?;
             db.execute("INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES('publication-group','publication-attempt',?1,'running','now')", [turn])?;
             db.execute("INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state)VALUES('publication-group','publication-call',0,'shell','{}','pending')", [])?;

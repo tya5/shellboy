@@ -1,5 +1,7 @@
 // CLI/protocol owner operations with no generated TUI form.
 pub(crate) const CLI_ONLY_OWNER_OPERATIONS: &[OperationId] = &[
+    OperationId::ShellBackground,
+    OperationId::TurnInterrupt,
     OperationId::ArtifactAdd,
     OperationId::ArtifactUpdate,
     OperationId::ArtifactList,
@@ -93,7 +95,7 @@ fn fresh_clap_executable_paths_and_every_option_match_the_catalogue_bindings() {
     executable_commands(&parser, &mut vec![], &mut leaves);
     assert_eq!(
         leaves.len(),
-        105,
+        107,
         "track new CLI lifecycle paths explicitly"
     );
     for name in ["serve", "shutdown", "storage check"] {
@@ -388,8 +390,8 @@ fn fresh_clap_executable_paths_and_every_option_match_the_catalogue_bindings() {
 
 #[test]
 fn identities_are_complete_and_attach_is_the_only_explicit_alias() {
-    assert_eq!(OperationId::ALL.len(), 87);
-    assert_eq!(SPECS.len(), 87);
+    assert_eq!(OperationId::ALL.len(), 89);
+    assert_eq!(SPECS.len(), 89);
     let ids = OperationId::ALL.iter().copied().collect::<BTreeSet<_>>();
     assert_eq!(ids.len(), OperationId::ALL.len());
     assert_eq!(
