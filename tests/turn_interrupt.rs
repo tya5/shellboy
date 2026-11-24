@@ -251,10 +251,7 @@ async fn interrupted_stream_is_saved_without_retry_and_empty_run_completes() {
     .await
     .unwrap();
     let result = control
-        .interrupt_turn(
-            accepted.thread_id.clone(),
-            accepted.turn_id.clone().unwrap(),
-        )
+        .interrupt_turn(accepted.turn_id.clone().unwrap())
         .await
         .unwrap();
     assert_eq!(result["requested"], true);
@@ -339,7 +336,7 @@ async fn interrupted_foreground_keeps_owned_work_and_carries_queued_input_in_sam
     .await;
     let old_turn = accepted.turn_id.clone().unwrap();
     let result = control
-        .interrupt_turn(accepted.thread_id.clone(), old_turn.clone())
+        .interrupt_turn(old_turn.clone())
         .await
         .unwrap();
     assert_eq!(result["requested"], true);
@@ -430,12 +427,12 @@ async fn recovery_turn_interrupt_is_idempotent_and_stale_target_cannot_stop_repl
     let old_turn = accepted.turn_id.clone().unwrap();
     saved_state(&control, "turn", &old_turn, "recovery_wait").await;
     let first = control
-        .interrupt_turn(accepted.thread_id.clone(), old_turn.clone())
+        .interrupt_turn(old_turn.clone())
         .await
         .unwrap();
     assert_eq!(first["requested"], true);
     let _ = control
-        .interrupt_turn(accepted.thread_id.clone(), old_turn.clone())
+        .interrupt_turn(old_turn.clone())
         .await
         .unwrap();
     saved_state(
@@ -461,7 +458,7 @@ async fn recovery_turn_interrupt_is_idempotent_and_stale_target_cannot_stop_repl
     .await;
     let next = incoming(&mut requests).await;
     let stale = control
-        .interrupt_turn(accepted.thread_id.clone(), old_turn.clone())
+        .interrupt_turn(old_turn.clone())
         .await
         .unwrap();
     assert_eq!(stale["requested"], false);
@@ -522,10 +519,7 @@ async fn later_stream_interruption_is_not_misclassified_by_an_earlier_completed_
     .await
     .unwrap();
     control
-        .interrupt_turn(
-            accepted.thread_id.clone(),
-            accepted.turn_id.clone().unwrap(),
-        )
+        .interrupt_turn(accepted.turn_id.clone().unwrap())
         .await
         .unwrap();
     saved_state(
@@ -606,7 +600,7 @@ async fn background_completion_after_interruption_starts_new_turn_and_completes_
     let run = accepted.run_id.clone().unwrap();
     let old_turn = accepted.turn_id.clone().unwrap();
     control
-        .interrupt_turn(accepted.thread_id.clone(), old_turn.clone())
+        .interrupt_turn(old_turn.clone())
         .await
         .unwrap();
     saved_state(&control, "turn", &old_turn, "stopped").await;

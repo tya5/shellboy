@@ -528,7 +528,7 @@ async fn human_turn_interruption_releases_waiting_messages_at_run_end() {
     )
     .await;
     f.control
-        .interrupt_turn(f.thread.clone(), accepted.turn_id.unwrap())
+        .interrupt_turn(accepted.turn_id.unwrap())
         .await
         .unwrap();
     drop(held);

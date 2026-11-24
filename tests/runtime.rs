@@ -2118,7 +2118,7 @@ async fn assert_human_background_notice(has_remaining_call: bool) {
         .unwrap();
     crate::test_watchdog::watchdog("tests/runtime.rs: assert_human_background_notice", async {
         loop {
-            if control.background(&accepted.thread_id).await.is_ok() {
+            if control.background(&accepted.thread_id, None).await.is_ok() {
                 break;
             }
             tokio::task::yield_now().await;
@@ -2832,7 +2832,7 @@ async fn explicit_foreground_wait_is_durable_and_human_backgrounding_releases_on
             Ok(())
         }).await.unwrap();
         if background {
-            control.background(&accepted.thread_id).await.unwrap();
+            control.background(&accepted.thread_id, None).await.unwrap();
             let next = incoming(&mut requests).await;
             state(&control, "turn", turn, "running").await;
             control

@@ -731,7 +731,7 @@ async fn the_entry_is_freed_when_the_attempt_is_stopped_or_interrupted() {
                     let request = wait_request(&control, Command::RunStop(RunTarget { run_id: run }));
                     assert!(control.request(request).await.ok);
                 } else {
-                    control.interrupt_turn(t.clone(), turn).await.unwrap();
+                    control.interrupt_turn(turn).await.unwrap();
                 }
                 // The provider stream stays open: only the stop or interrupt can end the attempt.
                 while entry(&poll(&control, None, &[&t], 0).await, &t).is_some() {

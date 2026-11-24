@@ -2,10 +2,7 @@
 //! DB Run/Turn state remains authoritative; these maps contain owned handles.
 use super::{DriverSlot, ForegroundRelease, ForegroundSlot, LiveShell};
 use crate::control::driver::proactive::ThreadJob;
-use crate::{
-    protocol::ApiError,
-    shell::ShellHandle,
-};
+use crate::{protocol::ApiError, shell::ShellHandle};
 use std::{
     collections::{HashMap, HashSet},
     sync::{

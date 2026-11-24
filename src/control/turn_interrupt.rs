@@ -358,7 +358,11 @@ mod tests {
     async fn turn_interrupt_command_and_tui_save_the_same_turn_fence() {
         for wire in [false, true] {
             let (_root, owner, control, thread, run, turn) = fixture().await;
-            let slot = control.live.register_or_nudge_driver(&thread, run.clone(), &control.stop, false).await.unwrap();
+            let slot = control
+                .live
+                .register_or_nudge_driver(&thread, run.clone(), &control.stop, false)
+                .await
+                .unwrap();
             let ack = if wire {
                 let request = Request::new(
                     format!("{}:turn-interrupt", owner.instance_id),
@@ -379,7 +383,10 @@ mod tests {
                 assert_eq!(saved, (at, 1, "live".into()));
                 Ok(())
             }).await.unwrap();
-            control.live.remove_driver_if_current(&thread, &slot.id).await;
+            control
+                .live
+                .remove_driver_if_current(&thread, &slot.id)
+                .await;
             control.shutdown().await.unwrap();
             owner.shutdown().await.unwrap();
         }

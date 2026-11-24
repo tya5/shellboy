@@ -1388,7 +1388,7 @@ impl Control {
         });
         let _ = stop.await;
     }
-    pub(crate) async fn background(
+    pub async fn background(
         self: &Arc<Self>,
         thread_id: &str,
         target: Option<(&str, &str)>,

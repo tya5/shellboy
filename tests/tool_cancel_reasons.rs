@@ -173,7 +173,7 @@ async fn check(scenario: Scenario, expected: &str) {
         Scenario::HumanBackground => {
             crate::test_watchdog::watchdog("tests/tool_cancel_reasons.rs: check", async {
                 loop {
-                    if control.background(&accepted.thread_id).await.is_ok() {
+                    if control.background(&accepted.thread_id, None).await.is_ok() {
                         break;
                     }
                     tokio::task::yield_now().await;

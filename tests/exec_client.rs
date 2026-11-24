@@ -937,7 +937,7 @@ async fn esc_ended_processing_turn_exits_four() {
     let pending = fixture.next(&mut child).await;
     fixture
         .control
-        .interrupt_turn(accepted.thread_id.clone(), accepted.turn_id.unwrap())
+        .interrupt_turn(accepted.turn_id.unwrap())
         .await
         .unwrap();
     drop(pending);
