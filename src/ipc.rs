@@ -356,6 +356,14 @@ pub async fn call(
     connect(endpoint, command, operation_id, origin).await
 }
 
+/// Use the selected directory's listener, not an inherited invocation endpoint.
+pub(crate) async fn call_selected(
+    data_dir: &Path,
+    command: Command,
+) -> Result<Response<Value>, ApiError> {
+    connect(read_endpoint(data_dir).await?, command, None, None).await
+}
+
 /// The CLI retries only a definite wait admission refusal, on the same owner.
 pub async fn call_cli_wait(
     data_dir: &Path,
