@@ -2,7 +2,7 @@
 
 [Guide index](README.md) · [Delegation](delegation.md) · [Shell](shell.md) · [CLI reference](cli-reference.md)
 
-This guide describes how a model works in Shellboy. A conversation is a Thread, one response interval is a Turn, and a Run owns execution over its lifetime. A child agent is an independent Run on another Thread. A Run owns its shells, never another Run; Thread parentage only organizes conversations.
+This guide describes how a model works in Shellboy. A conversation is a Thread, one response interval is a Turn, and a Run owns execution over its lifetime. A child agent is an independent Run on another Thread. A Run owns its own shells, never another Run. Schedules and services belong to a Thread, and their executions need not have a Run.
 
 ## Read this guide in the running environment
 
@@ -16,6 +16,33 @@ shellboy docs get --id shellboy/shell
 ```
 
 The JSON's `result.text` contains the text; use `next_cursor` to continue. The full guide is not expanded into every prompt. `result.links` identifies bundled document IDs and sections. Your Thread's selected instruction file provides separate working instructions, not the product guide; it is not necessarily in the current cwd.
+
+## Find the next operation quickly
+
+| What you need | Entry point | Follow-up |
+|---|---|---|
+| Ask a person or another Thread | `shellboy message ask --text 'Question'` or add `--thread CHILD_THREAD_ID` | [Ask and reply](#reply-to-a-request) |
+| Reply to an applied request | `shellboy message reply --message MESSAGE_ID --text 'Result'` | Inspect `message get` if delivery is uncertain |
+| Wait for a shell or read its output | [Waiting for a shell](#waiting-for-a-shell-and-leaving-shells-behind) | Use the work execution ID, not the ID of the wait command |
+| Run a command once or periodically | `shellboy schedule --help` | [Scheduled checks](#scheduled-checks) |
+| Keep a watcher running independently of a Run | `shellboy service --help` | [Services](#services-for-long-running-commands) |
+| Command meaning and examples | `shellboy --help` / `shellboy docs search --query 'background'` | `docs get` using the returned guide ID |
+| Current work state | `shellboy status --thread THREAD_ID` | get the target returned by each item; this is saved state, not an inference of OS process liveness |
+| Assignment of a sent request | `shellboy message get --message MESSAGE_ID` | inspect `reply.state`, then read `reply.node_id` when replied |
+| Output of a launched command | `shellboy shell get --execution WORK_EXECUTION_ID` | shell read with that same ID; continue using the read cursor |
+| Evidence for a conversation's decisions | `shellboy history search ...` / `history list ...` | history get by node ID; history relations for relationships |
+| The recent end (or a position) of a long Thread | `shellboy history window --thread THREAD_ID --before 20` | `--ordinal N --expect-node NODE_ID` to read around a position you saw; `cursor_expired` means the path changed, re-read from the end |
+| Search across guides, documents, and history | `shellboy rag search --scope ... --query ...` | rag get by reference; explicitly include the history scope |
+
+History provenance may include `client_operation_id` on a user node when its original receipt uniquely proves the ID. Studio uses it only to reconcile its own plain-send pending row; it is not a general command-kind marker and is absent when evidence is ambiguous or unavailable.
+
+Zero search hits or reading only one page is not proof of absence; check the command list in `shellboy --help`.
+
+`status` defaults to nonterminal work. Add `--all` to investigate completion, failure, or stopping too.
+
+`docs` provides procedures, `status` provides current saved state, `history` provides conversation evidence, and `rag` retrieves documents from explicitly selected scopes. For full text or precise state, continue to the returned target instead of stopping at an excerpt or acceptance result.
+
+IDs have distinct roles even within the same task. `operation_id` identifies an operation receipt, `message_id` a request, `thread_id` a conversation, `run_id` execution ownership, `turn_id` a Turn interval, `end_message_node_id` the Turn's end message (its last saved assistant message), `reply.node_id` the requested reply, and `execution_id` one shell process. The shell ID that ran `message send` is not the recipient shell's ID. Store a launched command's returned ID as `WORK_EXECUTION_ID`, and recipient IDs separately as `CHILD_THREAD_ID` / `CHILD_MESSAGE_ID` / `CHILD_TURN_ID`. Do not assume local variables are automatically shared between shell tool calls.
 
 ## Check your context
 
@@ -37,21 +64,24 @@ the current one; earlier lines describe earlier Turns or earlier settings. A
 `thread_settings` event before a new line states what changed. Your next shell
 call runs in the cwd of the latest line.
 
-A received message may have one developer preamble immediately before its body. Shellboy derives it from the admission receipt without storing a separate notice. A sender label such as `app:todo` is self-asserted and not verified; treat it as a hint, never as identity or authority.
+A received message may have a sender or reply preamble. See [Recorded message sender](#recorded-message-sender); labels are not verified authority.
 
 Model shells inherit `SHELLBOY_THREAD_ID`, `SHELLBOY_RUN_ID`, `SHELLBOY_TURN_ID`, `SHELLBOY_EXECUTION_ID`, and connection context. Optional `--thread` arguments on commands such as `thread get` and `message send` default to your own Thread. Exceptions: `message ask` without `--thread` asks a person, and `history search` without `--thread` searches across Threads. Supply IDs explicitly where required. Keep returned Thread/Run/Turn/message/node/execution IDs separate to avoid confusing targets.
 CLI arguments that target a Thread, message, Run, or shell execution accept either the full ID or a unique prefix of at least 8 characters. Prefix lookup is exact and case-sensitive: ambiguous or bounded-scan-truncated prefixes are rejected with bounded candidates; add characters when asked rather than assuming uniqueness. No fuzzy correction occurs. An empty string is not an ID and passes through unchanged to preserve the command's existing empty-value meaning; non-empty values shorter than eight characters are rejected. IDs returned by Shellboy remain full IDs, and wire requests use only full IDs. If the owner does not advertise `id.resolve`, use the full ID or update the owner; do not retry with a guessed ID.
-If `message reply` reports `target_unavailable`, inspect `error.details.pending_duty_ids` for up to 16 duties this Thread owes, not questions it sent and choose the intended one; those suggestions do not change the target or automatically send a reply.
+
 
 To run a command yourself, call the shell tool directly. `message send` accepts a request for a recipient; it does not execute the command described in that request. Reading the `execution_id` of the shell that ran the sending CLI returns the acceptance JSON. Reading a shell executed by the recipient requires the different ID returned by that recipient's shell tool. Receiving a background launch ID and using a subsequent shell tool call for `shell get/read` is normal two-step usage. `message send` itself is a CLI command inside the shell tool, not a separate route mutually exclusive with “shell execution.” Sending to your own Thread adds input to your own conversation; it does not start another agent.
 
-A shell starts in the cwd saved on its Thread. Different Threads separate history and cwd, not filesystem sandboxes. Divide file ownership when editing concurrently. AGENTS.md follows the snapshot taken at Turn start; it does not change partway through a retry of the same Turn. Use `thread create/set/fork --agents PATH` to select a readable UTF-8 instruction file (up to 8 MiB), relative to the target effective cwd. `thread get` exposes `agents_path`. Selection uses normal Thread settings authority, not Run ownership permissions. Changes record the real actor and old/new paths and notify the next new Turn; current-Turn retries retain the old snapshot. Changing cwd alone leaves the reference unchanged. Explicit missing files are rejected; a file deleted after selection still follows the existing no-instructions behavior at a new Turn.
+A shell starts in its Thread's saved cwd. Threads separate history and cwd, not
+filesystem access. Divide file ownership when editing concurrently. See [Working
+instructions and conflicts](#working-instructions-and-conflicts) for AGENTS selection
+and snapshot lifetime.
 
 When you want the user to open a file or folder, write its absolute `file://` URL (for example, `file:///Users/me/report.md`); ordinary mentions of paths do not need this prefix.
 
 Origin is authenticated context inherited from the model shell by the CLI. Do not dump the whole environment, display tokens, or copy them. Permissions and ownership checks differ from an ordinary human's external CLI. See [Identity and operations](delegation.md#identity-and-operations).
 
-Add attachments through the shell as well, using `shellboy attachment add --path PATH --kind image`. Inspect the returned array's `source_node_id` and `delivery_status`; acceptance is not proof that the model has read the attachment. It is applied to a dedicated node after all results in your tool group are ready. Older attachments are resent at their original provenance positions, so do not treat one as a new image if the current message has no attachment. Shellboy puts the current binary hash at the source position and appends attachment status notices at the conversation tail. Replayed notices describe what happened at that point, not a fresh update; check `shellboy attachment list --thread THREAD` for current selection and availability. `shellboy attach PATH --kind image|file` is shorthand for `attachment add --path PATH --kind KIND`. See [Attachments](attachments.md).
+Add attachments through the shell as well, using `shellboy attachment add --path PATH --kind image`. Inspect the returned array's `source_node_id` and `delivery_status`; acceptance is not proof that the model has read the attachment. It is applied to a dedicated node after all results in your tool group are ready. Older attachments are resent at their original provenance positions, so do not treat one as a new image if the current message has no attachment. Shellboy puts the current binary hash at the source position and appends attachment status notices at the conversation tail. Replayed notices describe what happened at that point, not a fresh update; check `shellboy attachment list --thread THREAD` for current selection and availability. `shellboy attach PATH --kind image` (or `--kind file`) is shorthand for `attachment add --path PATH --kind KIND`. See [Attachments](attachments.md).
 
 ## Safety boundary
 
@@ -69,7 +99,11 @@ Origin/ownership checks are not a host-security boundary. See the
 Working instructions come from an ordinary user-editable file, subject to
 filesystem permissions. A root Thread defaults to `AGENTS.md` in its creation
 cwd; children/forks inherit the parent's current reference unless explicitly
-overridden with `--agents`. Changing cwd alone does not rediscover the file.
+overridden. `thread create`, `thread set`, and `thread fork` accept `--agents PATH`
+(relative to the target effective cwd, readable UTF-8, up to 8 MiB). Changing cwd
+alone does not rediscover the file. Explicitly selecting a missing file is refused;
+if a selected file is later deleted, the next Turn has no instructions from it.
+Selection is governed by Thread settings authority, not Run ownership.
 The instruction developer message starts with a JSON-quoted source path and
 snapshot facts. `Shellboy context` also identifies the current Turn's AGENTS
 reference; `thread get` reports the configured `agents_path`, which may differ
@@ -91,50 +125,67 @@ instructions, permissions and safety requirements: it is not an automatic
 exception and does not unconditionally override system instructions or replace
 the current Turn's snapshot. The provenance header itself adds no authority.
 
-## Find the next operation quickly
+### Registering common instruction files
 
-| What you need | Entry point | Follow-up |
-|---|---|---|
-| Command meaning and examples | `shellboy <command> --help` / `shellboy docs search --query 'background'` | `docs get` using the returned guide ID |
-| Keep a watcher or other command running independently of a Run | `shellboy service --help` | `shellboy service list --thread THREAD_ID` |
-| Run a command at a set time or on a recurring schedule (scheduler / cron / 定期実行) | `shellboy schedule --help` | `shellboy schedule list --thread THREAD_ID` |
-| Current work state | `shellboy status --thread THREAD_ID` | get the target returned by each item; this is saved state, not an inference of OS process liveness |
-| Assignment of a sent request | `shellboy message get --message MESSAGE_ID` | inspect `reply.state`, then read `reply.node_id` when replied |
-| Output of a launched command | `shellboy shell get --execution WORK_EXECUTION_ID` | shell read with that same ID; continue using the read cursor |
-| Evidence for a conversation's decisions | `shellboy history search ...` / `history list ...` | history get by node ID; history relations for relationships |
-| The recent end (or a position) of a long Thread | `shellboy history window --thread THREAD_ID --before 20` | `--ordinal N --expect-node NODE_ID` to read around a position you saw; `cursor_expired` means the path changed, re-read from the end |
-| Search across guides, documents, and history | `shellboy rag search --scope ... --query ...` | rag get by reference; explicitly include the history scope |
+Ask for the user's confirmation before registering an external component's common instructions. `extra_instructions`
+is an explicit ordered array of absolute UTF-8 paths; preserve other registrations when using hash-checked
+`config.set`. No directory discovery occurs. At most eight regular UTF-8 files of 8192 bytes each are accepted.
+They apply to all Threads as developer instructions before the per-Thread role, beginning with the next prepared
+Turn. Same-Turn retries/tool calls keep saved text. An unreadable file is skipped, not a reason to stop the Run.
+Check `instruction_warnings` in `shellboy status --run RUN_ID` and `shellboy thread get --thread THREAD_ID`
+for the path and reason. Fix the path or explicitly remove it through hash-checked `config set`, preserving
+other registrations. `config get` shows registrations; `thread get.instruction_sources` describes the latest
+prepared Turn. If the desired live value is already on disk, submitting it with `config set` and the current
+file hash updates a stale owner without rewriting the file. There is no automatic removal. Never put credentials
+in these files or claim consent was checked by the config API. Raw AGENTS JSON remains literal text.
 
-History provenance may include `client_operation_id` on a user node when its original receipt uniquely proves the ID. Studio uses it only to reconcile its own plain-send pending row; it is not a general command-kind marker and is absent when evidence is ambiguous or unavailable.
+## Reply to a request
 
-Zero search hits or reading only one page is not proof of absence; check the command list in `shellboy --help`.
+When the preamble says `Reply expected`, finish the task and
+use `shellboy message reply --message MESSAGE_ID --text 'Result and evidence'`.
+Reply once to that specific applied message; an ordinary progress message or a
+Turn end message is not its reply. Reply only to a request this Thread received,
+never on behalf of a child or to a request you sent. To withdraw your own
+request, use `message cancel`. Do not reply after cancellation.
+If the target is unavailable, check `error.details.pending_duty_ids` for up to
+16 duties this Thread owes, not questions it sent. A missing ID prefix can
+return the same suggestions with `not_found`. Verify the intended duty before
+sending; suggestions never change the target.
+See [Delegation](delegation.md#waiting-for-replies) for reminders and wait states.
 
-`status` defaults to nonterminal work. Add `--all` to investigate completion, failure, or stopping too.
+### Ask the human for a decision
 
-`docs` provides procedures, `status` provides current saved state, `history` provides conversation evidence, and `rag` retrieves documents from explicitly selected scopes. For full text or precise state, continue to the returned target instead of stopping at an excerpt or acceptance result.
+Run `shellboy message ask --text 'Question and options'` without `--thread`.
+The default recipient is `human`; `--deliver` requires a Thread recipient. Use `--thread`
+only to ask another Thread for a reply, never to ask your own Thread.
 
-IDs have distinct roles even within the same task. `operation_id` identifies an operation receipt, `message_id` a request, `thread_id` a conversation, `run_id` execution ownership, `turn_id` a Turn interval, `end_message_node_id` the Turn's end message (its last saved assistant message), `reply.node_id` the requested reply, and `execution_id` one shell process. The shell ID that ran `message send` is not the recipient shell's ID. Store a launched command's returned ID as `WORK_EXECUTION_ID`, and recipient IDs separately as `CHILD_THREAD_ID` / `CHILD_MESSAGE_ID` / `CHILD_TURN_ID`. Do not assume local variables are automatically shared between shell tool calls.
+The person answers in Studio or the TUI. Their answer arrives as a message in
+this Thread, linked to your question by `reply_to`, and closes the question.
+It starts a Run if needed. Never use `message reply` on your own question.
 
-## Carry out one task
+To withdraw a pending question, use `shellboy message cancel --message MESSAGE_ID`.
 
-1. Read instructions, current state, and necessary original text.
-2. Perform bounded work through shell. Use background execution for long tasks and track the returned execution.
-3. If dividing work, create/select a child Thread and request a reply with `message ask --thread`; retain the accepted message ID.
-4. End your Turn when only a child result remains. Its explicit reply is normally delivered back to your Thread; read the original reply node.
-5. Report results, verification, failures, and remaining work to the user.
+### Ask another Thread for work
 
-Give children their purpose, scope, permitted files, completion criteria and expected return information in the
-request. They do not inherit the entire parent conversation. Use `message ask --thread CHILD_THREAD_ID
---text ...`, retain `message_id`, and end the Turn when only the reply remains.
-The child uses `message reply --message MESSAGE_ID --text ...` once the request is applied. A normal delivered reply
-continues the sender's conversation. Inspect `message get` and its `reply.node_id` when evidence is needed; do not
-mistake the child's final Turn text for the requested reply. Progress is an ordinary message. Parent Run completion
-or stop neither adopts nor stops another Thread's Run. Only its own live shells can retain a background Run.
-Use `message ask --thread` to request a reply. A reply closes one message ID and does not open a new request; send the next assignment as a separate ask. If work depends on an external wait, ask after the wait clears.
-Unanswered-request reminders at Run completion remain. See [Delegation](delegation.md).
+Create or select a child Thread, then send its scope, permitted files, completion
+criteria and expected evidence in the request. The child does not inherit your whole
+conversation. Save the returned `message_id`, then end your Turn when only the reply
+remains. A normal delivered reply continues the sender's conversation.
 
+```sh
+shellboy message ask --thread CHILD_THREAD_ID --text 'Do the assigned work and reply with what you verified.'
+shellboy message get --message MESSAGE_ID
+shellboy history get --node REPLY_NODE_ID
+```
 
-### Waiting for a shell, and leaving shells behind
+Check `reply.state` and use its `reply.node_id` for the body. Do not substitute a
+child's final Turn text or treat acceptance as a reply. A reply closes one duty; use
+a separate ask for the next assignment. Use ordinary `message send` for progress.
+There are no automatic child Turn/Run lifecycle notices; an unanswered applied duty
+can get a Run-end reminder. The child's Run is independent: your Run ending neither
+waits for nor stops that Run. See [Delegation](delegation.md).
+
+## Waiting for a shell, and leaving shells behind
 
 A background shell has no time limit. A shell that never ends keeps your Run
 live after your Turn ends. An explicit `thread_settled` observer keeps waiting. Shellboy does not stop it automatically, because that
@@ -143,8 +194,8 @@ would also stop correct long commands.
 - Wait for a shell with `shellboy wait` and `shell_ended` for its
   `execution_id`. This also works for a Thread-owned service execution with no
   Run. For output, wait with `shell_output` and the saved `shell read` cursor,
-  then read again and put the new read cursor in the next condition. `--after`
-  is only for `thread_settled`. Do not use a loop you
+  then read again and put the new read cursor in the next condition. On `shellboy wait`,
+  `--after` is only for `thread_settled` (the separate `events wait` has its own cursor). Do not use a loop you
   write such as `until grep ...; do sleep 1; done`. The wait is saved, has a
   timeout, and a timeout leaves the shell running. The timeout includes time
   waiting for admission: the CLI retries capacity refusals itself and reports
@@ -167,8 +218,12 @@ would also stop correct long commands.
 
 ```sh
 shellboy wait --conditions-json '[{"type":"shell_ended","execution_id":"WORK_EXECUTION_ID"}]' --timeout-ms 30000
-shellboy shell stop --execution WORK_EXECUTION_ID
+shellboy shell get --execution WORK_EXECUTION_ID
+shellboy shell read --execution WORK_EXECUTION_ID --encoding UTF-8 --limit-bytes 65536
 ```
+
+The wait process exiting successfully is not the work process succeeding. Check its
+wait outcome, then the target execution's exit code or signal and output completeness.
 
 ### Noninteractive Git and stalled shells
 
@@ -222,40 +277,214 @@ shellboy wait --conditions-json '[{"type":"thread_settled","thread_ids":["CHILD_
 ```
 
 Never include your own Thread in `thread_settled`; it cannot settle while you wait.
+Direct waits on your invoking Run, Turn or shell fail with `self_wait`; indirect
+dependency cycles are not detected and can time out.
 
 Keep `result.cursor` even on timeout and pass it with unchanged conditions.
 Read `result.snapshot.changes`; `snapshot.more` means continue with that cursor.
 This also catches a finish/restart or recovery/resume between calls and survives
-owner restart. `satisfied` does not imply success or authorize recovery/retry.
+owner restart. `satisfied` does not imply success or authorize recovery/retry; `recovery_wait`
+is a reported settled state, not a terminal Run.
 ThreadList/Get expose `last_end_message` separately from `last_input`, including the
 latter's saved sender and self-asserted label. See [Delegation](delegation.md#waiting-for-several-threads)
 for bounds, current-state baselines and result/original-content inspection.
 
-## Reply to a request
+## Scheduled checks
 
-When the preamble says `Reply expected`, finish the task and
-use `shellboy message reply --message MESSAGE_ID --text 'Result and evidence'`.
-Reply once to that specific applied message; an ordinary progress message or a
-Turn end message is not its reply. Reply only to a request this Thread received,
-never on behalf of a child or to a request you sent. To withdraw your own
-request, use `message cancel`. Do not reply after cancellation.
-See [Delegation](delegation.md#waiting-for-replies) for reminders and wait states.
+One-shot schedules (`--at` or `--in`) disappear from `schedule list` when their
+execution settles, even if it fails or is stopped. Find the result with
+`shellboy shell list --thread THREAD`, then inspect its status and saved output
+with `shell get` and `shell read`. Recurring schedules stay listed.
+If a disabled one-shot's time has passed, `schedule enable --schedule ID`
+returns `invalid_state` and leaves it disabled. Add a new schedule for a future
+time instead of retrying enable.
 
-### Ask the human for a decision
+The scheduler (cron, 定期実行, スケジュール) belongs to the Thread. It runs shell commands without starting a model
+Turn. `schedule add` and `schedule set --schedule ID --description TEXT` take an optional description. To wake the owning Thread only when there is work, use a command such as:
 
-Run `shellboy message ask --text 'Question and options'` without `--thread`.
-The default recipient is `human`; no `--deliver` is needed. Use `--thread`
-only to ask another Thread for a reply, never to ask your own Thread.
+```sh
+shellboy schedule add --thread THREAD --cron '0 * * * *' -- \
+  'if test -f needs-review; then shellboy message send --thread "$SHELLBOY_THREAD_ID" --text "Review is needed"; fi'
+```
 
-The person answers in Studio or the TUI. Their answer arrives as a message in
-this Thread, linked to your question by `reply_to`, and closes the question.
-It starts a Run if needed. Never use `message reply` on your own question.
+Scheduled commands receive `SHELLBOY_THREAD_ID`, but no model shell Origin.
 
-To withdraw a pending question, use `shellboy message cancel --message MESSAGE_ID`.
+### Services for long-running commands
+
+For a long-running watcher, use `shellboy service add --thread THREAD --command 'my-watcher'` instead of a schedule or a background Run shell. Use `service list --thread THREAD` to inspect it and `service start --service ID`, `service stop --service ID`, or `service remove --service ID` to manage it. A service can send input with `shellboy message send --thread "$SHELLBOY_THREAD_ID" --text TEXT`. Unexpected exit or spawn failure disables the service and sends one notice from `service:<id>`; it does not restart until explicitly started.
+
+To observe a particular service execution, take its latest `execution_id` from
+`service list --thread THREAD` (not the service ID). Use `shell get --execution
+EXECUTION_ID` to verify the target, then a bounded `shell_ended` wait for exit
+or a `shell_output` wait with the cursor from `shell read` for new output. These
+waits observe that execution only; if the service starts again, look up the new
+execution ID. A wait timeout does not stop the service.
+
+Once the owner accepts shutdown, a scheduled command or service that has not
+passed the start gate cannot launch, even if the owner already reserved its
+execution. This cancellation does not disable a service or send a failure notice.
+
+Cron uses the owner's local time. At a daylight-saving gap, a fixed-time entry
+runs at the first valid time after the gap; interval entries skip nonexistent
+times. During a repeated hour, a fixed-time entry uses the first occurrence,
+while interval entries may run in both halves. When several occurrences are
+already past, the owner runs at most one and schedules the next future occurrence.
+
+After a forced owner exit, a recovered terminal execution record does not prove
+that a surviving OS child stopped. If a schedule or Thread deletion was
+interrupted before its final commit, issue a new delete to finish it; the owner
+does not resume the interrupted deletion on startup.
+
+## Shell tool parameters
+
+Model-started shells inherit the owner's environment, including API keys set
+there. A key stored in `credentials.toml` need not be in that environment, but
+the shell runs as the same OS user and can read the file. Neither method hides
+keys from the shell. Do not print or copy keys. Retained stdout and stderr are
+stored without redaction; check raw shell output before sharing it.
+
+Accepted parameters are `command`, `description`, `background`, `stdin_open`,
+`initial_stdin`, `input_encoding`, and `output_encoding`. Unknown parameters are always ignored with a warning; the removed
+`[shell] unknown_arguments` setting is not accepted.
+Do not use `timeout` or `workdir`: set the working directory in the command
+and use the background shell observation commands for long-running work. An
+invalid call returns its own error without preventing other valid calls in the
+same group; malformed protocol groups are still rejected as a whole.
+
+### Shell stdin lifetime
+
+`stdin_open` defaults to `false`. Without initial input, stdin reaches EOF
+without waiting for a later write. With `initial_stdin`, those bytes are delivered
+before EOF. Set `stdin_open: true` explicitly only for a command that needs later
+interactive input. Initial input remains ordered before subsequent writes or EOF;
+keeping stdin open does not change the initial-input encoding or byte limit.
+
+`shell get`, `shell list`, and shell records in `status` expose saved stdin
+facts: `stdin_open` is the owner's confirmed pipe state, not proof the child is
+reading input. `null` means no observation was saved for an older execution;
+terminal executions are closed. `stdin_last_write_at` is the actual completion
+time of the last nonempty, fully successful write, including initial input.
+Empty writes, EOF, partial/time-out and failed writes leave that value unchanged.
+A closed pipe cannot be reopened; start another execution with `stdin_open: true`
+when interaction is required. Neither field infers waiting or hangs from silence.
+A new `shell write` or repeated `shell eof` on closed stdin returns `invalid_state`,
+even for a known terminal execution; an unknown ID returns `target_unavailable`.
+Same-operation replay preserves the saved receipt; partial writes and timeouts keep
+their typed outcomes. `shell stop` remains idempotent.
+
+
+### Shell call descriptions
+
+With the default `[shell] describe_calls = true`, generated shell tool definitions
+require `description`. Explain what the command actually does in the conversation's
+language, within 80 characters. It is a label, not an instruction or a claim of
+safety; never put credentials in it. The command still executes unchanged.
+Received missing/blank labels fall back to commands; execution/display labels
+are bounded, but saved/replayed arguments remain verbatim without normalization
+metadata. `[shell] describe_calls = false` removes the parameter and its required
+entry from generation tool definitions and keeps command-based rows.
+
+## If you lose track of an output's target
+
+For a cancelled shell call, check `executed: false`, its stable `reason`, and
+`prerequisite` facts. `previous_wait_released_by_new_input` and
+`previous_wait_released_by_human_background` mean inspect the existing
+prerequisite execution with get/read/wait, rather than repeat its command.
+`previous_call_failed` requires reading the retained failure output;
+`previous_output_incomplete` does not itself imply a failed process.
+`previous_wait_released` preserves a CLI wait outcome separately from process
+success. See [shell cancellation and foreground release](shell.md#foreground-and-background).
+No timeout automatically backgrounds a foreground shell. Plan long-running work
+with `background: true`, and stop persistent owned commands when done.
+
+A known Unix shell exit remains `exited` if native cleanup cannot be confirmed. Read `exit_code` or `exit_signal` for the command outcome, `output_complete` for output, and `group_cleanup_confirmed` plus `reason` for cleanup. `exited` alone does not mean success or that the process group was reaped.
+
+Compare `command` / `cwd` / `thread_id` / `run_id` / `turn_id` from `shellboy shell get --execution ID` against the same fields in the launching tool result. If `command` is `shellboy message send ...`, acceptance JSON from read is that process's actual stdout. Do not infer another shell's successful launch or ID from acceptance JSON. Retrieve the tool result that executed the intended command; if it was never executed, pass that command directly to the shell tool. Prefer saved commands and tool arguments over your own description that you “ran it directly.”
+
+Use the same current release for the owner and CLI. The local RPC handshake uses the current protocol (`shellboy protocol schema` shows its number) and checks the advertised capabilities; a version mismatch is rejected before the request. To inspect the generated external-client contract without starting an owner, run `shellboy protocol schema`. The schema describes `status` activity and memory modes, `shell.list`, `usage.get`, and `config.get` from their current wire projections; provider/config-specific leaves remain open and nullable-versus-omitted behavior is significant. Do not interpret a version mismatch as a successful operation or retry side effects under a new operation ID.
+
+## Queued messages and human Turn interruption
+
+`shellboy message send --thread THREAD_ID --text 'Report; no reply needed'` queues ordinary input at the next tool-group/request boundary. Use this for routine reports. Add `--deliver now` only when the information must urgently release the recipient's foreground shell wait. That shell continues with its execution ID; immediate delivery does not cancel an in-progress model response. Do not poll or send repeated nudges merely because an input remains queued.
+
+If the target is in `recovery_wait`, a normal machine send (including this one) is held and does not resume it. Inspect the saved reason with `run get`; use `run retry` when recovery should reprepare the same Turn. Use `message send --resume-recovery` only when this new message is itself the reviewed instruction to resume; the `recovery_resumed` event records `external_cli` for an explicit external CLI resume and preserves an authenticated shell Origin when present. The TUI message-send form exposes the same explicit choice. A human TUI/chat instruction or caller-less human `message reply` resumes explicitly; a model-origin reply does not impersonate a human and remains held at recovery wait.
+
+Retain the accepted `message_id`. `shellboy message get --message MESSAGE_ID` exposes its saved delivery/context; applied means path admission, not a successful answer. To cancel unread input explicitly, use `shellboy message cancel --message MESSAGE_ID` (repeat `--message` for up to 128 fixed IDs). Humans may cancel any sender's input; models may cancel ordinary queued input in the target Thread. For a reply request, only its sender Thread or the owner can withdraw it. Withdrawal after delivery leaves history intact; a late reply is rejected with `invalid_state`, `reply_state: cancelled`, and `reason: withdrawn`. Check each returned outcome: another input may already have been admitted. Same-operation replay returns the saved outcomes. Cancellation does not wake the recipient. A model asker receives `reply_outcome: cancelled`, which can start a Run if its Thread is idle and not stopping. `archive_draft_id` identifies a durable source available to a human through TUI `/restore list` or `/restore draft ID`; restoration does not execute or send anything automatically.
+
+A human's Esc interruption ends only the active Turn. Its notification describes which output was cut short or which calls did not run; do not assume those actions executed. Received partial output is saved for inspection but omitted from the model conversation. A foreground shell may continue in the background: inspect its returned execution ID before repeating work. Check the latest human direction before continuing. Ctrl+C and Run stop remain full stops, including owned background shells; a later genuine shell completion may wake a Turn after Esc. A waiting complete-delivery message is still delivered when the Run then completes. Automatic time-based backgrounding is not enabled.
+
+
+## Send a message when the Run completes
+
+Use `--deliver complete` for an ordinary message that waits until your live Run
+would otherwise complete normally, after owned shells and pending input and events
+have been handled; it does not wait for another Thread's Run. This is a delivery timing on `message send`, not a
+separate Revisit operation, a new human request, or a judgement of success.
+
+```sh
+shellboy message send --deliver complete --text 'Before finishing, inspect the original request and later constraints using their saved node IDs. Continue missing work and report unverified results.'
+```
+
+Inside your shell, omitting `--thread` targets your own Thread. The result has
+`delivery_status: held` and `deliver: complete` while it waits; keep its
+`message_id`. Inspect it with `message get` and remove it with
+`message cancel --message MESSAGE_ID`. Several such messages may wait; at
+completion they arrive together, in send order, as a new Turn of the same Run,
+and your Run continues. Messages you or others send later with the default
+timing or `--deliver now` are delivered at their own boundaries first; a waiting
+complete-delivery message never delays them. To continue again, send another
+one during that Turn.
+
+If no Run is live when it is sent (for example your parent sends one to a child
+that already finished), it is delivered immediately like an ordinary message and
+starts an independent new Run under the ordinary message rules.
+
+A waiting complete-delivery message never outlives its Run. If the Run ends
+some other way, it is released at that moment as ordinary input: after `/stop`,
+Ctrl+C or `run stop` it is held like any input sent to a stopping Run and is
+admitted at the next explicit resume; after shutdown it is admitted at the next
+resume after restart; when the Run enters `recovery_wait`, it joins the held
+input that an explicit retry sends. After a human Esc interruption the Run still
+completes, so the message is delivered then; check the latest human direction
+first.
+
+## Inspect a delegation sender
+
+Retain `message_id` from each send. `shellboy message get --message MESSAGE_ID`
+returns `sender`; `shellboy history get --node MESSAGE_ID` and `history list`
+can return the original saved sender at `provenance.sender`, even for input appended to
+an active Run. `kind=model` identifies the verified originating instance,
+Thread, Run, Turn and shell execution IDs, not the receiving Run's owner.
+Deleted sender Threads do not erase those saved IDs. Follow those IDs with the
+ordinary inspection commands; they are facts, not permission to stop/retry work.
+`external_cli` is not necessarily a human, recorded TUI submissions can be
+`human`, and missing historical evidence is `unknown`. No credential is exposed.
+
+An optional `--sender-label 'reviewer'` is a self-asserted name (at most 64 Unicode
+characters, no controls/newlines), not a verified role or authority.
+Only `message send` and `message reply` accept `--sender-label`; `message ask` does not. Across data directories,
+Origin is stripped across owners, so the receiver sees `external_cli` plus that
+unverified name, not your authenticated model identity.
+
+### Recorded Message Sender
+
+For applicable received messages, replay and request inspection derive one developer
+preamble from the exact body's admission receipt in its creation Thread. It comes
+immediately before the body and is not stored as a separate history node. It reports
+sender kind, the saved model `Sender Thread` ID when available, an unverified label
+when supplied by a non-human sender, and the reply command or original `Reply to`
+message ID when applicable. IDs and labels are escaped so they cannot add lines.
+The identity is a routing fact, not a role or authority guarantee; a label remains
+self-asserted and is never auto-filled from a Thread title or ID. Human, external
+CLI and unknown/malformed senders do not acquire a model Thread identity line.
+Use the full ID with `thread get` if current Thread details are needed. Renaming
+or deleting a Thread does not rewrite the saved sender ID. Clients use structured
+`provenance.sender`, not parsed preamble text; current title resolution is UI-only.
+
 
 ## Distinguish acceptance from completion
 
-CLI `ok:true` means that the operation succeeded, not that a sent request has been replied to. In `message send` results, inspect `message_id`, `delivery_status`, `assignment`, and optional `run_id` / `turn_id`. Do not equate `accepted` with `applied`; track `held` / `pending` using `message get`.
+CLI `ok:true` means the requested command reached its own success boundary, not that downstream work succeeded or a reply arrived. In `message send` results, inspect `message_id`, `delivery_status`, `assignment`, and optional `run_id` / `turn_id`. Do not equate `accepted` with `applied`; track `held` / `pending` using `message get`.
 
 If a connection drops and the result is uncertain, first query your saved `operation_id` with `shellboy operation get --operation OPERATION_ID`. After a post-send connection failure, even an automatically generated ID remains in the returned JSON's `operation_id` / `error.details.operation_id`. A missing receipt is not proof that the operation never executed. Do not unconditionally repeat the same side effect with a new operation ID; inspect the target's state and original text. get/list/search/preview/status do not persist receipts and observe again even with the same query ID. History semantic search may incur query-embedding cost again. Retain the original operation IDs of mutations and `wait` requests to correlate their results. See [Recovery](recovery-and-storage.md) and [CLI reference](cli-reference.md).
 
@@ -270,8 +499,8 @@ wait is in memory and is cleared at owner restart; it is not an automatic retry.
 Separate profiles remain independent even when they use the same upstream quota.
 See [Recovery](recovery-and-storage.md#automatic-retries-for-temporary-model-communication-failures).
 
-Get exact whole-Thread totals with `shellboy usage get --thread THREAD_ID`, not
-`thread get`. The latter shows bounded recent context evidence; unknown usage or
+Use `shellboy usage get --thread THREAD_ID` for saved usage, not `thread get`.
+Check the selected time window, pagination and coverage before calling it a total. The latter shows bounded recent context evidence; unknown usage or
 pending edits must not be read as zero or false.
 
 To inspect your own saved usage, run `shellboy usage get`; add
@@ -320,6 +549,12 @@ Use the returned execution ID with shell get/read for full command/output; a lis
 never starts a shell or fetches its output.
 
 
+### Receipt retention and expiry
+
+Mutation and wait results can be reclaimed by internal maintenance after 24 hours from created_at, or under receipt-capacity pressure. Pending and unapplied references are protected. An `operation_expired` response to a repeated ID does not mean the mutation never happened. Expired-ID metadata remains to prevent reexecution, so inspect `operation get`'s `result_expired` and the target's state/history rather than automatically repeating the side effect under a new ID.
+
+Repeated reads do not consume operation-receipt budget. Pending reservations for mutations/wait and expired-ID metadata do use finite budgets, so acceptance is not unlimited. Inspect `status` / `storage status`. See [Recovery and capacity](recovery-and-storage.md#when-operation-receipt-capacity-rejects-a-request).
+
 ## Retrieve the original text you need
 
 ```bash
@@ -338,6 +573,15 @@ shellboy history relations --node NODE_ID --relation replacements --limit 50
 ```
 
 A Thread search includes its current selected path and sources of completed replacements; global search does not guarantee path membership. Kind and creation-period filters can apply at search time too. Hit provenance identifies origin, not a list of fork destinations. Spans are semantic chunk ranges in Unicode scalar positions within extracted text; distance is L2 distance. They do not mean exact word matches: verify the original text with get. For Thread-scoped search, `thread_scope.on_current_path` distinguishes selected-path nodes from replacement sources alone. Do not infer membership from global search or merge distinct nodes merely because their content matches. Relations distinguish conversation previous/next from replacement sources/replacements; pass `next_cursor` with the same node and relation. Use history list to inspect the selected path; do not assume relations return all ancestors or descendants. See [History and search](history-and-search.md).
+
+For `history.list` / `history.window` spill items, use additive `spill_tools.items` to associate compressed tool
+results with saved `call_id`, optional `execution_id` and optional `original_node_id`. At most eight sources are
+included; honor `truncated`. `status:"unknown"` on legacy spills means unavailable provenance, not zero calls.
+Do not globally search a call ID or assume an execution is still running. Existing direct `executions` metadata is
+unchanged. Explicit source-relation/history-get inspection remains available when needed; source bodies can be gone.
+
+Spill tool metadata lookup uses a bounded separate column and covering index; it never parses the spill payload. Older
+spills remain unknown after migration; no automatic payload backfill or source traversal occurs.
 
 ### When semantic history search helps
 
@@ -369,7 +613,7 @@ Do not request disclosure of private model reasoning or secret values. Report co
 
 By default only user messages (including messages sent from other Threads), summaries and model replies are indexed automatically (`auto_kinds` in `scope_status`). Tool output, spilled detail and Shellboy event notices are not, so a semantic `history search` can miss them; `scope_status.kinds_not_auto_indexed` lists them. For a command's output, an error message, a file path or any exact string, search the original text, which covers every kind and sends no embedding request:
 
-- To find a command's output, list the commands first: `shellboy shell list --command-contains TEXT [--thread THREAD_ID]`, then read the one you want with `shell get`.
+- To find a command's output, list the commands first: `shellboy shell list --command-contains TEXT` (add `--thread THREAD_ID` if needed), then read the one you want with `shell get`.
 - Otherwise keyword search: `shellboy rag search --scope history:THREAD_ID --mode keyword --query 'exact text'`. Prefer `history:THREAD_ID` over `history`: it filters results to that Thread but does not reduce the pages scanned. Adding a second `--scope` makes a mixed search that returns no `next_cursor`, so do not combine scopes when you need a complete answer.
 - A page scans a bounded number of nodes (2,000). A non-null `result.next_cursor`, or `keyword:"partial"` in `scope_status`, means the rest was not searched yet; it never means "not found". Continue with `--cursor` until `next_cursor` is null. On a large history that is many pages and takes minutes, so loop inside one shell command instead of spending a turn per page:
 
@@ -383,30 +627,13 @@ while :; do
 done
 ```
 
+For project knowledge, pass `rag --db ./knowledge/rag.db` consistently. It selects only that knowledge DB. A `history` scope still reads the conversation data directory selected by `--data-dir`, `SHELLBOY_DATA_DIR`, or the OS default; the owner is not changed by `--db`. Reuse the registered source name if the canonical path is already registered. A `stale` search hit after an embedding pause is from the previous saved revision, not verified against the file just scanned.
+
 Use semantic search for meaning in what was said, not for exact strings in tool output. Do not run `index backfill --kind ...` to fill a gap on your own: it is paid. Run `shellboy index preview --scope threads --thread THREAD_ID --kind tool_result` (uncharged), report the source/segment/character counts, and ask the user first.
 
 ## PowerShell usage
 
 Executable blocks in this guide use Bash. In PowerShell, use `$env:SHELLBOY_RUN_ID` for the current Run and `$env:SHELLBOY_THREAD_ID` for the current Thread; do not copy `$SHELLBOY_RUN_ID` unchanged. JSON argument quoting differs by shell; use the [Shell guide](shell.md) examples. The Windows native adapter has been implemented and cross-codechecked; these usage examples have not been verified on physical Windows hardware.
-
-## If you lose track of an output's target
-
-For a cancelled shell call, check `executed: false`, its stable `reason`, and
-`prerequisite` facts. `previous_wait_released_by_new_input` and
-`previous_wait_released_by_human_background` mean inspect the existing
-prerequisite execution with get/read/wait, rather than repeat its command.
-`previous_call_failed` requires reading the retained failure output;
-`previous_output_incomplete` does not itself imply a failed process.
-`previous_wait_released` preserves a CLI wait outcome separately from process
-success. See [shell cancellation and foreground release](shell.md#foreground-and-background).
-No timeout automatically backgrounds a foreground shell. Plan long-running work
-with `background: true`, and stop persistent owned commands when done.
-
-A known Unix shell exit remains `exited` if native cleanup cannot be confirmed. Read `exit_code` or `exit_signal` for the command outcome, `output_complete` for output, and `group_cleanup_confirmed` plus `reason` for cleanup. `exited` alone does not mean success or that the process group was reaped.
-
-Compare `command` / `cwd` / `thread_id` / `run_id` / `turn_id` from `shellboy shell get --execution ID` against the same fields in the launching tool result. If `command` is `shellboy message send ...`, acceptance JSON from read is that process's actual stdout. Do not infer another shell's successful launch or ID from acceptance JSON. Retrieve the tool result that executed the intended command; if it was never executed, pass that command directly to the shell tool. Prefer saved commands and tool arguments over your own description that you “ran it directly.”
-
-Use the same current release for the owner and CLI. The local RPC handshake uses the current protocol (`shellboy protocol schema` shows its number) and checks the advertised capabilities; a version mismatch is rejected before the request. To inspect the generated external-client contract without starting an owner, run `shellboy protocol schema`. The schema describes `status` activity and memory modes, `shell.list`, `usage.get`, and `config.get` from their current wire projections; provider/config-specific leaves remain open and nullable-versus-omitted behavior is significant. Do not interpret a version mismatch as a successful operation or retry side effects under a new operation ID.
 
 ## Resolve saved model response items
 
@@ -436,7 +663,14 @@ Once the conversation's purpose is clear, edit your own title with `shellboy thr
 Read settings with `shellboy config get`; it never returns a credential value. Change them with
 `shellboy config set` only when the user asked for that change, not to work around a problem you met. Before
 writing, show the current and new values of each field. Pass `result.file.content_hash` as `--expected-hash`.
-Afterwards, show the returned `changes` and their `restart_required` / `applied_to_running_owner` facts.
+Afterwards, distinguish the returned `changes`, `restart_required`, and
+`applied_to_running_owner`; the last can be true even if the file did not change.
+Use `--data-dir DIR` to select the owner, not `--config`. For a connection name
+with a dot, quote the TOML path component, for example:
+
+```sh
+shellboy config set --expected-hash HASH --set 'connections."my.proxy".base_url=https://example.com/v1'
+```
 Connections apply from the next Run. A Run pins its start-time connection generation across tool continuations,
 admission waits, automatic summaries and retries; live changes never split one Run across endpoints or policies.
 Default connection/model apply to new Threads immediately. Credentials keep their next-request lookup semantics.
@@ -459,481 +693,25 @@ no command returns the value. `shellboy config get` shows only where each key co
 (`loaded.credential_source`: `env`, `stored` or `none`). `shellboy connection test --connection NAME` (fine for diagnosing a saved connection) sends one
 model-catalog GET and reports `http_status`, `failure` and `models`; treat `ok: true` as "the endpoint answered with a
 catalog", never as proof the key is valid, and `failure: "auth"` as "the endpoint refused the credential" without
-guessing why. A stored key and ordinary connection edits apply to the next request. The connection used by
-`embedding.connection` keeps restart semantics so the index identity does not change mid-owner.
+guessing why. Stored-key lookup occurs at the next request; connection edits follow the Run and embedding restart boundaries in [Change settings only when asked](#change-settings-only-when-asked).
 On transport failure, `transport_cause` in the test and saved attempt error
 reports available DNS, connection, TLS or proxy CONNECT evidence without URLs
 or credentials. `--post-model MODEL` sends one **paid** synthetic conversation
 POST, without retries, after the catalog GET. Run it only with explicit user
 approval to use that provider; read `conversation.ok` separately from the
 catalog `ok`. A fresh probe cannot prove an existing pooled connection is good.
-Use `connection test --base-url ... --api-key-env VAR` and `credentials set`/`clear` only when asked. The credentials file is readable by any process of the user, including your shell, so never print or copy it. Your identity is recorded with the change.
 
-## Operation tracking, saved context, and deletion preview
+Use `connection test --base-url ... --api-key-env VAR` and `credentials set`/`clear` only when asked. Never print or copy credentials; see [Shell tool parameters](#shell-tool-parameters) for what the shell can read. Your identity is recorded with the change.
 
-Query a lost operation result with `shellboy operation get --operation OPERATION_ID`. Distinguish its receipt state/outcome from downstream completion, and follow targets to their get commands. Check downstream for message and compact. Repeating compact with the same ID returns its original queued acceptance even after downstream completion. pending/result_uncertain do not prove that side effects never occurred or that retrying with a new ID is safe. The query itself creates no receipt; its operation ID does not guarantee replay of the observation. Repeating attachment.add with the same ID returns the original result before mutable preflight, while preserving authentication and request-equality checks.
-
-Run/Turn/message/history get always includes `context`; Thread context can be absent for a fork. `history list` requires `provenance`, `context`, and `selection` on each item; `history get` requires `provenance` and `context`. Context contains saved times, states, reasons, and ownership. `parent_thread_id` means Thread lineage; `owner_run_id` exists for shell ownership only; Runs do not have parent owners. Unknown `started_at` and an unfinished `lifetime_ms` are omitted. `lifetime_ms` spans creation to termination, including preparation and waiting. Read `recovery_reason` as a JSON value; recovery wait or uncertainty after restart do not necessarily mean failure. Distinguish history origin from selection destinations.
-
-To move a conversation back to an earlier point, `shellboy thread rewind --thread THREAD --node NODE` cuts that Thread's selected path to end at NODE and keeps the removed part as a child Thread (`branch_thread_id` in the result; opening it undoes the rewind). It rewinds the conversation only: shell side effects are not undone, and the result lists the shell executions and child Threads started after NODE. It is refused while the target has a live or stopping Run or messages with unknown path admission; definitely unadmitted queued messages are allowed. `--run RUN` atomically stops that exact `recovery_wait` Run and rewinds its Thread. Because you always run inside a live Run, omitting `--thread` (your own Thread) is refused; rewind only another idle Thread, or continue from an earlier point with `shellboy thread fork --thread THREAD --node NODE`, or ask the user to run `/rewind`. `--exclude-node` ends the path just before NODE. The result also lists unanswered replies to messages the Thread sent (`pending_replies_to_sent_messages`); background shells from the removed part may still report `shell_ended`. Going back into a summarized range works only while the originals exist (not after `thread prune`).
-
-`thread list --order created` returns newest Threads first without reordering
-when their activity changes. It works with `--archived`; query, tag, cwd, awaiting, and
-state filters keep their existing list order and cannot be combined with
-`--order created`. Continue paging with the same order and archive selection.
-Every summary carries `created_at`; for Threads created before schema 54,
-created_at is the earliest recorded activity. If none was recorded, it is null.
-Creation order puts null last and breaks ties by descending Thread ID.
-
-To tidy mass-produced Threads, archive finished ones instead of deleting them: `shellboy thread archive --thread ID_1 --thread ID_2` (up to 200 IDs per call; add `--descendants` to include each Thread's children) hides them from the default `shellboy thread list` and changes nothing else (history, search, usage and messages still work, no storage is freed, `updated_at` does not move). There is no archive-by-filter command, so choose the IDs yourself: read `shellboy thread list --limit 200` (each item has `state`, `updated_at`, `last_end_message` and `parent_id`) and pick Threads whose work is complete and whose results you or the user no longer need in the list. Do not archive a Thread whose Run you still wait on; a Run in progress is not stopped, but the Thread leaves the list. List what you archived with `thread list --archived only` and reverse it with `shellboy thread unarchive --thread ID`. Omitting `--thread` archives your own Thread, and a bare `thread archive --descendants` hides your whole own subtree, so name IDs explicitly. Archive only Threads you created or were asked to tidy: never your parent or the Thread the user is talking in, since that hides it from the user's list. A new Run on an archived Thread unarchives it, and a call that selects more than 256 Threads with `--descendants` is refused without changes.
-
-Use `shellboy thread list --state failed --limit 50` (or `--state recovery_wait`) to page current Thread states in update order; keep all filters when passing `--cursor NEXT_CURSOR`. A short or empty page
-with `next_cursor` means more matches may exist; continue until the cursor is
-absent. Rows can move as activity changes, so this is not a frozen snapshot.
-
-`awaiting_replies_exact` and `awaiting_thread_count_exact` describe the total
-and Thread-directed pending counts, respectively. As with
-`awaiting_named_count_exact`, absent means exact and `false` means 17 or more,
-not exactly 17.
-
-To find Threads waiting on a named recipient across the owner, pass the name to `--awaiting`. For the default recipient, use `shellboy thread list --awaiting human --limit 50` and continue with `--cursor NEXT_CURSOR`. Each item reports `awaiting_named_count` and `awaiting_named_count_exact`: counts through 16 are exact; count 17 with exact=false means 17 or more. Legacy pending receipts are retained and counted with a 17-row bound. `awaiting_named_oldest_at` is the minimum saved question time only when the count is exact; it is absent for 17-or-more. This is a paged read over pending replies for the selected name only; Thread-to-Thread reply duties are excluded. The `awaiting` filter is exclusive with query, tag, cwd, and state filters; archived mode remains available.
-
-To find or group Threads, use tags rather than parents. `shellboy thread tag --thread ID --add "customer A" --add "bug hunt"` labels a Thread (many tags per Thread, at most 64; up to 200 IDs per call; `--remove` takes a label off), `shellboy thread list --tag "customer A" --tag "bug hunt"` lists only the Threads that carry every given tag (AND; tag order does not matter), `shellboy thread list --cwd /path` lists the Threads of one working directory (the saved path after lexical cleanup; a parent directory does not match), `shellboy thread cwds` lists the working directories in use (archived Threads count), and `shellboy thread tags` lists the tag names in use. Tags are free text (trimmed, one line, 128 characters), case sensitive, not inherited by `thread create`, `fork` or `rewind`, and they change no history, search, usage or list order. Use the same spelling every time (look at `thread tags` before inventing a new name). `thread get` and `thread list` show each Thread's `tags`. To archive everything with a tag, list with `--tag`, then pass the IDs to `thread archive`. For updated-order lists, including search and tag filters, follow `next_cursor` with unchanged filters even if a page is empty; a request examines at most 200 candidate Threads plus one lookahead. `excerpt_complete: false` means the latest 32 selected history nodes had no excerpt; older history may contain prose.
-
-`parent_id` is conversation hierarchy: delegation and reports, `--include-children` usage, `thread delete --descendants` and branch families. Do not use it only to file Threads; label them with tags instead. `shellboy thread set --thread ID --parent PARENT_ID` moves a Thread with its subtree and `--parent ''` detaches it; it changes no setting and no running work (only shells have an owning Run; Threads and Runs are independent, so the move changes no Run and stopping a parent's Run never stops a child's). Consequences to weigh before moving a Thread: it leaves its old parent's tree, a child's report to `parent_id` then goes to the new parent, and `--include-children` usage and `thread delete --descendants` follow the new tree. A move that would make a Thread its own ancestor is refused.
-
-To see how conversations branch, run `shellboy thread branches [--thread THREAD]`. A branch is a child Thread (made by `thread fork`, the user's `/edit`, or `thread rewind`) that shares the start of its parent's history. The result is a bounded, paged tree of the family (the topmost live ancestor and everything below it): each item gives `parent_thread_id`, `branch_kind` (`fork`, `rewind`, or `unknown`), `state` (`current`/`ancestor`/`branch`), `divergence.node_id` (the last node shared with the parent), the tip's last request excerpt and time, `size.path_nodes` (`bytes` is always null), `running`, and `pruned_originals`. Use it to find a rewound-away part (the child of the Thread you rewound), to choose a `thread fork --node` target, or to pick a branch to `thread get`/`history list`. Limits: 200 items per page, 256 Threads per family (`family_truncated`), 160-character excerpts; a cursor expires only when the tree changes (a family Thread is created or deleted).
-
-To release disk used by originals you no longer need, prune them explicitly. Read anything you still need first (`shellboy history get --node NODE`), then run `shellboy thread prune --before NODE --dry-run` (omitting `--thread` targets your own Thread), review `replacements.summaries`, `replacements.spills`, `shared_replacements_kept` and `source_nodes_on_other_live_paths`, and only then run `shellboy thread prune --before NODE`. The prune releases the originals of summaries and spills adopted before NODE; the existing GC reclaims them (to check immediately, run `shellboy storage collect --category history` and read its counts). It cannot be undone: afterwards `history get` of those originals, a summary restore, and a spill's `retrieve:` hint report "pruned / not retained". Originals other live Threads still hold are kept. GC frees pages inside the database but does not shrink the file (no automatic VACUUM). The full flow is `thread prune` -> GC (`storage collect --category history`) -> `storage vacuum`; the last step is explicit, needs the owner stopped (so it is refused from inside Shellboy) and is the user's to run (`shellboy storage vacuum --dry-run` shows what it would return). Do this only when the task or user asks for it; nothing prunes automatically.
-
-Within an authorized deletion task, use `shellboy thread delete-preview --thread THREAD_ID` (add `--descendants` to include descendants) to inspect blocking Runs, targeted descendants, and direct sharing, source, and attachment references. This is neither deletion authorization nor a guarantee of GC capacity; `reclaimable_bytes` is null. Actual delete rechecks current state. See [Recovery and storage](recovery-and-storage.md) and [CLI reference](cli-reference.md).
-
-For project knowledge, pass `rag --db ./knowledge/rag.db` consistently. It selects only that knowledge DB. A `history` scope still reads the conversation data directory selected by `--data-dir`, `SHELLBOY_DATA_DIR`, or the OS default; the owner is not changed by `--db`. Reuse the registered source name if the canonical path is already registered. A `stale` search hit after an embedding pause is from the previous saved revision, not verified against the file just scanned.
-
-## Backfilling old embeddings and checking cost
-
-Paid embeddings already saved are retained until explicitly removed. Ordinary RAG sync, raw-output expiry, and source retirement can remove material from search without deleting its saved vectors. Reindexing identical knowledge text can reuse the prior vector. `rag source remove --source NAME` removes vectors exclusive to that registration; shared vectors stay. For history, use explicit `index remove --space ID` for an inactive space, not `storage collect`. One `rag search` shares a successful query embedding across scopes using the same provider request identity; it may still charge for each distinct identity.
-
-Backfill/rebuild for old conversations incurs API cost separately from ordinary conversation searches. Backfill and rebuild take in only the configured `auto_kinds` (by default user messages and summaries) unless you add `--kind tool_result` (or `assistant_response`, `spill`, `event`, `all`); preview with the same `--kind` to see exactly what would be embedded, and ask the user before adding kinds, since tool output is most of the volume. A full `rebuild --scope all` without `--kind` is refused when the active index holds other kinds, because the new space would drop them; `shellboy index preview --scope all` shows the count as `indexed_outside_selection`. Never accept that loss for the user: pass `--kind all` only with their consent to the cost, or ask them. `index shrink` (smaller stored precision) keeps every kind.
-
-Treat an index pause notice as a historical stop record. Inspect `shellboy index status` for current reason/time and spaces; conversation can continue and existing indexed search can remain available. Do not repeat the same explanation or start retry loops every Turn. After the cause is fixed, `shellboy index preview` without a scope previews only previously authorized retry-eligible work. Report its source/segment/character counts and possible API charges; obtain explicit user consent before `shellboy index retry`. The CLI has no interactive consent gate. Do not initiate paid retry, backfill, rebuild or probe merely because a guide suggests it.
-
-For a requested dimension change, inspect status first and explain possible quality loss, candidate/active coexistence and charges. `vector_payload_bytes` is vector payload (`segments × dimension × 4`, or `× 1` for an int8 space), not physical SQLite/WAL size or guaranteed reclaimable bytes. Only after explicit consent may you use `shellboy index probe --dimensions N` (one potentially charged request) or a scoped `shellboy index rebuild ... --dimensions N` following its scope preview. Dimension support must not be guessed from a model alias; a failed probe/rebuild does not authorize trying alternatives. Probe observations are not a permanent capability catalogue. See [Index management](history-and-search.md#index-management-and-cost-previews).
-
-To make searches lighter without any charge, `shellboy index shrink` converts the active index to int8 from its saved vectors: no embedding API call, same dimension, about a quarter of the vector bytes read per search. It differs from `index rebuild`, which re-embeds text and costs money. Never start it unasked: run `shellboy index shrink --dry-run`, explain its facts (bytes added, the old index stays and still counts toward the data limit, rank order changes slightly, `distance` values become hundreds and only order results within one search) and get explicit consent. Then run it and follow `shrink` in `shellboy index status`. It resumes after a restart; on `shrink.error`, fix the cause and run it again, or `--cancel`. `index shrink` only converts and never deletes.
-
-Retained indexes hold paid vectors, including a partial one (`partial`) left by a replaced rebuild candidate. Nothing deletes them automatically, after a conversion or a rebuild, and neither may you on your own:
-
-1. After a conversion or rebuild succeeds, tell the user the old index is retained and its size (`retained_vector_payload_bytes` and `retained_remove_with` in `index status`).
-2. Suggest checking real searches first. `shellboy index shrink --revert --dry-run` shows the way back to the float32 index and how many segments would need indexing again. A revert can lead to charges for those segments: explain that and get consent, as for shrink.
-3. Explain that deleting frees that space for reuse inside the database (the file itself shrinks only with `storage vacuum`) and that recreating the index afterwards needs a paid rebuild. Ask.
-4. Only on the user's explicit yes, show `shellboy index remove --space SPACE_ID --dry-run`, then run it without `--dry-run`. `removed: true` means the index is no longer searchable; `reclaim_pending: true` means maintenance still has physical data to reclaim. Inspect the discarded space's remaining segments in `index status` and logical index bytes in storage status. Reclamation resumes after restart and does not guarantee immediate disk-file shrinkage.
-
-Never delete an index to relieve a low-disk or storage-limit hold on your own: tell the user it is an option and let them decide.
-
-Shellboy scales every provider embedding (index and query) to unit L2 length before storing or comparing it, for all models, so a reduced dimension ranks consistently. Run `shellboy index probe --dimensions N` first, then the scoped `index rebuild --dimensions N`, only with the user's consent to cost, and compare search quality before relying on the new space; spaces built unnormalized at a reduced dimension need that rebuild.
-
-
-### Receipt retention and expiry
-
-Mutation and wait results can be reclaimed by internal maintenance after 24 hours from created_at, or under receipt-capacity pressure. Pending and unapplied references are protected. An `operation_expired` response to a repeated ID does not mean the mutation never happened. Expired-ID metadata remains to prevent reexecution, so inspect `operation get`'s `result_expired` and the target's state/history rather than automatically repeating the side effect under a new ID.
-
-Repeated reads do not consume operation-receipt budget. Pending reservations for mutations/wait and expired-ID metadata do use finite budgets, so acceptance is not unlimited. Inspect `status` / `storage status`. See [Recovery and capacity](recovery-and-storage.md#when-operation-receipt-capacity-rejects-a-request).
-
-## Edit the selected path when input is large
-
-At a task boundary, after the push or report, review your own conversation once.
-Use `thread get`'s `context_usage.last_successful_attempt.input_tokens` (the last
-actual input, if reported) and `history list`'s large ranges as evidence. Do not
-start a new conversation as a substitute for this cleanup. Spill large tool outputs from completed work that are no longer
-needed with `compact --spill --from NODE --to NODE`; summarize a completed range
-with `compact --summary --from NODE --to NODE` when only its key facts are needed.
-Add `--dry-run` to inspect targets, projected characters and
-predicted failures without model calls, queueing or adoption. Check coverage
-limits; summary after-size is unknown, and a preview is not permission to execute
-an edit after the source changes.
-Shellboy also compacts automatically (argument-free spill and summary) at the
-next safe boundary once a response reports input tokens at or above the
-configured `auto_at_tokens` (default 200,000; `compact list` shows
-`reason: "proactive_threshold"`). You may change your own Thread's threshold with
-`shellboy thread set --auto-compact-at N` (`0` turns it off for this Thread, `''`
-returns to the configured value); `thread get` shows `auto_compact_at` and
-`effective_auto_compact_at`. It applies from the next request boundary. `thread set` also takes
-`--auto-compact-target-percent` and `--summary-max-chars` (an empty string restores the inherited value). The optional
-per-connection `spill` is a native TOML boolean; no global spill key exists. For an
-explicit Thread policy, use `shellboy thread set --spill on|off`, or `--spill ''` to
-inherit again. `thread get` shows nullable raw `spill` separately from boolean
-`effective_spill`; precedence is Thread, connection, built-in on. Null in a JSON
-`thread.set` is ordinary no-change, not clear. Child Threads, forks and rewinds copy
-the raw nullable override. Off means automatic spill bypass while automatic summary
-remains; it does not disable compaction. The effective setting drives the automatic route. If an automatic summary fails deterministically (refused, empty, or not smaller than its source), the same
-range with the same settings is not tried again; transient failures (rate limits, server
-errors, cancellation) are retried at the next eligible report. An explicit
-`compact --summary --from NODE --to NODE` on a range that already failed this way is refused
-too ("already failed deterministically"); change the range, the output limit
-(`--max-chars`) or the model before retrying. Do not answer it with repeated
-`compact --maximal`; that drops role context and cache hits. Do targeted range
-edits only when still needed.
-An active-Turn summary may cover user messages delivered during the work. Its
-notice says how many were covered. To inspect their exact order, follow the
-originals with `shellboy history relations --node FIRST --relation next`,
-replacing `FIRST` with the first source node ID given by the notice.
-
-Leave unfinished work, unapplied user instructions and information required for
-the current task untouched. If no completed range is safely dispensable, do not
-edit it. Do this once per task boundary, not on every request: path edits can
-invalidate prompt caches. Original facts remain accessible through `history get`,
-search and `compact --restore`; a summary is not a replacement for original evidence.
-
-For other explicitly needed range edits, use `compact --spill/--summary --from NODE --to NODE`. `--omit --from NODE --to NODE` can omit a detour in the middle; `--trim --to NODE` omits the prefix through that node. Boundaries are inclusive, complete groups. Omitting the current request, an incomplete group, or the newest group is rejected. Inspect candidates and adjust the range.
-
-Acceptance is queued; check operation get through downstream completion. Repeating an operation ID does not edit twice. Changes apply to the next request, not one already in progress. Make infrequent, substantial edits. Do not repeatedly edit the path and unnecessarily invalidate caches.
-
-The first/last original node IDs in an omission notification can also be used to summarize that range with `--summary --from ... --to ...`. Specify the whole omitted range of one marker. Prefer summarizing a range to rereading large amounts of original text and growing the input. Retrieve needed source text in small pieces with `history get --node NODE --limit-bytes BYTES`. `compact --restore [--from MARKER]` restores the original range, while later conversation remains and previously excluded attachments do not automatically return. Check current state before repeating an already executed operation. See [Input size and range editing](history-and-search.md#input-size-and-range-editing).
-
-### Reading summaries and their cost
-
-Closed, manual and active-Turn summaries use the same typed summary request and
-owned adoption transaction. `summary_usage` records total provider requests and
-reported/unknown token counters; `compact list` and `usage get` are read-only.
-A rejected attempt preserves the original path and reports its request usage.
-Historical `history get --node SUMMARY_NODE --parts` records remain readable
-when old summaries refer to per-part cache entries, but the current request path
-does not create map/reduce parts or consult the old segment-size controls.
-
-Use `summary_max_chars` for output limits, the model and
-effort for provider behavior, and `auto_at_tokens` to control when proactive
-summaries start. The per-Thread `auto_compact_target_percent` (default 20) decides whether the previous compaction was deep enough to need a summary.
-Original source nodes remain available through history and restore operations.
-
-## Large paths and long indexing tasks
-
-Before range editing, use `shellboy history list --thread THREAD_ID --excerpt-chars 0 --limit 20` to retrieve node IDs, kind, `selection.ordinal`, and `payload_chars`, then get only necessary bodies. payload_chars counts characters of stored JSON, not tokens; reclaimed content is null. Keep the same excerpt-chars on continuation pages. In `history window`, size can also be null because the source was not loaded (zero excerpt length or more than 1 MiB); a requested excerpt over the source budget is a placeholder.
-
-For a long `rag index`, pass a fixed index command to the shell tool with `background:true`, and retain the work execution ID returned by that tool. Wait with `shellboy wait --conditions-json '[{"type":"shell_ended","execution_id":"WORK_EXECUTION_ID"}]' --timeout-ms 30000`, then retrieve the result with `shellboy shell read --execution WORK_EXECUTION_ID --encoding UTF-8 --limit-bytes 65536`. Read the RAG JSON in `result.text` and inspect success/partial failure and failure_count/failures. Do not read a different execution that ran wait or message send. Continue partial/large output using the read cursor. For later per-source state, last scan/content-change times, and failures, use `rag status`; inspect a document with `rag inspect --id ID`. See [RAG](rag.md).
-
-A hybrid search with `ok:true` and `degraded:true` used only keyword search for some scopes. Follow `scope_status` reasons, missing counts, and `next.steps[].command`; inspect dry-run before explicitly running potentially charged indexing. Do not guess that real configuration, authentication, or communication errors merely mean “not ready.”
-
-## Resume conversations interrupted by application exit
-
-`thread list` exposes `latest_run_stop_reason`. Values `app_shutdown` and
-`previous_instance_interrupted` identify conversations whose latest Run stopped
-at an application lifecycle boundary; `explicit_stop` and normal completion do
-not. The thread browser marks these rows `[exit]`. A new Run clears the marker.
-
-When the user asks you to resume several conversations, inspect their saved
-interruption records and send the requested instructions with
-`shellboy message send --thread <thread-id> --text '<instruction>'`. Exclude your
-own Thread if it appears among the targets. Each destination starts an independent
-Run, so send a few at a time when many targets could exceed provider rate limits.
-
-Only shells have an owning Run. When a destination runs work, that work is its own independent Run, including for a child whose
-`parent_id` is your Thread, and stopping your Run does not stop it. You may stop or retry any Run, but only act on ones you started or were asked to handle, and check the ID first: stopping or retrying another Run can interrupt the user's conversation.
-
-The saved
-`result_uncertain: true` describes uncertain effects of the interrupted work.
-Use the saved evidence to decide how to continue rather than assuming the work
-completed or repeating side effects automatically.
-
-## Send a message when the Run completes
-
-Use `--deliver complete` for an ordinary message that waits until your live Run
-would otherwise complete normally, after owned shells/children and pending input
-and events have been handled. This is a delivery timing on `message send`, not a
-separate Revisit operation, a new human request, or a judgement of success.
-
-```sh
-shellboy message send --deliver complete --text 'Before finishing, inspect the original request and later constraints using their saved node IDs. Continue missing work and report unverified results.'
-```
-
-Inside your shell, omitting `--thread` targets your own Thread. The result has
-`delivery_status: held` and `deliver: complete` while it waits; keep its
-`message_id`. Inspect it with `message get` and remove it with
-`message cancel --message MESSAGE_ID`. Several such messages may wait; at
-completion they arrive together, in send order, as a new Turn of the same Run,
-and your Run continues. Messages you or others send later with the default
-timing or `--deliver now` are delivered at their own boundaries first; a waiting
-complete-delivery message never delays them. To continue again, send another
-one during that Turn.
-
-If no Run is live when it is sent (for example your parent sends one to a child
-that already finished), it is delivered immediately like an ordinary message and
-starts an independent new Run under the ordinary message rules.
-
-A waiting complete-delivery message never outlives its Run. If the Run ends
-some other way, it is released at that moment as ordinary input: after `/stop`,
-Ctrl+C or `run stop` it is held like any input sent to a stopping Run and is
-admitted at the next explicit resume; after shutdown it is admitted at the next
-resume after restart; when the Run enters `recovery_wait`, it joins the held
-input that an explicit retry sends. After a human Esc interruption the Run still
-completes, so the message is delivered then; check the latest human direction
-first.
-
-There are no automatic child Turn/Run lifecycle notices. Request a specific reply with `message ask --thread`, end the
-sender Turn, and inspect the saved reply/message when it is delivered. Progress is an ordinary message.
-
-## Inspect a delegation sender
-
-Retain `message_id` from each send. `shellboy message get --message MESSAGE_ID`
-returns `sender`; `shellboy history get --node MESSAGE_ID` and `history list`
-return the same saved sender at `provenance.sender`, even for input appended to
-an active Run. `kind=model` identifies the verified originating instance,
-Thread, Run, Turn and shell execution IDs, not the receiving Run's owner.
-Deleted sender Threads do not erase those saved IDs. Follow those IDs with the
-ordinary inspection commands; they are facts, not permission to stop/retry work.
-`external_cli` is not necessarily a human, recorded TUI submissions can be
-`human`, and missing historical evidence is `unknown`. No credential is exposed.
-
-An optional `--sender-label 'reviewer'` is a self-asserted name (at most 64 Unicode
-characters, no controls/newlines), not a verified role or authority.
-Only `message send` and `message reply` accept `--sender-label`; `message ask` does not. Across data directories,
-Origin is stripped across owners, so the receiver sees `external_cli` plus that
-unverified name, not your authenticated model identity.
-
-## Storage and resources
-
-Shell raw output can expire (default seven days / total 1GiB); large output consumes that budget. Preserve needed results in a durable file or answer rather than relying on later raw reads.
-Managed clipboard images can also expire (default seven days / total 256MiB); their exposed absolute `path` has the same lifecycle, not permanent availability. Active selections, drafts and send pins protect them.
-If a Turn ends with `storage_limit`, read `error.details.reason`: `logical_limit` means Shellboy's data limit, `disk_free_low` means the data directory's volume has less free space than `limits.disk_free_min_bytes` (default 5GiB). Either way new model, shell, child, summary and index work is held; stop, `shellboy status`, `storage status` and `storage collect` still work. For `disk_free_low`, `storage collect` and `thread prune` do not return space to the OS (the database file does not shrink), so do not loop on them: tell the user the free bytes and the minimum, and wait for them to free space and retry. Do not retry on your own or work around the hold. The hold only stops new work: commands you already started, and commands you run in your own shell, are not stopped and can still write to the disk, so avoid large writes while the disk is low.
-Collection keeps history references/reasons, not the reclaimed content; conversations have no automatic expiry. See [Recovery and storage](recovery-and-storage.md) and [Configuration](configuration.md) for retention, GC and cache budgets.
-
-## Queued messages and human Turn interruption
-
-`shellboy message send --thread THREAD_ID --text 'Report; no reply needed'` queues ordinary input at the next tool-group/request boundary. Use this for routine reports. Add `--deliver now` only when the information must urgently release the recipient's foreground shell wait. That shell continues with its execution ID; immediate delivery does not cancel an in-progress model response. Do not poll or send repeated nudges merely because an input remains queued.
-
-If the target is in `recovery_wait`, a normal machine send (including this one) is held and does not resume it. Inspect the saved reason with `run get`; use `run retry` when recovery should reprepare the same Turn. Use `message send --resume-recovery` only when this new message is itself the reviewed instruction to resume; the `recovery_resumed` event records `external_cli` for an explicit external CLI resume and preserves an authenticated shell Origin when present. The TUI message-send form exposes the same explicit choice. A human TUI/chat instruction or caller-less human `message reply` resumes explicitly; a model-origin reply does not impersonate a human and remains held at recovery wait.
-
-Retain the accepted `message_id`. `shellboy message get --message MESSAGE_ID` exposes its saved delivery/context; applied means path admission, not a successful answer. To cancel unread input explicitly, use `shellboy message cancel --message MESSAGE_ID` (repeat `--message` for up to 128 fixed IDs). Humans may cancel any sender's input; models may cancel ordinary queued input in the target Thread. For a reply request, only its sender Thread or the owner can withdraw it. Withdrawal after delivery leaves history intact; a late reply is rejected with `invalid_state`, `reply_state: cancelled`, and `reason: withdrawn`. Check each returned outcome: another input may already have been admitted. Same-operation replay returns the saved outcomes. Cancellation does not wake the recipient. A model asker receives `reply_outcome: cancelled`, which can start a Run if its Thread is idle and not stopping. `archive_draft_id` identifies a durable source available to a human through TUI `/restore list` or `/restore draft ID`; restoration does not execute or send anything automatically.
-
-A human's Esc interruption ends only the active Turn. Its notification describes which output was cut short or which calls did not run; do not assume those actions executed. Received partial output is saved for inspection but omitted from the model conversation. A foreground shell may continue in the background: inspect its returned execution ID before repeating work. Check the latest human direction before continuing. Ctrl+C and Run stop remain full stops, including owned background shells; a later genuine shell completion may wake a Turn after Esc. A waiting complete-delivery message is still delivered when the Run then completes. Automatic time-based backgrounding is not enabled.
-
-
-### Human Watch views and saved facts
-
-The TUI's `/threads active` and `/threads descendants` are human display commands,
-not CLI operations. Models keep using `shellboy thread list`, `status`, Run/Turn
-get and shell read/list through the shell tool. Watch unread state is session
-local, and bounded descendant counts may be lower bounds; neither establishes
-an exhaustive or durable work inventory. Thread ancestry differs from Run
-ownership. Recheck exact saved IDs/state before acting on a reported target.
-
-### Owner memory observation
-
-Use `shellboy status --memory` for on-demand owner cache accounting and native
-process memory, without activity filters. It does not call a model or embedding
-endpoint. Inspect each value and unavailable_reason; null means unknown, not zero.
-Existing retained/limit/entry figures exclude some working or live/pinned memory
-and are not additive with OS footprint/RSS. Do not infer a leak or total heap from
-these snapshots alone. The observation does not change cache limits or purge data.
-
-### Conversation row legend
-
-Conversation rows use a shared display-only legend (`/help`): `⏵` running,
-`◌` unavailable, `✓`/`✗`/`⊘` outcomes, `⁂` notification and `⬦` summary.
-A background label is a saved launch/release fact, not model concurrency.
-Notifications show saved identity/outcome; Enter follows the loaded shell row
-or saved child Thread. Missing names are not inferred from similar commands.
-
-### Known connection cooldowns
-
-If `recovery_reason` includes `details.usage_limit`, read its `resets_at_utc`
-and optional limit window. For a saved `usage_limit_reached` reset the owner
-admits one `run retry` at reset (or on startup if it is already due and the Run
-is still eligible), not before. If over 128 held messages need admission, that
-one retry leaves the Run parked for another manual retry. Set
-`[recovery] auto_retry_usage_limit = false` to keep recovery manual. Other
-conversations sharing the connection may be blocked locally until reset;
-changing only the model on that connection does not evade its cooldown. Do
-not automatically switch provider or model. The in-memory cooldown gate is
-separate and is discarded at owner restart.
-
-## Startup timing
-
-Use `shellboy startup [--last N]` (default 5, maximum 20) to inspect startup-stage timings without starting the owner. The read is bounded to 16 MiB and 64 current/rotated log files. It exposes only stage names, timestamps, elapsed milliseconds, application/migration versions and totals; it never prints arbitrary log fields. `records_may_be_missing` is always true because diagnostics can be dropped or rotated, and missing stages are not zero.
-
-## Driving Shellboy with `chat --json`
-
-An external agent or test can drive a running owner with `printf 'message\n' | shellboy chat --json`:
-piped lines in, one JSON object per progress event and end message out (schema in the
-[CLI reference](cli-reference.md#interactive-chat-client-242)), recorded as `external_cli`. It
-uses the same RPCs as `message send`, `wait` and `events wait` (it follows change hints instead of polling); a model needs no chat client inside its own shell. `shellboy exec` runs saved work noninteractively and validates only its final JSON answer locally.
-
-## Terminal-free startup
-
-`serve --data-dir DIR --config FILE` can start a separate owner from a background
-shell without a TUI. Use a disposable explicit directory and wait for its stdout
-`ready` JSON before sending commands with that same `--data-dir`. The owner lock
-rejects reuse of a live owner's data. EOF on the background shell's stdin is not
-a shutdown request. The child remains owned work, not a detached daemon; model
-requests to its configured endpoint have their usual cost. Startup failures use
-stderr. Use `shutdown --data-dir DIR` on every OS, or Unix SIGTERM/SIGHUP, to
-request the common cleanup. Accepted means saved request, not completed cleanup:
-observe the process and final stopped JSON. No final row after force-kill does
-not establish success. No bounded completion time or owner handover/reconnect is
-promised. TUI owners reject shutdown RPC. Native ownership/recovery qualification
-is tracked in issue #5; use disposable data for experiments.
-
-Headless owners remain owned descendants of their launching background shell;
-parent shell/Run/owner stop can terminate them and their tools. Do not detach or
-break away. On Unix Ctrl+C/INT, TERM and HUP request cleanup. Repeated TERM during
-drain does not force it; external SIGKILL can, with no guaranteed final JSON.
-Windows uses the same shutdown CLI, not CTRL_BREAK. There is no duration promise.
-After interruption, inspect status/run get and saved tool outputs before explicit
-retry/new input/stop; do not repeat a possibly executed command blindly.
-
-Without a TUI there is no interactive draft/restore, Turn interrupt or slash-only
-UI operation, and no late UI attach/reconnect. Existing CLI compact is available.
-Owner binary replacement does not inherit live tools or automatically resume work.
-
-### Shell tool parameters
-
-Model-started shells inherit the owner's environment, including API keys set
-there. A key stored in `credentials.toml` need not be in that environment, but
-the shell runs as the same OS user and can read the file. Neither method hides
-keys from the shell. Do not print or copy keys. Retained stdout and stderr are
-stored without redaction; check raw shell output before sharing it.
-
-Accepted parameters are `command`, `description`, `background`, `stdin_open`,
-`initial_stdin`, `input_encoding`, and `output_encoding`. Unknown parameters are always ignored with a warning; the removed
-`[shell] unknown_arguments` setting is not accepted.
-Do not use `timeout` or `workdir`: set the working directory in the command
-and use the background shell observation commands for long-running work. An
-invalid call returns its own error without preventing other valid calls in the
-same group; malformed protocol groups are still rejected as a whole.
-
-### Shell stdin lifetime
-
-`stdin_open` defaults to `false`. Without initial input, stdin reaches EOF
-without waiting for a later write. With `initial_stdin`, those bytes are delivered
-before EOF. Set `stdin_open: true` explicitly only for a command that needs later
-interactive input. Initial input remains ordered before subsequent writes or EOF;
-keeping stdin open does not change the initial-input encoding or byte limit.
-
-`shell get`, `shell list`, and shell records in `status` expose saved stdin
-facts: `stdin_open` is the owner's confirmed pipe state, not proof the child is
-reading input. `null` means no observation was saved for an older execution;
-terminal executions are closed. `stdin_last_write_at` is the actual completion
-time of the last nonempty, fully successful write, including initial input.
-Empty writes, EOF, partial/time-out and failed writes leave that value unchanged.
-A closed pipe cannot be reopened; start another execution with `stdin_open: true`
-when interaction is required. Neither field infers waiting or hangs from silence.
-
-
-### Shell call descriptions
-
-With the default `[shell] describe_calls = true`, generated shell tool definitions
-require `description`. Explain what the command actually does in the conversation's
-language, within 80 characters. It is a label, not an instruction or a claim of
-safety; never put credentials in it. The command still executes unchanged.
-Received missing/blank labels fall back to commands; execution/display labels
-are bounded, but saved/replayed arguments remain verbatim without normalization
-metadata. `[shell] describe_calls = false` removes the parameter and its required
-entry from generation tool definitions and keeps command-based rows.
-
-### Compare saved request sizes
-
-Use bounded saved usage, not direct access to the owner's database:
-
-```sh
-shellboy usage get --thread THREAD_ID --include-children --since-node NODE --until 2026-10-31T12:00:00Z # NODE must be on this Thread path
-shellboy usage get --group-by thread --since 2026-10-31T06:00:00Z --until 2026-10-31T12:00:00Z
-```
-
-Inspect `items[].input_per_request.mean`, `max`, `p50`, and `p95` to find
-conversations above, for example, 300,000 input tokens. `cache.ratio` uses only
-attempts with both input/cache counts reported; inspect its paired/unknown counts.
-The max request includes attempt/Thread/Run/Turn IDs; use Turn get and history
-list/get to inspect saved sources, not an attempt ID as a node ID. Hour/day groups
-accept `--timezone UTC` or `--timezone +09:00`; default is the owner's local time.
-
-Follow `more`/`next_cursor` with the same flags, including on an empty filtered
-page. Each page is capped at 10,000 candidates and 168 groups, over a maximum
-31-day interval (last24h by default). `scan_truncated` discloses partial-window
-statistics; do not combine percentiles across pages or mistake them for complete
-period usage. Unknown is not zero, and these measurements are not a bill or a
-reason to automatically compact unfinished work.
-
-`index remove` commits deletion without computing exact index-size counts: `counts_exact` is false and pending
-quantities/segments are null (unknown). Request `--dry-run` explicitly for exact projected counts; it may scan the
-index. `removed: true` still means the durable decision, and `reclaim_pending: true` means maintenance owns cleanup.
-
-### Registering common instruction files
-
-Ask for the user's confirmation before registering an external component's common instructions. `extra_instructions`
-is an explicit ordered array of absolute UTF-8 paths; preserve other registrations when using hash-checked
-`config.set`. No directory discovery occurs. At most eight regular UTF-8 files of 8192 bytes each are accepted.
-They apply to all Threads as developer instructions before the per-Thread role, beginning with the next prepared
-Turn. Same-Turn retries/tool calls keep saved text. An unreadable file is skipped, not a reason to stop the Run.
-Check `instruction_warnings` in `shellboy status --run RUN_ID` and `shellboy thread get --thread THREAD_ID`
-for the path and reason. Fix the path or explicitly remove it through hash-checked `config set`, preserving
-other registrations. `config get` shows registrations; `thread get.instruction_sources` describes the latest
-prepared Turn. If the desired live value is already on disk, submitting it with `config set` and the current
-file hash updates a stale owner without rewriting the file. There is no automatic removal. Never put credentials
-in these files or claim consent was checked by the config API. Raw AGENTS JSON remains literal text.
-
-For `history.list` / `history.window` spill items, use additive `spill_tools.items` to associate compressed tool
-results with saved `call_id`, optional `execution_id` and optional `original_node_id`. At most eight sources are
-included; honor `truncated`. `status:"unknown"` on legacy spills means unavailable provenance, not zero calls.
-Do not globally search a call ID or assume an execution is still running. Existing direct `executions` metadata is
-unchanged. Explicit source-relation/history-get inspection remains available when needed; source bodies can be gone.
-
-#274 metadata lookup uses a bounded separate column and covering index; it never parses the spill payload. Older
-spills remain unknown after migration; no automatic payload backfill or source traversal occurs.
-
-Automatic compaction does not repeat a deterministically failed summary range (same original endpoints, model
-and output limit); the latest closed and the latest active failure are remembered per Thread, and transient
-failures are retried at the next eligible report. An explicit compact of the same failed range is refused the same
-way until the range, the output limit or the model changes.
-
-The protocol has no Run ownership or duplicate reply-duty lists. Use `pending_replies` counts and `message list --awaiting`, and inspect the
-recipient of each item. External peers must match the advertised version exactly; update Studio/clients with the owner, without a
-fallback to an older protocol. A Run owns shells only. Explicit own Run/Turn/invoking-shell waits fail with `self_wait`; other observations
-have no dependency graph. Child requests use expected replies and normal delivery after the sender Turn ends.
-
-## Wait for any child Thread
-
-Delegate with reply-expected messages to other Threads: retain each accepted request ID and finish your Turn.
-External inspection may use `thread_settled` with `--after`. Inspect `result.snapshot.changes`, `result.cursor` and
-`last_end_message` and `last_input` without treating recovery_wait as terminal or automatically replaying an interrupted wait.
-
-### Closed Shell Stdin (#282)
-
-Shell stdin is closed by default. `initial_stdin` is delivered before automatic
-EOF; set `stdin_open: true` at shell creation for later interactive input.
-A new `shell.write` to an already closed stdin and a second or later `shell.eof`
-return `invalid_state`, including for a known terminal execution. The error
-explains the default and how to start a new interactive shell. An unknown ID
-remains `target_unavailable`. Replaying an operation ID preserves its original
-receipt, not a second side effect. This intentionally changes the earlier
-successful closed-write/EOF behavior without adding a wire alias or version.
-Partial writes, timeouts and in-flight failures retain their typed write result;
-`shell.stop` remains idempotent.
-
-### Recorded Message Sender
-
-For applicable received messages, replay and request inspection derive one developer
-preamble from the exact body's admission receipt in its creation Thread. It comes
-immediately before the body and is not stored as a separate history node. It reports
-sender kind, the saved model `Sender Thread` ID when available, an unverified label
-when supplied by a non-human sender, and the reply command or original `Reply to`
-message ID when applicable. IDs and labels are escaped so they cannot add lines.
-The identity is a routing fact, not a role or authority guarantee; a label remains
-self-asserted and is never auto-filled from a Thread title or ID. Human, external
-CLI and unknown/malformed senders do not acquire a model Thread identity line.
-Use the full ID with `thread get` if current Thread details are needed. Renaming
-or deleting a Thread does not rewrite the saved sender ID. Clients use structured
-`provenance.sender`, not parsed preamble text; current title resolution is UI-only.
-
-
-### Output Limits By API
+## Output limits by API
 
 For Claude, prefer a connection with `api = "anthropic_messages"`, the native
 Messages mode; it retains the existing 32768 output-token default. If using a
 Responses or Chat Completions connection for Claude, explicitly configure that
 connection's `max_tokens` to a value the endpoint/model supports. This is guidance,
 not automatic model detection or a promise of proxy compatibility. Configure it
-in the connection's TOML entry or with `shellboy config set --expected-hash HASH
---set connections.NAME.max_tokens=N` (hash from `config get`).
+in the connection's TOML entry or with
+`shellboy config set --expected-hash HASH --set connections.NAME.max_tokens=N` (hash from `config get`).
 
 Use the saved connection's optional positive `max_tokens` setting for an output
 limit. Responses sends it as `max_output_tokens`, Chat Completions as
@@ -976,51 +754,280 @@ endpoint's supported range. Do not diagnose context-window limits, filters, othe
 incomplete reasons, unknown stop reasons or connection/EOF failures as output
 limits by guesswork.
 
-### Scheduled checks
+## Operation tracking, saved context, and deletion preview
 
-One-shot schedules (`--at` or `--in`) disappear from `schedule list` when their
-execution settles, even if it fails or is stopped. Find the result with
-`shellboy shell list --thread THREAD`, then inspect its status and saved output
-with `shell get` and `shell read`. Recurring schedules stay listed.
-If a disabled one-shot's time has passed, `schedule enable --schedule ID`
-returns `invalid_state` and leaves it disabled. Add a new schedule for a future
-time instead of retrying enable.
+Follow [acceptance and completion](#distinguish-acceptance-from-completion) for
+lost results. Repeating `compact` with the same ID returns the original queued
+acceptance even after downstream completion. Replaying `attachment add` returns
+its original result before mutable preflight, while preserving authentication and
+request-equality checks.
 
-The scheduler (cron, 定期実行, スケジュール) belongs to the Thread. It runs shell commands without starting a model
-Turn. `schedule add` and `schedule set --schedule ID --description TEXT` take an optional description. To wake the owning Thread only when there is work, use a command such as:
+Run/Turn/message/history get always includes `context`; Thread context can be absent for a fork. `history list` requires `provenance`, `context`, and `selection` on each item; `history get` requires `provenance` and `context`. Context contains saved times, states, reasons, and ownership. `parent_thread_id` means Thread lineage; `owner_run_id` exists for shell ownership only; Runs do not have parent owners. Unknown `started_at` and an unfinished `lifetime_ms` are omitted. `lifetime_ms` spans creation to termination, including preparation and waiting. Read `recovery_reason` as a JSON value; recovery wait or uncertainty after restart do not necessarily mean failure. Distinguish history origin from selection destinations.
+
+To move a conversation back to an earlier point, `shellboy thread rewind --thread THREAD --node NODE` cuts that Thread's selected path to end at NODE and keeps the removed part as a child Thread (`branch_thread_id` in the result; opening it undoes the rewind). It rewinds the conversation only: shell side effects are not undone, and the result lists the shell executions and child Threads started after NODE. It is refused while the target has a live or stopping Run or messages with unknown path admission; definitely unadmitted queued messages are allowed. `--run RUN` atomically stops that exact `recovery_wait` Run and rewinds its Thread. Because you always run inside a live Run, omitting `--thread` (your own Thread) is refused; rewind only another idle Thread, or continue from an earlier point with `shellboy thread fork --thread THREAD --node NODE`, or ask the user to run `/rewind`. `--exclude-node` ends the path just before NODE. The result also lists unanswered replies to messages the Thread sent (`pending_replies_to_sent_messages`); background shells from the removed part may still report `shell_ended`. Going back into a summarized range works only while the originals exist (not after `thread prune`).
+
+`thread list --order created` returns newest Threads first without reordering
+when their activity changes. It works with `--archived`; query, tag, cwd, awaiting, and
+state filters keep their existing list order and cannot be combined with
+`--order created`. Continue paging with the same order and archive selection.
+Every summary carries `created_at`; for Threads created before schema 54,
+created_at is the earliest recorded activity. If none was recorded, it is null.
+Creation order puts null last and breaks ties by descending Thread ID.
+
+To tidy mass-produced Threads, archive finished ones instead of deleting them: `shellboy thread archive --thread ID_1 --thread ID_2` (up to 200 IDs per call; add `--descendants` to include each Thread's children) hides them from the default `shellboy thread list` and changes nothing else (history, search, usage and messages still work, no storage is freed, `updated_at` does not move). There is no archive-by-filter command, so choose the IDs yourself: read `shellboy thread list --limit 200` (each item has `state`, `updated_at`, `last_end_message` and `parent_id`) and pick Threads whose work is complete and whose results you or the user no longer need in the list. Do not archive a Thread whose Run you still wait on; a Run in progress is not stopped, but the Thread leaves the list. List what you archived with `thread list --archived only` and reverse it with `shellboy thread unarchive --thread ID`. Omitting `--thread` archives your own Thread, and a bare `thread archive --descendants` hides your whole own subtree, so name IDs explicitly. Archive only Threads you created or were asked to tidy: never your parent or the Thread the user is talking in, since that hides it from the user's list. A new Run on an archived Thread unarchives it, and a call that selects more than 256 Threads with `--descendants` is refused without changes.
+
+Use `shellboy thread list --state failed --limit 50` (or `--state recovery_wait`) to page current Thread states in update order; keep all filters when passing `--cursor NEXT_CURSOR`. A short or empty page
+with `next_cursor` means more matches may exist; continue until the cursor is
+absent. Rows can move as activity changes, so this is not a frozen snapshot.
+
+`awaiting_replies_exact` and `awaiting_thread_count_exact` describe the total
+and Thread-directed pending counts, respectively. As with
+`awaiting_named_count_exact`, absent means exact and `false` means 17 or more,
+not exactly 17.
+
+To find Threads waiting on a named recipient across the owner, pass the name to `--awaiting`. For the default recipient, use `shellboy thread list --awaiting human --limit 50` and continue with `--cursor NEXT_CURSOR`. Each item reports `awaiting_named_count` and `awaiting_named_count_exact`: counts through 16 are exact; count 17 with exact=false means 17 or more. Legacy pending receipts are retained and counted with a 17-row bound. `awaiting_named_oldest_at` is the minimum saved question time only when the count is exact; it is absent for 17-or-more. This is a paged read over pending replies for the selected name only; Thread-to-Thread reply duties are excluded. The `awaiting` filter is exclusive with query, tag, cwd, and state filters; archived mode remains available.
+
+To find or group Threads, use tags rather than parents. `shellboy thread tag --thread ID --add "customer A" --add "bug hunt"` labels a Thread (many tags per Thread, at most 64; up to 200 IDs per call; `--remove` takes a label off), `shellboy thread list --tag "customer A" --tag "bug hunt"` lists only the Threads that carry every given tag (AND; tag order does not matter), `shellboy thread list --cwd /path` lists the Threads of one working directory (the saved path after lexical cleanup; a parent directory does not match), `shellboy thread cwds` lists the working directories in use (archived Threads count), and `shellboy thread tags` lists the tag names in use. Tags are free text (trimmed, one line, 128 characters), case sensitive, not inherited by `thread create`, `fork` or `rewind`, and they change no history, search, usage or list order. Use the same spelling every time (look at `thread tags` before inventing a new name). `thread get` and `thread list` show each Thread's `tags`. To archive everything with a tag, list with `--tag`, then pass the IDs to `thread archive`. For updated-order lists, including search and tag filters, follow `next_cursor` with unchanged filters even if a page is empty; a request examines at most 200 candidate Threads plus one lookahead. `excerpt_complete: false` means the latest 32 selected history nodes had no excerpt; older history may contain prose.
+
+`parent_id` is conversation hierarchy: delegation and reports, `--include-children` usage, `thread delete --descendants` and branch families. Do not use it only to file Threads; label them with tags instead. `shellboy thread set --thread ID --parent PARENT_ID` moves a Thread with its subtree and `--parent ''` detaches it; it changes no setting and no running work (only shells have an owning Run; Threads and Runs are independent, so the move changes no Run and stopping a parent's Run never stops a child's). Consequences to weigh before moving a Thread: it leaves its old parent's tree, a child's report to `parent_id` then goes to the new parent, and `--include-children` usage and `thread delete --descendants` follow the new tree. A move that would make a Thread its own ancestor is refused.
+
+To see how conversations branch, run `shellboy thread branches` or target another conversation with `--thread THREAD`. A branch is a child Thread (made by `thread fork`, the user's `/edit`, or `thread rewind`) that shares the start of its parent's history. The result is a bounded, paged tree of the family (the topmost live ancestor and everything below it): each item gives `parent_thread_id`, `branch_kind` (`fork`, `rewind`, or `unknown`), `state` (`current`/`ancestor`/`branch`), `divergence.node_id` (the last node shared with the parent), the tip's last request excerpt and time, `size.path_nodes` (`bytes` is always null), `running`, and `pruned_originals`. Use it to find a rewound-away part (the child of the Thread you rewound), to choose a `thread fork --node` target, or to pick a branch to `thread get`/`history list`. Limits: 200 items per page, 256 Threads per family (`family_truncated`), 160-character excerpts; a cursor expires only when the tree changes (a family Thread is created or deleted).
+
+To release disk used by originals you no longer need, prune them explicitly. Read anything you still need first (`shellboy history get --node NODE`), then run `shellboy thread prune --before NODE --dry-run` (omitting `--thread` targets your own Thread), review `replacements.summaries`, `replacements.spills`, `shared_replacements_kept` and `source_nodes_on_other_live_paths`, and only then run `shellboy thread prune --before NODE`. The prune releases the originals of summaries and spills adopted before NODE; the existing GC reclaims them (to check immediately, run `shellboy storage collect --category history` and read its counts). It cannot be undone: a summary restore and a spill's `retrieve:` hint cannot recover originals no live consumer retains. `history get` refuses those originals immediately, even before GC; originals still held by live consumers remain readable. GC frees pages inside the database but does not shrink the file (no automatic VACUUM). The full flow is `thread prune` -> GC (`storage collect --category history`) -> `storage vacuum`; the last step is explicit, needs the owner stopped (so it is refused from inside Shellboy) and is the user's to run (`shellboy storage vacuum --dry-run` shows what it would return). Do this only when the task or user asks for it; nothing prunes automatically.
+
+Within an authorized deletion task, use `shellboy thread delete-preview --thread THREAD_ID` (add `--descendants` to include descendants) to inspect blocking Runs, targeted descendants, and direct sharing, source, and attachment references. This is neither deletion authorization nor a guarantee of GC capacity; `reclaimable_bytes` is null. Actual delete rechecks current state. See [Recovery and storage](recovery-and-storage.md) and [CLI reference](cli-reference.md).
+
+## Backfilling old embeddings and checking cost
+
+Paid embeddings already saved are retained until explicitly removed. Ordinary RAG sync, raw-output expiry, and source retirement can remove material from search without deleting its saved vectors. Reindexing identical knowledge text can reuse the prior vector. `rag source remove --source NAME` removes vectors exclusive to that registration; shared vectors stay. For history, use explicit `index remove --space ID` for an inactive space, not `storage collect`. One `rag search` shares a successful query embedding across scopes using the same provider request identity; it may still charge for each distinct identity.
+
+Backfill/rebuild for old conversations incurs API cost separately from ordinary conversation searches. Backfill and rebuild take in only the configured `auto_kinds` (by default user messages and summaries) unless you add `--kind tool_result` (or `assistant_response`, `spill`, `event`, `all`); preview with the same `--kind` to see exactly what would be embedded, and ask the user before adding kinds, since tool output is most of the volume. A full `rebuild --scope all` without `--kind` is refused when the active index holds other kinds, because the new space would drop them; `shellboy index preview --scope all` shows the count as `indexed_outside_selection`. Never accept that loss for the user: pass `--kind all` only with their consent to the cost, or ask them. `index shrink` (smaller stored precision) keeps every kind.
+
+Treat an index pause notice as a historical stop record. Inspect `shellboy index status` for current reason/time and spaces; conversation can continue and existing indexed search can remain available. Do not repeat the same explanation or start retry loops every Turn. After the cause is fixed, `shellboy index preview` without a scope previews only previously authorized retry-eligible work. Report its source/segment/character counts and possible API charges; obtain explicit user consent before `shellboy index retry`. The CLI has no interactive consent gate. Do not initiate paid retry, backfill, rebuild or probe merely because a guide suggests it.
+
+For a requested dimension change, inspect status first and explain possible quality loss, candidate/active coexistence and charges. `vector_payload_bytes` is vector payload (`segments × dimension × 4`, or `× 1` for an int8 space), not physical SQLite/WAL size or guaranteed reclaimable bytes. Only after explicit consent may you use `shellboy index probe --dimensions N` (one potentially charged request) or a scoped `shellboy index rebuild ... --dimensions N` following its scope preview. Dimension support must not be guessed from a model alias; a failed probe/rebuild does not authorize trying alternatives. Probe observations are not a permanent capability catalogue. See [Index management](history-and-search.md#index-management-and-cost-previews).
+
+To make searches lighter without any charge, `shellboy index shrink` converts the active index to int8 from its saved vectors: no embedding API call, same dimension, about a quarter of the vector bytes read per search. It differs from `index rebuild`, which re-embeds text and costs money. Never start it unasked: run `shellboy index shrink --dry-run`, explain its facts (bytes added, the old index stays and still counts toward the data limit, rank order changes slightly, `distance` values become hundreds and only order results within one search) and get explicit consent. Then run it and follow `shrink` in `shellboy index status`. It resumes after a restart; on `shrink.error`, fix the cause and run it again, or `--cancel`. `index shrink` only converts and never deletes.
+
+Retained indexes hold paid vectors, including a partial one (`partial`) left by a replaced rebuild candidate. Nothing deletes them automatically, after a conversion or a rebuild, and neither may you on your own:
+
+1. After a conversion or rebuild succeeds, tell the user the old index is retained and its size (`retained_vector_payload_bytes` and `retained_remove_with` in `index status`).
+2. Suggest checking real searches first. `shellboy index shrink --revert --dry-run` shows the way back to the float32 index and how many segments would need indexing again. A revert can lead to charges for those segments: explain that and get consent, as for shrink.
+3. Explain that deleting frees that space for reuse inside the database (the file itself shrinks only with `storage vacuum`) and that recreating the index afterwards needs a paid rebuild. Ask.
+4. Only on the user's explicit yes, show `shellboy index remove --space SPACE_ID --dry-run`, then run it without `--dry-run`. `removed: true` means the index is no longer searchable; `reclaim_pending: true` means maintenance still has physical data to reclaim. Inspect the discarded space's remaining segments in `index status` and logical index bytes in storage status. Reclamation resumes after restart and does not guarantee immediate disk-file shrinkage.
+
+Never delete an index to relieve a low-disk or storage-limit hold on your own: tell the user it is an option and let them decide.
+
+Shellboy scales every provider embedding (index and query) to unit L2 length before storing or comparing it, for all models, so a reduced dimension ranks consistently. Run `shellboy index probe --dimensions N` first, then the scoped `index rebuild --dimensions N`, only with the user's consent to cost, and compare search quality before relying on the new space; spaces built unnormalized at a reduced dimension need that rebuild.
+
+
+`index remove` commits deletion without computing exact index-size counts: `counts_exact` is false and pending
+quantities/segments are null (unknown). Request `--dry-run` explicitly for exact projected counts; it may scan the
+index. `removed: true` still means the durable decision, and `reclaim_pending: true` means maintenance owns cleanup.
+
+## Edit the selected path when input is large
+
+At a task boundary, after the push or report, review your own conversation once.
+Use `thread get`'s `context_usage.last_successful_attempt.input_tokens` (the last
+actual input, if reported) and `history list`'s large ranges as evidence. Do not
+start a new conversation as a substitute for this cleanup. Spill large tool outputs from completed work that are no longer
+needed with `compact --spill --from NODE --to NODE`; summarize a completed range
+with `compact --summary --from NODE --to NODE` when only its key facts are needed.
+Add `--dry-run` to inspect targets, projected characters and
+predicted failures without model calls, queueing or adoption. Check coverage
+limits; summary after-size is unknown, and a preview is not permission to execute
+an edit after the source changes.
+Shellboy also compacts automatically (argument-free spill and summary) at the
+next safe boundary once a response reports input tokens at or above the
+configured `auto_at_tokens` (default 200,000; `compact list` shows
+`reason: "proactive_threshold"`). You may change your own Thread's threshold with
+`shellboy thread set --auto-compact-at N` (`0` turns it off for this Thread, `''`
+returns to the configured value); `thread get` shows `auto_compact_at` and
+`effective_auto_compact_at`. It applies from the next request boundary. `thread set` also takes
+`--auto-compact-target-percent` and `--summary-max-chars` (an empty string restores the inherited value). The optional
+per-connection `spill` is a native TOML boolean; no global spill key exists. For an
+explicit Thread policy, use `shellboy thread set --spill on` or `shellboy thread set --spill off`; use `--spill ''` to
+inherit again. `thread get` shows nullable raw `spill` separately from boolean
+`effective_spill`; precedence is Thread, connection, built-in on. Null in a JSON
+`thread.set` is ordinary no-change, not clear. Child Threads, forks and rewinds copy
+the raw nullable override. Off means automatic spill bypass while automatic summary
+remains; it does not disable compaction. The effective setting drives the automatic route. If an automatic summary fails deterministically (refused, empty, or not smaller than its source), the same
+range with the same settings is not tried again; transient failures (rate limits, server
+errors, cancellation) are retried at the next eligible report. An explicit
+`compact --summary --from NODE --to NODE` on a range that already failed this way is refused
+too ("already failed deterministically"); change the range, the output limit
+(`--max-chars`) or the model before retrying. Do not answer it with repeated
+`compact --maximal`; that drops role context and cache hits. Do targeted range
+edits only when still needed.
+An active-Turn summary may cover user messages delivered during the work. Its
+notice says how many were covered. To inspect their exact order, follow the
+originals with `shellboy history relations --node FIRST --relation next`,
+replacing `FIRST` with the first source node ID given by the notice.
+
+Leave unfinished work, unapplied user instructions and information required for
+the current task untouched. If no completed range is safely dispensable, do not
+edit it. Do this once per task boundary, not on every request: path edits can
+invalidate prompt caches. Original facts remain accessible through `history get`,
+search and `compact --restore`; a summary is not a replacement for original evidence.
+
+For other explicitly needed range edits, use `compact --spill --from NODE --to NODE` or `compact --summary --from NODE --to NODE`. `--omit --from NODE --to NODE` can omit a detour in the middle; `--trim --to NODE` omits the prefix through that node. Boundaries are inclusive, complete groups. Omitting the current request, an incomplete group, or the newest group is rejected. Inspect candidates and adjust the range.
+
+Acceptance is queued; check operation get through downstream completion. Repeating an operation ID does not edit twice. Changes apply to the next request, not one already in progress. Make infrequent, substantial edits. Do not repeatedly edit the path and unnecessarily invalidate caches.
+
+The first/last original node IDs in an omission notification can also be used to summarize that range with `--summary --from ... --to ...`. Specify the whole omitted range of one marker. Prefer summarizing a range to rereading large amounts of original text and growing the input. Retrieve needed source text in small pieces with `history get --node NODE --limit-bytes BYTES`. `compact --restore` (optionally `--from MARKER`) restores the original range, while later conversation remains and previously excluded attachments do not automatically return. Check current state before repeating an already executed operation. See [Input size and range editing](history-and-search.md#input-size-and-range-editing).
+
+### Reading summaries and their cost
+
+Closed, manual and active-Turn summaries use the same typed summary request and
+owned adoption transaction. `summary_usage` records total provider requests and
+reported/unknown token counters; `compact list` and `usage get` are read-only.
+A rejected attempt preserves the original path and reports its request usage.
+Historical `history get --node SUMMARY_NODE --parts` records remain readable
+when old summaries refer to per-part cache entries, but the current request path
+does not create map/reduce parts or consult the old segment-size controls.
+
+Use `summary_max_chars` for output limits, the model and
+effort for provider behavior, and `auto_at_tokens` to control when proactive
+summaries start. The per-Thread `auto_compact_target_percent` (default 20) decides whether the previous compaction was deep enough to need a summary.
+Original source nodes remain available through history and restore operations.
+
+## Large paths and long indexing tasks
+
+Before range editing, use `shellboy history list --thread THREAD_ID --excerpt-chars 0 --limit 20` to retrieve node IDs, kind, `selection.ordinal`, and `payload_chars`, then get only necessary bodies. payload_chars counts characters of stored JSON, not tokens; reclaimed content is null. Keep the same excerpt-chars on continuation pages. In `history window`, size can also be null because the source was not loaded (zero excerpt length or more than 1 MiB); a requested excerpt over the source budget is a placeholder.
+
+For a long `rag index`, pass a fixed index command to the shell tool with `background:true`, and retain the work execution ID returned by that tool. Wait with `shellboy wait --conditions-json '[{"type":"shell_ended","execution_id":"WORK_EXECUTION_ID"}]' --timeout-ms 30000`, then retrieve the result with `shellboy shell read --execution WORK_EXECUTION_ID --encoding UTF-8 --limit-bytes 65536`. Read the RAG JSON in `result.text` and inspect success/partial failure and failure_count/failures. Do not read a different execution that ran wait or message send. Continue partial/large output using the read cursor. For later per-source state, last scan/content-change times, and failures, use `rag status`; inspect a document with `rag inspect --id ID`. See [RAG](rag.md).
+
+A hybrid search with `ok:true` and `degraded:true` used only keyword search for some scopes. Follow `scope_status` reasons, missing counts, and `next.steps[].command`; inspect dry-run before explicitly running potentially charged indexing. Do not guess that real configuration, authentication, or communication errors merely mean “not ready.”
+
+## Resume conversations interrupted by application exit
+
+`thread list` exposes `latest_run_stop_reason`. Values `app_shutdown` and
+`previous_instance_interrupted` identify conversations whose latest Run stopped
+at an application lifecycle boundary; `explicit_stop` and normal completion do
+not. The thread browser marks these rows `[exit]`. A new Run clears the marker.
+
+When the user asks you to resume several conversations, inspect their saved
+interruption records and send the requested instructions with
+`shellboy message send --thread THREAD_ID --text 'Instruction'`. Exclude your
+own Thread if it appears among the targets. Each destination starts an independent
+Run, so send a few at a time when many targets could exceed provider rate limits.
+
+Only shells have an owning Run. When a destination runs work, that work is its own independent Run, including for a child whose
+`parent_id` is your Thread, and stopping your Run does not stop it. You may stop or retry any Run, but only act on ones you started or were asked to handle, and check the ID first: stopping or retrying another Run can interrupt the user's conversation.
+
+The saved
+`result_uncertain: true` describes uncertain effects of the interrupted work.
+Use the saved evidence to decide how to continue rather than assuming the work
+completed or repeating side effects automatically.
+
+## Storage and resources
+
+Shell raw output can expire (default seven days / total 1GiB); large output consumes that budget. Preserve needed results in a durable file or answer rather than relying on later raw reads.
+Managed clipboard images can also expire (default seven days / total 256MiB); their exposed absolute `path` has the same lifecycle, not permanent availability. Active selections, drafts and send pins protect them.
+If a Turn ends with `storage_limit`, read `error.details.reason`: `logical_limit` means Shellboy's data limit, `disk_free_low` means the data directory's volume has less free space than `limits.disk_free_min_bytes` (default 5GiB). Either way new model, shell, child, summary and index work is held; stop, `shellboy status`, `storage status` and `storage collect` still work. For `disk_free_low`, `storage collect` and `thread prune` do not return space to the OS (the database file does not shrink), so do not loop on them: tell the user the free bytes and the minimum, and wait for them to free space and retry. Do not retry on your own or work around the hold. The hold only stops new work: commands you already started, and commands you run in your own shell, are not stopped and can still write to the disk, so avoid large writes while the disk is low.
+Collection keeps history references/reasons, not the reclaimed content; conversations have no automatic expiry. See [Recovery and storage](recovery-and-storage.md) and [Configuration](configuration.md) for retention, GC and cache budgets.
+
+## Human Watch views and saved facts
+
+The TUI's `/threads active` and `/threads descendants` are human display commands,
+not CLI operations. Models keep using `shellboy thread list`, `status`, Run/Turn
+get and shell read/list through the shell tool. Watch unread state is session
+local, and bounded descendant counts may be lower bounds; neither establishes
+an exhaustive or durable work inventory. Thread ancestry differs from Run
+ownership. Recheck exact saved IDs/state before acting on a reported target.
+
+## Owner memory observation
+
+Use `shellboy status --memory` for on-demand owner cache accounting and native
+process memory, without activity filters. It does not call a model or embedding
+endpoint. Inspect each value and unavailable_reason; null means unknown, not zero.
+Existing retained/limit/entry figures exclude some working or live/pinned memory
+and are not additive with OS footprint/RSS. Do not infer a leak or total heap from
+these snapshots alone. The observation does not change cache limits or purge data.
+
+## Conversation row legend
+
+Conversation rows use a shared display-only legend (`/help`): `⏵` running,
+`◌` unavailable, `✓`/`✗`/`⊘` outcomes, `⁂` notification and `⬦` summary.
+A background label is a saved launch/release fact, not model concurrency.
+Notifications show saved identity/outcome; Enter follows the loaded shell row
+or saved child Thread. Missing names are not inferred from similar commands.
+
+## Known connection cooldowns
+
+If `recovery_reason` includes `details.usage_limit`, read its `resets_at_utc`
+and optional limit window. For a saved `usage_limit_reached` reset the owner
+admits one `run retry` at reset (or on startup if it is already due and the Run
+is still eligible), not before. If over 128 held messages need admission, that
+one retry leaves the Run parked for another manual retry. Set
+`[recovery] auto_retry_usage_limit = false` to keep recovery manual. Other
+conversations sharing the connection may be blocked locally until reset;
+changing only the model on that connection does not evade its cooldown. Do
+not automatically switch provider or model. The in-memory cooldown gate is
+separate and is discarded at owner restart.
+
+## Startup timing
+
+Use `shellboy startup --last N` (or omit `--last`) (default 5, maximum 20) to inspect startup-stage timings without starting the owner. The read is bounded to 16 MiB and 64 current/rotated log files. It exposes only stage names, timestamps, elapsed milliseconds, application/migration versions and totals; it never prints arbitrary log fields. `records_may_be_missing` is always true because diagnostics can be dropped or rotated, and missing stages are not zero.
+
+## Driving Shellboy with `chat --json`
+
+An external agent or test can drive a running owner with `printf 'message\n' | shellboy chat --json`:
+piped lines in, one JSON object per progress event and end message out (schema in the
+[CLI reference](cli-reference.md#interactive-chat-client-242)), recorded as `external_cli`. It
+uses the same RPCs as `message send`, `wait` and `events wait` (it follows change hints instead of polling); a model needs no chat client inside its own shell. `shellboy exec` runs saved work noninteractively and validates only its final JSON answer locally.
+
+## Terminal-free startup
+
+`serve --data-dir DIR --config FILE` can start a separate owner from a background
+shell without a TUI. Use a disposable explicit directory and wait for its stdout
+`ready` JSON before sending commands with that same `--data-dir`. The owner lock
+rejects reuse of a live owner's data. EOF on the background shell's stdin is not
+a shutdown request. The child remains owned work, not a detached daemon; model
+requests to its configured endpoint have their usual cost. Startup failures use
+stderr. Use `shutdown --data-dir DIR` on every OS, or Unix SIGTERM/SIGHUP, to
+request the common cleanup. Accepted means saved request, not completed cleanup:
+observe the process and final stopped JSON. No final row after force-kill does
+not establish success. No bounded completion time or owner handover/reconnect is
+promised. TUI owners reject shutdown RPC. Native ownership/recovery qualification
+is tracked in issue #5; use disposable data for experiments.
+
+Headless owners remain owned descendants of their launching background shell;
+parent shell/Run/owner stop can terminate them and their tools. Do not detach or
+break away. On Unix Ctrl+C/INT, TERM and HUP request cleanup. Repeated TERM during
+drain does not force it; external SIGKILL can, with no guaranteed final JSON.
+Windows uses the same shutdown CLI, not CTRL_BREAK. There is no duration promise.
+After interruption, inspect status/run get and saved tool outputs before explicit
+retry/new input/stop; do not repeat a possibly executed command blindly.
+
+Without a TUI there is no interactive draft/restore, Turn interrupt or slash-only
+UI operation, and no late UI attach/reconnect. Existing CLI compact is available.
+Owner binary replacement does not inherit live tools or automatically resume work.
+
+## Compare saved request sizes
+
+Use bounded saved usage, not direct access to the owner's database:
 
 ```sh
-shellboy schedule add --thread THREAD --cron '0 * * * *' -- \
-  'if test -f needs-review; then shellboy message send --thread "$SHELLBOY_THREAD_ID" --text "Review is needed"; fi'
+shellboy usage get --thread THREAD_ID --include-children --since-node NODE --until 2026-10-31T12:00:00Z # NODE must be on this Thread path
+shellboy usage get --group-by thread --since 2026-10-31T06:00:00Z --until 2026-10-31T12:00:00Z
 ```
 
-Scheduled commands receive `SHELLBOY_THREAD_ID`, but no model shell Origin.
+Inspect `items[].input_per_request.mean`, `max`, `p50`, and `p95` to find
+conversations above, for example, 300,000 input tokens. `cache.ratio` uses only
+attempts with both input/cache counts reported; inspect its paired/unknown counts.
+The max request includes attempt/Thread/Run/Turn IDs; use Turn get and history
+list/get to inspect saved sources, not an attempt ID as a node ID. Hour/day groups
+accept `--timezone UTC` or `--timezone +09:00`; default is the owner's local time.
 
-For a long-running watcher, use `shellboy service add --thread THREAD --command 'my-watcher'` instead of a schedule or a background Run shell. Use `service list --thread THREAD` to inspect it and `service start|stop|remove --service ID` to manage it. A service can send input with `shellboy message send --thread "$SHELLBOY_THREAD_ID" --text TEXT`. Unexpected exit or spawn failure disables the service and sends one notice from `service:<id>`; it does not restart until explicitly started.
+Follow `more`/`next_cursor` with the same flags, including on an empty filtered
+page. Each page is capped at 10,000 candidates and 168 groups, over a maximum
+31-day interval (last24h by default). `scan_truncated` discloses partial-window
+statistics; do not combine percentiles across pages or mistake them for complete
+period usage. Unknown is not zero, and these measurements are not a bill or a
+reason to automatically compact unfinished work.
 
-To observe a particular service execution, take its latest `execution_id` from
-`service list --thread THREAD` (not the service ID). Use `shell get --execution
-EXECUTION_ID` to verify the target, then a bounded `shell_ended` wait for exit
-or a `shell_output` wait with the cursor from `shell read` for new output. These
-waits observe that execution only; if the service starts again, look up the new
-execution ID. A wait timeout does not stop the service.
-
-Once the owner accepts shutdown, a scheduled command or service that has not
-passed the start gate cannot launch, even if the owner already reserved its
-execution. This cancellation does not disable a service or send a failure notice.
-
-Cron uses the owner's local time. At a daylight-saving gap, a fixed-time entry
-runs at the first valid time after the gap; interval entries skip nonexistent
-times. During a repeated hour, a fixed-time entry uses the first occurrence,
-while interval entries may run in both halves. When several occurrences are
-already past, the owner runs at most one and schedules the next future occurrence.
-
-After a forced owner exit, a recovered terminal execution record does not prove
-that a surviving OS child stopped. If a schedule or Thread deletion was
-interrupted before its final commit, issue a new delete to finish it; the owner
-does not resume the interrupted deletion on startup.
-
-### Live attempt order
+## Live attempt order
 
 With the current protocol, `events wait --text` reports a live attempt's
 `input_through_node_id` (the last selected input node, or `null` for no input)
@@ -1029,10 +1036,12 @@ attempt was not saved. Keep adopted previews until saved history arrives;
 a resync is not evidence of discard. Order live previews by the saved input
 boundary, not by when the preview or a sent message arrived.
 
+## Export or import a Thread
+
 To export a Thread for the user, run `shellboy thread export --thread ID --out PATH`. The file can include private conversation data and encrypted reasoning, so use the requested destination and do not share it without permission. This is a live export of retained history, not a snapshot or a recovery of deleted data.
 
 To import a retained-history JSONL export at the user's request, run `shellboy thread import --in PATH`. It creates a new Thread, does not resume execution, and does not replay the source provider's opaque reasoning.
 
 ## Thread artifacts
 
-Register an output explicitly with `shellboy artifact add --thread "$SHELLBOY_THREAD_ID" --uri URI --title TITLE [--mime MIME]`. Use the URI format your client or system prompt specifies. For both `artifact add` and `artifact update`, you can pass a relative file path: the CLI joins it to your current directory before sending it, without checking that the target exists. Absolute paths and URIs with a scheme are sent unchanged. `shellboy artifact update --artifact A --uri URI` appends a version and retains the title unless replaced. Omitted MIME is not inherited. Use `artifact list --thread T`, `artifact get --artifact A [--version N]`, and `artifact remove --artifact A`. Pass `next_cursor` back as `--cursor` to continue list or version history.
+Register an output explicitly with `shellboy artifact add --thread "$SHELLBOY_THREAD_ID" --uri URI --title TITLE`. Add `--mime MIME` if needed. Use the URI format your client or system prompt specifies. For both `artifact add` and `artifact update`, you can pass a relative file path: the CLI joins it to your current directory before sending it, without checking that the target exists. Absolute paths and URIs with a scheme are sent unchanged. `shellboy artifact update --artifact A --uri URI` appends a version and retains the title unless replaced. Omitted MIME is not inherited. Use `artifact list --thread T`, `artifact get --artifact A` (optionally `--version N`), and `artifact remove --artifact A`. Pass `next_cursor` back as `--cursor` to continue list or version history.

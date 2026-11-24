@@ -239,11 +239,10 @@ Root cwd defaults to owner startup cwd; child cwd to the parent's. Relative cwd 
 
 | Operation and all specific flags | Main result and conditions |
 |---|---|
-| `message send [--thread THREAD] [--deliver now\|complete] [--resume-recovery] [--sender-label TEXT] (--text TEXT | --text-stdin)` | message_id/thread_id/delivery_status/assignment/run_id/turn_id, plus `deliver` when not the default. `--sender-label` is self-asserted (not verified); non-human messages may include it in the derived preamble without changing saved text. Active work takes additions at safe boundaries; stopping can yield held/pending. Machine messages hold at `recovery_wait` unless `--resume-recovery` explicitly resumes; the event records `external_cli` or authenticated shell Origin. Human input/reply explicitly resumes; model-origin replies remain non-human |
-
+| `message send [--thread THREAD] [--deliver now\|complete] [--resume-recovery] [--sender-label TEXT] (--text TEXT \| --text-stdin)` | message_id/thread_id/delivery_status/assignment/run_id/turn_id, plus `deliver` when not the default. `--sender-label` is self-asserted (not verified); non-human messages may include it in the derived preamble without changing saved text. Active work takes additions at safe boundaries; stopping can yield held/pending. Machine messages hold at `recovery_wait` unless `--resume-recovery` explicitly resumes; the event records `external_cli` or authenticated shell Origin. Human input/reply explicitly resumes; model-origin replies remain non-human |
 | `message ask [--to NAME or --thread THREAD] [--deliver now\|complete] (--text TEXT or --text-stdin)` | Open one reply duty. A named recipient defaults to `human` and requires model origin. Delivery timing applies only to Thread recipients. |
 | `message list --awaiting [--owed-by THREAD or --asked-by THREAD or --to NAME] [--limit N] [--cursor C]` | Bounded read of pending replies by direction. Without a direction it lists all pending requests. Items include the credential-free saved `sender` (`MessageSender`); `asked_by` is the model Thread ID or null. `--asked-by` matches only model Thread senders. `thread get` returns bounded directional counts, not the list. |
-| `message reply --message MESSAGE (--text TEXT | --text-stdin) [--sender-label TEXT]` | Reply once to an applied pending reply request; returns `reply_to`/reply message ID and optional delivery |
+| `message reply --message MESSAGE (--text TEXT \| --text-stdin) [--sender-label TEXT]` | Reply once to an applied pending reply request; returns `reply_to`/reply message ID and optional delivery |
 | `message get --message MESSAGE` | Original immutable assignment, current delivery_status, sender facts, and `expect_reply`, `reply` state/node, or `reply_to` when applicable; `end_message_node_id` remains available when present |
 | `message cancel --message MESSAGE [--message MESSAGE ...]` | Cancel 1..128 fixed message IDs. Queued input can be archived; an admitted pending reply duty returns `reply_cancelled` without removing history. Other outcomes are `cancelled`/`already_cancelled`/`already_admitted`/`not_found`/`forbidden`/`unavailable`. Does not wake the model |
 | `operation get --operation ID` | operation_id/state/outcome, instance_id/created_at/current_instance, result_uncertain/result_expired/replay_policy/targets, target-dependent downstream. Global `--operation-id` identifies this query; `--operation` identifies its target |
@@ -539,8 +538,9 @@ shellboy message get --message MESSAGE_ID
 shellboy history get --node REPLY_NODE_ID
 ```
 
-The reply arrives in a model sender's conversation, or external senders read
-`reply.node_id`. `satisfied` includes `replied`, `ignored`, `cancelled`, and
+The reply arrives in a model sender's conversation: finish the sending Turn
+when only the reply remains. External callers can use the bounded wait shown
+here; read `reply.node_id` for the reply body. `satisfied` includes `replied`, `ignored`, `cancelled`, and
 `recipient_deleted`; inspect the snapshot. Timeouts do not cancel the request.
 An unanswered applied request gets one Run-end reminder, then `ignored` if still
 unanswered. Stopping or failing the recipient Run resolves an unanswered
@@ -924,6 +924,10 @@ tracked separately in #85; use run get/the existing recovery reason for now.
 
 ## Schedules and services
 
+For command examples and execution IDs, see the Agent Guide's
+[scheduled checks](agent-guide.md#scheduled-checks) and
+[services](agent-guide.md#services-for-long-running-commands).
+
 `shellboy schedule enable --schedule ID` resumes future occurrences. For a
 disabled one-shot whose scheduled time has passed, it returns `invalid_state`
 and leaves the schedule disabled. Use `schedule add` to set a new time.
@@ -1117,16 +1121,8 @@ Use `history get --node REPLY_NODE_ID` for the body. If `message reply` gets
 `target_unavailable` for an unknown or unavailable ID, `error.details.pending_duty_ids` lists
 up to 16 duties the caller Thread owes, excluding questions it sent.
 
-`wait reply_received` uses a JSON condition
-`{"type":"reply_received","message_id":"MESSAGE_ID"}`. Example:
-
-```bash
-shellboy wait --conditions-json '[{"type":"reply_received","message_id":"MESSAGE_ID"}]' --timeout-ms 30000
-```
-
-Inspect the snapshot:
-`satisfied` can mean replied, ignored, cancelled, or recipient deleted. Timeout
-does not cancel the duty. `thread get` includes `pending_replies` `{owed_by, asked_by}` counts (`{count, exact}`, exact through 16); `message list --awaiting` pages the duties oldest first. Cancelling a queued request cancels both input and duty;
+For the external `reply_received` wait example and result meanings, see
+[Reply-expected delegation](#reply-expected-delegation). `thread get` includes `pending_replies` `{owed_by, asked_by}` counts (`{count, exact}`, exact through 16); `message list --awaiting` pages the duties oldest first. Cancelling a queued request cancels both input and duty;
 cancelling an admitted duty returns `reply_cancelled`, retains history, and
 notifies the recipient without waking it.
 
@@ -1140,7 +1136,8 @@ storage status for logical index bytes. Reclamation resumes after restart.
 Omit `--thread` to ask a person. They answer in Studio or the TUI; the answer
 arrives in this Thread with `reply_to` and starts a Run if needed. Your questions
 are listed by `message list --awaiting --to human` and counted in
-`thread get` under `pending_replies.asked_by`. Never reply to your own question;
+`thread get` under `pending_replies.asked_by`. `--deliver` is only for Thread
+recipients. Never reply to your own question;
 withdraw it with `message cancel`.
 
 ### Spill tool sources (#274)
