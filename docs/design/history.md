@@ -158,3 +158,15 @@ Later changes or clearing in the source Thread do not alter existing branches.
 The shared raw-override constructor is not authority to copy GC fact state,
 active jobs, Runs, leases or processes. Existing path/group, attachment, current
 identity and transaction rollback rules remain unchanged.
+
+### TUI canonical copy (#311 Unit 2)
+
+An explicit Copy reads one exact immutable node identity through native
+`history.get` against the selected owner. The body's UTF-8 cursor is scoped to
+node, source revision, encoding and projection. A different revision, missing
+or pruned source, or tombstone refuses copy; the client never copies an excerpt
+or a successfully read prefix instead. Requests use at most 64 KiB per page;
+the client retains at most 64 pages, 1 MiB for a code-block search (128 blocks),
+and 64 KiB for plain copy or clipboard output. No automatic history scan is
+performed. Optional provenance can be omitted under the existing frame budget;
+canonical body text must not be omitted silently.

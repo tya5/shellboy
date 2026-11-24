@@ -47,23 +47,44 @@ async fn source(
     budget: usize,
     language: UiLanguage,
 ) -> Result<String, ApiError> {
-    let history = crate::history::History::new(control.store.database.clone());
+    let data_dir = control
+        .store
+        .database
+        .path()
+        .parent()
+        .expect("owner database has a directory");
     let mut text = String::new();
     let mut cursor = None;
+    let mut revision = None;
     let mut seen = std::collections::HashSet::new();
     for _ in 0..SOURCE_PAGES {
-        let body = history
-            .get(HistoryGetArgs {
+        let response = crate::ipc::call_selected(
+            data_dir,
+            Command::HistoryGet(HistoryGetArgs {
                 end_message_only: false,
                 parts: false,
                 node_id: node_id.clone(),
                 limit_bytes: MAX_BODY_BYTES,
                 cursor,
                 encoding: DEFAULT_ENCODING.into(),
-            })
-            .await?;
+            }),
+        )
+        .await?;
+        let malformed =
+            || ApiError::new(ErrorCode::ProtocolMismatch, "Invalid history.get response");
+        if !response.ok {
+            return Err(response.error.unwrap_or_else(malformed));
+        }
+        let body: HistoryBody = serde_json::from_value(response.result.ok_or_else(malformed)?)
+            .map_err(|_| malformed())?;
         if body.node_id != node_id {
             return Err(CopyError::ReferenceChanged.error(language));
+        }
+        if revision
+            .replace(body.provenance.source_revision)
+            .is_some_and(|old| old != body.provenance.source_revision)
+        {
+            return Err(CopyError::SourceChanged.error(language));
         }
         if let Some(reason) = body.tombstone_reason {
             return Err(CopyError::Unavailable(reason).error(language));
@@ -230,6 +251,9 @@ mod tests {
                 tx.commit()?;
                 Ok(())
             }).await.unwrap();
+            let (rpc, requests) = tokio::sync::mpsc::channel(16);
+            let server = crate::ipc::LocalServer::bind(&owner, rpc).await.unwrap();
+            let dispatcher = tokio::spawn(control.clone().serve(requests));
             assert_eq!(control.store.config.ui.language, language);
             let expected = limit(language);
             let rejected = text(&control, "plain".into(), Some(BLOCKS), None)
@@ -262,6 +286,9 @@ mod tests {
                 text(&control, "plain".into(), None, None).await.unwrap(),
                 original
             );
+            server.shutdown().await.unwrap();
+            dispatcher.await.unwrap();
+            control.shutdown().await.unwrap();
             drop(control);
             owner.shutdown().await.unwrap();
         }

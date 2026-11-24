@@ -3342,6 +3342,9 @@ async fn external_input_copy_keeps_only_canonical_body_and_code_not_sender_metad
         tx.commit()?;
         Ok(())
     }).await.unwrap();
+    let (rpc, requests) = tokio::sync::mpsc::channel(16);
+    let server = shellboy::ipc::LocalServer::bind(&owner, rpc).await.unwrap();
+    let dispatcher = tokio::spawn(control.clone().serve(requests));
     assert_eq!(
         frontend::copy_source(&control, "external-copy".into(), None)
             .await
@@ -3370,5 +3373,8 @@ async fn external_input_copy_keeps_only_canonical_body_and_code_not_sender_metad
         original.provenance.sender.unwrap().label.as_deref(),
         Some("Claude（レビュア）")
     );
+    server.shutdown().await.unwrap();
+    dispatcher.await.unwrap();
+    control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
 }
