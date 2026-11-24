@@ -351,6 +351,10 @@ conversation browser; it is separate from F8 operation forms.
   `<data_dir>/logs/shellboy.log`. Only aggregations taking at least 100ms appear.
   [TUI details](tui.md#saved-usage-details) explains refresh and snapshot behavior.
 
+Shellboy no longer repeats unchanged request settings at each Turn and sends
+shorter lifecycle notices. Saved conversations are unchanged. This is not a
+limit on provider input or charges.
+
 ## 4. Change connection or model
 
 `/model` alone shows the current selection. `/models` retrieves the current connection's model list. Type to filter, select with Up/Down, and press Enter to change the current conversation's model. Esc only closes the list. Use `/models CONNECTION` for another connection. To set values directly:
