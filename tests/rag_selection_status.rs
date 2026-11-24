@@ -540,11 +540,13 @@ async fn version_one_readers_reject_without_writes_then_writer_migrates_existing
     ] {
         assert_eq!(result["ok"], false, "{result}");
         assert_eq!(result["error"]["code"], "schema_unsupported", "{result}");
-        assert!(
-            result["error"]["message"]
-                .as_str()
-                .unwrap()
-                .contains("shellboy rag init"),
+        assert_eq!(
+            result["error"]["message"],
+            "Knowledge database schema requires migration before reading",
+            "{result}"
+        );
+        assert_eq!(
+            result["error"]["hint"], "Run shellboy rag init for the selected store.",
             "{result}"
         );
     }
