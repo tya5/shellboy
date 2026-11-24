@@ -305,22 +305,22 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     Migration {
         version: 57,
         sql: include_str!("../../migrations/0057_answer_output_limit.sql"),
-        foreign_keys: None,
+        foreign_keys: Some(Impact::IndexOnly),
     },
     Migration {
         version: 58,
         sql: include_str!("../../migrations/0058_thread_import_origin.sql"),
-        foreign_keys: None,
+        foreign_keys: Some(Impact::IndexOnly),
     },
     Migration {
         version: 59,
         sql: include_str!("../../migrations/0059_thread_artifacts.sql"),
-        foreign_keys: None,
+        foreign_keys: Some(Impact::IndexOnly),
     },
     Migration {
         version: 60,
         sql: include_str!("../../migrations/0060_operation_receipt_lane.sql"),
-        foreign_keys: None,
+        foreign_keys: Some(Impact::IndexOnly),
     },
     Migration {
         version: 61,
@@ -330,17 +330,17 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     Migration {
         version: 62,
         sql: include_str!("../../migrations/0062_instruction_warnings.sql"),
-        foreign_keys: None,
+        foreign_keys: Some(Impact::IndexOnly),
     },
     Migration {
         version: 63,
         sql: include_str!("../../migrations/0063_thread_reply_summary.sql"),
-        foreign_keys: None,
+        foreign_keys: Some(Impact::IndexOnly),
     },
     Migration {
         version: 64,
         sql: include_str!("../../migrations/0064_thread_cwd_partitions.sql"),
-        foreign_keys: None,
+        foreign_keys: Some(Impact::IndexOnly),
     },
 ];
 
@@ -415,7 +415,8 @@ pub(super) fn run(
                 transaction.execute_batch(include_str!("migrate/retire_summary_ledger.sql"))?;
             }
             if migration.rebuilds_tables() {
-                super::check_integrity(&transaction, true, false)?;
+                super::migration_integrity::Check::for_migration(Some(migration))
+                    .run(&transaction)?;
             }
             transaction.commit()?;
             Ok(())

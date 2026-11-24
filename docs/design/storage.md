@@ -738,12 +738,12 @@ The legacy writer exemption list is not expanded.
 The startup migration registry declares each migration's optional typed foreign-key
 impact beside its version and SQL: `IndexOnly` or `Tables(&[...])`. No SQL text
 classification is allowed. Missing metadata means a full foreign-key check.
-Index-only means no row/FK changes apart from the migration ledger/version;
+`IndexOnly` means no existing FK relation can change (including nullable additions and new empty tables);
 migrations 25-27 explicitly have this classification. Table metadata declares
 all affected tables, including data/constraint changes. Validation checks those
 surviving tables and their referencing child tables (transitively, discovered
 from SQLite FK schema metadata, not SQL text). A changed parent must not hide
-violations in an untouched child. Unknown classifications, empty table metadata,
+violations in an untouched child. A rebuild uses its declared scope before commit, and the persisted union is checked before readiness. Unknown classifications, empty table metadata,
 and malformed/legacy pending markers conservatively require a full check.
 
 Before the first upgrade transaction, persist the union of the entire outstanding
@@ -760,7 +760,7 @@ quick_check is independent and unchanged. No new schema version or worker is add
 
 The reviewed registry initially marks only migrations25-27 as `IndexOnly` and
 migration14 as `Tables([turn, draft])` (turn-column addition and draft indexes).
-Migration30 (#229) and migration31 (#231) are also `IndexOnly`: a nullable `ADD COLUMN` without a foreign key whose existing rows are all NULL changes no relation, so no scan is needed. Migration34 (#222 stage 3) creates the new, empty `thread_tag` table (primary key `(thread_id, tag)`, foreign key to `thread`, index `(tag, thread_id)`) and the partial `threads_cwd_updated` index; it is also `IndexOnly` because no existing row can violate a constraint of an empty table. Tags are metadata: `thread delete` removes a Thread's rows in its own transaction, and the table is not a GC root. Other historical entries remain unclassified/full. Ledger/version writes are
+Migration30 (#229) and migration31 (#231) are also `IndexOnly`: a nullable `ADD COLUMN` without a foreign key whose existing rows are all NULL changes no relation, so no scan is needed. Migration34 (#222 stage 3) creates the new, empty `thread_tag` table (primary key `(thread_id, tag)`, foreign key to `thread`, index `(tag, thread_id)`) and the partial `threads_cwd_updated` index; it is also `IndexOnly` because no existing row can violate a constraint of an empty table. Tags are metadata: `thread delete` removes a Thread's rows in its own transaction, and the table is not a GC root. For #397, migrations 57–60 and 62 do not change existing FK relations; migration 61 rebuilds `schedule`, and its scope includes `schedule`, `shell_execution`, and their referencing descendants. Migrations 63 and 64 only create indexes over existing columns, including partial indexes; they change no FK relation. Other undeclared entries remain full. Ledger/version writes are
 inherent migration bookkeeping, not application-table changes requiring a scan.
 
 

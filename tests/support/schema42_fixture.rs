@@ -17,7 +17,7 @@ pub(crate) fn open_schema42_fixture(path: &Path) -> Connection {
     db
 }
 
-const THROUGH_54: &[&str] = &[
+const THROUGH_60: &[&str] = &[
     include_str!("../../migrations/0001_initial.sql"),
     include_str!("../../migrations/0002_gc_indexes.sql"),
     include_str!("../../migrations/0003_context_indexes.sql"),
@@ -72,14 +72,20 @@ const THROUGH_54: &[&str] = &[
     include_str!("../../migrations/0052_unified_model_attempt.sql"),
     include_str!("../../migrations/0053_retired_schedule_shells.sql"),
     include_str!("../../migrations/0054_thread_created_at.sql"),
+    include_str!("../../migrations/0055_automatic_compaction.sql"),
+    include_str!("../../migrations/0056_directional_reply_pending.sql"),
+    include_str!("../../migrations/0057_answer_output_limit.sql"),
+    include_str!("../../migrations/0058_thread_import_origin.sql"),
+    include_str!("../../migrations/0059_thread_artifacts.sql"),
+    include_str!("../../migrations/0060_operation_receipt_lane.sql"),
 ];
 
 /// Build an empty legacy database, independently of the current bootstrap.
 /// The Rust row-conversion hooks have no input here; migration 52 also has DDL.
 pub(crate) fn build_historical_schema(db: &mut Connection, version: usize) {
-    assert!((1..=THROUGH_54.len()).contains(&version));
+    assert!((1..=THROUGH_60.len()).contains(&version));
     db.pragma_update(None, "foreign_keys", true).unwrap();
-    for (index, sql) in THROUGH_54[..version].iter().enumerate() {
+    for (index, sql) in THROUGH_60[..version].iter().enumerate() {
         let rebuild = sql.starts_with("-- rebuild: foreign keys off\n");
         if rebuild {
             db.pragma_update(None, "foreign_keys", false).unwrap();

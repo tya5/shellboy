@@ -8,6 +8,7 @@ const PENDING: &str = "integrity.migration_pending";
 
 #[derive(Clone, Copy)]
 pub(super) enum Impact {
+    // Includes additive schema changes that cannot alter existing FK relations.
     IndexOnly,
     Tables(&'static [&'static str]),
 }
@@ -35,21 +36,23 @@ impl Check {
     pub(super) fn for_migrations(migrations: &[Migration], from: i64, to: i64) -> Self {
         let mut scope = Self::Skip;
         for version in from + 1..=to {
-            let effect = migrations
-                .iter()
-                .find(|entry| entry.version == version)
-                .and_then(|entry| entry.foreign_keys);
-            scope = scope.merge(match effect {
-                Some(Impact::IndexOnly) => Self::Skip,
-                Some(Impact::Tables(tables))
-                    if !tables.is_empty() && tables.iter().all(|name| !name.is_empty()) =>
-                {
-                    Self::Tables(tables.iter().map(|name| (*name).to_owned()).collect())
-                }
-                _ => Self::Full,
-            });
+            scope = scope.merge(Self::for_migration(
+                migrations.iter().find(|entry| entry.version == version),
+            ));
         }
         scope
+    }
+
+    pub(super) fn for_migration(migration: Option<&Migration>) -> Self {
+        match migration.and_then(|entry| entry.foreign_keys) {
+            Some(Impact::IndexOnly) => Self::Skip,
+            Some(Impact::Tables(tables))
+                if !tables.is_empty() && tables.iter().all(|name| !name.is_empty()) =>
+            {
+                Self::Tables(tables.iter().map(|name| (*name).to_owned()).collect())
+            }
+            _ => Self::Full,
+        }
     }
 
     pub(super) fn required(&self) -> bool {
@@ -249,6 +252,103 @@ mod tests {
         // Simulate a restart after the migration already committed its version.
         let db = super::super::open_connection(&path, None, None, true).unwrap();
         assert_eq!(pending(&db).unwrap(), None);
+    }
+
+    fn scope_56_to_62() -> Check {
+        let scope = Check::for_migrations(super::super::migrate::MIGRATIONS, 56, 62);
+        assert_eq!(
+            scope,
+            Check::Tables(["schedule".into(), "shell_execution".into()].into())
+        );
+        scope
+    }
+
+    #[test]
+    fn schedule_rebuild_rejects_new_orphan_and_rolls_back() {
+        let mut db = super::super::historical_memory(60);
+        // Inject an orphan inside the real rebuild transaction, after its table swap.
+        db.execute_batch(
+            "PRAGMA foreign_keys=ON;
+            CREATE TABLE fixture_child(schedule_id TEXT REFERENCES schedule(id));
+            CREATE TRIGGER fixture_orphan AFTER INSERT ON schema_migration WHEN new.version=61
+            BEGIN INSERT INTO fixture_child VALUES('missing'); END;",
+        )
+        .unwrap();
+        let error = super::super::migrate::run(&mut db, 60, &|_, _| {}, &|| {}).unwrap_err();
+        assert!(error.to_string().contains("foreign key violations"));
+        assert_eq!(
+            db.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
+                .unwrap(),
+            60
+        );
+        assert_eq!(
+            db.pragma_query_value(None, "foreign_keys", |r| r.get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        assert!(db.prepare("SELECT kind FROM schedule").is_err());
+        assert!(
+            !db.prepare("SELECT 1 FROM fixture_child")
+                .unwrap()
+                .exists([])
+                .unwrap()
+        );
+        assert!(
+            !db.prepare("SELECT 1 FROM schema_migration WHERE version=61")
+                .unwrap()
+                .exists([])
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn schedule_upgrade_ignores_unrelated_orphan_and_rechecks_saved_scope_on_restart() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("db");
+        let mut db = Connection::open(&path).unwrap();
+        super::super::register_vec().unwrap();
+        super::super::build_historical_schema(&mut db, 56);
+        db.execute_batch("PRAGMA foreign_keys=OFF;
+            INSERT INTO run(id,thread_id,state,created_at) VALUES('unrelated','missing','completed','now');
+            PRAGMA foreign_keys=ON;").unwrap();
+        let scope = scope_56_to_62();
+        assert_eq!(
+            Check::for_migrations(
+                super::super::migrate::MIGRATIONS,
+                56,
+                super::super::SCHEMA_VERSION
+            ),
+            scope
+        );
+        drop(db);
+        let db = super::super::open_connection(&path, None, None, true).unwrap();
+        assert!(Check::Full.run(&db).is_err());
+        assert_eq!(pending(&db).unwrap(), None);
+        // Recreate the persisted checkpoint after the schema commits but before validation clears it.
+        persist(&db, scope.clone()).unwrap();
+        db.progress_handler(1, Some(|| true)).unwrap();
+        assert!(scope.run(&db).is_err());
+        db.progress_handler(0, None::<fn() -> bool>).unwrap();
+        db.execute_batch(
+            "PRAGMA foreign_keys=OFF;
+            INSERT INTO schedule(id,thread_id,once_at,enabled,cwd,command)
+                VALUES('affected','missing',1,1,'/','fixture');",
+        )
+        .unwrap();
+        drop(db);
+        let error = super::super::open_connection(&path, None, None, true).unwrap_err();
+        assert!(error.to_string().contains("foreign key violations"));
+        let db = Connection::open(&path).unwrap();
+        assert_eq!(pending(&db).unwrap(), Some(scope));
+        db.execute("DELETE FROM schedule WHERE id='affected'", [])
+            .unwrap();
+        drop(db);
+        let db = super::super::open_connection(&path, None, None, true).unwrap();
+        assert_eq!(pending(&db).unwrap(), None);
+        assert!(
+            Check::Full.run(&db).is_err(),
+            "unrelated orphan was not modified"
+        );
     }
 
     #[test]
