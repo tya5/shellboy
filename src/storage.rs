@@ -200,9 +200,9 @@ impl StorageError {
         match self {
             Self::Operation(error) => *error,
             Self::InvalidInput(message) => ApiError::new(ErrorCode::InvalidState, message),
-            error @ (Self::QueueFull | Self::Closed) => {
-                ApiError::new(ErrorCode::InvalidState, error.to_string())
-            }
+            Self::QueueFull => ApiError::new(ErrorCode::InvalidState, self.to_string())
+                .details(serde_json::json!({"reason": "database_queue_full", "transient": true})),
+            error @ Self::Closed => ApiError::new(ErrorCode::InvalidState, error.to_string()),
             error => save_error(error.to_string())
                 .hint("Check storage capacity and permissions; existing data was preserved"),
         }
@@ -534,6 +534,12 @@ pub(crate) enum GcCaptureAdmission {
     Started(crate::compaction::WriterJobId),
 }
 
+// A refusal returns both uncalled closures; an accepted job never does.
+enum GcCaptureReply<F, L> {
+    Busy(F, L),
+    Finished(GcCaptureAdmission),
+}
+
 #[derive(Debug)]
 pub(crate) enum GcCompletionSubmitError {
     NotAdmitted(StorageError),
@@ -576,54 +582,63 @@ impl DbWorker {
     {
         let runtime = tokio::runtime::Handle::current();
         let wake = self.gc_retirement_wake();
-        let (command, reply) = make_gc_capture_job(stage, operation, launch, runtime, wake);
-        let sender = self
-            .shared
-            .sender
-            .lock()
-            .expect("DB admission mutex poisoned")
-            .as_ref()
-            .map(|lanes| lanes.foreground.clone())
-            .ok_or(StorageError::Closed)?;
-        if cancel
-            .as_ref()
-            .is_some_and(tokio_util::sync::CancellationToken::is_cancelled)
-        {
-            return Ok(GcCaptureAdmission::Cancelled);
-        }
-        let permit = if let Some(token) = cancel.as_ref() {
-            tokio::select! {biased;
-                _=token.cancelled()=>return Ok(GcCaptureAdmission::Cancelled),
-                permit=sender.reserve_owned()=>permit.map_err(|_|StorageError::Closed)?,
-            }
-        } else {
-            sender
-                .reserve_owned()
-                .await
-                .map_err(|_| StorageError::Closed)?
-        };
-        {
-            let admission = self
+        let cancel = cancel.unwrap_or_default();
+        let (mut operation, mut launch) = (operation, launch);
+        let mut delay = Duration::from_secs(1);
+        loop {
+            let sender = self
                 .shared
                 .sender
                 .lock()
-                .expect("DB admission mutex poisoned");
-            if admission.is_none() {
-                return Err(StorageError::Closed);
-            }
-            if cancel
+                .expect("DB admission mutex poisoned")
                 .as_ref()
-                .is_some_and(tokio_util::sync::CancellationToken::is_cancelled)
-            {
+                .map(|lanes| lanes.foreground.clone())
+                .ok_or(StorageError::Closed)?;
+            let (command, reply) = make_gc_capture_job(
+                stage.clone(),
+                operation,
+                launch,
+                runtime.clone(),
+                wake.clone(),
+            );
+            if cancel.is_cancelled() {
                 return Ok(GcCaptureAdmission::Cancelled);
             }
-            self.shared
-                .foreground_waiting
-                .fetch_add(1, Ordering::AcqRel);
-            permit.send(command);
+            let permit = {
+                tokio::select! {biased;
+                    _=cancel.cancelled()=>return Ok(GcCaptureAdmission::Cancelled),
+                    permit=sender.reserve_owned()=>permit.map_err(|_|StorageError::Closed)?,
+                }
+            };
+            {
+                let admission = self
+                    .shared
+                    .sender
+                    .lock()
+                    .expect("DB admission mutex poisoned");
+                if admission.is_none() {
+                    return Err(StorageError::Closed);
+                }
+                if cancel.is_cancelled() {
+                    return Ok(GcCaptureAdmission::Cancelled);
+                }
+                self.shared
+                    .foreground_waiting
+                    .fetch_add(1, Ordering::AcqRel);
+                permit.send(command);
+            }
+            match reply.receive().await? {
+                GcCaptureReply::Finished(result) => return Ok(result),
+                GcCaptureReply::Busy(returned_operation, returned_launch) => {
+                    operation = returned_operation;
+                    launch = returned_launch;
+                    crate::model::request_path::wait_backoff(&cancel, delay).await;
+                    delay = (delay * 2).min(Duration::from_secs(4));
+                }
+            }
         }
-        reply.receive().await
     }
+
     pub(crate) async fn cancel_gc_job(
         &self,
         id: crate::compaction::WriterJobId,
@@ -1302,7 +1317,7 @@ fn make_gc_capture_job<F, L, Fut>(
     launch: L,
     runtime: tokio::runtime::Handle,
     wake: GcRetirementWake,
-) -> (Command, DbReply<GcCaptureAdmission>)
+) -> (Command, DbReply<GcCaptureReply<F, L>>)
 where
     F: FnOnce(
             &mut Connection,
@@ -1321,24 +1336,23 @@ where
 {
     let (sender, receiver) = oneshot::channel();
     let job: Job = Box::new(move |db, _, _slow, coordinator| {
-        let stage_copy = stage.clone();
-        let result = if coordinator.can_install_capture() {
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| operation(db, &stage_copy)))
-                .unwrap_or(Err(StorageError::JobPanicked))
-        } else {
-            Err(StorageError::QueueFull)
-        };
-        let mut result = result;
+        if !coordinator.can_install_capture() {
+            let _ = sender.send(Ok(GcCaptureReply::Busy(operation, launch)));
+            return JobOutcome::default();
+        }
+        let mut result =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| operation(db, &stage)))
+                .unwrap_or(Err(StorageError::JobPanicked));
         finish_transaction(db, &mut result);
         let result = result.and_then(|capture| match capture {
             crate::compaction::GcCaptureOutcome::NoTarget => Ok(GcCaptureAdmission::NoTarget),
             crate::compaction::GcCaptureOutcome::Cancelled => Ok(GcCaptureAdmission::Cancelled),
             crate::compaction::GcCaptureOutcome::Captured(captured) => coordinator
-                .install_after_commit(db, *captured, stage_copy, runtime, wake, launch)
+                .install_after_commit(db, *captured, stage, runtime, wake, launch)
                 .map(GcCaptureAdmission::Started)
                 .map_err(|message| StorageError::InvalidInput(message.into())),
         });
-        let _ = sender.send(result);
+        let _ = sender.send(result.map(GcCaptureReply::Finished));
         JobOutcome::default()
     });
     (
@@ -2698,27 +2712,7 @@ mod lane_budget_tests {
         Panic,
     }
 
-    async fn active_gc_source_fixture(
-        exit: TestProducerExit,
-    ) -> (
-        tempfile::TempDir,
-        DbWorker,
-        crate::compaction::WriterJobId,
-        oneshot::Receiver<()>,
-    ) {
-        let root = tempfile::tempdir().unwrap();
-        let db = DbWorker::open_with_capacity(root.path().join("db"), 1)
-            .await
-            .unwrap();
-        db.call(|db|{
-            db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','/AGENTS.md','fixture','fixture','now')",[])?;
-            db.execute_batch("INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','completed','now');INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','t','r','completed','now');")?;
-            db.execute("INSERT INTO node(id,turn_id,kind,created_at,payload_revision,payload_json,payload_bytes,body_hash)VALUES('source','u','message','now',1,'{}',2,'hash')",[])?;
-            db.execute("INSERT INTO thread_path(thread_id,ordinal,node_id)VALUES('t',0,'source')",[])?;
-            db.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='u'),'a','u',0,0,'fixture','fixture',0,'completed','{}','now')", [])?;
-            db.execute("INSERT INTO automatic_compaction(attempt_id,turn_id,attempt_started_at,token) VALUES('a','u','now','tok')", [])?;
-            Ok(())
-        }).await.unwrap();
+    fn gc_source() -> crate::compaction::CapturedSummaryInput {
         let attachments = Vec::new();
         let stamp = crate::compaction::CapturedSourceStamp {
             source: crate::compaction::GcSourceFacts {
@@ -2743,7 +2737,7 @@ mod lane_budget_tests {
             complete: true,
             tool: false,
         };
-        let captured = crate::compaction::CapturedSummaryInput {
+        crate::compaction::CapturedSummaryInput {
             thread: "t".into(),
             epoch: 0,
             profile: "fixture".into(),
@@ -2756,7 +2750,31 @@ mod lane_budget_tests {
             groups: vec![group],
             active_turn: false,
             active_user_messages: Vec::new(),
-        };
+        }
+    }
+
+    async fn active_gc_source_fixture(
+        exit: TestProducerExit,
+    ) -> (
+        tempfile::TempDir,
+        DbWorker,
+        crate::compaction::WriterJobId,
+        oneshot::Receiver<()>,
+    ) {
+        let root = tempfile::tempdir().unwrap();
+        let db = DbWorker::open_with_capacity(root.path().join("db"), 1)
+            .await
+            .unwrap();
+        db.call(|db|{
+            db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','/AGENTS.md','fixture','fixture','now')",[])?;
+            db.execute_batch("INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','completed','now');INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','t','r','completed','now');")?;
+            db.execute("INSERT INTO node(id,turn_id,kind,created_at,payload_revision,payload_json,payload_bytes,body_hash)VALUES('source','u','message','now',1,'{}',2,'hash')",[])?;
+            db.execute("INSERT INTO thread_path(thread_id,ordinal,node_id)VALUES('t',0,'source')",[])?;
+            db.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='u'),'a','u',0,0,'fixture','fixture',0,'completed','{}','now')", [])?;
+            db.execute("INSERT INTO automatic_compaction(attempt_id,turn_id,attempt_started_at,token) VALUES('a','u','now','tok')", [])?;
+            Ok(())
+        }).await.unwrap();
+        let captured = gc_source();
         let stage = crate::compaction::GcStage {
             attempt_id: "a".into(),
             token: "tok".into(),
@@ -2793,6 +2811,58 @@ mod lane_budget_tests {
         };
         assert_eq!(started_rx.await.unwrap(), job_id);
         (root, db, job_id, rx)
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn busy_gc_capture_retries_same_stage_and_adopts_once() {
+        use std::{future::Future, task::Poll};
+        crate::test_watchdog::watchdog("busy GC capture retry", async {
+            let (_root, db, previous, retired) = active_gc_source_fixture(TestProducerExit::AwaitCancellation).await;
+            let stage = crate::compaction::GcStage {
+                attempt_id: "a".into(), token: "tok".into(), thread_id: "t".into(), stage: "closed_summary",
+            };
+            let captures = Arc::new(AtomicUsize::new(0));
+            let captured = captures.clone();
+            let (started, launched) = oneshot::channel();
+            let admission = db.call_with_gc_capture_cancellable(
+                stage,
+                move |_, stage| {
+                    assert_eq!(stage.token, "tok");
+                    assert_eq!(stage.stage, "closed_summary");
+                    captured.fetch_add(1, Ordering::SeqCst);
+                    Ok(crate::compaction::GcCaptureOutcome::Captured(Box::new(gc_source())))
+                },
+                move |id, input, cancel| async move {
+                    assert_eq!(input.groups[0].stamps[0].source.id, "source");
+                    let _ = started.send(id);
+                    cancel.cancelled().await;
+                },
+                None,
+            );
+            tokio::pin!(admission);
+            // Poll once to enqueue in the empty lane, then fence the writer. The
+            // earlier producer is still held, so the capture reply must be busy.
+            std::future::poll_fn(|cx| { assert!(admission.as_mut().poll(cx).is_pending()); Poll::Ready(()) }).await;
+            db.call(|_| Ok(())).await.unwrap();
+            std::future::poll_fn(|cx| { assert!(admission.as_mut().poll(cx).is_pending()); Poll::Ready(()) }).await;
+            assert_eq!(captures.load(Ordering::SeqCst), 0);
+            assert!(db.cancel_gc_job(previous).await.unwrap());
+            retired.await.unwrap();
+            let GcCaptureAdmission::Started(id) = admission.await.unwrap() else { panic!("capture must resume") };
+            assert_eq!(launched.await.unwrap(), id);
+            assert_eq!(captures.load(Ordering::SeqCst), 1);
+            let mut response = Some(Ok(synthetic_gc_summary()));
+            assert_eq!(db.complete_gc_job_cancellable(id, &mut response, None, None).await.unwrap(), crate::compaction::CompletionDisposition::Accepted);
+            let boundary = Arc::new(tokio::sync::Mutex::new(())).lock_owned().await;
+            db.adopt_gc_candidate(id, boundary, |_, _| Ok(((), crate::compaction::GcStageFact {
+                selection_revision: 0, reasoning_epoch: 0, summary_node_id: "synthetic-summary".into(),
+                source_nodes: 1, spilled_groups: 0, drop_all_reasoning: false, captured_reasoning_epoch: 0,
+                source_characters: None, summary_characters: None, summary_limit: None, model_requests: None, summary_usage: None,
+            }))).await.unwrap();
+            let adopted = db.call(|db| Ok(db.query_row("SELECT closed_summary IS NOT NULL FROM automatic_compaction WHERE attempt_id='a' AND token='tok'", [], |row| row.get::<_, bool>(0))?)).await.unwrap();
+            assert!(adopted);
+            db.shutdown().await.unwrap();
+        }).await.unwrap();
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -2938,21 +3008,17 @@ mod lane_budget_tests {
                     thread_id: "t".into(),
                     stage: "closed_summary",
                 };
-                loop {
-                    match db
-                        .call_with_gc_capture_cancellable(
-                            stage.clone(),
-                            |_, _| Ok(crate::compaction::GcCaptureOutcome::NoTarget),
-                            |_, _, _| async { panic!("NoTarget probe must not launch a producer") },
-                            None,
-                        )
-                        .await
-                    {
-                        Ok(GcCaptureAdmission::NoTarget) => break,
-                        Err(StorageError::QueueFull) => tokio::task::yield_now().await,
-                        other => panic!("unexpected lifecycle probe result: {other:?}"),
-                    }
-                }
+                assert_eq!(
+                    db.call_with_gc_capture_cancellable(
+                        stage,
+                        |_, _| Ok(crate::compaction::GcCaptureOutcome::NoTarget),
+                        |_, _, _| async { panic!("NoTarget probe must not launch a producer") },
+                        None,
+                    )
+                    .await
+                    .unwrap(),
+                    GcCaptureAdmission::NoTarget
+                );
                 db.shutdown().await.unwrap();
             }
         })

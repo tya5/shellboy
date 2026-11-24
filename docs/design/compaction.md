@@ -61,6 +61,11 @@ shutdown cancel and join through the same slot. The existing writer coordinator
 continues to own producer completion, terminal facts, FINISH and retirement. Matching
 job-ID lifecycle events consume exit and join receipts; ordinary database
 replies neither advance nor retire the producer.
+An occupied GC slot is a transient pre-capture refusal, not a full DB lane.
+Retry only that capture after cancellation-aware bounded backoff, retaining the
+same stage and uncalled closures. A full foreground lane already waits for
+admission. Neither case repeats a committed capture or a provider request.
+
 
 Manual summary and preview retain their strict operation-specific snapshot,
 range, marker, provenance and transaction rules. This current automatic path
