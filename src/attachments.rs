@@ -1573,7 +1573,20 @@ const MANAGED_PAGE: &str = "SELECT m.id,m.absolute_path,m.state,COALESCE(m.raw_s
 
 #[cfg(test)]
 mod mime_tests {
-    use super::mime_type;
+    use super::*;
+
+    #[test]
+    fn next_action_for_unsupported_bytes_preserves_the_evidence() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("file.txt");
+        std::fs::write(&path, b"binary\0data").unwrap();
+        let error = read_encoded(&path, 64, 64, false, &Mutex::new(Cache::default()))
+            .err()
+            .expect("the attachment must be rejected");
+        assert_eq!(error.code, ErrorCode::InvalidArgument);
+        assert_eq!(error.message, UNSUPPORTED_FORMAT_ERROR);
+        assert_eq!(error.hint.as_deref(), Some(ATTACH_HELP));
+    }
 
     #[test]
     fn classifies_content_without_filename_hints() {

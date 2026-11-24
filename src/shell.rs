@@ -729,7 +729,6 @@ fn bash_arguments(command: &str) -> [&str; 5] {
     ["--noprofile", "--norc", "-c", "--", command]
 }
 
-#[cfg(unix)]
 const LAUNCH_INSPECT: &str =
     "Inspect the saved execution with shellboy shell get --execution EXECUTION_ID.";
 const SHELL_EXECUTABLE: &str =
@@ -742,6 +741,7 @@ fn unix_launch_error(stage: &str, error: std::io::Error, action: &str) -> ApiErr
     ApiError::new(ErrorCode::IoFailed, format!("{stage}: {error}")).hint(action)
 }
 
+#[cfg(unix)]
 fn launch_command(config: &Config, command: &str) -> Command {
     match config.shell.kind {
         ShellKind::Bash => {
@@ -1606,5 +1606,71 @@ mod stdin_fact_ack_tests {
             .await
             .unwrap()
             .unwrap();
+    }
+}
+
+#[cfg(all(test, unix))]
+mod next_action_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn next_action_distinguishes_exec_from_cwd_failure() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = tempfile::tempdir().unwrap();
+        let missing = root.path().join("missing");
+        let ordinary_file = root.path().join("ordinary-file");
+        std::fs::write(&ordinary_file, b"not executable").unwrap();
+        std::fs::set_permissions(&ordinary_file, std::fs::Permissions::from_mode(0o600)).unwrap();
+        for (exe, cwd, stage, errno, hint) in [
+            (
+                missing.as_path(),
+                root.path(),
+                "Shell exec failed",
+                libc::ENOENT,
+                SHELL_EXECUTABLE,
+            ),
+            (
+                ordinary_file.as_path(),
+                root.path(),
+                "Shell exec failed",
+                libc::EACCES,
+                SHELL_EXECUTABLE,
+            ),
+            (
+                std::path::Path::new("/bin/sh"),
+                missing.as_path(),
+                "Shell spawn failed",
+                libc::ENOENT,
+                SHELL_CWD,
+            ),
+            (
+                std::path::Path::new("/bin/sh"),
+                ordinary_file.as_path(),
+                "Shell spawn failed",
+                libc::ENOTDIR,
+                SHELL_CWD,
+            ),
+        ] {
+            let mut config = Config::default();
+            config.shell.executable = Some(exe.to_path_buf());
+            let args = serde_json::from_value(serde_json::json!({"command":"exit 0"})).unwrap();
+            let result = ShellSupervisor::new(&config)
+                .spawn(
+                    "launch-witness".into(),
+                    cwd.to_path_buf(),
+                    args,
+                    BTreeMap::new(),
+                )
+                .await;
+            let error = result.err().expect("native launch must fail");
+            let saved = serde_json::to_value(error).unwrap();
+            assert_eq!(saved["code"], "io_failed");
+            assert_eq!(
+                saved["message"],
+                format!("{stage}: {}", std::io::Error::from_raw_os_error(errno))
+            );
+            assert_eq!(saved["hint"], hint);
+        }
     }
 }
