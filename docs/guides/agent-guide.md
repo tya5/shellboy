@@ -365,6 +365,10 @@ and use the background shell observation commands for long-running work. An
 invalid call returns its own error without preventing other valid calls in the
 same group; malformed protocol groups are still rejected as a whole.
 
+### Shell, attachment and retrieval next actions
+
+Use the failure's `hint` as the next diagnostic step; keep the OS or provider `message` as evidence. Distinguish launch failure from a process that ran and exited. If you have an execution ID, inspect it with `shellboy shell get --execution EXECUTION_ID` before repeating work. For excluded or unavailable attachments, run `shellboy attachment list --thread THREAD_ID`; do not claim the omitted bytes were sent. Use `shellboy index status` for the owner history index and `shellboy rag status` for the standalone store. When semantic coverage is missing, repeat the same RAG query and scope with `--mode keyword` if keyword results will suffice. A hint does not authorize resending a mutation or making another paid call.
+
 ### Shell stdin lifetime
 
 `stdin_open` defaults to `false`. Without initial input, stdin reaches EOF

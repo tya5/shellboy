@@ -683,7 +683,7 @@ pub(super) async fn search(
     let mut failures = Vec::new();
     if let Some(error) = discovery_error {
         failures
-            .push(json!({"scope":"registered_sources","code":error.code,"message":error.message}));
+            .push(json!({"scope":"registered_sources","code":error.code,"message":error.message,"hint":error.hint()}));
     }
     let mut lists = Vec::new();
     let mut statuses = Vec::new();
@@ -850,7 +850,8 @@ pub(super) async fn search(
             let degraded = mode == SearchMode::Hybrid
                 && (keyword == "ok" || keyword == "partial")
                 && preparation.is_some();
-            let mut failure = json!({"scope":scope,"code":wire_code,"message":error.message});
+            let mut failure =
+                json!({"scope":scope,"code":wire_code,"message":error.message,"hint":error.hint()});
             if let Some(preparation) = preparation {
                 let next = preparation_next(context, scope, source_id.as_deref(), &preparation);
                 status["semantic"] = json!("not_ready");
@@ -908,7 +909,7 @@ pub(super) async fn search(
         Ok(json!({"protocol_version":crate::protocol::PROTOCOL_VERSION,"ok":true,"result":result}))
     } else {
         Ok(
-            json!({"protocol_version":crate::protocol::PROTOCOL_VERSION,"ok":false,"result":result,"error":{"code":"partial_failure","message":"Some requested scopes failed; successful scope results are included"}}),
+            json!({"protocol_version":crate::protocol::PROTOCOL_VERSION,"ok":false,"result":result,"error":{"code":"partial_failure","message":"Some requested scopes failed; successful scope results are included","hint":super::action_for_code("partial_failure")}}),
         )
     }
 }

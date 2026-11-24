@@ -155,7 +155,7 @@ pub(super) async fn index_derived(
             *failure_count += 1;
             if failures.len() < 50 {
                 failures.push(
-                    json!({"document_id":document,"code":error.code,"message":error.message}),
+                    json!({"document_id":document,"code":error.code,"message":error.message,"hint":error.hint()}),
                 );
             }
         } else {

@@ -136,13 +136,20 @@ fn adopt_failure_tx(
     let retry_delays = &config.indexing.retry_delays_ms;
     let retries = config.indexing.retries;
     let pause_count = config.indexing.common_failure_pause_count;
-    let error_json = serde_json::to_value(error).map_err(|_| {
+    let mut error_json = serde_json::to_value(error).map_err(|_| {
         StorageError::from(err(
             ErrorCode::InvalidState,
             "Cannot encode embedding error",
         ))
     })?;
     let failure = error.embedding_failure();
+    error_json["hint"] = json!(
+        if failure.credentials_or_credit || failure.invalid_configuration {
+            "Check the configured embedding connection with shellboy config check."
+        } else {
+            "Inspect the paused or failed work with shellboy index status."
+        }
+    );
     let immediate = failure.credentials_or_credit || failure.invalid_configuration;
     let length = !immediate && failure.input_limit;
     let common = failure.transient;

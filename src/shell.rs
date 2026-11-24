@@ -405,7 +405,9 @@ impl ShellSupervisor {
         gate: Option<Arc<tokio::sync::Mutex<bool>>>,
         owner: SpawnOwner,
     ) -> Result<ShellExecution, ApiError> {
-        args.validate()?;
+        args.validate().map_err(|error| {
+            error.hint("Check the shell tool arguments with shellboy docs get --id shellboy/shell.")
+        })?;
         if execution_id.trim().is_empty() {
             return Err(ApiError::new(
                 ErrorCode::InvalidArgument,
@@ -413,8 +415,10 @@ impl ShellSupervisor {
             ));
         }
         // Resolve both encodings before any process or external side effect.
-        resolve_encoding(&args.input_encoding)?;
-        resolve_encoding(&args.output_encoding)?;
+        resolve_encoding(&args.input_encoding)
+            .map_err(|error| error.hint("Set input_encoding to utf-8."))?;
+        resolve_encoding(&args.output_encoding)
+            .map_err(|error| error.hint("Set output_encoding to utf-8."))?;
         let initial = args
             .initial_stdin
             .as_deref()
@@ -434,6 +438,7 @@ impl ShellSupervisor {
                     ErrorCode::ConfigInvalid,
                     "output buffer budget is unsupported",
                 )
+                .hint("Check io.output_buffer_bytes with shellboy config check.")
             })?;
         #[cfg(windows)]
         {
@@ -518,10 +523,7 @@ impl ShellSupervisor {
             .details(serde_json::json!({"reason":"turn_interrupted_before_spawn"})));
         }
         let lifeline = unix_lifeline::Prepared::configure(&mut command).map_err(|error| {
-            ApiError::new(
-                ErrorCode::IoFailed,
-                format!("shell lifeline setup failed: {error}"),
-            )
+            unix_launch_error("Shell lifeline setup failed", error, LAUNCH_INSPECT)
         })?;
         let spawned_at = Instant::now();
         // Serialize native publication with emergency force cleanup. No await
@@ -534,13 +536,24 @@ impl ShellSupervisor {
         drop(command);
         let mut child = lifeline
             .attached(child.map_err(|error| {
-                ApiError::new(ErrorCode::IoFailed, format!("shell spawn failed: {error}"))
+                let action = match error.kind() {
+                    std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory => SHELL_CWD,
+                    _ => LAUNCH_INSPECT,
+                };
+                unix_launch_error("Shell spawn failed", error, action)
             })?)
             .map_err(|error| {
-                ApiError::new(ErrorCode::IoFailed, format!("shell exec failed: {error}"))
+                let action = match error.kind() {
+                    std::io::ErrorKind::NotFound | std::io::ErrorKind::PermissionDenied => {
+                        SHELL_EXECUTABLE
+                    }
+                    _ => LAUNCH_INSPECT,
+                };
+                unix_launch_error("Shell exec failed", error, action)
             })?;
         let pgid = child.child.id().ok_or_else(|| {
-            ApiError::new(ErrorCode::IoFailed, "spawned shell has no process handle")
+            ApiError::new(ErrorCode::IoFailed, "Spawned shell has no process handle")
+                .hint(LAUNCH_INSPECT)
         })? as i32;
         groups.insert(pgid);
         if self
@@ -717,6 +730,18 @@ fn bash_arguments(command: &str) -> [&str; 5] {
 }
 
 #[cfg(unix)]
+const LAUNCH_INSPECT: &str =
+    "Inspect the saved execution with shellboy shell get --execution EXECUTION_ID.";
+const SHELL_EXECUTABLE: &str =
+    "Check the shell.executable setting for an installed executable for shell.kind.";
+const SHELL_CWD: &str =
+    "Inspect the working directory with shellboy thread get --thread THREAD_ID.";
+
+#[cfg(unix)]
+fn unix_launch_error(stage: &str, error: std::io::Error, action: &str) -> ApiError {
+    ApiError::new(ErrorCode::IoFailed, format!("{stage}: {error}")).hint(action)
+}
+
 fn launch_command(config: &Config, command: &str) -> Command {
     match config.shell.kind {
         ShellKind::Bash => {

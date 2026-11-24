@@ -127,12 +127,59 @@ pub enum IngestKind {
 pub(crate) struct Error {
     pub code: String,
     pub message: String,
+    action: Option<&'static str>,
 }
+impl Error {
+    fn with_action(mut self, action: &'static str) -> Self {
+        self.action = Some(action);
+        self
+    }
+
+    fn hint(&self) -> &'static str {
+        self.action.unwrap_or_else(|| action_for_code(&self.code))
+    }
+}
+
+fn action_for_code(code: &str) -> &'static str {
+    match code {
+        "db_not_found" => "Run shellboy rag init for the selected store.",
+        "config_invalid" => "Check the selected configuration with shellboy config check.",
+        "revision_unavailable" | "cursor_expired" | "history_changed" => {
+            "Run the original shellboy rag search again without a cursor to obtain fresh references."
+        }
+        "source_changed" | "source_unavailable" | "source_not_found" | "conflict" => {
+            "Inspect the registered source with shellboy rag source list."
+        }
+        "index_incompatible"
+        | "rag_semantic_guides_missing"
+        | "rag_semantic_profile_missing"
+        | "rag_semantic_coverage_missing"
+        | "rag_semantic_history_missing" => {
+            "Use shellboy rag search --mode keyword for a search without embeddings."
+        }
+        "rag_semantic_store_missing" => "Run shellboy rag init for the selected store.",
+        "embedding_failed"
+        | "embedding_paused"
+        | "history_unavailable"
+        | "partial_failure"
+        | "schema_unsupported"
+        | "database_failed"
+        | "io_failed"
+        | "busy"
+        | "worker_failed"
+        | "extractor_failed"
+        | "not_found" => "Inspect the selected store with shellboy rag status.",
+        "thread_not_found" => "Check the target with shellboy thread get --thread THREAD_ID.",
+        _ => "Check the command arguments with shellboy rag --help.",
+    }
+}
+
 pub(crate) type Result<T> = std::result::Result<T, Error>;
 pub(crate) fn err(code: &str, message: impl Into<String>) -> Error {
     Error {
         code: code.into(),
         message: message.into(),
+        action: None,
     }
 }
 impl From<rusqlite::Error> for Error {
@@ -262,7 +309,7 @@ pub async fn execute(
     execute_with_text(options, config, data_dir, cwd, text).await
 }
 fn failure(error: Error) -> Value {
-    json!({"protocol_version":crate::protocol::PROTOCOL_VERSION,"ok":false,"error":{"code":error.code,"message":error.message}})
+    json!({"protocol_version":crate::protocol::PROTOCOL_VERSION,"ok":false,"error":{"code":error.code,"message":error.message,"hint":error.hint()}})
 }
 async fn cli_text<R: tokio::io::AsyncRead + Unpin>(
     options: &RagOptions,
@@ -425,7 +472,7 @@ async fn run(
     };
     if value.get("partial_failure").and_then(Value::as_bool) == Some(true) {
         Ok(
-            json!({"protocol_version":crate::protocol::PROTOCOL_VERSION,"ok":false,"result":value,"error":{"code":"partial_failure","message":"Some inputs failed; successful revisions were preserved"}}),
+            json!({"protocol_version":crate::protocol::PROTOCOL_VERSION,"ok":false,"result":value,"error":{"code":"partial_failure","message":"Some inputs failed; successful revisions were preserved","hint":action_for_code("partial_failure")}}),
         )
     } else {
         Ok(json!({"protocol_version":crate::protocol::PROTOCOL_VERSION,"ok":true,"result":value}))
@@ -434,6 +481,20 @@ async fn run(
 
 #[cfg(test)]
 mod owned_ingest_tests {
+    #[test]
+    fn next_actions_preserve_rag_codes_and_evidence() {
+        for (code, action) in [
+            ("db_not_found", "shellboy rag init"),
+            ("embedding_paused", "shellboy rag status"),
+            ("index_incompatible", "shellboy rag search --mode keyword"),
+        ] {
+            let payload = super::failure(super::err(code, "synthetic evidence"));
+            assert_eq!(payload["error"]["code"], code);
+            assert_eq!(payload["error"]["message"], "synthetic evidence");
+            assert!(payload["error"]["hint"].as_str().unwrap().contains(action));
+        }
+    }
+
     use super::*;
     fn options(
         db: PathBuf,

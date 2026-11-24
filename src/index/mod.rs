@@ -76,7 +76,11 @@ fn now() -> String {
     chrono::Utc::now().to_rfc3339()
 }
 fn err(code: ErrorCode, message: impl Into<String>) -> ApiError {
-    ApiError::new(code, message)
+    ApiError::new(code, message).hint(match code {
+        ErrorCode::InvalidArgument => "Check index command arguments with shellboy index --help.",
+        ErrorCode::ConfigInvalid => "Check indexing configuration with shellboy config check.",
+        _ => "Inspect the selected history index with shellboy index status.",
+    })
 }
 fn db_error(error: StorageError) -> ApiError {
     error.into_api_error()

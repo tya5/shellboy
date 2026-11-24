@@ -1243,3 +1243,11 @@ Recovery rewind is available as `shellboy thread rewind --thread THREAD_ID --nod
 - `shellboy artifact list --thread THREAD_ID [--limit N] [--cursor CURSOR]` lists latest metadata, newest-updated first. Equal timestamps sort by artifact ID. Pass `next_cursor` to continue the same live list; start again without a cursor to see entries that moved ahead of it.
 
 On add and update, the CLI joins a relative file path to its own current working directory before sending it. It does not check file existence or normalize `..` beyond the path join. Absolute paths, URLs and custom-scheme URIs are left unchanged. The owner stores the resulting string without resolving it against its own working directory.
+
+### Next actions for shell, attachment and search failures
+
+Read `error.hint` for the next action and `error.message` for diagnostic evidence. An OS launch error is not a child exit code: check `shell.executable` for an executable error or inspect the saved Thread cwd with `shellboy thread get --thread THREAD_ID`. When a shell execution ID is known, inspect its saved state with `shellboy shell get --execution EXECUTION_ID` before deciding whether to rerun.
+
+An unavailable or excluded attachment was not sent in that request. Inspect `shellboy attachment list --thread THREAD_ID` for current state; an earlier replay notice or accepted attachment command is not a delivery receipt.
+
+Standalone `rag` reports hints on failures and on failed scopes or inputs in a partial result. Use `shellboy rag init` for the intended, uninitialized store, `shellboy rag status` for a failed standalone embedding or store, and `shellboy index status` for the owner history index. For missing semantic coverage, repeat the search with `--mode keyword` to avoid another embedding call. Preserve the original query and requested scope.

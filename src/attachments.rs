@@ -42,8 +42,12 @@ fn now() -> String {
 fn id() -> String {
     uuid::Uuid::new_v4().to_string()
 }
+const INSPECT_ATTACHMENTS: &str =
+    "Inspect the saved selection with shellboy attachment list --thread THREAD_ID.";
+const ATTACH_HELP: &str = "Check supported file arguments with shellboy attach --help.";
+
 fn io_error(message: impl Into<String>) -> ApiError {
-    ApiError::new(ErrorCode::IoFailed, message)
+    ApiError::new(ErrorCode::IoFailed, message).hint(INSPECT_ATTACHMENTS)
 }
 fn sql_error(error: rusqlite::Error) -> ApiError {
     crate::storage::save_error(error.to_string())
@@ -54,14 +58,16 @@ fn storage_error(error: StorageError) -> ApiError {
 fn stale() -> ApiError {
     ApiError::new(
         ErrorCode::OperationConflict,
-        "Attachment selection changed; prepare again before starting an API request",
+        "Attachment selection changed; no API request was started",
     )
+    .hint(INSPECT_ATTACHMENTS)
 }
 fn cancelled() -> ApiError {
     ApiError::new(
         ErrorCode::InvalidState,
         "Attachment preparation cancelled; no API request may start",
     )
+    .hint(INSPECT_ATTACHMENTS)
 }
 
 #[derive(Clone)]
@@ -354,21 +360,59 @@ impl AttachmentService {
             let Some((cwd,revision))=row else{return Ok(None);};
             let mut statement=db.prepare("SELECT a.absolute_path FROM attachment_selection s JOIN attachment_ref a ON a.id=s.attachment_id WHERE s.thread_id=?1 AND s.state='active' AND s.protected=1")?;
             let paths=statement.query_map([&thread],|r|r.get::<_,String>(0))?.collect::<Result<Vec<_>,_>>()?;Ok(Some((PathBuf::from(cwd),revision,paths)))
-        }).await.map_err(storage_error)?.ok_or_else(||ApiError::new(ErrorCode::ThreadNotFound,"Attachment target Thread was not found or was deleted"))?;
+        }).await.map_err(storage_error)?.ok_or_else(||ApiError::new(ErrorCode::ThreadNotFound,"Attachment target Thread was not found or was deleted").hint("Check the target with shellboy thread get --thread THREAD_ID."))?;
         let limit = self.config.limits.attachment_request_bytes;
         let file_limit = self.config.limits.attachment_file_bytes;
         let deadline = self.deadline();
-        let planned=self.workers.execute(deadline,cancel,move||{
-            let mut total=0u64;
-            for path in protected { if let Ok(meta)=std::fs::metadata(path) && meta.is_file() && meta.len() <= file_limit { total=total.checked_add(meta.len()).ok_or_else(||io_error("Attachment byte count overflow"))?; } }
-            let mut result=Vec::new();
-            for file in files { let path=if file.path.is_absolute(){file.path}else{cwd.join(file.path)}; if path.as_os_str().is_empty(){return Err(io_error("Attachment path is empty"));}
-                let bytes=std::fs::metadata(&path).ok().filter(|m|m.is_file()).map(|m|m.len());
-                total=total.checked_add(bytes.filter(|bytes| *bytes <= file_limit).unwrap_or(0)).ok_or_else(||io_error("Attachment byte count overflow"))?;
-                result.push(PlannedAttachment{path,kind:file.kind,observed_bytes:bytes,managed_id:None});
-            }
-            if total>limit{return Err(ApiError::new(ErrorCode::InputLimit,"New protected attachments exceed the request raw-byte limit; reduce or split the attachments").details(json!({"protected_bytes":total,"limit_bytes":limit})));}Ok(result)
-        }).await?;
+        let planned = self
+            .workers
+            .execute(deadline, cancel, move || {
+                let mut total = 0u64;
+                for path in protected {
+                    if let Ok(meta) = std::fs::metadata(path)
+                        && meta.is_file()
+                        && meta.len() <= file_limit
+                    {
+                        total = total
+                            .checked_add(meta.len())
+                            .ok_or_else(|| io_error("Attachment byte count overflow"))?;
+                    }
+                }
+                let mut result = Vec::new();
+                for file in files {
+                    let path = if file.path.is_absolute() {
+                        file.path
+                    } else {
+                        cwd.join(file.path)
+                    };
+                    if path.as_os_str().is_empty() {
+                        return Err(io_error("Attachment path is empty"));
+                    }
+                    let bytes = std::fs::metadata(&path)
+                        .ok()
+                        .filter(|m| m.is_file())
+                        .map(|m| m.len());
+                    total = total
+                        .checked_add(bytes.filter(|bytes| *bytes <= file_limit).unwrap_or(0))
+                        .ok_or_else(|| io_error("Attachment byte count overflow"))?;
+                    result.push(PlannedAttachment {
+                        path,
+                        kind: file.kind,
+                        observed_bytes: bytes,
+                        managed_id: None,
+                    });
+                }
+                if total > limit {
+                    return Err(ApiError::new(
+                        ErrorCode::InputLimit,
+                        "New protected attachments exceed the request raw-byte limit",
+                    )
+                    .hint("Use shellboy attach PATH with a smaller file selection.")
+                    .details(json!({"protected_bytes":total,"limit_bytes":limit})));
+                }
+                Ok(result)
+            })
+            .await?;
         Ok(AddPlan {
             thread_id: thread_id.into(),
             selection_revision: revision,
@@ -482,7 +526,7 @@ impl AttachmentService {
             }
         }
         if protected > self.config.limits.attachment_request_bytes {
-            return Err(ApiError::new(ErrorCode::InputLimit,"Current protected attachment files exceed the request limit; request is held for explicit retry").details(json!({"protected_bytes":protected,"limit_bytes":self.config.limits.attachment_request_bytes})));
+            return Err(ApiError::new(ErrorCode::InputLimit,"Current protected attachment files exceed the request limit; request is held for explicit retry").hint("Reduce the selection with shellboy attachment remove --thread THREAD_ID --attachment ATTACHMENT_ID.").details(json!({"protected_bytes":protected,"limit_bytes":self.config.limits.attachment_request_bytes})));
         }
         let mut excluded = Vec::new();
         for s in selected.iter().filter(|s| s.active && !s.protected) {
@@ -634,13 +678,13 @@ impl AttachmentService {
                         manifest.state = "unavailable".into();
                         manifest.error = Some(error.clone());
                         let notice = format!(
-                            "Attachment unavailable: {} ({error}); continue with the remaining conversation",
+                            "Attachment unavailable: {} ({error}); inspect the saved selection with shellboy attachment list --thread {thread_id}",
                             s.path.display()
                         );
                         result.notices.push(notice.clone());
                         if s.previous_state.as_deref() != Some("unavailable") {
                             let end = error.floor_char_boundary(error.len().min(1024));
-                            status.push(format!("Attachment unavailable: id={} source={} ({}); continue with the remaining conversation (see attachment list for current details)", s.id, s.source_node_id, &error[..end]));
+                            status.push(format!("Attachment unavailable: id={} source={} ({}); inspect with shellboy attachment list --thread {thread_id}", s.id, s.source_node_id, &error[..end]));
                         }
                     }
                 }
@@ -936,7 +980,8 @@ pub fn remove_tx(
             return Err(ApiError::new(
                 ErrorCode::InvalidArgument,
                 "Attachment does not belong to this Thread",
-            ));
+            )
+            .hint(INSPECT_ATTACHMENTS));
         }
     }
     if changed > 0 {
@@ -988,18 +1033,19 @@ pub fn record_prepared_tx(
 fn open_attachment(path: &Path, limit: u64) -> Result<(File, Signature), ApiError> {
     let meta = std::fs::metadata(path).map_err(|e| io_error(e.to_string()))?;
     if !meta.is_file() {
-        return Err(io_error("Attachment path is not a regular file"));
+        return Err(io_error("Attachment path is not a regular file").hint(ATTACH_HELP));
     }
     let file = File::open(path).map_err(|e| io_error(e.to_string()))?;
     let meta = file.metadata().map_err(|e| io_error(e.to_string()))?;
     if !meta.is_file() {
-        return Err(io_error("Attachment path is not a regular file"));
+        return Err(io_error("Attachment path is not a regular file").hint(ATTACH_HELP));
     }
     if meta.len() > limit {
         return Err(ApiError::new(
             ErrorCode::InputLimit,
             "Attachment exceeds the single-file raw-byte limit",
-        ));
+        )
+        .hint("Use shellboy attach PATH with a smaller file."));
     }
     Ok((
         file,
@@ -1059,10 +1105,9 @@ fn read_encoded(
     let hash = hash.finalize().iter().map(|b| format!("{b:02x}")).collect();
     let mime = mime_type(&bytes);
     if mime == "application/octet-stream" {
-        return Err(ApiError::new(
-            ErrorCode::InvalidArgument,
-            UNSUPPORTED_FORMAT_ERROR,
-        ));
+        return Err(
+            ApiError::new(ErrorCode::InvalidArgument, UNSUPPORTED_FORMAT_ERROR).hint(ATTACH_HELP),
+        );
     }
     let encoded = Arc::new(Encoded {
         base64: STANDARD.encode(&bytes),

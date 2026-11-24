@@ -122,6 +122,7 @@ fn create_process_error(cause: std::io::Error) -> ApiError {
         ErrorCode::IoFailed,
         format!("create shell in execution Job: {cause}"),
     )
+    .hint(super::LAUNCH_INSPECT)
 }
 
 fn take_handle(handle: HANDLE, action: &str) -> Result<OwnedHandle, ApiError> {
@@ -538,10 +539,16 @@ impl ShellSupervisor {
             &arguments(self.config.shell.kind, &args.command),
         )?;
         let env_block = windows_command::environment_block(&entries)?;
-        let (stdin_parent, stdin_child) = super::windows_stdin::input_pipe().await?;
-        let stdout = output_pipe().await?;
-        let stderr = output_pipe().await?;
-        let job = create_job()?;
+        let (stdin_parent, stdin_child) = super::windows_stdin::input_pipe()
+            .await
+            .map_err(|error| error.hint(super::LAUNCH_INSPECT))?;
+        let stdout = output_pipe()
+            .await
+            .map_err(|error| error.hint(super::LAUNCH_INSPECT))?;
+        let stderr = output_pipe()
+            .await
+            .map_err(|error| error.hint(super::LAUNCH_INSPECT))?;
+        let job = create_job().map_err(|error| error.hint(super::LAUNCH_INSPECT))?;
         let turn_gate = match &gate {
             Some(gate) => Some(gate.lock().await),
             None => None,

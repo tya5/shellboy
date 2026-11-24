@@ -437,3 +437,13 @@ not arguments, output, labels, IDs, paths or payload text. SQLite failures remai
 before classifying history for `--attempt`; compare sides use separate prefixes.
 A stale prefix remains unknown, not a partial exact body. These reasons describe
 synthetic/source-proven facts and do not diagnose the reported private incident.
+
+### Next actions for shell launch, attachments and retrieval (#400)
+
+Keep OS and provider messages as evidence. Select one next action from the
+local launch phase, attachment failure, or retrieval error code, not from
+error prose. Standalone RAG includes `hint` on top-level and per-input/scope
+errors. History-index failures retain their evidence and point to safe
+observation or remediation, not automatic retry. Attachment notices describe
+what was not sent and how to inspect it. None of these hints authorizes a new
+shell execution, attachment delivery, or paid request.

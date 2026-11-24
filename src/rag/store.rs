@@ -135,8 +135,9 @@ fn validate_schema(db: &Connection) -> Result<()> {
     if version != 5 {
         return Err(err(
             "schema_unsupported",
-            "Knowledge database schema requires migration; run shellboy rag init to migrate without registering materials or indexing before reading",
-        ));
+            "Knowledge database schema requires migration before reading",
+        )
+        .with_action("Run shellboy rag init for the selected store."));
     }
     Ok(())
 }
@@ -540,7 +541,7 @@ pub(super) async fn index(
                 failure_count += 1;
                 if failures.len() < 50 {
                     failures.push(
-                        json!({"source_id":source,"code":error.code,"message":error.message}),
+                        json!({"source_id":source,"code":error.code,"message":error.message,"hint":error.hint()}),
                     );
                 }
                 if !dry_run {
@@ -554,7 +555,7 @@ pub(super) async fn index(
                 )?;
                 }
                 source_results
-                    .push(json!({"source_id":source,"scan_complete":false,"error":error.code}));
+                    .push(json!({"source_id":source,"scan_complete":false,"error":error.code,"message":error.message,"hint":error.hint()}));
                 continue;
             }
         };
@@ -587,10 +588,10 @@ pub(super) async fn index(
                 breaker.failure(&error.code);
                 failure_count += 1;
                 if failures.len() < 50 {
-                    failures.push(json!({"source_id":source,"key":key,"code":error.code,"message":error.message,"previous_revision_retained":s.db.query_row("SELECT EXISTS(SELECT 1 FROM documents WHERE source_id=?1 AND key=?2 AND active_revision IS NOT NULL)",params![source,key],|row|row.get::<_,bool>(0))?}));
+                    failures.push(json!({"source_id":source,"key":key,"code":error.code,"message":error.message,"hint":error.hint(),"previous_revision_retained":s.db.query_row("SELECT EXISTS(SELECT 1 FROM documents WHERE source_id=?1 AND key=?2 AND active_revision IS NOT NULL)",params![source,key],|row|row.get::<_,bool>(0))?}));
                 }
                 if !dry_run {
-                    let saved_error = json!({"code":error.code,"message":error.message.chars().take(2048).collect::<String>()}).to_string();
+                    let saved_error = json!({"code":error.code,"message":error.message.chars().take(2048).collect::<String>(),"hint":error.hint()}).to_string();
                     s.db.execute("INSERT OR IGNORE INTO documents(id,source_id,key,status,error)VALUES(?1,?2,?3,'failed',?4)",params![hash(format!("{source}\0{key}").as_bytes()),source,key,saved_error])?;
                     s.db.execute("UPDATE documents SET status=CASE WHEN active_revision IS NULL THEN 'failed' ELSE 'stale' END,error=?3 WHERE source_id=?1 AND key=?2",params![source,key,saved_error])?;
                 }
