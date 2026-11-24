@@ -1,6 +1,6 @@
 //! Capture only immutable page identities; body retention stays with management.
 use crate::{
-    protocol::{ApiError, Command, ErrorCode, HistoryBody, HistoryGetArgs},
+    protocol::{ApiError, Command, ErrorCode, HistoryBody, HistoryGetArgs, HistorySnippet, Page},
     ui::{HistorySourceScope, InspectionTarget},
 };
 use serde_json::Value;
@@ -34,14 +34,21 @@ pub(super) async fn native_body(
     control: &crate::control::Control,
     args: HistoryGetArgs,
 ) -> Result<HistoryBody, ApiError> {
+    native_read(control, Command::HistoryGet(args)).await
+}
+
+async fn native_read<T: serde::de::DeserializeOwned>(
+    control: &crate::control::Control,
+    command: Command,
+) -> Result<T, ApiError> {
     let data_dir = control
         .store
         .database
         .path()
         .parent()
         .expect("owner database has a directory");
-    let response = crate::ipc::call_selected(data_dir, Command::HistoryGet(args)).await?;
-    let malformed = || ApiError::new(ErrorCode::ProtocolMismatch, "Invalid history.get response");
+    let response = crate::ipc::call_selected(data_dir, command).await?;
+    let malformed = || ApiError::new(ErrorCode::ProtocolMismatch, "Invalid native history response");
     if !response.ok {
         return Err(response.error.unwrap_or_else(malformed));
     }
@@ -53,29 +60,24 @@ pub(super) async fn request(
     command: Command,
     stop: tokio_util::sync::CancellationToken,
 ) -> Result<Value, crate::protocol::ApiError> {
-    if let Command::HistoryGet(args) = command {
-        let body = tokio::select! { biased;
-            _ = stop.cancelled() => return Err(ApiError::new(ErrorCode::InvalidState, "Display snapshot observation closed")),
-            result = native_body(control, args) => result?,
-        };
-        return super::presentation_work(move || serialize(body)).await?;
+    tokio::select! { biased;
+        _ = stop.cancelled() => Err(ApiError::new(ErrorCode::InvalidState, "Display snapshot observation closed")),
+        result = async {
+            match command {
+                Command::HistoryGet(args) => {
+                    let body = native_body(control, args).await?;
+                    super::presentation_work(move || serialize(body)).await?
+                }
+                command @ Command::HistoryList(_) => {
+                    let page: Page<HistorySnippet> = native_read(control, command).await?;
+                    super::presentation_work(move || serialize(page)).await?
+                }
+                _ => Err(ApiError::new(ErrorCode::InvalidArgument, "Not a retained history read")),
+            }
+        } => result,
     }
-    command.validate()?;
-    let original = super::snapshot::read(
-        control.store.database.path().to_path_buf(),
-        stop,
-        move |db| match command {
-            Command::HistoryList(args) => crate::history::list_nodes(db, &args).map_err(Into::into),
-            _ => Err(crate::protocol::ApiError::new(
-                crate::protocol::ErrorCode::InvalidArgument,
-                "Not a retained history read",
-            )
-            .into()),
-        },
-    )
-    .await?;
-    super::presentation_work(move || serialize(original)).await?
 }
+
 fn serialize(value: impl serde::Serialize) -> Result<Value, ApiError> {
     serde_json::to_value(value).map_err(|_| {
         ApiError::new(
