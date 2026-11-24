@@ -93,7 +93,8 @@ pub(super) fn save(
         return Err(error(
             ErrorCode::OperationConflict,
             "Draft revision was already submitted",
-        ));
+        )
+        .details(serde_json::json!({"reason":"draft_revision_submitted"})));
     }
     tx.execute(
         "INSERT INTO view_state(thread_id,anchor_node_id,anchor_offset,follow_tail)
