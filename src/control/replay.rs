@@ -86,6 +86,19 @@ impl AssemblyBudget {
         self.0 -= bytes;
         Ok(())
     }
+
+    fn reserve_stamp_slot(&mut self, stamps: &mut Vec<Stamp>) -> Result<(), StorageError> {
+        let capacity = stamps.capacity();
+        if stamps.len() == capacity {
+            let growth = capacity.max(1);
+            let added_bytes = growth * size_of::<Stamp>();
+            // A moving reallocation may briefly hold the old and new buffers.
+            self.check(capacity * size_of::<Stamp>() + added_bytes)?;
+            self.charge(added_bytes)?;
+            stamps.reserve_exact(growth);
+        }
+        Ok(())
+    }
 }
 
 fn row_text<'a>(row: &'a rusqlite::Row<'_>, column: usize) -> rusqlite::Result<&'a str> {
@@ -549,7 +562,8 @@ impl ReplayCache {
         while let Some(row) = rows.next()? {
             let id = row_text(row, 0)?;
             let kind = row_text(row, 3)?;
-            work.charge(size_of::<Stamp>() + id.len() + kind.len())?;
+            work.charge(id.len() + kind.len())?;
+            work.reserve_stamp_slot(&mut stamps)?;
             let mut stamp = Stamp {
                 id: id.to_owned(),
                 revision: row.get(1)?,
@@ -1051,6 +1065,33 @@ mod tests {
     }
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn replay_assembly_refuses_unfunded_stamp_capacity_before_growth() {
+        let slot = size_of::<Stamp>();
+        let mut work = AssemblyBudget(5 * slot);
+        let mut stamps = Vec::new();
+        for n in 0..2 {
+            work.reserve_stamp_slot(&mut stamps).unwrap();
+            stamps.push(Stamp {
+                id: String::new(),
+                revision: n,
+                tombstone: false,
+                kind: String::new(),
+                imported: false,
+                preamble: None,
+            });
+        }
+        assert_eq!(work.0, 3 * slot);
+        let error = work.reserve_stamp_slot(&mut stamps).unwrap_err();
+        assert_eq!(error.into_api_error().code, ErrorCode::InputLimit);
+        assert_eq!(stamps.capacity(), 2);
+
+        let mut work = AssemblyBudget(4 * slot);
+        work.reserve_stamp_slot(&mut stamps).unwrap();
+        assert_eq!(stamps.capacity(), 4);
+        assert_eq!(work.0, 2 * slot);
+    }
 
     #[test]
     fn proactive_witness_ignores_current_suffix_and_tracks_older_tool_groups() {

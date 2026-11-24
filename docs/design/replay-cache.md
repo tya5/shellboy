@@ -20,8 +20,9 @@ DB transactionが失敗したcacheの一時entryに依存してHTTPを開始し�
 
 The selected-path loader owns a per-request working allowance independent of
 `cache.history_bytes`. It uses the existing `model::MAX_RESPONSE_BYTES` model
-I/O ceiling (64 MiB) for replay working weights: path stamps, reasoning keep
-metadata, and every cached or newly converted frame. SQLite does not project
+I/O ceiling (64 MiB) for replay working weights: reserved path-stamp storage
+(including spare slots), reasoning keep metadata, and every cached or newly
+converted frame. SQLite does not project
 a source larger than the allowance at the start of suffix decoding. The loader checks each source against the current remaining
 allowance before decoding it, and charges each frame before adding it to the
 lease. The same allowance must cover the ordered pointer vector, borrowed
