@@ -945,7 +945,7 @@ async fn run_with_clipboard_slots(
 #[allow(clippy::too_many_arguments)]
 async fn run_with_delivery(
     control: Arc<Control>,
-    mut actions: crate::ui::actions::ActionReceiver,
+    actions: crate::ui::actions::ActionReceiver,
     updates: BufferedUpdates,
     cwd: PathBuf,
     owner: DataOwner,
@@ -954,13 +954,37 @@ async fn run_with_delivery(
     command_slots: Arc<Semaphore>,
     #[cfg(test)] startup: Option<receipt_delivery::Startup>,
 ) -> Result<(), ApiError> {
-    let language = control.store.config.ui.language;
-    actions.close_tool_starts_on_quit(&control);
     let client_context = client_operations::ClientContext {
         config_path: owner.loaded.config_path.clone(),
         data_dir: owner.loaded.data_dir.clone(),
         cwd: cwd.clone(),
     };
+    let result = run_client(
+        control.clone(), actions, updates, cwd, client_context, server.failures(), clipboard,
+        command_slots,
+        #[cfg(test)]
+        startup,
+    ).await;
+    // The embedded launcher still owns and stops Core. The client drain above
+    // is also usable without taking ownership of the listener or database.
+    let closed = crate::owner_session::close(owner, Some(control), Some(server)).await;
+    result.and(closed)
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_client(
+    control: Arc<Control>,
+    mut actions: crate::ui::actions::ActionReceiver,
+    updates: BufferedUpdates,
+    cwd: PathBuf,
+    client_context: client_operations::ClientContext,
+    mut ipc_failure: tokio::sync::watch::Receiver<Option<ApiError>>,
+    clipboard: Arc<dyn ClipboardBackend>,
+    command_slots: Arc<Semaphore>,
+    #[cfg(test)] startup: Option<receipt_delivery::Startup>,
+) -> Result<(), ApiError> {
+    let language = control.store.config.ui.language;
+    actions.close_tool_starts_on_quit(&control);
     let mut selection = selection::Selection::default();
     let mut live_output = live_output::Observation::default();
     let observed_control = control.clone();
@@ -969,7 +993,6 @@ async fn run_with_delivery(
     output_signal.as_mut().enable();
     let mut owner_signal = Box::pin(observed_control.saved_observation_hint().notified());
     owner_signal.as_mut().enable();
-    let mut ipc_failure = server.failures();
     let mut watch_ipc_failure = true;
     let mut control_tasks = JoinSet::new();
     let mut streams = streaming::Display::default();
@@ -1593,7 +1616,7 @@ async fn run_with_delivery(
                         model,
                         effort,
                     } => {
-                        let diagnostics = owner.diagnostics.clone();
+                        let diagnostics = control.diagnostics().clone();
                         let trace = MessageSendTrace {
                             stage: MessageSendStage::Queued,
                             draft_id: draft_id.clone(),
@@ -2248,7 +2271,7 @@ async fn run_with_delivery(
                         model,
                         effort,
                     } => {
-                        let diagnostics = owner.diagnostics.clone();
+                        let diagnostics = control.diagnostics().clone();
                         let trace = MessageSendTrace {
                             stage: MessageSendStage::Queued,
                             draft_id: draft_id.clone(),
@@ -2433,7 +2456,7 @@ async fn run_with_delivery(
                             Ok(Some(stop))=>stop,Ok(None)=>continue,
                             Err(error)=>{update(&updates,UiUpdate::ThreadListFailed {generation,error:error.to_string()}).await;continue;}
                         };
-                        let control=control.clone();let results=background_tx.clone();let progress_slots=progress_slots.clone();let diagnostics=owner.diagnostics.clone();
+                        let control=control.clone();let results=background_tx.clone();let progress_slots=progress_slots.clone();let diagnostics=control.diagnostics().clone();
                         if !spawn_read(&mut read_workers,&read_slots,&read_cancel,async move {
                             let requested_cursor=cursor.clone();
                             let result=tokio::select! { biased;_=page_stop.cancelled()=>return,
@@ -3877,7 +3900,7 @@ async fn run_with_delivery(
     drop(background_rx);
     let grace = Duration::from_millis(control.store.config.io.shutdown_grace_ms);
     let shutdown_updates = &updates;
-    let shutdown_diagnostics = owner.diagnostics.clone();
+    let shutdown_diagnostics = control.diagnostics().clone();
     let shutdown = async move {
         use crate::diagnostics::{ShutdownBoundary as Edge, ShutdownScope, ShutdownStage as Stage};
         let started = std::time::Instant::now();
@@ -3889,11 +3912,6 @@ async fn run_with_delivery(
                 u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
             )
         };
-        // Durable work precedes presentation-only waits; the outer select still
-        // flushes the bounded delivery and accepts explicit shutdown choices.
-        trace(Stage::Listener, Edge::Begin);
-        server.stop_accepting().await;
-        trace(Stage::Listener, Edge::End);
         // Coalesced autosaves retain the newest snapshot per Thread; FIFO
         // database admission within each Thread is preserved on shutdown too.
         trace(Stage::DraftEnqueue, Edge::Begin);
@@ -3909,11 +3927,6 @@ async fn run_with_delivery(
             .map_err(|_| ApiError::new(ErrorCode::SaveFailed, "Draft save worker failed"))
             .and_then(|result| result);
         trace(Stage::DraftSave, Edge::End);
-        // Preserve registered waits/owned work before cancellation erases them.
-        // Failure is returned by Control::shutdown after drain still completes.
-        trace(Stage::InterruptCapture, Edge::Begin);
-        let _ = control.prepare_shutdown().await;
-        trace(Stage::InterruptCapture, Edge::End);
         trace(Stage::ControlTasks, Edge::Begin);
         while control_tasks.join_next().await.is_some() {}
         trace(Stage::ControlTasks, Edge::End);
@@ -3923,30 +3936,14 @@ async fn run_with_delivery(
         trace(Stage::Images, Edge::Begin);
         drop(images);
         trace(Stage::Images, Edge::End);
-        trace(Stage::Control, Edge::Begin);
-        let control_result = control.shutdown().await;
-        shutdown_diagnostics.record_shutdown_result(
-            ShutdownScope::Frontend,
-            Stage::Control,
-            u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
-            control_result.as_ref().err().map(|error| error.code),
-        );
-        let server_result = server.shutdown().await;
         trace(Stage::Workers, Edge::Begin);
         while workers.join_next().await.is_some() {}
         trace(Stage::Workers, Edge::End);
-        // Owner closes the diagnostic writer last; its inner stages explain
-        // this final await, which cannot be logged after that close.
-        trace(Stage::Owner, Edge::Begin);
-        let owner_result = owner.shutdown().await;
         if let Some(value) = initialize {
             update(shutdown_updates, value).await;
         }
         receipt_batch.finish(&mut pending, shutdown_updates).await;
         save_result
-            .and(server_result)
-            .and(control_result)
-            .and(owner_result)
     };
     wait_for_shutdown_delivery_localized(&mut actions, &updates, grace, shutdown, language).await
 }
