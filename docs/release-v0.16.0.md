@@ -1,4 +1,4 @@
-- Core: `v0.15.0` → `v0.16.0` (main source `de08b27982d7de74732cb59ca1dd1b2f25d51fdf`)
+- Core: `v0.15.0` → `v0.16.0` (main source `b0b8feb8daaf57e4cbee6459a5d7667eb8599790`)
 
 ## 日本語
 
@@ -18,6 +18,8 @@
 - **保留中の Revisit と入力（#391）:** Run の完了を待つ Revisit が、現在の Turn に届く後続の入力を妨げなくなりました。
 
 - **Agent Guide（#379）:** 操作の順に構成し、返信義務と待機の確認手順を見つけやすくしました。
+
+- **Windows（#392）:** ローカルにリダイレクトされた NTFS フォルダーは利用でき、ネットワーク上のデータディレクトリは明示的に拒否します。共有違反の診断と、シェルの実効 PATH を改善しました。
 
 ### アップグレード
 
@@ -44,6 +46,8 @@
 - **Held Revisit input (#391):** A Revisit waiting for Run completion no longer blocks later input to the active Turn.
 
 - **Agent Guide (#379):** Reorganized around common operations, with clearer instructions for finding owed replies and waiting on work.
+
+- **Windows (#392):** The owner accepts locally redirected NTFS folders and explicitly refuses network data directories. The change also improves file-sharing diagnostics and the effective shell PATH.
 
 ### Upgrade notes
 
