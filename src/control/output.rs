@@ -287,7 +287,7 @@ impl ShellOutputReader {
         self.database
             .call(move |db| Ok(f(db)))
             .await
-            .map_err(storage_error)?
+            .map_err(StorageError::into_api_error)?
     }
     pub async fn stream(&self, execution_id: &str) -> Result<OutputStreamReader> {
         self.stream_selected(execution_id, StreamSelection::Both)
@@ -865,7 +865,7 @@ impl ReadPin {
                 Ok(())
             })
             .await
-            .map_err(storage_error)?;
+            .map_err(StorageError::into_api_error)?;
         self.armed = false;
         Ok(())
     }
@@ -944,7 +944,4 @@ fn expired_output_for(db: &Connection, execution: &str, generation: u64) -> Resu
 }
 fn sql_error(error: rusqlite::Error) -> ApiError {
     crate::storage::save_error(format!("output database operation failed: {error}"))
-}
-fn storage_error(error: StorageError) -> ApiError {
-    error.into_api_error()
 }

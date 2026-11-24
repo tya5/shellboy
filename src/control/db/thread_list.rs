@@ -1,5 +1,5 @@
 use super::{
-    Result, error, normalize, sql_error, storage_error, tags, thread_display_title, thread_summary,
+    Result, StorageError, error, normalize, sql_error, tags, thread_display_title, thread_summary,
     title_text,
 };
 use crate::digest::sha256_hex as hash;
@@ -241,7 +241,7 @@ fn updated_page(
     }
     // Heavy summary, observations and excerpt reads run only for admitted IDs.
     let mut by_id: std::collections::HashMap<_, _> = thread_summary::read_ids_tx(connection, &ids)
-        .map_err(storage_error)?
+        .map_err(StorageError::into_api_error)?
         .into_iter()
         .map(|raw| (raw.thread_id.clone(), raw))
         .collect();
@@ -323,7 +323,7 @@ fn attach_tags(connection: &Connection, items: &mut [ThreadSummary]) -> Result<(
 }
 
 fn summaries_by_id(connection: &Connection, ids: &[String]) -> Result<Vec<ThreadSummary>> {
-    let raw = thread_summary::read_ids_tx(connection, ids).map_err(storage_error)?;
+    let raw = thread_summary::read_ids_tx(connection, ids).map_err(StorageError::into_api_error)?;
     let mut items = Vec::with_capacity(raw.len());
     for raw in raw {
         let title = thread_display_title(connection, &raw.thread_id, &raw.stored_title)?;

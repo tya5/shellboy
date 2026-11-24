@@ -235,7 +235,7 @@ impl Store {
                     Ok(result)
                 })
                 .await
-                .map_err(storage_error)?;
+                .map_err(StorageError::into_api_error)?;
             let crate::storage::Background::Done(window) = window else {
                 pass.deferred = true;
                 return Ok(pass);
@@ -276,7 +276,7 @@ impl Store {
             }
             None => self.database.call_with_requester(requester, job).await,
         }
-        .map_err(storage_error)
+        .map_err(StorageError::into_api_error)
     }
 
     /// Retry admission outside the writer between bounded background windows.
@@ -324,7 +324,7 @@ impl Store {
                     .database
                     .call(|db| Ok(db.total_changes()))
                     .await
-                    .map_err(storage_error)?;
+                    .map_err(StorageError::into_api_error)?;
                 if observed.is_some_and(|previous| previous != current) {
                     // Another unit may have freed enough room while this
                     // requester waited for the background lane.
@@ -357,7 +357,7 @@ impl Store {
                         Ok(result.map(|window| (window, before, db.total_changes())))
                     })
                     .await
-                    .map_err(storage_error)?;
+                    .map_err(StorageError::into_api_error)?;
                 drop(requester);
                 match unit {
                     crate::storage::Background::Done(window) => {
@@ -411,7 +411,7 @@ impl Store {
                     observer.observe_inspection(&mut db, &kind, queued_at, requester, |db| {
                         let tx = db.transaction().map_err(sql_error)?;
                         let raw = crate::compaction::preview::read_tx(&tx, &thread, &args, &config)
-                            .map_err(storage_error)?;
+                            .map_err(StorageError::into_api_error)?;
                         tx.commit().map_err(sql_error)?;
                         Ok::<_, ApiError>(raw)
                     })?;
@@ -639,7 +639,7 @@ impl Store {
                 Ok(None)
             })
             .await
-            .map_err(storage_error)
+            .map_err(StorageError::into_api_error)
     }
     pub async fn prepare_draft_submission(
         &self,
@@ -671,7 +671,7 @@ impl Store {
                 )
             })
             .await
-            .map_err(storage_error)
+            .map_err(StorageError::into_api_error)
     }
     pub(crate) async fn send_draft_content(
         &self,
@@ -782,7 +782,7 @@ impl Store {
                             now,
                             &store.config,
                         )
-                        .map_err(storage_error)?;
+                        .map_err(StorageError::into_api_error)?;
                     }
                     Ok(result)
                 },
@@ -805,7 +805,7 @@ impl Store {
         self.database
             .call(move |db| Ok(saved_operation(db, &operation, &fingerprint)))
             .await
-            .map_err(storage_error)?
+            .map_err(StorageError::into_api_error)?
     }
 
     /// Commit intent before an OS-side operation. A pending record is never
@@ -903,7 +903,7 @@ impl Store {
                 Ok(())
             })
             .await
-            .map_err(storage_error)
+            .map_err(StorageError::into_api_error)
     }
 
     pub(super) async fn finalize_deletion(
@@ -941,7 +941,7 @@ impl Store {
                 Ok(outcome)
             })
             .await
-            .map_err(storage_error)?
+            .map_err(StorageError::into_api_error)?
     }
 
     /// Trusted human UI control: resolve and stop in one transaction, without
@@ -975,7 +975,7 @@ impl Store {
                 Ok(effects)
             })
             .await
-            .map_err(storage_error)?
+            .map_err(StorageError::into_api_error)?
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1028,7 +1028,7 @@ impl Store {
                 let mut path:Vec<String>=tx.prepare("SELECT node_id FROM thread_path WHERE thread_id=?1 ORDER BY ordinal").map_err(sql_error)?.query_map([&fork],|r|r.get(0)).map_err(sql_error)?.collect::<rusqlite::Result<_>>().map_err(sql_error)?;
                 if path.pop().as_deref()!=Some(&node){return Err(error(ErrorCode::InvalidState,"Edit fork boundary changed"));}
                 tx.execute("DELETE FROM attachment_selection WHERE thread_id=?1 AND attachment_id IN (SELECT id FROM attachment_ref WHERE source_node_id=?2)",params![fork,node]).map_err(sql_error)?;
-                history::select_path(&tx,&fork,1,&path,&now).map_err(storage_error)?;
+                history::select_path(&tx,&fork,1,&path,&now).map_err(StorageError::into_api_error)?;
                 if args.connection.is_some()||args.model.is_some()||args.effort.is_some(){store.set_thread(&tx,&ThreadSetArgs{ auto_compact_target_percent:None,summary_max_chars:None,max_tokens:None,spill:None,agents: None,thread_id:Some(fork.clone()),connection:args.connection,model:args.model,effort:args.effort,cwd:None,title:None,auto_compact_at:None,parent_id: None},None,&now)?;}
                 let revision:i64=history::selection_revision(&tx, &fork, history::ThreadScope::Any).map_err(sql_error)?;
                 let mut result=store.send_content(&tx,&MessageSendArgs { max_model_requests: None, human: true, resume_recovery: false,
@@ -1037,7 +1037,7 @@ impl Store {
                 crate::attachments::add_tx(&tx,&crate::attachments::AddPlan{thread_id:result.result["thread_id"].as_str().unwrap().into(),selection_revision:revision,files},Some(message))?;
                 result.result["source_thread_id"]=json!(thread);result.result["replaced_request_id"]=json!(node);
                 if let Some(submission)=&options.submission {
-                    super::pending_messages::submit_draft_tx(&tx,&operation_id,submission,&result.result,&now,&store.config).map_err(storage_error)?;
+                    super::pending_messages::submit_draft_tx(&tx,&operation_id,submission,&result.result,&now,&store.config).map_err(StorageError::into_api_error)?;
                 }
                 Ok(result)
             })();
@@ -1046,7 +1046,7 @@ impl Store {
             let body=match &result{Ok(result)=>SavedOutcome{result:Some(result.result.clone()),error:None},Err(error)=>SavedOutcome{result:None,error:Some(error.clone())}};
             tx.execute("UPDATE operation_receipt SET state=?2,result_ref_json=?3,reserved_bytes=0 WHERE operation_id=?1 AND state='pending'",params![operation_id,if result.is_ok(){"completed"}else{"failed"},serde_json::to_string(&body).unwrap()])?;
             tx.commit()?;Ok(result)
-        }).await.map_err(storage_error)?
+        }).await.map_err(StorageError::into_api_error)?
     }
 
     pub async fn finalize_internal(&self, operation: String, outcome: Result<Value>) -> Result<()> {
@@ -1061,7 +1061,7 @@ impl Store {
                 error: Some(error),
             },
         };
-        self.database.call(move|db|{db.execute("UPDATE operation_receipt SET state=?2,result_ref_json=?3,reserved_bytes=0 WHERE operation_id=?1 AND state='pending'",params![operation,if saved.error.is_some(){"failed"}else{"completed"},serde_json::to_string(&saved).unwrap()])?;Ok(())}).await.map_err(storage_error)
+        self.database.call(move|db|{db.execute("UPDATE operation_receipt SET state=?2,result_ref_json=?3,reserved_bytes=0 WHERE operation_id=?1 AND state='pending'",params![operation,if saved.error.is_some(){"failed"}else{"completed"},serde_json::to_string(&saved).unwrap()])?;Ok(())}).await.map_err(StorageError::into_api_error)
     }
 
     fn execute_transaction(
@@ -1532,7 +1532,7 @@ impl Store {
                 let mut keys = Vec::new();
                 let (cancelled, changed) =
                     super::pending_messages::cancel_tx(tx, args, caller, now, &mut keys)
-                        .map_err(storage_error)?;
+                        .map_err(StorageError::into_api_error)?;
                 let mut result = MutationResult::value(cancelled)?;
                 result.wait_keys = keys;
                 result.changed_threads = changed;
@@ -1669,7 +1669,7 @@ impl Store {
                 )
             })
             .await
-            .map_err(storage_error)??;
+            .map_err(StorageError::into_api_error)??;
         let path = normalize(Path::new(&path), &cwd)?;
         let prepared = self.instructions.prepare(cwd, path.clone()).await?;
         if prepared.is_none() {
@@ -1974,7 +1974,8 @@ impl Store {
         };
         let changed = profile != current.connection || model != current.model;
         if changed {
-            crate::compaction::a_state::scope_tx(tx, &id, profile, model).map_err(storage_error)?;
+            crate::compaction::a_state::scope_tx(tx, &id, profile, model)
+                .map_err(StorageError::into_api_error)?;
         }
         tx.execute("UPDATE thread SET cwd=?2,profile_id=?3,model_id=?4,effort=?5,revision=revision+1,profile_revision=profile_revision+1,reasoning_epoch=reasoning_epoch+?6,updated_at=?7,title=COALESCE(?8,title) WHERE id=?1",params![id,cwd.to_string_lossy(),profile,model,effort,i64::from(changed),now,title]).map_err(sql_error)?;
         if let Some(path) = &args.agents {
@@ -2358,7 +2359,7 @@ fn assign_message(
                         if !super::state::resume_recovery_turn_tx(
                             tx, id, &run_id, &turn_id, generation, now,
                         )
-                        .map_err(storage_error)?
+                        .map_err(StorageError::into_api_error)?
                         {
                             return Err(error(
                                 ErrorCode::OperationConflict,
@@ -2414,7 +2415,7 @@ fn assign_message(
                 actor(caller),
                 now,
             )
-            .map_err(storage_error)?;
+            .map_err(StorageError::into_api_error)?;
             if super::message_delivery::interrupted_remaining(tx, id).map_err(sql_error)? {
                 tx.execute("UPDATE turn SET state='recovery_wait',recovery_reason_json='{\"reason\":\"held_messages_remaining\"}' WHERE id=?1", [&turn_id]).map_err(sql_error)?;
                 status = DeliveryStatus::Held;
@@ -2728,7 +2729,7 @@ pub(crate) fn recovery_rewind_tx(
         ));
     }
     super::state::stop_drained_run_tx(tx, run, thread, &mut result.wait_keys)
-        .map_err(storage_error)?;
+        .map_err(StorageError::into_api_error)?;
     let terminal: (String, i64) = tx
         .query_row(
             "SELECT state,generation FROM turn WHERE id=?1 AND run_id=?2",
@@ -2968,7 +2969,7 @@ fn stop_run(tx: &Transaction<'_>, id: &str, now: &str) -> Result<MutationResult>
             id,
             super::state::RunStopAdmission::Explicit { at: now },
         )
-        .map_err(storage_error)?;
+        .map_err(StorageError::into_api_error)?;
         // Publish the stopping state without waiting for reply_grace (#243).
         result.changed_threads.push(details.thread_id);
     }
@@ -3009,7 +3010,7 @@ fn retry_run(
         actor(caller),
         now,
     )
-    .map_err(storage_error)?;
+    .map_err(StorageError::into_api_error)?;
     Ok(MutationResult {
         wait_keys: vec![
             super::wait::wakes::Key::CallerInput(details.thread_id.clone()),
@@ -3168,7 +3169,7 @@ pub(super) fn delete_targets_effects(
         tx.execute("DELETE FROM schedule WHERE thread_id=?1", [id])
             .map_err(sql_error)?;
         super::interruption::discard_staged_captures(tx, id).map_err(sql_error)?;
-        crate::compaction::a_state::cleanup_tx(tx, id).map_err(storage_error)?;
+        crate::compaction::a_state::cleanup_tx(tx, id).map_err(StorageError::into_api_error)?;
         // Retain the last path/replacement as ownership evidence until payload
         // GC. Deleted Threads are not roots or public selection targets. Removing
         // these rows now makes turn-less summaries/legacy nodes look ownerless.
@@ -3286,9 +3287,6 @@ fn error(code: ErrorCode, message: impl Into<String>) -> ApiError {
 }
 fn sql_error(error: rusqlite::Error) -> ApiError {
     crate::storage::save_error(format!("database operation failed: {error}"))
-}
-fn storage_error(error: StorageError) -> ApiError {
-    error.into_api_error()
 }
 
 /// Receipt completion describes the command, not the asynchronous work it queued.
