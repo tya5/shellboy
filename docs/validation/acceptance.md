@@ -5,8 +5,10 @@
 On macOS, the independent-owner browser witness archived and unarchived the
 selected Thread through the production adapter, refused an ID from another
 owner, and observed that the other owner remained unchanged. The separate
-notice witness distinguishes an unknown archive outcome from a refusal and
-preserves its operation ID. Formatting, all-target Clippy with warnings
+notice witness at 80 columns renders the full owner-prefixed operation ID in
+F1 details, even after the list becomes empty, in both languages. The management
+witness distinguishes unknown from refused and follows the exact receipt ID.
+Formatting, all-target Clippy with warnings
 denied, test layout, and language audit passed locally. No hosted CI or
 full native disconnect cutover is established by this slice.
 

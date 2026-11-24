@@ -6890,32 +6890,32 @@
   "src/ui/threads.rs:2f1710c9e60fe0f0:1": {
     "category": "a",
     "reason": "Reviewed ThreadBrowser::archive_result: each match arm builds an explicit (Japanese, English) pair; both are stored and notice_for_language selects the English text for En and the Japanese text for Ja. The count and error values are interpolated unchanged.",
-    "source_tokens_sha256": "9f8b70d3d73f9169ea654648d3b2a61d78d0acc96cc1d8adf5dc8190267c5ebb"
+    "source_tokens_sha256": "c01c308d7c58c2812ed9df54bad69444da02d3f080b6c065ef75c86ad5683b55"
   },
   "src/ui/threads.rs:08696790bd9da988:1": {
     "category": "a",
     "reason": "Reviewed ThreadBrowser::archive_result: each match arm builds an explicit (Japanese, English) pair; both are stored and notice_for_language selects the English text for En and the Japanese text for Ja. The count and error values are interpolated unchanged.",
-    "source_tokens_sha256": "9f8b70d3d73f9169ea654648d3b2a61d78d0acc96cc1d8adf5dc8190267c5ebb"
+    "source_tokens_sha256": "c01c308d7c58c2812ed9df54bad69444da02d3f080b6c065ef75c86ad5683b55"
   },
   "src/ui/threads.rs:5be5c8473c1ff414:1": {
     "category": "a",
     "reason": "Reviewed ThreadBrowser::archive_result: each match arm builds an explicit (Japanese, English) pair; both are stored and notice_for_language selects the English text for En and the Japanese text for Ja. The count and error values are interpolated unchanged.",
-    "source_tokens_sha256": "9f8b70d3d73f9169ea654648d3b2a61d78d0acc96cc1d8adf5dc8190267c5ebb"
+    "source_tokens_sha256": "c01c308d7c58c2812ed9df54bad69444da02d3f080b6c065ef75c86ad5683b55"
   },
   "src/ui/threads.rs:300f8932417faf80:1": {
     "category": "a",
     "reason": "Reviewed ThreadBrowser::archive_result: each match arm builds an explicit (Japanese, English) pair; both are stored and notice_for_language selects the English text for En and the Japanese text for Ja. The count and error values are interpolated unchanged.",
-    "source_tokens_sha256": "9f8b70d3d73f9169ea654648d3b2a61d78d0acc96cc1d8adf5dc8190267c5ebb"
+    "source_tokens_sha256": "c01c308d7c58c2812ed9df54bad69444da02d3f080b6c065ef75c86ad5683b55"
   },
   "src/ui/threads.rs:853c3837481db4a0:1": {
     "category": "a",
     "reason": "Reviewed ThreadBrowser::archive_result: each match arm builds an explicit (Japanese, English) pair; both are stored and notice_for_language selects the English text for En and the Japanese text for Ja. The count and error values are interpolated unchanged.",
-    "source_tokens_sha256": "9f8b70d3d73f9169ea654648d3b2a61d78d0acc96cc1d8adf5dc8190267c5ebb"
+    "source_tokens_sha256": "c01c308d7c58c2812ed9df54bad69444da02d3f080b6c065ef75c86ad5683b55"
   },
   "src/ui/threads.rs:b21ef148b46a63a7:1": {
     "category": "a",
     "reason": "Reviewed ThreadBrowser::archive_result: each match arm builds an explicit (Japanese, English) pair; both are stored and notice_for_language selects the English text for En and the Japanese text for Ja. The count and error values are interpolated unchanged.",
-    "source_tokens_sha256": "9f8b70d3d73f9169ea654648d3b2a61d78d0acc96cc1d8adf5dc8190267c5ebb"
+    "source_tokens_sha256": "c01c308d7c58c2812ed9df54bad69444da02d3f080b6c065ef75c86ad5683b55"
   },
   "src/presentation/events.rs:a34d8382cdc112cb:1": {
     "category": "a",
@@ -7262,9 +7262,9 @@
     "reason": "Japanese domain catalogue copy for ThreadListState; English UI projection is in src/ui/operations/metadata.rs and CLI help is in src/cli.rs.",
     "source_tokens_sha256": "96e5d9c800a6abe12a1ab2c225443f33021496f3ef462712cfd5f78e244d9e60"
   },
-  "src/ui/threads.rs:77e979eab6509224:1": {
+  "src/ui/threads.rs:8b86bd1c37313140:1": {
     "category": "a",
-    "reason": "The unknown archive outcome stores paired Japanese and English notices; notice_for_language selects the matching text and preserves the operation ID.",
-    "source_tokens_sha256": "9f8b70d3d73f9169ea654648d3b2a61d78d0acc96cc1d8adf5dc8190267c5ebb"
+    "reason": "The short archive notice is stored as a Japanese/English pair and F1 details show the full operation ID separately.",
+    "source_tokens_sha256": "c01c308d7c58c2812ed9df54bad69444da02d3f080b6c065ef75c86ad5683b55"
   }
 }

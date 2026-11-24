@@ -277,16 +277,7 @@ async fn management_request_trigger(
     ) {
         match crate::ipc::call_selected(data_dir, command).await {
             Ok(response) => response,
-            Err(error) => {
-                let operation_id = error
-                    .details
-                    .as_ref()
-                    .and_then(|details| details.get("operation_id"));
-                return Ok(match operation_id {
-                    Some(id) => serde_json::json!({"request_operation_id":id,"error":error}),
-                    None => serde_json::json!({"error":error}),
-                });
-            }
+            Err(error) => return Ok(management::native_failure(error)),
         }
     } else {
         crate::usage_totals::with_trigger(

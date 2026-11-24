@@ -678,6 +678,7 @@ pub(super) struct ThreadBrowser {
     patch_error: Option<String>,
     notice: Option<String>,
     notice_en: Option<String>,
+    unknown_archive_operation: Option<String>,
     notice_seen: std::cell::Cell<bool>,
     preferred: Option<String>,
     preferred_screen: Option<usize>,
@@ -923,18 +924,16 @@ impl ThreadBrowser {
                     details["request_may_have_been_applied"].as_bool() == Some(true)
                 }) =>
             {
-                let id = error
+                if let Some(id) = error
                     .details
                     .as_ref()
                     .and_then(|details| details["operation_id"].as_str())
-                    .unwrap_or_default();
+                {
+                    self.unknown_archive_operation = Some(id.to_owned());
+                }
                 (
-                    format!(
-                        "アーカイブ操作の結果は未確認です。再操作の前に結果を確認してください: {id}"
-                    ),
-                    format!(
-                        "Archive outcome unknown. Check the operation result before retrying: {id}"
-                    ),
+                    "結果は未確認です (F1で照会ID)".to_owned(),
+                    "Archive outcome unknown (F1 for ID)".to_owned(),
                 )
             }
             (true, Err(error)) => (
@@ -2033,6 +2032,14 @@ impl ThreadBrowser {
             KeyCode::Esc => self.close(),
             KeyCode::F(1) => {
                 self.clear_preferred();
+                let receipt = self.unknown_archive_operation.as_ref().map(|id| {
+                    let heading = super::i18n::local!(
+                        self.language,
+                        "未確認のアーカイブ操作: 再操作の前に照会してください",
+                        "Unknown archive outcome: look up the request before retrying"
+                    );
+                    format!("{heading}\n{id}")
+                });
                 if let Some(thread) = self.items.get(self.selected) {
                     let page = self
                         .watch_page_info
@@ -2055,17 +2062,22 @@ impl ThreadBrowser {
                     } else {
                         thread.title.clone()
                     };
-                    return ThreadOutcome::Info(
-                        BrowserMessage::Info {
-                            thread,
-                            title: &title,
-                            phase: activity_label(thread, self.language),
-                            excerpt: &self.excerpt_text(thread),
-                            page: &page,
-                            controls,
-                        }
-                        .render(self.language),
-                    );
+                    let info = BrowserMessage::Info {
+                        thread,
+                        title: &title,
+                        phase: activity_label(thread, self.language),
+                        excerpt: &self.excerpt_text(thread),
+                        page: &page,
+                        controls,
+                    }
+                    .render(self.language);
+                    return ThreadOutcome::Info(match receipt {
+                        Some(receipt) => format!("{receipt}\n\n{info}"),
+                        None => info,
+                    });
+                }
+                if let Some(receipt) = receipt {
+                    return ThreadOutcome::Info(receipt);
                 }
             }
             KeyCode::Up => {
@@ -4343,7 +4355,7 @@ mod tests {
         }).await.unwrap();
     }
 
-    fn text(buffer: &ratatui::buffer::Buffer) -> String {
+    pub(super) fn text(buffer: &ratatui::buffer::Buffer) -> String {
         (buffer.area.y..buffer.area.bottom())
             .map(|y| {
                 let mut line = String::new();
@@ -5705,23 +5717,55 @@ mod archive_tests {
             )),
         );
         assert!(paint(&browser, 140, 14).contains("Could not unarchive: boom"));
-        let unknown = crate::protocol::ApiError::new(
-            crate::protocol::ErrorCode::IoFailed,
-            "lost reply",
-        )
-        .details(
-            serde_json::json!({"request_may_have_been_applied":true,"operation_id":"archive-op"}),
-        );
-        browser.archive_result(false, Err(unknown.clone()));
-        assert!(paint(&browser, 140, 14).contains("Archive outcome unknown"));
-        assert!(paint(&browser, 140, 14).contains("archive-op"));
         let mut ja = opened(UiLanguage::Ja, vec![row("a", false)]);
-        ja.archive_result(true, Err(unknown));
-        assert!(paint(&ja, 140, 14).contains("結果は未確認"));
         ja.archive_result(true, Ok(2));
         assert!(paint(&ja, 140, 14).contains("2件の会話をアーカイブしました"));
         ja.archive_result(true, Ok(0));
         assert!(paint(&ja, 140, 14).contains("既にアーカイブ済みです"));
+    }
+
+    #[test]
+    fn unknown_archive_receipt_is_visible_in_f1_details_at_eighty_columns() {
+        let id = "00000000-0000-4000-8000-000000000001:00000000-0000-4000-8000-000000000002";
+        let unknown =
+            crate::protocol::ApiError::new(crate::protocol::ErrorCode::IoFailed, "lost reply")
+                .details(
+                    serde_json::json!({"request_may_have_been_applied":true,"operation_id":id}),
+                );
+        for (language, notice) in [
+            (UiLanguage::En, "Archive outcome unknown"),
+            (UiLanguage::Ja, "結果は未確認"),
+        ] {
+            let mut config = crate::config::Config::default();
+            config.ui.language = language;
+            let mut ui = crate::ui::UiState::new(&config, std::path::PathBuf::new());
+            // A committed archive can leave the list empty before the lost reply is reported.
+            ui.thread_browser = opened(language, vec![]);
+            ui.thread_browser.archive_result(true, Err(unknown.clone()));
+            let screen = paint(&ui.thread_browser, 80, 24);
+            assert!(screen.contains(notice) && screen.contains("F1"), "{screen}");
+            assert!(!screen.contains(id));
+            ui.event(crossterm::event::Event::Key(KeyEvent::new(
+                KeyCode::F(1),
+                KeyModifiers::NONE,
+            )));
+            let mut terminal =
+                ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 24)).unwrap();
+            terminal
+                .draw(|frame| crate::ui::draw(frame, &mut ui))
+                .unwrap();
+            let screen = super::tests::text(terminal.backend().buffer());
+            // The framed reader can wrap across rows; every ID character must remain visible.
+            let visible: String = screen
+                .lines()
+                .map(|line| {
+                    line.trim_matches(|ch: char| {
+                        !(ch.is_ascii_alphanumeric() || ch == '-' || ch == ':')
+                    })
+                })
+                .collect();
+            assert!(visible.contains(id), "{screen}");
+        }
     }
 
     #[test]
