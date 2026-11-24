@@ -82,7 +82,6 @@ impl UiState {
                     signature,
                     action: UiAction::SaveDraft {
                         thread_id: thread_id.clone(),
-                        selection_revision: view.selection_revision,
                         draft: view.draft.clone(),
                         anchor: view.navigation.anchor.clone(),
                         follow: view.navigation.follow(),
@@ -137,7 +136,6 @@ impl UiState {
             .filter_map(|(_, view)| {
                 view.thread_id.as_ref().map(|thread| UiAction::SaveDraft {
                     thread_id: thread.clone(),
-                    selection_revision: view.selection_revision,
                     draft: view.draft.clone(),
                     anchor: view.navigation.anchor.clone(),
                     follow: view.navigation.follow(),

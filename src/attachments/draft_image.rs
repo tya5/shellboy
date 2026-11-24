@@ -419,7 +419,7 @@ mod tests {
                 .pins
                 .contains_key(&attachment.id)
         );
-        use crate::protocol::{DraftGetArgs, DraftSaveArgs, ThreadCreateArgs};
+        use crate::protocol::{DraftSaveArgs, ThreadCreateArgs};
         let native = |command| crate::ipc::call(&data, command, None, None);
         let created = native(Command::ThreadCreate(ThreadCreateArgs {
             connection: None,
@@ -434,16 +434,8 @@ mod tests {
         .result
         .unwrap();
         let thread_id = created["thread_id"].as_str().unwrap().to_owned();
-        let selected = native(Command::DraftGet(DraftGetArgs {
-            thread_id: thread_id.clone(),
-        }))
-        .await
-        .unwrap()
-        .result
-        .unwrap();
         let mut save = DraftSaveArgs {
             thread_id,
-            selection_revision: selected["selection_revision"].as_u64().unwrap(),
             draft: Box::new(crate::ui::DraftSnapshot {
                 draft_id: "draft".into(),
                 revision: 2,

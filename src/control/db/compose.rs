@@ -18,12 +18,11 @@ pub(super) fn save(
 ) -> super::Result<()> {
     let DraftSaveArgs {
         thread_id: thread,
-        selection_revision,
         draft,
         anchor,
         follow_tail,
     } = args;
-    let current = history::selection_revision(tx, thread, ThreadScope::Live)
+    history::selection_revision(tx, thread, ThreadScope::Live)
         .optional()
         .map_err(sql_error)?
         .ok_or_else(|| {
@@ -32,10 +31,21 @@ pub(super) fn save(
                 "Draft Thread is not available",
             )
         })?;
-    if u64::try_from(current).ok() != Some(*selection_revision) {
+    if !follow_tail
+        && let Some(node) = anchor.node_id.as_deref()
+        && tx
+            .query_row(
+                history::SELECTED_NODE_ORDINAL_SQL,
+                params![thread, node],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()
+            .map_err(sql_error)?
+            .is_none()
+    {
         return Err(error(
-            ErrorCode::OperationConflict,
-            "Selected history changed",
+            ErrorCode::CursorExpired,
+            "Saved view anchor is no longer selected",
         ));
     }
     crate::ui::draft::validate_positions(draft, draft_bytes)?;

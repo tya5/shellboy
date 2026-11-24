@@ -831,7 +831,6 @@ pub enum UiAction {
     },
     SaveDraft {
         thread_id: String,
-        selection_revision: u64,
         draft: DraftSnapshot,
         anchor: ViewAnchor,
         follow: bool,
@@ -1121,6 +1120,11 @@ pub enum UiUpdate {
     },
     StorageFailed {
         thread_id: String,
+        message: String,
+    },
+    DraftAnchorExpired {
+        thread_id: String,
+        anchor: ViewAnchor,
         message: String,
     },
     DraftSaveFailed {
@@ -3330,7 +3334,6 @@ impl UiState {
                         } else {
                             self.deferred_actions.push(UiAction::SaveDraft {
                                 thread_id: thread,
-                                selection_revision: view.selection_revision,
                                 draft: view.draft.clone(),
                                 anchor: view.navigation.anchor.clone(),
                                 follow: view.navigation.follow(),
@@ -3554,6 +3557,31 @@ impl UiState {
                 {
                     view.save_retry = false;
                     view.status = message;
+                }
+            }
+            UiUpdate::DraftAnchorExpired {
+                thread_id,
+                anchor,
+                message,
+            } => {
+                if let Some(view) = self.views.values_mut().find(|view| {
+                    view.thread_id.as_deref() == Some(&thread_id)
+                        && !view.navigation.follow()
+                        && view.navigation.anchor == anchor
+                }) {
+                    view.status = message;
+                    view.save_retry = false;
+                    view.navigation
+                        .on_event(NavEvent::Read(ReadEvent::RebaseRequested {
+                            ticket: (view.navigation.view_revision, None),
+                            pending: None,
+                        }));
+                    self.deferred_actions.push(UiAction::RebaseHistory {
+                        thread_id,
+                        generation: view.generation,
+                        view_revision: view.navigation.view_revision,
+                        anchor,
+                    });
                 }
             }
             UiUpdate::DraftSaveFailed { thread_id, message } => {
@@ -4429,7 +4457,6 @@ impl UiState {
             .map(|thread_id| {
                 vec![UiAction::SaveDraft {
                     thread_id: thread_id.clone(),
-                    selection_revision: view.selection_revision,
                     draft: view.draft.clone(),
                     anchor: view.navigation.anchor.clone(),
                     follow: view.navigation.follow(),

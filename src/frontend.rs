@@ -524,6 +524,7 @@ enum BackgroundResult {
     },
     DraftSaved {
         thread_id: String,
+        anchor: ViewAnchor,
         result: Result<(), ApiError>,
     },
     Refreshed {
@@ -1069,7 +1070,8 @@ async fn run_client(
         compose_disconnected.clone(),
     );
     let clipboard_slots = Arc::new(Semaphore::new(2));
-    let send_slots = Arc::new(Semaphore::new(32));
+    // Leave ordinary IPC capacity for draft saves and other clients.
+    let send_slots = Arc::new(Semaphore::new(crate::ipc::MAX_IPC_WORK / 2));
     let mut render_width = 80_u16;
     let mut management = management_state::Management::default();
     let mut external_observation: Option<inspection_external::ExternalObservation> = None;
@@ -1764,13 +1766,13 @@ async fn run_client(
                                 })?;
                                 let snapshot=message_queue::submission_snapshot(snapshot,&draft_id,revision,&text,&attachments,None,control.store.config.limits.draft_bytes)?;
                                 compose_call(&control,
-                                    Command::DraftSubmit(crate::protocol::DraftSubmitArgs {
+                                    Command::DraftSubmit(Box::new(crate::protocol::DraftSubmitArgs {
                                         selection_revision: thread_id.as_ref().map(|_| selection_revision),
                                         thread_id,
                                         create: ThreadCreateArgs { agents: None, connection, cwd: Some(cwd), model, effort, parent_id: None },
                                         draft: Box::new(snapshot),
                                         deliver: if now { crate::protocol::Deliver::Now } else { crate::protocol::Deliver::Next },
-                                    }), Some(trace.operation_id.clone()),
+                                    })), Some(trace.operation_id.clone()),
                                 ).await
                             }
                             .await;
@@ -2396,19 +2398,21 @@ async fn run_client(
                             let ids = attachments.iter().map(|a| a.id.clone()).collect();
                             let result = async {
                                 let snapshot=message_queue::submission_snapshot(snapshot,&draft_id,revision,&text,&attachments,Some((&source_thread_id,&source_node_id)),control.store.config.limits.draft_bytes)?;
-                                let cwd = cwd.into_os_string().into_string().map_err(|_| {
-                                    ApiError::new(
-                                        ErrorCode::InvalidArgument,
-                                        "Thread cwd must be valid Unicode",
-                                    )
-                                })?;
-                                compose_call(&control, Command::DraftSubmit(crate::protocol::DraftSubmitArgs {
+                                let cwd = match cwd.into_os_string().into_string() {
+                                    Ok(cwd) => cwd,
+                                    Err(_) => {
+                                        // Preserve edited-input error precedence without revalidating successful sends.
+                                        crate::control::native_draft_input(&snapshot)?;
+                                        return Err(ApiError::new(ErrorCode::InvalidArgument, "Thread cwd must be valid Unicode"));
+                                    }
+                                };
+                                compose_call(&control, Command::DraftSubmit(Box::new(crate::protocol::DraftSubmitArgs {
                                     thread_id: Some(source_thread_id),
                                     selection_revision: Some(selection_revision),
                                     create: ThreadCreateArgs { agents: None, cwd: Some(cwd), connection, model, effort, parent_id: None },
                                     draft: Box::new(snapshot),
                                     deliver: if now { crate::protocol::Deliver::Now } else { crate::protocol::Deliver::Next },
-                                }), Some(trace.operation_id.clone())).await
+                                })), Some(trace.operation_id.clone())).await
                             }
                             .await;
                             trace_send(
@@ -2929,7 +2933,6 @@ async fn run_client(
                     }
                     UiAction::SaveDraft {
                         thread_id,
-                        selection_revision,
                         draft,
                         anchor,
                         follow,
@@ -2937,7 +2940,6 @@ async fn run_client(
                         images.associate(&draft.draft_id, &thread_id);
                         if draft_saver.enqueue(
                             thread_id.clone(),
-                            selection_revision,
                             draft,
                             anchor,
                             follow,
@@ -3465,7 +3467,7 @@ async fn run_client(
                         Err(error) => status(&updates, Some(ticket.thread), error).await,
                     }
                 }
-                Some(BackgroundResult::DraftSaved { thread_id, result: Err(error) }) => {
+                Some(BackgroundResult::DraftSaved { thread_id, anchor, result: Err(error) }) => {
                     if compose_transport_error(&error) {
                         compose_disconnected.store(true, Ordering::Release);
                         if let Some(operation) = unknown_compose_operation(&error) {
@@ -3474,8 +3476,10 @@ async fn run_client(
                         update(&updates, UiUpdate::StorageFailed { thread_id, message: compose_disconnected_message(&error) }).await;
                     } else if error.is_storage_failure() {
                         update(&updates,UiUpdate::StorageFailed{thread_id,message:ui_diagnostics::save_failed(language, error)}).await;
+                    } else if error.code == ErrorCode::CursorExpired {
+                        update(&updates, UiUpdate::DraftAnchorExpired { thread_id, anchor, message: error.to_string() }).await;
                     } else {
-                        update(&updates, UiUpdate::DraftSaveFailed { thread_id, message: error.to_string() }).await;
+                        update(&updates, UiUpdate::StorageFailed { thread_id, message: error.to_string() }).await;
                     }
                 }
                 Some(BackgroundResult::DraftSaved { result: Ok(()), .. }) => {}
@@ -4314,7 +4318,6 @@ async fn compose_call<T: serde::de::DeserializeOwned>(
 async fn save_draft(
     control: &Control,
     thread_id: String,
-    selection_revision: u64,
     draft: DraftSnapshot,
     anchor: ViewAnchor,
     follow_tail: bool,
@@ -4324,7 +4327,6 @@ async fn save_draft(
         control,
         Command::DraftSave(crate::protocol::DraftSaveArgs {
             thread_id,
-            selection_revision,
             draft: Box::new(draft),
             anchor,
             follow_tail,

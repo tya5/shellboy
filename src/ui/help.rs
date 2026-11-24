@@ -294,6 +294,14 @@ impl Page {
             ),
         );
         page.entry(
+            "/reconnect",
+            local!(
+                config.ui.language,
+                "再接続して未確認の操作結果を確認する。再送しない",
+                "Reconnect and check unconfirmed operation receipts without resending"
+            ),
+        );
+        page.entry(
             "Ctrl+Q / /quit",
             local!(
                 config.ui.language,

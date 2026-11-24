@@ -4194,20 +4194,8 @@ mod receipt_wait_tests {
             .await
             .unwrap();
         let thread_id = thread.result["thread_id"].as_str().unwrap().to_owned();
-        let target = thread_id.clone();
-        let selection_revision = db
-            .call(move |db| {
-                Ok(history::selection_revision(
-                    db,
-                    &target,
-                    history::ThreadScope::Live,
-                )?)
-            })
-            .await
-            .unwrap() as u64;
         let mut args = crate::protocol::DraftSaveArgs {
             thread_id,
-            selection_revision,
             draft: Box::new(crate::ui::DraftSnapshot {
                 revision: 2,
                 text: "current".into(),
@@ -4223,6 +4211,52 @@ mod receipt_wait_tests {
             )
             .await
             .unwrap();
+        let thread = args.thread_id.clone();
+        db.call(move |db| {
+            let tx = db.transaction()?;
+            history::append_node(
+                &tx,
+                &thread,
+                "reading",
+                None,
+                "user",
+                &json!({"role":"user","content":"reading"}),
+                "now",
+            )?;
+            history::append_node(
+                &tx,
+                &thread,
+                "later",
+                None,
+                "user",
+                &json!({"role":"user","content":"later"}),
+                "now",
+            )?;
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        args.anchor.node_id = Some("reading".into());
+        store
+            .execute(
+                Request::new("current:after-append", Command::DraftSave(args.clone())),
+                None,
+            )
+            .await
+            .unwrap();
+        let mut displaced = args.clone();
+        displaced.anchor.node_id = Some("not-selected".into());
+        displaced.draft.revision = 3;
+        displaced.draft.text = "must not persist".into();
+        let refused = store
+            .execute(
+                Request::new("current:displaced", Command::DraftSave(displaced)),
+                None,
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(refused.code, ErrorCode::CursorExpired);
         args.draft.revision = 1;
         args.draft.text = "stale".into();
         args.follow_tail = true;
@@ -4235,10 +4269,10 @@ mod receipt_wait_tests {
             .unwrap_err();
         assert_eq!(refused.code, ErrorCode::OperationConflict);
         let saved = db.call(|db| Ok(db.query_row(
-            "SELECT json_extract(d.body_json, '$.text'), v.follow_tail FROM draft d JOIN view_state v USING(thread_id)",
-            [], |r| Ok((r.get::<_, String>(0)?, r.get::<_, bool>(1)?)),
+            "SELECT json_extract(d.body_json, '$.text'), v.follow_tail, v.anchor_node_id FROM draft d JOIN view_state v USING(thread_id)",
+            [], |r| Ok((r.get::<_, String>(0)?, r.get::<_, bool>(1)?, r.get::<_, String>(2)?)),
         )?)).await.unwrap();
-        assert_eq!(saved, ("current".into(), false));
+        assert_eq!(saved, ("current".into(), false, "reading".into()));
         db.shutdown().await.unwrap();
     }
 

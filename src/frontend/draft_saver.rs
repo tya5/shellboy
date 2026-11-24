@@ -1,8 +1,7 @@
 //! Existing autosave queue, per-Thread coalescing and worker lifetime.
 use super::*;
-type Snapshot = (String, u64, DraftSnapshot, ViewAnchor, bool);
+type Snapshot = (String, DraftSnapshot, ViewAnchor, bool);
 struct PendingSave {
-    selection_revision: u64,
     draft: DraftSnapshot,
     anchor: ViewAnchor,
     follow: bool,
@@ -27,34 +26,29 @@ impl DraftSaver {
         let (sender, mut receiver) = mpsc::channel::<Snapshot>(32);
         let worker = tokio::spawn(async move {
             let mut failure = None;
-            while let Some((thread, selection_revision, draft, anchor, follow)) =
-                receiver.recv().await
-            {
+            while let Some((thread, draft, anchor, follow)) = receiver.recv().await {
                 let result = if disconnected.load(Ordering::Acquire) {
                     Err(ApiError::new(
                         ErrorCode::AppNotRunning,
                         "Composer is disconnected; draft kept",
                     ))
                 } else {
-                    save_draft(
-                        &control,
-                        thread.clone(),
-                        selection_revision,
-                        draft,
-                        anchor,
-                        follow,
-                    )
-                    .await
+                    save_draft(&control, thread.clone(), draft, anchor.clone(), follow).await
                 };
                 if let Err(error) = &result {
                     if compose_transport_error(error) {
                         disconnected.store(true, Ordering::Release);
                     }
-                    failure = Some(error.clone());
+                    // The deleted Thread cannot own a saved draft, but this
+                    // typed refusal still reaches the interactive client.
+                    if error.code != ErrorCode::TargetUnavailable {
+                        failure = Some(error.clone());
+                    }
                 }
                 let _ = results
                     .send(BackgroundResult::DraftSaved {
                         thread_id: thread,
+                        anchor,
                         result,
                     })
                     .await;
@@ -72,7 +66,6 @@ impl DraftSaver {
     pub(super) fn enqueue(
         &mut self,
         thread: String,
-        selection_revision: u64,
         draft: DraftSnapshot,
         anchor: ViewAnchor,
         follow: bool,
@@ -83,7 +76,6 @@ impl DraftSaver {
             self.backlog.insert(
                 thread,
                 PendingSave {
-                    selection_revision,
                     draft,
                     anchor,
                     follow,
@@ -122,7 +114,6 @@ impl DraftSaver {
         }
         while let Some(thread) = self.backlog.keys().next().cloned() {
             let PendingSave {
-                selection_revision,
                 draft,
                 anchor,
                 follow,
@@ -130,20 +121,13 @@ impl DraftSaver {
             } = self.backlog.remove(&thread).unwrap();
             match self
                 .sender
-                .try_send((thread.clone(), selection_revision, draft, anchor, follow))
+                .try_send((thread.clone(), draft, anchor, follow))
             {
                 Ok(()) => {}
-                Err(mpsc::error::TrySendError::Full((
-                    _,
-                    selection_revision,
-                    draft,
-                    anchor,
-                    follow,
-                ))) => {
+                Err(mpsc::error::TrySendError::Full((_, draft, anchor, follow))) => {
                     self.backlog.insert(
                         thread,
                         PendingSave {
-                            selection_revision,
                             draft,
                             anchor,
                             follow,
@@ -152,17 +136,10 @@ impl DraftSaver {
                     );
                     break;
                 }
-                Err(mpsc::error::TrySendError::Closed((
-                    _,
-                    selection_revision,
-                    draft,
-                    anchor,
-                    follow,
-                ))) => {
+                Err(mpsc::error::TrySendError::Closed((_, draft, anchor, follow))) => {
                     self.backlog.insert(
                         thread.clone(),
                         PendingSave {
-                            selection_revision,
                             draft,
                             anchor,
                             follow,
@@ -213,7 +190,6 @@ impl DraftSaver {
         for (
             thread,
             PendingSave {
-                selection_revision,
                 draft,
                 anchor,
                 follow,
@@ -221,10 +197,7 @@ impl DraftSaver {
             },
         ) in self.backlog
         {
-            let _ = self
-                .sender
-                .send((thread, selection_revision, draft, anchor, follow))
-                .await;
+            let _ = self.sender.send((thread, draft, anchor, follow)).await;
         }
         drop(self.sender);
         self.worker
@@ -302,7 +275,6 @@ mod tests {
                     );
                     assert!(saver.enqueue(
                         thread,
-                        0,
                         draft,
                         ViewAnchor {
                             node_id: Some("anchor-source".into()),
@@ -412,7 +384,6 @@ mod tests {
         for number in 0..64 {
             assert!(saver.enqueue(
                 format!("thread-{number}"),
-                0,
                 DraftSnapshot::default(),
                 ViewAnchor::default(),
                 true,
@@ -421,7 +392,6 @@ mod tests {
         }
         assert!(!saver.enqueue(
             "rejected".into(),
-            0,
             DraftSnapshot::default(),
             ViewAnchor::default(),
             true,
@@ -452,7 +422,6 @@ mod tests {
         assert_eq!(saver.rejected_message(UiLanguage::Ja), stopped_message);
         assert!(!saver.enqueue(
             "rejected".into(),
-            0,
             DraftSnapshot::default(),
             ViewAnchor::default(),
             true,
@@ -460,7 +429,6 @@ mod tests {
         ));
         assert!(saver.enqueue(
             "thread-0".into(),
-            0,
             DraftSnapshot {
                 text: "new revision".into(),
                 ..Default::default()
@@ -473,7 +441,6 @@ mod tests {
         assert!(saver.pump().is_none(), "revisions must not repeat warnings");
         assert!(saver.enqueue(
             "closing".into(),
-            0,
             DraftSnapshot::default(),
             ViewAnchor::default(),
             true,
@@ -511,7 +478,6 @@ mod tests {
         let mut saver = DraftSaver::new(control.clone(), results, Default::default());
         saver.enqueue(
             "thread".into(),
-            0,
             DraftSnapshot {
                 draft_id: "autosave".into(),
                 text: "autosave despite stopped UI".into(),
@@ -568,7 +534,6 @@ mod tests {
         let updates = BufferedUpdates::new(tx);
         assert!(saver.enqueue(
             "thread".into(),
-            0,
             DraftSnapshot {
                 text: "first unsaved".into(),
                 revision: 5,
@@ -586,7 +551,6 @@ mod tests {
         assert_eq!(saver.backlog["thread"].draft.text, "first unsaved");
         assert!(saver.enqueue(
             "thread".into(),
-            0,
             DraftSnapshot {
                 text: "newest unsaved".into(),
                 revision: 6,
@@ -617,7 +581,6 @@ mod tests {
         assert!(failure.is_none());
         assert!(saver.enqueue(
             "later-thread".into(),
-            0,
             DraftSnapshot {
                 text: "another unsaved draft".into(),
                 revision: 1,
@@ -636,7 +599,6 @@ mod tests {
         );
         assert!(saver.enqueue(
             "later-thread".into(),
-            0,
             DraftSnapshot {
                 text: "latest other draft".into(),
                 revision: 2,
@@ -681,7 +643,6 @@ mod tests {
             .unwrap();
         assert!(saver.enqueue(
             "thread".into(),
-            0,
             DraftSnapshot {
                 text: "not saved".into(),
                 ..Default::default()

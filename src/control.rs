@@ -409,6 +409,32 @@ async fn maintenance_loop(
     }
 }
 
+pub(crate) fn native_draft_input(
+    draft: &crate::ui::DraftSnapshot,
+) -> Result<
+    (
+        crate::attachments::DraftContent,
+        Vec<crate::attachments::AttachmentInput>,
+    ),
+    ApiError,
+> {
+    let (content, ordered) = crate::ui::draft::decode(&draft.text, draft.attachments.clone())?;
+    let files = ordered
+        .into_iter()
+        .map(|attachment| {
+            let kind =
+                crate::protocol::AttachmentKind::parse(&attachment.kind).ok_or_else(|| {
+                    ApiError::new(ErrorCode::InvalidArgument, "Unknown draft attachment kind")
+                })?;
+            Ok(crate::attachments::AttachmentInput {
+                path: attachment.path,
+                kind,
+            })
+        })
+        .collect::<Result<Vec<_>, ApiError>>()?;
+    Ok((content, files))
+}
+
 impl Control {
     pub fn new(owner: &DataOwner, startup_cwd: PathBuf) -> Arc<Self> {
         let config = Arc::new(owner.loaded.config.clone());
@@ -1053,20 +1079,7 @@ impl Control {
         let draft = args.draft;
         crate::ui::draft::validate_positions(&draft, self.store.config.limits.draft_bytes)?;
         let edit = draft.edit.clone();
-        let (content, ordered) = crate::ui::draft::decode(&draft.text, draft.attachments.clone())?;
-        let files = ordered
-            .into_iter()
-            .map(|attachment| {
-                let kind =
-                    crate::protocol::AttachmentKind::parse(&attachment.kind).ok_or_else(|| {
-                        ApiError::new(ErrorCode::InvalidArgument, "Unknown draft attachment kind")
-                    })?;
-                Ok(crate::attachments::AttachmentInput {
-                    path: attachment.path,
-                    kind,
-                })
-            })
-            .collect::<Result<Vec<_>, ApiError>>()?;
+        let (content, files) = native_draft_input(&draft)?;
         let submission = db::DraftSubmission {
             draft_id: db::DraftSubmission::id_for_operation(&operation_id),
             source_draft_id: draft.draft_id.clone(),
@@ -1243,9 +1256,10 @@ impl Control {
                         }
                         let mut images = self.attachments.lock_draft_images().await;
                         // Keep the compose preparation future out of shared request dispatch.
-                        let result = Box::pin(
-                            self.submit_native_draft(request.operation_id.clone(), args.clone()),
-                        )
+                        let result = Box::pin(self.submit_native_draft(
+                            request.operation_id.clone(),
+                            args.as_ref().clone(),
+                        ))
                         .await?;
                         images.hand_off(&args.draft);
                         Ok(MutationResult {

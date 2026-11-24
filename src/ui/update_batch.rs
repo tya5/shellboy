@@ -67,6 +67,7 @@ impl UiUpdate {
             | Self::Threads { .. }
             | Self::Thread { .. }
             | Self::StorageFailed { .. }
+            | Self::DraftAnchorExpired { .. }
             | Self::DraftSaveFailed { .. }
             | Self::ReceiptSource { .. }
             | Self::RestoredSnapshot { .. }

@@ -825,6 +825,9 @@ mod tests {
             tx.commit()?;Ok(())
         }).await.unwrap();
         let control = Control::new(&owner, root.path().into());
+        let (rpc, requests) = tokio::sync::mpsc::channel(8);
+        let server = crate::ipc::LocalServer::bind(&owner, rpc).await.unwrap();
+        tokio::spawn(control.clone().serve(requests));
         let pending = owner.db.call(|db| query(db, "thread")).await.unwrap();
         assert_eq!(
             pending
@@ -935,6 +938,7 @@ mod tests {
             })
             .await
             .unwrap();
+        drop(server);
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
         let owner = DataOwner::start(
@@ -945,6 +949,9 @@ mod tests {
         .await
         .unwrap();
         let control = Control::new(&owner, root.path().into());
+        let (rpc, requests) = tokio::sync::mpsc::channel(8);
+        let server = crate::ipc::LocalServer::bind(&owner, rpc).await.unwrap();
+        tokio::spawn(control.clone().serve(requests));
         let restored = restore_archive(&control, "cancelled-message:z-first".into())
             .await
             .unwrap();
@@ -983,6 +990,7 @@ mod tests {
                 .code,
             ErrorCode::TargetUnavailable
         );
+        drop(server);
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
     }
@@ -1116,7 +1124,6 @@ mod retention_tests {
             let result = crate::frontend::save_draft(
                 &control,
                 "thread".into(),
-                0,
                 draft,
                 ViewAnchor::default(),
                 true,

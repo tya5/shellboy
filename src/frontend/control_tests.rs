@@ -92,7 +92,6 @@ async fn missing_history_targets_are_local_errors_and_do_not_stop_other_runs() {
 fn save(text: &str, revision: u64) -> UiAction {
     UiAction::SaveDraft {
         thread_id: "thread".into(),
-        selection_revision: 0,
         draft: DraftSnapshot {
             text: text.into(),
             revision,
@@ -473,14 +472,18 @@ async fn saturated_queue_quit_persists_prior_send_and_latest_snapshot_without_st
         serde_json::from_str::<DraftSnapshot>(&body).unwrap().text,
         "latest quit snapshot"
     );
-    let waits: i64 = db
-        .query_row("SELECT COUNT(*) FROM operation_receipt", [], |row| {
-            row.get(0)
-        })
+    let unexpected: i64 = db
+        .query_row(
+            "SELECT count(*) FROM operation_receipt o WHERE NOT EXISTS (
+             SELECT 1 FROM receipt r WHERE r.client_operation_id=o.operation_id
+         ) AND json_extract(o.result_ref_json,'$.result.accepted') IS NOT 1",
+            [],
+            |row| row.get(0),
+        )
         .unwrap();
-    assert!(
-        waits <= 1,
-        "management requests must not start ahead of Quit"
+    assert_eq!(
+        unexpected, 0,
+        "only the accepted send and draft saves may have receipts"
     );
 }
 
@@ -1607,7 +1610,6 @@ async fn quit_before_initial_draft_restore_cannot_mask_an_existing_saved_draft()
     super::save_draft(
         &control,
         "thread".into(),
-        0,
         DraftSnapshot {
             draft_id: "persisted".into(),
             revision: 7,
@@ -2311,7 +2313,7 @@ async fn refused_native_send_restores_the_exact_frozen_draft() {
     };
     let refused = super::compose_call::<serde_json::Value>(
         &control,
-        Command::DraftSubmit(DraftSubmitArgs {
+        Command::DraftSubmit(Box::new(DraftSubmitArgs {
             thread_id: Some("thread".into()),
             selection_revision: Some(99),
             create: ThreadCreateArgs {
@@ -2324,7 +2326,7 @@ async fn refused_native_send_restores_the_exact_frozen_draft() {
             },
             draft: Box::new(draft.clone()),
             deliver: Deliver::Next,
-        }),
+        })),
         Some(operation.clone()),
     )
     .await
