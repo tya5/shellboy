@@ -7400,8 +7400,9 @@ mod layout_cache_tests {
             text_width::set_terminal_width(policy);
             for language in [crate::config::UiLanguage::En, crate::config::UiLanguage::Ja] {
                 let confirmation = Confirmation::Operation {
-                    command: Command::ThreadGet(ThreadTarget {
+                    command: Command::ThreadGet(crate::protocol::ThreadGetArgs {
                         thread_id: Some("fixture".into()),
+                        display: false,
                     }),
                     detail: raw.into(),
                 };
@@ -7569,8 +7570,9 @@ mod layout_cache_tests {
     fn confirmation_helpers_are_used_by_the_real_bilingual_screen() {
         fn configure(ui: &mut UiState) {
             ui.confirmation = Some(Confirmation::Operation {
-                command: Command::ThreadGet(ThreadTarget {
+                command: Command::ThreadGet(crate::protocol::ThreadGetArgs {
                     thread_id: Some("fixture".into()),
+                    display: false,
                 }),
                 detail: "INDEX-ID".into(),
             });
@@ -7591,8 +7593,9 @@ mod layout_cache_tests {
         config.ui.language = crate::config::UiLanguage::Ja;
         let mut ui = UiState::new(&config, std::env::temp_dir());
         ui.confirmation = Some(Confirmation::Operation {
-            command: Command::ThreadGet(ThreadTarget {
+            command: Command::ThreadGet(crate::protocol::ThreadGetArgs {
                 thread_id: Some("fixture".into()),
+                display: false,
             }),
             detail: (0..80).map(|n| format!("CHECK {n:03}\n")).collect(),
         });
@@ -8785,6 +8788,7 @@ mod tool_refresh_tests {
     }
     fn details() -> ThreadDetails {
         ThreadDetails {
+            display_coverage: None,
             instruction_sources: None,
             instruction_warnings: Vec::new(),
             archived_at: None,

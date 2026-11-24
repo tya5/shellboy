@@ -3209,8 +3209,9 @@ pub(super) async fn checkpoint(
 async fn thread_get_summarizing(control: &Arc<Control>, thread: &str) -> Value {
     let details = request(
         control,
-        Command::ThreadGet(ThreadTarget {
+        Command::ThreadGet(crate::protocol::ThreadGetArgs {
             thread_id: Some(thread.into()),
+            display: false,
         }),
     )
     .await;

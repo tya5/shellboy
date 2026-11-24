@@ -119,8 +119,9 @@ async fn performance_semantic_ranking_writer_contention() {
             let started = Instant::now();
             let request = crate::protocol::Request::new(
                 format!("{}:{}", reading.store.instance_id, uuid::Uuid::new_v4()),
-                crate::protocol::Command::ThreadGet(crate::protocol::ThreadTarget {
+                crate::protocol::Command::ThreadGet(crate::protocol::ThreadGetArgs {
                     thread_id: Some("probe".into()),
+                    display: false,
                 }),
             );
             let response = reading.request(request).await;

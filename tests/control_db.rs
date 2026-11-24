@@ -332,7 +332,10 @@ async fn thread_settings_inherit_agents_and_model_switch_never_restores_old_epoc
         .unwrap();
     let missing = store
         .execute(
-            request(Command::ThreadGet(ThreadTarget { thread_id: None })),
+            request(Command::ThreadGet(shellboy::protocol::ThreadGetArgs {
+                thread_id: None,
+                display: false,
+            })),
             None,
         )
         .await
@@ -2331,8 +2334,9 @@ async fn large_database_observations_do_not_grow_receipts_even_when_pending_rese
     let commands = [
         Command::Status(StatusArgs::default()),
         Command::ThreadList(ThreadListArgs::default()),
-        Command::ThreadGet(ThreadTarget {
+        Command::ThreadGet(shellboy::protocol::ThreadGetArgs {
             thread_id: Some(thread.thread_id.clone()),
+            display: false,
         }),
         Command::ThreadDeletePreview(ThreadDeleteArgs {
             preview_marker: None,
@@ -2409,8 +2413,9 @@ async fn fresh_observations_can_reuse_a_mutation_id_without_replacing_its_saved_
     let thread = saved["thread_id"].as_str().unwrap().to_owned();
     let read = Request::new(
         original.operation_id.clone(),
-        Command::ThreadGet(ThreadTarget {
+        Command::ThreadGet(shellboy::protocol::ThreadGetArgs {
             thread_id: Some(thread.clone()),
+            display: false,
         }),
     );
     let before = store.execute(read.clone(), None).await.unwrap().result;
@@ -2486,8 +2491,9 @@ async fn thread_get_omits_totals_and_usage_get_remains_exact_without_writes() {
         .unwrap();
     let own = execute(
         &store,
-        Command::ThreadGet(ThreadTarget {
+        Command::ThreadGet(shellboy::protocol::ThreadGetArgs {
             thread_id: Some(parent.thread_id.clone()),
+            display: false,
         }),
     )
     .await
@@ -2656,8 +2662,9 @@ fn set_auto_compact(thread: &str, value: &str) -> Command {
 async fn get_thread(store: &Store, thread: &str) -> Value {
     execute(
         store,
-        Command::ThreadGet(ThreadTarget {
+        Command::ThreadGet(shellboy::protocol::ThreadGetArgs {
             thread_id: Some(thread.into()),
+            display: false,
         }),
     )
     .await
@@ -3114,8 +3121,9 @@ async fn single_summary_settings_inherit_clear_and_reopen() {
     );
     let result = execute(
         &reopened,
-        Command::ThreadGet(ThreadTarget {
+        Command::ThreadGet(shellboy::protocol::ThreadGetArgs {
             thread_id: Some(child.thread_id),
+            display: false,
         }),
     )
     .await;

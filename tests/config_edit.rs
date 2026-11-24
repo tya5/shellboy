@@ -11,7 +11,7 @@ use shellboy::{
     control::Control,
     protocol::{
         ApiError, Command, ConfigChange, ConfigGetArgs, ConfigSetArgs, ErrorCode, EventsWaitArgs,
-        Request, ThreadCreateArgs, ThreadSetArgs, ThreadTarget,
+        Request, ThreadCreateArgs, ThreadSetArgs,
     },
 };
 use std::{
@@ -1516,8 +1516,9 @@ async fn public_thread_get_resolves_live_connection_spill_with_raw_precedence() 
     .await;
     let thread = created["thread_id"].as_str().unwrap().to_owned();
     let get_thread = || {
-        Command::ThreadGet(ThreadTarget {
+        Command::ThreadGet(shellboy::protocol::ThreadGetArgs {
             thread_id: Some(thread.clone()),
+            display: false,
         })
     };
     let initial = request(&control, get_thread()).await;

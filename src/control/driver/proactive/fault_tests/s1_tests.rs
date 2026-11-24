@@ -311,7 +311,7 @@ async fn terminal_public_case(case: &str) {
         settled(&control, &target).await;
         let page = request(&control, Command::Status(StatusArgs { thread_id: Some(target.clone()), all: true, limit: 200, ..Default::default() })).await;
         let list = request(&control, Command::CompactList(CompactListArgs { thread_id: Some(target.clone()), since: None, until: None, limit: 20 })).await;
-        let details = request(&control, Command::ThreadGet(ThreadTarget {thread_id: Some(target.clone())})).await;
+        let details = request(&control, Command::ThreadGet(crate::protocol::ThreadGetArgs {thread_id: Some(target.clone()), display: false, })).await;
         let scope = target.clone();
         let failure_slots = control.store.database.call(move |db| {
             let mut statement = db.prepare("SELECT key,value FROM app_meta WHERE key IN (?1,?2) ORDER BY key")?;
@@ -528,8 +528,9 @@ async fn all_canonical_guard_causes_share_one_public_projection_without_requests
         .await;
         let details = request(
             &control,
-            Command::ThreadGet(ThreadTarget {
+            Command::ThreadGet(crate::protocol::ThreadGetArgs {
                 thread_id: Some(target.clone()),
+                display: false,
             }),
         )
         .await;

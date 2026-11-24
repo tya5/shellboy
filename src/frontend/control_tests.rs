@@ -528,7 +528,7 @@ async fn reserved_shutdown_choices_keep_the_existing_grace_wait_and_force_bounda
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn cancel_remains_available_at_full_receipt_budget_without_creating_a_receipt() {
-    use crate::protocol::{Command, ErrorCode, ThreadTarget, WaitArgs, WaitCondition};
+    use crate::protocol::{Command, ErrorCode, WaitArgs, WaitCondition};
     let (root, owner, control, server) = fixture().await;
     let (sender, receiver) = actions::channel(4);
     let (updates, incoming) = std::sync::mpsc::sync_channel(128);
@@ -606,8 +606,9 @@ async fn cancel_remains_available_at_full_receipt_budget_without_creating_a_rece
     );
     let observed = super::request(
         &control,
-        Command::ThreadGet(ThreadTarget {
+        Command::ThreadGet(crate::protocol::ThreadGetArgs {
             thread_id: Some("thread".into()),
+            display: false,
         }),
     )
     .await
@@ -1750,7 +1751,7 @@ async fn saved_usage_detail_open_and_changed_refresh_use_scoped_worker_results()
 async fn slow_usage_trigger_and_scope_follow_existing_owner_request_workers_without_content() {
     use crate::{
         diagnostics::UsageTrigger,
-        protocol::{Command, RunTarget, ThreadTarget, TurnTarget, UsageGetArgs},
+        protocol::{Command, RunTarget, TurnTarget, UsageGetArgs},
     };
     let (_root, owner, control, server) = fixture().await;
     let logfile = owner.loaded.data_dir.join("logs").join("shellboy.log");
@@ -1783,8 +1784,9 @@ async fn slow_usage_trigger_and_scope_follow_existing_owner_request_workers_with
             turn_id: Some("target-run".into()),
             ..Default::default()
         }),
-        Command::ThreadGet(ThreadTarget {
+        Command::ThreadGet(crate::protocol::ThreadGetArgs {
             thread_id: Some("thread".into()),
+            display: false,
         }),
         Command::RunGet(RunTarget {
             run_id: "target-run".into(),
@@ -1875,6 +1877,45 @@ async fn slow_usage_trigger_and_scope_follow_existing_owner_request_workers_with
             .all(|row| row["usage_slow"].as_object().unwrap().len() == 3
                 && row["usage_slow"]["elapsed_ms"] == 100)
     );
+}
+
+#[tokio::test]
+async fn native_display_header_keeps_typed_title_omission_and_default_contract() {
+    use crate::protocol::{Command, ThreadDetails, ThreadGetArgs};
+    let (_root, owner, control, server) = fixture().await;
+    owner.db.call(|db| {
+        db.execute("UPDATE thread SET title='' WHERE id='thread'", [])?;
+        db.execute("INSERT INTO node(id,kind,created_at,payload_json) VALUES('oversize-title','user','now',?1)",
+            [serde_json::json!({"role":"user","content":"exact title", "padding":"x".repeat(128*1024)}).to_string()])?;
+        db.execute("INSERT INTO thread_path(thread_id,ordinal,node_id) VALUES('thread',0,'oversize-title')", [])?;
+        Ok(())
+    }).await.unwrap();
+    let path = &owner.loaded.data_dir;
+    let bounded = super::native_header(path, "thread").await.unwrap();
+    assert_eq!(
+        bounded.prepare_for_ui(crate::config::UiLanguage::En).title,
+        "Untitled (original text is outside the captured range)"
+    );
+    assert_eq!(
+        bounded
+            .prepare_inspection_in(crate::config::UiLanguage::Ja)
+            .1,
+        ["title"]
+    );
+    let ordinary: ThreadDetails = super::inspection_history::native_read(
+        path,
+        Command::ThreadGet(ThreadGetArgs {
+            thread_id: Some("thread".into()),
+            display: false,
+        }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(ordinary.title, "exact title");
+    assert!(ordinary.display_coverage.is_none());
+    server.shutdown().await.unwrap();
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

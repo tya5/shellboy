@@ -1246,7 +1246,10 @@ impl Form {
                 },
             ),
             OpKind::ThreadGet => (vec![thread()], |form, _cwd| {
-                Ok(Command::ThreadGet(form.thread_target()?))
+                Ok(Command::ThreadGet(crate::protocol::ThreadGetArgs {
+                    thread_id: form.thread_target()?.thread_id,
+                    display: false,
+                }))
             }),
             OpKind::ThreadBranches => (
                 vec![

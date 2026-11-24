@@ -987,8 +987,9 @@ mod frame_delivery_tests {
     async fn lost_reply_distinguishes_receipt_free_observations_and_stateful_waits() {
         let cases = [
             Command::Status(Default::default()),
-            Command::ThreadGet(crate::protocol::ThreadTarget {
+            Command::ThreadGet(crate::protocol::ThreadGetArgs {
                 thread_id: Some("t".into()),
+                display: false,
             }),
             Command::IndexStatus(crate::protocol::IndexArgs {
                 kinds: Vec::new(),

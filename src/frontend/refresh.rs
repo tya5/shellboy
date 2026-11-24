@@ -5,6 +5,7 @@ use history_reader::{HistoryInfo, RawHistory};
 use rusqlite::Connection;
 
 pub(super) struct Query {
+    pub data_dir: std::path::PathBuf,
     pub thread: String,
     pub ids: Vec<String>,
     pub generation: Option<u64>,
@@ -50,7 +51,15 @@ fn read_visible_tx(
     waits: Option<&[(String, String)]>,
     sequence: u64,
 ) -> Result<RawVisible, StorageError> {
-    read_visible_tx_limited(db, thread, tool_scope, waits, sequence, 3)
+    read_visible_tx_limited(
+        db,
+        thread,
+        tool_scope,
+        waits,
+        sequence,
+        3,
+        header::read_tx(db, thread).map(Arc::new),
+    )
 }
 
 fn read_visible_tx_limited(
@@ -60,6 +69,7 @@ fn read_visible_tx_limited(
     waits: Option<&[(String, String)]>,
     sequence: u64,
     limit: usize,
+    details: Result<Arc<header::RawHeader>, StorageError>,
 ) -> Result<RawVisible, StorageError> {
     if tool_scope
         .as_ref()
@@ -71,7 +81,7 @@ fn read_visible_tx_limited(
         )
         .into());
     }
-    let details = Arc::new(header::read_tx(db, thread)?);
+    let details = details?;
     let (mut history, before_cursor) = history_reader::query_current_tx(db, thread)?;
     let page_ids = history.source_ids().map(str::to_owned).collect::<Vec<_>>();
     let mut sources = message_metadata::read_tx(db, Some(thread), &page_ids)?;
@@ -193,7 +203,16 @@ fn read_current_and_views_tx(
     sequence: u64,
     views: &view_read::Tickets,
 ) -> Result<RawCurrentAndViews, StorageError> {
-    read_current_and_views_tx_limited(db, thread, ids, tool_scope, (waits, 3), sequence, views)
+    read_current_and_views_tx_limited(
+        db,
+        thread,
+        ids,
+        tool_scope,
+        (waits, 3),
+        sequence,
+        views,
+        header::read_tx(db, thread).map(Arc::new),
+    )
 }
 
 fn read_current_and_views_tx_limited(
@@ -204,10 +223,11 @@ fn read_current_and_views_tx_limited(
     wait_policy: (Option<&[(String, String)]>, usize),
     sequence: u64,
     views: &view_read::Tickets,
+    details: Result<Arc<header::RawHeader>, StorageError>,
 ) -> Result<RawCurrentAndViews, StorageError> {
     let (waits, limit) = wait_policy;
     let receipts = receipt_states_tx(db, ids)?;
-    let visible = read_visible_tx_limited(db, thread, tool_scope, waits, sequence, limit);
+    let visible = read_visible_tx_limited(db, thread, tool_scope, waits, sequence, limit, details);
     let facts = if views.is_empty() {
         None
     } else {
@@ -230,6 +250,7 @@ pub(super) async fn run(
     permit: tokio::sync::OwnedSemaphorePermit,
 ) {
     let Query {
+        data_dir,
         thread,
         ids,
         generation,
@@ -264,10 +285,11 @@ pub(super) async fn run(
         let limit=control.store.config.ui.live_work_rows;
         let view_scopes=super::view_read::prepare_requests(&views).await;
         let index=control.index.clone();
+        let details = super::native_header(&data_dir, &thread).await.map(Arc::new).map_err(StorageError::from);
         let read=snapshot::read_sequenced(
             control.store.database.path().to_path_buf(),stop.clone(),move |db,sequence| {
             // Keep typed per-surface failures; do not reinterpret WAL contention.
-            let (receipts, visible, views) = read_current_and_views_tx_limited(db,&target,&ids,tool_scope,(waits.as_deref(),limit),sequence,&view_scopes)?;
+            let (receipts, visible, views) = read_current_and_views_tx_limited(db,&target,&ids,tool_scope,(waits.as_deref(),limit),sequence,&view_scopes,details)?;
             let visible = visible.and_then(|mut raw| {
                 raw.index_pause = index.read_display_pause(db)?;
                 Ok(raw)
@@ -582,6 +604,10 @@ mod tests {
             Ok(())
         }).await.unwrap();
         let control = Control::new(&owner, root.path().into());
+        let (rpc, dispatcher) = mpsc::channel(16);
+        let server = crate::ipc::LocalServer::bind(&owner, rpc).await.unwrap();
+        let dispatcher = tokio::spawn(control.clone().serve(dispatcher));
+        control.start().await.unwrap();
         let cancelled = CancellationToken::new();
         cancelled.cancel();
         let error = activity::read_cancellable(&control, "t", cancelled)
@@ -620,6 +646,7 @@ mod tests {
                 "selected index pause snapshot",
                 run(
                     Query {
+                        data_dir: owner.loaded.data_dir.clone(),
                         thread: "t".into(),
                         ids: vec![],
                         generation: Some(1),
@@ -662,6 +689,8 @@ mod tests {
                 .unwrap();
         }
         drop(control);
+        server.shutdown().await.unwrap();
+        dispatcher.await.unwrap();
         owner.shutdown().await.unwrap();
     }
 
@@ -716,6 +745,7 @@ mod tests {
             "E readonly observation",
             run(
                 Query {
+                    data_dir: owner.loaded.data_dir.clone(),
                     thread: "t".into(),
                     ids: vec!["held-paired".into()],
                     generation: Some(3),

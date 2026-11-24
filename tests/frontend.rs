@@ -1307,9 +1307,12 @@ async fn edit_adapter_loads_full_original_then_forks_before_first_request_and_di
             .is_ok()
     );
     assert!(!field(&managed, "/management/definitions/not_indexed_sources").is_empty());
-    send.send(UiAction::Command(Command::ThreadGet(ThreadTarget {
-        thread_id: Some(fork),
-    })))
+    send.send(UiAction::Command(Command::ThreadGet(
+        shellboy::protocol::ThreadGetArgs {
+            thread_id: Some(fork),
+            display: false,
+        },
+    )))
     .await
     .unwrap();
     next_state_update(&mut incoming, |u| match u {

@@ -1,7 +1,10 @@
 //! Current-view raw header facts and bounded title evidence, never CLI policy.
 use crate::{
     context::ExecutionContext,
-    protocol::{ApiError, ErrorCode, ThreadDetails},
+    protocol::{
+        ApiError, ErrorCode, ThreadDetails, ThreadDisplayCoverage,
+        ThreadTitleFallback as TitleFallback,
+    },
     storage::StorageError,
 };
 use rusqlite::Connection;
@@ -19,22 +22,16 @@ const EFFORT_BYTES: usize = 64;
 const RECOVERY_BYTES: usize = 64 * 1024;
 const LIMITED: &str = "名称未設定（元本文の取得範囲外）";
 
-pub(super) struct RawHeader {
+pub(crate) struct RawHeader {
     details: ThreadDetails,
     updated_at: String,
     title: Option<TitleWitness>,
     recovery_limited: bool,
 }
 #[derive(Default)]
-pub(super) struct TitleWitness {
+pub(crate) struct TitleWitness {
     path: Candidates,
     pending: Candidates,
-}
-#[derive(Clone, Copy)]
-enum TitleFallback {
-    Limited,
-    Untitled,
-    NotSent,
 }
 #[derive(Default)]
 struct Candidates {
@@ -136,7 +133,7 @@ fn header_params(thread: &str) -> (&str, i64, i64, i64, i64, i64, i64) {
         RECOVERY_BYTES as i64,
     )
 }
-pub(super) fn read_tx(db: &Connection, thread: &str) -> Result<RawHeader, StorageError> {
+pub(crate) fn read_tx(db: &Connection, thread: &str) -> Result<RawHeader, StorageError> {
     if thread.is_empty() || thread.len() > IDENTITY_BYTES {
         return Err(header_scalar_limit("thread_id"));
     }
@@ -149,6 +146,7 @@ pub(super) fn read_tx(db: &Connection, thread: &str) -> Result<RawHeader, Storag
         return Err(header_scalar_limit(&field));
     }
     let details = ThreadDetails {
+        display_coverage: None,
         instruction_sources: None,
         instruction_warnings: Vec::new(),
         archived_at: None,
@@ -198,7 +196,7 @@ pub(super) fn read_tx(db: &Connection, thread: &str) -> Result<RawHeader, Storag
 }
 
 /// Same bounded title evidence for the header and at most3 displayed children.
-pub(super) fn read_title_tx(
+pub(crate) fn read_title_tx(
     db: &Connection,
     thread: &str,
     stored: &str,
@@ -269,26 +267,73 @@ fn read_candidates(
 }
 
 impl RawHeader {
-    pub(super) fn thread_id(&self) -> &str {
+    pub(crate) fn into_native(self) -> ThreadDetails {
+        let mut details = self.details;
+        let mut fallback = None;
+        if let Some(title) = self.title {
+            let (value, _, outcome) = title.prepare_outcome();
+            fallback = outcome;
+            details.title = outcome.map_or(value, |kind| {
+                title_fallback(kind, crate::config::UiLanguage::En)
+            });
+        }
+        details.context = Some(ExecutionContext {
+            state: "active".into(),
+            parent_thread_id: details.parent_id.clone(),
+            updated_at: Some(self.updated_at),
+            thread_id: Some(details.thread_id.clone()),
+            ..Default::default()
+        });
+        details.display_coverage = Some(ThreadDisplayCoverage {
+            title: fallback,
+            recovery_limited: self.recovery_limited,
+        });
+        details
+    }
+
+    pub(crate) fn from_native(details: ThreadDetails) -> Self {
+        Self {
+            updated_at: String::new(),
+            title: None,
+            recovery_limited: false,
+            details,
+        }
+    }
+
+    pub(crate) fn thread_id(&self) -> &str {
         &self.details.thread_id
     }
     /// Borrow raw title witnesses: sharing this header never duplicates source JSON.
     #[cfg(test)]
-    pub(super) fn prepare(&self) -> ThreadDetails {
+    pub(crate) fn prepare(&self) -> ThreadDetails {
         self.prepare_inspection().0
     }
-    pub(super) fn prepare_for_ui(&self, language: crate::config::UiLanguage) -> ThreadDetails {
+    pub(crate) fn prepare_for_ui(&self, language: crate::config::UiLanguage) -> ThreadDetails {
         self.prepare_inspection_in(language).0
     }
     #[cfg(test)]
-    pub(super) fn prepare_inspection(&self) -> (ThreadDetails, Vec<String>) {
+    pub(crate) fn prepare_inspection(&self) -> (ThreadDetails, Vec<String>) {
         self.prepare_inspection_in(crate::config::UiLanguage::Ja)
     }
-    pub(super) fn prepare_inspection_in(
+    pub(crate) fn prepare_inspection_in(
         &self,
         language: crate::config::UiLanguage,
     ) -> (ThreadDetails, Vec<String>) {
         let mut details = self.details.clone();
+        if let Some(coverage) = details.display_coverage.take() {
+            if let Some(fallback) = coverage.title {
+                details.title = title_fallback(fallback, language);
+            }
+            let mut limited = Vec::new();
+            if coverage.title == Some(TitleFallback::Limited) {
+                limited.push("title".into());
+            }
+            if coverage.recovery_limited {
+                details.recovery_reason = Some(recovery_coverage_notice(language));
+                limited.push("recovery_reason".into());
+            }
+            return (details, limited);
+        }
         let mut limited = Vec::new();
         if let Some(title) = &self.title {
             let (_, is_limited, _) = title.prepare_outcome();
@@ -298,10 +343,7 @@ impl RawHeader {
             }
         }
         if self.recovery_limited {
-            details.recovery_reason = Some(match language {
-                crate::config::UiLanguage::Ja => "取得範囲外: 保存された復旧理由は64KiBを超えています。Turn原文で確認してください。".into(),
-                crate::config::UiLanguage::En => "Saved recovery reason exceeds 64 KiB; inspect the original Turn.".into(),
-            });
+            details.recovery_reason = Some(recovery_coverage_notice(language));
             limited.push("recovery_reason".into());
         }
         details.context = Some(ExecutionContext {
@@ -314,8 +356,33 @@ impl RawHeader {
         (details, limited)
     }
 }
+fn recovery_coverage_notice(language: crate::config::UiLanguage) -> String {
+    match language {
+        crate::config::UiLanguage::Ja => {
+            "取得範囲外: 保存された復旧理由は64KiBを超えています。Turn原文で確認してください。"
+                .into()
+        }
+        crate::config::UiLanguage::En => {
+            "Saved recovery reason exceeds 64 KiB; inspect the original Turn.".into()
+        }
+    }
+}
+
+fn title_fallback(fallback: TitleFallback, language: crate::config::UiLanguage) -> String {
+    use crate::config::UiLanguage::{En, Ja};
+    match (language, fallback) {
+        (En, TitleFallback::Limited) => "Untitled (original text is outside the captured range)",
+        (En, TitleFallback::Untitled) => "Untitled",
+        (En, TitleFallback::NotSent) => "Not sent",
+        (Ja, TitleFallback::Limited) => LIMITED,
+        (Ja, TitleFallback::Untitled) => "名称未設定",
+        (Ja, TitleFallback::NotSent) => "未送信",
+    }
+    .into()
+}
+
 impl TitleWitness {
-    pub(super) fn prepare(&self) -> String {
+    pub(crate) fn prepare(&self) -> String {
         self.prepare_outcome().0
     }
     fn prepare_for_ui(&self, language: crate::config::UiLanguage) -> String {
@@ -651,11 +718,11 @@ mod tests {
 }
 
 /// Owned title evidence for one bounded browser ID set.
-pub(super) struct RawTitles {
+pub(crate) struct RawTitles {
     entries: std::collections::BTreeMap<String, (String, Option<TitleWitness>)>,
 }
 impl RawTitles {
-    pub(super) fn prepare(self) -> (std::collections::BTreeMap<String, String>, Vec<String>) {
+    pub(crate) fn prepare(self) -> (std::collections::BTreeMap<String, String>, Vec<String>) {
         let mut titles = std::collections::BTreeMap::new();
         let mut limited = Vec::new();
         for (id, (stored, witness)) in self.entries {
@@ -730,14 +797,14 @@ SELECT thread,input_pos,lane,position,
  bytes IS NOT NULL AND (bytes>?2 OR used>?3),0,0 FROM budgeted
 ORDER BY input_pos,lane,position";
 
-pub(super) fn read_titles_tx(
+pub(crate) fn read_titles_tx(
     db: &Connection,
     requests: &[(String, String)],
 ) -> Result<RawTitles, StorageError> {
     read_titles_with_limits_tx(db, requests, SOURCE_BYTES, WITNESS_BYTES)
 }
 /// Same canonical title discovery with a smaller caller-owned copy channel.
-pub(super) fn read_titles_bounded_tx(
+pub(crate) fn read_titles_bounded_tx(
     db: &Connection,
     requests: &[(String, String)],
     bytes: usize,

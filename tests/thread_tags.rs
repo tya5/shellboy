@@ -595,8 +595,9 @@ async fn thread_get_lists_tags_and_new_threads_do_not_inherit_them() {
         .unwrap();
     let details = run(
         &store,
-        Command::ThreadGet(ThreadTarget {
+        Command::ThreadGet(shellboy::protocol::ThreadGetArgs {
             thread_id: Some(parent.clone()),
+            display: false,
         }),
     )
     .await
@@ -606,8 +607,9 @@ async fn thread_get_lists_tags_and_new_threads_do_not_inherit_them() {
     assert!(stored(&store, &child).await.is_empty());
     let child_details = run(
         &store,
-        Command::ThreadGet(ThreadTarget {
+        Command::ThreadGet(shellboy::protocol::ThreadGetArgs {
             thread_id: Some(child),
+            display: false,
         }),
     )
     .await

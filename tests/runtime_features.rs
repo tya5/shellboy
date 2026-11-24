@@ -988,8 +988,9 @@ async fn stopping_recovery_cancels_an_inflight_manual_summary_without_adopting_i
     assert_eq!(summary.body["tools"], json!([]));
     let details = request(
         &control,
-        Command::ThreadGet(ThreadTarget {
+        Command::ThreadGet(shellboy::protocol::ThreadGetArgs {
             thread_id: Some(thread),
+            display: false,
         }),
     )
     .await;
@@ -1908,8 +1909,9 @@ async fn shell_created_agents_waits_for_next_turn_and_survives_a_new_startup_cwd
     let control = Control::new(&reopened, alternate);
     let details = request(
         &control,
-        Command::ThreadGet(ThreadTarget {
+        Command::ThreadGet(shellboy::protocol::ThreadGetArgs {
             thread_id: Some(thread.clone()),
+            display: false,
         }),
     )
     .await;
@@ -2273,8 +2275,9 @@ async fn actual_unicode_request_input_characters_are_saved_before_http_and_retai
     }).await.unwrap();
     let details = request(
         &control,
-        Command::ThreadGet(ThreadTarget {
+        Command::ThreadGet(shellboy::protocol::ThreadGetArgs {
             thread_id: Some(target.clone()),
+            display: false,
         }),
     )
     .await;
@@ -2314,8 +2317,9 @@ async fn thread_get_reports_uncertain_context_for_a_large_saved_thread() {
     }).await.unwrap();
     let details = request(
         &control,
-        Command::ThreadGet(ThreadTarget {
+        Command::ThreadGet(shellboy::protocol::ThreadGetArgs {
             thread_id: Some(target),
+            display: false,
         }),
     )
     .await;
@@ -2479,8 +2483,9 @@ async fn explicit_agents_changes_wait_for_new_turn_and_retry_keeps_snapshot() {
     settled(&control, &thread).await;
     let run = request(
         &control,
-        Command::ThreadGet(ThreadTarget {
+        Command::ThreadGet(shellboy::protocol::ThreadGetArgs {
             thread_id: Some(thread.clone()),
+            display: false,
         }),
     )
     .await["run_id"]
@@ -2552,8 +2557,9 @@ async fn explicit_agents_changes_wait_for_new_turn_and_retry_keeps_snapshot() {
     settled(&control, &thread).await;
     let run = request(
         &control,
-        Command::ThreadGet(ThreadTarget {
+        Command::ThreadGet(shellboy::protocol::ThreadGetArgs {
             thread_id: Some(thread.clone()),
+            display: false,
         }),
     )
     .await["run_id"]
@@ -3776,8 +3782,9 @@ async fn prepare_report_from_thread(
 ) -> PreparedReport {
     let details = request(
         control,
-        Command::ThreadGet(ThreadTarget {
+        Command::ThreadGet(shellboy::protocol::ThreadGetArgs {
             thread_id: Some(thread.to_owned()),
+            display: false,
         }),
     )
     .await;
@@ -7643,7 +7650,7 @@ async fn proactive_spill_then_cancelled_connection_wait_preserves_adoption() {
         assert_eq!(changed.0, adopted.0);
         assert_eq!(changed.2, adopted.2);
         assert_eq!(changed.1, adopted.1 + 1, "model change advances the reasoning epoch once");
-        let run = request(&control, Command::ThreadGet(ThreadTarget { thread_id: Some(target.clone()) })).await["run_id"].as_str().unwrap().to_owned();
+        let run = request(&control, Command::ThreadGet(shellboy::protocol::ThreadGetArgs { thread_id: Some(target.clone()), display: false, })).await["run_id"].as_str().unwrap().to_owned();
         request(&control, Command::RunStop(RunTarget { run_id: run.clone() })).await;
         settled(&control, &target).await;
         assert_eq!(request(&control,Command::RunGet(RunTarget{run_id:run})).await["state"],"stopped");

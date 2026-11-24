@@ -378,8 +378,9 @@ async fn archived_threads_stay_readable_countable_and_can_receive_messages() {
     archive(&store, &[&child], false).await.unwrap();
     let details = run(
         &store,
-        Command::ThreadGet(ThreadTarget {
+        Command::ThreadGet(shellboy::protocol::ThreadGetArgs {
             thread_id: Some(child.clone()),
+            display: false,
         }),
     )
     .await

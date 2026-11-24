@@ -489,7 +489,7 @@ async fn extra_instructions_live_update_waits_for_next_turn_and_saved_sources_ar
         assert!(!continued.body.to_string().contains("must not appear"));
         continued.reply.send((200,answer("done"))).unwrap();
         completed_run(&control,&target).await;
-        let details=request(&control,Command::ThreadGet(shellboy::protocol::ThreadTarget { thread_id:Some(target.clone()) })).await;
+        let details=request(&control,Command::ThreadGet(shellboy::protocol::ThreadGetArgs { thread_id:Some(target.clone()), display: false })).await;
         let sources=&details["instruction_sources"];
         assert_eq!(sources["extra"][0]["path"],json!(common));
         assert!(sources["extra"][0].get("body").is_none());
@@ -506,7 +506,7 @@ async fn extra_instructions_live_update_waits_for_next_turn_and_saved_sources_ar
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn extra_instructions_missing_file_warns_without_blocking_the_run() {
-    use shellboy::protocol::{StatusArgs, ThreadTarget};
+    use shellboy::protocol::StatusArgs;
 
     crate::test_watchdog::watchdog("missing common instruction warning", async {
         let root = tempfile::tempdir().unwrap();
@@ -550,8 +550,9 @@ async fn extra_instructions_missing_file_warns_without_blocking_the_run() {
         let warnings = json!([{"path": missing, "reason": "not_found", "hint": "Check the configured instruction file path."}]);
         let details = request(
             &control,
-            Command::ThreadGet(ThreadTarget {
+            Command::ThreadGet(shellboy::protocol::ThreadGetArgs {
                 thread_id: Some(target.clone()),
+                display: false,
             }),
         )
         .await;

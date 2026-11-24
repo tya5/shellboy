@@ -43,8 +43,9 @@ async fn details(store: &Store, id: &str) -> ThreadDetails {
     serde_json::from_value(
         execute(
             store,
-            Command::ThreadGet(ThreadTarget {
+            Command::ThreadGet(shellboy::protocol::ThreadGetArgs {
                 thread_id: Some(id.into()),
+                display: false,
             }),
         )
         .await,
