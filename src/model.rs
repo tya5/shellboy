@@ -88,6 +88,38 @@ pub enum TransportCause {
     Unknown,
 }
 
+impl TransportCause {
+    pub(crate) fn next_action(self) -> &'static str {
+        match self {
+            Self::Dns => "Check the configured endpoint name and its DNS resolution.",
+            Self::ConnectionRefused => {
+                "Check that the endpoint is listening on the configured host and port."
+            }
+            Self::ConnectionReset => "Check the network or VPN connection for interruptions.",
+            Self::Unreachable => "Check that the network or VPN connection to this endpoint is up.",
+            Self::TlsUnknownIssuer => {
+                "Check that the endpoint's issuing CA is trusted by this system."
+            }
+            Self::TlsNameMismatch => {
+                "Check that the configured endpoint hostname matches its TLS certificate."
+            }
+            Self::TlsExpired => "Check the endpoint TLS certificate expiry with its administrator.",
+            Self::Tls => {
+                "Check the endpoint's TLS configuration without disabling certificate verification."
+            }
+            Self::ProxyConnect { status: Some(407) } => {
+                "Check the configured proxy authentication."
+            }
+            Self::ProxyConnect { .. } => {
+                "Check the configured proxy's connectivity to the endpoint."
+            }
+            Self::Unknown => {
+                "Check the selected connection with shellboy connection test --connection NAME."
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, thiserror::Error)]
 #[error("{kind}: {message}")]
 pub struct ModelError {

@@ -2523,7 +2523,10 @@
         "reply_limit",
         "storage_limit",
         "save_failed",
-        "io_failed"
+        "io_failed",
+        "model_auth",
+        "model_request_rejected",
+        "model_request_failed"
       ],
       "type": "string"
     },
@@ -12100,6 +12103,12 @@
         "expect_reply": {
           "type": "boolean"
         },
+        "hint": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "id": {
           "type": "string"
         },
@@ -12113,6 +12122,12 @@
           "type": "string"
         },
         "last_output_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "message": {
           "type": [
             "string",
             "null"

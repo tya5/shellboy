@@ -118,7 +118,7 @@ pub(crate) fn point_sql(kind: Kind) -> String {
         Kind::Turn => (
             "turn r",
             "r.id",
-            "r.state,r.thread_id,r.run_id,r.id,r.created_at,NULL,r.ended_at,NULL,CASE WHEN json_valid(r.recovery_reason_json) THEN substr(COALESCE(json_extract(r.recovery_reason_json,'$.kind'),json_extract(r.recovery_reason_json,'$.code')),1,512) END",
+            "r.state,r.thread_id,r.run_id,r.id,r.created_at,NULL,r.ended_at,NULL,CASE WHEN json_valid(r.recovery_reason_json) THEN substr(COALESCE(json_extract(r.recovery_reason_json,'$.kind'),json_extract(r.recovery_reason_json,'$.code'),json_extract(r.recovery_reason_json,'$.reason')),1,512) END",
             "JOIN run t ON t.id=r.run_id",
             "r.thread_id",
             "NULL",
@@ -195,8 +195,13 @@ pub(crate) fn point_sql(kind: Kind) -> String {
         Kind::Attempt => crate::compaction::discard::status_sql("r"),
         _ => "NULL".into(),
     };
+    let recovery = if kind == Kind::Turn {
+        super::turn_recovery_fields("r")
+    } else {
+        "NULL,NULL".into()
+    };
     format!(
-        "SELECT {id},{fields},{owner},{operation},{answer},{connection},{model},substr(q.title,1,80),q.parent_thread_id,substr(q.profile_id,1,128),substr(q.model_id,1,256),{revisit},{elapsed},{output},{stdin},{detail},{guard} FROM json_each(?1) j CROSS JOIN {table} {joins} LEFT JOIN thread q ON q.id={thread} WHERE {id}=j.value LIMIT 201"
+        "SELECT {id},{fields},{owner},{operation},{answer},{connection},{model},substr(q.title,1,80),q.parent_thread_id,substr(q.profile_id,1,128),substr(q.model_id,1,256),{revisit},{elapsed},{output},{stdin},{detail},{recovery},{guard} FROM json_each(?1) j CROSS JOIN {table} {joins} LEFT JOIN thread q ON q.id={thread} WHERE {id}=j.value LIMIT 201"
     )
 }
 
@@ -262,14 +267,14 @@ pub(crate) fn read_status_tx(
                 }
                 continue;
             }
-            if row.get_ref(25)?.as_str_or_null().ok().flatten().is_some() {
+            if row.get_ref(27)?.as_str_or_null().ok().flatten().is_some() {
                 result.limited.push(Limited {
                     id: id.into(),
                     reason: "canonical_metadata_unconfirmed",
                 });
                 continue;
             }
-            let borrowed = (1..25)
+            let borrowed = (1..27)
                 .map(|column| {
                     row.get_ref(column)
                         .map(|v| v.as_str_or_null().ok().flatten())
@@ -282,7 +287,7 @@ pub(crate) fn read_status_tx(
                             16384
                         } else if column == 22 && kind == Kind::Run {
                             200_000 // Eight paths, up to 4096 bytes each before JSON escaping.
-                        } else if column == 8 {
+                        } else if matches!(column, 8 | 24 | 25) {
                             2048
                         } else {
                             1024
@@ -535,6 +540,8 @@ fn canonical_item(
         attempt_connection: get(12),
         attempt_model: get(13),
         reason: get(8),
+        message: get(24),
+        hint: get(25),
         compaction_outcome: (fact.key.kind == Kind::Attempt)
             .then(|| {
                 get(23)
@@ -787,6 +794,49 @@ mod tests {
                 assert_eq!(actual["current"], serde_json::to_value(expected).unwrap());
             }
             assert!(budget.used <= TEXT_BYTES);
+        }
+    }
+    #[test]
+    fn status_recovery_preserves_evidence_action_and_plain_reason() {
+        let db = canonical_fixture();
+        let args = crate::protocol::StatusArgs {
+            all: true,
+            ..Default::default()
+        };
+        let keys = [Key {
+            kind: Kind::Turn,
+            id: "t".into(),
+        }];
+        for (saved, reason, message, hint) in [
+            (
+                serde_json::json!({"code":"model_auth","message":"provider evidence","hint":"Test the connection","details":{"private":"do not project"}}),
+                "model_auth",
+                Some("provider evidence"),
+                Some("Test the connection"),
+            ),
+            (
+                serde_json::json!({"reason":"previous_instance_interrupted"}),
+                "previous_instance_interrupted",
+                None,
+                None,
+            ),
+        ] {
+            db.execute(
+                "UPDATE turn SET recovery_reason_json=?1 WHERE id='t'",
+                [saved.to_string()],
+            )
+            .unwrap();
+            let page = super::super::snapshot(&db, &args, "fixture").unwrap();
+            let turn = page.items.into_iter().find(|v| v.id == "t").unwrap();
+            assert_eq!(turn.reason.as_deref(), Some(reason));
+            assert_eq!(turn.message.as_deref(), message);
+            assert_eq!(turn.hint.as_deref(), hint);
+            let point = prepare(read_status_tx(&db, &keys, &mut TextBudget::default()).unwrap());
+            assert_eq!(
+                point["items"][0]["current"],
+                serde_json::to_value(turn).unwrap()
+            );
+            assert!(!point.to_string().contains("do not project"));
         }
     }
     #[test]

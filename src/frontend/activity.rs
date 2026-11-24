@@ -421,6 +421,10 @@ pub(super) fn prepare_in(raw: RawProjection, language: crate::config::UiLanguage
                     }
                 }
             }
+            if let Some(hint) = error.as_ref().and_then(|error| error.hint.as_deref()) {
+                message.push_str(crate::ui::text_width::glyphs::separator());
+                message.push_str(hint);
+            }
             let (pending_messages, saved_tool_results, live_shells, uncollected_shells) =
                 recovery_counts.expect("saved recovery reason has collected recovery counts");
             snapshot.recovery = Some(RecoverySnapshot {

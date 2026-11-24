@@ -105,6 +105,12 @@ Brackets mean optional; `|` means alternatives. Add common global flags and `--h
 | `status [--thread THREAD] [--run RUN] [--since RFC3339] [--state STATE]... [--all] [--limit N] [--cursor C]` | `items`, `filters`, `observed_at`, `scope`, `consistency`, `fingerprint`, `next_cursor`; default 50, maximum 200. Saved state from one DB read transaction; no new execution, API request, or operation receipt |
 | `status --memory` | Owner-wide cache retained/limit/entry accounting and native process memory; unknown values have reasons. Exclusive with activity filters; on-demand and no provider request |
 
+A Turn can include `reason`, `message` (saved failure evidence) and `hint` (one next action).
+Each diagnostic is bounded; use `turn get --turn ID` to inspect the saved Turn before retrying.
+`model_auth` identifies missing local credentials or HTTP authorization refusal, not an invalid-key verdict.
+`model_request_rejected` identifies another client-error response; `model_request_failed` covers other failures.
+A typed reset, content filter or transport cause can carry more specific guidance.
+
 ### Configuration through the owner (2 commands)
 
 | Command | Behavior |
@@ -122,7 +128,7 @@ owner they fail with `app_not_running`. Use `restart_required` to tell whether a
 |---|---|
 | `credentials set --connection NAME` | Store the API key read from **standard input** for a connection in the file. One trailing line break is dropped; the key is refused from a terminal (it would be echoed) and there is no argument for it. Result: `connection`, `stored`, `replaced`, `key_source`, `credentials_path`, `permissions_tightened`, `changed_by`. Never returns the key. Same `--operation-id` replays the saved outcome |
 | `credentials clear --connection NAME` | Remove that connection's stored key. Result: `cleared` (false when there was none; nothing is written), `key_source`, `credentials_path` |
-| `connection test --connection NAME` or `--base-url URL [--api DIALECT] [--api-key-stdin \| --api-key-env VAR] [--api-key-header NAME] [--no-ssl-verify]` | Send one model-catalog GET by default for a saved connection or an unsaved candidate. Result: `sent`, `ok`, `http_status`, `failure` (`auth`, `url`, `rate_limited`, `server`, `http_status`, `timeout`, `unreachable`, `credential_missing`, `invalid_configuration`, `response`), `models`, `model_count`, `credential` (`source`, `api_key_env`, `env_set`). `ok` means a catalog answered, not that the key is valid. Transport failures may include a redacted `transport_cause` and a `hint` that starts with network or VPN reachability. No receipt |
+| `connection test --connection NAME` or `--base-url URL [--api DIALECT] [--api-key-stdin \| --api-key-env VAR] [--api-key-header NAME] [--no-ssl-verify]` | Send one model-catalog GET by default for a saved connection or an unsaved candidate. Result: `sent`, `ok`, `http_status`, `failure` (`auth`, `url`, `rate_limited`, `server`, `http_status`, `timeout`, `unreachable`, `credential_missing`, `invalid_configuration`, `response`), `models`, `model_count`, `credential` (`source`, `api_key_env`, `env_set`). `ok` means a catalog answered, not that the key is valid. Transport failures may include a redacted `transport_cause` and a `hint` specific to that cause (including VPN reachability or proxy settings where applicable). No receipt |
 
 ```sh
 printf %s "$KEY" | shellboy credentials set --connection proxy

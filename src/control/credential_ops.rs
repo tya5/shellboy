@@ -233,7 +233,7 @@ async fn conversation_probe(name: &str, mut connection: Connection, model: &str)
 fn add_transport_diagnosis(result: &mut Value, error: &crate::model::ModelError) {
     if let Some(cause) = error.transport_cause {
         result["transport_cause"] = json!(cause);
-        result["hint"] = json!(crate::model::http::TRANSPORT_HINT);
+        result["hint"] = json!(cause.next_action());
     }
 }
 

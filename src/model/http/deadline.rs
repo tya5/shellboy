@@ -255,8 +255,6 @@ pub(super) fn transport_error(error: reqwest::Error, stage: &str) -> ModelError 
         Unknown => "underlying transport cause unavailable",
     };
     message.push_str(". ");
-    message.push_str(TRANSPORT_HINT);
-    message.push(' ');
     message.push_str(detail);
     let mut error = ModelError::new(kind, message);
     error.transport_cause = Some(cause);
@@ -341,9 +339,12 @@ mod tests {
             .unwrap();
         let error = classified(client, "http://private-host.invalid/a?key=private-query").await;
         assert_eq!(error["transport_cause"]["kind"], "dns");
-        assert!(error["message"].as_str().unwrap().contains(
-            "Check that the network or VPN connection to this endpoint is up, then inspect proxy connectivity and TLS settings."
-        ));
+        assert!(
+            error["message"]
+                .as_str()
+                .unwrap()
+                .contains("DNS lookup failed")
+        );
         assert!(!error.to_string().contains("private-"));
     }
 

@@ -479,7 +479,15 @@ async fn terminal_provider_failure_through_retry_persists_one_transition_time() 
     )
     .await
     .unwrap_err();
-    assert_eq!(returned.code, ErrorCode::IoFailed);
+    assert_eq!(returned.code, ErrorCode::ModelRequestRejected);
+    assert!(returned.message.contains("synthetic permanent failure"));
+    assert!(
+        returned
+            .hint
+            .as_deref()
+            .unwrap()
+            .contains("shellboy config get")
+    );
     assert_eq!(
         returned.details.as_ref().unwrap()["failure_kind"],
         "provider"

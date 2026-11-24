@@ -54,6 +54,10 @@ pub struct WorkItem {
     pub attempt_connection: Option<String>,
     pub attempt_model: Option<String>,
     pub reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hint: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub instruction_warnings: Vec<InstructionWarning>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -145,6 +149,13 @@ fn stamp(value: &str) -> Result<DateTime<FixedOffset>> {
             "Recorded work timestamp is invalid",
         )
     })
+}
+// Both status paths project only bounded strings, never the full error record.
+fn turn_recovery_fields(alias: &str) -> String {
+    let saved = format!("{alias}.recovery_reason_json");
+    ["message", "hint"].map(|key| format!(
+        "CASE WHEN json_valid({saved}) THEN CASE WHEN json_type({saved},'$.{key}')='text' THEN substr(json_extract({saved},'$.{key}'),1,512) END END"
+    )).join(",")
 }
 fn short(value: String, max: usize) -> String {
     value.chars().take(max).collect()
@@ -464,10 +475,12 @@ fn work_item(row: &rusqlite::Row<'_>, kind: WorkKind, state: String) -> Result<W
             .get::<_, Option<String>>(15)
             .map_err(sql)?
             .map(|s| short(s, 512)),
-        thread_title: short(row.get(16).map_err(sql)?, 80),
-        parent_thread_id: row.get(17).map_err(sql)?,
-        current_connection: short(row.get(18).map_err(sql)?, 128),
-        current_model: short(row.get(19).map_err(sql)?, 256),
+        message: row.get(16).map_err(sql)?,
+        hint: row.get(17).map_err(sql)?,
+        thread_title: short(row.get(18).map_err(sql)?, 80),
+        parent_thread_id: row.get(19).map_err(sql)?,
+        current_connection: short(row.get(20).map_err(sql)?, 128),
+        current_model: short(row.get(21).map_err(sql)?, 256),
         execution_id: (kind == WorkKind::Shell).then_some(id.clone()),
         message_id: (kind == WorkKind::Message).then_some(id.clone()),
         attempt_id: (kind == WorkKind::Attempt).then_some(id.clone()),
@@ -483,7 +496,7 @@ fn work_item(row: &rusqlite::Row<'_>, kind: WorkKind, state: String) -> Result<W
     };
 
     if kind == WorkKind::Message {
-        let metadata: Option<String> = row.get(20).map_err(sql)?;
+        let metadata: Option<String> = row.get(22).map_err(sql)?;
         if let Some(metadata) = metadata {
             let metadata: Value = serde_json::from_str(&metadata).map_err(|_| {
                 ApiError::new(ErrorCode::InvalidState, "invalid message reply metadata")
@@ -637,6 +650,7 @@ pub fn snapshot(db: &Connection, args: &StatusArgs, instance: &str) -> Result<St
     // Only sort/filter identity keys. The five detail branches seek by rowid
     // after the bounded page is chosen, so non-page work is never projected.
     let sources_sql = sources_sql.join(" UNION ALL ");
+    let turn_recovery = turn_recovery_fields("t");
     let query = format!(
         r#"WITH input(thread,run,states,since,after,key_kind,key_id,watermark,lim) AS (
         VALUES (:thread,:run,:states,:since,:after,:kind,:id,:watermark,:lim)
@@ -650,12 +664,12 @@ pub fn snapshot(db: &Connection, args: &StatusArgs, instance: &str) -> Result<St
                (c.activity=input.after AND (c.kind,c.id)>(input.key_kind,input.key_id)))
         ORDER BY c.activity DESC,c.kind,c.id LIMIT (SELECT lim FROM input)
     ),
-    work(kind,id,state,thread_id,run_id,turn_id,owner_run_id,created_at,started_at,ended_at,updated_at,operation_id,answer_node_id,attempt_connection,attempt_model,reason) AS (
-      SELECT 'run',r.id,r.state,r.thread_id,r.id,(SELECT id FROM turn WHERE run_id=r.id ORDER BY created_at DESC,id DESC LIMIT 1),NULL,r.created_at,NULL,r.ended_at,NULL,NULL,(SELECT answer_node_id FROM turn WHERE run_id=r.id ORDER BY created_at DESC,id DESC LIMIT 1),NULL,NULL,r.stop_reason FROM run r WHERE r.rowid IN (SELECT rid FROM page_keys WHERE kind='run')
-      UNION ALL SELECT 'turn',t.id,t.state,t.thread_id,t.run_id,t.id,NULL,t.created_at,NULL,t.ended_at,NULL,NULL,t.answer_node_id,NULL,NULL,CASE WHEN json_valid(t.recovery_reason_json) THEN COALESCE(json_extract(t.recovery_reason_json,'$.kind'),json_extract(t.recovery_reason_json,'$.code')) END FROM turn t JOIN run r ON r.id=t.run_id WHERE t.rowid IN (SELECT rid FROM page_keys WHERE kind='turn')
-      UNION ALL SELECT 'shell',s.id,s.state,r.thread_id,s.owner_run_id,s.turn_id,s.owner_run_id,NULL,s.started_at,s.ended_at,NULL,NULL,NULL,NULL,NULL,s.end_reason FROM shell_execution s JOIN run r ON r.id=s.owner_run_id WHERE s.rowid IN (SELECT rid FROM page_keys WHERE kind='shell')
-      UNION ALL SELECT 'message',m.message_node_id,m.state,m.target_thread_id,m.run_id,m.turn_id,NULL,m.created_at,NULL,NULL,NULLIF(m.updated_at,''),CASE WHEN EXISTS(SELECT 1 FROM operation_receipt o WHERE o.operation_id=m.client_operation_id) THEN m.client_operation_id END,NULL,NULL,NULL,m.hold_reason FROM receipt m LEFT JOIN run r ON r.id=m.run_id LEFT JOIN turn t ON t.id=m.turn_id WHERE m.rowid IN (SELECT rid FROM page_keys WHERE kind='message')
-      UNION ALL SELECT 'attempt',a.id,a.state,t.thread_id,t.run_id,t.id,NULL,NULL,a.started_at,a.ended_at,NULL,NULL,t.answer_node_id,a.profile_id,a.model_id,CASE WHEN json_valid(a.error_json) THEN COALESCE(json_extract(a.error_json,'$.kind'),json_extract(a.error_json,'$.code')) END FROM model_attempt a JOIN turn t ON t.id=a.turn_id JOIN run r ON r.id=t.run_id WHERE a.rowid IN (SELECT rid FROM page_keys WHERE kind='attempt')
+    work(kind,id,state,thread_id,run_id,turn_id,owner_run_id,created_at,started_at,ended_at,updated_at,operation_id,answer_node_id,attempt_connection,attempt_model,reason,message,hint) AS (
+      SELECT 'run',r.id,r.state,r.thread_id,r.id,(SELECT id FROM turn WHERE run_id=r.id ORDER BY created_at DESC,id DESC LIMIT 1),NULL,r.created_at,NULL,r.ended_at,NULL,NULL,(SELECT answer_node_id FROM turn WHERE run_id=r.id ORDER BY created_at DESC,id DESC LIMIT 1),NULL,NULL,r.stop_reason,NULL,NULL FROM run r WHERE r.rowid IN (SELECT rid FROM page_keys WHERE kind='run')
+      UNION ALL SELECT 'turn',t.id,t.state,t.thread_id,t.run_id,t.id,NULL,t.created_at,NULL,t.ended_at,NULL,NULL,t.answer_node_id,NULL,NULL,CASE WHEN json_valid(t.recovery_reason_json) THEN COALESCE(json_extract(t.recovery_reason_json,'$.kind'),json_extract(t.recovery_reason_json,'$.code'),json_extract(t.recovery_reason_json,'$.reason')) END,{turn_recovery} FROM turn t JOIN run r ON r.id=t.run_id WHERE t.rowid IN (SELECT rid FROM page_keys WHERE kind='turn')
+      UNION ALL SELECT 'shell',s.id,s.state,r.thread_id,s.owner_run_id,s.turn_id,s.owner_run_id,NULL,s.started_at,s.ended_at,NULL,NULL,NULL,NULL,NULL,s.end_reason,NULL,NULL FROM shell_execution s JOIN run r ON r.id=s.owner_run_id WHERE s.rowid IN (SELECT rid FROM page_keys WHERE kind='shell')
+      UNION ALL SELECT 'message',m.message_node_id,m.state,m.target_thread_id,m.run_id,m.turn_id,NULL,m.created_at,NULL,NULL,NULLIF(m.updated_at,''),CASE WHEN EXISTS(SELECT 1 FROM operation_receipt o WHERE o.operation_id=m.client_operation_id) THEN m.client_operation_id END,NULL,NULL,NULL,m.hold_reason,NULL,NULL FROM receipt m LEFT JOIN run r ON r.id=m.run_id LEFT JOIN turn t ON t.id=m.turn_id WHERE m.rowid IN (SELECT rid FROM page_keys WHERE kind='message')
+      UNION ALL SELECT 'attempt',a.id,a.state,t.thread_id,t.run_id,t.id,NULL,NULL,a.started_at,a.ended_at,NULL,NULL,t.answer_node_id,a.profile_id,a.model_id,CASE WHEN json_valid(a.error_json) THEN COALESCE(json_extract(a.error_json,'$.kind'),json_extract(a.error_json,'$.code')) END,NULL,NULL FROM model_attempt a JOIN turn t ON t.id=a.turn_id JOIN run r ON r.id=t.run_id WHERE a.rowid IN (SELECT rid FROM page_keys WHERE kind='attempt')
     ) SELECT w.*,t.title,t.parent_thread_id,t.profile_id,t.model_id,(SELECT json_object('expect_reply',json_extract(m.result_json,'$.expect_reply'),'reply',json_extract(m.result_json,'$.reply'),'reply_to',json_extract(m.result_json,'$.reply_to')) FROM receipt m WHERE w.kind='message' AND m.message_node_id=w.id),p.watermark FROM page_keys p JOIN work w ON w.kind=p.kind AND w.id=p.id JOIN thread t ON t.id=w.thread_id ORDER BY p.activity DESC,p.kind,p.id"#
     );
     let mut statement = db.prepare(&query).map_err(sql)?;
@@ -679,7 +693,7 @@ pub fn snapshot(db: &Connection, args: &StatusArgs, instance: &str) -> Result<St
         if kind == WorkKind::Run {
             item.revisit = crate::control::revisit::summary_for_run(db, &item.id).map_err(sql)?;
         }
-        watermark = row.get(21).map_err(sql)?;
+        watermark = row.get(23).map_err(sql)?;
         selected.push(item);
     }
     // A page can hold many Runs; bound the added warning bytes without hiding

@@ -1,4 +1,5 @@
 //! Ephemeral per-Turn/generation budget; durable state remains in SQLite.
+use crate::{model, protocol::ErrorCode};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Reduction {
     OldGroups,
@@ -89,14 +90,15 @@ pub(super) async fn retry_or_recover(
         failure.error.to_string()
     };
     let facts = control.compactor.recovery_facts(&snapshot.thread).await?;
-    let mut error=ApiError::new(ErrorCode::IoFailed,message)
-        .hint("Choose an available action; retry may charge again. Saved tools are not re-executed.")
+    let mut error=ApiError::new(failure_code(&failure.error, failure.facts.status),message)
+        .with_recovery_hint()
         .details(json!({"recovery":facts,"automatic_retries":automatic_retries,"retry_limit":retry_limit,
             "automatic_reduction_unavailable":reduction_unavailable,"last_failure_at":now(),"failure_kind":failure.error.kind,"http":failure.facts.http_observation}));
-    if let Some(cause) = failure.error.transport_cause
-        && let Some(details) = &mut error.details
-    {
-        details["transport_cause"] = json!(cause);
+    if let Some(cause) = failure.error.transport_cause {
+        error.hint = Some(cause.next_action().into());
+        if let Some(details) = &mut error.details {
+            details["transport_cause"] = json!(cause);
+        }
     }
     if let Some(fact) = usage_limit {
         error.hint = Some(if control.store.config.recovery.auto_retry_usage_limit
@@ -138,9 +140,40 @@ pub(super) async fn retry_or_recover(
     .await?;
     Err(error)
 }
+fn failure_code(error: &model::ModelError, http_status: Option<u16>) -> ErrorCode {
+    let status = error
+        .stream_provider_status
+        .map(|fact| fact.value)
+        .or(error.status)
+        .or(http_status);
+    match (error.kind.as_str(), status) {
+        ("config_missing" | "config_missing_credentials", _) | (_, Some(401 | 403)) => {
+            ErrorCode::ModelAuth
+        }
+        (_, Some(400..=499)) => ErrorCode::ModelRequestRejected,
+        _ => ErrorCode::ModelRequestFailed,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn model_failure_families_use_status_and_local_kind_not_prose() {
+        for (kind, status, expected) in [
+            ("config_missing", None, ErrorCode::ModelAuth),
+            ("provider", Some(401), ErrorCode::ModelAuth),
+            ("provider", Some(403), ErrorCode::ModelAuth),
+            ("provider", Some(404), ErrorCode::ModelRequestRejected),
+            ("provider", Some(422), ErrorCode::ModelRequestRejected),
+            ("provider", Some(503), ErrorCode::ModelRequestFailed),
+            ("protocol", None, ErrorCode::ModelRequestFailed),
+        ] {
+            let mut error = model::ModelError::new(kind, "Invalid key; please authenticate");
+            error.status = status;
+            assert_eq!(failure_code(&error, None), expected);
+        }
+    }
     #[test]
     fn two_stage_budget_is_shared_by_requests_and_reset_only_by_turn_or_generation() {
         let mut budget = OverflowBudget::default();

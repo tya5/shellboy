@@ -343,7 +343,10 @@ states!(ErrorCode {
     ReplyLimit,
     StorageLimit,
     SaveFailed,
-    IoFailed
+    IoFailed,
+    ModelAuth,
+    ModelRequestRejected,
+    ModelRequestFailed
 });
 states!(RunState {
     Live,
@@ -460,6 +463,9 @@ impl ApiError {
             ErrorCode::ReplyLimit => "Withdraw an outstanding request you sent, or wait for a reply before asking again. This request was not accepted",
             ErrorCode::StorageLimit => "Inspect shellboy storage status and storage capacity; resolve the cause before explicitly choosing a recovery action",
             ErrorCode::SaveFailed => "Preserve unsaved input and inspect capacity/permissions; do not keep submitting mutations while saving is unavailable",
+            ErrorCode::ModelAuth => "Check the selected connection with shellboy connection test --connection NAME",
+            ErrorCode::ModelRequestRejected => "Inspect the selected connection and model with shellboy config get",
+            ErrorCode::ModelRequestFailed => "Inspect the saved Turn with shellboy turn get --turn ID before retrying",
             ErrorCode::IoFailed => "Inspect any known operation receipt and saved target state; read shellboy docs get --id shellboy/recovery-and-storage before repeating a side effect",
         }.into());
         self

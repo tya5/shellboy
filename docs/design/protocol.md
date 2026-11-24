@@ -676,6 +676,22 @@ are English before any interactive locale is available. Keep `io_failed`, the
 permission/path guards unchanged. Source details are not translated. This copy
 change is for the release after 0.6.0, not the 0.6.0 integration batch.
 
+## Model recovery next actions (#400)
+
+A saved model failure is an `ApiError`: `model_auth` covers missing local credentials
+or a structured 401/403, `model_request_rejected` covers other structured 4xx,
+and `model_request_failed` covers other failures. No provider prose is interpreted.
+`message` retains the failure evidence; `hint` is Shellboy's next action. Typed
+transport diagnostics supply the same cause-specific hint to recovery and
+`connection.test` (catalog GET and opt-in POST). Existing reset and filter
+handling is unchanged.
+
+Turn items in `status` and retained status observation can include the saved
+`message` and `hint` from the same record the TUI reads, at most 512 characters
+per field. They do not include the error's `details`. `reason` selects the saved
+`kind`, then `code`, then `reason` (e.g. `previous_instance_interrupted`). Missing
+text is omitted. Observation remains read-only; the text does not imply a retry.
+
 ## Content-filter recovery facts (#159)
 
 `turn get` and `run get` keep the existing `recovery_hint` JSON string. For an
