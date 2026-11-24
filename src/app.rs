@@ -233,6 +233,38 @@ pub enum StartupStage {
     Closing,
 }
 
+impl StartupStage {
+    pub(crate) fn failure(self, mut error: ApiError) -> ApiError {
+        let hint = match self {
+            Self::Configuration => "Check the selected configuration with shellboy config check.",
+            Self::OwnerLock => "Check whether this data directory already has a running owner.",
+            Self::Database | Self::DatabasePragmas => {
+                "Check the selected data directory's storage and permissions."
+            }
+            Self::DatabaseMigration | Self::DatabaseValidate => {
+                "Check that the selected Shellboy version supports this data directory's database schema."
+            }
+            Self::DatabaseForeignKeys | Self::DatabaseQuickCheck => {
+                "Preserve the database and inspect it with shellboy storage check."
+            }
+            Self::InterruptedWork | Self::Control | Self::Closing => {
+                "Read the owner log for the selected data directory."
+            }
+            Self::Endpoint => {
+                "Check the selected data directory's local IPC endpoint and permissions."
+            }
+        };
+        error.hint.get_or_insert_with(|| hint.to_owned());
+        let details = error.details.get_or_insert_with(|| serde_json::json!({}));
+        if let Some(fields) = details.as_object_mut() {
+            fields
+                .entry("startup_stage")
+                .or_insert_with(|| serde_json::json!(self));
+        }
+        error
+    }
+}
+
 /// One existing startup watch carries both facts so coalescing cannot lose locale.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct StartupProgress {
@@ -335,7 +367,9 @@ impl DataOwner {
                 })
         })
         .await
-        .map_err(|_| ApiError::new(ErrorCode::IoFailed, "Configuration worker failed"))??;
+        .map_err(|_| ApiError::new(ErrorCode::IoFailed, "Configuration worker failed"))
+        .and_then(|result| result)
+        .map_err(|error| StartupStage::Configuration.failure(error))?;
         let language = loaded.config.ui.language;
         let motion = loaded.config.ui.motion;
         let configuration_elapsed = configuration_started.elapsed();
@@ -344,7 +378,9 @@ impl DataOwner {
         let directory = loaded.data_dir.clone();
         let lock = tokio::task::spawn_blocking(move || OwnerLock::acquire(&directory))
             .await
-            .map_err(|_| ApiError::new(ErrorCode::IoFailed, "Owner lock worker failed"))??;
+            .map_err(|_| ApiError::new(ErrorCode::IoFailed, "Owner lock worker failed"))
+            .and_then(|result| result)
+            .map_err(|error| StartupStage::OwnerLock.failure(error))?;
         // Keep database and endpoint I/O on the same resolved directory as the lock.
         #[cfg(windows)]
         let loaded = LoadedConfig {
@@ -359,7 +395,9 @@ impl DataOwner {
             Ok::<_, ApiError>(clean)
         })
         .await
-        .map_err(|_| ApiError::new(ErrorCode::IoFailed, "Owner marker worker failed"))??;
+        .map_err(|_| ApiError::new(ErrorCode::IoFailed, "Owner marker worker failed"))
+        .and_then(|result| result)
+        .map_err(|error| StartupStage::OwnerLock.failure(error))?;
         let diagnostics = crate::diagnostics::Diagnostics::start(
             loaded.data_dir.join("logs"),
             loaded.config.logging.clone(),
@@ -383,7 +421,7 @@ impl DataOwner {
             clean,
         )
         .await
-        .map_err(storage_error)?;
+        .map_err(|error| StartupStage::Database.failure(storage_error(error)))?;
         db.attach_diagnostics(diagnostics.clone());
         diagnostics.record(
             crate::diagnostics::DiagnosticEvent::Startup,
@@ -435,7 +473,7 @@ impl DataOwner {
                     diagnostics.shutdown(),
                 )
                 .await;
-                return Err(storage_error(error));
+                return Err(StartupStage::InterruptedWork.failure(storage_error(error)));
             }
         };
         for failure in report.failures {

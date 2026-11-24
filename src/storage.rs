@@ -2031,6 +2031,20 @@ fn open_connection(
         diagnostics,
         progress,
     });
+    open_at_startup(path, &trace, clean_shutdown).map_err(|error| {
+        // The trace is the phase owner; do not infer failure stages from SQLite text.
+        let mut error = error.into_api_error();
+        error.hint = None;
+        trace.borrow().stage.failure(error).into()
+    })
+}
+
+fn open_at_startup(
+    path: &Path,
+    trace: &std::cell::RefCell<StartupDbTrace<'_>>,
+    clean_shutdown: bool,
+) -> Result<Connection, StorageError> {
+    use crate::app::StartupStage;
     register_vec()?;
     let mut connection = Connection::open_with_flags(
         path,
@@ -2049,8 +2063,14 @@ fn open_connection(
         )));
     }
     // Validate before changing persistent journal mode on an unknown database.
+    trace
+        .borrow_mut()
+        .next(StartupStage::DatabaseValidate, None, None);
     let version = schema_version(&connection)?;
     validate_ledger(&connection, version)?;
+    trace
+        .borrow_mut()
+        .next(StartupStage::DatabasePragmas, None, None);
     let journal: String = connection.query_row("PRAGMA journal_mode=WAL", [], |row| row.get(0))?;
     if !journal.eq_ignore_ascii_case("wal") {
         return Err(StorageError::Configuration(format!(
@@ -2069,6 +2089,9 @@ fn open_connection(
     // Persist before the first migration transaction so a crash cannot bypass
     // the post-migration foreign-key scan on the next startup.
     if migrated {
+        trace
+            .borrow_mut()
+            .next(StartupStage::DatabaseMigration, None, None);
         migration_integrity::persist(
             &connection,
             migration_integrity::Check::for_migrations(
@@ -2079,6 +2102,9 @@ fn open_connection(
         )?;
     }
     let version = if version == 0 {
+        trace
+            .borrow_mut()
+            .next(StartupStage::DatabaseMigration, None, None);
         let transaction =
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         transaction.execute_batch(CURRENT_SCHEMA)?;
@@ -3342,12 +3368,15 @@ mod integrity_policy_tests {
         db.execute_batch("PRAGMA ignore_check_constraints=ON; INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,result_ref_json,created_at)VALUES('corrupt','fixture','{}','hash','failed','malformed','now');").unwrap();
         drop(db);
         assert!(open_connection(&path, None, None, true).is_ok());
-        assert!(
-            open_connection(&path, None, None, false)
-                .unwrap_err()
-                .to_string()
-                .contains("quick_check")
+        let error = open_connection(&path, None, None, false)
+            .unwrap_err()
+            .into_api_error();
+        assert!(error.message.contains("quick_check"));
+        assert_eq!(
+            error.details.unwrap()["startup_stage"],
+            "database_quick_check"
         );
+        assert!(error.hint.unwrap().contains("shellboy storage check"));
     }
 
     #[test]

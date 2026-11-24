@@ -182,6 +182,47 @@ pub struct StorageDetails {
     pub disk_free_state: DiskState,
     pub reclaimable_is_lower_bound: bool,
 }
+fn storage_advisories(
+    warning: bool,
+    limit: bool,
+    disk: DiskState,
+) -> Vec<crate::protocol::StorageAdvisory> {
+    use crate::protocol::{StorageAdvisory, StorageAdvisoryReason::*};
+    let mut advisories = Vec::new();
+    let mut add = |reason, hint: &str| {
+        advisories.push(StorageAdvisory {
+            reason,
+            hint: hint.into(),
+        })
+    };
+    if limit {
+        add(
+            LogicalLimit,
+            "Review retention settings before admitting new work.",
+        );
+    } else if warning {
+        add(
+            LogicalWarning,
+            "Review retention settings before reaching the storage limit.",
+        );
+    }
+    match disk {
+        DiskState::Ok => {}
+        DiskState::Warning => add(
+            DiskWarning,
+            "Check free space on the data directory's volume.",
+        ),
+        DiskState::Held => add(
+            DiskHeld,
+            "Free space on the data directory's volume before resuming work.",
+        ),
+        DiskState::Unknown => add(
+            DiskFreeUnknown,
+            "Check free space on the data directory's volume with the operating system.",
+        ),
+    }
+    advisories
+}
 #[derive(Debug, Clone, Serialize)]
 pub struct HistoryStep {
     pub stage: String,
@@ -331,8 +372,12 @@ impl GcService {
             )
             .await?;
         let total = logical.total();
+        let warning = total >= self.config.limits.data_warning_bytes;
+        let limit_reached = total >= self.config.limits.data_max_bytes;
+        let disk_free_state = disk_state(physical.4, self.config.limits.disk_free_min_bytes);
         Ok(StorageDetails {
             status: StorageStatus {
+                advisories: storage_advisories(warning, limit_reached, disk_free_state),
                 logical_live_bytes: total,
                 reclaimable_bytes: reclaimable,
                 db_bytes: physical.0,
@@ -348,10 +393,10 @@ impl GcService {
             logical_raw_bytes: logical.raw,
             logical_index_bytes: logical.index,
             logical_managed_bytes: logical.managed,
-            warning: total >= self.config.limits.data_warning_bytes,
-            limit_reached: total >= self.config.limits.data_max_bytes,
+            warning,
+            limit_reached,
             disk_free_min_bytes: self.config.limits.disk_free_min_bytes,
-            disk_free_state: disk_state(physical.4, self.config.limits.disk_free_min_bytes),
+            disk_free_state,
             reclaimable_is_lower_bound: true,
         })
     }

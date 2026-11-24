@@ -230,6 +230,10 @@ async fn live_run_receives_complete_messages_in_send_order_when_it_would_complet
     for text in ["COMPLETE_ONE", "COMPLETE_TWO"] {
         let accepted = send(&f.control, &f.thread, text, Deliver::Complete).await;
         assert_eq!(accepted.deliver, Deliver::Complete);
+        assert_eq!(
+            accepted.hint.as_deref(),
+            Some("Wait for the target Run to finish; the message is already saved.")
+        );
         assert_eq!(accepted.delivery_status, DeliveryStatus::Held);
         assert_eq!(accepted.assignment, Assignment::Pending);
         assert!(accepted.run_id.is_none());

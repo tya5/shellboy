@@ -2204,6 +2204,8 @@ impl Store {
             message_id: message_id.clone(),
             thread_id: id.clone(),
             delivery_status: status,
+            hint: (status == DeliveryStatus::Held)
+                .then(|| super::message_delivery::held_hint(reason).to_owned()),
             assignment,
             deliver: args.deliver,
             run_id: assigned_run,
@@ -2829,10 +2831,14 @@ pub fn message_details(connection: &Connection, id: &str) -> Result<MessageDetai
             .filter(|assignment| *assignment != Assignment::Pending)
             .unwrap_or(Assignment::ExistingTurn)
     };
+    let context = crate::context::for_message(connection, id)?;
+    let hint = (status == DeliveryStatus::Held)
+        .then(|| super::message_delivery::held_hint(context.hold_reason.as_deref()).to_owned());
     Ok(MessageDetails {
         to_human: metadata["to_human"] == true,
         sender: MessageSender::from_saved(Some(&row.6)),
-        context: crate::context::for_message(connection, id)?,
+        context,
+        hint,
         message_id: id.into(),
         thread_id: row.0,
         delivery_status: status,

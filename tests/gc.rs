@@ -458,6 +458,10 @@ async fn logical_capacity_and_physical_database_space_are_reported_separately() 
     let wire = serde_json::to_value(&status).unwrap();
     assert_eq!(wire["warning_bytes"], 1);
     assert_eq!(wire["limit_bytes"], 1);
+    assert_eq!(
+        wire["advisories"][0],
+        serde_json::json!({"reason":"logical_limit","hint":"Review retention settings before admitting new work."})
+    );
     assert!(status.reclaimable_is_lower_bound);
     assert_eq!(status.status.reclaimable_bytes, 0);
     assert_eq!(

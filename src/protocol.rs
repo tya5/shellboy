@@ -1726,7 +1726,7 @@ impl ShellToolArgs {
         nonempty(&self.output_encoding, "output_encoding")
     }
 }
-record!(MessageAccepted { #[serde(default, skip_serializing_if = "is_false")] to_human: bool, #[serde(default, skip_serializing_if = "is_false")] expect_reply: bool, message_id: String, thread_id: String, delivery_status: DeliveryStatus, assignment: Assignment, #[serde(default, skip_serializing_if = "Deliver::is_next")] deliver: Deliver, #[serde(default, skip_serializing_if = "Option::is_none")] run_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] turn_id: Option<String> });
+record!(MessageAccepted { #[serde(default, skip_serializing_if = "is_false")] to_human: bool, #[serde(default, skip_serializing_if = "is_false")] expect_reply: bool, message_id: String, thread_id: String, delivery_status: DeliveryStatus, #[serde(default, skip_serializing_if = "Option::is_none")] hint: Option<String>, assignment: Assignment, #[serde(default, skip_serializing_if = "Deliver::is_next")] deliver: Deliver, #[serde(default, skip_serializing_if = "Option::is_none")] run_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] turn_id: Option<String> });
 impl MessageAccepted {
     pub fn validate(&self) -> Result<(), ApiError> {
         nonempty(&self.message_id, "message_id")?;
@@ -1938,13 +1938,14 @@ pub enum InstructionWarningReason {
 }
 record!(InstructionWarning {
     path: std::path::PathBuf,
-    reason: InstructionWarningReason
+    reason: InstructionWarningReason,
+    #[serde(default, skip_serializing_if = "Option::is_none")] hint: Option<String>
 });
 record!(ThreadDetails { #[serde(default, skip_serializing_if = "Vec::is_empty")] instruction_warnings: Vec<InstructionWarning>, #[serde(default, skip_serializing_if = "Option::is_none")] instruction_sources: Option<Value>, #[serde(default)] auto_compact_at: Option<u64>, #[serde(default, skip_serializing_if = "Option::is_none")] effective_auto_compact_at: Option<u64>, #[serde(default)] auto_compact_target_percent: Option<u64>, #[serde(default)] summary_max_chars: Option<u64>, #[serde(default,skip_serializing_if="Option::is_none")] effective_auto_compact_target_percent: Option<u64>, #[serde(default,skip_serializing_if="Option::is_none")] effective_summary_max_chars: Option<u64>, #[serde(default)] max_tokens: Option<u64>, #[serde(default)] spill: Option<bool>, #[serde(default = "default_true")] effective_spill: bool, #[serde(default,skip_serializing_if="Option::is_none")] effective_max_tokens: Option<u64>, #[serde(default)] pending_replies: PendingReplyCounts, #[serde(default)] last_end_message: Option<Value>, #[serde(default)] last_input: Option<Value>, #[serde(default,skip_serializing_if="Option::is_none")] last_compaction:Option<Value>, summarizing: bool, agents_path: String, #[serde(default, skip_serializing_if = "Option::is_none")] context_usage: Option<Value>, #[serde(default, skip_serializing_if = "Option::is_none")] context: Option<crate::context::ExecutionContext>, thread_id: String, title: String, cwd: String, connection: String, model: String, #[serde(default, skip_serializing_if = "Option::is_none")] effort: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] parent_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] run_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] turn_id: Option<String>, shells_count: u64, #[serde(default, skip_serializing_if = "Option::is_none")] archived_at: Option<String>, #[serde(default, skip_serializing_if = "Vec::is_empty")] tags: Vec<String>, #[serde(default, skip_serializing_if = "Option::is_none")] recovery_reason: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] parent_change: Option<ParentChange> });
 
 // Present only in the result of a `thread set --parent` that moved the Thread: where it was and which live Run still answers to its previous owner (#222).
 record!(ParentChange { #[serde(default)] previous_parent_id: Option<String>, #[serde(default)] live_run_id: Option<String> });
-record!(MessageDetails { #[serde(default, skip_serializing_if = "is_false")] to_human: bool, sender: MessageSender, context: crate::context::ExecutionContext, message_id: String, thread_id: String, delivery_status: DeliveryStatus, assignment: Assignment, #[serde(default, skip_serializing_if = "Option::is_none")] run_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] turn_id: Option<String>, #[serde(default, skip_serializing_if = "is_false")] expect_reply: bool, #[serde(default, skip_serializing_if = "Option::is_none")] reply: Option<Value>, #[serde(default, skip_serializing_if = "Option::is_none")] reply_to: Option<String> });
+record!(MessageDetails { #[serde(default, skip_serializing_if = "is_false")] to_human: bool, sender: MessageSender, context: crate::context::ExecutionContext, message_id: String, thread_id: String, delivery_status: DeliveryStatus, #[serde(default, skip_serializing_if = "Option::is_none")] hint: Option<String>, assignment: Assignment, #[serde(default, skip_serializing_if = "Option::is_none")] run_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] turn_id: Option<String>, #[serde(default, skip_serializing_if = "is_false")] expect_reply: bool, #[serde(default, skip_serializing_if = "Option::is_none")] reply: Option<Value>, #[serde(default, skip_serializing_if = "Option::is_none")] reply_to: Option<String> });
 args!(
     #[derive(Eq)]
     RunWaitReason {
@@ -2006,6 +2007,7 @@ fn nullable_origin_identity(generator: &mut schemars::SchemaGenerator) -> schema
 
 // Config edit details are open; authenticated change provenance is not.
 record!(ConfigSetResult {
+    #[serde(default, skip_serializing_if = "Option::is_none")] hint: Option<String>,
     #[schemars(schema_with = "nullable_origin_identity")]
     changed_by: Option<OriginIdentity>,
     #[serde(flatten)] fields: std::collections::BTreeMap<String, Value>,
@@ -2250,7 +2252,18 @@ args!(
     }
 );
 record!(IndexProbeObservation { connection: String, model: String, requested_dimensions: Option<usize>, dimension: Option<usize>, checked_at: String, success: bool, error: Option<Value> });
-record!(StorageStatus { logical_live_bytes: u64, reclaimable_bytes: u64, db_bytes: u64, wal_bytes: u64, managed_bytes: u64, log_bytes: u64, #[serde(default, skip_serializing_if = "Option::is_none")] filesystem_free_bytes: Option<u64>, warning_bytes: u64, limit_bytes: u64 });
+states!(StorageAdvisoryReason {
+    LogicalWarning,
+    LogicalLimit,
+    DiskWarning,
+    DiskHeld,
+    DiskFreeUnknown
+});
+record!(StorageAdvisory {
+    reason: StorageAdvisoryReason,
+    hint: String
+});
+record!(StorageStatus { #[serde(default, skip_serializing_if = "Vec::is_empty")] advisories: Vec<StorageAdvisory>, logical_live_bytes: u64, reclaimable_bytes: u64, db_bytes: u64, wal_bytes: u64, managed_bytes: u64, log_bytes: u64, #[serde(default, skip_serializing_if = "Option::is_none")] filesystem_free_bytes: Option<u64>, warning_bytes: u64, limit_bytes: u64 });
 record!(ShellListItem {
     execution_id: String,
     run_id: String,

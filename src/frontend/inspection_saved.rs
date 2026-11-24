@@ -418,6 +418,7 @@ pub(super) fn prepare(raw: RawSaved) -> Result<PreparedSaved, ApiError> {
             let assignment_limited =
                 raw.run.is_some() && raw.limited.iter().any(|p| p == "/assignment");
             let details = MessageDetails {
+                hint: None,
                 to_human: false,
                 sender: MessageSender::from_saved(raw.sender.as_deref()),
                 context: ExecutionContext {

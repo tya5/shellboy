@@ -173,6 +173,7 @@ pub async fn read_key(path: &Path, name: &str) -> Result<Option<String>, StoreEr
 pub fn check_key(value: &str) -> Result<(), ApiError> {
     let bad = |message: &str| {
         Err(ApiError::new(ErrorCode::InvalidArgument, message)
+            .hint("Supply the corrected credential through standard input.")
             .details(json!({"field":"value","written":false})))
     };
     if value.trim().is_empty() {
@@ -183,6 +184,7 @@ pub fn check_key(value: &str) -> Result<(), ApiError> {
             ErrorCode::InputLimit,
             format!("the key must be at most {MAX_KEY_BYTES} bytes"),
         )
+        .hint("Supply the corrected credential through standard input.")
         .details(json!({"field":"value","written":false})));
     }
     // Printable ASCII only: a zero-width or other invisible character in a pasted key would
@@ -198,7 +200,8 @@ pub fn check_connection_name(name: &str) -> Result<(), ApiError> {
         return Err(ApiError::new(
             ErrorCode::InvalidArgument,
             "connection must be a non-empty name of at most 256 bytes without control characters",
-        ));
+        )
+        .hint("Check the connection name with shellboy config get."));
     }
     Ok(())
 }
@@ -214,14 +217,23 @@ fn relabel(mut error: ApiError) -> ApiError {
     if error.code == ErrorCode::OperationConflict {
         error.message =
             "The credentials file changed while it was being written; nothing was written".into();
-        error.hint = Some("Repeat the command".into());
+        error.hint = Some("Read shellboy config get before repeating the edit.".into());
         error.details = Some(json!({"written":false}));
     }
     error
 }
 fn invalid_file(error: StoreError, path: &Path) -> ApiError {
+    let hint = match &error {
+        StoreError::Invalid { .. } => {
+            "Check credentials.toml syntax without printing its contents."
+        }
+        StoreError::Unreadable => {
+            "Check the credentials file's accessibility without printing its contents."
+        }
+        StoreError::TooLarge => "Check the size of credentials.toml without printing its contents.",
+    };
     ApiError::new(ErrorCode::ConfigInvalid, error.to_string())
-        .hint("Nothing was written. Fix or remove the file by hand; its entries are never shown")
+        .hint(hint)
         .details(json!({"credentials_path":path,"written":false}))
 }
 
@@ -302,6 +314,7 @@ fn write(
             ErrorCode::IoFailed,
             "The credentials file is read-only; nothing was written",
         )
+        .hint("Check that the owner has write permission on credentials.toml.")
         .details(json!({"credentials_path":path,"written":false})));
     }
     let permissions_tightened = state.present && loose(&state.target);

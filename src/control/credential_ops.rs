@@ -53,6 +53,7 @@ impl Control {
                     ErrorCode::IoFailed,
                     "Another configuration change is still running; nothing was written",
                 )
+                .hint("Read shellboy config get before repeating the edit.")
                 .details(json!({"written":false}))
             })?;
         self.attachments
@@ -88,7 +89,7 @@ impl Control {
                         ErrorCode::InvalidArgument,
                         "This connection sends its own Authorization header from headers, so a stored key would never be used",
                     )
-                    .hint("Remove that header from the connection, or keep the credential where it is")
+                    .hint("Check the selected connection's Authorization header with shellboy config get.")
                     .details(json!({"field":"connection","written":false})));
                 }
                 let path = credential_store::path_beside(config_path);

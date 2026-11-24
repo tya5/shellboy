@@ -132,9 +132,11 @@ impl InstructionLoader {
                         "path": path, "hash": crate::digest::sha256_hex(&body),
                         "bytes": body.len(), "body": body,
                     })),
-                    Err(reason) => {
-                        warnings.push(crate::protocol::InstructionWarning { path, reason })
-                    }
+                    Err(reason) => warnings.push(crate::protocol::InstructionWarning {
+                        path,
+                        reason,
+                        hint: Some(instruction_hint(reason).into()),
+                    }),
                 }
             }
             if files.is_empty() {
@@ -160,9 +162,25 @@ impl InstructionLoader {
     }
 }
 pub(crate) fn decode_warnings(value: Option<&str>) -> Vec<crate::protocol::InstructionWarning> {
-    value
+    let mut warnings: Vec<crate::protocol::InstructionWarning> = value
         .and_then(|json| serde_json::from_str(json).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    for warning in &mut warnings {
+        warning.hint = Some(instruction_hint(warning.reason).into());
+    }
+    warnings
+}
+
+fn instruction_hint(reason: crate::protocol::InstructionWarningReason) -> &'static str {
+    use crate::protocol::InstructionWarningReason::*;
+    match reason {
+        NotFound => "Check the configured instruction file path.",
+        PermissionDenied => "Check that the owner can read the instruction file.",
+        IoFailed => "Check whether the instruction file is readable from this host.",
+        NotRegularFile => "Point the instruction setting at a regular file.",
+        InputLimit => "Reduce the instruction file size.",
+        InvalidUtf8 => "Save the instruction file as UTF-8.",
+    }
 }
 
 fn read_extra(path: &std::path::Path) -> Result<String, crate::protocol::InstructionWarningReason> {

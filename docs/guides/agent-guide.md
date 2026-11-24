@@ -713,6 +713,13 @@ again and show the user what changed before repeating. Your identity is recorded
 works for changes from CLI or another device as well as this client. It reports no
 values, so render only the subsequent read and show file and loaded values separately.
 
+For a held send, follow its `hint`; it is saved, not necessarily delivered.
+If delivery is uncertain, check the existing operation before resending. A
+skipped instruction warning or `storage status` advisory gives a `reason` and
+`hint`; `disk_free_unknown` is not a hold. A terminal startup error can report
+`details.startup_stage`. If `config set` reports `restart_required`, its hint
+identifies the relevant owner; do not restart it without approval.
+
 ## Keys and connection checks
 
 Never put a key in a command line, in `config.toml`, in a message or in your answer. `shellboy credentials set`

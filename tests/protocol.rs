@@ -283,6 +283,7 @@ fn thread_set_max_tokens_accepts_positive_integer_strings_and_empty_clear_only()
 #[test]
 fn success_and_error_envelopes_match_contract_and_omit_absent_fields() {
     let message = MessageAccepted {
+        hint: None,
         to_human: false,
         expect_reply: false,
         deliver: Deliver::Next,
@@ -326,6 +327,7 @@ fn assignment_never_exposes_fabricated_or_partial_ids() {
     ] {
         assert!(
             MessageAccepted {
+                hint: None,
                 to_human: false,
                 expect_reply: false,
                 deliver: Deliver::Next,

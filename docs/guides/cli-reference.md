@@ -105,6 +105,7 @@ Brackets mean optional; `|` means alternatives. Add common global flags and `--h
 | `status [--thread THREAD] [--run RUN] [--since RFC3339] [--state STATE]... [--all] [--limit N] [--cursor C]` | `items`, `filters`, `observed_at`, `scope`, `consistency`, `fingerprint`, `next_cursor`; default 50, maximum 200. Saved state from one DB read transaction; no new execution, API request, or operation receipt |
 | `status --memory` | Owner-wide cache retained/limit/entry accounting and native process memory; unknown values have reasons. Exclusive with activity filters; on-demand and no provider request |
 
+A Run status item can include skipped `instruction_warnings` with `path`, `reason` and `hint`.
 A Turn can include `reason`, `message` (saved failure evidence) and `hint` (one next action).
 Each diagnostic is bounded; use `turn get --turn ID` to inspect the saved Turn before retrying.
 `model_auth` identifies missing local credentials or HTTP authorization refusal, not an invalid-key verdict.

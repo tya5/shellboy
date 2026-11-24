@@ -6247,22 +6247,22 @@
   "src/ui/view.rs:96e61934f7a4902e:1": {
     "category": "a",
     "reason": "Restore guidance is rendered in the Japanese branch of ThreadView::on_receipt. receipt_english provides the matching English restore message; receipt_delivery now leaves generated guidance to that locale-aware view.",
-    "source_tokens_sha256": "f5b2be9e98bb90469d7cc4b56af7691faa07c8de876d135b626261a8f7f105ae"
+    "source_tokens_sha256": "c9006bd5a22503e115e164a6241ddaab0da965e5d994e6ef129161d50bbd31ba"
   },
   "src/ui/view.rs:f63545560e66db13:1": {
     "category": "a",
     "reason": "Restore guidance is rendered in the Japanese branch of ThreadView::on_receipt. receipt_english provides the matching English restore message; receipt_delivery now leaves generated guidance to that locale-aware view.",
-    "source_tokens_sha256": "f5b2be9e98bb90469d7cc4b56af7691faa07c8de876d135b626261a8f7f105ae"
+    "source_tokens_sha256": "c9006bd5a22503e115e164a6241ddaab0da965e5d994e6ef129161d50bbd31ba"
   },
   "src/ui/view.rs:0266ccfd3bcf7ec9:1": {
     "category": "a",
     "reason": "Retained-composer hint is rendered only in ThreadView::on_receipt Japanese branch; receipt_english has the English Current input retained sentence. User-provided receipt message remains opaque.",
-    "source_tokens_sha256": "f5b2be9e98bb90469d7cc4b56af7691faa07c8de876d135b626261a8f7f105ae"
+    "source_tokens_sha256": "c9006bd5a22503e115e164a6241ddaab0da965e5d994e6ef129161d50bbd31ba"
   },
   "src/ui/view.rs:9a6bd1ff2a02edef:1": {
     "category": "a",
     "reason": "Retained-composer hint is rendered only in ThreadView::on_receipt Japanese branch; receipt_english has the English Current input retained sentence. User-provided receipt message remains opaque.",
-    "source_tokens_sha256": "f5b2be9e98bb90469d7cc4b56af7691faa07c8de876d135b626261a8f7f105ae"
+    "source_tokens_sha256": "c9006bd5a22503e115e164a6241ddaab0da965e5d994e6ef129161d50bbd31ba"
   },
   "src/presentation/events.rs:7346b96eb637e521:1": {
     "category": "a",

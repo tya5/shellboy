@@ -1479,6 +1479,17 @@ impl ThreadView {
                 ));
             }
         }
+        if pending.restored_revision == Some(self.draft.revision)
+            && matches!(status, ReceiptStatus::Failed | ReceiptStatus::Cancelled)
+        {
+            self.status
+                .push_str(crate::ui::text_width::glyphs::separator());
+            self.status.push_str(crate::ui::i18n::local!(
+                self.language,
+                "未送信。復元した入力を編集してください",
+                "Not sent; edit the restored draft"
+            ));
+        }
         if matches!(status, ReceiptStatus::Completed | ReceiptStatus::Applied)
             && (pending.send.is_none() || pending.source_node_id.is_some())
         {

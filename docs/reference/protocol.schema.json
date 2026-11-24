@@ -4367,6 +4367,12 @@
     },
     "InstructionWarning": {
       "properties": {
+        "hint": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "path": {
           "type": "string"
         },
@@ -4467,6 +4473,12 @@
         },
         "expect_reply": {
           "type": "boolean"
+        },
+        "hint": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "message_id": {
           "type": "string"
@@ -4619,6 +4631,12 @@
         },
         "expect_reply": {
           "type": "boolean"
+        },
+        "hint": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "message_id": {
           "type": "string"
@@ -10016,6 +10034,31 @@
       "title": "StatusTarget",
       "type": "object"
     },
+    "StorageAdvisory": {
+      "properties": {
+        "hint": {
+          "type": "string"
+        },
+        "reason": {
+          "$ref": "#/definitions/StorageAdvisoryReason"
+        }
+      },
+      "required": [
+        "reason",
+        "hint"
+      ],
+      "type": "object"
+    },
+    "StorageAdvisoryReason": {
+      "enum": [
+        "logical_warning",
+        "logical_limit",
+        "disk_warning",
+        "disk_held",
+        "disk_free_unknown"
+      ],
+      "type": "string"
+    },
     "StorageArgs": {
       "additionalProperties": false,
       "properties": {
@@ -10046,6 +10089,12 @@
     "StorageStatus": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
+        "advisories": {
+          "items": {
+            "$ref": "#/definitions/StorageAdvisory"
+          },
+          "type": "array"
+        },
         "db_bytes": {
           "format": "uint64",
           "minimum": 0,
@@ -12688,6 +12737,12 @@
               "type": "null"
             }
           ]
+        },
+        "hint": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
@@ -13280,6 +13335,12 @@
         "expect_reply": {
           "type": "boolean"
         },
+        "hint": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "message_id": {
           "type": "string"
         },
@@ -13339,6 +13400,12 @@
         "expect_reply": {
           "type": "boolean"
         },
+        "hint": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "message_id": {
           "type": "string"
         },
@@ -13384,6 +13451,12 @@
         },
         "expect_reply": {
           "type": "boolean"
+        },
+        "hint": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "message_id": {
           "type": "string"
@@ -13886,6 +13959,12 @@
     "storage.status": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
+        "advisories": {
+          "items": {
+            "$ref": "#/definitions/StorageAdvisory"
+          },
+          "type": "array"
+        },
         "db_bytes": {
           "format": "uint64",
           "minimum": 0,

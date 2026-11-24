@@ -131,7 +131,7 @@ async fn initialize_localized_reporting(
         owner.publish_startup_stage(StartupStage::Closing).await;
         progress(StartupStage::Closing, language, motion);
         let _ = close(owner, Some(control), None).await;
-        return Err(error);
+        return Err(StartupStage::Control.failure(error));
     }
     owner
         .diagnostics
@@ -152,7 +152,7 @@ async fn initialize_localized_reporting(
             owner.publish_startup_stage(StartupStage::Closing).await;
             progress(StartupStage::Closing, language, motion);
             let _ = close(owner, Some(control), None).await;
-            return Err(error);
+            return Err(StartupStage::Endpoint.failure(error));
         }
     };
     owner.diagnostics.record_startup_stage(

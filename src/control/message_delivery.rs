@@ -10,6 +10,21 @@ use crate::{
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde_json::{Value, json};
 
+pub(crate) fn held_hint(reason: Option<&str>) -> &'static str {
+    match reason {
+        Some("run_completion") => {
+            "Wait for the target Run to finish; the message is already saved."
+        }
+        Some("recovery_wait") => {
+            "Inspect the parked Turn with shellboy turn get --turn ID before deciding how to resume."
+        }
+        Some("stopping" | "previous_instance_interrupted" | "terminal_before_path_admission") => {
+            "Inspect the target Thread with shellboy thread get --thread ID before resuming it."
+        }
+        _ => "Check shellboy operation get --operation ID before resending.",
+    }
+}
+
 const TERMINAL: &str = "(EXISTS(SELECT 1 FROM run r WHERE r.id=receipt.run_id AND r.state IN ('completed','stopped','failed')) OR EXISTS(SELECT 1 FROM turn u WHERE u.id=receipt.turn_id AND u.state IN ('completed','stopped','failed')))";
 
 /// Call only at an actual message-delivery path boundary, not generic history selection.

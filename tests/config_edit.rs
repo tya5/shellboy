@@ -1422,6 +1422,10 @@ async fn the_cli_reads_and_changes_a_headless_owner_end_to_end() {
         .await;
         assert_eq!(changed["ok"], true, "{changed}");
         assert_eq!(changed["result"]["restart_required"], true);
+        assert_eq!(
+            changed["result"]["hint"],
+            "Restart the owner for this data directory to apply the saved changes."
+        );
         let text = std::fs::read_to_string(&config).unwrap();
         assert!(text.contains("default_model = \"model-z\""));
         assert!(text.contains("max_fps = 20"));

@@ -120,6 +120,12 @@ impl Control {
         super::runtime::encode_result(
             crate::protocol::ConfigSetResult {
                 changed_by: caller.map(Origin::identity),
+                hint: (fields.get("restart_required").and_then(Value::as_bool) == Some(true)).then(
+                    || {
+                        "Restart the owner for this data directory to apply the saved changes."
+                            .to_owned()
+                    },
+                ),
                 fields: fields.into_iter().collect(),
             },
             ErrorCode::InvalidState,

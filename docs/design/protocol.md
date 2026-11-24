@@ -693,6 +693,20 @@ per field. They do not include the error's `details`. `reason` selects the saved
 `kind`, then `code`, then `reason` (e.g. `previous_instance_interrupted`). Missing
 text is omitted. Observation remains read-only; the text does not imply a retry.
 
+### Delivery, credential, startup, and storage actions (#400)
+
+`message.send` and `message.get` can include a `hint` for held input, derived
+from the existing receipt reason. Acceptance still does not establish delivery.
+`config.set` includes a `hint` when its result requires an owner restart;
+credential rejection uses the existing error `hint` without exposing values.
+Terminal startup errors can include `details.startup_stage` and a next action;
+this phase is descriptive, not persistent owner state.
+
+Skipped instruction warnings carry `path`, `reason`, and a reason-specific
+`hint` in Thread and Run/status readback. `storage.status.advisories` is omitted
+when healthy. Each entry has a typed `reason` and a `hint` independently for
+logical usage or volume free space. `disk_free_unknown` does not imply a hold.
+
 ## Content-filter recovery facts (#159)
 
 `turn get` and `run get` keep the existing `recovery_hint` JSON string. For an

@@ -547,7 +547,7 @@ async fn extra_instructions_missing_file_warns_without_blocking_the_run() {
             .unwrap();
         completed_run(&control, &target).await;
 
-        let warnings = json!([{"path": missing, "reason": "not_found"}]);
+        let warnings = json!([{"path": missing, "reason": "not_found", "hint": "Check the configured instruction file path."}]);
         let details = request(
             &control,
             Command::ThreadGet(ThreadTarget {

@@ -96,8 +96,8 @@ impl PendingMessage {
             ),
             "uncertain_path_admission" => i18n::local!(
                 language,
-                "反映状況を確認できません",
-                "Delivery could not be verified"
+                "反映状況不明。再送前に操作結果を確認してください",
+                "Delivery could not be verified; check the operation receipt before resending"
             ),
             "previous_instance_interrupted" => i18n::local!(
                 language,
@@ -105,7 +105,11 @@ impl PendingMessage {
                 "Interrupted by previous shutdown"
             ),
             "stopped" | "stopping" => i18n::local!(language, "停止", "Stopped"),
-            "recovery_wait" => i18n::local!(language, "復旧待ち", "Waiting for recovery"),
+            "recovery_wait" => i18n::local!(
+                language,
+                "復旧待ち。保留中のターンを確認してください",
+                "Waiting for recovery; inspect the parked Turn"
+            ),
             "run_completion" => i18n::local!(
                 language,
                 "作業の完了時に届ける",
