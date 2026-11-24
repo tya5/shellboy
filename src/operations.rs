@@ -1040,8 +1040,8 @@ pub(crate) const FIELD_SPECS: &[FieldSpec] = &[
     FieldSpec {
         id: FieldId::ShellSegments,
         default_origin: DefaultOrigin::None,
-        label: "Output stream ranges",
-        help: "Include stdout/stderr byte ranges in the returned text.",
+        label: "出力ストリームの範囲",
+        help: "取得したテキストのstdout・stderrのバイト範囲を含めます。",
         kind: FieldType::Boolean,
         discovery: Discovery::None,
     },
