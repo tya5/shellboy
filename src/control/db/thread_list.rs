@@ -604,18 +604,29 @@ mod tests {
 
     #[test]
     fn tag_pages_and_deep_cwd_pages_do_not_walk_unrelated_candidates() {
+        let root = tempfile::tempdir().unwrap();
+        let fixture_cwd = |name| {
+            normalize(&root.path().join(name), root.path())
+                .unwrap()
+                .into_os_string()
+                .into_string()
+                .unwrap()
+        };
+        let work = fixture_cwd("work");
+        let archive = fixture_cwd("archive");
         let measure = |growth| {
             let db = Connection::open_in_memory().unwrap();
             db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
             db.execute_batch(&format!("
                 WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<=500+{growth})
                 INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at,archived_at)
-                  SELECT printf('t%06d',i),'Title','/work','','p','m','2026-11-24T00:00:00Z',NULL FROM n;
+                  SELECT printf('t%06d',i),'Title','','','p','m','2026-11-24T00:00:00Z',NULL FROM n;
                 WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<{growth})
                 INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at,archived_at)
-                  SELECT printf('z%06d',i),'Archive','/work','','p','m','2026-11-24T00:00:00Z','archived' FROM n;
+                  SELECT printf('z%06d',i),'Archive','','','p','m','2026-11-24T00:00:00Z','archived' FROM n;
                 INSERT INTO thread_tag(thread_id,tag) SELECT id,'common' FROM thread;
                 INSERT INTO thread_tag(thread_id,tag) VALUES('t000200','rare');")).unwrap();
+            db.execute("UPDATE thread SET cwd=?1", [&work]).unwrap();
             let tag_args = ThreadListArgs {
                 tags: vec!["common".into(), "rare".into()],
                 ..Default::default()
@@ -624,14 +635,14 @@ mod tests {
             assert!(tag_page.items.is_empty() && tag_page.next_cursor.is_some());
             // Continue at the same timestamp and ID, with thousands of rows above it.
             let args = ThreadListArgs {
-                cwd: Some("/work".into()),
+                cwd: Some(work.clone()),
                 limit: 1,
                 ..Default::default()
             };
             let cursor = PageCursor {
                 version: 1,
                 scope: list_scope(args.archived).into(),
-                filter: list_cursor_filter("", &[], Some("/work")),
+                filter: list_cursor_filter("", &[], Some(&work)),
                 last_sort_key: serde_json::to_string(&(Some("2026-11-24T00:00:00Z"), "t000201"))
                     .unwrap(),
                 watermark: 100_000,
@@ -653,15 +664,15 @@ mod tests {
             assert_eq!(page.items[0].thread_id, "t000200");
             // No preceding archive scan even when there are only archived candidates in the cwd.
             db.execute(
-                "UPDATE thread SET cwd='/archive' WHERE archived_at IS NOT NULL",
-                [],
+                "UPDATE thread SET cwd=?1 WHERE archived_at IS NOT NULL",
+                [&archive],
             )
             .unwrap();
             let (page, archive_steps) = measured(&db, || {
                 thread_list(
                     &db,
                     &ThreadListArgs {
-                        cwd: Some("/archive".into()),
+                        cwd: Some(archive.clone()),
                         ..Default::default()
                     },
                 )
