@@ -1101,8 +1101,9 @@ impl Control {
         disconnected: CancellationToken,
     ) -> (Response<Value>, Option<MutationResult>) {
         let operation = request.operation_id.clone();
-        let observation = !request.command.requires_receipt();
-        let observation_name = request.command.name();
+        let receipt_free = !request.command.requires_receipt();
+        let read_only = request.command.is_read_only();
+        let command_name = request.command.name();
         let terminal_fence = matches!(&request.command, Command::Status(args) if !args.memory);
         let result = async {
             request.validate()?;
@@ -1132,7 +1133,7 @@ impl Control {
             }
             match request.command.route() {
                 CommandRoute::Runtime => {
-                    let result = if observation {
+                    let result = if receipt_free {
                         self.runtime_observation(request, origin, disconnected)
                             .await
                     } else {
@@ -1277,15 +1278,16 @@ impl Control {
         };
         // Receipt-free results still obey the exact response-envelope bound,
         // including operation ID and recovery hints, before reaching transport.
-        let result = if observation {
+        let result = if receipt_free {
             let result = result.map_err(|error: ApiError| {
-                if error.hint.is_none()
+                if read_only
+                    && error.hint.is_none()
                     && matches!(error.code, ErrorCode::IoFailed | ErrorCode::InvalidState)
                 {
-                    let cost = if observation_name == "history.search" {
+                    let cost = if command_name == "history.search" {
                         " Repeating semantic search may incur another query embedding charge."
                     } else { "" };
-                    error.hint(format!("This observation did not create an operation receipt. Check the reported cause, then repeat shellboy {} for fresh state.{cost}", observation_name.replace('.', " ")))
+                    error.hint(format!("This observation did not create an operation receipt. Check the reported cause, then repeat shellboy {} for fresh state.{cost}", command_name.replace('.', " ")))
                 } else { error }
             });
             let projected = result
@@ -1302,7 +1304,7 @@ impl Control {
         match result {
             Ok(effects) => {
                 let mut response = Response::success(operation, effects.result.clone());
-                if crate::history::rpc::fit_response(observation_name, &mut response).is_err() {
+                if crate::history::rpc::fit_response(command_name, &mut response).is_err() {
                     return (
                         Response::failure(
                             response.operation_id,

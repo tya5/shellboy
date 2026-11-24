@@ -282,14 +282,12 @@ mod tests {
         else {
             panic!("expected upload ID")
         };
-        assert_eq!(
-            call("other", begin(), None)
-                .await
-                .unwrap()
-                .error
-                .unwrap()
-                .code,
-            ErrorCode::InvalidState
+        let refused = call("other", begin(), None).await.unwrap().error.unwrap();
+        assert_eq!(refused.code, ErrorCode::InvalidState);
+        assert!(
+            refused.hint.is_none(),
+            "unexpected advice: {:?}",
+            refused.hint
         );
         let DraftImageResult::Begun { upload_id } =
             serde_json::from_value(call("draft", begin(), None).await.unwrap().result.unwrap())
