@@ -78,12 +78,12 @@ In the TUI, the wheel moves by three display rows; PgUp/PgDn move by the history
 ```bash
 shellboy history list --thread THREAD_ID --run RUN_ID --limit 20
 shellboy history list --thread THREAD_ID --since '2026-10-25T00:00:00Z'
-shellboy history list --thread THREAD_ID --status running
+shellboy history list --thread THREAD_ID --shell-state running
 ```
 
 `--run` filters by the Run of the Turn that generated the node. `--thread` denotes a path currently adopting the node; selecting a forked Thread does not change the originating Run. `--since` inclusively compares node creation time against an absolute RFC3339 timestamp. It does not mean shell end time or state update time.
 
-`--status` is an exact match on the **stored state of a related shell execution**: `starting`, `running`, `stopping`, `exited`, `failed`, or `stopped`. This differs from Run/Turn state. Nodes without a related actual shell are excluded. A background shell can remain running after the tool call returns.
+`--shell-state` is an exact match on the **stored state of a related shell execution**: `starting`, `running`, `stopping`, `exited`, `failed`, or `stopped`. This differs from Run/Turn state. Nodes without a related actual shell are excluded. A background shell can remain running after the tool call returns.
 
 List `provenance` and `context` describe node origin and storage state. `selection.thread_id` / `ordinal` describe the path being listed; `selection.current_cwd` is that Thread's current configuration. For the actual shell launch directory, inspect `executions[].cwd`. Do not infer historical execution cwd from current settings.
 

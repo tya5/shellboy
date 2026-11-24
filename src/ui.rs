@@ -4492,7 +4492,7 @@ impl UiState {
                 title: i18n::local!(self.config.ui.language, "未送信の下書き", "Unsent draft")
                     .into(),
                 cwd: view.cwd.to_string_lossy().into(),
-                parent_id: None,
+                parent_thread_id: None,
                 state: i18n::local!(self.config.ui.language, "未保存", "Not saved").into(),
                 updated_at: String::new(),
                 created_at: None,
@@ -5292,7 +5292,7 @@ impl UiState {
                         effort: if follow_defaults && !view.explicit_effort {
                             config.default_connection.as_ref().and_then(|name| config.connections.get(name)).and_then(|connection| connection.default_effort.clone())
                         } else { view.effort.clone() },
-                        parent_id: None,
+                        parent_thread_id: None,
                     };
                     self.select_agents(args)
                 }
@@ -8885,7 +8885,7 @@ mod tool_refresh_tests {
             connection: "p".into(),
             model: "m".into(),
             effort: None,
-            parent_id: None,
+            parent_thread_id: None,
             run_id: None,
             turn_id: None,
             shells_count: 0,

@@ -43,7 +43,7 @@ async fn create_in(store: &Store, parent: Option<&str>, cwd: Option<&str>) -> St
             cwd: cwd.map(str::to_owned),
             model: None,
             effort: None,
-            parent_id: parent.map(str::to_owned),
+            parent_thread_id: parent.map(str::to_owned),
         }),
     )
     .await

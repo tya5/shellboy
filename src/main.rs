@@ -296,7 +296,7 @@ fn main() -> ExitCode {
                 &data,
                 origin.as_ref(),
                 &mut options.thread_id,
-                &mut options.create.parent_id,
+                &mut options.create.parent_thread_id,
             )) {
                 return print_error(error, None);
             }

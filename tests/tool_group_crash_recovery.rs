@@ -332,7 +332,7 @@ async fn real_result_write_failure_is_repaired_after_storage_is_restored() {
         Command::ThreadCreate(ThreadCreateArgs {
             agents: None,
             cwd: None,
-            parent_id: None,
+            parent_thread_id: None,
             connection: None,
             model: None,
             effort: None,
@@ -533,7 +533,7 @@ async fn sigkill_real_owner_during_native_shell_then_first_post_has_adjacent_pai
         Command::ThreadCreate(ThreadCreateArgs {
             agents: None,
             cwd: None,
-            parent_id: None,
+            parent_thread_id: None,
             connection: None,
             model: None,
             effort: None,
@@ -683,7 +683,7 @@ fn shutdown_owner_crash_child() {
             let _dispatcher = tokio::spawn(control.clone().serve(receive));
             control.start().await.unwrap();
             let t = rpc(&control, Command::ThreadCreate(ThreadCreateArgs {
-                agents:None, connection:None, cwd:None, model:None, effort:None, parent_id:None,
+                agents:None, connection:None, cwd:None, model:None, effort:None, parent_thread_id:None,
             })).await;
             let command = if cfg!(windows) {
                 "[IO.File]::AppendAllText((Join-Path (Get-Location) 'service-pids'), (\"$PID\" + [Environment]::NewLine)); Start-Sleep -Seconds 600"

@@ -133,7 +133,7 @@ mod tests {
             cwd: None,
             model: None,
             effort: None,
-            parent_id: None,
+            parent_thread_id: None,
         };
         let content = DraftContent {
             text: "前後".into(),

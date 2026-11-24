@@ -408,7 +408,7 @@ pub(crate) async fn thread(control: &Arc<Control>) -> String {
         Command::ThreadCreate(ThreadCreateArgs {
             agents: None,
             cwd: None,
-            parent_id: None,
+            parent_thread_id: None,
             connection: None,
             model: None,
             effort: None,
@@ -603,7 +603,7 @@ async fn draft_references_and_first_message_commit_together_and_changed_missing_
             ThreadCreateArgs {
                 agents: None,
                 cwd: None,
-                parent_id: None,
+                parent_thread_id: None,
                 connection: None,
                 model: None,
                 effort: None,
@@ -1078,7 +1078,7 @@ async fn editing_first_request_forks_an_empty_prefix_and_accepts_once_with_new_s
         model: Some("edited-model".into()),
         effort: Some(String::new()),
         cwd: Some(root.path().to_str().unwrap().into()),
-        parent_id: None,
+        parent_thread_id: None,
     };
     let edited = control
         .edit_request_with_settings(
@@ -1233,7 +1233,7 @@ async fn context_observations_wait_for_a_request_boundary_and_survive_failed_htt
             connection: None,
             model: Some("changed-model".into()),
             effort: Some("low".into()),
-            parent_id: None,
+            parent_thread_id: None,
         })),
     )
     .await;
@@ -1304,7 +1304,7 @@ async fn model_a_b_a_never_revives_prior_reasoning_but_preserves_canonical_dag()
                     model: Some(model.into()),
                     effort: None,
                     cwd: None,
-                    parent_id: None,
+                    parent_thread_id: None,
                 })),
             )
             .await;
@@ -2161,7 +2161,7 @@ async fn responses_session_header_uses_stable_thread_uuid_and_distinct_child_and
         &control,
         Command::ThreadCreate(ThreadCreateArgs {
             agents: None,
-            parent_id: Some(parent.clone()),
+            parent_thread_id: Some(parent.clone()),
             cwd: None,
             connection: None,
             model: None,
@@ -2389,7 +2389,7 @@ async fn explicit_agents_changes_wait_for_new_turn_and_retry_keeps_snapshot() {
         Command::ThreadCreate(ThreadCreateArgs {
             agents: Some("old.md".into()),
             cwd: None,
-            parent_id: None,
+            parent_thread_id: None,
             connection: None,
             model: None,
             effort: None,
@@ -7725,7 +7725,7 @@ async fn sender_label_reaches_the_request_only_when_present_and_not_human() {
             Command::ThreadCreate(ThreadCreateArgs {
                 agents: None,
                 cwd: None,
-                parent_id: None,
+                parent_thread_id: None,
                 connection: None,
                 model: None,
                 effort: None,

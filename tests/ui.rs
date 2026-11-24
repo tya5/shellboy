@@ -3009,7 +3009,7 @@ fn dense_thread_rows_and_selected_preview_stay_compact() {
                 thread_id: format!("thread-{i:02}"),
                 title: format!("TITLE{i:02}"),
                 cwd: "/synthetic/project".into(),
-                parent_id: None,
+                parent_thread_id: None,
                 state: "idle".into(),
                 // Keep this density fixture in the supplied newest-first order.
                 updated_at: format!("2026-10-25T00:00:{:02}Z", 29 - i),

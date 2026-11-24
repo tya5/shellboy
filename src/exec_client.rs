@@ -31,7 +31,7 @@ pub struct ExecOptions {
     #[arg(long)]
     pub schema: PathBuf,
     /// Existing conversation; otherwise create a new saved conversation.
-    #[arg(long="thread",conflicts_with_all=["agents","cwd","connection","model","effort","parent_id"])]
+    #[arg(long="thread",conflicts_with_all=["agents","cwd","connection","model","effort","parent_thread_id"])]
     pub thread_id: Option<String>,
     #[command(flatten)]
     pub create: ThreadCreateOptions,
@@ -573,7 +573,7 @@ async fn prepare(options: &ExecOptions) -> Result<(Schema, String, ThreadCreateA
             || options.create.connection.is_some()
             || options.create.model.is_some()
             || options.create.effort.is_some()
-            || options.create.parent_id.is_some())
+            || options.create.parent_thread_id.is_some())
     {
         return Err("Existing --thread conflicts with new-Thread options".into());
     }
@@ -641,7 +641,7 @@ async fn prepare(options: &ExecOptions) -> Result<(Schema, String, ThreadCreateA
         connection: options.create.connection.clone(),
         model: options.create.model.clone(),
         effort: options.create.effort.clone(),
-        parent_id: options.create.parent_id.clone(),
+        parent_thread_id: options.create.parent_thread_id.clone(),
     };
     Command::ThreadCreate(create.clone())
         .validate()
@@ -693,7 +693,7 @@ pub async fn execute(
     let result: Result<Outcome,Failure>=async {
         session.progress.stage = "resolve_ids";
         timeout_at(session.deadline, crate::cli::resolve_conversation_ids(
-            &session.data, session.origin.as_ref(), &mut session.progress.thread_id, &mut create.parent_id,
+            &session.data, session.origin.as_ref(), &mut session.progress.thread_id, &mut create.parent_thread_id,
         )).await.map_err(|_| Failure::new(5, "timeout", "Client execution deadline expired; no target was stopped"))?.map_err(Failure::api)?;
         session.connect().await?;
         session.verify_end_message_support().await?;

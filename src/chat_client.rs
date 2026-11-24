@@ -29,7 +29,7 @@ const HINT_POLL_MS: u64 = 30_000;
 #[derive(Debug, Clone, Args)]
 pub struct ChatOptions {
     /// Continue an existing conversation; otherwise create one on the first input.
-    #[arg(long="thread",conflicts_with_all=["agents","cwd","connection","model","effort","parent_id"])]
+    #[arg(long="thread",conflicts_with_all=["agents","cwd","connection","model","effort","parent_thread_id"])]
     pub thread_id: Option<String>,
     #[command(flatten)]
     pub create: ThreadCreateOptions,
@@ -758,7 +758,7 @@ pub async fn run<R: AsyncBufRead + Unpin, W: Write>(
         connection: options.create.connection.clone(),
         model: options.create.model.clone(),
         effort: options.create.effort.clone(),
-        parent_id: options.create.parent_id.clone(),
+        parent_thread_id: options.create.parent_thread_id.clone(),
     };
     Command::ThreadCreate(create.clone())
         .validate()

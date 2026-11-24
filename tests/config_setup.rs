@@ -428,7 +428,7 @@ async fn first_send_failure_has_source_and_missing_details_and_localized_next_ac
         cwd: None,
         model: None,
         effort: None,
-        parent_id: None,
+        parent_thread_id: None,
     };
     let error = store
         .send_new_thread(
@@ -494,7 +494,7 @@ language = 'ja'
             cwd: None,
             model: None,
             effort: None,
-            parent_id: None,
+            parent_thread_id: None,
         })))
         .await;
     assert!(reply.ok, "{reply:?}");

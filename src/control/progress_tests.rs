@@ -15,7 +15,7 @@ async fn missing_attachment_before_snapshot_recovers_once_without_driver_restart
                 model: None,
                 effort: None,
                 cwd: None,
-                parent_id: None,
+                parent_thread_id: None,
             }),
         )
         .await;
@@ -173,7 +173,7 @@ async fn in_process_edit_refuses_running_run_without_waiting() {
                     model: None,
                     effort: None,
                     cwd: None,
-                    parent_id: None,
+                    parent_thread_id: None,
                 },
                 db::DraftSendOptions::default(),
             )

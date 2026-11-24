@@ -1613,7 +1613,7 @@ async fn resolver_covers_cli_alias_fields_for_parent_threads_and_recovery_runs()
     assert_eq!(args.recovery_run_id.as_deref(), Some("Run-23456789"));
     assert_eq!(args.node_id, "node-exact");
 
-    let command = convert(&["thread", "create", "--parent", "abcdef01"]).await;
+    let command = convert(&["thread", "create", "--parent-thread", "abcdef01"]).await;
     let resolved = shellboy::cli::resolve_id_arguments(command, |kind, prefix| async move {
         Ok(format!("{kind:?}-{prefix}"))
     })
@@ -1622,7 +1622,7 @@ async fn resolver_covers_cli_alias_fields_for_parent_threads_and_recovery_runs()
     let Command::ThreadCreate(args) = resolved else {
         panic!("command kind changed");
     };
-    assert_eq!(args.parent_id.as_deref(), Some("Thread-abcdef01"));
+    assert_eq!(args.parent_thread_id.as_deref(), Some("Thread-abcdef01"));
 }
 
 #[tokio::test]
@@ -1632,7 +1632,7 @@ async fn id_resolver_passes_empty_sentinels_to_command_validation() {
         "set",
         "--thread",
         "12345678-1234-4234-8234-123456789abc",
-        "--parent",
+        "--parent-thread",
         "",
     ])
     .await;
@@ -1644,7 +1644,7 @@ async fn id_resolver_passes_empty_sentinels_to_command_validation() {
     let Command::ThreadSet(args) = resolved else {
         panic!("command kind changed");
     };
-    assert_eq!(args.parent_id.as_deref(), Some(""));
+    assert_eq!(args.parent_thread_id.as_deref(), Some(""));
 
     let empty_message = shellboy::cli::resolve_id_arguments(
         Command::MessageGet(shellboy::protocol::MessageTarget {
@@ -1658,4 +1658,54 @@ async fn id_resolver_passes_empty_sentinels_to_command_validation() {
         empty_message.validate().unwrap_err().code,
         ErrorCode::InvalidArgument
     );
+}
+
+#[tokio::test]
+async fn exact_target_cli_names_reject_retired_selectors() {
+    for (base, retired, current, value, wire_key) in [
+        (
+            &["message", "list", "--awaiting"][..],
+            "--owed-by",
+            "--owed-by-thread",
+            "t",
+            "owed_by_thread_id",
+        ),
+        (
+            &["message", "list", "--awaiting"][..],
+            "--asked-by",
+            "--asked-by-thread",
+            "t",
+            "asked_by_thread_id",
+        ),
+        (
+            &["thread", "create"][..],
+            "--parent",
+            "--parent-thread",
+            "t",
+            "parent_thread_id",
+        ),
+        (
+            &["thread", "set"][..],
+            "--parent",
+            "--parent-thread",
+            "",
+            "parent_thread_id",
+        ),
+        (
+            &["history", "list", "--thread", "t"][..],
+            "--status",
+            "--shell-state",
+            "running",
+            "shell_state",
+        ),
+    ] {
+        let error =
+            Cli::try_parse_from([&["shellboy"][..], base, &[retired, value]].concat()).unwrap_err();
+        assert_eq!(error.kind(), clap::error::ErrorKind::UnknownArgument);
+        let command = convert(&[base, &[current, value]].concat()).await;
+        assert_eq!(
+            serde_json::to_value(command).unwrap()["args"][wire_key],
+            value
+        );
+    }
 }

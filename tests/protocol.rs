@@ -764,35 +764,35 @@ fn history_filter_preflight_rejects_invalid_time_without_changing_first_error_pr
     }
     for (args, message) in [
         (
-            json!({"thread_id":"","since":"bad","state":"bad"}),
+            json!({"thread_id":"","since":"bad","shell_state":"bad"}),
             "thread_id must not be empty",
         ),
         (
-            json!({"thread_id":"t","limit":0,"since":"bad","state":"bad"}),
+            json!({"thread_id":"t","limit":0,"since":"bad","shell_state":"bad"}),
             "limit must be in 1..=200",
         ),
         (
-            json!({"thread_id":"t","cursor":"","since":"bad","state":"bad"}),
+            json!({"thread_id":"t","cursor":"","since":"bad","shell_state":"bad"}),
             "cursor must not be empty",
         ),
         (
-            json!({"thread_id":"t","since":"","state":"bad"}),
+            json!({"thread_id":"t","since":"","shell_state":"bad"}),
             "since must not be empty",
         ),
         (
-            json!({"thread_id":"t","since":"bad","state":""}),
-            "state must not be empty",
+            json!({"thread_id":"t","since":"bad","shell_state":""}),
+            "shell_state must not be empty",
         ),
         (
-            json!({"thread_id":"t","since":"bad","state":"bad"}),
-            "status must be a saved shell execution state: starting, running, stopping, exited, failed, stopped",
+            json!({"thread_id":"t","since":"bad","shell_state":"bad"}),
+            "shell-state must be a saved shell execution state: starting, running, stopping, exited, failed, stopped",
         ),
     ] {
         let command: Command =
             serde_json::from_value(json!({"command":"history.list","args":args})).unwrap();
         assert_eq!(command.validate().unwrap_err().message, message);
     }
-    let valid: Command = serde_json::from_value(json!({"command":"history.list","args":{"thread_id":"t","since":"2026-10-25T16:00:00+09:00","state":"running"}})).unwrap();
+    let valid: Command = serde_json::from_value(json!({"command":"history.list","args":{"thread_id":"t","since":"2026-10-25T16:00:00+09:00","shell_state":"running"}})).unwrap();
     valid.validate().unwrap();
 }
 
@@ -1762,5 +1762,49 @@ fn id_resolve_is_a_bounded_read_only_capability_command() {
         );
         assert!(command.is_read_only());
         assert_eq!(command.name(), "id.resolve");
+    }
+}
+
+#[test]
+fn exact_target_wire_names_reject_retired_selectors() {
+    for (operation, mut args, old, current, value) in [
+        (
+            "message.list",
+            json!({}),
+            "owed_by",
+            "owed_by_thread_id",
+            "t",
+        ),
+        (
+            "message.list",
+            json!({}),
+            "asked_by",
+            "asked_by_thread_id",
+            "t",
+        ),
+        (
+            "thread.create",
+            json!({}),
+            "parent_id",
+            "parent_thread_id",
+            "t",
+        ),
+        ("thread.set", json!({}), "parent_id", "parent_thread_id", ""),
+        (
+            "history.list",
+            json!({"thread_id":"t"}),
+            "state",
+            "shell_state",
+            "running",
+        ),
+    ] {
+        args[old] = json!(value);
+        let rejected = serde_json::from_value::<Command>(json!({"command":operation,"args":args}));
+        assert!(rejected.unwrap_err().to_string().contains(old));
+        args.as_object_mut().unwrap().remove(old);
+        args[current] = json!(value);
+        let accepted: Command =
+            serde_json::from_value(json!({"command":operation,"args":args})).unwrap();
+        accepted.validate().unwrap();
     }
 }

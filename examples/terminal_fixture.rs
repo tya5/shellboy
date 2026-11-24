@@ -249,7 +249,7 @@ def call(*args):
         raise RuntimeError("Fixture CLI rejected a request")
     return reply["result"]
 
-child = call("thread", "create", "--parent", os.environ["SHELLBOY_THREAD_ID"])["thread_id"]
+child = call("thread", "create", "--parent-thread", os.environ["SHELLBOY_THREAD_ID"])["thread_id"]
 accepted = call("message", "send", "--thread", child, "--text", "SHELLBOY_REVIEW_CHILD_BACKGROUND")
 print("SHELLBOY_REVIEW_PARENT_WAITING", flush=True)
 call("wait", "--conditions-json", json.dumps([{"type":"run_ended", "run_id":accepted["run_id"]}]), "--timeout-ms", "120000")

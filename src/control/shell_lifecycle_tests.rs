@@ -102,7 +102,7 @@ pub(super) async fn start(control: &Arc<Control>) -> String {
             model: None,
             effort: None,
             cwd: None,
-            parent_id: None,
+            parent_thread_id: None,
         }),
     )
     .await;
@@ -504,7 +504,7 @@ async fn starting_signal_acknowledges_saved_intent_without_a_live_handle() {
             model: None,
             effort: None,
             cwd: None,
-            parent_id: None,
+            parent_thread_id: None,
         }),
     )
     .await;
@@ -747,7 +747,7 @@ async fn saved_self_stop_replay_does_not_create_a_new_grace_owner_or_stop_effect
             model: None,
             effort: None,
             cwd: None,
-            parent_id: None,
+            parent_thread_id: None,
         }),
     )
     .await;

@@ -1037,7 +1037,7 @@ impl Store {
                 if path.pop().as_deref()!=Some(&node){return Err(error(ErrorCode::InvalidState,"Edit fork boundary changed"));}
                 tx.execute("DELETE FROM attachment_selection WHERE thread_id=?1 AND attachment_id IN (SELECT id FROM attachment_ref WHERE source_node_id=?2)",params![fork,node]).map_err(sql_error)?;
                 history::select_path(&tx,&fork,1,&path,&now).map_err(StorageError::into_api_error)?;
-                if args.connection.is_some()||args.model.is_some()||args.effort.is_some(){store.set_thread(&tx,&ThreadSetArgs{ auto_compact_target_percent:None,summary_max_chars:None,max_tokens:None,spill:None,agents: None,thread_id:Some(fork.clone()),connection:args.connection,model:args.model,effort:args.effort,cwd:None,title:None,auto_compact_at:None,parent_id: None},None,&now)?;}
+                if args.connection.is_some()||args.model.is_some()||args.effort.is_some(){store.set_thread(&tx,&ThreadSetArgs{ auto_compact_target_percent:None,summary_max_chars:None,max_tokens:None,spill:None,agents: None,thread_id:Some(fork.clone()),connection:args.connection,model:args.model,effort:args.effort,cwd:None,title:None,auto_compact_at:None,parent_thread_id: None},None,&now)?;}
                 let revision:i64=history::selection_revision(&tx, &fork, history::ThreadScope::Any).map_err(sql_error)?;
                 let mut result=store.send_content(&tx,&MessageSendArgs { max_model_requests: None, human: true, resume_recovery: false,
   sender_label: None,thread_id:Some(fork),text:content.text.clone(),deliver:options.deliver},None,&operation_id,&now,SendContent { reply: ReplyIntent::None, elements: content.new_source_elements(files.len())?, sender: MessageSender::recorded(None, None, true) })?;
@@ -1307,7 +1307,7 @@ impl Store {
                         cwd: None,
                         model: None,
                         effort: None,
-                        parent_id: None,
+                        parent_thread_id: None,
                     },
                     now,
                 )?;
@@ -1664,7 +1664,9 @@ impl Store {
         caller: &Option<Origin>,
     ) -> Result<Option<AgentsPlan>> {
         let (path, cwd, source) = match &request.command {
-            Command::ThreadCreate(a) => (a.agents.clone(), a.cwd.clone(), a.parent_id.clone()),
+            Command::ThreadCreate(a) => {
+                (a.agents.clone(), a.cwd.clone(), a.parent_thread_id.clone())
+            }
             Command::ThreadFork(a) => (a.agents.clone(), a.cwd.clone(), Some(a.thread_id.clone())),
             Command::ThreadSet(a) => (
                 a.agents.clone(),
@@ -1763,7 +1765,7 @@ impl Store {
         now: &str,
     ) -> Result<String> {
         let config = &self.config.current();
-        let inherited = if let Some(parent) = &args.parent_id {
+        let inherited = if let Some(parent) = &args.parent_thread_id {
             Some(tx.query_row(
                 "SELECT cwd,agents_path,profile_id,model_id,effort FROM thread WHERE id=?1 AND deleted_at IS NULL",
                 [parent],
@@ -1840,13 +1842,15 @@ impl Store {
                 }
             })
             .filter(|value| !value.is_empty());
-        let overrides =
-            history::thread_overrides::ThreadOverrides::inherit(tx, args.parent_id.as_deref())
-                .map_err(sql_error)?;
+        let overrides = history::thread_overrides::ThreadOverrides::inherit(
+            tx,
+            args.parent_thread_id.as_deref(),
+        )
+        .map_err(sql_error)?;
         let id = uuid::Uuid::new_v4().to_string();
         tx.execute(
             "INSERT INTO thread(id,parent_thread_id,cwd,agents_path,profile_id,model_id,effort,updated_at,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?8)",
-            params![id,args.parent_id,cwd.to_string_lossy(),agents,profile,model,effort,now],
+            params![id,args.parent_thread_id,cwd.to_string_lossy(),agents,profile,model,effort,now],
         ).map_err(sql_error)?;
         overrides.apply(tx, &id).map_err(sql_error)?;
         bump_roots(tx)?;
@@ -1895,7 +1899,7 @@ impl Store {
         let current = thread_details(tx, &id)?;
         let title = args.title.as_deref().map(str::trim);
         // Parent first, in the same transaction: a later failure rolls the move back.
-        let moved = match args.parent_id.as_deref() {
+        let moved = match args.parent_thread_id.as_deref() {
             Some(requested) => reparent::apply(tx, &id, requested, caller, now)?,
             None => None,
         };
@@ -1953,7 +1957,7 @@ impl Store {
             .map_err(sql_error)?;
         }
         // A move alone is organization: no updated_at change, so the list does not jump.
-        let moved_only = args.parent_id.is_some()
+        let moved_only = args.parent_thread_id.is_some()
             && title.is_none()
             && args.connection.is_none()
             && args.model.is_none()
@@ -2598,7 +2602,7 @@ fn read_thread_details(
     id: &str,
     include_summarizing: bool,
 ) -> Result<ThreadDetails> {
-    let mut details=connection.query_row("SELECT title,cwd,profile_id,model_id,effort,parent_thread_id,agents_path,auto_compact_at,archived_at,auto_compact_target_percent,summary_max_chars,max_tokens,spill_override FROM thread WHERE id=?1 AND deleted_at IS NULL",[id],|row|Ok(ThreadDetails { display_coverage:None, instruction_warnings: Vec::new(), instruction_sources: None, archived_at: row.get(8)?, tags: Vec::new(), auto_compact_at: row.get::<_,Option<i64>>(7)?.map(|v|v as u64), effective_auto_compact_at: None, auto_compact_target_percent: row.get::<_,Option<i64>>(9)?.map(|v|v as u64), summary_max_chars:row.get::<_,Option<i64>>(10)?.map(|v|v as u64), effective_auto_compact_target_percent:None,effective_summary_max_chars:None,max_tokens:row.get::<_,Option<i64>>(11)?.map(|v|v as u64),spill:crate::storage::decode_spill_override(row.get_ref(12)?,12)?,effective_spill:false,effective_max_tokens:None,pending_replies: Default::default(), last_end_message: None, last_input: None,  last_compaction:None,summarizing:false,agents_path: row.get(6)?,context_usage:None,thread_id:id.into(),title:row.get(0)?,cwd:row.get(1)?,connection:row.get(2)?,model:row.get(3)?,effort:row.get(4)?,parent_id:row.get(5)?,run_id:None,turn_id:None,shells_count:0,recovery_reason:None,parent_change:None,context:None})).optional().map_err(sql_error)?.ok_or_else(||error(ErrorCode::ThreadNotFound,"Thread not found"))?;
+    let mut details=connection.query_row("SELECT title,cwd,profile_id,model_id,effort,parent_thread_id,agents_path,auto_compact_at,archived_at,auto_compact_target_percent,summary_max_chars,max_tokens,spill_override FROM thread WHERE id=?1 AND deleted_at IS NULL",[id],|row|Ok(ThreadDetails { display_coverage:None, instruction_warnings: Vec::new(), instruction_sources: None, archived_at: row.get(8)?, tags: Vec::new(), auto_compact_at: row.get::<_,Option<i64>>(7)?.map(|v|v as u64), effective_auto_compact_at: None, auto_compact_target_percent: row.get::<_,Option<i64>>(9)?.map(|v|v as u64), summary_max_chars:row.get::<_,Option<i64>>(10)?.map(|v|v as u64), effective_auto_compact_target_percent:None,effective_summary_max_chars:None,max_tokens:row.get::<_,Option<i64>>(11)?.map(|v|v as u64),spill:crate::storage::decode_spill_override(row.get_ref(12)?,12)?,effective_spill:false,effective_max_tokens:None,pending_replies: Default::default(), last_end_message: None, last_input: None,  last_compaction:None,summarizing:false,agents_path: row.get(6)?,context_usage:None,thread_id:id.into(),title:row.get(0)?,cwd:row.get(1)?,connection:row.get(2)?,model:row.get(3)?,effort:row.get(4)?,parent_thread_id:row.get(5)?,run_id:None,turn_id:None,shells_count:0,recovery_reason:None,parent_change:None,context:None})).optional().map_err(sql_error)?.ok_or_else(||error(ErrorCode::ThreadNotFound,"Thread not found"))?;
     details.instruction_sources = connection.query_row(
         "SELECT CASE WHEN s.content_hash GLOB 'instruction-bundle-v1:sha256:*' AND json_valid(substr(s.body,38)) THEN json_extract(substr(s.body,38),'$.extra') ELSE NULL END FROM turn t JOIN instruction_snapshot s ON s.id=t.instruction_snapshot_id WHERE t.thread_id=?1 ORDER BY t.created_at DESC,t.rowid DESC LIMIT 1",[id],|r|r.get::<_,Option<String>>(0)).optional().map_err(sql_error)?.flatten().and_then(|body|serde_json::from_str::<Vec<Value>>(&body).ok()).map(|mut files| {for file in &mut files {if let Some(file)=file.as_object_mut() { file.remove("body"); }} json!({"extra":files,"snapshot":"latest_prepared_turn"})});
     let warnings: Option<String> = connection.query_row(
@@ -4186,7 +4190,7 @@ mod receipt_wait_tests {
                         agents: None,
                         model: None,
                         effort: None,
-                        parent_id: None,
+                        parent_thread_id: None,
                     }),
                 ),
                 None,
@@ -4301,7 +4305,7 @@ mod receipt_wait_tests {
                 cwd: None,
                 model: None,
                 effort: None,
-                parent_id: None,
+                parent_thread_id: None,
             }),
         );
         let expected =
@@ -4488,7 +4492,7 @@ mod receipt_wait_tests {
                 cwd: None,
                 model: None,
                 effort: None,
-                parent_id: None,
+                parent_thread_id: None,
             }),
         );
         let background = store.background.lock().await;
@@ -4702,7 +4706,7 @@ mod agents_reference_tests {
         Command::ThreadCreate(ThreadCreateArgs {
             agents: agents.map(str::to_owned),
             cwd: cwd.map(str::to_owned),
-            parent_id: parent,
+            parent_thread_id: parent,
             connection: None,
             model: None,
             effort: None,
@@ -5386,7 +5390,7 @@ mod agents_reference_tests {
                     model: None,
                     effort: None,
                     cwd: None,
-                    parent_id: None,
+                    parent_thread_id: None,
                 },
                 "TUI synthetic input".into(),
             )
@@ -5546,7 +5550,7 @@ mod draft_recovery_revision_tests {
             let args = ThreadCreateArgs {
                 agents: None,
                 cwd: None,
-                parent_id: None,
+                parent_thread_id: None,
                 connection: None,
                 model: None,
                 effort: None,
@@ -6635,7 +6639,7 @@ mod browser_creation_notification_tests {
         Command::ThreadCreate(ThreadCreateArgs {
             agents: None,
             cwd: None,
-            parent_id: None,
+            parent_thread_id: None,
             connection: None,
             model: None,
             effort: None,
@@ -6796,7 +6800,7 @@ mod inspection_isolation_tests {
             cursor: None,
             run_id: None,
             since: Some("2026-11-03T09:30:00+09:00".into()),
-            state: None,
+            shell_state: None,
         };
         let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
         let started = Instant::now();

@@ -23,7 +23,7 @@ async fn fixture() -> (tempfile::TempDir, Store, String) {
                     cwd: None,
                     model: None,
                     effort: None,
-                    parent_id: None,
+                    parent_thread_id: None,
                 })),
                 None,
             )

@@ -956,7 +956,7 @@ async fn frozen_submission_survives_precommit_failure_and_accepts_atomically_wit
         cwd: None,
         model: None,
         effort: None,
-        parent_id: None,
+        parent_thread_id: None,
     };
     let options = DraftSendOptions {
         deliver: Deliver::Now,
@@ -1115,7 +1115,7 @@ async fn frozen_first_send_survives_without_thread_and_binds_only_at_acceptance(
                 cwd: None,
                 model: None,
                 effort: None,
-                parent_id: None,
+                parent_thread_id: None,
             },
             None,
             crate::attachments::DraftContent::appended("first request".into(), 0),
@@ -1237,7 +1237,7 @@ async fn actual_control_draft_replay_precedes_missing_files_and_old_owner_checks
         cwd: None,
         model: None,
         effort: None,
-        parent_id: None,
+        parent_thread_id: None,
     };
     let mut frozen = submission(&operation, "composer", 3, "saved request\u{fffc}");
     frozen.snapshot["attachments"] = json!([{"id":"original-chip","path":file,"kind":"file","state":"active","position":"saved request".len()}]);
@@ -1409,7 +1409,7 @@ async fn frozen_budget_preserves_tiny_raw_text_limits_and_json_escaping_with_sep
         cwd: None,
         model: None,
         effort: None,
-        parent_id: None,
+        parent_thread_id: None,
     };
     for (n, text) in [
         "hi".into(),
@@ -1544,7 +1544,7 @@ async fn admitted_copy_retires_atomically_replay_stays_exact_and_storage_does_no
             cwd: None,
             model: None,
             effort: None,
-            parent_id: None,
+            parent_thread_id: None,
         };
         let options = DraftSendOptions {
             submission: Some(frozen.clone()),

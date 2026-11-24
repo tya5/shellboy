@@ -1180,7 +1180,7 @@ async fn removing_a_connection_a_thread_uses_stops_it_until_it_is_moved() {
             Command::ThreadCreate(ThreadCreateArgs {
                 agents: None,
                 cwd: None,
-                parent_id: None,
+                parent_thread_id: None,
                 connection: Some("p".into()),
                 model: Some("m".into()),
                 effort: None,
@@ -1510,7 +1510,7 @@ async fn public_thread_get_resolves_live_connection_spill_with_raw_precedence() 
             cwd: None,
             model: None,
             effort: None,
-            parent_id: None,
+            parent_thread_id: None,
         }),
     )
     .await;

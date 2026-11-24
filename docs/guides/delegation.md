@@ -18,7 +18,7 @@ a host security boundary. Act only on work you were asked to handle, checking th
 This example runs in the parent model's Bash shell. Replace `CHILD_THREAD_ID` and similar placeholders with actual IDs from each returned JSON. Check `ok` and result/error after each command; do not mechanically continue after a failure.
 
 ```bash
-shellboy thread create --parent "$SHELLBOY_THREAD_ID"
+shellboy thread create --parent-thread "$SHELLBOY_THREAD_ID"
 # Retain result.thread_id
 shellboy message ask --thread CHILD_THREAD_ID --text 'Task: read-only audit of the parser. Make no changes. Return definite defects, supporting evidence, and the scope verified.'
 # Retain result.message_id / assignment / run_id / turn_id
@@ -93,7 +93,7 @@ the observation, not the target. Follow `next_cursor` for long reply nodes.
 
 ## Progress reports and lifetime
 
-A child can inspect `parent_id` in `thread get` and send a needed one-off progress report to its parent.
+A child can inspect `parent_thread_id` in `thread get` and send a needed one-off progress report to its parent.
 
 ```bash
 shellboy thread get

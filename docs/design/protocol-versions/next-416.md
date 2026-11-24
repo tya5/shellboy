@@ -1,0 +1,13 @@
+# Protocol (next, #416 Unit 2)
+
+- `message list --awaiting` renames `--owed-by` and `--asked-by` to
+  `--owed-by-thread` and `--asked-by-thread`. Wire `message.list` args use
+  `owed_by_thread_id` and `asked_by_thread_id`, matching the page filters.
+- Thread creation and parent changes use `--parent-thread` and wire
+  `parent_thread_id`. Thread summary and details use `parent_thread_id`.
+  Empty `thread set --parent-thread ''` still detaches the Thread.
+- `history list` uses `--shell-state` and wire `shell_state` in args and
+  page filters. This matches a related shell's saved state, not Run state.
+
+These are renames, not aliases. Selection, cursor scopes, durable receipt
+keys, and export identities are unchanged.

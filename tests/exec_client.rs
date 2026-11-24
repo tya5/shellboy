@@ -274,7 +274,7 @@ impl Fixture {
                     cwd: None,
                     model: None,
                     effort: None,
-                    parent_id: None,
+                    parent_thread_id: None,
                 }),
             ))
             .await;
@@ -1044,7 +1044,7 @@ fn chat_options(tty_json: bool) -> shellboy::chat_client::ChatOptions {
             connection: None,
             model: None,
             effort: None,
-            parent_id: None,
+            parent_thread_id: None,
         },
         json: tty_json,
         until: shellboy::exec_client::ResultMode::TurnEnd,
@@ -1769,7 +1769,7 @@ async fn chat_and_exec_resolve_thread_and_parent_prefixes_before_targeting() {
                 cwd: None,
                 model: None,
                 effort: None,
-                parent_id: None,
+                parent_thread_id: None,
             }),
         ))
         .await;
@@ -1780,9 +1780,9 @@ async fn chat_and_exec_resolve_thread_and_parent_prefixes_before_targeting() {
     let prefix = &id[..8];
     for (chat, flag) in [
         (true, "--thread"),
-        (true, "--parent"),
+        (true, "--parent-thread"),
         (false, "--thread"),
-        (false, "--parent"),
+        (false, "--parent-thread"),
     ] {
         let mut command = if chat {
             chat_command(&fixture, &["--json", flag, prefix])
@@ -1835,7 +1835,7 @@ async fn chat_and_exec_resolve_thread_and_parent_prefixes_before_targeting() {
                     }),
                 ))
                 .await;
-            assert_eq!(detail.result.unwrap()["parent_id"], id);
+            assert_eq!(detail.result.unwrap()["parent_thread_id"], id);
         }
     }
     assert_eq!(fixture.count("IdResolve"), 4);

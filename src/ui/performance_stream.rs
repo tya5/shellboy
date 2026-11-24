@@ -236,7 +236,7 @@ async fn stream_input_layout_and_db_fairness() {
                                 effort: None,
                                 title: Some(title),
                                 auto_compact_at: None,
-                                parent_id: None,
+                                parent_thread_id: None,
                             })),
                         ))
                         .await;

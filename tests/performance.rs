@@ -132,7 +132,7 @@ async fn performance_history_startup_and_pages() {
                     cursor,
                     run_id: None,
                     since: None,
-                    state: None,
+                    shell_state: None,
                 })
                 .await
                 .unwrap();

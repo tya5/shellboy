@@ -249,7 +249,7 @@ async fn a_moved_fork_leaves_its_family_and_a_detached_fork_becomes_its_own_root
                 cwd: None,
                 model: None,
                 effort: None,
-                parent_id: None,
+                parent_thread_id: None,
             },
         ))
         .await
@@ -264,7 +264,7 @@ async fn a_moved_fork_leaves_its_family_and_a_detached_fork_becomes_its_own_root
     f.run(Command::ThreadSet(Box::new(
         shellboy::protocol::ThreadSetArgs {
             thread_id: Some(forked.clone()),
-            parent_id: Some(other.clone()),
+            parent_thread_id: Some(other.clone()),
             ..Default::default()
         },
     )))
@@ -282,7 +282,7 @@ async fn a_moved_fork_leaves_its_family_and_a_detached_fork_becomes_its_own_root
     f.run(Command::ThreadSet(Box::new(
         shellboy::protocol::ThreadSetArgs {
             thread_id: Some(forked.clone()),
-            parent_id: Some(String::new()),
+            parent_thread_id: Some(String::new()),
             ..Default::default()
         },
     )))

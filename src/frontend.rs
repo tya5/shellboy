@@ -1745,7 +1745,7 @@ async fn run_client(
                                     Command::DraftSubmit(Box::new(crate::protocol::DraftSubmitArgs {
                                         selection_revision: thread_id.as_ref().map(|_| selection_revision),
                                         thread_id,
-                                        create: ThreadCreateArgs { agents: None, connection, cwd: Some(cwd), model, effort, parent_id: None },
+                                        create: ThreadCreateArgs { agents: None, connection, cwd: Some(cwd), model, effort, parent_thread_id: None },
                                         draft: Box::new(snapshot),
                                         deliver: if now { crate::protocol::Deliver::Now } else { crate::protocol::Deliver::Next },
                                     })), Some(trace.operation_id.clone()),
@@ -2353,7 +2353,7 @@ async fn run_client(
                                 compose_call(&control, Command::DraftSubmit(Box::new(crate::protocol::DraftSubmitArgs {
                                     thread_id: Some(source_thread_id),
                                     selection_revision: Some(selection_revision),
-                                    create: ThreadCreateArgs { agents: None, cwd: Some(cwd), connection, model, effort, parent_id: None },
+                                    create: ThreadCreateArgs { agents: None, cwd: Some(cwd), connection, model, effort, parent_thread_id: None },
                                     draft: Box::new(snapshot),
                                     deliver: if now { crate::protocol::Deliver::Now } else { crate::protocol::Deliver::Next },
                                 })), Some(trace.operation_id.clone())).await
@@ -4818,7 +4818,7 @@ mod stream_tests {
                 thread_id: "valid".into(),
                 title: String::new(),
                 cwd: String::new(),
-                parent_id: None,
+                parent_thread_id: None,
                 state: "idle".into(),
                 updated_at: "2026-10-25T09:30:00Z".into(),
                 created_at: None,
@@ -4845,7 +4845,7 @@ mod stream_tests {
                 thread_id: "unknown".into(),
                 title: String::new(),
                 cwd: String::new(),
-                parent_id: None,
+                parent_thread_id: None,
                 state: "idle".into(),
                 updated_at: "unknown timezone/date".into(),
                 created_at: None,

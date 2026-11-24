@@ -52,7 +52,7 @@ fn listing(thread: &str, limit: u32, cursor: Option<String>) -> HistoryListArgs 
         cursor,
         run_id: None,
         since: None,
-        state: None,
+        shell_state: None,
     }
 }
 fn path(connection: &Connection, id: &str) -> rusqlite::Result<Vec<String>> {
@@ -653,7 +653,7 @@ async fn history_metadata_links_real_executions_and_preserves_fork_origin() {
     let mut args = listing("fork", 1, None);
     args.run_id = Some("origin-run".into());
     args.since = Some("2026-10-25T00:00:01Z".into());
-    args.state = Some("running".into());
+    args.shell_state = Some("running".into());
     let first = history.list(args.clone()).await.unwrap();
     assert_eq!(first.items[0].node_id, "calls");
     let cursor = first.next_cursor.unwrap();
@@ -685,7 +685,7 @@ async fn history_metadata_links_real_executions_and_preserves_fork_origin() {
         "shell state changed without a path revision"
     );
     let mut exited = listing("fork", 20, None);
-    exited.state = Some("exited".into());
+    exited.shell_state = Some("exited".into());
     assert_eq!(history.list(exited).await.unwrap().items.len(), 2);
     let mut invalid = listing("fork", 20, None);
     invalid.since = Some("yesterday".into());

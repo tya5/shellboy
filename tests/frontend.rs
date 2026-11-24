@@ -1103,7 +1103,7 @@ async fn edit_adapter_loads_full_original_then_forks_before_first_request_and_di
                 model: None,
                 effort: None,
                 cwd: None,
-                parent_id: None,
+                parent_thread_id: None,
             })),
         ))
         .await;
@@ -1540,7 +1540,7 @@ async fn draft_database_save_failure_stops_admission_and_owned_shell_but_retains
                 cwd: None,
                 model: None,
                 effort: None,
-                parent_id: None,
+                parent_thread_id: None,
             },
             None,
             "start shell".into(),
@@ -1641,7 +1641,7 @@ async fn draft_database_save_failure_stops_admission_and_owned_shell_but_retains
                 cwd: None,
                 model: None,
                 effort: None,
-                parent_id: None,
+                parent_thread_id: None,
             }),
         ))
         .await;
@@ -2699,7 +2699,7 @@ async fn persisted_output_identity_is_delivered_before_each_history_window() {
                 model: None,
                 effort: None,
                 cwd: None,
-                parent_id: None,
+                parent_thread_id: None,
             })),
         ))
         .await;
@@ -3145,7 +3145,7 @@ async fn quit_accepted_before_frontend_binding_still_drains_queued_send_and_late
                     cwd: None,
                     model: None,
                     effort: None,
-                    parent_id: None,
+                    parent_thread_id: None,
                 }),
             ),
             None,

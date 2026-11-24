@@ -41,7 +41,7 @@ async fn help_examples_parse_and_name_the_next_observation() {
         );
     }
     let cases = [
-        vec!["thread", "create", "--parent", "THREAD_ID"],
+        vec!["thread", "create", "--parent-thread", "THREAD_ID"],
         vec![
             "message",
             "send",

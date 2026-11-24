@@ -229,7 +229,7 @@ impl Fixture {
             Command::ThreadCreate(ThreadCreateArgs {
                 agents: None,
                 cwd: None,
-                parent_id: None,
+                parent_thread_id: None,
                 connection: None,
                 model: None,
                 effort: None,
@@ -1732,7 +1732,7 @@ async fn usage_limit_new_conversation(f: &mut Fixture) {
         Command::ThreadCreate(ThreadCreateArgs {
             agents: None,
             cwd: None,
-            parent_id: None,
+            parent_thread_id: None,
             connection: None,
             model: None,
             effort: None,
@@ -2136,7 +2136,7 @@ async fn concurrent_threads_record_independent_429_observations() {
         Command::ThreadCreate(ThreadCreateArgs {
             agents: None,
             cwd: None,
-            parent_id: None,
+            parent_thread_id: None,
             connection: None,
             model: None,
             effort: None,
@@ -2252,7 +2252,7 @@ async fn connection_cooldown_blocks_other_thread_and_stop_remains_responsive() {
         Command::ThreadCreate(ThreadCreateArgs {
             agents: None,
             cwd: None,
-            parent_id: None,
+            parent_thread_id: None,
             connection: None,
             model: None,
             effort: None,
@@ -2318,7 +2318,7 @@ async fn connection_cooldown_revalidates_model_before_second_thread_sends() {
         Command::ThreadCreate(ThreadCreateArgs {
             agents: None,
             cwd: None,
-            parent_id: None,
+            parent_thread_id: None,
             connection: None,
             model: None,
             effort: None,
@@ -2586,7 +2586,7 @@ async fn shared_connection_wait_is_recorded_on_successful_attempt() {
         Command::ThreadCreate(ThreadCreateArgs {
             agents: None,
             cwd: None,
-            parent_id: None,
+            parent_thread_id: None,
             connection: None,
             model: None,
             effort: None,
@@ -2757,7 +2757,7 @@ async fn owner_restart_clears_connection_cooldown_without_resuming_old_work() {
         Command::ThreadCreate(ThreadCreateArgs {
             agents: None,
             cwd: None,
-            parent_id: None,
+            parent_thread_id: None,
             connection: None,
             model: None,
             effort: None,
@@ -2809,7 +2809,7 @@ async fn successful_connection_probe_releases_queued_threads_without_serializing
             Command::ThreadCreate(ThreadCreateArgs {
                 agents: None,
                 cwd: None,
-                parent_id: None,
+                parent_thread_id: None,
                 connection: None,
                 model: None,
                 effort: None,
@@ -4066,7 +4066,7 @@ async fn model_filter_changes_catalog_not_direct_model_execution() {
         Command::ThreadCreate(ThreadCreateArgs {
             agents: None,
             cwd: None,
-            parent_id: None,
+            parent_thread_id: None,
             connection: Some("gpt".into()),
             model: None,
             effort: None,

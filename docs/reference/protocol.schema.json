@@ -4158,13 +4158,13 @@
             "null"
           ]
         },
-        "since": {
+        "shell_state": {
           "type": [
             "string",
             "null"
           ]
         },
-        "state": {
+        "since": {
           "type": [
             "string",
             "null"
@@ -4192,13 +4192,13 @@
             "null"
           ]
         },
-        "since": {
+        "shell_state": {
           "type": [
             "string",
             "null"
           ]
         },
-        "state": {
+        "since": {
           "type": [
             "string",
             "null"
@@ -5491,7 +5491,7 @@
     "MessageListArgs": {
       "additionalProperties": false,
       "properties": {
-        "asked_by": {
+        "asked_by_thread_id": {
           "default": null,
           "type": [
             "string",
@@ -5511,7 +5511,7 @@
           "minimum": 0,
           "type": "integer"
         },
-        "owed_by": {
+        "owed_by_thread_id": {
           "default": null,
           "type": [
             "string",
@@ -11470,7 +11470,7 @@
             "null"
           ]
         },
-        "parent_id": {
+        "parent_thread_id": {
           "default": null,
           "type": [
             "string",
@@ -11693,7 +11693,7 @@
             }
           ]
         },
-        "parent_id": {
+        "parent_thread_id": {
           "type": [
             "string",
             "null"
@@ -12123,7 +12123,7 @@
             "null"
           ]
         },
-        "parent_id": {
+        "parent_thread_id": {
           "type": [
             "string",
             "null"
@@ -12240,7 +12240,7 @@
             "null"
           ]
         },
-        "parent_id": {
+        "parent_thread_id": {
           "type": [
             "string",
             "null"
@@ -16164,7 +16164,7 @@
             }
           ]
         },
-        "parent_id": {
+        "parent_thread_id": {
           "type": [
             "string",
             "null"
@@ -16434,7 +16434,7 @@
             }
           ]
         },
-        "parent_id": {
+        "parent_thread_id": {
           "type": [
             "string",
             "null"

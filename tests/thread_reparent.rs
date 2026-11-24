@@ -43,7 +43,7 @@ async fn create(store: &Store, parent: Option<&str>) -> String {
             cwd: None,
             model: None,
             effort: None,
-            parent_id: parent.map(str::to_owned),
+            parent_thread_id: parent.map(str::to_owned),
         }),
     )
     .await
@@ -53,7 +53,7 @@ async fn create(store: &Store, parent: Option<&str>) -> String {
 fn set_parent(thread: &str, parent: &str) -> Command {
     Command::ThreadSet(Box::new(ThreadSetArgs {
         thread_id: Some(thread.into()),
-        parent_id: Some(parent.into()),
+        parent_thread_id: Some(parent.into()),
         ..Default::default()
     }))
 }
@@ -141,7 +141,7 @@ async fn move_and_detach_change_only_the_parent_and_never_updated_at() {
         .await
         .unwrap();
     assert_eq!(attached.changed_threads, [t.clone(), a.clone()]);
-    assert_eq!(attached.result["parent_id"], json!(a));
+    assert_eq!(attached.result["parent_thread_id"], json!(a));
     assert_eq!(
         attached.result["parent_change"]["previous_parent_id"],
         Value::Null
@@ -195,7 +195,7 @@ async fn move_and_detach_change_only_the_parent_and_never_updated_at() {
         .unwrap();
     assert_eq!(detached.changed_threads, [t.clone(), b.clone()]);
     assert!(parent_of(&store, &t).await.is_none());
-    assert_eq!(detached.result["parent_id"], Value::Null);
+    assert_eq!(detached.result["parent_thread_id"], Value::Null);
     assert_eq!(
         text(&store, &t, "SELECT updated_at FROM thread WHERE id=?1").await,
         stamp
@@ -609,7 +609,7 @@ async fn combined_fields_apply_together_and_any_failure_rolls_the_move_back() {
         &store,
         Command::ThreadSet(Box::new(ThreadSetArgs {
             thread_id: Some(child.clone()),
-            parent_id: Some(a.clone()),
+            parent_thread_id: Some(a.clone()),
             title: Some("renamed".into()),
             ..Default::default()
         })),
@@ -624,7 +624,7 @@ async fn combined_fields_apply_together_and_any_failure_rolls_the_move_back() {
         &store,
         Command::ThreadSet(Box::new(ThreadSetArgs {
             thread_id: Some(child.clone()),
-            parent_id: Some(String::new()),
+            parent_thread_id: Some(String::new()),
             auto_compact_at: Some("-5".into()),
             ..Default::default()
         })),
@@ -638,7 +638,7 @@ async fn combined_fields_apply_together_and_any_failure_rolls_the_move_back() {
         &store,
         Command::ThreadSet(Box::new(ThreadSetArgs {
             thread_id: Some(child.clone()),
-            parent_id: Some(String::new()),
+            parent_thread_id: Some(String::new()),
             connection: Some("not-configured".into()),
             ..Default::default()
         })),

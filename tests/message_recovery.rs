@@ -145,14 +145,14 @@ async fn rpc(control: &Arc<Control>, command: Command) -> Value {
     assert!(response.ok, "{:?}", response.error);
     response.result.unwrap()
 }
-fn create(parent_id: Option<String>) -> Command {
+fn create(parent_thread_id: Option<String>) -> Command {
     Command::ThreadCreate(ThreadCreateArgs {
         agents: None,
         connection: None,
         cwd: None,
         model: None,
         effort: None,
-        parent_id,
+        parent_thread_id,
     })
 }
 fn send(thread: &str, text: &str) -> Command {

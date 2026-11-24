@@ -126,7 +126,7 @@ pub(super) fn new(operation: OpKind, c: &Context) -> Form {
                     connection: form.optional("connection")?,
                     model: form.optional("model")?,
                     effort: form.effort()?,
-                    parent_id: form.optional("parent")?,
+                    parent_thread_id: form.optional("parent")?,
                 };
                 if thread_id.is_some()
                     && (create.agents.is_some()
@@ -134,7 +134,7 @@ pub(super) fn new(operation: OpKind, c: &Context) -> Form {
                         || create.connection.is_some()
                         || create.model.is_some()
                         || create.effort.is_some()
-                        || create.parent_id.is_some())
+                        || create.parent_thread_id.is_some())
                 {
                     return Err(local!(form.language, "既存Threadと新規Thread設定は併用できません。対象又は新規設定を消去してください", "An existing Thread cannot be combined with new Thread settings. Clear the target or the new settings.").into());
                 }
@@ -802,7 +802,7 @@ mod tests {
         assert_eq!(options.create.agents, Some(PathBuf::from("AGENTS.md")));
         assert_eq!(options.create.connection.as_deref(), Some("proxy"));
         assert_eq!(options.create.model.as_deref(), Some("model"));
-        assert_eq!(options.create.parent_id.as_deref(), Some("parent"));
+        assert_eq!(options.create.parent_thread_id.as_deref(), Some("parent"));
         assert_eq!(options.create.effort.as_deref(), Some(""));
         assert_eq!(options.text.as_deref(), Some("hello"));
         assert!(!options.text_stdin);

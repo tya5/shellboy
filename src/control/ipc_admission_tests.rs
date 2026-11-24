@@ -218,7 +218,7 @@ base_url="http://127.0.0.1:1/v1"
                     cwd: None,
                     model: None,
                     effort: None,
-                    parent_id: None,
+                    parent_thread_id: None,
                 }),
             ),
             reply,
@@ -291,7 +291,7 @@ async fn disconnecting_a_send_observer_does_not_lose_commit_effects_or_race_shut
                 cwd: None,
                 model: None,
                 effort: None,
-                parent_id: None,
+                parent_thread_id: None,
             }),
         ))
         .await;
@@ -441,7 +441,7 @@ base_url="http://127.0.0.1:1/v1"
                     cwd: None,
                     model: None,
                     effort: None,
-                    parent_id: None,
+                    parent_thread_id: None,
                 }),
             )
             .await;

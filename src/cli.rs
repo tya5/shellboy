@@ -385,7 +385,7 @@ pub enum ThreadCommand {
     },
     /// Create a saved Thread; send a message separately to start work.
     #[command(
-        after_help = "Delegate from a parent model shell:\n  shellboy thread create --parent THREAD_ID\n  shellboy message send --thread CHILD_THREAD_ID --text 'Read-only audit; return findings and evidence'\n\nRead result.thread_id from create, then track the separate message_id/run_id/turn_id from send. Guide: shellboy docs get --id shellboy/delegation"
+        after_help = "Delegate from a parent model shell:\n  shellboy thread create --parent-thread THREAD_ID\n  shellboy message send --thread CHILD_THREAD_ID --text 'Read-only audit; return findings and evidence'\n\nRead result.thread_id from create, then track the separate message_id/run_id/turn_id from send. Guide: shellboy docs get --id shellboy/delegation"
     )]
     Create(ThreadCreateOptions),
     Fork(ThreadForkOptions),
@@ -995,8 +995,8 @@ pub struct ThreadCreateOptions {
     /// Empty string explicitly clears effort; omission inherits the default.
     #[arg(long)]
     pub effort: Option<String>,
-    #[arg(long = "parent")]
-    pub parent_id: Option<String>,
+    #[arg(long = "parent-thread")]
+    pub parent_thread_id: Option<String>,
 }
 #[derive(Debug, Clone, Args)]
 pub struct ThreadForkOptions {
@@ -1092,8 +1092,8 @@ pub struct ThreadSetOptions {
     #[arg(long)]
     pub spill: Option<String>,
     /// Move this Thread under another live Thread; an empty string detaches it (no parent). Live Runs keep their owner.
-    #[arg(long = "parent")]
-    pub parent_id: Option<String>,
+    #[arg(long = "parent-thread")]
+    pub parent_thread_id: Option<String>,
 }
 #[derive(Debug, Clone, Args)]
 #[group(required = true, multiple = false)]
@@ -1132,11 +1132,11 @@ pub struct MessageListOptions {
     #[arg(long, required = true)]
     pub awaiting: bool,
     /// Requests that this Thread must answer (excludes named questions).
-    #[arg(long, conflicts_with_all = ["asked_by", "to"])]
-    pub owed_by: Option<String>,
+    #[arg(long = "owed-by-thread", conflicts_with_all = ["asked_by_thread_id", "to"])]
+    pub owed_by_thread_id: Option<String>,
     /// Requests this model Thread sent, including its human questions.
-    #[arg(long, conflicts_with = "to")]
-    pub asked_by: Option<String>,
+    #[arg(long = "asked-by-thread", conflicts_with = "to")]
+    pub asked_by_thread_id: Option<String>,
     /// Questions addressed to this named recipient.
     #[arg(long)]
     pub to: Option<String>,
@@ -1236,8 +1236,8 @@ pub struct HistoryListOptions {
     #[arg(long)]
     pub since: Option<String>,
     /// Related shell's saved native state (starting/running/stopping/exited/failed/stopped).
-    #[arg(long = "status")]
-    pub state: Option<String>,
+    #[arg(long = "shell-state")]
+    pub shell_state: Option<String>,
 }
 #[derive(Debug, Clone, Args)]
 pub struct HistoryWindowOptions {
@@ -1558,7 +1558,7 @@ struct IdSlot {
 
 fn id_kind_for_field(field: &str) -> Option<wire::IdKind> {
     match field {
-        "thread_id" | "thread_ids" | "parent_id" => Some(wire::IdKind::Thread),
+        "thread_id" | "thread_ids" | "parent_thread_id" => Some(wire::IdKind::Thread),
         "message_id" | "message_ids" => Some(wire::IdKind::Message),
         "run_id" | "recovery_run_id" => Some(wire::IdKind::Run),
         "execution_id" => Some(wire::IdKind::ShellExecution),
@@ -1678,25 +1678,25 @@ pub async fn resolve_owner_prefix(
 #[derive(serde::Serialize, serde::Deserialize)]
 struct ConversationIds {
     thread_id: Option<String>,
-    parent_id: Option<String>,
+    parent_thread_id: Option<String>,
 }
 
 pub async fn resolve_conversation_ids(
     data: &Path,
     origin: Option<&wire::Origin>,
     thread_id: &mut Option<String>,
-    parent_id: &mut Option<String>,
+    parent_thread_id: &mut Option<String>,
 ) -> Result<(), ApiError> {
     let resolved = resolve_id_arguments(
         ConversationIds {
             thread_id: thread_id.clone(),
-            parent_id: parent_id.clone(),
+            parent_thread_id: parent_thread_id.clone(),
         },
         |kind, prefix| resolve_owner_prefix(data, origin, kind, prefix, false),
     )
     .await?;
     *thread_id = resolved.thread_id;
-    *parent_id = resolved.parent_id;
+    *parent_thread_id = resolved.parent_thread_id;
     Ok(())
 }
 
@@ -1937,7 +1937,7 @@ impl Cli {
                     cwd: path_option(a.cwd)?,
                     model: a.model,
                     effort: a.effort,
-                    parent_id: a.parent_id,
+                    parent_thread_id: a.parent_thread_id,
                 }),
                 ThreadCommand::Fork(a) => C::ThreadFork(wire::ThreadForkArgs {
                     agents: path_option(a.agents)?,
@@ -1985,7 +1985,7 @@ impl Cli {
                     summary_max_chars: a.summary_max_chars,
                     max_tokens: a.max_tokens,
                     spill: a.spill,
-                    parent_id: a.parent_id,
+                    parent_thread_id: a.parent_thread_id,
                 })),
             },
             CliCommand::Message { command } => match command {
@@ -1999,8 +1999,8 @@ impl Cli {
                     deliver: a.deliver.unwrap_or_default(),
                 }),
                 MessageCommand::List(a) => C::MessageList(wire::MessageListArgs {
-                    owed_by: a.owed_by,
-                    asked_by: a.asked_by,
+                    owed_by_thread_id: a.owed_by_thread_id,
+                    asked_by_thread_id: a.asked_by_thread_id,
                     to: a.to,
                     limit: a.limit,
                     cursor: a.cursor,
@@ -2065,7 +2065,7 @@ impl Cli {
                     cursor: a.cursor,
                     run_id: a.run_id,
                     since: a.since,
-                    state: a.state,
+                    shell_state: a.shell_state,
                 }),
                 HistoryCommand::Window(a) => C::HistoryWindow(wire::HistoryWindowArgs {
                     items: false,

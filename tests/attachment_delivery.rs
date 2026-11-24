@@ -195,7 +195,7 @@ async fn draft_source_exists_with_ordered_refs_in_same_acceptance_transaction() 
                 cwd: None,
                 model: None,
                 effort: None,
-                parent_id: None,
+                parent_thread_id: None,
             },
             Some("thread".into()),
             "before image".into(),

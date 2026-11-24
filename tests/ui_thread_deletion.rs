@@ -45,7 +45,7 @@ fn list(ui: &mut UiState, ids: &[&str]) {
                 thread_id: (*id).into(),
                 title: format!("title {id}"),
                 cwd: "/synthetic".into(),
-                parent_id: None,
+                parent_thread_id: None,
                 state: "completed".into(),
                 // Supplied fixture order represents a newest-first server page.
                 created_at: None,
@@ -219,7 +219,7 @@ fn background_success_updates_the_list_and_invalidates_old_pages_without_switchi
             thread_id: args.thread_id,
             title: "stale deleted row".into(),
             cwd: "/".into(),
-            parent_id: None,
+            parent_thread_id: None,
             state: "completed".into(),
             updated_at: "now".into(),
             created_at: None,

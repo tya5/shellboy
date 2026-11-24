@@ -122,7 +122,7 @@ async fn default_explicit_and_thread_catalog_selection_never_changes_thread_or_g
             cwd: None,
             model: None,
             effort: None,
-            parent_id: None,
+            parent_thread_id: None,
         }),
     );
     let thread = control.request(create).await.result.unwrap()["thread_id"]
@@ -511,7 +511,7 @@ async fn runtime_observations_keep_receipts_constant_and_release_raw_output_pins
                 cwd: None,
                 model: None,
                 effort: None,
-                parent_id: None,
+                parent_thread_id: None,
             }),
         ))
         .await;

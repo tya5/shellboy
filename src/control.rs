@@ -785,7 +785,7 @@ impl Control {
                 model: None,
                 effort: None,
                 cwd: None,
-                parent_id: None,
+                parent_thread_id: None,
             },
         )
         .await
@@ -1834,7 +1834,7 @@ mod failure_tests {
                             model: None,
                             effort: None,
                             cwd: None,
-                            parent_id: None,
+                            parent_thread_id: None,
                         },
                         None,
                         "accepted before close".into(),
@@ -1869,7 +1869,7 @@ mod failure_tests {
                         model: None,
                         effort: None,
                         cwd: None,
-                        parent_id: None,
+                        parent_thread_id: None,
                     }),
                 ))
                 .await;
@@ -1953,7 +1953,7 @@ mod failure_tests {
                     model: None,
                     effort: None,
                     cwd: None,
-                    parent_id: None,
+                    parent_thread_id: None,
                 },
                 None,
                 "durable pre-cancel source".into(),
@@ -2096,7 +2096,7 @@ mod failure_tests {
                 cwd: None,
                 model: None,
                 effort: None,
-                parent_id: None,
+                parent_thread_id: None,
             })))
             .await;
         let origin = Origin {

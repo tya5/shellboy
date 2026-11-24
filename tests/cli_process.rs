@@ -412,7 +412,7 @@ async fn cross_data_directory_sender_label(verb: &str) {
                     model: None,
                     cwd: None,
                     effort: None,
-                    parent_id: None,
+                    parent_thread_id: None,
                 }),
             ),
             None,

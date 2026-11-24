@@ -101,7 +101,7 @@ async fn upload_recovery(auto_trim: bool) {
         Command::ThreadCreate(ThreadCreateArgs {
             agents: None,
             cwd: None,
-            parent_id: None,
+            parent_thread_id: None,
             connection: None,
             model: None,
             effort: None,
@@ -284,7 +284,7 @@ async fn refused_proxy_connections_exhaust_the_finite_retry_budget() {
         Command::ThreadCreate(ThreadCreateArgs {
             agents: None,
             cwd: None,
-            parent_id: None,
+            parent_thread_id: None,
             connection: None,
             model: None,
             effort: None,

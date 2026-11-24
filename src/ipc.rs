@@ -1022,7 +1022,7 @@ mod frame_delivery_tests {
                 cwd: None,
                 model: None,
                 effort: None,
-                parent_id: None,
+                parent_thread_id: None,
             },
             draft: Box::new(crate::ui::DraftSnapshot {
                 revision: 1,

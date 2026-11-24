@@ -217,7 +217,7 @@ fn defaults() -> ThreadCreateArgs {
         cwd: None,
         model: None,
         effort: None,
-        parent_id: None,
+        parent_thread_id: None,
     }
 }
 fn operation(control: &Control) -> String {
@@ -519,7 +519,7 @@ async fn separate_sources_same_path_model_switch_fork_and_owner_restart_preserve
             model: Some("other-model".into()),
             effort: None,
             title: None,
-            parent_id: None,
+            parent_thread_id: None,
         })),
     )
     .await;
@@ -1398,7 +1398,7 @@ async fn schema49_migrated_legacy_summary_reopens_as_user_before_newer_user_in_o
             cwd: None,
             model: Some("fixture".into()),
             effort: None,
-            parent_id: None,
+            parent_thread_id: None,
         }),
     )
     .await;

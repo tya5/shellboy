@@ -16,7 +16,7 @@ async fn create(control: &Arc<Control>) -> String {
         Command::ThreadCreate(ThreadCreateArgs {
             agents: None,
             cwd: None,
-            parent_id: None,
+            parent_thread_id: None,
             connection: None,
             model: None,
             effort: None,

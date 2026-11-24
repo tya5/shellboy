@@ -1254,7 +1254,7 @@ async fn history_gc_f7_ordering(hint_first: bool) {
         .cli_only(&["thread", "fork", "--thread", "f7-parent", "--node", RESULT])
         .await;
     let child = forked["result"]["thread_id"].as_str().unwrap().to_owned();
-    assert_eq!(forked["result"]["parent_id"], "f7-parent");
+    assert_eq!(forked["result"]["parent_thread_id"], "f7-parent");
     for action in fixture.ui.select_thread(child.clone()) {
         fixture.actions.send(action).await.unwrap();
     }

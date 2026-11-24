@@ -142,7 +142,7 @@ async fn start(control: &Arc<Control>) -> MessageAccepted {
             cwd: None,
             model: None,
             effort: None,
-            parent_id: None,
+            parent_thread_id: None,
         }),
     )
     .await;
@@ -175,7 +175,7 @@ async fn accepted_send_operation_id_is_projected_after_driver_admission() {
             cwd: None,
             model: None,
             effort: None,
-            parent_id: None,
+            parent_thread_id: None,
         }),
     )
     .await;
@@ -364,7 +364,7 @@ async fn background_read_keeps_target_raw_separate_from_message_send_and_observe
             cwd: None,
             model: None,
             effort: None,
-            parent_id: None,
+            parent_thread_id: None,
         }),
     )
     .await;
@@ -737,7 +737,7 @@ async fn incomplete_response_created_after_gc_roots_survives_sweep() {
             cwd: None,
             model: None,
             effort: None,
-            parent_id: None,
+            parent_thread_id: None,
         }),
     )
     .await;
@@ -1354,7 +1354,7 @@ async fn slow_database_batches_binary_shell_output_without_losing_natural_exit_t
                 cwd: None,
                 model: None,
                 effort: None,
-                parent_id: None,
+                parent_thread_id: None,
             }),
         ),
     )
@@ -1992,7 +1992,7 @@ async fn real_shell_cli_starts_independent_child_without_parent_retention_or_lif
             cwd: None,
             model: None,
             effort: None,
-            parent_id: Some(parent.thread_id.clone()),
+            parent_thread_id: Some(parent.thread_id.clone()),
         }),
     )
     .await;
@@ -2278,7 +2278,7 @@ async fn assert_human_background_notice(has_remaining_call: bool) {
             connection: None,
             model: None,
             effort: Some("low".into()),
-            parent_id: None,
+            parent_thread_id: None,
         })),
     )
     .await;
@@ -2416,7 +2416,7 @@ async fn missing_attachment_and_deleted_draft_targets_leave_other_work_alive() {
         cwd: None,
         model: None,
         effort: None,
-        parent_id: None,
+        parent_thread_id: None,
     };
     let target = command(&control, Command::ThreadCreate(args.clone())).await;
     let target = target["thread_id"].as_str().unwrap().to_owned();
@@ -3043,7 +3043,7 @@ async fn expected_reply_terminal_and_cancel_outcomes_deliver_http_after_sender_r
                 cwd: None,
                 model: None,
                 effort: None,
-                parent_id: Some(parent.thread_id.clone()),
+                parent_thread_id: Some(parent.thread_id.clone()),
             }),
         )
         .await;
@@ -3182,7 +3182,7 @@ async fn startup_maintenance_settles_terminal_reply_backlog_beyond_one_batch() {
                             cwd: None,
                             model: None,
                             effort: None,
-                            parent_id: None,
+                            parent_thread_id: None,
                         }),
                     ),
                     None,
@@ -3259,7 +3259,7 @@ async fn thread_service_file_trigger_sends_through_ipc_and_drains() {
             cwd: None,
             model: None,
             effort: None,
-            parent_id: None,
+            parent_thread_id: None,
         }),
     )
     .await;

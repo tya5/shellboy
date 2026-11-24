@@ -210,7 +210,7 @@ mod tests {
                     excerpt_chars: 32,
                     run_id: None,
                     since: None,
-                    state: None,
+                    shell_state: None,
                 }),
                 tokio_util::sync::CancellationToken::new(),
             )
@@ -442,7 +442,7 @@ mod tests {
             cursor: None,
             run_id: None,
             since: None,
-            state: None,
+            shell_state: None,
         });
         let InspectionTarget::HistorySources(scope) =
             capture(&command, &json!({"items":[]})).unwrap()

@@ -28,7 +28,7 @@ async fn accepted_user_message_fences_new_owner_scope_without_revising_selection
                     Command::ThreadCreate(ThreadCreateArgs {
                         agents: None,
                         cwd: None,
-                        parent_id: None,
+                        parent_thread_id: None,
                         connection: None,
                         model: None,
                         effort: None,

@@ -124,7 +124,7 @@ async fn start(control: &Arc<Control>) -> MessageAccepted {
             cwd: None,
             model: None,
             effort: None,
-            parent_id: None,
+            parent_thread_id: None,
         }),
     )
     .await;
@@ -244,7 +244,7 @@ async fn child_thread(control: &Arc<Control>, parent: &str) -> String {
             cwd: None,
             model: None,
             effort: None,
-            parent_id: Some(parent.into()),
+            parent_thread_id: Some(parent.into()),
         }),
     )
     .await["thread_id"]

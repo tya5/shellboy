@@ -36,7 +36,7 @@ async fn named_thread(control: &Arc<Control>, name: &str) -> String {
             agents: None,
             cwd: None,
             effort: None,
-            parent_id: None,
+            parent_thread_id: None,
         }),
     )
     .await["thread_id"]

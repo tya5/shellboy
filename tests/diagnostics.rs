@@ -247,7 +247,7 @@ async fn streamed_fixture(malformed_final: bool) {
                 cwd: None,
                 model: None,
                 effort: None,
-                parent_id: None,
+                parent_thread_id: None,
             }),
         ))
         .await;

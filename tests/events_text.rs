@@ -269,7 +269,7 @@ async fn saved(control: &Arc<Control>, thread: &str) -> String {
             cursor: None,
             run_id: None,
             since: None,
-            state: None,
+            shell_state: None,
         }),
     );
     let response = watchdog("history list", control.request(request))

@@ -138,7 +138,7 @@ def main():
         assert len({item['id'] for page in [first, second, third] for item in page['items']}) == 5
         error = cli('wrong-cursor', 'status', '--thread', 'child', '--all', '--cursor', first['next_cursor'], ok=False)
         assert error['code'] == 'cursor_expired' and error['hint']
-        history = cli('history', 'history', 'list', '--thread', 'parent', '--run', 'root-run', '--status', 'exited')
+        history = cli('history', 'history', 'list', '--thread', 'parent', '--run', 'root-run', '--shell-state', 'exited')
         link = history['items'][0]['executions'][0]
         assert link['execution_id'] == 'execution' and link['cwd'] == str(root)
         assert link['request_node_id'] == 'request'

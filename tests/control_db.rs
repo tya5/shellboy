@@ -141,7 +141,7 @@ async fn create(store: &Store, parent: Option<String>) -> ThreadDetails {
                 cwd: None,
                 model: None,
                 effort: None,
-                parent_id: parent,
+                parent_thread_id: parent,
             }),
         )
         .await
@@ -267,7 +267,7 @@ async fn thread_settings_inherit_agents_and_model_switch_never_restores_old_epoc
             &store,
             Command::ThreadCreate(ThreadCreateArgs {
                 agents: None,
-                parent_id: Some(parent.thread_id.clone()),
+                parent_thread_id: Some(parent.thread_id.clone()),
                 cwd: Some("../child".into()),
                 connection: None,
                 model: None,
@@ -310,7 +310,7 @@ async fn thread_settings_inherit_agents_and_model_switch_never_restores_old_epoc
                 cwd: Some("nested/..".into()),
                 model: Some(model.into()),
                 effort: None,
-                parent_id: None,
+                parent_thread_id: None,
             })),
         )
         .await;
@@ -1160,7 +1160,7 @@ async fn first_send_creates_thread_and_message_atomically_and_retransmits_once()
         cwd: None,
         model: None,
         effort: None,
-        parent_id: None,
+        parent_thread_id: None,
     };
     store.database.call(|db|{db.execute_batch("CREATE TRIGGER fixture_initial_save_failure BEFORE INSERT ON receipt BEGIN SELECT RAISE(ABORT,'fixture first-send failure'); END;")?;Ok(())}).await.unwrap();
     assert_eq!(
@@ -1301,7 +1301,7 @@ async fn explicit_effort_clear_is_null_and_model_change_retains_an_existing_effo
             model: None,
             effort: Some("high".into()),
             cwd: None,
-            parent_id: None,
+            parent_thread_id: None,
         })),
     )
     .await;
@@ -1321,7 +1321,7 @@ async fn explicit_effort_clear_is_null_and_model_change_retains_an_existing_effo
             model: Some("next-model".into()),
             effort: None,
             cwd: None,
-            parent_id: None,
+            parent_thread_id: None,
         })),
     )
     .await;
@@ -1341,7 +1341,7 @@ async fn explicit_effort_clear_is_null_and_model_change_retains_an_existing_effo
             model: None,
             effort: Some(String::new()),
             cwd: None,
-            parent_id: None,
+            parent_thread_id: None,
         })),
     )
     .await;
@@ -1581,7 +1581,7 @@ async fn receipt_saturation_rejects_before_effects_but_keeps_replay_observation_
         cwd: None,
         model: None,
         effort: None,
-        parent_id: None,
+        parent_thread_id: None,
     }));
     let _created = store
         .execute(create_request.clone(), None)
@@ -1615,7 +1615,7 @@ async fn receipt_saturation_rejects_before_effects_but_keeps_replay_observation_
         cwd: None,
         model: None,
         effort: None,
-        parent_id: None,
+        parent_thread_id: None,
     }));
     for _ in 0..3 {
         assert_eq!(
@@ -1703,7 +1703,7 @@ async fn old_terminal_receipt_collection_preserves_pending_and_expires_old_execu
         cwd: None,
         model: None,
         effort: None,
-        parent_id: None,
+        parent_thread_id: None,
     }));
     let outcome = store
         .execute(create_request.clone(), None)
@@ -1810,7 +1810,7 @@ async fn quota_refusal_follows_complete_bounded_reclamation_without_accepting_ne
         cwd: None,
         model: None,
         effort: None,
-        parent_id: None,
+        parent_thread_id: None,
     }));
     let write = request(Command::ShellWrite(ShellWriteArgs {
         execution_id: "never-spawned".into(),
@@ -1887,7 +1887,7 @@ async fn history_filter_validation_and_valid_reads_never_create_receipts() {
             cursor: None,
             run_id: None,
             since: Some(since.into()),
-            state: state.map(str::to_owned),
+            shell_state: state.map(str::to_owned),
         };
         assert_eq!(
             store
@@ -1921,7 +1921,7 @@ async fn history_filter_validation_and_valid_reads_never_create_receipts() {
         cursor: None,
         run_id: None,
         since: Some("2026-10-25T16:00:00+09:00".into()),
-        state: Some("running".into()),
+        shell_state: Some("running".into()),
     }));
     let original = store.execute(valid.clone(), None).await.unwrap().result;
     assert_eq!(store.execute(valid, None).await.unwrap().result, original);
@@ -1998,7 +1998,7 @@ async fn normal_receipt_saturation_preserves_bounded_run_and_shell_stop_admissio
         cwd: None,
         model: None,
         effort: None,
-        parent_id: None,
+        parent_thread_id: None,
     }));
     assert_eq!(
         store.execute(normal, None).await.unwrap_err().code,
@@ -2362,7 +2362,7 @@ async fn large_database_observations_do_not_grow_receipts_even_when_pending_rese
             cursor: None,
             run_id: None,
             since: None,
-            state: None,
+            shell_state: None,
         }),
         Command::HistoryGet(HistoryGetArgs {
             end_message_only: false,
@@ -2407,7 +2407,7 @@ async fn fresh_observations_can_reuse_a_mutation_id_without_replacing_its_saved_
         cwd: None,
         model: None,
         effort: None,
-        parent_id: None,
+        parent_thread_id: None,
     }));
     let saved = store.execute(original.clone(), None).await.unwrap().result;
     let thread = saved["thread_id"].as_str().unwrap().to_owned();
@@ -3340,7 +3340,7 @@ async fn spill_precedence_inheritance_revision_and_rollback_are_public() {
         cwd: None,
         model: None,
         effort: None,
-        parent_id: None,
+        parent_thread_id: None,
     };
     let parent: ThreadDetails = serde_json::from_value(
         execute(&store, Command::ThreadCreate(create_off.clone()))
@@ -3360,7 +3360,7 @@ async fn spill_precedence_inheritance_revision_and_rollback_are_public() {
                 cwd: None,
                 model: None,
                 effort: None,
-                parent_id: None,
+                parent_thread_id: None,
             }),
         )
         .await
@@ -3395,7 +3395,7 @@ async fn spill_precedence_inheritance_revision_and_rollback_are_public() {
                 cwd: None,
                 model: None,
                 effort: None,
-                parent_id: Some(parent.thread_id.clone()),
+                parent_thread_id: Some(parent.thread_id.clone()),
             }),
         )
         .await
@@ -3548,7 +3548,7 @@ async fn long_public_model_selection_round_trips_without_normalization() {
             &store,
             Command::ThreadCreate(ThreadCreateArgs {
                 agents: None,
-                parent_id: None,
+                parent_thread_id: None,
                 connection: None,
                 cwd: None,
                 model: Some(model.clone()),

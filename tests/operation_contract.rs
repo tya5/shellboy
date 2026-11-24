@@ -41,7 +41,7 @@ async fn thread(store: &Store) -> String {
                 &store.instance_id,
                 Command::ThreadCreate(ThreadCreateArgs {
                     agents: None,
-                    parent_id: None,
+                    parent_thread_id: None,
                     cwd: None,
                     connection: None,
                     model: None,
@@ -154,7 +154,7 @@ async fn stopping_thread_remains_observable_when_context_metrics_are_temporarily
                 connection: None,
                 model: None,
                 effort: None,
-                parent_id: None,
+                parent_thread_id: None,
             }),
         ))
         .await;
@@ -556,7 +556,7 @@ async fn measure_current_instance_receipt_sizes() {
                 cursor: None,
                 run_id: None,
                 since: None,
-                state: None,
+                shell_state: None,
             }),
         ),
         (
@@ -648,7 +648,7 @@ async fn full_receipt_budget_keeps_replay_status_gc_and_explicit_owner_restart_a
         &control.store.instance_id,
         Command::ThreadCreate(ThreadCreateArgs {
             agents: None,
-            parent_id: None,
+            parent_thread_id: None,
             cwd: None,
             connection: None,
             model: None,
@@ -832,7 +832,7 @@ async fn current_instance_result_expiry_preserves_identity_conflicts_and_runtime
         "first",
         Command::ThreadCreate(ThreadCreateArgs {
             agents: None,
-            parent_id: None,
+            parent_thread_id: None,
             cwd: None,
             connection: None,
             model: None,
@@ -958,7 +958,7 @@ async fn pressure_expiry_commits_on_refusal_without_reexecuting_or_deleting_curr
         "first",
         Command::ThreadCreate(ThreadCreateArgs {
             agents: None,
-            parent_id: None,
+            parent_thread_id: None,
             cwd: None,
             connection: None,
             model: None,
@@ -974,7 +974,7 @@ async fn pressure_expiry_commits_on_refusal_without_reexecuting_or_deleting_curr
         "first",
         Command::ThreadCreate(ThreadCreateArgs {
             agents: None,
-            parent_id: None,
+            parent_thread_id: None,
             cwd: None,
             connection: None,
             model: None,
@@ -1092,7 +1092,7 @@ async fn queued_middle_omit_and_restore_apply_once_with_durable_downstream_resul
                 connection: None,
                 model: None,
                 effort: None,
-                parent_id: None,
+                parent_thread_id: None,
             }),
         ))
         .await;

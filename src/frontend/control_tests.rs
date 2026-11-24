@@ -2391,7 +2391,7 @@ async fn refused_native_send_restores_the_exact_frozen_draft() {
                 cwd: None,
                 model: None,
                 effort: None,
-                parent_id: None,
+                parent_thread_id: None,
             },
             draft: Box::new(draft.clone()),
             deliver: Deliver::Next,

@@ -378,7 +378,7 @@ mod tests {
                 &control,
                 Command::ThreadCreate(ThreadCreateArgs {
                     agents: None,
-                    parent_id: None,
+                    parent_thread_id: None,
                     cwd: None,
                     connection: None,
                     model: None,
@@ -414,7 +414,7 @@ mod tests {
             &control,
             Command::ThreadCreate(ThreadCreateArgs {
                 agents: None,
-                parent_id: Some("thread".into()),
+                parent_thread_id: Some("thread".into()),
                 cwd: None,
                 connection: None,
                 model: None,
@@ -778,7 +778,7 @@ mod tests {
                     &control,
                     Command::ThreadCreate(ThreadCreateArgs {
                         agents: None,
-                        parent_id: None,
+                        parent_thread_id: None,
                         cwd: None,
                         connection: None,
                         model: None,
@@ -818,7 +818,7 @@ mod tests {
                 &control,
                 Command::ThreadCreate(ThreadCreateArgs {
                     agents: None,
-                    parent_id: None,
+                    parent_thread_id: None,
                     cwd: None,
                     connection: None,
                     model: None,
@@ -840,7 +840,7 @@ mod tests {
             &control,
             Command::ThreadCreate(ThreadCreateArgs {
                 agents: None,
-                parent_id: Some("thread".into()),
+                parent_thread_id: Some("thread".into()),
                 cwd: None,
                 connection: None,
                 model: None,

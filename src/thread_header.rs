@@ -104,7 +104,7 @@ const HEADER_SQL: &str = "SELECT
       WHEN octet_length(t.profile_id)>?4 THEN 'connection'
       WHEN octet_length(t.model_id)>?4 THEN 'model'
       WHEN octet_length(t.effort)>?6 THEN 'effort'
-      WHEN octet_length(t.parent_thread_id)>?5 THEN 'parent_id'
+      WHEN octet_length(t.parent_thread_id)>?5 THEN 'parent_thread_id'
       WHEN octet_length(t.agents_path)>?3 THEN 'agents_path'
       WHEN octet_length(t.updated_at)>?5 THEN 'updated_at'
       WHEN octet_length(r.id)>?5 THEN 'run_id'
@@ -172,7 +172,7 @@ pub(crate) fn read_tx(db: &Connection, thread: &str) -> Result<RawHeader, Storag
         connection: row.get(2)?,
         model: row.get(3)?,
         effort: row.get(4)?,
-        parent_id: row.get(5)?,
+        parent_thread_id: row.get(5)?,
         agents_path: row.get(6)?,
         run_id: row.get(8)?,
         turn_id: row.get(9)?,
@@ -279,7 +279,7 @@ impl RawHeader {
         }
         details.context = Some(ExecutionContext {
             state: "active".into(),
-            parent_thread_id: details.parent_id.clone(),
+            parent_thread_id: details.parent_thread_id.clone(),
             updated_at: Some(self.updated_at),
             thread_id: Some(details.thread_id.clone()),
             ..Default::default()
@@ -348,7 +348,7 @@ impl RawHeader {
         }
         details.context = Some(ExecutionContext {
             state: "active".into(),
-            parent_thread_id: details.parent_id.clone(),
+            parent_thread_id: details.parent_thread_id.clone(),
             updated_at: Some(self.updated_at.clone()),
             thread_id: Some(details.thread_id.clone()),
             ..Default::default()

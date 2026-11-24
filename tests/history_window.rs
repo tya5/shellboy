@@ -541,7 +541,7 @@ fn spill_tool_sources_are_identical_in_list_and_window_even_without_excerpts() {
             cursor: None,
             run_id: None,
             since: None,
-            state: None,
+            shell_state: None,
         };
         list.excerpt_chars = 0;
         let listed = shellboy::history::list_nodes(db, &list).unwrap();

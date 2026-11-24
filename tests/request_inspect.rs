@@ -172,7 +172,7 @@ async fn rebuilt_attempts_match_sent_bytes_and_consecutive_requests_share_the_co
         Command::ThreadCreate(ThreadCreateArgs {
             agents: None,
             cwd: None,
-            parent_id: None,
+            parent_thread_id: None,
             connection: None,
             model: None,
             effort: None,

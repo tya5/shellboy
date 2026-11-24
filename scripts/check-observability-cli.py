@@ -165,7 +165,7 @@ def main():
         # New child after preview: delete must resolve the selection again.
         before = cli('preview_before_child_created', 'thread', 'delete-preview', '--thread', 'visual-table', '--descendants')['result']
         assert before['selection']['thread_count'] == 1
-        child = cli('create_child_after_preview', 'thread', 'create', '--parent', 'visual-table')['result']['thread_id']
+        child = cli('create_child_after_preview', 'thread', 'create', '--parent-thread', 'visual-table')['result']['thread_id']
         cli('delete_rechecks_descendants', 'thread', 'delete', '--thread', 'visual-table', '--descendants')
         cli('new_child_deleted', 'thread', 'get', '--thread', child, error='thread_not_found')
         # A single-Thread deletion preserves its child/fork references.

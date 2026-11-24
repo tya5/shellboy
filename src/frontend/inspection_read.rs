@@ -336,7 +336,7 @@ pub(super) fn prepare_in(
             )
         }
     };
-    let parent_thread = value["parent_id"].as_str().map(str::to_owned);
+    let parent_thread = value["parent_thread_id"].as_str().map(str::to_owned);
     Ok(PreparedInspection {
         target,
         dependencies: Dependencies {

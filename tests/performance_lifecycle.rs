@@ -140,12 +140,12 @@ fn settings() -> ThreadCreateArgs {
         cwd: None,
         model: None,
         effort: None,
-        parent_id: None,
+        parent_thread_id: None,
     }
 }
 async fn thread(control: &Arc<Control>, parent: Option<String>) -> String {
     let mut args = settings();
-    args.parent_id = parent;
+    args.parent_thread_id = parent;
     command(control, Command::ThreadCreate(args)).await["thread_id"]
         .as_str()
         .unwrap()

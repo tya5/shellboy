@@ -45,7 +45,7 @@ pub fn list_nodes(
             start as i64,
             watermark as i64,
             args.run_id,
-            args.state,
+            args.shell_state,
             args.excerpt_chars
         ])
         .map_err(sql_error)?;
@@ -101,7 +101,7 @@ pub fn list_nodes(
             thread_id: args.thread_id.clone(),
             run_id: args.run_id.clone(),
             since: since.map(|time| time.with_timezone(&chrono::Utc).to_rfc3339()),
-            state: args.state.clone(),
+            shell_state: args.shell_state.clone(),
             excerpt_chars: args.excerpt_chars,
         },
         items,
@@ -117,7 +117,7 @@ fn list_filter(
     let invalid = |message| ApiError::new(ErrorCode::InvalidArgument, message);
     // Shell states can change without a selected-path revision. Bind filtered
     // cursors to those saved states, never to a stale receipt's old projection.
-    let state_fingerprint = if args.state.is_some() {
+    let state_fingerprint = if args.shell_state.is_some() {
         let mut digest = Sha256::new();
         let mut statement=connection.prepare("SELECT s.id,s.state FROM shell_execution s JOIN tool_call c ON c.operation_id=s.id JOIN tool_group g ON g.id=c.group_id JOIN turn u ON u.id=g.turn_id AND u.run_id=s.owner_run_id AND u.id=s.turn_id WHERE EXISTS(SELECT 1 FROM output_item o JOIN thread_path p ON p.node_id=o.node_id WHERE o.attempt_id=g.attempt_id AND p.thread_id=?1) OR EXISTS(SELECT 1 FROM tool_result tr JOIN thread_path p ON p.node_id=tr.node_id WHERE tr.group_id=c.group_id AND tr.call_id=c.call_id AND p.thread_id=?1) ORDER BY s.id").map_err(sql_error)?;
         let mut rows = statement.query([&args.thread_id]).map_err(sql_error)?;
@@ -137,14 +137,14 @@ fn list_filter(
     } else {
         None
     };
-    let filter = if args.run_id.is_none() && args.since.is_none() && args.state.is_none() {
+    let filter = if args.run_id.is_none() && args.since.is_none() && args.shell_state.is_none() {
         args.thread_id.clone()
     } else {
         serde_json::to_string(&(
             args.thread_id.as_str(),
             &args.run_id,
             since.map(|t| t.to_rfc3339()),
-            &args.state,
+            &args.shell_state,
             state_fingerprint,
         ))
         .map_err(|_| invalid("Cannot encode history filters"))?

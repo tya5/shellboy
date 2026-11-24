@@ -22,7 +22,7 @@ fn item(id: &str, parent: Option<&str>) -> ThreadSummary {
         thread_id: id.into(),
         title: format!("Title {id}"),
         cwd: "/synthetic/project".into(),
-        parent_id: parent.map(String::from),
+        parent_thread_id: parent.map(String::from),
         state: "idle".into(),
         updated_at: "2026-10-25T10:00:00Z".into(),
         created_at: None,
@@ -255,7 +255,7 @@ fn a_patched_parent_moves_the_whole_subtree_in_the_tree() {
     };
     let visible_before = order(&ui);
     assert!(visible_before.contains(&"c".to_owned()));
-    // `thread set --parent b` on c: the patch carries c's new parent (a fresh read sequence).
+    // `thread set --parent-thread b` on c: the patch carries c's new parent (a fresh read sequence).
     let patch = shellboy::ui::thread_patch::BrowserPatch {
         generation: ui.list_generation(),
         read_sequence: 5,
@@ -273,7 +273,7 @@ fn a_patched_parent_moves_the_whole_subtree_in_the_tree() {
         ui.threads()
             .iter()
             .find(|row| row.thread_id == id)
-            .and_then(|row| row.parent_id.clone())
+            .and_then(|row| row.parent_thread_id.clone())
     };
     assert_eq!(parent_of(&ui, "c").as_deref(), Some("b"));
     assert_eq!(parent_of(&ui, "d").as_deref(), Some("c"));

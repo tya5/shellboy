@@ -125,8 +125,8 @@ async fn named_ask_leaves_only_its_recipient_list_after_reply() {
         .execute(
             request(Command::MessageList(MessageListArgs {
                 to: Some(exact),
-                owed_by: None,
-                asked_by: None,
+                owed_by_thread_id: None,
+                asked_by_thread_id: None,
                 limit: DEFAULT_LIST_LIMIT,
                 cursor: None,
             })),
@@ -683,8 +683,8 @@ async fn models_can_request_and_reply_across_threads() {
         let page = store
             .execute(
                 request(Command::MessageList(MessageListArgs {
-                    owed_by: owed_by.map(str::to_owned),
-                    asked_by: asked_by.map(str::to_owned),
+                    owed_by_thread_id: owed_by.map(str::to_owned),
+                    asked_by_thread_id: asked_by.map(str::to_owned),
                     to: to.map(str::to_owned),
                     limit: 10,
                     cursor: None,

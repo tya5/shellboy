@@ -58,8 +58,8 @@ async fn multiple_threads_and_last_end_message_input_stay_distinct_during_a_new_
         std::fs::write(&config,format!("default_connection='fixture'\ndefault_model='fixture'\n[connections.fixture]\nbase_url='http://{address}/v1'\n")).unwrap();
         let owner=DataOwner::start(Some(config),Some(root.path().join("data")),root.path().into()).await.unwrap();
         let control=Control::new(&owner,root.path().into());
-        let first=call(&control,Command::ThreadCreate(ThreadCreateArgs { agents:None, connection:None, cwd:None, model:None, effort:None, parent_id:None })).await;
-        let other=call(&control,Command::ThreadCreate(ThreadCreateArgs { agents:None, connection:None, cwd:None, model:None, effort:None, parent_id:None })).await;
+        let first=call(&control,Command::ThreadCreate(ThreadCreateArgs { agents:None, connection:None, cwd:None, model:None, effort:None, parent_thread_id:None })).await;
+        let other=call(&control,Command::ThreadCreate(ThreadCreateArgs { agents:None, connection:None, cwd:None, model:None, effort:None, parent_thread_id:None })).await;
         let thread=first["thread_id"].as_str().unwrap().to_owned();let other=other["thread_id"].as_str().unwrap().to_owned();
         call(&control,Command::MessageSend(MessageSendArgs{ max_model_requests: None, human: false, resume_recovery: false,
 thread_id:Some(thread.clone()),text:"first input".into(),sender_label:Some("initial".into()),deliver: Deliver::Next})).await;

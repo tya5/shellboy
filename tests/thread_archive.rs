@@ -43,7 +43,7 @@ async fn create(store: &Store, parent: Option<&str>) -> String {
             cwd: None,
             model: None,
             effort: None,
-            parent_id: parent.map(str::to_owned),
+            parent_thread_id: parent.map(str::to_owned),
         }),
     )
     .await
@@ -409,7 +409,7 @@ async fn archived_threads_stay_readable_countable_and_can_receive_messages() {
             cursor: None,
             run_id: None,
             since: None,
-            state: None,
+            shell_state: None,
         }),
     )
     .await;

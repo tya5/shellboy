@@ -297,7 +297,7 @@ impl ThreadCreateArgs {
             ("cwd", &self.cwd),
             ("agents", &self.agents),
             ("model", &self.model),
-            ("parent_id", &self.parent_id),
+            ("parent_thread_id", &self.parent_thread_id),
         ] {
             optional_nonempty(value.as_deref(), name)?;
         }
@@ -472,7 +472,7 @@ impl ThreadSetArgs {
             && self.summary_max_chars.is_none()
             && self.max_tokens.is_none()
             && self.spill.is_none()
-            && self.parent_id.is_none()
+            && self.parent_thread_id.is_none()
         {
             Err(invalid("thread.set requires a change"))
         } else {
@@ -647,7 +647,7 @@ impl HistoryListArgs {
         optional_nonempty(self.cursor.as_deref(), "cursor")?;
         optional_nonempty(self.run_id.as_deref(), "run_id")?;
         optional_nonempty(self.since.as_deref(), "since")?;
-        optional_nonempty(self.state.as_deref(), "state")?;
+        optional_nonempty(self.shell_state.as_deref(), "shell_state")?;
         self.validate_excerpt()?;
         self.validate_state()?;
         self.parsed_since().map(|_| ())
@@ -655,14 +655,14 @@ impl HistoryListArgs {
     // Shared with the direct reader to preserve its native-state-before-time
     // precedence while moving rejection ahead of operation admission.
     pub(crate) fn validate_state(&self) -> Result<(), ApiError> {
-        if self.state.as_deref().is_some_and(|state| {
+        if self.shell_state.as_deref().is_some_and(|state| {
             !matches!(
                 state,
                 "starting" | "running" | "stopping" | "exited" | "failed" | "stopped"
             )
         }) {
             return Err(super::invalid(
-                "status must be a saved shell execution state: starting, running, stopping, exited, failed, stopped",
+                "shell-state must be a saved shell execution state: starting, running, stopping, exited, failed, stopped",
             ));
         }
         Ok(())
@@ -1006,12 +1006,16 @@ impl Command {
             Self::MessageList(a) => {
                 limit(a.limit, MAX_LIST_LIMIT)?;
                 optional_nonempty(a.cursor.as_deref(), "cursor")?;
-                optional_nonempty(a.asked_by.as_deref(), "asked_by")?;
-                optional_nonempty(a.owed_by.as_deref(), "owed_by")?;
-                if [a.asked_by.is_some(), a.owed_by.is_some(), a.to.is_some()]
-                    .into_iter()
-                    .filter(|set| *set)
-                    .count()
+                optional_nonempty(a.asked_by_thread_id.as_deref(), "asked_by_thread_id")?;
+                optional_nonempty(a.owed_by_thread_id.as_deref(), "owed_by_thread_id")?;
+                if [
+                    a.asked_by_thread_id.is_some(),
+                    a.owed_by_thread_id.is_some(),
+                    a.to.is_some(),
+                ]
+                .into_iter()
+                .filter(|set| *set)
+                .count()
                     > 1
                 {
                     return Err(invalid("message.list accepts at most one direction filter"));

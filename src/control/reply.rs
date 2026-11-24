@@ -69,8 +69,8 @@ pub(super) fn list_pending(
 ) -> Result<crate::protocol::MessageListPage, crate::protocol::ApiError> {
     use crate::protocol::{ApiError, ErrorCode, MessageListFilters, PageCursor, RecordPage};
     let (index, predicate, key) = pending_direction(
-        args.owed_by.as_deref(),
-        args.asked_by.as_deref(),
+        args.owed_by_thread_id.as_deref(),
+        args.asked_by_thread_id.as_deref(),
         args.to.as_deref(),
     );
     let scope = "message.list.pending";
@@ -120,8 +120,8 @@ pub(super) fn list_pending(
     Ok(RecordPage::new(
         args.limit,
         MessageListFilters {
-            owed_by_thread_id: args.owed_by.clone(),
-            asked_by_thread_id: args.asked_by.clone(),
+            owed_by_thread_id: args.owed_by_thread_id.clone(),
+            asked_by_thread_id: args.asked_by_thread_id.clone(),
             to_omitted: args.to.is_some(),
         },
         rows.into_iter().map(|(_, _, item)| item).collect(),

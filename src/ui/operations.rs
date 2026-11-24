@@ -1327,7 +1327,7 @@ impl Form {
                         connection: form.optional("connection")?,
                         model: form.optional("model")?,
                         effort: form.effort()?,
-                        parent_id: form.optional("parent")?,
+                        parent_thread_id: form.optional("parent")?,
                     }))
                 },
             ),
@@ -1538,7 +1538,7 @@ impl Form {
                         summary_max_chars: form.clearable("summary_max_chars")?,
                         max_tokens: form.clearable("max_tokens")?,
                         spill: None,
-                        parent_id: form.clearable("parent")?,
+                        parent_thread_id: form.clearable("parent")?,
                     })))
                 },
             ),
@@ -1724,7 +1724,7 @@ impl Form {
                         cursor: form.optional("cursor")?,
                         run_id: form.optional("run")?,
                         since: form.optional("since")?,
-                        state: form.optional("state")?,
+                        shell_state: form.optional("state")?,
                     }))
                 },
             ),
@@ -3068,7 +3068,7 @@ mod tests {
         }
         assert!(
             matches!(history.command(&context.cwd).unwrap(), Command::HistoryList(args)
-            if args.run_id.as_deref() == Some("run") && args.since.as_deref() == Some("2026-10-25T00:00:00Z") && args.state.as_deref() == Some("running"))
+            if args.run_id.as_deref() == Some("run") && args.since.as_deref() == Some("2026-10-25T00:00:00Z") && args.shell_state.as_deref() == Some("running"))
         );
         history
             .fields
@@ -3257,22 +3257,22 @@ mod tests {
         set(&mut form, "model", "unchanged-model");
         // Empty leaves the parent alone.
         assert!(
-            matches!(form.command(&context.cwd).unwrap(), Command::ThreadSet(a) if a.parent_id.is_none())
+            matches!(form.command(&context.cwd).unwrap(), Command::ThreadSet(a) if a.parent_thread_id.is_none())
         );
         // `none` detaches (the wire value is the empty string).
         set(&mut form, "parent", "none");
         assert!(
-            matches!(form.command(&context.cwd).unwrap(), Command::ThreadSet(a) if a.parent_id.as_deref() == Some(""))
+            matches!(form.command(&context.cwd).unwrap(), Command::ThreadSet(a) if a.parent_thread_id.as_deref() == Some(""))
         );
         // An ID moves the Thread under it.
         set(&mut form, "parent", "new-parent-id");
         assert!(
-            matches!(form.command(&context.cwd).unwrap(), Command::ThreadSet(a) if a.parent_id.as_deref() == Some("new-parent-id"))
+            matches!(form.command(&context.cwd).unwrap(), Command::ThreadSet(a) if a.parent_thread_id.as_deref() == Some("new-parent-id"))
         );
         // A move alone is a valid thread.set (no other field needed).
         set(&mut form, "model", "");
         assert!(
-            matches!(form.command(&context.cwd).unwrap(), Command::ThreadSet(a) if a.parent_id.is_some() && a.model.is_none())
+            matches!(form.command(&context.cwd).unwrap(), Command::ThreadSet(a) if a.parent_thread_id.is_some() && a.model.is_none())
         );
     }
     #[test]

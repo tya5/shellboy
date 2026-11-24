@@ -802,7 +802,7 @@
   "src/ui/threads.rs:03e76b90ffcad3a0:1": {
     "category": "a",
     "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
-    "source_tokens_sha256": "b9beb2b0cb425ec979686e11b25a0a4bb0da81079be52cc32da9e91f21ecb51b"
+    "source_tokens_sha256": "2b34aa9fed267cf219873d6be0729541fa37d454436580c61addcf33640b05ec"
   },
   "src/ui/threads.rs:05bcfbb952d25bf6:1": {
     "category": "a",
@@ -812,12 +812,12 @@
   "src/ui/threads.rs:17d1fbe0d5842062:1": {
     "category": "a",
     "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
-    "source_tokens_sha256": "b9beb2b0cb425ec979686e11b25a0a4bb0da81079be52cc32da9e91f21ecb51b"
+    "source_tokens_sha256": "2b34aa9fed267cf219873d6be0729541fa37d454436580c61addcf33640b05ec"
   },
   "src/ui/threads.rs:18c648c232fcb2d5:1": {
     "category": "a",
     "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
-    "source_tokens_sha256": "b9beb2b0cb425ec979686e11b25a0a4bb0da81079be52cc32da9e91f21ecb51b"
+    "source_tokens_sha256": "2b34aa9fed267cf219873d6be0729541fa37d454436580c61addcf33640b05ec"
   },
   "src/ui/threads.rs:1b0a8eb466c03340:1": {
     "category": "a",
@@ -842,7 +842,7 @@
   "src/ui/threads.rs:27ab8252051f3bf8:1": {
     "category": "a",
     "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
-    "source_tokens_sha256": "b9beb2b0cb425ec979686e11b25a0a4bb0da81079be52cc32da9e91f21ecb51b"
+    "source_tokens_sha256": "2b34aa9fed267cf219873d6be0729541fa37d454436580c61addcf33640b05ec"
   },
   "src/ui/threads.rs:28d01c30883506ac:1": {
     "category": "a",
@@ -857,12 +857,12 @@
   "src/ui/threads.rs:2b02db01fef3e847:1": {
     "category": "a",
     "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
-    "source_tokens_sha256": "b9beb2b0cb425ec979686e11b25a0a4bb0da81079be52cc32da9e91f21ecb51b"
+    "source_tokens_sha256": "2b34aa9fed267cf219873d6be0729541fa37d454436580c61addcf33640b05ec"
   },
   "src/ui/threads.rs:2cd4fe089c1adeea:1": {
     "category": "a",
     "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
-    "source_tokens_sha256": "b9beb2b0cb425ec979686e11b25a0a4bb0da81079be52cc32da9e91f21ecb51b"
+    "source_tokens_sha256": "2b34aa9fed267cf219873d6be0729541fa37d454436580c61addcf33640b05ec"
   },
   "src/ui/threads.rs:352a772363007f3c:1": {
     "category": "a",
@@ -887,12 +887,12 @@
   "src/ui/threads.rs:439c41c44b4f1a7d:1": {
     "category": "a",
     "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
-    "source_tokens_sha256": "b9beb2b0cb425ec979686e11b25a0a4bb0da81079be52cc32da9e91f21ecb51b"
+    "source_tokens_sha256": "2b34aa9fed267cf219873d6be0729541fa37d454436580c61addcf33640b05ec"
   },
   "src/ui/threads.rs:4a9661b8fc037aec:1": {
     "category": "a",
     "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
-    "source_tokens_sha256": "b9beb2b0cb425ec979686e11b25a0a4bb0da81079be52cc32da9e91f21ecb51b"
+    "source_tokens_sha256": "2b34aa9fed267cf219873d6be0729541fa37d454436580c61addcf33640b05ec"
   },
   "src/ui/threads.rs:4d0ff1fa13abebf0:1": {
     "category": "a",
@@ -922,17 +922,17 @@
   "src/ui/threads.rs:5cf688b1161b693f:1": {
     "category": "a",
     "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
-    "source_tokens_sha256": "b9beb2b0cb425ec979686e11b25a0a4bb0da81079be52cc32da9e91f21ecb51b"
+    "source_tokens_sha256": "2b34aa9fed267cf219873d6be0729541fa37d454436580c61addcf33640b05ec"
   },
   "src/ui/threads.rs:62daf31a037d9662:1": {
     "category": "a",
     "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
-    "source_tokens_sha256": "b9beb2b0cb425ec979686e11b25a0a4bb0da81079be52cc32da9e91f21ecb51b"
+    "source_tokens_sha256": "2b34aa9fed267cf219873d6be0729541fa37d454436580c61addcf33640b05ec"
   },
   "src/ui/threads.rs:684da57b5141fec7:1": {
     "category": "a",
     "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
-    "source_tokens_sha256": "b9beb2b0cb425ec979686e11b25a0a4bb0da81079be52cc32da9e91f21ecb51b"
+    "source_tokens_sha256": "2b34aa9fed267cf219873d6be0729541fa37d454436580c61addcf33640b05ec"
   },
   "src/ui/threads.rs:69f649d0bf711005:1": {
     "category": "a",
@@ -942,17 +942,17 @@
   "src/ui/threads.rs:6b6b6a501140a3a9:1": {
     "category": "a",
     "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
-    "source_tokens_sha256": "b9beb2b0cb425ec979686e11b25a0a4bb0da81079be52cc32da9e91f21ecb51b"
+    "source_tokens_sha256": "2b34aa9fed267cf219873d6be0729541fa37d454436580c61addcf33640b05ec"
   },
   "src/ui/threads.rs:6b6b6a501140a3a9:2": {
     "category": "a",
     "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
-    "source_tokens_sha256": "b9beb2b0cb425ec979686e11b25a0a4bb0da81079be52cc32da9e91f21ecb51b"
+    "source_tokens_sha256": "2b34aa9fed267cf219873d6be0729541fa37d454436580c61addcf33640b05ec"
   },
   "src/ui/threads.rs:6b6b6a501140a3a9:3": {
     "category": "a",
     "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
-    "source_tokens_sha256": "b9beb2b0cb425ec979686e11b25a0a4bb0da81079be52cc32da9e91f21ecb51b"
+    "source_tokens_sha256": "2b34aa9fed267cf219873d6be0729541fa37d454436580c61addcf33640b05ec"
   },
   "src/ui/threads.rs:6d429bf572bea1fc:1": {
     "category": "a",
@@ -962,12 +962,12 @@
   "src/ui/threads.rs:7179959f576d8823:1": {
     "category": "a",
     "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
-    "source_tokens_sha256": "b9beb2b0cb425ec979686e11b25a0a4bb0da81079be52cc32da9e91f21ecb51b"
+    "source_tokens_sha256": "2b34aa9fed267cf219873d6be0729541fa37d454436580c61addcf33640b05ec"
   },
   "src/ui/threads.rs:73e4e6adaf4d838d:1": {
     "category": "a",
     "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
-    "source_tokens_sha256": "b9beb2b0cb425ec979686e11b25a0a4bb0da81079be52cc32da9e91f21ecb51b"
+    "source_tokens_sha256": "2b34aa9fed267cf219873d6be0729541fa37d454436580c61addcf33640b05ec"
   },
   "src/ui/threads.rs:7aaf65c3b1b3f3f6:1": {
     "category": "a",
@@ -977,22 +977,22 @@
   "src/ui/threads.rs:7bda6297def68be8:1": {
     "category": "a",
     "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
-    "source_tokens_sha256": "b9beb2b0cb425ec979686e11b25a0a4bb0da81079be52cc32da9e91f21ecb51b"
+    "source_tokens_sha256": "2b34aa9fed267cf219873d6be0729541fa37d454436580c61addcf33640b05ec"
   },
   "src/ui/threads.rs:7d6b83c6b7348603:1": {
     "category": "a",
     "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
-    "source_tokens_sha256": "b9beb2b0cb425ec979686e11b25a0a4bb0da81079be52cc32da9e91f21ecb51b"
+    "source_tokens_sha256": "2b34aa9fed267cf219873d6be0729541fa37d454436580c61addcf33640b05ec"
   },
   "src/ui/threads.rs:7d838451770f915e:1": {
     "category": "a",
     "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
-    "source_tokens_sha256": "b9beb2b0cb425ec979686e11b25a0a4bb0da81079be52cc32da9e91f21ecb51b"
+    "source_tokens_sha256": "2b34aa9fed267cf219873d6be0729541fa37d454436580c61addcf33640b05ec"
   },
   "src/ui/threads.rs:7ebc34907e90c4c0:1": {
     "category": "a",
     "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
-    "source_tokens_sha256": "b9beb2b0cb425ec979686e11b25a0a4bb0da81079be52cc32da9e91f21ecb51b"
+    "source_tokens_sha256": "2b34aa9fed267cf219873d6be0729541fa37d454436580c61addcf33640b05ec"
   },
   "src/ui/threads.rs:8087ef176b4c0d1d:1": {
     "category": "a",
@@ -1007,12 +1007,12 @@
   "src/ui/threads.rs:9676341e507f1036:1": {
     "category": "a",
     "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
-    "source_tokens_sha256": "b9beb2b0cb425ec979686e11b25a0a4bb0da81079be52cc32da9e91f21ecb51b"
+    "source_tokens_sha256": "2b34aa9fed267cf219873d6be0729541fa37d454436580c61addcf33640b05ec"
   },
   "src/ui/threads.rs:98317bae50982c52:1": {
     "category": "a",
     "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
-    "source_tokens_sha256": "b9beb2b0cb425ec979686e11b25a0a4bb0da81079be52cc32da9e91f21ecb51b"
+    "source_tokens_sha256": "2b34aa9fed267cf219873d6be0729541fa37d454436580c61addcf33640b05ec"
   },
   "src/ui/threads.rs:9abc66d964ad2f60:1": {
     "category": "a",
@@ -1022,7 +1022,7 @@
   "src/ui/threads.rs:9ca7d8cf8c013360:1": {
     "category": "a",
     "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
-    "source_tokens_sha256": "b9beb2b0cb425ec979686e11b25a0a4bb0da81079be52cc32da9e91f21ecb51b"
+    "source_tokens_sha256": "2b34aa9fed267cf219873d6be0729541fa37d454436580c61addcf33640b05ec"
   },
   "src/ui/threads.rs:a325ebf1700f8a3e:1": {
     "category": "a",
@@ -1032,7 +1032,7 @@
   "src/ui/threads.rs:a61360828f648330:1": {
     "category": "a",
     "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
-    "source_tokens_sha256": "b9beb2b0cb425ec979686e11b25a0a4bb0da81079be52cc32da9e91f21ecb51b"
+    "source_tokens_sha256": "2b34aa9fed267cf219873d6be0729541fa37d454436580c61addcf33640b05ec"
   },
   "src/ui/threads.rs:a6c3ef78d56a7a5b:1": {
     "category": "a",
@@ -1047,12 +1047,12 @@
   "src/ui/threads.rs:bb37953c3e148b0b:1": {
     "category": "a",
     "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
-    "source_tokens_sha256": "b9beb2b0cb425ec979686e11b25a0a4bb0da81079be52cc32da9e91f21ecb51b"
+    "source_tokens_sha256": "2b34aa9fed267cf219873d6be0729541fa37d454436580c61addcf33640b05ec"
   },
   "src/ui/threads.rs:bbc7c0413b562151:1": {
     "category": "a",
     "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
-    "source_tokens_sha256": "b9beb2b0cb425ec979686e11b25a0a4bb0da81079be52cc32da9e91f21ecb51b"
+    "source_tokens_sha256": "2b34aa9fed267cf219873d6be0729541fa37d454436580c61addcf33640b05ec"
   },
   "src/ui/threads.rs:c5661a5eb0cfca5e:1": {
     "category": "a",
@@ -1067,27 +1067,27 @@
   "src/ui/threads.rs:c7518c08bc44cbf4:1": {
     "category": "a",
     "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
-    "source_tokens_sha256": "b9beb2b0cb425ec979686e11b25a0a4bb0da81079be52cc32da9e91f21ecb51b"
+    "source_tokens_sha256": "2b34aa9fed267cf219873d6be0729541fa37d454436580c61addcf33640b05ec"
   },
   "src/ui/threads.rs:c9a2f1d38bef31a1:1": {
     "category": "a",
     "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
-    "source_tokens_sha256": "b9beb2b0cb425ec979686e11b25a0a4bb0da81079be52cc32da9e91f21ecb51b"
+    "source_tokens_sha256": "2b34aa9fed267cf219873d6be0729541fa37d454436580c61addcf33640b05ec"
   },
   "src/ui/threads.rs:ccbdbf8cf35b10f7:1": {
     "category": "a",
     "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
-    "source_tokens_sha256": "b9beb2b0cb425ec979686e11b25a0a4bb0da81079be52cc32da9e91f21ecb51b"
+    "source_tokens_sha256": "2b34aa9fed267cf219873d6be0729541fa37d454436580c61addcf33640b05ec"
   },
   "src/ui/threads.rs:ccbdbf8cf35b10f7:2": {
     "category": "a",
     "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
-    "source_tokens_sha256": "b9beb2b0cb425ec979686e11b25a0a4bb0da81079be52cc32da9e91f21ecb51b"
+    "source_tokens_sha256": "2b34aa9fed267cf219873d6be0729541fa37d454436580c61addcf33640b05ec"
   },
   "src/ui/threads.rs:ccbdbf8cf35b10f7:3": {
     "category": "a",
     "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
-    "source_tokens_sha256": "b9beb2b0cb425ec979686e11b25a0a4bb0da81079be52cc32da9e91f21ecb51b"
+    "source_tokens_sha256": "2b34aa9fed267cf219873d6be0729541fa37d454436580c61addcf33640b05ec"
   },
   "src/ui/threads.rs:cd5737cf4caf2d35:1": {
     "category": "a",
@@ -1112,12 +1112,12 @@
   "src/ui/threads.rs:da88d03c0cd7c307:1": {
     "category": "a",
     "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
-    "source_tokens_sha256": "b9beb2b0cb425ec979686e11b25a0a4bb0da81079be52cc32da9e91f21ecb51b"
+    "source_tokens_sha256": "2b34aa9fed267cf219873d6be0729541fa37d454436580c61addcf33640b05ec"
   },
   "src/ui/threads.rs:e41f81eb06954ce0:1": {
     "category": "a",
     "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
-    "source_tokens_sha256": "b9beb2b0cb425ec979686e11b25a0a4bb0da81079be52cc32da9e91f21ecb51b"
+    "source_tokens_sha256": "2b34aa9fed267cf219873d6be0729541fa37d454436580c61addcf33640b05ec"
   },
   "src/ui/threads.rs:e52a5a0b453130a7:1": {
     "category": "a",
@@ -1127,7 +1127,7 @@
   "src/ui/threads.rs:ff7dd36ce1b2f0eb:1": {
     "category": "a",
     "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
-    "source_tokens_sha256": "b9beb2b0cb425ec979686e11b25a0a4bb0da81079be52cc32da9e91f21ecb51b"
+    "source_tokens_sha256": "2b34aa9fed267cf219873d6be0729541fa37d454436580c61addcf33640b05ec"
   },
   "src/ui/threads.rs:ff8e747ed6480f71:1": {
     "category": "a",
@@ -1312,222 +1312,222 @@
   "src/ui/operations/client_forms.rs:58fd544407463cfa:1": {
     "category": "a",
     "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
-    "source_tokens_sha256": "b9b99618a7b11f4e9a3e8cadf6d0cd7847504711d515d72bcf046a9b558ebd0b"
+    "source_tokens_sha256": "0df35c5cb26c2c42048915063ee359afaac6ce257b06433302fb52e398ed9313"
   },
   "src/ui/operations/client_forms.rs:3d842a69813afdbe:1": {
     "category": "a",
     "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
-    "source_tokens_sha256": "b9b99618a7b11f4e9a3e8cadf6d0cd7847504711d515d72bcf046a9b558ebd0b"
+    "source_tokens_sha256": "0df35c5cb26c2c42048915063ee359afaac6ce257b06433302fb52e398ed9313"
   },
   "src/ui/operations/client_forms.rs:3ff87e519d11d515:1": {
     "category": "a",
     "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
-    "source_tokens_sha256": "b9b99618a7b11f4e9a3e8cadf6d0cd7847504711d515d72bcf046a9b558ebd0b"
+    "source_tokens_sha256": "0df35c5cb26c2c42048915063ee359afaac6ce257b06433302fb52e398ed9313"
   },
   "src/ui/operations/client_forms.rs:ea016b74bb87e72a:1": {
     "category": "a",
     "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
-    "source_tokens_sha256": "b9b99618a7b11f4e9a3e8cadf6d0cd7847504711d515d72bcf046a9b558ebd0b"
+    "source_tokens_sha256": "0df35c5cb26c2c42048915063ee359afaac6ce257b06433302fb52e398ed9313"
   },
   "src/ui/operations/client_forms.rs:3fc7219c4fb6297c:1": {
     "category": "a",
     "reason": "bounded validation receives paired Ja/En labels and selects by form language; values and bounds are unchanged",
-    "source_tokens_sha256": "b9b99618a7b11f4e9a3e8cadf6d0cd7847504711d515d72bcf046a9b558ebd0b"
+    "source_tokens_sha256": "0df35c5cb26c2c42048915063ee359afaac6ce257b06433302fb52e398ed9313"
   },
   "src/ui/operations/client_forms.rs:e7cad39b98070e61:1": {
     "category": "a",
     "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
-    "source_tokens_sha256": "b9b99618a7b11f4e9a3e8cadf6d0cd7847504711d515d72bcf046a9b558ebd0b"
+    "source_tokens_sha256": "0df35c5cb26c2c42048915063ee359afaac6ce257b06433302fb52e398ed9313"
   },
   "src/ui/operations/client_forms.rs:8f3a08c67d77ec33:1": {
     "category": "a",
     "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
-    "source_tokens_sha256": "b9b99618a7b11f4e9a3e8cadf6d0cd7847504711d515d72bcf046a9b558ebd0b"
+    "source_tokens_sha256": "0df35c5cb26c2c42048915063ee359afaac6ce257b06433302fb52e398ed9313"
   },
   "src/ui/operations/client_forms.rs:256b55ca71e73beb:1": {
     "category": "a",
     "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
-    "source_tokens_sha256": "b9b99618a7b11f4e9a3e8cadf6d0cd7847504711d515d72bcf046a9b558ebd0b"
+    "source_tokens_sha256": "0df35c5cb26c2c42048915063ee359afaac6ce257b06433302fb52e398ed9313"
   },
   "src/ui/operations/client_forms.rs:256b55ca71e73beb:2": {
     "category": "a",
     "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
-    "source_tokens_sha256": "b9b99618a7b11f4e9a3e8cadf6d0cd7847504711d515d72bcf046a9b558ebd0b"
+    "source_tokens_sha256": "0df35c5cb26c2c42048915063ee359afaac6ce257b06433302fb52e398ed9313"
   },
   "src/ui/operations/client_forms.rs:99fcb0b96b6acd1a:1": {
     "category": "a",
     "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
-    "source_tokens_sha256": "b9b99618a7b11f4e9a3e8cadf6d0cd7847504711d515d72bcf046a9b558ebd0b"
+    "source_tokens_sha256": "0df35c5cb26c2c42048915063ee359afaac6ce257b06433302fb52e398ed9313"
   },
   "src/ui/operations/client_forms.rs:3fc7219c4fb6297c:2": {
     "category": "a",
     "reason": "bounded validation receives paired Ja/En labels and selects by form language; values and bounds are unchanged",
-    "source_tokens_sha256": "b9b99618a7b11f4e9a3e8cadf6d0cd7847504711d515d72bcf046a9b558ebd0b"
+    "source_tokens_sha256": "0df35c5cb26c2c42048915063ee359afaac6ce257b06433302fb52e398ed9313"
   },
   "src/ui/operations/client_forms.rs:fcceb0337245f983:1": {
     "category": "a",
     "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
-    "source_tokens_sha256": "b9b99618a7b11f4e9a3e8cadf6d0cd7847504711d515d72bcf046a9b558ebd0b"
+    "source_tokens_sha256": "0df35c5cb26c2c42048915063ee359afaac6ce257b06433302fb52e398ed9313"
   },
   "src/ui/operations/client_forms.rs:703e6617434d3a0f:1": {
     "category": "a",
     "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
-    "source_tokens_sha256": "b9b99618a7b11f4e9a3e8cadf6d0cd7847504711d515d72bcf046a9b558ebd0b"
+    "source_tokens_sha256": "0df35c5cb26c2c42048915063ee359afaac6ce257b06433302fb52e398ed9313"
   },
   "src/ui/operations/client_forms.rs:70fdb70690edc2b8:1": {
     "category": "a",
     "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
-    "source_tokens_sha256": "b9b99618a7b11f4e9a3e8cadf6d0cd7847504711d515d72bcf046a9b558ebd0b"
+    "source_tokens_sha256": "0df35c5cb26c2c42048915063ee359afaac6ce257b06433302fb52e398ed9313"
   },
   "src/ui/operations/client_forms.rs:679ff4f04c0fe240:1": {
     "category": "a",
     "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
-    "source_tokens_sha256": "b9b99618a7b11f4e9a3e8cadf6d0cd7847504711d515d72bcf046a9b558ebd0b"
+    "source_tokens_sha256": "0df35c5cb26c2c42048915063ee359afaac6ce257b06433302fb52e398ed9313"
   },
   "src/ui/operations/client_forms.rs:4b6ee25d2b0a9250:1": {
     "category": "a",
     "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
-    "source_tokens_sha256": "b9b99618a7b11f4e9a3e8cadf6d0cd7847504711d515d72bcf046a9b558ebd0b"
+    "source_tokens_sha256": "0df35c5cb26c2c42048915063ee359afaac6ce257b06433302fb52e398ed9313"
   },
   "src/ui/operations/client_forms.rs:2c314d32aa831d9a:1": {
     "category": "a",
     "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
-    "source_tokens_sha256": "b9b99618a7b11f4e9a3e8cadf6d0cd7847504711d515d72bcf046a9b558ebd0b"
+    "source_tokens_sha256": "0df35c5cb26c2c42048915063ee359afaac6ce257b06433302fb52e398ed9313"
   },
   "src/ui/operations/client_forms.rs:54cf8bc88f390dc4:1": {
     "category": "a",
     "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
-    "source_tokens_sha256": "b9b99618a7b11f4e9a3e8cadf6d0cd7847504711d515d72bcf046a9b558ebd0b"
+    "source_tokens_sha256": "0df35c5cb26c2c42048915063ee359afaac6ce257b06433302fb52e398ed9313"
   },
   "src/ui/operations/client_forms.rs:aedfcd16218d6b3a:1": {
     "category": "a",
     "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
-    "source_tokens_sha256": "b9b99618a7b11f4e9a3e8cadf6d0cd7847504711d515d72bcf046a9b558ebd0b"
+    "source_tokens_sha256": "0df35c5cb26c2c42048915063ee359afaac6ce257b06433302fb52e398ed9313"
   },
   "src/ui/operations/client_forms.rs:914bf3fd37c16dae:1": {
     "category": "a",
     "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
-    "source_tokens_sha256": "b9b99618a7b11f4e9a3e8cadf6d0cd7847504711d515d72bcf046a9b558ebd0b"
+    "source_tokens_sha256": "0df35c5cb26c2c42048915063ee359afaac6ce257b06433302fb52e398ed9313"
   },
   "src/ui/operations/client_forms.rs:184936194ec29745:1": {
     "category": "a",
     "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
-    "source_tokens_sha256": "b9b99618a7b11f4e9a3e8cadf6d0cd7847504711d515d72bcf046a9b558ebd0b"
+    "source_tokens_sha256": "0df35c5cb26c2c42048915063ee359afaac6ce257b06433302fb52e398ed9313"
   },
   "src/ui/operations/client_forms.rs:c1d3a65a87404711:1": {
     "category": "a",
     "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
-    "source_tokens_sha256": "b9b99618a7b11f4e9a3e8cadf6d0cd7847504711d515d72bcf046a9b558ebd0b"
+    "source_tokens_sha256": "0df35c5cb26c2c42048915063ee359afaac6ce257b06433302fb52e398ed9313"
   },
   "src/ui/operations/client_forms.rs:4b1bf6fd83b8a252:1": {
     "category": "a",
     "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
-    "source_tokens_sha256": "b9b99618a7b11f4e9a3e8cadf6d0cd7847504711d515d72bcf046a9b558ebd0b"
+    "source_tokens_sha256": "0df35c5cb26c2c42048915063ee359afaac6ce257b06433302fb52e398ed9313"
   },
   "src/ui/operations/client_forms.rs:c31770e21ac337b2:1": {
     "category": "a",
     "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
-    "source_tokens_sha256": "b9b99618a7b11f4e9a3e8cadf6d0cd7847504711d515d72bcf046a9b558ebd0b"
+    "source_tokens_sha256": "0df35c5cb26c2c42048915063ee359afaac6ce257b06433302fb52e398ed9313"
   },
   "src/ui/operations/client_forms.rs:ce49e4b2a52226f6:1": {
     "category": "a",
     "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
-    "source_tokens_sha256": "b9b99618a7b11f4e9a3e8cadf6d0cd7847504711d515d72bcf046a9b558ebd0b"
+    "source_tokens_sha256": "0df35c5cb26c2c42048915063ee359afaac6ce257b06433302fb52e398ed9313"
   },
   "src/ui/operations/client_forms.rs:c2894c16a763f2f7:1": {
     "category": "a",
     "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
-    "source_tokens_sha256": "b9b99618a7b11f4e9a3e8cadf6d0cd7847504711d515d72bcf046a9b558ebd0b"
+    "source_tokens_sha256": "0df35c5cb26c2c42048915063ee359afaac6ce257b06433302fb52e398ed9313"
   },
   "src/ui/operations/client_forms.rs:df6a8e9eb24354f3:1": {
     "category": "a",
     "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
-    "source_tokens_sha256": "b9b99618a7b11f4e9a3e8cadf6d0cd7847504711d515d72bcf046a9b558ebd0b"
+    "source_tokens_sha256": "0df35c5cb26c2c42048915063ee359afaac6ce257b06433302fb52e398ed9313"
   },
   "src/ui/operations/client_forms.rs:cc4f39ea17489f19:1": {
     "category": "a",
     "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
-    "source_tokens_sha256": "b9b99618a7b11f4e9a3e8cadf6d0cd7847504711d515d72bcf046a9b558ebd0b"
+    "source_tokens_sha256": "0df35c5cb26c2c42048915063ee359afaac6ce257b06433302fb52e398ed9313"
   },
   "src/ui/operations/client_forms.rs:c42c12812ac044fb:1": {
     "category": "a",
     "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
-    "source_tokens_sha256": "b9b99618a7b11f4e9a3e8cadf6d0cd7847504711d515d72bcf046a9b558ebd0b"
+    "source_tokens_sha256": "0df35c5cb26c2c42048915063ee359afaac6ce257b06433302fb52e398ed9313"
   },
   "src/ui/operations/client_forms.rs:935078df9b0896d0:1": {
     "category": "a",
     "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
-    "source_tokens_sha256": "b9b99618a7b11f4e9a3e8cadf6d0cd7847504711d515d72bcf046a9b558ebd0b"
+    "source_tokens_sha256": "0df35c5cb26c2c42048915063ee359afaac6ce257b06433302fb52e398ed9313"
   },
   "src/ui/operations/client_forms.rs:fca5a98d618904db:1": {
     "category": "a",
     "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
-    "source_tokens_sha256": "b9b99618a7b11f4e9a3e8cadf6d0cd7847504711d515d72bcf046a9b558ebd0b"
+    "source_tokens_sha256": "0df35c5cb26c2c42048915063ee359afaac6ce257b06433302fb52e398ed9313"
   },
   "src/ui/operations/client_forms.rs:c5ceef9d882ab5c5:1": {
     "category": "a",
     "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
-    "source_tokens_sha256": "b9b99618a7b11f4e9a3e8cadf6d0cd7847504711d515d72bcf046a9b558ebd0b"
+    "source_tokens_sha256": "0df35c5cb26c2c42048915063ee359afaac6ce257b06433302fb52e398ed9313"
   },
   "src/ui/operations/client_forms.rs:0a1a2082297e9e8c:1": {
     "category": "a",
     "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
-    "source_tokens_sha256": "b9b99618a7b11f4e9a3e8cadf6d0cd7847504711d515d72bcf046a9b558ebd0b"
+    "source_tokens_sha256": "0df35c5cb26c2c42048915063ee359afaac6ce257b06433302fb52e398ed9313"
   },
   "src/ui/operations/client_forms.rs:5ff86809d35618b4:1": {
     "category": "a",
     "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
-    "source_tokens_sha256": "b9b99618a7b11f4e9a3e8cadf6d0cd7847504711d515d72bcf046a9b558ebd0b"
+    "source_tokens_sha256": "0df35c5cb26c2c42048915063ee359afaac6ce257b06433302fb52e398ed9313"
   },
   "src/ui/operations/client_forms.rs:b0087fe81176f34a:1": {
     "category": "a",
     "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
-    "source_tokens_sha256": "b9b99618a7b11f4e9a3e8cadf6d0cd7847504711d515d72bcf046a9b558ebd0b"
+    "source_tokens_sha256": "0df35c5cb26c2c42048915063ee359afaac6ce257b06433302fb52e398ed9313"
   },
   "src/ui/operations/client_forms.rs:9ec94d71e50d99bf:1": {
     "category": "a",
     "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
-    "source_tokens_sha256": "b9b99618a7b11f4e9a3e8cadf6d0cd7847504711d515d72bcf046a9b558ebd0b"
+    "source_tokens_sha256": "0df35c5cb26c2c42048915063ee359afaac6ce257b06433302fb52e398ed9313"
   },
   "src/ui/operations/client_forms.rs:eac60607419ad6b5:1": {
     "category": "a",
     "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
-    "source_tokens_sha256": "b9b99618a7b11f4e9a3e8cadf6d0cd7847504711d515d72bcf046a9b558ebd0b"
+    "source_tokens_sha256": "0df35c5cb26c2c42048915063ee359afaac6ce257b06433302fb52e398ed9313"
   },
   "src/ui/operations/client_forms.rs:1e6dc9b7a8435fae:1": {
     "category": "a",
     "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
-    "source_tokens_sha256": "b9b99618a7b11f4e9a3e8cadf6d0cd7847504711d515d72bcf046a9b558ebd0b"
+    "source_tokens_sha256": "0df35c5cb26c2c42048915063ee359afaac6ce257b06433302fb52e398ed9313"
   },
   "src/ui/operations/client_forms.rs:e7cad39b98070e61:2": {
     "category": "a",
     "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
-    "source_tokens_sha256": "b9b99618a7b11f4e9a3e8cadf6d0cd7847504711d515d72bcf046a9b558ebd0b"
+    "source_tokens_sha256": "0df35c5cb26c2c42048915063ee359afaac6ce257b06433302fb52e398ed9313"
   },
   "src/ui/operations/client_forms.rs:99fcb0b96b6acd1a:2": {
     "category": "a",
     "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
-    "source_tokens_sha256": "b9b99618a7b11f4e9a3e8cadf6d0cd7847504711d515d72bcf046a9b558ebd0b"
+    "source_tokens_sha256": "0df35c5cb26c2c42048915063ee359afaac6ce257b06433302fb52e398ed9313"
   },
   "src/ui/operations/client_forms.rs:16c08280262f41d0:1": {
     "category": "a",
     "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
-    "source_tokens_sha256": "b9b99618a7b11f4e9a3e8cadf6d0cd7847504711d515d72bcf046a9b558ebd0b"
+    "source_tokens_sha256": "0df35c5cb26c2c42048915063ee359afaac6ce257b06433302fb52e398ed9313"
   },
   "src/ui/operations/client_forms.rs:66bc43dad90f641f:1": {
     "category": "a",
     "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
-    "source_tokens_sha256": "b9b99618a7b11f4e9a3e8cadf6d0cd7847504711d515d72bcf046a9b558ebd0b"
+    "source_tokens_sha256": "0df35c5cb26c2c42048915063ee359afaac6ce257b06433302fb52e398ed9313"
   },
   "src/ui/operations/client_forms.rs:db67d9786b18b0fc:1": {
     "category": "a",
     "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
-    "source_tokens_sha256": "b9b99618a7b11f4e9a3e8cadf6d0cd7847504711d515d72bcf046a9b558ebd0b"
+    "source_tokens_sha256": "0df35c5cb26c2c42048915063ee359afaac6ce257b06433302fb52e398ed9313"
   },
   "src/ui/operations/client_forms.rs:256b55ca71e73beb:3": {
     "category": "a",
     "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
-    "source_tokens_sha256": "b9b99618a7b11f4e9a3e8cadf6d0cd7847504711d515d72bcf046a9b558ebd0b"
+    "source_tokens_sha256": "0df35c5cb26c2c42048915063ee359afaac6ce257b06433302fb52e398ed9313"
   },
   "src/ui/activity/wait.rs:2990239b6433936c:1": {
     "category": "a",
@@ -1772,7 +1772,7 @@
   "src/ui/operations.rs:029f6b93dce69082:1": {
     "category": "a",
     "reason": "Japanese text of the bilingual history.window operation copy, classified like its neighbors Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback. Re-reviewed for #296: the enclosing operation builder adds only HistoryWindowArgs.items=false; Japanese label literals, bilingual rendering and command field values are unchanged. Re-reviewed for #303: obsolete summary controls removed and Thread output/target fields replaced. This unchanged Japanese literal remains UI-only; existing Ja/English projection and command values are unchanged. Re-reviewed for the schema45 spill setting change: the only enclosing Form::new delta is the internal ThreadSetArgs initializer spill: None; this legacy form adds no visible field or localized string, and Japanese labels/routing and command values are unchanged. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:069e23a42d290b1e:1": {
     "category": "a",
@@ -1782,7 +1782,7 @@
   "src/ui/operations.rs:069e23a42d290b1e:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:0c34fd3e3f28f63e:1": {
     "category": "a",
@@ -1792,7 +1792,7 @@
   "src/ui/operations.rs:0c34fd3e3f28f63e:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:0e87088ce14c9e4c:1": {
     "category": "a",
@@ -1802,12 +1802,12 @@
   "src/ui/operations.rs:0e87088ce14c9e4c:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:0f875dc2b12d3530:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback. Re-reviewed for #296: the enclosing operation builder adds only HistoryWindowArgs.items=false; Japanese label literals, bilingual rendering and command field values are unchanged. Re-reviewed for #303: obsolete summary controls removed and Thread output/target fields replaced. This unchanged Japanese literal remains UI-only; existing Ja/English projection and command values are unchanged. Re-reviewed for the schema45 spill setting change: the only enclosing Form::new delta is the internal ThreadSetArgs initializer spill: None; this legacy form adds no visible field or localized string, and Japanese labels/routing and command values are unchanged. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:1364fa9713f89b10:1": {
     "category": "a",
@@ -1817,17 +1817,17 @@
   "src/ui/operations.rs:1364fa9713f89b10:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:21605a86ab72428d:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback. Re-reviewed for #296: the enclosing operation builder adds only HistoryWindowArgs.items=false; Japanese label literals, bilingual rendering and command field values are unchanged. Re-reviewed for #303: obsolete summary controls removed and Thread output/target fields replaced. This unchanged Japanese literal remains UI-only; existing Ja/English projection and command values are unchanged. Re-reviewed for the schema45 spill setting change: the only enclosing Form::new delta is the internal ThreadSetArgs initializer spill: None; this legacy form adds no visible field or localized string, and Japanese labels/routing and command values are unchanged. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:2453bb067f0edb89:1": {
     "category": "a",
     "reason": "Japanese text of the bilingual history.window operation copy, classified like its neighbors Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback. Re-reviewed for #296: the enclosing operation builder adds only HistoryWindowArgs.items=false; Japanese label literals, bilingual rendering and command field values are unchanged. Re-reviewed for #303: obsolete summary controls removed and Thread output/target fields replaced. This unchanged Japanese literal remains UI-only; existing Ja/English projection and command values are unchanged. Re-reviewed for the schema45 spill setting change: the only enclosing Form::new delta is the internal ThreadSetArgs initializer spill: None; this legacy form adds no visible field or localized string, and Japanese labels/routing and command values are unchanged. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:256b55ca71e73beb:1": {
     "category": "a",
@@ -1837,12 +1837,12 @@
   "src/ui/operations.rs:256b55ca71e73beb:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:256b55ca71e73beb:3": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:2bd629b280ab1812:1": {
     "category": "a",
@@ -1852,7 +1852,7 @@
   "src/ui/operations.rs:2bd629b280ab1812:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:2e70e191b3c15d51:1": {
     "category": "a",
@@ -1862,12 +1862,12 @@
   "src/ui/operations.rs:2e70e191b3c15d51:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:2f1b750776c0b8b7:1": {
     "category": "a",
     "reason": "Japanese text of the bilingual history.window operation copy, classified like its neighbors Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback. Re-reviewed for #296: the enclosing operation builder adds only HistoryWindowArgs.items=false; Japanese label literals, bilingual rendering and command field values are unchanged. Re-reviewed for #303: obsolete summary controls removed and Thread output/target fields replaced. This unchanged Japanese literal remains UI-only; existing Ja/English projection and command values are unchanged. Re-reviewed for the schema45 spill setting change: the only enclosing Form::new delta is the internal ThreadSetArgs initializer spill: None; this legacy form adds no visible field or localized string, and Japanese labels/routing and command values are unchanged. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:308f9d956e64cb0f:1": {
     "category": "a",
@@ -1877,17 +1877,17 @@
   "src/ui/operations.rs:308f9d956e64cb0f:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:308f9d956e64cb0f:3": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:308f9d956e64cb0f:4": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:31e0c346273bb2da:1": {
     "category": "a",
@@ -1897,7 +1897,7 @@
   "src/ui/operations.rs:31e0c346273bb2da:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:3b3d325079d81adf:1": {
     "category": "a",
@@ -1907,7 +1907,7 @@
   "src/ui/operations.rs:3b3d325079d81adf:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:3e74041ef65012b5:1": {
     "category": "a",
@@ -1917,17 +1917,17 @@
   "src/ui/operations.rs:3e74041ef65012b5:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:3e74041ef65012b5:3": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:3ef74892c51b7cf6:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback. Re-reviewed for #296: the enclosing operation builder adds only HistoryWindowArgs.items=false; Japanese label literals, bilingual rendering and command field values are unchanged. Re-reviewed for #303: obsolete summary controls removed and Thread output/target fields replaced. This unchanged Japanese literal remains UI-only; existing Ja/English projection and command values are unchanged. Re-reviewed for the schema45 spill setting change: the only enclosing Form::new delta is the internal ThreadSetArgs initializer spill: None; this legacy form adds no visible field or localized string, and Japanese labels/routing and command values are unchanged. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:3fc7219c4fb6297c:1": {
     "category": "a",
@@ -1937,37 +1937,37 @@
   "src/ui/operations.rs:3fc7219c4fb6297c:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:3fc7219c4fb6297c:3": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:3fc7219c4fb6297c:4": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:3fc7219c4fb6297c:5": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:3fc7219c4fb6297c:6": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:3fc7219c4fb6297c:7": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:3fc7219c4fb6297c:8": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:3fe71c0645a08bdf:1": {
     "category": "a",
@@ -1977,7 +1977,7 @@
   "src/ui/operations.rs:3fe71c0645a08bdf:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:3ff87e519d11d515:1": {
     "category": "a",
@@ -1987,17 +1987,17 @@
   "src/ui/operations.rs:3ff87e519d11d515:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:3ff87e519d11d515:3": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:3ff87e519d11d515:4": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:420a6f8c410ffee5:1": {
     "category": "a",
@@ -2007,7 +2007,7 @@
   "src/ui/operations.rs:420a6f8c410ffee5:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:42204d3800ce3b29:1": {
     "category": "a",
@@ -2017,7 +2017,7 @@
   "src/ui/operations.rs:42204d3800ce3b29:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:438f56e0f9f6230b:1": {
     "category": "a",
@@ -2027,7 +2027,7 @@
   "src/ui/operations.rs:438f56e0f9f6230b:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:467da2df0c93bc50:1": {
     "category": "a",
@@ -2037,7 +2037,7 @@
   "src/ui/operations.rs:467da2df0c93bc50:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:4862d75be34d3cf1:1": {
     "category": "a",
@@ -2047,7 +2047,7 @@
   "src/ui/operations.rs:4862d75be34d3cf1:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:4eee69fe31c36862:1": {
     "category": "a",
@@ -2057,7 +2057,7 @@
   "src/ui/operations.rs:4eee69fe31c36862:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:4ef15c8c112f06f6:1": {
     "category": "a",
@@ -2067,7 +2067,7 @@
   "src/ui/operations.rs:4ef15c8c112f06f6:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:518a6ffa3c126190:1": {
     "category": "a",
@@ -2077,7 +2077,7 @@
   "src/ui/operations.rs:518a6ffa3c126190:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:52898e69a76a2a74:1": {
     "category": "a",
@@ -2087,12 +2087,12 @@
   "src/ui/operations.rs:52898e69a76a2a74:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:56536b1c95c92223:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback (FieldId::Archived / FieldId::Descendants labels in metadata.rs). Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback. Re-reviewed for #296: the enclosing operation builder adds only HistoryWindowArgs.items=false; Japanese label literals, bilingual rendering and command field values are unchanged. Re-reviewed for #303: obsolete summary controls removed and Thread output/target fields replaced. This unchanged Japanese literal remains UI-only; existing Ja/English projection and command values are unchanged. Re-reviewed for the schema45 spill setting change: the only enclosing Form::new delta is the internal ThreadSetArgs initializer spill: None; this legacy form adds no visible field or localized string, and Japanese labels/routing and command values are unchanged. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:5bd32228272813a9:1": {
     "category": "a",
@@ -2102,17 +2102,17 @@
   "src/ui/operations.rs:5bd32228272813a9:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:5bd32228272813a9:3": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:5bd32228272813a9:4": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:5ce83451d9727162:1": {
     "category": "a",
@@ -2122,7 +2122,7 @@
   "src/ui/operations.rs:5ce83451d9727162:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:5ec571d74776c9ee:1": {
     "category": "a",
@@ -2132,17 +2132,17 @@
   "src/ui/operations.rs:5ec571d74776c9ee:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:5ec571d74776c9ee:3": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:5ed29234850df876:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback. Re-reviewed for #296: the enclosing operation builder adds only HistoryWindowArgs.items=false; Japanese label literals, bilingual rendering and command field values are unchanged. Re-reviewed for #303: obsolete summary controls removed and Thread output/target fields replaced. This unchanged Japanese literal remains UI-only; existing Ja/English projection and command values are unchanged. Re-reviewed for the schema45 spill setting change: the only enclosing Form::new delta is the internal ThreadSetArgs initializer spill: None; this legacy form adds no visible field or localized string, and Japanese labels/routing and command values are unchanged. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:6201e742cf268a24:1": {
     "category": "a",
@@ -2152,7 +2152,7 @@
   "src/ui/operations.rs:6201e742cf268a24:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:62c47e8cf86515f2:1": {
     "category": "a",
@@ -2162,7 +2162,7 @@
   "src/ui/operations.rs:62c47e8cf86515f2:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:647167466551298e:1": {
     "category": "a",
@@ -2172,7 +2172,7 @@
   "src/ui/operations.rs:647167466551298e:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:69ba911ca69acf5b:1": {
     "category": "a",
@@ -2182,7 +2182,7 @@
   "src/ui/operations.rs:69ba911ca69acf5b:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:6b64e3751636d02e:1": {
     "category": "a",
@@ -2192,7 +2192,7 @@
   "src/ui/operations.rs:6b64e3751636d02e:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:6b8a86b275545086:1": {
     "category": "a",
@@ -2202,7 +2202,7 @@
   "src/ui/operations.rs:6b8a86b275545086:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:6c6b672abcc787e4:1": {
     "category": "a",
@@ -2212,7 +2212,7 @@
   "src/ui/operations.rs:6c6b672abcc787e4:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:6db0f20b809f67b5:1": {
     "category": "a",
@@ -2222,7 +2222,7 @@
   "src/ui/operations.rs:6db0f20b809f67b5:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:714c3a350162d715:1": {
     "category": "a",
@@ -2232,7 +2232,7 @@
   "src/ui/operations.rs:714c3a350162d715:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:7623e1171cfbf221:1": {
     "category": "a",
@@ -2242,7 +2242,7 @@
   "src/ui/operations.rs:7623e1171cfbf221:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:77c1f34500462ca3:1": {
     "category": "a",
@@ -2252,7 +2252,7 @@
   "src/ui/operations.rs:77c1f34500462ca3:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:78bbaa0ec69fbc39:1": {
     "category": "a",
@@ -2262,12 +2262,12 @@
   "src/ui/operations.rs:78bbaa0ec69fbc39:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:78d79579b3c4f1e2:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback. Re-reviewed for #296: the enclosing operation builder adds only HistoryWindowArgs.items=false; Japanese label literals, bilingual rendering and command field values are unchanged. Re-reviewed for #303: obsolete summary controls removed and Thread output/target fields replaced. This unchanged Japanese literal remains UI-only; existing Ja/English projection and command values are unchanged. Re-reviewed for the schema45 spill setting change: the only enclosing Form::new delta is the internal ThreadSetArgs initializer spill: None; this legacy form adds no visible field or localized string, and Japanese labels/routing and command values are unchanged. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:7e7f8e884af4fe39:1": {
     "category": "a",
@@ -2277,7 +2277,7 @@
   "src/ui/operations.rs:7e7f8e884af4fe39:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:80aab534242d8deb:1": {
     "category": "a",
@@ -2287,7 +2287,7 @@
   "src/ui/operations.rs:80aab534242d8deb:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:83a89ad6efba19d1:1": {
     "category": "a",
@@ -2297,7 +2297,7 @@
   "src/ui/operations.rs:83a89ad6efba19d1:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:848a6e6c4a25eaf1:1": {
     "category": "a",
@@ -2307,7 +2307,7 @@
   "src/ui/operations.rs:848a6e6c4a25eaf1:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:8672d3f7bb7ca9c9:1": {
     "category": "a",
@@ -2317,7 +2317,7 @@
   "src/ui/operations.rs:8672d3f7bb7ca9c9:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:87e017068d1b26e3:1": {
     "category": "a",
@@ -2327,7 +2327,7 @@
   "src/ui/operations.rs:87e017068d1b26e3:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:8bcc510d40a805ff:1": {
     "category": "a",
@@ -2337,7 +2337,7 @@
   "src/ui/operations.rs:8bcc510d40a805ff:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:8e4fe1bb32a3ac70:1": {
     "category": "a",
@@ -2347,12 +2347,12 @@
   "src/ui/operations.rs:8e4fe1bb32a3ac70:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:8ff80490925cfc3b:1": {
     "category": "a",
     "reason": "Reviewed #236 thread rewind: Japanese branch of a paired local!/catalogue En/Ja string; English counterpart is separate; interpolated values opaque. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback. Re-reviewed for #296: the enclosing operation builder adds only HistoryWindowArgs.items=false; Japanese label literals, bilingual rendering and command field values are unchanged. Re-reviewed for #303: obsolete summary controls removed and Thread output/target fields replaced. This unchanged Japanese literal remains UI-only; existing Ja/English projection and command values are unchanged. Re-reviewed for the schema45 spill setting change: the only enclosing Form::new delta is the internal ThreadSetArgs initializer spill: None; this legacy form adds no visible field or localized string, and Japanese labels/routing and command values are unchanged. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:90b3e9ee029cd19b:1": {
     "category": "a",
@@ -2362,7 +2362,7 @@
   "src/ui/operations.rs:90b3e9ee029cd19b:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:90b559183763cb55:1": {
     "category": "a",
@@ -2372,7 +2372,7 @@
   "src/ui/operations.rs:90b559183763cb55:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:92ecdf93e14a9de0:1": {
     "category": "a",
@@ -2382,7 +2382,7 @@
   "src/ui/operations.rs:92ecdf93e14a9de0:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:94897a84832ffe3b:1": {
     "category": "a",
@@ -2392,12 +2392,12 @@
   "src/ui/operations.rs:94897a84832ffe3b:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:94897a84832ffe3b:3": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:9aa71ceffbf6fb2f:1": {
     "category": "a",
@@ -2407,7 +2407,7 @@
   "src/ui/operations.rs:9aa71ceffbf6fb2f:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:9f1f211b4526f034:1": {
     "category": "a",
@@ -2417,12 +2417,12 @@
   "src/ui/operations.rs:9f1f211b4526f034:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:a0a6d7143c6d3cf9:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback. Re-reviewed for #296: the enclosing operation builder adds only HistoryWindowArgs.items=false; Japanese label literals, bilingual rendering and command field values are unchanged. Re-reviewed for #303: obsolete summary controls removed and Thread output/target fields replaced. This unchanged Japanese literal remains UI-only; existing Ja/English projection and command values are unchanged. Re-reviewed for the schema45 spill setting change: the only enclosing Form::new delta is the internal ThreadSetArgs initializer spill: None; this legacy form adds no visible field or localized string, and Japanese labels/routing and command values are unchanged. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:a4cdf9ed33f1b835:1": {
     "category": "a",
@@ -2432,22 +2432,22 @@
   "src/ui/operations.rs:a4cdf9ed33f1b835:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:a4cdf9ed33f1b835:3": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:a4cdf9ed33f1b835:4": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:a4cdf9ed33f1b835:5": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:a62c2328334e53b1:1": {
     "category": "a",
@@ -2457,12 +2457,12 @@
   "src/ui/operations.rs:a62c2328334e53b1:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:a6a08d25e6536c06:1": {
     "category": "a",
     "reason": "Japanese text of the bilingual history.window operation copy, classified like its neighbors Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback. Re-reviewed for #296: the enclosing operation builder adds only HistoryWindowArgs.items=false; Japanese label literals, bilingual rendering and command field values are unchanged. Re-reviewed for #303: obsolete summary controls removed and Thread output/target fields replaced. This unchanged Japanese literal remains UI-only; existing Ja/English projection and command values are unchanged. Re-reviewed for the schema45 spill setting change: the only enclosing Form::new delta is the internal ThreadSetArgs initializer spill: None; this legacy form adds no visible field or localized string, and Japanese labels/routing and command values are unchanged. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:a71af27fe55add77:1": {
     "category": "a",
@@ -2472,7 +2472,7 @@
   "src/ui/operations.rs:a71af27fe55add77:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:ad21d3da778e60e5:1": {
     "category": "a",
@@ -2487,12 +2487,12 @@
   "src/ui/operations.rs:b1accee036e69ade:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:b1accee036e69ade:3": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:b3461cc4ef1e99e7:1": {
     "category": "a",
@@ -2502,7 +2502,7 @@
   "src/ui/operations.rs:b3461cc4ef1e99e7:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:b3711c0f0ee0ac2a:1": {
     "category": "a",
@@ -2512,7 +2512,7 @@
   "src/ui/operations.rs:b3711c0f0ee0ac2a:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:b41693c5e3b3d37f:1": {
     "category": "a",
@@ -2522,7 +2522,7 @@
   "src/ui/operations.rs:b41693c5e3b3d37f:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:b4c1b3d5062b568f:1": {
     "category": "a",
@@ -2532,7 +2532,7 @@
   "src/ui/operations.rs:b4c1b3d5062b568f:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:b5bdb07c97da9845:1": {
     "category": "a",
@@ -2547,7 +2547,7 @@
   "src/ui/operations.rs:b783e6e5958a219a:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:b79385f22361b83b:1": {
     "category": "a",
@@ -2557,7 +2557,7 @@
   "src/ui/operations.rs:b79385f22361b83b:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:b836c49e526602f2:1": {
     "category": "a",
@@ -2567,7 +2567,7 @@
   "src/ui/operations.rs:b836c49e526602f2:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:bd9032bc125a2890:1": {
     "category": "a",
@@ -2577,7 +2577,7 @@
   "src/ui/operations.rs:bd9032bc125a2890:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:c15ec877e4d704a9:1": {
     "category": "a",
@@ -2587,7 +2587,7 @@
   "src/ui/operations.rs:c15ec877e4d704a9:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:c31df2c0f63b9037:1": {
     "category": "a",
@@ -2597,7 +2597,7 @@
   "src/ui/operations.rs:c31df2c0f63b9037:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:c88455f47d5d3b39:1": {
     "category": "a",
@@ -2607,27 +2607,27 @@
   "src/ui/operations.rs:c88455f47d5d3b39:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:c976f6e20e51fd1c:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback. Re-reviewed for #296: the enclosing operation builder adds only HistoryWindowArgs.items=false; Japanese label literals, bilingual rendering and command field values are unchanged. Re-reviewed for #303: obsolete summary controls removed and Thread output/target fields replaced. This unchanged Japanese literal remains UI-only; existing Ja/English projection and command values are unchanged. Re-reviewed for the schema45 spill setting change: the only enclosing Form::new delta is the internal ThreadSetArgs initializer spill: None; this legacy form adds no visible field or localized string, and Japanese labels/routing and command values are unchanged. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:c976f6e20e51fd1c:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback. Re-reviewed for #296: the enclosing operation builder adds only HistoryWindowArgs.items=false; Japanese label literals, bilingual rendering and command field values are unchanged. Re-reviewed for #303: obsolete summary controls removed and Thread output/target fields replaced. This unchanged Japanese literal remains UI-only; existing Ja/English projection and command values are unchanged. Re-reviewed for the schema45 spill setting change: the only enclosing Form::new delta is the internal ThreadSetArgs initializer spill: None; this legacy form adds no visible field or localized string, and Japanese labels/routing and command values are unchanged. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:c976f6e20e51fd1c:3": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback. Re-reviewed for #296: the enclosing operation builder adds only HistoryWindowArgs.items=false; Japanese label literals, bilingual rendering and command field values are unchanged. Re-reviewed for #303: obsolete summary controls removed and Thread output/target fields replaced. This unchanged Japanese literal remains UI-only; existing Ja/English projection and command values are unchanged. Re-reviewed for the schema45 spill setting change: the only enclosing Form::new delta is the internal ThreadSetArgs initializer spill: None; this legacy form adds no visible field or localized string, and Japanese labels/routing and command values are unchanged. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:c976f6e20e51fd1c:4": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback. Re-reviewed for #296: the enclosing operation builder adds only HistoryWindowArgs.items=false; Japanese label literals, bilingual rendering and command field values are unchanged. Re-reviewed for #303: obsolete summary controls removed and Thread output/target fields replaced. This unchanged Japanese literal remains UI-only; existing Ja/English projection and command values are unchanged. Re-reviewed for the schema45 spill setting change: the only enclosing Form::new delta is the internal ThreadSetArgs initializer spill: None; this legacy form adds no visible field or localized string, and Japanese labels/routing and command values are unchanged. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:ca405fd0acebed63:1": {
     "category": "a",
@@ -2637,7 +2637,7 @@
   "src/ui/operations.rs:ca405fd0acebed63:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:cc424470d0e69488:1": {
     "category": "a",
@@ -2647,12 +2647,12 @@
   "src/ui/operations.rs:cc424470d0e69488:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:cca576f2f955fcb1:1": {
     "category": "a",
     "reason": "Japanese text of the bilingual history.window operation copy, classified like its neighbors Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback. Re-reviewed for #296: the enclosing operation builder adds only HistoryWindowArgs.items=false; Japanese label literals, bilingual rendering and command field values are unchanged. Re-reviewed for #303: obsolete summary controls removed and Thread output/target fields replaced. This unchanged Japanese literal remains UI-only; existing Ja/English projection and command values are unchanged. Re-reviewed for the schema45 spill setting change: the only enclosing Form::new delta is the internal ThreadSetArgs initializer spill: None; this legacy form adds no visible field or localized string, and Japanese labels/routing and command values are unchanged. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:d0d847b052ac3b50:1": {
     "category": "a",
@@ -2662,12 +2662,12 @@
   "src/ui/operations.rs:d0d847b052ac3b50:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:d64458c280168e4b:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback. Re-reviewed for #296: the enclosing operation builder adds only HistoryWindowArgs.items=false; Japanese label literals, bilingual rendering and command field values are unchanged. Re-reviewed for #303: obsolete summary controls removed and Thread output/target fields replaced. This unchanged Japanese literal remains UI-only; existing Ja/English projection and command values are unchanged. Re-reviewed for the schema45 spill setting change: the only enclosing Form::new delta is the internal ThreadSetArgs initializer spill: None; this legacy form adds no visible field or localized string, and Japanese labels/routing and command values are unchanged. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:d71c4bafc5bb91e9:1": {
     "category": "a",
@@ -2677,12 +2677,12 @@
   "src/ui/operations.rs:d71c4bafc5bb91e9:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:d948f8c126dca97a:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback. Re-reviewed for #296: the enclosing operation builder adds only HistoryWindowArgs.items=false; Japanese label literals, bilingual rendering and command field values are unchanged. Re-reviewed for #303: obsolete summary controls removed and Thread output/target fields replaced. This unchanged Japanese literal remains UI-only; existing Ja/English projection and command values are unchanged. Re-reviewed for the schema45 spill setting change: the only enclosing Form::new delta is the internal ThreadSetArgs initializer spill: None; this legacy form adds no visible field or localized string, and Japanese labels/routing and command values are unchanged. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:dbdc5bc7bc50568f:1": {
     "category": "a",
@@ -2692,7 +2692,7 @@
   "src/ui/operations.rs:dbdc5bc7bc50568f:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:de9ac2554289ad16:1": {
     "category": "a",
@@ -2702,12 +2702,12 @@
   "src/ui/operations.rs:de9ac2554289ad16:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:de9ac2554289ad16:3": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:e136c67b45b46c29:1": {
     "category": "a",
@@ -2717,7 +2717,7 @@
   "src/ui/operations.rs:e136c67b45b46c29:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:e5c29ad48e3b7b62:1": {
     "category": "a",
@@ -2727,7 +2727,7 @@
   "src/ui/operations.rs:e5c29ad48e3b7b62:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:e71ad616b568f81d:1": {
     "category": "a",
@@ -2737,7 +2737,7 @@
   "src/ui/operations.rs:e71ad616b568f81d:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:f2872a7fcec2f195:1": {
     "category": "a",
@@ -2747,7 +2747,7 @@
   "src/ui/operations.rs:f2872a7fcec2f195:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:f2d90a0be0cb1b6e:1": {
     "category": "a",
@@ -2757,7 +2757,7 @@
   "src/ui/operations.rs:f2d90a0be0cb1b6e:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:f4ef0893dd833538:1": {
     "category": "a",
@@ -2767,12 +2767,12 @@
   "src/ui/operations.rs:f4ef0893dd833538:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:f5b2fdf157ed7003:1": {
     "category": "a",
     "reason": "Japanese-only TUI caption for the optional ThreadRewind recovery Run field. Ja keeps the explicit form caption; English maps the run field to FieldId::RecoveryRun and uses its English metadata label. The wire selector is recovery_run_id and has no inferred default. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:f60497f9a47573ac:1": {
     "category": "a",
@@ -2782,7 +2782,7 @@
   "src/ui/operations.rs:f60497f9a47573ac:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:fa1a79578fac9214:1": {
     "category": "a",
@@ -2792,17 +2792,17 @@
   "src/ui/operations.rs:fa1a79578fac9214:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:fa1a79578fac9214:3": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:fa1a79578fac9214:4": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values. Re-reviewed for #327: AttachmentList form construction now supplies default pagination args; the literal remains UI-only with unchanged language projection. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/presentation/time_text.rs:2721e3380759d54f:1": {
     "category": "a",
@@ -6282,7 +6282,7 @@
   "src/ui/operations/client_forms.rs:b24da370241aa208:1": {
     "category": "a",
     "reason": "Japanese source label for FieldId::ExecResult; metadata::field_label_for selects the English Result mode label in English UI. CLI field name/value is preserved.",
-    "source_tokens_sha256": "b9b99618a7b11f4e9a3e8cadf6d0cd7847504711d515d72bcf046a9b558ebd0b"
+    "source_tokens_sha256": "0df35c5cb26c2c42048915063ee359afaac6ce257b06433302fb52e398ed9313"
   },
   "src/ui/presentation.rs:ad4a1d6eef0954dc:1": {
     "category": "a",
@@ -7150,7 +7150,7 @@
   "src/ui/operations.rs:04b494200a186966:1": {
     "category": "a",
     "reason": "Thread list form label rendered through the same-ID ThreadListOrder bilingual projection; not model input. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/operations.rs:d7e64583a5e5af46:1": {
     "category": "a",
@@ -7220,27 +7220,27 @@
   "src/ui/operations.rs:4a68c5feeaaac4fd:1": {
     "category": "a",
     "reason": "Japanese operation catalogue or Japanese UI form label paired with English. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:8a085a739fb552e5:2": {
     "category": "a",
     "reason": "Japanese operation catalogue or Japanese UI form label paired with English. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:d8d5c51bfed13ae8:1": {
     "category": "a",
     "reason": "Japanese operation catalogue or Japanese UI form label paired with English. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:b8fe59d2c7af05e3:1": {
     "category": "a",
     "reason": "Japanese operation catalogue or Japanese UI form label paired with English. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:bb9bfcc22799d939:1": {
     "category": "a",
     "reason": "Japanese operation catalogue or Japanese UI form label paired with English. Re-reviewed for #311: Thread Get constructs typed default-read arguments in the same form match; label literals and bilingual rendering are unchanged.",
-    "source_tokens_sha256": "93865d92ba7d5971b4bc5389723250849842e0591938dd0fca4f674dbb5def93"
+    "source_tokens_sha256": "65a958fc06b261beb8024388f25e0976bac3138c99ff38e7f046fdf7ec0a0bcb"
   },
   "src/ui/operations.rs:c88455f47d5d3b39:3": {
     "category": "a",

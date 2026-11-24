@@ -530,7 +530,7 @@ impl BrowserMessage<'_> {
                 "Conversation ID: {}\nTitle: {title}\nWorking folder: {}\nParent conversation: {}\nState: {phase}\nNative state: {}\nLatest Run stop reason: {}\nUpdated: {}{}\n\n{excerpt}{page}\n\n{controls}\nType / Backspace to filter.",
                 thread.thread_id,
                 thread.cwd,
-                thread.parent_id.as_deref().unwrap_or("root"),
+                thread.parent_thread_id.as_deref().unwrap_or("root"),
                 thread.state,
                 thread.latest_run_stop_reason.as_deref().unwrap_or("none"),
                 thread.updated_at,
@@ -554,7 +554,7 @@ impl BrowserMessage<'_> {
                 "会話ID: {}\nタイトル: {title}\n作業フォルダー: {}\n親の会話: {}\n状態: {phase}\nNative state: {}\nLatest Run stop reason: {}\n更新日時: {}{}\n\n{excerpt}{page}\n\n{controls}文字入力/Backspaceは絞り込みです。",
                 thread.thread_id,
                 thread.cwd,
-                thread.parent_id.as_deref().unwrap_or("root"),
+                thread.parent_thread_id.as_deref().unwrap_or("root"),
                 thread.state,
                 thread.latest_run_stop_reason.as_deref().unwrap_or("none"),
                 thread.updated_at,
@@ -584,7 +584,7 @@ impl BrowserMessage<'_> {
                     .unwrap_or_default(),
                 one_line(&thread.thread_id),
                 thread
-                    .parent_id
+                    .parent_thread_id
                     .as_deref()
                     .map(one_line)
                     .unwrap_or_else(|| "none".into()),
@@ -624,7 +624,7 @@ impl BrowserMessage<'_> {
                     .unwrap_or_default(),
                 one_line(&thread.thread_id),
                 thread
-                    .parent_id
+                    .parent_thread_id
                     .as_deref()
                     .map(one_line)
                     .unwrap_or_else(|| "なし".into()),
@@ -1401,7 +1401,7 @@ impl ThreadBrowser {
                 self.items
                     .iter()
                     .find(|row| &row.thread_id == id)
-                    .and_then(|row| row.parent_id.clone())
+                    .and_then(|row| row.parent_thread_id.clone())
             })
             .collect::<BTreeSet<_>>()
             .into_iter()
@@ -2158,7 +2158,7 @@ impl ThreadBrowser {
                     && let Some(thread) = self.items.get(self.selected)
                     && let Some(child) = self.items.iter().position(|t| {
                         t.thread_id != thread.thread_id
-                            && t.parent_id.as_deref() == Some(&thread.thread_id)
+                            && t.parent_thread_id.as_deref() == Some(&thread.thread_id)
                     })
                 {
                     self.selected = child;
@@ -2301,7 +2301,7 @@ impl ThreadBrowser {
         let mut roots = Vec::new();
         for (index, thread) in threads.iter().enumerate() {
             if let Some(parent) = thread
-                .parent_id
+                .parent_thread_id
                 .as_deref()
                 .and_then(|id| ids.get(id))
                 .copied()
@@ -2347,7 +2347,7 @@ impl ThreadBrowser {
                     depth,
                     last,
                     missing_parent: thread
-                        .parent_id
+                        .parent_thread_id
                         .as_deref()
                         .is_some_and(|id| !ids.contains_key(id)),
                     cycle,
@@ -2399,7 +2399,7 @@ impl ThreadBrowser {
 
     fn parent_index(&self, index: usize) -> Option<usize> {
         let threads = &self.items;
-        let parent = threads.get(index)?.parent_id.as_deref()?;
+        let parent = threads.get(index)?.parent_thread_id.as_deref()?;
         self.tree()
             .ids
             .get(parent)
@@ -2414,7 +2414,7 @@ impl ThreadBrowser {
         };
         if !threads
             .iter()
-            .any(|child| child.parent_id.as_deref() == Some(thread.thread_id.as_str()))
+            .any(|child| child.parent_thread_id.as_deref() == Some(thread.thread_id.as_str()))
         {
             return false;
         }
@@ -3551,7 +3551,7 @@ mod tests {
             latest_run_stop_reason: None,
             revisit: None,
             thread_id: id.into(),
-            parent_id: parent.map(Into::into),
+            parent_thread_id: parent.map(Into::into),
             title: format!("会話 {id}"),
             cwd: format!("/workspace/{id}"),
             state: "running".into(),
@@ -4487,7 +4487,7 @@ mod tests {
             thread_id: "blank-title".into(),
             title: String::new(),
             cwd: "/synthetic".into(),
-            parent_id: None,
+            parent_thread_id: None,
             state: "idle".into(),
             updated_at: String::new(),
             created_at: None,
@@ -4740,7 +4740,7 @@ mod patch_tests {
             thread_id: id.into(),
             title: title.into(),
             cwd: "/synthetic".into(),
-            parent_id: None,
+            parent_thread_id: None,
             state: "idle".into(),
             activity: crate::activity::ActivityPhase::Idle,
             latest_run_stop_reason: None,
@@ -4923,7 +4923,7 @@ mod patch_tests {
     fn patches_preserve_collapse_and_selected_excerpt_distinguishes_stale_error_and_empty() {
         let parent = row("parent", "parent", "2026-01-01");
         let mut child = row("child", "child", "2026-01-01");
-        child.parent_id = Some("parent".into());
+        child.parent_thread_id = Some("parent".into());
         let mut browser = initial(vec![parent, child, row("chosen", "chosen", "2026-01-01")]);
         browser.collapsed.insert("parent".into());
         browser.invalidate_tree();
@@ -5479,7 +5479,7 @@ mod archive_tests {
             thread_id: id.into(),
             title: format!("title {id}"),
             cwd: "/synthetic".into(),
-            parent_id: None,
+            parent_thread_id: None,
             state: "idle".into(),
             activity: crate::activity::ActivityPhase::Idle,
             latest_run_stop_reason: None,
@@ -5884,7 +5884,7 @@ mod watch_integration_tests {
             thread_id: id.into(),
             title: format!("task {id}"),
             cwd: "/synthetic".into(),
-            parent_id: Some("parent".into()),
+            parent_thread_id: Some("parent".into()),
             state: "live".into(),
             activity: phase,
             latest_run_stop_reason: None,
@@ -6617,7 +6617,7 @@ mod language_tests {
             thread_id: id.into(),
             title: format!("Task {id}"),
             cwd: "/synthetic".into(),
-            parent_id: None,
+            parent_thread_id: None,
             state: "saved_native_state".into(),
             activity: phase,
             latest_run_stop_reason: None,

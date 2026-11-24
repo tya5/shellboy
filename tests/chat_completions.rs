@@ -395,7 +395,7 @@ async fn core_retries_tools_context_reduction_and_saved_cache_usage_are_shared()
         let owner=DataOwner::start(Some(config),Some(root.path().join("data")),root.path().into()).await.unwrap();
         let control=Control::new(&owner,root.path().into());control.start().await.unwrap();
         let req=|command|Request::new(format!("{}:{}",owner.instance_id,uuid::Uuid::new_v4()),command);
-        let created=control.request(req(Command::ThreadCreate(ThreadCreateArgs{agents:None,connection:None,cwd:None,model:None,effort:None,parent_id:None}))).await;
+        let created=control.request(req(Command::ThreadCreate(ThreadCreateArgs{agents:None,connection:None,cwd:None,model:None,effort:None,parent_thread_id:None}))).await;
         assert!(created.ok,"{created:?}");let thread=created.result.unwrap()["thread_id"].as_str().unwrap().to_owned();
         let expected_thread=thread.clone();
         let server=tokio::spawn(async move {

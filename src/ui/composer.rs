@@ -967,7 +967,7 @@ mod contract_tests {
                     connection: None,
                     model: None,
                     effort: None,
-                    parent_id: None,
+                    parent_thread_id: None,
                 }))
                 .as_slice(),
             [UiAction::SelectAgents { .. }]
@@ -1108,7 +1108,7 @@ mod contract_tests {
                 connection: None,
                 model: None,
                 effort: None,
-                parent_id: None,
+                parent_thread_id: None,
             }))
             .remove(0);
         ui.action_rejected(&action);
