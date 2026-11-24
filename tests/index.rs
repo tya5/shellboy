@@ -682,7 +682,7 @@ async fn raw_gc_keeps_canonical_quote_and_attachment_vectors_including_legacy_wi
         f._temp.path().to_owned(),
         attachments,
     );
-    f.db.call(|db| { db.execute_batch("CREATE TRIGGER reject_raw_delete BEFORE DELETE ON embedding_job WHEN OLD.body_kind='tool_raw' BEGIN SELECT RAISE(ABORT,'fixture raw deletion failure'); END;")?; Ok(()) }).await.unwrap();
+    f.db.call(|db| { db.execute_batch("CREATE TRIGGER reject_raw_marker BEFORE INSERT ON app_meta WHEN NEW.key='raw_tombstone.execution' BEGIN SELECT RAISE(ABORT,'fixture raw deletion failure'); END;")?; Ok(()) }).await.unwrap();
     assert!(
         gc.collect(StorageCategory::Raw, chrono::Utc::now())
             .await
@@ -711,10 +711,10 @@ async fn raw_gc_keeps_canonical_quote_and_attachment_vectors_including_legacy_wi
     assert_eq!(
         unchanged,
         (6, 0, 0),
-        "vector deletion, marker and generation must roll back together"
+        "a failed expiry marker must roll back the generation and preserve saved vectors"
     );
     f.db.call(|db| {
-        db.execute_batch("DROP TRIGGER reject_raw_delete")?;
+        db.execute_batch("DROP TRIGGER reject_raw_marker")?;
         Ok(())
     })
     .await
@@ -747,8 +747,8 @@ async fn raw_gc_keeps_canonical_quote_and_attachment_vectors_including_legacy_wi
         .unwrap();
     assert_eq!(
         counts,
-        (0, 4, 0),
-        "raw retention must preserve both canonical bodies"
+        (0, 6, 2),
+        "raw retention must preserve canonical and raw vector records"
     );
     let after =
         f.db.call(|db| {
@@ -871,7 +871,7 @@ async fn encoding_change_preserves_canonical_quote_without_reembedding() {
     let reader =
         shellboy::control::output::ShellOutputReader::new(f.db.clone(), "canonical-encoding");
     reader.read(encoding_read("cp932")).await.unwrap();
-    assert_eq!(derived_counts(&f.db).await, (1, 1, 1));
+    assert_eq!(derived_counts(&f.db).await, (2, 2, 2));
     assert_eq!(f.proxy.count(), before);
     let hits = f.service.search_detailed("cat", 10).await.unwrap();
     assert_eq!(hits.len(), 1);
@@ -1526,7 +1526,14 @@ async fn decoding_change_atomically_invalidates_all_spaces_without_touching_raw_
     .unwrap();
     let output = reader.read(encoding_read("cp932")).await.unwrap();
     assert_eq!(output.text, "cat ASCII output");
-    assert_eq!(derived_counts(&f.db).await, (0, 0, 0));
+    assert_eq!(derived_counts(&f.db).await, (2, 2, 2));
+    assert!(
+        f.service
+            .search_detailed("cat", 10)
+            .await
+            .unwrap()
+            .is_empty()
+    );
     f.db.call(|db| {
         let raw: Vec<u8> = db.query_row(
             "SELECT bytes FROM output_chunk WHERE execution_id='execution'",
@@ -1556,10 +1563,10 @@ async fn decoding_change_atomically_invalidates_all_spaces_without_touching_raw_
     let added = f.service.enqueue_tool_raw("raw-node").await.unwrap();
     assert_eq!(added.segments, 1);
     f.drain().await;
-    assert_eq!(derived_counts(&f.db).await, (1, 1, 1));
+    assert_eq!(derived_counts(&f.db).await, (3, 3, 3));
     assert_eq!(f.proxy.count(), 3);
     reader.read(encoding_read("Shift_JIS")).await.unwrap();
-    assert_eq!(derived_counts(&f.db).await, (1, 1, 1));
+    assert_eq!(derived_counts(&f.db).await, (3, 3, 3));
     f.close().await;
 }
 #[tokio::test]

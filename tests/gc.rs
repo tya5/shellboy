@@ -380,10 +380,10 @@ async fn root_revision_change_revalidates_before_destructive_batch() {
 }
 
 #[tokio::test]
-async fn real_vectors_and_node_tombstone_roll_back_together_and_duplicate_payload_is_cleared() {
+async fn tombstoning_clears_duplicate_payload_but_keeps_paid_vectors() {
     let f = Fixture::new(Config::default()).await;
     f.node("dead", None).await;
-    f.db.call(|db|{db.execute_batch("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='turn'),'attempt','turn',0,0,'p','m',0,'completed','{}','now'); INSERT INTO output_item VALUES('attempt',0,NULL,'message',NULL,'completed','{\"secret\":\"duplicate\"}','dead'); CREATE VIRTUAL TABLE shellboy_vec_00000000000000000000000000000000 USING vec0(embedding float[2]); INSERT INTO index_space(id,profile_id,model_id,dimension,splitter_version,state,vec_table_name) VALUES('space','p','m',2,'1','inactive','shellboy_vec_00000000000000000000000000000000'); INSERT INTO shellboy_vec_00000000000000000000000000000000(rowid,embedding)VALUES(1,'[1,2]'); INSERT INTO embedding_job(id,space_id,source_node_id,source_revision,body_kind,source_hash,span_start,span_end,state)VALUES('embed','space','dead',0,'text','hash',0,2,'completed'); INSERT INTO embedding_chunk VALUES('chunk','embed','space','dead',0,0,2,'hash',1); CREATE TRIGGER fail_node BEFORE UPDATE OF payload_json ON node WHEN NEW.payload_json IS NULL BEGIN SELECT RAISE(ABORT,'injected'); END;")?;Ok(())}).await.unwrap();
+    f.db.call(|db|{db.execute_batch("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='turn'),'attempt','turn',0,0,'p','m',0,'completed','{}','now'); INSERT INTO output_item VALUES('attempt',0,NULL,'message',NULL,'completed','{\"secret\":\"duplicate\"}','dead'); CREATE VIRTUAL TABLE shellboy_vec_00000000000000000000000000000000 USING vec0(embedding float[2]); INSERT INTO index_space(id,profile_id,model_id,dimension,splitter_version,state,vec_table_name) VALUES('space','p','m',2,'1','inactive','shellboy_vec_00000000000000000000000000000000'); INSERT INTO shellboy_vec_00000000000000000000000000000000(rowid,embedding)VALUES(1,'[1,2]'); INSERT INTO embedding_job(id,space_id,source_node_id,source_revision,body_kind,source_hash,span_start,span_end,state)VALUES('embed','space','dead',0,'text','hash',0,2,'done'); INSERT INTO embedding_chunk VALUES('chunk','embed','space','dead',0,0,2,'hash',1); CREATE TRIGGER fail_node BEFORE UPDATE OF payload_json ON node WHEN NEW.payload_json IS NULL BEGIN SELECT RAISE(ABORT,'injected'); END;")?;Ok(())}).await.unwrap();
     f.job().await;
     assert!(collect_history(&f.gc, now()).await.is_err());
     f.db.call(|db| {
@@ -420,9 +420,9 @@ async fn real_vectors_and_node_tombstone_roll_back_together_and_duplicate_payloa
                 db,
                 "SELECT COUNT(*) FROM shellboy_vec_00000000000000000000000000000000"
             )?,
-            0
+            1
         );
-        assert_eq!(scalar(db, "SELECT COUNT(*) FROM embedding_chunk")?, 0);
+        assert_eq!(scalar(db, "SELECT COUNT(*) FROM embedding_chunk")?, 1);
         assert_eq!(
             scalar(db, "SELECT payload_revision FROM node WHERE id='dead'")?,
             1
