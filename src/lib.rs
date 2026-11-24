@@ -97,4 +97,4 @@ pub mod width_cache;
 pub(crate) mod stdin_facts;
 
 #[cfg(test)]
-mod stdin_compat;
+mod stdin_contract;
