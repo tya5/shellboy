@@ -499,7 +499,7 @@ fn targets_deleted(
         | UiAction::LoadHistory { thread_id, .. }
         | UiAction::SaveDraft { thread_id, .. }
         | UiAction::Cancel { thread_id }
-        | UiAction::Background { thread_id } => threads.contains(thread_id),
+        | UiAction::Background { thread_id, .. } => threads.contains(thread_id),
         UiAction::RebaseStream(request) => threads.contains(&request.thread_id),
         UiAction::ThreadDeletion { args, .. } => threads.contains(&args.thread_id),
         _ => false,

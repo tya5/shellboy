@@ -113,3 +113,13 @@ For mixed modules, each range is the full pinned file under review (including re
 | `src/frontend/watch_read.rs:1-764` (764 lines) | 2 | Rewritten, not deleted. Replace exact-ID watch queries. |
 
 The final source check is structural: no owner initialization, listener, supervisor handle, direct owner shutdown, DB reader, or raw executor subscription in the TUI call graph. The explicit Core management command is a protocol client, not a local teardown path. The user-visible proof is a terminal disappearing while its owner and accepted work stay reachable, then a new terminal attaching to that same instance.
+
+### Embedded intervention migration (Unit 4)
+
+Ctrl+B and `/background` use only the most recent foreground execution in the
+current conversation projection. No observed execution means no mutation.
+Esc uses the displayed active Turn ID. These IDs go through the selected
+listener as receipt-backed `shell.background` and `turn.interrupt` commands.
+Neither a stale refusal nor a lost reply is retried against another identity.
+The typed acknowledgment is not completion; saved readback still determines
+what happened to the shell or Turn.

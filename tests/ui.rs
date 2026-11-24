@@ -378,7 +378,10 @@ fn configurable_keys_and_interrupt_background_quit_are_explicit_actions() {
         KeyCode::Char('b'),
         KeyModifiers::CONTROL,
     )));
-    assert!(matches!(actions[0], UiAction::Background { .. }));
+    assert!(
+        actions.is_empty(),
+        "no exact foreground execution has been observed"
+    );
     let actions = ui.event(Event::Key(KeyEvent::new(
         KeyCode::Char('q'),
         KeyModifiers::CONTROL,
