@@ -824,10 +824,13 @@ pub(super) fn draw(
                 .map(|i| format!("{} [{}] ", glyphs::arrow(), i + 1))
                 .unwrap_or_default()
         );
-        let metadata = format!(
-            "{}{elapsed}{deadline}{age}",
+        let state = if matches!(row.target, LiveWorkTarget::Wait { .. }) && row.wait_info.is_some()
+        {
+            super::i18n::local!(view.language, "結果待ち", "Waiting for result").to_owned()
+        } else {
             WorkMessage::state(row).render(view.language)
-        );
+        };
+        let metadata = format!("{state}{elapsed}{deadline}{age}");
         lines.push(
             super::region::RegionRow {
                 prefix,
@@ -1614,7 +1617,7 @@ mod tests {
         assert!(text.contains("◉ 抱えている作業"), "{text}");
         assert!(text.contains("[1] $") && text.contains("> [1]"), "{text}");
         assert!(
-            text.contains("期限目安") && text.contains("待機中"),
+            text.contains("期限目安") && text.contains("結果待ち"),
             "{text}"
         );
     }
@@ -2158,6 +2161,14 @@ mod tests {
                     assert!(rows[2].starts_with(&format!("{first}[1]")), "{rows:?}");
                     assert!(rows[3].starts_with(&format!("{first}[2]")), "{rows:?}");
                     assert!(rows[4].starts_with(&format!("{last}[3]")), "{rows:?}");
+                    let (running, waiting) = match language {
+                        UiLanguage::Ja => ("実行中", "結果待ち"),
+                        UiLanguage::En => ("Running", "Waiting for result"),
+                    };
+                    assert!(
+                        rows[2].contains(running) && rows[4].contains(waiting),
+                        "{rows:?}"
+                    );
                     assert!(rows[2].contains("[1] $"), "{rows:?}");
                     assert!(buffer[(0, 2)].modifier.contains(
                         ratatui::style::Modifier::REVERSED | ratatui::style::Modifier::BOLD

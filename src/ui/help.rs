@@ -582,6 +582,10 @@ impl Page {
         );
         page.note(local!(config.ui.language, "Escで入力へ戻ります。見出しには最古の作業と最後の出力の経過を表示し、折りたたみ中も残ります。画面が低く区画がない場合は状態欄に表示します。回答後も残る作業は保存時刻が基準です。抜粋を開いても実行・停止しません。", "Esc returns to input. The heading shows the oldest work and last output ages even when folded; when the screen is too short for the section, the status bar shows them instead. Work that remains after an answer uses saved timestamps. Opening an excerpt does not execute or stop work."));
 
+        page.note(local!(config.ui.language,
+            "◉ は区画、⁂ は通知、$ はシェル、↳ は参照先。⋯ は省略や待機の印です。状態は文字で確認し、枝の線は並びだけを示します。",
+            "◉ marks a section, ⁂ a notice, $ a shell, and ↳ a reference. ⋯ marks waiting or omitted detail. Read the state text; tree lines only show position."));
+
         page.section(local!(
             config.ui.language,
             "内容・処理状況を調べる",
