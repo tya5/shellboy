@@ -168,8 +168,8 @@ or pruned source, or tombstone refuses copy; the client never copies an excerpt
 or a successfully read prefix instead. Requests use at most 64 KiB per page;
 the client retains at most 64 pages, 1 MiB for a code-block search (128 blocks),
 and 64 KiB for plain copy or clipboard output. No automatic history scan is
-performed. Optional provenance can be omitted under the existing frame budget;
-canonical body text must not be omitted silently.
+performed. The response includes typed provenance. Canonical body text must not be
+omitted silently.
 
 An explicit body inspection uses the same owner read, but obtains only the
 requested page (one node, at most 64 KiB of text and the native frame limit).

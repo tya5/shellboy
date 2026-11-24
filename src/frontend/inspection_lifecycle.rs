@@ -837,6 +837,7 @@ mod tests {
                     .unwrap();
                 let actual = super::super::management_request(
                     &control,
+                    &owner.loaded.data_dir,
                     command,
                     tokio_util::sync::CancellationToken::new(),
                 )

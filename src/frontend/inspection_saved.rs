@@ -749,6 +749,7 @@ mod tests {
                     values.push(
                         super::super::management_request(
                             &control,
+                            &owner.loaded.data_dir,
                             command,
                             tokio_util::sync::CancellationToken::new(),
                         )
@@ -768,6 +769,7 @@ mod tests {
                 );
                 let storage = super::super::management_request(
                     &control,
+                    &owner.loaded.data_dir,
                     Command::StorageStatus(crate::protocol::StorageArgs { category: None }),
                     tokio_util::sync::CancellationToken::new(),
                 )
@@ -775,6 +777,7 @@ mod tests {
                 .unwrap();
                 let deletion = super::super::management_request(
                     &control,
+                    &owner.loaded.data_dir,
                     Command::ThreadDeletePreview(crate::protocol::ThreadDeleteArgs {
                         preview_marker: None,
                         thread_id: "target".into(),
@@ -786,6 +789,7 @@ mod tests {
                 .unwrap();
                 let index = super::super::management_request(
                     &control,
+                    &owner.loaded.data_dir,
                     Command::IndexStatus(crate::protocol::IndexArgs::default()),
                     tokio_util::sync::CancellationToken::new(),
                 )

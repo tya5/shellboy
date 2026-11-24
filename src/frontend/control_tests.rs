@@ -1809,6 +1809,7 @@ async fn slow_usage_trigger_and_scope_follow_existing_owner_request_workers_with
         std::time::Duration::from_millis(100),
         super::management_request(
             &control,
+            &owner.loaded.data_dir,
             command.clone(),
             tokio_util::sync::CancellationToken::new(),
         ),
@@ -1819,6 +1820,7 @@ async fn slow_usage_trigger_and_scope_follow_existing_owner_request_workers_with
         std::time::Duration::from_millis(100),
         super::management_request_trigger(
             &control,
+            &owner.loaded.data_dir,
             command.clone(),
             tokio_util::sync::CancellationToken::new(),
             UsageTrigger::Changed,
@@ -1831,6 +1833,7 @@ async fn slow_usage_trigger_and_scope_follow_existing_owner_request_workers_with
             std::time::Duration::from_micros(99_999),
             super::management_request_trigger(
                 &control,
+                &owner.loaded.data_dir,
                 command.clone(),
                 tokio_util::sync::CancellationToken::new(),
                 UsageTrigger::Changed,
@@ -1901,6 +1904,7 @@ async fn ordinary_thread_selection_reads_only_lightweight_metadata_and_detail_op
         std::time::Duration::from_millis(100),
         super::management_request(
             &control,
+            &owner.loaded.data_dir,
             Command::UsageGet(UsageGetArgs {
                 thread_id: Some("thread".into()),
                 ..Default::default()
@@ -1945,7 +1949,7 @@ async fn canonical_code_choices_read_past_a_page_but_never_copy_a_prefix_or_chan
         tx.commit()?;
         Ok(())
     }).await.unwrap();
-    let offer = super::copying::choices(&control, "copy-long".into())
+    let offer = super::copying::choices(&control, &owner.loaded.data_dir, "copy-long".into())
         .await
         .unwrap();
     assert_eq!(offer.blocks.len(), 1);
@@ -1953,6 +1957,7 @@ async fn canonical_code_choices_read_past_a_page_but_never_copy_a_prefix_or_chan
     assert_eq!(
         super::copying::text(
             &control,
+            &owner.loaded.data_dir,
             "copy-long".into(),
             Some(0),
             Some(offer.source_hash.clone())
@@ -1962,35 +1967,59 @@ async fn canonical_code_choices_read_past_a_page_but_never_copy_a_prefix_or_chan
         code
     );
     assert_eq!(
-        super::copying::text(&control, "copy-long".into(), None, None)
-            .await
-            .unwrap_err()
-            .code,
+        super::copying::text(
+            &control,
+            &owner.loaded.data_dir,
+            "copy-long".into(),
+            None,
+            None
+        )
+        .await
+        .unwrap_err()
+        .code,
         ErrorCode::InputLimit
     );
     assert_eq!(
-        super::copying::text(&control, "copy-long".into(), Some(8), None)
-            .await
-            .unwrap_err()
-            .code,
+        super::copying::text(
+            &control,
+            &owner.loaded.data_dir,
+            "copy-long".into(),
+            Some(8),
+            None
+        )
+        .await
+        .unwrap_err()
+        .code,
         ErrorCode::InvalidArgument
     );
     assert_eq!(
-        super::copying::text(&control, "copy-long".into(), Some(128), None)
-            .await
-            .unwrap_err()
-            .code,
+        super::copying::text(
+            &control,
+            &owner.loaded.data_dir,
+            "copy-long".into(),
+            Some(128),
+            None
+        )
+        .await
+        .unwrap_err()
+        .code,
         ErrorCode::InputLimit
     );
     assert_eq!(
-        super::copying::text(&control, "copy-large-block".into(), Some(0), None)
-            .await
-            .unwrap_err()
-            .code,
+        super::copying::text(
+            &control,
+            &owner.loaded.data_dir,
+            "copy-large-block".into(),
+            Some(0),
+            None
+        )
+        .await
+        .unwrap_err()
+        .code,
         ErrorCode::InputLimit
     );
     assert_eq!(
-        super::copying::choices(&control, "copy-too-large".into())
+        super::copying::choices(&control, &owner.loaded.data_dir, "copy-too-large".into())
             .await
             .unwrap_err()
             .code,
@@ -2011,6 +2040,7 @@ async fn canonical_code_choices_read_past_a_page_but_never_copy_a_prefix_or_chan
     assert_eq!(
         super::copying::text(
             &control,
+            &owner.loaded.data_dir,
             "copy-long".into(),
             Some(0),
             Some(offer.source_hash)
