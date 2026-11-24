@@ -4263,7 +4263,10 @@ mod tests {
                 let event = events.recv().await.unwrap();
                 assert_eq!(event["event"], "ready");
                 assert_eq!(event["instance_id"], instance);
-                assert_eq!(event["data_dir"], serde_json::json!(data));
+                let reported_data = std::path::Path::new(event["data_dir"].as_str().unwrap());
+                assert!(reported_data.is_absolute());
+                // Owner startup resolves Windows paths to their verbatim form.
+                assert_eq!(reported_data.canonicalize().unwrap(), data.canonicalize().unwrap());
                 (instance, events, serve)
             }
             let (instance, mut events, serve) = start(&data, "wire-thread", "Independent owner thread").await;
