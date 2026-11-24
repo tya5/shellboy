@@ -250,30 +250,6 @@ async fn failed_attempt_retires_keepalive_pool_and_retry_uses_fresh_generation()
 }
 
 #[tokio::test]
-async fn connection_refused_is_before_body_source_and_not_a_partial_upload() {
-    let socket = tokio::net::TcpSocket::new_v4().unwrap();
-    socket.bind("127.0.0.1:0".parse().unwrap()).unwrap();
-    let client = client(socket.local_addr().unwrap(), 1000, 1000);
-    for _ in 0..3 {
-        let failure = crate::test_watchdog::watchdog("tests/http_observation.rs: connection_refused_is_before_body_source_and_not_a_partial_upload",
-            client.response(request(), CancellationToken::new(), None),
-        )
-        .await
-        .unwrap()
-        .unwrap_err();
-        let observed = failure.error.http_observation.as_deref().unwrap();
-        assert_eq!(observed.phase, HttpPhase::BeforeBodySource);
-        assert_eq!(observed.body_source_bytes_consumed, 0);
-        assert!(!observed.is_known_upload_incomplete());
-        assert!(
-            failure
-                .error
-                .message
-                .contains("no partial upload was observed")
-        );
-    }
-}
-#[tokio::test]
 async fn completed_unauthorized_response_does_not_retire_a_reusable_pool() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let client = client(listener.local_addr().unwrap(), 2000, 2000);

@@ -852,32 +852,75 @@ async fn a_saved_connection_is_tested_with_one_catalog_request_and_facts_only() 
 }
 
 #[tokio::test]
-async fn connection_test_reports_refusal_with_endpoint_action() {
+async fn connection_test_reports_resets_with_network_action() {
+    use tokio::io::AsyncBufReadExt;
     crate::test_watchdog::watchdog("connection test transport hint", async {
         let root = tempfile::tempdir().unwrap();
-        write_config(root.path(), "");
-        let (_owner, control) = start(root.path()).await;
-        // Own the port until both probes finish, but never listen on it.
-        let socket = tokio::net::TcpSocket::new_v4().unwrap();
-        socket.bind("127.0.0.1:0".parse().unwrap()).unwrap();
-        let url = format!("http://{}/v1", socket.local_addr().unwrap());
-        let result = call(
-            &control,
-            Command::ConnectionTest(ConnectionTestArgs {
-                post_model: Some("model-a".into()),
-                ..candidate(&url)
-            }),
-        )
-        .await
-        .unwrap();
-        for report in [&result, &result["conversation"]] {
-            assert_eq!(report["transport_cause"]["kind"], "connection_refused");
+        let data = root.path().join("data");
+        let config = write_config(root.path(), "");
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/v1", listener.local_addr().unwrap());
+        let mut owner = cli(root.path());
+        for var in [
+            "HTTP_PROXY",
+            "HTTPS_PROXY",
+            "ALL_PROXY",
+            "http_proxy",
+            "https_proxy",
+            "all_proxy",
+        ] {
+            owner.env_remove(var);
+        }
+        owner.env("NO_PROXY", "*").env("no_proxy", "*");
+        let mut child = tokio::process::Command::from(owner)
+            .args(["serve", "--data-dir"])
+            .arg(&data)
+            .arg("--config")
+            .arg(config)
+            .stdout(std::process::Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let mut stdout = tokio::io::BufReader::new(child.stdout.take().unwrap());
+        let mut ready = String::new();
+        assert_ne!(stdout.read_line(&mut ready).await.unwrap(), 0);
+        let mut command = cli(root.path());
+        command.arg("--data-dir").arg(&data).args([
+            "connection",
+            "test",
+            "--base-url",
+            &url,
+            "--post-model",
+            "model-a",
+        ]);
+        let reset = async {
+            for expected in [
+                "GET /v1/models HTTP/1.1\r\n",
+                "POST /v1/responses HTTP/1.1\r\n",
+            ] {
+                let (stream, _) = listener.accept().await.unwrap();
+                let mut reader = tokio::io::BufReader::new(stream);
+                let mut line = String::new();
+                reader.read_line(&mut line).await.unwrap();
+                assert_eq!(line, expected);
+                reader.get_ref().set_zero_linger().unwrap();
+            }
+        };
+        let ((ok, out, err), ()) = tokio::join!(run_with_stdin(command, ""), reset);
+        assert!(ok, "{out}{err}");
+        let reply: Value = serde_json::from_str(&out).unwrap();
+        let result = &reply["result"];
+        for report in [result, &result["conversation"]] {
+            assert_eq!(
+                report["transport_cause"]["kind"], "connection_reset",
+                "{reply}"
+            );
             assert_eq!(
                 report["hint"],
-                "Check that the endpoint is listening on the configured host and port."
+                "Check the network or VPN connection for interruptions."
             );
         }
-        control.shutdown().await.unwrap();
+        child.kill().await.unwrap();
     })
     .await
     .unwrap();

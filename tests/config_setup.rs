@@ -288,19 +288,30 @@ async fn check_only_gets_catalog_and_preserves_status_and_base_root_hint_without
             "extra connections after the completed command"
         );
     }
-    let socket = tokio::net::TcpSocket::new_v4().unwrap();
-    socket.bind("127.0.0.1:0".parse().unwrap()).unwrap();
-    let address = socket.local_addr().unwrap();
+    // A bound, non-listening TCP port can time out on macOS rather than
+    // refuse. Own a listening endpoint and reset the catalog request instead.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let reset = async {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut line = [0; b"GET /v1/models HTTP/1.1\r\n".len()];
+        stream.read_exact(&mut line).await.unwrap();
+        assert_eq!(&line, b"GET /v1/models HTTP/1.1\r\n");
+        stream.set_zero_linger().unwrap();
+    };
     std::fs::write(&path, configuration(&format!("http://{address}/v1"), false)).unwrap();
     let home = root.path().to_path_buf();
-    let (ok, value, text) = tokio::task::spawn_blocking(move || {
+    let check = tokio::task::spawn_blocking(move || {
         run(command(&home)
             .arg("--config")
             .arg(path)
             .args(["config", "check"]))
-    })
-    .await
-    .unwrap();
+    });
+    let (report, ()) =
+        crate::test_watchdog::watchdog("catalog reset", async { tokio::join!(check, reset) })
+            .await
+            .unwrap();
+    let (ok, value, text) = report.unwrap();
     assert!(
         !ok && value["error"]["details"]["failure_kind"] == "transport",
         "{text}"

@@ -349,7 +349,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn transport_cause_distinguishes_refusal_and_reset() {
+    async fn transport_cause_identifies_reset_after_request() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
         let client = reqwest::Client::builder()
@@ -363,11 +363,24 @@ mod tests {
             assert_eq!(stream.read_u8().await.unwrap(), b'G');
             stream.set_zero_linger().unwrap();
         };
-        let (error, ()) = tokio::join!(classified(client.clone(), &url), reset);
+        let (error, ()) = tokio::join!(classified(client, &url), reset);
         assert_eq!(error["transport_cause"]["kind"], "connection_reset");
-        drop(listener);
-        let error = classified(client, &url).await;
-        assert_eq!(error["transport_cause"]["kind"], "connection_refused");
+    }
+
+    #[test]
+    fn refusal_reports_an_endpoint_listening_action() {
+        // A reserved port without a listener can time out on macOS. Closing
+        // it before connecting would race another process binding that port.
+        let error = std::io::Error::from(std::io::ErrorKind::ConnectionRefused);
+        let cause = transport_cause(&error);
+        assert!(matches!(
+            cause,
+            crate::model::TransportCause::ConnectionRefused
+        ));
+        assert_eq!(
+            cause.next_action(),
+            "Check that the endpoint is listening on the configured host and port."
+        );
     }
 
     #[tokio::test]

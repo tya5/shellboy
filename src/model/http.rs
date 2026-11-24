@@ -882,6 +882,56 @@ fn cancelled() -> ModelError {
 mod observation_tests {
     use super::*;
 
+    #[tokio::test]
+    async fn connection_setup_failure_does_not_report_a_partial_upload() {
+        struct FailingDns;
+        impl reqwest::dns::Resolve for FailingDns {
+            fn resolve(&self, _: reqwest::dns::Name) -> reqwest::dns::Resolving {
+                Box::pin(async {
+                    Err(std::io::Error::from(std::io::ErrorKind::ConnectionRefused).into())
+                })
+            }
+        }
+        let client = HttpModelClient::for_connection(
+            "observed",
+            Connection {
+                base_url: "http://fixture.invalid/v1".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        client.pool.write().unwrap().client = Some(
+            reqwest::Client::builder()
+                .no_proxy()
+                .dns_resolver(Arc::new(FailingDns))
+                .build()
+                .unwrap(),
+        );
+        let request = crate::model::response_request(
+            "fixture",
+            vec![serde_json::json!({"role":"user","content":"synthetic"})],
+            None,
+            false,
+        );
+        let failure = crate::test_watchdog::watchdog(
+            "connection setup fails before upload",
+            client.response(request, CancellationToken::new(), None),
+        )
+        .await
+        .unwrap()
+        .unwrap_err();
+        let observed = failure.error.http_observation.as_deref().unwrap();
+        assert_eq!(observed.phase, HttpPhase::BeforeBodySource);
+        assert_eq!(observed.body_source_bytes_consumed, 0);
+        assert!(!observed.is_known_upload_incomplete());
+        assert!(
+            failure
+                .error
+                .message
+                .contains("no partial upload was observed")
+        );
+    }
+
     #[test]
     fn retry_after_presence_is_unknown_before_headers() {
         let facts = response::ResponseFacts::default().rate_metadata();
