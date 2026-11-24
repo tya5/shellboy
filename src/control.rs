@@ -12,6 +12,7 @@ pub(crate) mod message_delivery;
 mod notification;
 mod owner_shutdown;
 pub(crate) mod pending_messages;
+mod request_admission;
 mod runtime;
 mod schedule;
 pub(crate) mod submission_retention;
@@ -184,33 +185,11 @@ pub struct Control {
     stop: CancellationToken,
     diagnostics: crate::diagnostics::Diagnostics,
     storage_failed: AtomicBool,
-    active_requests: AtomicUsize,
-    context_requests: AtomicUsize,
-    admission_closed: AtomicBool,
+    admission: Arc<request_admission::RequestAdmission>,
     waits: wait::WaitRegistry,
     runtime_operations: Mutex<HashMap<String, RuntimeOperation>>,
     /// One `config.set` at a time; held until its file work has truly ended.
     config_write: Arc<Mutex<()>>,
-}
-struct RequestGuard {
-    control: Arc<Control>,
-    changes_context: bool,
-}
-impl Drop for RequestGuard {
-    fn drop(&mut self) {
-        // A shutdown drain still needs this wake. All four operations are SeqCst: this
-        // decrement then the close load here, the close store then the count load in
-        // `work_is_drained`. With weaker orders both loads could read old values (store
-        // buffering): the wake skipped and the drain parked for good. In one total order,
-        // a load here that misses the close puts the decrement before the drain's load.
-        self.control.active_requests.fetch_sub(1, Ordering::SeqCst);
-        if self.changes_context {
-            self.control.context_requests.fetch_sub(1, Ordering::SeqCst);
-        }
-        if self.control.admission_closed.load(Ordering::SeqCst) {
-            self.control.changed.notify_waiters();
-        }
-    }
 }
 /// Trigger- and deadline-driven maintenance requester (storage design #171).
 /// It runs only the kinds producers marked, and repeats a kind only after a
@@ -465,6 +444,7 @@ impl Control {
             attachments.clone(),
         ));
         let waits = wait::WaitRegistry::new(store.database.wait_wakes());
+        let changed = Arc::new(Notify::new());
         Arc::new(Self {
             #[cfg(test)]
             memory_samples: AtomicUsize::new(0),
@@ -490,48 +470,25 @@ impl Control {
             origins: Mutex::new(HashMap::new()),
             events,
             ui_events: ui_events::UiEvents::new(),
-            changed: Arc::new(Notify::new()),
+            changed: changed.clone(),
             change_clock: Arc::new(change_clock::ChangeClock::new(waits.keyed.clone())),
             stop: owner_lifetime,
             diagnostics: owner.diagnostics.clone(),
             storage_failed: AtomicBool::new(false),
-            active_requests: AtomicUsize::new(0),
-            context_requests: AtomicUsize::new(0),
-            admission_closed: AtomicBool::new(false),
+            admission: request_admission::RequestAdmission::new(changed),
             waits,
             runtime_operations: Mutex::new(HashMap::new()),
             config_write: Arc::new(Mutex::new(())),
         })
     }
-    fn admit_request(self: &Arc<Self>, command: &Command) -> Result<RequestGuard, ApiError> {
+    fn admit_request(
+        self: &Arc<Self>,
+        command: &Command,
+    ) -> Result<request_admission::RequestGuard, ApiError> {
         self.admit(command.changes_context())
     }
-    fn admit(self: &Arc<Self>, changes_context: bool) -> Result<RequestGuard, ApiError> {
-        // Close and the context count share a SeqCst order: either this guard is
-        // counted before capture, or the second close check rejects admission.
-        // Acquire/Release alone on the two atomics permits store buffering.
-        if self.stop.is_cancelled() || self.admission_closed.load(Ordering::SeqCst) {
-            return Err(ApiError::new(
-                ErrorCode::InvalidState,
-                "Owner is shutting down",
-            ));
-        }
-        self.active_requests.fetch_add(1, Ordering::AcqRel);
-        if changes_context {
-            self.context_requests.fetch_add(1, Ordering::SeqCst);
-        }
-        let guard = RequestGuard {
-            control: self.clone(),
-            changes_context,
-        };
-        if self.stop.is_cancelled() || self.admission_closed.load(Ordering::SeqCst) {
-            drop(guard);
-            return Err(ApiError::new(
-                ErrorCode::InvalidState,
-                "Owner is shutting down",
-            ));
-        }
-        Ok(guard)
+    fn admit(&self, changes_context: bool) -> Result<request_admission::RequestGuard, ApiError> {
+        self.admission.admit(&self.stop, changes_context)
     }
     pub async fn start(self: &Arc<Self>) -> Result<(), ApiError> {
         if self.stop.is_cancelled() {
@@ -1543,7 +1500,7 @@ impl Control {
     /// drains already accepted work. This method never waits for a lock or I/O.
     pub fn begin_shutdown(&self) {
         self.shell.close_start_admission();
-        self.admission_closed.store(true, Ordering::SeqCst);
+        self.admission.close();
         self.stop.cancel();
         self.live.try_stop_shells();
         self.changed.notify_waiters();
@@ -1558,15 +1515,7 @@ impl Control {
                 // Unlike waits and long reads, these admitted workers can still
                 // create Runs or sources after file preparation. Let them reach
                 // their saved outcome before taking the pre-cancellation view.
-                loop {
-                    let notified = self.changed.notified();
-                    tokio::pin!(notified);
-                    notified.as_mut().enable();
-                    if self.context_requests.load(Ordering::SeqCst) == 0 {
-                        break;
-                    }
-                    notified.await;
-                }
+                self.admission.wait_context_zero().await;
                 self.store
                     .database
                     .call(|db| {
@@ -1611,10 +1560,7 @@ impl Control {
         let live_empty = self.live.is_empty().await;
         let operations_empty = self.runtime_operations.lock().await.is_empty();
         let compactions_empty = self.compact_tasks.lock().await.is_empty();
-        live_empty
-            && operations_empty
-            && compactions_empty
-            && self.active_requests.load(Ordering::SeqCst) == 0
+        live_empty && operations_empty && compactions_empty && self.admission.is_idle()
     }
 
     pub async fn shutdown(self: &Arc<Self>) -> Result<(), ApiError> {
@@ -1775,7 +1721,7 @@ mod failure_tests {
                     .await
             });
             tokio::time::timeout(Duration::from_secs(3), async {
-                while control.context_requests.load(Ordering::Acquire) != 1 {
+                while control.admission.context_count() != 1 {
                     tokio::task::yield_now().await;
                 }
             })
@@ -1784,7 +1730,7 @@ mod failure_tests {
             let preparing = control.clone();
             let prepare = tokio::spawn(async move { preparing.prepare_shutdown().await });
             tokio::time::timeout(Duration::from_secs(3), async {
-                while !control.admission_closed.load(Ordering::Acquire) {
+                while !control.admission.closed_for_test() {
                     tokio::task::yield_now().await;
                 }
             })
@@ -1860,8 +1806,8 @@ mod failure_tests {
                     Ok(())
                 }).await.unwrap();
             }
-            assert_eq!(control.context_requests.load(Ordering::Acquire), 0);
-            assert_eq!(control.active_requests.load(Ordering::Acquire), 0);
+            assert_eq!(control.admission.context_count(), 0);
+            assert_eq!(control.admission.active_count(), 0);
             owner.shutdown().await.unwrap();
         }
     }
@@ -1960,7 +1906,7 @@ mod failure_tests {
         let preparing = control.clone();
         let prepare = tokio::spawn(async move { preparing.prepare_shutdown().await });
         tokio::time::timeout(Duration::from_secs(3), async {
-            while !control.admission_closed.load(Ordering::Acquire) {
+            while !control.admission.closed_for_test() {
                 tokio::task::yield_now().await;
             }
         })
@@ -1973,13 +1919,13 @@ mod failure_tests {
         assert!(prepare.await.unwrap_err().is_cancelled());
         control.begin_shutdown();
         assert!(control.stop.is_cancelled());
-        assert_eq!(control.context_requests.load(Ordering::Acquire), 1);
+        assert_eq!(control.admission.context_count(), 1);
         drop(guard);
         tokio::time::timeout(Duration::from_secs(3), control.shutdown())
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(control.active_requests.load(Ordering::Acquire), 0);
+        assert_eq!(control.admission.active_count(), 0);
         owner.shutdown().await.unwrap();
     }
 

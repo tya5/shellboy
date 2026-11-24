@@ -231,7 +231,7 @@ base_url="http://127.0.0.1:1/v1"
     drop(send);
     dispatcher.await.unwrap();
     crate::test_watchdog::watchdog("src/control/ipc_admission_tests.rs: disconnected_ipc_mutations_retain_all_32_permits_until_evaluation_completes", async {
-        while control.active_requests.load(Ordering::Acquire) != 32 {
+        while control.admission.active_count() != 32 {
             tokio::task::yield_now().await;
         }
     })
@@ -336,7 +336,7 @@ async fn disconnecting_a_send_observer_does_not_lose_commit_effects_or_race_shut
     crate::test_watchdog::watchdog(
         "owned worker admitted before observation is cancelled",
         async {
-            while control.active_requests.load(Ordering::Acquire) == 0 {
+            while control.admission.active_count() == 0 {
                 tokio::task::yield_now().await;
             }
         },
@@ -347,7 +347,7 @@ async fn disconnecting_a_send_observer_does_not_lose_commit_effects_or_race_shut
     let stopping = control.clone();
     let shutdown = tokio::spawn(async move { stopping.shutdown().await });
     crate::test_watchdog::watchdog("shutdown closes admission before blocked commit", async {
-        while !control.admission_closed.load(Ordering::Acquire) {
+        while !control.admission.closed_for_test() {
             tokio::task::yield_now().await;
         }
     })
@@ -465,7 +465,7 @@ base_url="http://127.0.0.1:1/v1"
             move |record| records.send(record.clone()).is_ok(),
         ));
         assert_eq!(output.recv().await.unwrap()["event"], "ready");
-        while control.context_requests.load(Ordering::Acquire) != 1 {
+        while control.admission.context_count() != 1 {
             tokio::task::yield_now().await;
         }
         input
@@ -478,7 +478,7 @@ base_url="http://127.0.0.1:1/v1"
             .unwrap()
             .clone()
             .unwrap();
-        while !control.admission_closed.load(Ordering::Acquire) {
+        while !control.admission.closed_for_test() {
             tokio::task::yield_now().await;
         }
         assert!(

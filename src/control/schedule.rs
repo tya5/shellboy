@@ -109,7 +109,7 @@ pub(super) async fn dispatch(control: &Arc<Control>) -> Result<Option<DateTime<U
         .database
         .call(move |db| {
             let tx = db.transaction()?;
-            if owner.admission_closed.load(std::sync::atomic::Ordering::SeqCst) {
+            if owner.admission.is_closed() {
                 return Ok((None, None, None));
             }
             let now = Utc::now();

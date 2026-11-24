@@ -9,7 +9,7 @@ impl Control {
     }
     pub(crate) fn freeze_owner_admission(&self) {
         self.shell.close_start_admission();
-        self.admission_closed.store(true, Ordering::SeqCst);
+        self.admission.close();
         self.changed.notify_waiters();
     }
     pub(crate) async fn stopping(&self) {
@@ -102,8 +102,8 @@ mod tests {
             assert_eq!(response.result.unwrap()["shutdown_complete"], false);
             assert_eq!(receipts(&control).await, 1);
             stop.cancelled().await;
-            assert!(control.admission_closed.load(Ordering::SeqCst));
-            assert_eq!(control.active_requests.load(Ordering::SeqCst), 0);
+            assert!(control.admission.is_closed());
+            assert!(control.admission.is_idle());
             assert_eq!(slots.available_permits(), 1);
             control.shutdown().await.unwrap();
             drop(send);
@@ -134,7 +134,7 @@ mod tests {
             let rejected = fresh.request(old).await;
             assert_eq!(rejected.error.unwrap().code, ErrorCode::ProtocolMismatch);
             assert!(!stop.is_cancelled());
-            assert!(!fresh.admission_closed.load(Ordering::SeqCst));
+            assert!(!fresh.admission.is_closed());
             assert_eq!(receipts(&fresh).await, 1);
             fresh.shutdown().await.unwrap();
             owner.shutdown().await.unwrap();

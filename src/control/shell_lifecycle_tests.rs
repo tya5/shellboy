@@ -423,7 +423,7 @@ async fn self_stop_during_registration_keeps_reply_grace_owned_until_shutdown_dr
 
     assert!(control.runtime_operations.lock().await.is_empty());
     assert!(control.live.test_shells().lock().await.is_empty());
-    assert_eq!(control.active_requests.load(Ordering::Acquire), 0);
+    assert_eq!(control.admission.active_count(), 0);
     owner.shutdown().await.unwrap();
     server.abort();
 }
@@ -479,7 +479,7 @@ async fn run_stop_reply_grace_remains_in_the_request_guard_and_freeze_releases_i
         .unwrap()
         .unwrap();
     request.await.unwrap();
-    assert_eq!(control.active_requests.load(Ordering::Acquire), 0);
+    assert_eq!(control.admission.active_count(), 0);
     let weak = Arc::downgrade(&control);
     drop(control);
     crate::test_watchdog::watchdog("src/control/shell_lifecycle_tests.rs: run_stop_reply_grace_remains_in_the_request_guard_and_freeze_releases_it", async {

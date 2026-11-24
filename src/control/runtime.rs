@@ -864,7 +864,7 @@ impl Control {
             let changed = self.changed.notified();
             tokio::pin!(changed);
             changed.as_mut().enable();
-            if self.stop.is_cancelled() || self.admission_closed.load(Ordering::SeqCst) {
+            if self.stop.is_cancelled() || self.admission.is_closed() {
                 return;
             }
             tokio::select! { biased;
