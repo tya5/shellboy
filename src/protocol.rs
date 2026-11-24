@@ -2509,7 +2509,9 @@ record!(CompactListFilters {
     #[serde(skip_serializing_if = "Option::is_none")] until: Option<String>,
 });
 record!(CompactListResult {
-    #[serde(flatten)] page: RecordPage<Value, CompactListFilters>,
+    items: Vec<Value>,
+    limit: u32,
+    filters: CompactListFilters,
     more: bool,
     period: TimeWindowResult,
     coverage: Value,

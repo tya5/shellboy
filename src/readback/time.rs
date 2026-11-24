@@ -34,8 +34,18 @@ impl Window {
         at.and_then(|s| DateTime::parse_from_rfc3339(s).ok())
             .is_some_and(|t| self.since.is_none_or(|s| t >= s) && self.until.is_none_or(|u| t < u))
     }
+    pub fn result(&self) -> crate::protocol::TimeWindowResult {
+        crate::protocol::TimeWindowResult {
+            since: self.since.map(|t| t.to_rfc3339()),
+            until: self.until.map(|t| t.to_rfc3339()),
+            bounds: "[since,until)".into(),
+            durations: "whole selected lifetimes, not overlap/proration".into(),
+            unknown_starts: "excluded when filtered".into(),
+            additional_properties: Default::default(),
+        }
+    }
     pub fn json(&self) -> Value {
-        json!({"since":self.since.map(|t|t.to_rfc3339()),"until":self.until.map(|t|t.to_rfc3339()),"bounds":"[since,until)","durations":"whole selected lifetimes, not overlap/proration","unknown_starts":"excluded when filtered"})
+        json!(self.result())
     }
     pub fn sql(&self, column: &str) -> String {
         let mut terms = vec!["1".to_owned()];

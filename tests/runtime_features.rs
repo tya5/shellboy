@@ -4247,6 +4247,10 @@ async fn proactive_events(control: &Arc<Control>, thread: &str) -> Vec<Value> {
         }),
     )
     .await;
+    assert_eq!(listed["limit"], 50);
+    assert_eq!(listed["filters"], json!({"thread_id": thread}));
+    assert!(listed["more"].is_boolean());
+    assert!(listed.get("next_cursor").is_none());
     listed["items"]
         .as_array()
         .unwrap()

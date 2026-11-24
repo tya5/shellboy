@@ -468,7 +468,10 @@ normalizes its states and timestamp. `status --memory` is not a record page.
 Its work fingerprint compares normalized selection, limit and ordered saved
 facts, excluding diagnostics and volatile live observations. `compact list`
 reports `more`, not a cursor. Service and schedule lists are fixed Thread
-reports capped at 64; no cursor or claim of exhaustive coverage.
+reports capped at 64; no cursor or claim of exhaustive coverage. Each row's
+`latest` describes only its most recently recorded execution, or is `null` if
+none exists. These reports do not show execution history; use `shell read`
+with that execution's ID to read its output.
 
 A present count pair is exact only with `*_count_exact: true`; otherwise it is
 a lower bound. A missing pair means no count was computed. The history list

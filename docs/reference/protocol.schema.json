@@ -14126,7 +14126,6 @@
     "compact": true,
     "compact.list": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "description": "A resumable owner record list. Readers own selection and cursor issuance;\nthis envelope owns the public page fields.",
       "properties": {
         "coverage": true,
         "filters": {
@@ -14143,12 +14142,6 @@
         },
         "more": {
           "type": "boolean"
-        },
-        "next_cursor": {
-          "type": [
-            "string",
-            "null"
-          ]
         },
         "period": {
           "$ref": "#/definitions/TimeWindowResult"
