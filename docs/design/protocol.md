@@ -1049,7 +1049,7 @@ writing; file readability and captured-content bounds are checked during Turn pr
 existing semantics. A hash-checked edit reconciles the loaded live values even if the file already matches.
 `written: false` with `applied_to_running_owner: true` means the owner changed without a disk write. Disk edits
 alone are not watched. Configuration success is not evidence that files exist or that consent was obtained.
-An unreadable or invalid common file is skipped, with `instruction_warnings: [{path,reason}]` on Run status
+An unreadable or invalid common file is skipped, with `instruction_warnings: [{path,reason,hint}]` on Run status
 items and on `thread.get` for the latest Run (#377, v18). The field is omitted
 when empty, and warnings contain no captured content. `reason` is one of
 `not_found`, `permission_denied`, `io_failed`, `not_regular_file`, `input_limit`,

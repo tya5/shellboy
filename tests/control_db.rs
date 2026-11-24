@@ -961,6 +961,91 @@ async fn model_request_ceiling_refuses_live_and_stopping_runs_without_assigning_
 }
 
 #[tokio::test]
+async fn held_message_actions_agree_on_send_and_readback() {
+    let (_directory, store) = store().await;
+    let wait = "Wait for the target Run to finish; the message is already saved.";
+    let recover =
+        "Inspect the parked Turn with shellboy turn get --turn ID before deciding how to resume.";
+    let inspect =
+        "Inspect the target Thread with shellboy thread get --thread ID before resuming it.";
+    let check = "Check shellboy operation get --operation ID before resending.";
+    for (state, deliver, reason, action) in [
+        ("live", Deliver::Complete, "run_completion", wait),
+        ("recovery_wait", Deliver::Next, "recovery_wait", recover),
+        ("stopping", Deliver::Next, "stopping", inspect),
+    ] {
+        let thread = create(&store, None).await;
+        let (first, _) = send(&store, &thread.thread_id, "initial input").await;
+        if state == "recovery_wait" {
+            let turn = first.turn_id.unwrap();
+            store.database.call(move |db| {
+                db.execute(r#"UPDATE turn SET state='recovery_wait',recovery_reason_json='{"reason":"fixture"}' WHERE id=?1"#, [turn])?;
+                Ok(())
+            }).await.unwrap();
+        } else if state == "stopping" {
+            execute(
+                &store,
+                Command::RunStop(RunTarget {
+                    run_id: first.run_id.unwrap(),
+                }),
+            )
+            .await;
+        }
+        let accepted: MessageAccepted = serde_json::from_value(
+            execute(
+                &store,
+                Command::MessageSend(MessageSendArgs {
+                    max_model_requests: None,
+                    human: false,
+                    resume_recovery: false,
+                    sender_label: None,
+                    deliver,
+                    thread_id: Some(thread.thread_id),
+                    text: "held input".into(),
+                }),
+            )
+            .await
+            .result,
+        )
+        .unwrap();
+        assert_eq!(accepted.delivery_status, DeliveryStatus::Held);
+        assert_eq!(accepted.hint.as_deref(), Some(action));
+        let message_id = accepted.message_id;
+        let current = message_id.clone();
+        let details = store
+            .database
+            .call(move |db| Ok(shellboy::control::db::message_details(db, &current)?))
+            .await
+            .unwrap();
+        assert_eq!(details.context.hold_reason.as_deref(), Some(reason));
+        assert_eq!(details.hint.as_deref(), Some(action));
+        if state == "stopping" {
+            for (saved, hint) in [
+                (Some("previous_instance_interrupted"), inspect),
+                (Some("terminal_before_path_admission"), inspect),
+                (Some("uncertain_path_admission"), check),
+                (None, check),
+            ] {
+                let id = message_id.clone();
+                let details = store
+                    .database
+                    .call(move |db| {
+                        db.execute(
+                            "UPDATE receipt SET hold_reason=?1 WHERE message_node_id=?2",
+                            rusqlite::params![saved, id],
+                        )?;
+                        Ok(shellboy::control::db::message_details(db, &id)?)
+                    })
+                    .await
+                    .unwrap();
+                assert_eq!(details.hint.as_deref(), Some(hint), "{saved:?}");
+            }
+        }
+    }
+    store.database.shutdown().await.unwrap();
+}
+
+#[tokio::test]
 async fn explicit_new_human_send_assigns_only_unassigned_stopping_messages_once() {
     let (_directory, store) = store().await;
     let thread = create(&store, None).await;

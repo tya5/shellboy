@@ -223,6 +223,47 @@ fn storage_advisories(
     }
     advisories
 }
+#[test]
+fn storage_advisories_keep_logical_limit_and_disk_state_independent() {
+    use crate::protocol::StorageAdvisoryReason::*;
+    for (warning, limit, logical) in [
+        (false, false, None),
+        (
+            true,
+            false,
+            Some((LogicalWarning, "before reaching the storage limit")),
+        ),
+        (
+            false,
+            true,
+            Some((LogicalLimit, "before admitting new work")),
+        ),
+        (
+            true,
+            true,
+            Some((LogicalLimit, "before admitting new work")),
+        ),
+    ] {
+        for (disk, physical) in [
+            (DiskState::Ok, None),
+            (DiskState::Warning, Some((DiskWarning, "Check free space"))),
+            (DiskState::Held, Some((DiskHeld, "before resuming work"))),
+            (
+                DiskState::Unknown,
+                Some((DiskFreeUnknown, "with the operating system")),
+            ),
+        ] {
+            let expected: Vec<_> = logical.into_iter().chain(physical).collect();
+            let actual = storage_advisories(warning, limit, disk);
+            assert_eq!(actual.len(), expected.len());
+            for (advisory, (reason, action)) in actual.iter().zip(expected) {
+                assert_eq!(advisory.reason, reason);
+                assert!(advisory.hint.contains(action), "{:?}", advisory);
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct HistoryStep {
     pub stage: String,

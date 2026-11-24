@@ -135,7 +135,7 @@ impl InstructionLoader {
                     Err(reason) => warnings.push(crate::protocol::InstructionWarning {
                         path,
                         reason,
-                        hint: Some(instruction_hint(reason).into()),
+                        hint: None,
                     }),
                 }
             }
@@ -180,6 +180,36 @@ fn instruction_hint(reason: crate::protocol::InstructionWarningReason) -> &'stat
         NotRegularFile => "Point the instruction setting at a regular file.",
         InputLimit => "Reduce the instruction file size.",
         InvalidUtf8 => "Save the instruction file as UTF-8.",
+    }
+}
+
+#[test]
+fn saved_instruction_warnings_get_one_action_for_each_reason() {
+    for (reason, action) in [
+        ("not_found", "Check the configured instruction file path."),
+        (
+            "permission_denied",
+            "Check that the owner can read the instruction file.",
+        ),
+        (
+            "io_failed",
+            "Check whether the instruction file is readable from this host.",
+        ),
+        (
+            "not_regular_file",
+            "Point the instruction setting at a regular file.",
+        ),
+        ("input_limit", "Reduce the instruction file size."),
+        ("invalid_utf8", "Save the instruction file as UTF-8."),
+    ] {
+        let saved = serde_json::json!([{ "path": "instructions.md", "reason": reason }]);
+        let warnings = decode_warnings(Some(&saved.to_string()));
+        assert_eq!(
+            serde_json::to_value(warnings).unwrap(),
+            serde_json::json!([
+                { "path": "instructions.md", "reason": reason, "hint": action }
+            ])
+        );
     }
 }
 

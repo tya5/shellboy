@@ -265,6 +265,58 @@ impl StartupStage {
     }
 }
 
+#[test]
+fn startup_failure_reports_stage_and_one_action() {
+    use StartupStage::*;
+    for (stage, key, action) in [
+        (Configuration, "configuration", "shellboy config check"),
+        (OwnerLock, "owner_lock", "running owner"),
+        (Database, "database", "storage and permissions"),
+        (
+            DatabasePragmas,
+            "database_pragmas",
+            "storage and permissions",
+        ),
+        (
+            DatabaseMigration,
+            "database_migration",
+            "supports this data directory's database schema",
+        ),
+        (
+            DatabaseValidate,
+            "database_validate",
+            "supports this data directory's database schema",
+        ),
+        (
+            DatabaseForeignKeys,
+            "database_foreign_keys",
+            "shellboy storage check",
+        ),
+        (
+            DatabaseQuickCheck,
+            "database_quick_check",
+            "shellboy storage check",
+        ),
+        (InterruptedWork, "interrupted_work", "owner log"),
+        (Control, "control", "owner log"),
+        (Endpoint, "endpoint", "local IPC endpoint"),
+        (Closing, "closing", "owner log"),
+    ] {
+        let error = stage.failure(
+            ApiError::new(ErrorCode::IoFailed, "evidence")
+                .details(serde_json::json!({"fact": true})),
+        );
+        assert_eq!(error.message, "evidence");
+        let details = error.details.unwrap();
+        assert_eq!(details["fact"], true);
+        assert_eq!(details["startup_stage"], key);
+        assert!(error.hint.unwrap().contains(action), "{key}");
+    }
+    let explicit =
+        Endpoint.failure(ApiError::new(ErrorCode::IoFailed, "evidence").hint("specific action"));
+    assert_eq!(explicit.hint.as_deref(), Some("specific action"));
+}
+
 /// One existing startup watch carries both facts so coalescing cannot lose locale.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct StartupProgress {

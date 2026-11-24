@@ -1452,7 +1452,20 @@ impl ThreadView {
             && self.draft.draft_id == draft_id
             && self.draft.revision != revision
             && (!self.draft.text.is_empty() || !self.draft.attachments.is_empty());
-        if self.language == crate::config::UiLanguage::En {
+        if pending.restored_revision == Some(self.draft.revision)
+            && matches!(status, ReceiptStatus::Failed | ReceiptStatus::Cancelled)
+        {
+            self.status = crate::ui::i18n::local!(
+                self.language,
+                "未送信。復元した入力を編集してください",
+                "Not sent; edit the restored draft"
+            )
+            .into();
+            if let Some(message) = message.as_deref() {
+                self.status.push_str(": ");
+                self.status.push_str(message);
+            }
+        } else if self.language == crate::config::UiLanguage::En {
             self.status = receipt_english(&status, revision, message.as_deref(), retained);
         } else {
             self.status = format!(
@@ -1478,17 +1491,6 @@ impl ThreadView {
                     " | 編集中の入力を保持（次は全文送信）",
                 ));
             }
-        }
-        if pending.restored_revision == Some(self.draft.revision)
-            && matches!(status, ReceiptStatus::Failed | ReceiptStatus::Cancelled)
-        {
-            self.status
-                .push_str(crate::ui::text_width::glyphs::separator());
-            self.status.push_str(crate::ui::i18n::local!(
-                self.language,
-                "未送信。復元した入力を編集してください",
-                "Not sent; edit the restored draft"
-            ));
         }
         if matches!(status, ReceiptStatus::Completed | ReceiptStatus::Applied)
             && (pending.send.is_none() || pending.source_node_id.is_some())
