@@ -57,7 +57,6 @@ pub(crate) mod wait;
 
 use crate::{
     app::{DataOwner, storage_error},
-    instructions::InstructionLoader,
     ipc::Invocation,
     protocol::*,
     shell::{ShellHandle, ShellSupervisor},
@@ -171,7 +170,6 @@ pub struct Control {
     compact_tasks: Mutex<HashMap<String, CancellationToken>>,
     boundaries: Mutex<HashMap<String, std::sync::Weak<Mutex<()>>>>,
     shell: ShellSupervisor,
-    instructions: InstructionLoader,
     replay: replay::ReplayCache,
     data_dir: PathBuf,
     endpoint: Arc<std::sync::RwLock<Option<crate::app::Endpoint>>>,
@@ -466,7 +464,6 @@ impl Control {
             owner.loaded.data_dir.clone(),
             attachments.clone(),
         ));
-        let instructions = store.instructions.clone();
         let waits = wait::WaitRegistry::new(store.database.wait_wakes());
         Arc::new(Self {
             #[cfg(test)]
@@ -485,7 +482,6 @@ impl Control {
             boundaries: Mutex::new(HashMap::new()),
             compact_tasks: Mutex::new(HashMap::new()),
             shell: ShellSupervisor::new(&config),
-            instructions,
             replay: replay::ReplayCache::new(config.cache.history_bytes),
             data_dir: owner.loaded.data_dir.clone(),
             endpoint: owner.endpoint.clone(),
@@ -1660,7 +1656,7 @@ impl Control {
         }
         tokio::try_join!(
             self.attachments.wait_idle(),
-            self.instructions.wait_idle(),
+            self.store.instructions.wait_idle(),
             self.gc.wait_idle(),
             self.index.wait_idle()
         )?;

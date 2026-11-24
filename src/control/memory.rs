@@ -13,7 +13,7 @@ impl Control {
             ));
         }
         let control = self.clone();
-        self.instructions.file_work(move || {
+        self.store.instructions.file_work(move || {
             #[cfg(test)]
             control.memory_samples.fetch_add(1, Ordering::SeqCst);
             let config = &control.store.config.cache;

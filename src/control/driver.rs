@@ -624,6 +624,7 @@ async fn turn_instructions(
         return Ok(size.map(|_| Arc::from(crate::instructions::saved_body(body, &hash))));
     }
     let (prepared, warnings) = control
+        .store
         .instructions
         .prepare_with_extra(
             snapshot.cwd.clone(),
