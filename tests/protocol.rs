@@ -1379,7 +1379,12 @@ fn protocol_v6_handshake_and_typed_results_cover_existing_wire_modes() {
         "object"
     );
     for operation in [
-        "status", "shell.list", "usage.get", "config.get", "shell.background", "turn.interrupt",
+        "status",
+        "shell.list",
+        "usage.get",
+        "config.get",
+        "shell.background",
+        "turn.interrupt",
     ] {
         assert_ne!(schema["operation_results"][operation], Value::Bool(true));
     }

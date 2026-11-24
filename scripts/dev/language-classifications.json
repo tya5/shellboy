@@ -3647,587 +3647,587 @@
   "src/operations.rs:36940b6028fa3039:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:3d1318625f072e40:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:9c0916f1d45cd264:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:eb38643992ee41e6:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:f402834d2f755d64:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:aee671f55c55d9f6:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:5552e23ec4484475:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:22ea2e4c4dd10015:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:6e54d30ea2f8d210:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:5744c3460cee40ae:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:f5ea7ec77b2ddec8:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:67a1ce59ff3dedcf:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:26291f4b7127eecc:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:074560b83ce6c8b6:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:dc4ff508c46b146b:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:881464e06aae8fc1:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:22fcad995020f44e:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:bc21ea819dd4c822:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:e2f08a52e9be3e29:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:702a257938d30dff:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:e9a80f0c44c5e374:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:e49b31acc55bc945:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:fb3018a3b776805d:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:357e0c486c8b6f0a:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:f20543ee83513850:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:693299e9ef056ab9:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:5c5091a38d12a2c0:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:235d59a48d6b13ae:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:2394986adf5b336c:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:ef057195bd2e4213:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:4dc67c3a9703e816:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:ccab2e7aeddd0d60:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:120777b052bed264:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:828f5c22607f24e0:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:0dc8db0d1d79f740:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:7dc3f2346e1252ef:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:dc09df505066593f:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:6cecdbfcfd449479:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:9d1e893c35c7503c:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:4b9fcf5a51a23e34:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:95a59ab780238bf9:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:fd3a61be37924cad:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:4c9cb0c679a72f7e:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:fdcf7b32ecdba8c7:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:3d9c7424ebbcc7c9:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:f67f208edb03211d:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:01efd2d17f8e714e:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:c72e13f5ed487f0b:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:d46ca5603774223d:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:07fd3f735415803b:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:3690449e18efd939:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:016c37cc59bb7e49:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:11ed3baa888f040f:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:381d95c17baf40a0:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:3a65ac16d78b9db0:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:ab3d48d9a68d44b2:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:a843e42aa9f90208:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:6936ee9f24c5a15a:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:af080bee711b4f37:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:1af716e66c961e33:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:b401a36ec2fc31e2:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:d544ff0774040c0f:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:15684b32197b5bfd:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:f20639781c854661:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:9c2d41d87b17ac82:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:a7175bdd361199af:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:a763dec1b7c2a947:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:312d08fac5670f3d:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:471a36e894a85167:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:dd18aa8d2d5cf37f:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:a42ccd181189d8c5:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:2563ee1347453711:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:00800fea957a2e00:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:1993f30dd67e4faa:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:7ae5eef0a186e0e1:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:61432acf1347c076:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:dad05b63d0715600:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:6893b1fccb69a49a:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:9f2f87302f472347:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:5ab3c1da12395d5e:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:803db1df384fec89:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:f834c2af83859a01:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:fed3e58f3eba46c1:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:fb7d5772a45526d3:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:934df1451b813591:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:bb7adc763a7864d8:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:ace0616637e72824:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:a8454e60d6b48309:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:5b5a6accd2746741:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:0e0b469c3aa70f07:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:44f1aea34d82bd50:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:b6f00bd03cb429fa:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:5ab0fda17b5800bf:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:c236ff6542e97a34:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:61a4e1c11e2d838a:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:3ed9526a65afb6d7:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:eb6164a09a7e2877:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:5afad421c3d7b630:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:fdf2ae5f8d7a359a:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:9af0a1a8ad593e5b:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:79b68a699021fc55:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:40b6eaf668e0a2cf:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:5c6da14a5e9044d5:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:e46785e1249319c1:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:7036cd3e59cc23a5:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:db95ec5f3b675760:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:6fac70508ec30108:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:492a0bdc729ac2e6:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:92d174e283cfa6c6:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:eb8a497b31391280:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:d25e24984ec475ea:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:37f9b5f6cb38651e:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:f77cccfeb6e4a2e7:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:c616ae52edc2ebe9:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:0c1d6eb147675207:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:7a6d29e4ab712041:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:5787140926acdc70:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:cb809c2006ed619a:1": {
     "category": "a",
@@ -6810,12 +6810,12 @@
   "src/operations.rs:f9b03f26f7ebb13c:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:3cc99a49f693cf8d:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:6717cd0cc0335f44:1": {
     "category": "a",
@@ -6840,17 +6840,17 @@
   "src/operations.rs:d1aad4f3c6bbf5e8:1": {
     "category": "a",
     "reason": "Reviewed #236 thread rewind: Japanese branch of a paired local!/catalogue En/Ja string; English counterpart is separate; interpolated values opaque. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:546f37705c9cdaa7:1": {
     "category": "a",
     "reason": "Reviewed ThreadBranches catalogue arm: the Japanese label/meaning has its English pair in ui/operations/metadata.rs (same wording, rustfmt braces defeat the automatic pair proof). Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:e10b4779a085db2a:1": {
     "category": "a",
     "reason": "Reviewed ThreadBranches catalogue arm: the Japanese label/meaning has its English pair in ui/operations/metadata.rs (same wording, rustfmt braces defeat the automatic pair proof). Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/presentation/branch_marker.rs:b0c6985ec939b9d1:1": {
     "category": "a",
@@ -6885,7 +6885,7 @@
   "src/operations.rs:7510ff6a9cff0cb6:1": {
     "category": "a",
     "reason": "Operation label Japanese source for OperationId::ThreadArchive; the same-ID English arm is the brace-form `OperationId::ThreadArchive => { local!(language, ..., \"Conversation · Archive\") }` in operation_label_for (as ThreadRewind). No command value changes. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/ui/threads.rs:2f1710c9e60fe0f0:1": {
     "category": "a",
@@ -6950,17 +6950,17 @@
   "src/operations.rs:1d1347bb079960b0:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:42f55814ab71f4e5:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:5ffa457b60c9ae5f:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:aebb6bfacb9a07f4:1": {
     "category": "a",
@@ -7055,12 +7055,12 @@
   "src/operations.rs:db56949da3e72914:1": {
     "category": "a",
     "reason": "Japanese text of the bilingual history.window operation copy, classified like its neighbors Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:c353d06db59f26d8:1": {
     "category": "a",
     "reason": "Japanese text of the bilingual history.window operation copy, classified like its neighbors Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/ui/db_activity.rs:83a5000b25a0b62a:1": {
     "category": "a",
@@ -7105,32 +7105,32 @@
   "src/operations.rs:8576d73b47151efe:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:f9c184ce190235af:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:a1b714223f88fd3c:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:ab8b29168a3c0817:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:42727d418a86982e:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:116d23cc4c83010f:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md. Re-reviewed for S6a Thread spill policy: adding SpillPolicy to the operation catalogue invalidates the enclosing FIELD_SPECS/SPECS scope fingerprint; this unchanged Japanese literal remains UI-only under the existing bilingual catalogue projection. Re-reviewed for #327: AttachmentList now declares Limit and Cursor in operation metadata; the existing Japanese catalogue literals and bilingual UI projection are unchanged.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/frontend/message_queue.rs:885623703290c03f:1": {
     "category": "a",
@@ -7175,7 +7175,7 @@
   "src/operations.rs:38ba5c25f8e6af9a:1": {
     "category": "a",
     "reason": "Japanese MessageList catalogue copy paired with English in src/ui/operations/metadata.rs.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:9e6a5b54ce6b5d8a:1": {
     "category": "a",
@@ -7195,17 +7195,17 @@
   "src/operations.rs:a2db802ceb239015:1": {
     "category": "a",
     "reason": "Japanese operation catalogue or Japanese UI form label paired with English.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:27564634707dd185:1": {
     "category": "a",
     "reason": "Japanese operation catalogue or Japanese UI form label paired with English.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/operations.rs:8a119b5d9d674348:1": {
     "category": "a",
     "reason": "Japanese operation catalogue or Japanese UI form label paired with English.",
-    "source_tokens_sha256": "5dfa4bc656df9931cd9b61d39fca1042d56edd9d543e9b68a858879095637cf6"
+    "source_tokens_sha256": "51ce6d4f12281d817642a2ce0bb1640d63bfaa7d635a01f07a8652d7b97c9b7b"
   },
   "src/presentation/compaction_marker.rs:13fb8b0331ffbc2c:1": {
     "category": "a",
