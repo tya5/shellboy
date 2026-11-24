@@ -89,7 +89,7 @@ impl Control {
                         ErrorCode::InvalidArgument,
                         "This connection sends its own Authorization header from headers, so a stored key would never be used",
                     )
-                    .hint("Check the selected connection's Authorization header with shellboy config get.")
+                    .hint("Remove that header from the connection, or keep the credential where it is")
                     .details(json!({"field":"connection","written":false})));
                 }
                 let path = credential_store::path_beside(config_path);

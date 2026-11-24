@@ -432,6 +432,9 @@ Retain the accepted `message_id`. `shellboy message get --message MESSAGE_ID` ex
 A human's Esc interruption ends only the active Turn. Its notification describes which output was cut short or which calls did not run; do not assume those actions executed. Received partial output is saved for inspection but omitted from the model conversation. A foreground shell may continue in the background: inspect its returned execution ID before repeating work. Check the latest human direction before continuing. Ctrl+C and Run stop remain full stops, including owned background shells; a later genuine shell completion may wake a Turn after Esc. A waiting complete-delivery message is still delivered when the Run then completes. Automatic time-based backgrounding is not enabled.
 
 
+For a held send, follow its `hint`; it is saved, not necessarily delivered.
+If delivery is uncertain, check the existing operation before resending.
+
 ## Send a message when the Run completes
 
 Use `--deliver complete` for an ordinary message that waits until your live Run
@@ -695,6 +698,7 @@ Read settings with `shellboy config get`; it never returns a credential value. C
 writing, show the current and new values of each field. Pass `result.file.content_hash` as `--expected-hash`.
 Afterwards, distinguish the returned `changes`, `restart_required`, and
 `applied_to_running_owner`; the last can be true even if the file did not change.
+When `restart_required` is true, `hint` identifies the owner whose restart applies the saved changes.
 Use `--data-dir DIR` to select the owner, not `--config`. For a connection name
 with a dot, quote the TOML path component, for example:
 
@@ -712,13 +716,6 @@ again and show the user what changed before repeating. Your identity is recorded
 `config_changed` and reread with `config get`; the global hint is cursor-based and
 works for changes from CLI or another device as well as this client. It reports no
 values, so render only the subsequent read and show file and loaded values separately.
-
-For a held send, follow its `hint`; it is saved, not necessarily delivered.
-If delivery is uncertain, check the existing operation before resending. A
-skipped instruction warning or `storage status` advisory gives a `reason` and
-`hint`; `disk_free_unknown` is not a hold. A terminal startup error can report
-`details.startup_stage`. If `config set` reports `restart_required`, its hint
-identifies the relevant owner; do not restart it without approval.
 
 ## Keys and connection checks
 
@@ -973,6 +970,9 @@ Managed clipboard images can also expire (default seven days / total 256MiB); th
 If a Turn ends with `storage_limit`, read `error.details.reason`: `logical_limit` means Shellboy's data limit, `disk_free_low` means the data directory's volume has less free space than `limits.disk_free_min_bytes` (default 5GiB). Either way new model, shell, child, summary and index work is held; stop, `shellboy status`, `storage status` and `storage collect` still work. For `disk_free_low`, `storage collect` and `thread prune` do not return space to the OS (the database file does not shrink), so do not loop on them: tell the user the free bytes and the minimum, and wait for them to free space and retry. Do not retry on your own or work around the hold. The hold only stops new work: commands you already started, and commands you run in your own shell, are not stopped and can still write to the disk, so avoid large writes while the disk is low.
 Collection keeps history references/reasons, not the reclaimed content; conversations have no automatic expiry. See [Recovery and storage](recovery-and-storage.md) and [Configuration](configuration.md) for retention, GC and cache budgets.
 
+A skipped instruction warning or `storage status` advisory gives a `reason` and
+`hint`; `disk_free_unknown` is not a hold.
+
 ## Human Watch views and saved facts
 
 The TUI's `/threads active` and `/threads descendants` are human display commands,
@@ -1017,6 +1017,8 @@ not automatically switch provider or model. The in-memory cooldown gate is
 separate and is discarded at owner restart.
 
 ## Startup timing
+
+A terminal startup error can report `details.startup_stage`.
 
 Use `shellboy startup --last N` (or omit `--last`) (default 5, maximum 20) to inspect startup-stage timings without starting the owner. The read is bounded to 16 MiB and 64 current/rotated log files. It exposes only stage names, timestamps, elapsed milliseconds, application/migration versions and totals; it never prints arbitrary log fields. `records_may_be_missing` is always true because diagnostics can be dropped or rotated, and missing stages are not zero.
 

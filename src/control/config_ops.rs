@@ -122,7 +122,7 @@ impl Control {
                 changed_by: caller.map(Origin::identity),
                 hint: (fields.get("restart_required").and_then(Value::as_bool) == Some(true)).then(
                     || {
-                        "Restart the owner for this data directory to apply the saved changes."
+                        "The saved changes apply after the owner for this data directory restarts."
                             .to_owned()
                     },
                 ),
