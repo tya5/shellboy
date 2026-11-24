@@ -784,6 +784,12 @@ async fn raw_gc_keeps_canonical_quote_and_attachment_vectors_including_legacy_wi
             .iter()
             .any(|span| span.body_kind == "attachment_paths")
     );
+    assert!(
+        hits[0]
+            .spans
+            .iter()
+            .all(|span| span.body_kind != "tool_raw")
+    );
     let before = f.proxy.count();
     let preview = f.service.enqueue_tool_raw("raw-node").await.unwrap();
     assert_eq!(preview.unavailable, 0);
@@ -1560,14 +1566,33 @@ async fn decoding_change_atomically_invalidates_all_spaces_without_touching_raw_
             .unwrap()
             .is_empty()
     );
+    let automatic = f.service.enqueue_tool_raw("raw-node").await.unwrap();
+    assert_eq!(automatic.segments, 0);
+    assert!(
+        f.service
+            .search_detailed("cat", 10)
+            .await
+            .unwrap()
+            .is_empty()
+    );
     let before_reindex = f.proxy.count();
-    let added = f.service.enqueue_tool_raw("raw-node").await.unwrap();
-    assert_eq!(added.segments, 1);
+    let added = f
+        .service
+        .backfill(IndexArgs {
+            source_ids: vec!["raw-node".into()],
+            ..args()
+        })
+        .await
+        .unwrap();
+    assert_eq!(added.segments, 0);
+    assert_eq!(added.already_indexed, 1);
     f.drain().await;
-    assert_eq!(derived_counts(&f.db).await, (3, 3, 3));
-    assert_eq!(f.proxy.count(), before_reindex + 1);
+    assert_eq!(derived_counts(&f.db).await, (2, 2, 2));
+    assert_eq!(f.proxy.count(), before_reindex);
     reader.read(encoding_read("Shift_JIS")).await.unwrap();
-    assert_eq!(derived_counts(&f.db).await, (3, 3, 3));
+    let hits = f.service.search_detailed("cat", 10).await.unwrap();
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].spans[0].body_kind, "tool_raw");
     f.close().await;
 }
 #[tokio::test]

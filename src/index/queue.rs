@@ -61,6 +61,49 @@ pub(super) fn queue_job(
     }
     Ok(inserted > 0)
 }
+// A decoder change invalidates the old witness, not the vector of identical text.
+fn requalify_raw_vector(
+    tx: &Transaction<'_>,
+    space: &Space,
+    work: &Work,
+) -> Result<bool, StorageError> {
+    if work.body_kind != "tool_raw"
+        || work.recovery
+        || !matches!(
+            work.authorization.as_str(),
+            "explicit-backfill" | "explicit-rebuild"
+        )
+    {
+        return Ok(false);
+    }
+    let Some(job) = job_id_for(tx, space, work)? else {
+        return Ok(false);
+    };
+    let witness = serde_json::to_string(&work.witness).map_err(|_| serde_error())?;
+    let chunk: Option<String> = tx
+        .query_row(
+            "SELECT c.id FROM embedding_chunk c JOIN embedding_job j ON j.id=c.job_id
+         WHERE j.id=?1 AND j.state='done' AND c.space_id=j.space_id
+         AND c.source_node_id=j.source_node_id AND c.source_revision=j.source_revision
+         AND c.content_hash=j.source_hash AND c.span_start=j.span_start AND c.span_end=j.span_end
+         AND json_extract(j.authorized_watermark,'$.witness') IS NOT json(?2)",
+            params![job, witness],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let Some(chunk) = chunk else { return Ok(false) };
+    tx.execute(
+        "UPDATE embedding_job SET authorized_watermark=json_set(authorized_watermark,'$.witness',json(?2)) WHERE id=?1",
+        params![job, witness],
+    )?;
+    set_meta(
+        tx,
+        &IndexKeys::preview(&chunk),
+        &work.segment.text.chars().take(512).collect::<String>(),
+    )?;
+    Ok(true)
+}
+
 pub(super) fn job_id_for(
     db: &Connection,
     space: &Space,
@@ -190,17 +233,22 @@ impl IndexService {
             .flatten()
             .collect::<Vec<_>>();
         let total = work.len();
-        let inserted = self
+        let (inserted, requalified) = self
             .database
             .call(move |db| {
                 let tx = db.transaction()?;
                 let mut inserted = 0;
+                let mut requalified = false;
                 for work in work {
                     if !witness_valid(&tx, &work.witness, &work.body_kind)? {
                         continue;
                     }
                     if let Some(space) = space_for_group(&tx, IndexKeys::new(&key), &work.group)? {
-                        inserted += queue_job(&tx, &space, &work)? as usize;
+                        if requalify_raw_vector(&tx, &space, &work)? {
+                            requalified = true;
+                        } else {
+                            inserted += queue_job(&tx, &space, &work)? as usize;
+                        }
                     } else {
                         let bootstrap = bootstrap_key(IndexKeys::new(&key), &work);
                         let value = encode_bootstrap_work(&work)?;
@@ -220,11 +268,11 @@ impl IndexService {
                     }
                 }
                 tx.commit()?;
-                Ok(inserted)
+                Ok((inserted, requalified))
             })
             .await
             .map_err(db_error)?;
-        self.publish_saved(inserted > 0);
+        self.publish_saved(inserted > 0 || requalified);
         Ok((inserted, total))
     }
 }

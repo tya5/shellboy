@@ -1136,6 +1136,7 @@ impl IndexService {
                     let stream = self.reader.stream(&raw.execution).await?;
                     if stream.retention_generation() != raw.generation as u64
                         || stream.saved_sequence() != raw.saved_sequence as u64
+                        || stream.encoding() != raw.encoding
                     {
                         return Err(err(
                             ErrorCode::OperationConflict,
