@@ -14,6 +14,13 @@ Shellboyは端末で会話し、モデルにshell作業を依頼するアプリ�
 ページ送りします。これは使用量の記録で、費用の推定ではありません。
 
 
+## 目的別ガイド
+
+- **会話を始める・開き直す:** [初回設定](configuration.md#first-setup-without-an-owner)、[Windows と PowerShell の設定](configuration.md#windows-shell-examples)、[最初の依頼を送る](#2-最初の依頼を送る)、[会話を切り替える](#3-会話を切り替える)。
+- **メッセージを送る・返信を求める・委譲する:** [返信待ち](#返信待ち)と[返信を待つ手順](delegation.md#waiting-for-replies)。
+- **ファイルや過去の会話を使う:** [添付](attachments.md)、[Windows のシェル](shell.md#windows-shell-notes)、[キーワード検索と意味検索](rag.md)、[コンパクション](history-and-search.md#compaction-and-spill)。
+- **復旧・更新する:** [エラーの種類と次の操作](recovery-and-storage.md#typed-failures-and-next-actions)、[作業が受け付けられたか確認](recovery-and-storage.md#distinguish-acceptance-from-completion)、[更新前のバックアップ](../../README.md#upgrading)。
+
 ## UI の表示言語と診断
 
 履歴 GC の実行後は、F1 または `/help` の DB / GC 欄で、段階、走査数、

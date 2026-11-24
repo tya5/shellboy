@@ -15,6 +15,13 @@ summary metadata is read in bounded cursor pages. These are usage facts, not a
 cost estimate.
 
 
+## Jump to a task
+
+- **Start or reopen a Thread:** [First setup](configuration.md#first-setup-without-an-owner), [Windows and PowerShell setup](configuration.md#windows-shell-examples), [send your first request](#2-send-your-first-request), or [switch conversations](#3-switch-conversations).
+- **Send, ask, or delegate:** [Pending replies](#pending-replies) and [waiting for replies](delegation.md#waiting-for-replies).
+- **Work with files or saved conversations:** [Attachments](attachments.md), [Windows shell notes](shell.md#windows-shell-notes), [keyword and semantic search](rag.md), and [compaction](history-and-search.md#compaction-and-spill).
+- **Recover or upgrade:** [Typed failures and next actions](recovery-and-storage.md#typed-failures-and-next-actions), [check whether work was accepted](recovery-and-storage.md#distinguish-acceptance-from-completion), and [back up before upgrading](../../README.md#upgrading).
+
 ## UI language and diagnostics
 
 When history GC has run, F1 or `/help` shows a DB / GC section with its stage,

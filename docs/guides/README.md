@@ -9,7 +9,7 @@ Operation guides for people using Shellboy and models working inside it. Start w
 | Start, send a message, or switch conversations | [User Guide](user-guide.md) |
 | Learn to operate Shellboy as a model | [Agent Guide](agent-guide.md) |
 | Browse, search, and retrieve bundled guides | [Finding guides](docs.md) |
-| Index documents and search documents or history | [Documents and history search](rag.md) |
+| Find exact text, use semantic search, or estimate historical backfill | [Search without embeddings](rag.md#search-one-conversation-without-embedding) · [Semantic search](rag.md#semantic-search-and-multiple-scopes) · [Index and cost previews](history-and-search.md#index-management-and-cost-previews) |
 | Configure an API connection, models, storage, or key bindings | [Configuration](configuration.md) |
 | Use keys, slash commands, drafts, or paste | [TUI operations](tui.md) |
 | Create subagents, assign work, report, or wait | [Delegation and child agents](delegation.md) |
@@ -43,7 +43,7 @@ For people: User Guide → TUI operations → task-specific guides. For models: 
 
 CLI examples use Bash unless stated otherwise. Replace `THREAD_ID`, `RUN_ID`, `NODE_ID`, and similar placeholders with values from actual returned JSON. Read fields inside `result`; check `ok: true` separately from the target's state. Conversation and execution-control commands require an owner running with the same data directory. `docs` and `rag` run independently without starting an owner.
 
-Operation names and states follow the current implementation. Model/proxy capabilities, response quality, and pricing depend on the connection, not these operation descriptions. See [acceptance](../validation/acceptance.md) for untested Windows hardware, GUI terminal, and IME behavior. Current TUI labels are Japanese; guides quote actual labels where needed rather than implying an English UI already exists.
+Operation names and states follow the current implementation. Model/proxy capabilities, response quality, and pricing depend on the connection, not these operation descriptions. See [acceptance](../validation/acceptance.md) for untested Windows hardware, GUI terminal, and IME behavior. The TUI defaults to English; set `[ui] language` to `"ja"` for Japanese. See [UI language and diagnostics](user-guide.md#ui-language-and-diagnostics).
 
 The English guides are embedded in the executable. Use `shellboy docs list` to browse, `shellboy docs search --query background` to search, and `shellboy docs get --id shellboy/shell` to read. No configuration, API, or repository is needed. A Thread's `AGENTS.md` is read as work instructions at Turn start; links do not automatically inject guide bodies.
 

@@ -408,6 +408,20 @@ RAM body/layout/history/Base64-image cache budgets differ from storage retention
 
 Even when logical capacity stops new indexing, semantic searches of existing indexes remain available. Query embedding may cost money; search alone neither resumes indexing nor backfills old data. Physical disk exhaustion and operation receipt-budget rejection have separate recovery procedures.
 
+## Typed failures and next actions
+
+Read the returned `code` and `hint`; use the saved failure and its details to
+choose the next action rather than guessing from provider or operating-system prose.
+
+| Evidence | Next action |
+|---|---|
+| Transport cause `dns` | Check the configured endpoint hostname and its DNS resolution. |
+| Transport cause `proxy_connect` with status `407` | Check [proxy authentication](configuration.md#https-proxies-and-exclusions), not the model API key. |
+| Credential write refused with `invalid_argument` and a configured `Authorization` header | Keep the credential where it is, or remove that header before switching to a stored key. See [credential setup](configuration.md#store-a-key-and-check-a-connection). |
+| A confirmed configuration write reports `restart_required` | Restart the owner for that data directory to apply the saved change. If the write outcome is unknown, inspect the saved setting before writing again. |
+| Known refusal versus lost mutation reply | For a confirmed refusal, address its hint and edit the retained draft if needed. If delivery is unverified and the operation ID is known, use `shellboy operation get --operation OPERATION_ID` before resending. A missing receipt does not prove nothing ran. |
+| Turn in `recovery_wait` after a context-limit failure | Review the saved context with `/compact`. Use `/compact-max` only when the saved recovery facts report `maximum_reduction_available: true`; otherwise use `/edit` to change the input. See [input size and range editing](history-and-search.md#input-size-and-range-editing). |
+
 ## Common problems
 
 | Symptom / code | Check and response |

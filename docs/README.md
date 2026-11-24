@@ -1,6 +1,6 @@
 # Documentation
 
-Product users start with the [User Guide](guides/user-guide.md) ([Japanese](guides/user-guide.ja.md)). Models running inside Shellboy use the English-only [Agent Guide](guides/agent-guide.md). Developers start with the [effective specification](design/effective-spec.md).
+Product users start with the [User Guide](guides/user-guide.md) ([Japanese](guides/user-guide.ja.md)). Models running inside Shellboy use the English-only [Agent Guide](guides/agent-guide.md). Browse the [task index](guides/README.md#find-a-guide-by-task) to find the guide for a specific job. Developers start with the [effective specification](design/effective-spec.md).
 
 English is the default for documentation. Only the User Guide has a Japanese translation, `user-guide.ja.md`; unsuffixed guide files are English. Existing Japanese design and historical records remain available; this language change does not claim to translate the entire development archive. New documents are written in English. See the [language policy and UI evaluation](design/documentation-language.md).
 
