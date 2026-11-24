@@ -191,6 +191,12 @@ type RawCurrentAndViews = (
     Option<Result<view_read::RawBatch, StorageError>>,
 );
 
+struct VisibleReadScope<'a> {
+    tool_scope: Option<ToolObservation>,
+    waits: Option<&'a [(String, String)]>,
+    limit: usize,
+}
+
 // Production coupled collector: all consumers use this caller's connection and
 // read sequence; the same-Thread inspector borrows the already-read header Arc.
 #[cfg(test)]
@@ -207,8 +213,11 @@ fn read_current_and_views_tx(
         db,
         thread,
         ids,
-        tool_scope,
-        (waits, 3),
+        VisibleReadScope {
+            tool_scope,
+            waits,
+            limit: 3,
+        },
         sequence,
         views,
         header::read_tx(db, thread).map(Arc::new),
@@ -219,13 +228,16 @@ fn read_current_and_views_tx_limited(
     db: &Connection,
     thread: &str,
     ids: &[String],
-    tool_scope: Option<ToolObservation>,
-    wait_policy: (Option<&[(String, String)]>, usize),
+    scope: VisibleReadScope<'_>,
     sequence: u64,
     views: &view_read::Tickets,
     details: Result<Arc<header::RawHeader>, StorageError>,
 ) -> Result<RawCurrentAndViews, StorageError> {
-    let (waits, limit) = wait_policy;
+    let VisibleReadScope {
+        tool_scope,
+        waits,
+        limit,
+    } = scope;
     let receipts = receipt_states_tx(db, ids)?;
     let visible = read_visible_tx_limited(db, thread, tool_scope, waits, sequence, limit, details);
     let facts = if views.is_empty() {
@@ -289,7 +301,7 @@ pub(super) async fn run(
         let read=snapshot::read_sequenced(
             control.store.database.path().to_path_buf(),stop.clone(),move |db,sequence| {
             // Keep typed per-surface failures; do not reinterpret WAL contention.
-            let (receipts, visible, views) = read_current_and_views_tx_limited(db,&target,&ids,tool_scope,(waits.as_deref(),limit),sequence,&view_scopes,details)?;
+            let (receipts, visible, views) = read_current_and_views_tx_limited(db,&target,&ids,VisibleReadScope { tool_scope, waits: waits.as_deref(), limit },sequence,&view_scopes,details)?;
             let visible = visible.and_then(|mut raw| {
                 raw.index_pause = index.read_display_pause(db)?;
                 Ok(raw)
