@@ -524,6 +524,7 @@ pub(super) struct Observation {
 }
 pub(super) struct RawObservation {
     mode: BrowserMode,
+    requested: Vec<String>,
     patch: Option<super::browser_read::RawPatch>,
     details: Option<super::watch_read::RawWatch>,
     detail_ids: Vec<String>,
@@ -560,7 +561,12 @@ pub(super) fn read_tx(
         .filter(|id| permitted(id) || ticket.detail_parent_ids.contains(id))
         .cloned()
         .collect::<Vec<_>>();
-    let rows = thread_summary::read_ids_tx(db, &requested)?;
+    // Watch still needs raw run/answer identities and titles for its Unit 2 enrichment.
+    let rows = if ticket.mode == BrowserMode::Watch {
+        thread_summary::read_ids_tx(db, &requested)?
+    } else {
+        Vec::new()
+    };
     let found = rows
         .iter()
         .map(|row| row.thread_id.clone())
@@ -616,6 +622,7 @@ pub(super) fn read_tx(
     };
     Ok(RawObservation {
         mode: ticket.mode,
+        requested,
         patch,
         details,
         detail_ids,
@@ -688,27 +695,101 @@ fn observation_closed() -> ApiError {
     ApiError::new(ErrorCode::InvalidState, "Browser observation closed")
 }
 
+/// The same native adapter serves the embedded UI and an independent owner.
+pub(crate) struct NativeBrowser<'a> {
+    data_dir: &'a std::path::Path,
+}
+impl<'a> NativeBrowser<'a> {
+    pub(crate) fn new(data_dir: &'a std::path::Path) -> Self {
+        Self { data_dir }
+    }
+    pub(super) fn embedded(control: &'a Control) -> Self {
+        Self::new(
+            control
+                .store
+                .database
+                .path()
+                .parent()
+                .expect("owner database has a directory"),
+        )
+    }
+    pub(crate) async fn list(
+        &self,
+        args: ThreadListArgs,
+        stop: &CancellationToken,
+    ) -> Result<Page<ThreadSummary>, ApiError> {
+        let reply = tokio::select! { biased;
+            _ = stop.cancelled() => return Err(observation_closed()),
+            reply = crate::ipc::call_selected(self.data_dir, Command::ThreadList(args)) => reply?,
+        };
+        let malformed =
+            || ApiError::new(ErrorCode::ProtocolMismatch, "Invalid thread.list response");
+        if !reply.ok {
+            return Err(reply.error.unwrap_or_else(malformed));
+        }
+        serde_json::from_value(reply.result.ok_or_else(malformed)?).map_err(|_| malformed())
+    }
+    pub(crate) async fn exact(
+        &self,
+        ids: Vec<String>,
+        stop: &CancellationToken,
+    ) -> Result<Vec<ThreadSummary>, ApiError> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        self.list(
+            ThreadListArgs {
+                thread_ids: Some(ids),
+                ..Default::default()
+            },
+            stop,
+        )
+        .await
+        .map(|page| page.items)
+    }
+}
+
+pub(super) async fn observe_native(
+    native: &NativeBrowser<'_>,
+    raw: RawObservation,
+    ticket: &Ticket,
+    sequence: u64,
+    language: crate::config::UiLanguage,
+) -> Result<Observation, ApiError> {
+    let mut rows = native.exact(raw.requested.clone(), &ticket.stop).await?;
+    let title_only = raw.title_only.clone();
+    let ids = ticket.ids.clone();
+    let generation = ticket.generation;
+    presentation_work(move || {
+        let mut result = prepare_localized(raw, sequence, generation, language);
+        if let Some(patch) = &mut result.patch {
+            let found: BTreeSet<_> = rows.iter().map(|row| row.thread_id.as_str()).collect();
+            patch.missing_ids = ids
+                .into_iter()
+                .filter(|id| !found.contains(id.as_str()))
+                .collect();
+            rows.retain(|row| !title_only.contains(&row.thread_id));
+            patch.display_times = thread_display_times(&rows);
+            patch.rows = rows;
+        }
+        result
+    })
+    .await
+}
+
 pub(super) async fn page(
     control: &Control,
     args: ThreadListArgs,
     stop: CancellationToken,
     progress_slots: Arc<Semaphore>,
 ) -> Result<(Page<ThreadSummary>, Vec<ThreadDisplayTime>, u64), ApiError> {
-    let permit = tokio::select! {biased;
+    let _permit = tokio::select! {biased;
         _=stop.cancelled()=>return Err(observation_closed()),
         permit=progress_slots.acquire_owned()=>permit.map_err(|_|observation_closed())?,
     };
-    let result = super::snapshot::read_sequenced(
-        control.store.database.path().to_path_buf(),
-        stop.clone(),
-        move |db, _sequence| crate::control::db::thread_list(db, &args).map_err(Into::into),
-    )
-    .await;
-    drop(permit);
-    let (page, sequence) = checked_storage(control, result).await?;
-    if stop.is_cancelled() {
-        return Err(observation_closed());
-    }
+    let sequence = super::message_queue::read_revision();
+    let page = NativeBrowser::embedded(control).list(args, &stop).await?;
+    drop(_permit);
     presentation_work(move || {
         let times = thread_display_times(&page.items);
         (page, times, sequence)
@@ -999,23 +1080,15 @@ mod watch_tests {
         let ticket = browser.take(tokio::time::Instant::now()).unwrap();
         let trace = crate::frontend::sql_trace::Statements::new(&db);
         let raw = read_tx(&db, &ticket, None).unwrap();
-        assert_eq!(
-            trace.count(),
-            2,
-            "List metadata plus selected excerpt, without Watch detail work"
-        );
+        assert_eq!(trace.count(), 1, "Only the selected excerpt stays local");
         drop(trace);
         let observation = prepare(raw, 1, 1);
         assert!(observation.details.is_none());
         let patch = observation.patch.unwrap();
         assert!(patch.watch_summaries.is_empty());
-        assert_eq!(
-            patch
-                .rows
-                .iter()
-                .map(|row| row.thread_id.as_str())
-                .collect::<BTreeSet<_>>(),
-            BTreeSet::from(["child", "failed"])
+        assert!(
+            patch.rows.is_empty(),
+            "summaries come only from the native adapter"
         );
         assert_eq!(patch.excerpt.as_ref().unwrap().0, "child");
     }
