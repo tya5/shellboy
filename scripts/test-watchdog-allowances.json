@@ -18,7 +18,7 @@
   {
     "file": "src/control.rs",
     "rule": "raw-timeout",
-    "fingerprint": "5b158e808bb0c3ad4a4ceb4ac6d9eb615a79a8fc32b8cf1cdd1d58a6c1047227",
+    "fingerprint": "51b27b31e04e748bc0ec9e09c38fdfa50c4fd89926d4a58d2c10faee2c40b328",
     "function": "shutdown_closes_admission_but_finishes_file_preparation_before_capture",
     "count": 1,
     "reason": "Deferred #41/shared-read: existing shutdown_closes_admission_but_finishes_file_preparation_before_capture test occurrence only; migrate on #41 integration, no file-wide exemption."
@@ -34,7 +34,7 @@
   {
     "file": "src/control.rs",
     "rule": "raw-timeout",
-    "fingerprint": "873f7afd00a40bc19d64d25a52d12f20fcf42d3f1e4fe7282f984bdff3c5edcb",
+    "fingerprint": "888105495a24e0d80ae3b8287a829fb72ff9774cc0172cb1e1009fb5285867f4",
     "function": "shutdown_closes_admission_but_finishes_file_preparation_before_capture",
     "count": 1,
     "reason": "Deferred #41/shared-read: existing shutdown_closes_admission_but_finishes_file_preparation_before_capture test occurrence only; migrate on #41 integration, no file-wide exemption."
@@ -42,7 +42,7 @@
   {
     "file": "src/control.rs",
     "rule": "raw-timeout",
-    "fingerprint": "a7995772cc41346bba6674cb35c9f3c66301776ee33ba73524c90a779337feef",
+    "fingerprint": "29636dc87c2e8a637d8c4cdd4b95670f00827f543072246f5ba2d0b2c4df5afb",
     "function": "forced_shutdown_can_interrupt_pre_capture_admission_drain",
     "count": 1,
     "reason": "Deferred #41/shared-read: existing forced_shutdown_can_interrupt_pre_capture_admission_drain test occurrence only; migrate on #41 integration, no file-wide exemption."
