@@ -283,9 +283,10 @@ queue. Each optional ShutdownTrace has fixed scope/stage/boundary enums and a
 u64 elapsed millisecond value computed from a monotonic clock at the caller,
 before enqueueing. It contains no path, raw error, message, provider text or
 other unbounded data. Frontend and owner use independent start instants; elapsed
-values are comparable only within their scope. Trace stage pairs bracket existing
-listener, draft enqueue/save, accepted-send joins, interruption capture, task/read
-joins, image cleanup, Control shutdown, worker joins, DB close and endpoint cleanup.
+values are comparable only within their scope. Frontend trace stage pairs bracket draft enqueue/save, accepted-send joins,
+task/read joins, image cleanup and worker joins. The embedded composition
+still closes listener admission before the client drain and captures interrupted
+work before the control-task join. The owner records DB close and endpoint cleanup.
 Trace records are observations, not new Core states or completion guarantees.
 
 Keep the diagnostic writer alive until endpoint metadata cleanup has finished,
@@ -294,8 +295,7 @@ close, DB close precedes endpoint cleanup, and owner-lock release remains after
 owned shutdown returns. Even a metadata worker error must still drain diagnostics.
 This changes only the placement of cosmetic diagnostic-writer close; UI priority,
 accepted-save ordering, shutdown grace and result precedence stay unchanged.
-Frontend owner-begin and owner diagnostics-begin intentionally have no after
-record: the writer is closed during that final await and cannot report its own
+Owner diagnostics-begin intentionally has no after record: the writer is closed during that final await and cannot report its own
 completion. Never synthesize an end after the writer has closed. All records use
 existing best-effort overflow/drop accounting; missing stages alone are not proof
 of a hang. In a non-overloaded synthetic shutdown, the IPC frontend regression
