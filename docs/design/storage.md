@@ -766,6 +766,16 @@ An unrelated legacy orphan does not block a declared scoped upgrade; a violation
 in the checked scope does.
 
 
+## Windows owner directory (#392)
+
+Owner I/O uses the resolved local directory, including local NTFS redirection
+and junctions. The final symlink defense remains in place. UNC and mapped
+network data directories are refused with `network_data_directory`; move the
+data to a local folder for SQLite WAL. Publishing a new endpoint replaces a
+stale endpoint atomically. A confirmed sharing or lock conflict is reported as
+`io_failed` with `details.reason=file_in_use` where supported by the existing
+file-write diagnostic boundary; it does not trigger a retry.
+
 ## Retained columns without active producers (#395)
 
 New instruction snapshots do not persist mtime; the nullable column and old
