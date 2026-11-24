@@ -577,6 +577,7 @@ async fn measure_current_instance_receipt_sizes() {
         (
             "shell.read (64KiB page)",
             Command::ShellRead(ShellReadArgs {
+                segments: false,
                 execution_id: "shell".into(),
                 cursor: None,
                 encoding: Some("UTF-8".into()),

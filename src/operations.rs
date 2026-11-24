@@ -283,6 +283,7 @@ pub(crate) enum FieldId {
     Timeout,
     ExcerptChars,
     LimitBytes,
+    ShellSegments,
     EndMessageOnly,
     Parts,
     Encoding,
@@ -1034,6 +1035,14 @@ pub(crate) const FIELD_SPECS: &[FieldSpec] = &[
         label: "抜粋文字数",
         help: "0..4096Unicode scalarです。0は抜粋本文を省略し、CLI既定は512です。",
         kind: FieldType::Unsigned,
+        discovery: Discovery::None,
+    },
+    FieldSpec {
+        id: FieldId::ShellSegments,
+        default_origin: DefaultOrigin::None,
+        label: "Output stream ranges",
+        help: "Include stdout/stderr byte ranges in the returned text.",
+        kind: FieldType::Boolean,
         discovery: Discovery::None,
     },
     FieldSpec {
@@ -2050,6 +2059,7 @@ pub(crate) const SPECS: &[OperationSpec] = &[
             FieldId::Cursor,
             FieldId::Encoding,
             FieldId::LimitBytes,
+            FieldId::ShellSegments,
         ],
     },
     OperationSpec {

@@ -1260,6 +1260,9 @@ pub struct ShellReadOptions {
     pub cursor: Option<String>,
     #[arg(long)]
     pub encoding: Option<String>,
+    /// Include stdout/stderr ranges in the returned text.
+    #[arg(long)]
+    pub segments: bool,
     #[arg(long,default_value_t=wire::MAX_BODY_BYTES)]
     pub limit_bytes: u32,
 }
@@ -2114,6 +2117,7 @@ impl Cli {
                     execution_id: a.execution_id,
                 }),
                 ShellCommand::Read(a) => C::ShellRead(wire::ShellReadArgs {
+                    segments: a.segments,
                     execution_id: a.execution_id,
                     cursor: a.cursor,
                     encoding: a.encoding,

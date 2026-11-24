@@ -558,6 +558,7 @@ fn follow_in(
         "message_id" => Ok(Command::MessageGet(MessageTarget { message_id: id })),
         "execution_id" if matches!(mode, ManagementFollow::Read) => {
             Ok(Command::ShellRead(ShellReadArgs {
+                segments: false,
                 execution_id: id,
                 cursor: None,
                 encoding: None,
@@ -973,6 +974,7 @@ mod tests {
             execution_id: "shell-full-id".into(),
         });
         let raw = Command::ShellRead(ShellReadArgs {
+            segments: false,
             execution_id: "shell-full-id".into(),
             cursor: None,
             encoding: None,

@@ -78,7 +78,7 @@ P1照合追記: Thread作成/変更argsの `connection` は名前付きResponses
 
 frame上限8MiBは固定通信境界である。設定でdraft/stdin上限を増やしてもframe上限を黙って変更せず、超過は `input_limit` として返す。入力本文検査はUTF-8本文byte数と設定値の両方で別途実施し、JSON envelopeのサイズ判定で代用しない。途中切捨ては行わない。追加fixture `connection_profile_changes_are_independent_and_shell_nul_is_preflight_error` がこの型境界を検査する。
 
-P3照合修正: ShellReadArgs.encodingをOptionへ変更し、省略時にexecutionの保存済みdecode設定を維持する。明示指定だけが変更である。ShellOutputへdecode_errorsを追加し、完了端での不完全文字や不正byteの代替を表示と別に確認できる。詳細は [raw output設計](output.md) を参照。
+P3照合修正: ShellReadArgs.encodingをOptionへ変更し、省略時にexecutionの保存済みdecode設定を維持する。明示指定だけが変更である。ShellOutputへdecode_errorsを追加し、完了端での不完全文字や不正byteの代替を表示と別に確認できる。詳細は [raw output設計](output.md) を参照。 `shell.read` accepts optional `segments: true` (default false); the result then includes stream-labeled half-open UTF-8 byte ranges for nonempty `text`. The field is omitted by default; raw bytes and cursor semantics are unchanged.
 
 `model.list` の追加契約・接続解決・receipt規則は [models.md](models.md#cliと共有control操作2026-10-25採用) を参照。原文32操作に対する採用済み追加である。
 

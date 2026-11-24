@@ -565,6 +565,7 @@ async fn runtime_observations_keep_receipts_constant_and_release_raw_output_pins
             execution_id: "read-shell".into(),
         }),
         Command::ShellRead(ShellReadArgs {
+            segments: false,
             execution_id: "read-shell".into(),
             cursor: None,
             encoding: Some("UTF-8".into()),

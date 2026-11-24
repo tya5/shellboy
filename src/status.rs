@@ -232,6 +232,7 @@ fn links(kind: WorkKind, item: &WorkItem) -> Result<Vec<Command>> {
                 execution_id: item.id.clone(),
             }),
             Command::ShellRead(ShellReadArgs {
+                segments: false,
                 execution_id: item.id.clone(),
                 cursor: None,
                 encoding: None,
@@ -260,6 +261,7 @@ fn links(kind: WorkKind, item: &WorkItem) -> Result<Vec<Command>> {
             execution_id: id.clone(),
         }));
         links.push(Command::ShellRead(ShellReadArgs {
+            segments: false,
             execution_id: id.clone(),
             cursor: None,
             encoding: None,

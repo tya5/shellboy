@@ -1311,7 +1311,7 @@ record!(NodeProvenance {
     #[serde(default, skip_serializing_if = "Option::is_none")] origin_thread_id: Option<String>
 });
 record!(RelationItem { node_id: String, provenance: NodeProvenance, #[serde(default, skip_serializing_if = "Option::is_none")] replacement_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] source_revision: Option<i64>, #[serde(default, skip_serializing_if = "Option::is_none")] source_hash: Option<String> });
-args!(ShellReadArgs { execution_id: String, #[serde(default)] cursor: Option<String>, #[serde(default, skip_serializing_if="Option::is_none")] encoding: Option<String>, #[serde(default = "body_limit")] limit_bytes: u32 });
+args!(ShellReadArgs { execution_id: String, #[serde(default, skip_serializing_if="is_false")] segments: bool, #[serde(default)] cursor: Option<String>, #[serde(default, skip_serializing_if="Option::is_none")] encoding: Option<String>, #[serde(default = "body_limit")] limit_bytes: u32 });
 args!(ShellWriteArgs {
     execution_id: String,
     text: String,

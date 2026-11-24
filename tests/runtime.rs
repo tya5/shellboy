@@ -456,6 +456,7 @@ async fn background_read_keeps_target_raw_separate_from_message_send_and_observe
     let read = &replies[3]["result"];
     assert_eq!(read["execution_id"], target);
     assert_eq!(read["text"], "SHELLBOY_BG_READ_V1");
+    assert!(read.get("segments").is_none());
     assert_eq!(read["raw_bytes"], b"SHELLBOY_BG_READ_V1".len());
     assert_eq!(read["encoding"], "UTF-8");
     assert_eq!(read["decode_errors"], false);
@@ -463,6 +464,7 @@ async fn background_read_keeps_target_raw_separate_from_message_send_and_observe
     let observer_read = command(
         &control,
         Command::ShellRead(ShellReadArgs {
+            segments: false,
             execution_id: observer.into(),
             cursor: None,
             encoding: Some("UTF-8".into()),
@@ -1544,6 +1546,7 @@ async fn shell_output_wait_wakes_after_commit_while_shell_and_model_remain_block
     );
     let empty = reader
         .read(ShellReadArgs {
+            segments: false,
             execution_id: execution.clone(),
             cursor: None,
             encoding: Some("UTF-8".into()),
@@ -3281,6 +3284,7 @@ async fn thread_service_file_trigger_sends_through_ipc_and_drains() {
                 let read = command(
                     &control,
                     Command::ShellRead(ShellReadArgs {
+                        segments: false,
                         execution_id: execution.clone(),
                         cursor: None,
                         encoding: None,
@@ -3348,6 +3352,7 @@ async fn thread_service_file_trigger_sends_through_ipc_and_drains() {
     let read = command(
         &control,
         Command::ShellRead(ShellReadArgs {
+            segments: false,
             execution_id: execution.clone(),
             cursor: None,
             encoding: None,
@@ -3363,6 +3368,7 @@ async fn thread_service_file_trigger_sends_through_ipc_and_drains() {
         .request(Request::new(
             format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
             Command::ShellRead(ShellReadArgs {
+                segments: false,
                 execution_id: execution,
                 cursor: Some(old_cursor),
                 encoding: None,

@@ -22,6 +22,7 @@ async fn finish(db: &DbWorker) {
 }
 fn args(cursor: Option<String>, encoding: &str, limit: u32) -> ShellReadArgs {
     ShellReadArgs {
+        segments: true,
         execution_id: "x".into(),
         cursor,
         encoding: Some(encoding.into()),
@@ -182,6 +183,7 @@ async fn cp932_redecode_keeps_raw_unchanged_and_decoders_are_independent_per_str
     assert!(!first.decode_errors);
     let inherited = reader
         .read(ShellReadArgs {
+            segments: false,
             execution_id: "x".into(),
             cursor: None,
             encoding: None,
@@ -190,6 +192,9 @@ async fn cp932_redecode_keeps_raw_unchanged_and_decoders_are_independent_per_str
         .await
         .unwrap();
     assert_eq!(inherited.text, "あ日");
+    let mut opted_in = serde_json::to_value(&first).unwrap();
+    opted_in.as_object_mut().unwrap().remove("segments");
+    assert_eq!(serde_json::to_value(&inherited).unwrap(), opted_in);
     assert_eq!(inherited.encoding, "Shift_JIS");
     assert_eq!(
         reader
@@ -378,6 +383,7 @@ async fn streaming_reader_uses_fixed_watermark_and_missing_middle_raw_is_explici
     assert!(stream.next_page(64).await.unwrap().is_none());
     let all = reader
         .read(ShellReadArgs {
+            segments: false,
             execution_id: "x".into(),
             cursor: None,
             encoding: None,

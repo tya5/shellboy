@@ -1797,6 +1797,7 @@ impl Form {
                 ],
                 |form, _cwd| {
                     Ok(Command::ShellRead(ShellReadArgs {
+                        segments: false,
                         execution_id: form.owned("execution")?,
                         cursor: form.optional("cursor")?,
                         encoding: form.optional("encoding")?,

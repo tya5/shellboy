@@ -2117,6 +2117,7 @@ async fn structured_history_pages_details_url_copy_and_wait_cancel_keep_original
             .all(|field| field.key != "/request_operation_id")
     );
     send.send(UiAction::Manage(Command::ShellRead(ShellReadArgs {
+        segments: false,
         execution_id: "recorded-shell".into(),
         cursor: None,
         encoding: None,

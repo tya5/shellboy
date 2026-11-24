@@ -543,6 +543,7 @@ const MEANINGS: &[Meaning] = &[
             ("cursor", FieldId::Cursor),
             ("encoding", FieldId::Encoding),
             ("limit_bytes", FieldId::LimitBytes),
+            ("segments", FieldId::ShellSegments),
         ],
         None,
     ),

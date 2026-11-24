@@ -4,7 +4,7 @@
 
 ## 公開APIとcursor
 
-`ShellOutputReader::new(DbWorker,instance_id)`、`get(execution_id)` はShellDetails、`read(ShellReadArgs)` はShellOutputを返す。ShellOutputはtext/encoding/cursor/raw_bytes/output_complete/decode_errorsを持つ。出力完全性とtargetの成功終了は別であり、終了状態はgetで取得する。`read_stream(args,StreamSelection)` でBoth/Stdout/Stderrを選択でき、通常CLIはBoth。
+`ShellOutputReader::new(DbWorker,instance_id)`、`get(execution_id)` はShellDetails、`read(ShellReadArgs)` はShellOutputを返す。ShellOutputはtext/encoding/cursor/raw_bytes/output_complete/decode_errorsを持つ。出力完全性とtargetの成功終了は別であり、終了状態はgetで取得する。`read_stream(args,StreamSelection)` でBoth/Stdout/Stderrを選択でき、通常CLIはBoth。 `segments: true` (`--segments`) opts into stdout/stderr ranges in the unchanged `text`; offsets are half-open UTF-8 byte indices. The default response omits the key and neither setting changes the raw byte budget or cursor.
 
 **2026-10-24採用のローカル契約追補（CLI契約3/5/6節の照会情報を拡張）:** `shell get` は既存fieldに `command` / `cwd` / `thread_id` / `turn_id` を追加する。実executionの保存値を返し、command文字列を解析して別の実行へ読み替えない。新fieldはoptionalとし、旧応答のdeserializeとcommand未保存の旧記録を扱う。DB migration・操作・所有判定・raw/cursor契約は変更しない。commandはget時だけ取得し、rawの各ページ走査へ追加しない。モデル向けshell tool結果にも、execution_idを持つ全終了/待機解除経路で同じ保存値と既存run_idを付ける。結果保存transaction内で取得し、履歴とモデルreplayの対応を保つ。エラー/cancelledでexecutionを作っていない場合は実行情報を捏造しない。
 

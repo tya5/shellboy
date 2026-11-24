@@ -476,7 +476,11 @@ impl ShellOutputReader {
                 .await?;
             if streams.includes(&page.stream) {
                 let (part, bad) = decoders.decode(&page.stream, &page.bytes, false);
-                append_segment(&mut text, &mut segments, &page.stream, &part);
+                if args.segments {
+                    append_segment(&mut text, &mut segments, &page.stream, &part);
+                } else {
+                    text.push_str(&part);
+                }
                 decode_errors |= bad;
                 raw_bytes += page.bytes.len() as u64;
             }
@@ -485,7 +489,11 @@ impl ShellOutputReader {
         }
         if state.terminal() && position.sequence == state.saved && !eof_flushed {
             for (stream, part, bad) in decoders.finish_parts(streams) {
-                append_segment(&mut text, &mut segments, stream, &part);
+                if args.segments {
+                    append_segment(&mut text, &mut segments, stream, &part);
+                } else {
+                    text.push_str(&part);
+                }
                 decode_errors |= bad;
             }
             eof_flushed = true;
