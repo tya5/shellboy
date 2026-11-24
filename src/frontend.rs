@@ -15,8 +15,6 @@ mod header;
 mod history_reader;
 mod input_history;
 mod inspection_attachments;
-#[allow(dead_code)]
-mod inspection_confirmations;
 mod inspection_deletion;
 pub(crate) mod inspection_external;
 mod inspection_history;
