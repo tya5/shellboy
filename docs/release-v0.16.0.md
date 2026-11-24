@@ -1,4 +1,4 @@
-- Core: `v0.15.0` → `v0.16.0` (main source `b0b8feb8daaf57e4cbee6459a5d7667eb8599790`)
+- Core: `v0.15.0` → `v0.16.0` (main source `aea8b57e5c79ff68b6b336b3c43eb46a1c8f41b0`)
 
 ## 日本語
 
@@ -21,11 +21,15 @@
 
 - **Windows（#392）:** ローカルにリダイレクトされた NTFS フォルダーは利用でき、ネットワーク上のデータディレクトリは明示的に拒否します。共有違反の診断と、シェルの実効 PATH を改善しました。
 
+- **要求の重複を削減（#393）:** 設定が変わらない Turn では設定行を再送せず、新しいライフサイクル通知と返信の通知を短くします。保存済み履歴は書き換えません。
+- **Run の要求回数上限（#399）:** 新しい Run には `message send --max-model-requests N` で上限を設定できます。再試行と Run に属する自動要約も数えます。料金の上限ではありません。
+- **モデル障害（#400）:** 認証・要求の拒否・通信失敗を区別し、`status` などで診断と次の確認先を案内します。
+
 ### アップグレード
 
-- **DB:** 更新前にデータディレクトリ全体をバックアップしてください。owner DB は **62 → 64**。`0063_thread_reply_summary` と `0064_thread_cwd_partitions`（#381）は索引を追加し、保存本文は変更しません。独立 RAG DB は **4 → 5**（#383）。古い DB は `rag init` で更新できます。埋め込み API は呼び出しません。読み取り専用操作は自動更新しません。 #397 では、対象が宣言された移行の外部キー検査をその範囲に限定します。
-- **プロトコル:** **18 → 22**。19 は返信件数・状態一覧、20 は履歴ウィンドウ、21 は Thread 検索・抜粋と接続診断、22 は資格情報ファイルの警告です。owner、CLI、RPC クライアントは同じプロトコルのものに揃えてください。旧 `status` と旧状態フィルター用 `thread list` のカーソルは使えないため、カーソルなしで読み直してください。
-- **CLI・設定:** `connection test --post-model MODEL` を追加。コマンド・既存フラグ・設定キーの削除や改名、新規設定キーはありません。Unix の `config get` に値を含まない `credentials_file.warning` が追加されます。`wait --after` と `config set --set` の構文は変更していません。
+- **DB:** 更新前にデータディレクトリ全体をバックアップしてください。owner DB は **62 → 65**。`0063_thread_reply_summary` と `0064_thread_cwd_partitions`（#381）は索引を追加し、保存本文は変更しません。`0065_run_request_ceiling` は Run の上限と予約済み回数の列を追加します。独立 RAG DB は **4 → 5**（#383）。古い DB は `rag init` で更新できます。埋め込み API は呼び出しません。読み取り専用操作は自動更新しません。 #397 では、対象が宣言された移行の外部キー検査をその範囲に限定します。
+- **プロトコル:** **18 → 23**。19 は返信件数・状態一覧、20 は履歴ウィンドウ、21 は Thread 検索・抜粋と接続診断、22 は資格情報ファイルの警告、23 は Run の要求回数上限とモデル障害の診断です。owner、CLI、RPC クライアントは同じプロトコルのものに揃えてください。旧 `status` と旧状態フィルター用 `thread list` のカーソルは使えないため、カーソルなしで読み直してください。
+- **CLI・設定:** `connection test --post-model MODEL` と `message send --max-model-requests N` を追加。コマンド・既存フラグ・設定キーの削除や改名、新規設定キーはありません。Unix の `config get` に値を含まない `credentials_file.warning` が追加されます。`wait --after` と `config set --set` の構文は変更していません。
 - **ロールバック:** 逆マイグレーションはありません。旧版に戻す場合は、更新前の owner DB と独立 RAG DB のバックアップを使ってください。回収済みのシェル出力は読み直しても戻りません。
 
 ## English
@@ -49,9 +53,13 @@
 
 - **Windows (#392):** The owner accepts locally redirected NTFS folders and explicitly refuses network data directories. The change also improves file-sharing diagnostics and the effective shell PATH.
 
+- **Less repeated request metadata (#393):** Unchanged settings are not re-emitted each Turn. New lifecycle records and reply reminders are shorter; saved history is unchanged.
+- **Run request ceiling (#399):** Use `message send --max-model-requests N` when starting a new Run. Retries and Run-owned automatic summaries count; this is not a spending limit.
+- **Model failures (#400):** Saved recovery distinguishes authentication, rejected requests, and failed requests. `status` can show diagnostic evidence and a next action.
+
 ### Upgrade notes
 
-- **Database:** Back up the entire data directory before upgrading. Owner SQLite schema **62 → 64**. `0063_thread_reply_summary` and `0064_thread_cwd_partitions` (#381) add indexes without rewriting saved bodies. Standalone RAG schema **4 → 5** (#383); upgrade an old store with `rag init`, which makes no embedding request. Read-only operations do not migrate it. With #397, migrations with a declared scope validate foreign keys within that scope.
-- **Protocol:** **18 → 22**. Version 19 covers reply counts and state paging, 20 history windows, 21 Thread search/excerpts and connection diagnostics, and 22 the credential-file warning. Upgrade owner, CLI and RPC clients together. Old `status` cursors and old state-filtered `thread list` cursors expire; restart those reads without a cursor.
-- **CLI and configuration:** Adds `connection test --post-model MODEL`. No command, existing flag or config key was removed or renamed, and no config key was added. `config get` adds the value-free `credentials_file.warning` field for the Unix advisory. The `wait --after` and `config set --set` syntax is unchanged.
+- **Database:** Back up the entire data directory before upgrading. Owner SQLite schema **62 → 65**. `0063_thread_reply_summary` and `0064_thread_cwd_partitions` (#381) add indexes without rewriting saved bodies. `0065_run_request_ceiling` adds Run ceiling and reservation-count columns. Standalone RAG schema **4 → 5** (#383); upgrade an old store with `rag init`, which makes no embedding request. Read-only operations do not migrate it. With #397, migrations with a declared scope validate foreign keys within that scope.
+- **Protocol:** **18 → 23**. Version 19 covers reply counts and state paging, 20 history windows, 21 Thread search/excerpts and connection diagnostics, 22 the credential-file warning, and 23 the Run request ceiling and model-failure diagnostics. Upgrade owner, CLI and RPC clients together. Old `status` cursors and old state-filtered `thread list` cursors expire; restart those reads without a cursor.
+- **CLI and configuration:** Adds `connection test --post-model MODEL` and `message send --max-model-requests N`. No command, existing flag or config key was removed or renamed, and no config key was added. `config get` adds the value-free `credentials_file.warning` field for the Unix advisory. The `wait --after` and `config set --set` syntax is unchanged.
 - **Rollback:** No reverse migrations. To use an older release, restore pre-upgrade backups of the owner and standalone RAG databases. Rereading cannot recover reclaimed shell output bytes.

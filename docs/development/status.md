@@ -8,7 +8,7 @@ work lands; this branch does not tag or publish a release.
 
 ## Current main contract checkpoint
 
-Owner schema 64, standalone RAG schema 5, IPC 22. See the
+Owner schema 65, standalone RAG schema 5, IPC 23. See the
 [effective specification](../design/effective-spec.md) and numbered migrations.
 The #379 Guide pass landed; the numbered protocol notes remain canonical.
 
