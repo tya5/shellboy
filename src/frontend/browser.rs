@@ -729,6 +729,26 @@ impl<'a> NativeBrowser<'a> {
         }
         serde_json::from_value(reply.result.ok_or_else(malformed)?).map_err(|_| malformed())
     }
+    pub(crate) async fn set_archived(
+        &self,
+        thread_id: String,
+        archived: bool,
+    ) -> Result<usize, ApiError> {
+        let args = ThreadArchiveArgs {
+            thread_ids: vec![thread_id],
+            descendants: true,
+        };
+        if archived {
+            let result: crate::protocol::ThreadArchiveResult =
+                native_request(self.data_dir, Command::ThreadArchive(args)).await?;
+            Ok(result.archived.len())
+        } else {
+            let result: crate::protocol::ThreadUnarchiveResult =
+                native_request(self.data_dir, Command::ThreadUnarchive(args)).await?;
+            Ok(result.unarchived.len())
+        }
+    }
+
     pub(crate) async fn exact(
         &self,
         ids: Vec<String>,

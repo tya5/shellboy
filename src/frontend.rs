@@ -271,11 +271,30 @@ async fn management_request_trigger(
         };
     }
     let is_read_projection = !command.requires_receipt();
-    let response = crate::usage_totals::with_trigger(
-        trigger,
-        control.request_cancellable(operation(control, command), cancel),
-    )
-    .await;
+    let response = if matches!(
+        command,
+        Command::ThreadArchive(_) | Command::ThreadUnarchive(_)
+    ) {
+        match crate::ipc::call_selected(data_dir, command).await {
+            Ok(response) => response,
+            Err(error) => {
+                let operation_id = error
+                    .details
+                    .as_ref()
+                    .and_then(|details| details.get("operation_id"));
+                return Ok(match operation_id {
+                    Some(id) => serde_json::json!({"request_operation_id":id,"error":error}),
+                    None => serde_json::json!({"error":error}),
+                });
+            }
+        }
+    } else {
+        crate::usage_totals::with_trigger(
+            trigger,
+            control.request_cancellable(operation(control, command), cancel),
+        )
+        .await
+    };
     let operation_id = response.operation_id;
     let mut result = if response.ok {
         response.result.unwrap_or(Value::Null)
@@ -1853,17 +1872,14 @@ async fn run_client(
                     // joins the list through the ordinary changed-Thread patch.
                     UiAction::ArchiveThreads { thread_id, archive } => {
                         let Ok(permit) = command_slots.clone().try_acquire_owned() else {
-                            update(&updates, UiUpdate::ThreadsArchived { archive, result: Err(i18n::local!(language, "操作キューが満杯です。完了後に再操作してください", "The operation queue is full. Wait for completion, then try again").into()) }).await;
+                            update(&updates, UiUpdate::ThreadsArchived { archive, result: Err(ApiError::new(ErrorCode::InvalidState, i18n::local!(language, "操作キューが満杯です。完了後に再操作してください", "The operation queue is full. Wait for completion, then try again"))) }).await;
                             continue;
                         };
-                        let control = control.clone();
+                        let data_dir = client_context.data_dir.clone();
                         let sender = updates.worker();
                         spawn_work(&mut workers, permit, async move {
-                            let args = ThreadArchiveArgs { thread_ids: vec![thread_id], descendants: true };
-                            let command = if archive { Command::ThreadArchive(args) } else { Command::ThreadUnarchive(args) };
-                            let result = request(&control, command).await.map(|value| {
-                                value[if archive { "archived" } else { "unarchived" }].as_array().map_or(0, Vec::len)
-                            }).map_err(|error| error.message);
+                            let result = browser::NativeBrowser::new(&data_dir)
+                                .set_archived(thread_id, archive).await;
                             update(&sender, UiUpdate::ThreadsArchived { archive, result }).await;
                         });
                     }

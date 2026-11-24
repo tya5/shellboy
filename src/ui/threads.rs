@@ -892,7 +892,11 @@ impl ThreadBrowser {
         self.archived
     }
     /// Localized outcome of an archive or unarchive key, shown as the list notice.
-    pub fn archive_result(&mut self, archive: bool, result: Result<usize, String>) {
+    pub fn archive_result(
+        &mut self,
+        archive: bool,
+        result: Result<usize, crate::protocol::ApiError>,
+    ) {
         let (ja, en) = match (archive, result) {
             (true, Ok(0)) => (
                 "既にアーカイブ済みです".to_owned(),
@@ -914,6 +918,25 @@ impl ThreadBrowser {
                 format!("{count}件の会話のアーカイブを解除しました"),
                 format!("Unarchived {count} conversation(s)"),
             ),
+            (_, Err(error))
+                if error.details.as_ref().is_some_and(|details| {
+                    details["request_may_have_been_applied"].as_bool() == Some(true)
+                }) =>
+            {
+                let id = error
+                    .details
+                    .as_ref()
+                    .and_then(|details| details["operation_id"].as_str())
+                    .unwrap_or_default();
+                (
+                    format!(
+                        "アーカイブ操作の結果は未確認です。再操作の前に結果を確認してください: {id}"
+                    ),
+                    format!(
+                        "Archive outcome unknown. Check the operation result before retrying: {id}"
+                    ),
+                )
+            }
             (true, Err(error)) => (
                 format!("アーカイブできませんでした: {error}"),
                 format!("Could not archive: {error}"),
@@ -4293,6 +4316,12 @@ mod tests {
                 let mut terminal = ratatui::Terminal::new(backend).unwrap();
                 terminal.draw(|frame| browser.draw(frame, frame.area(), None, true)).unwrap();
                 assert!(text(terminal.backend().buffer()).contains("Independent owner thread"));
+                assert_eq!(client.set_archived("wire-thread".into(), true).await.unwrap(), 1);
+                assert!(client.list(ThreadListArgs::default(), &stop).await.unwrap().items.is_empty());
+                // The other owner's exact ID must not redirect the native mutation.
+                assert_eq!(client.set_archived("other-thread".into(), true).await.unwrap_err().code, crate::protocol::ErrorCode::ThreadNotFound);
+                assert_eq!(other_browser.list(ThreadListArgs::default(), &other_stop).await.unwrap().items[0].thread_id, "other-thread");
+                assert_eq!(client.set_archived("wire-thread".into(), false).await.unwrap(), 1);
                 stop.cancel();
             }
             let again = NativeBrowser::new(&data).list(Default::default(), &CancellationToken::new()).await.unwrap();
@@ -5668,9 +5697,27 @@ mod archive_tests {
         browser.archive_result(true, Ok(3));
         let screen = paint(&browser, 140, 14);
         assert!(screen.contains("Archived 3 conversation(s)"), "{screen}");
-        browser.archive_result(false, Err("boom".into()));
+        browser.archive_result(
+            false,
+            Err(crate::protocol::ApiError::new(
+                crate::protocol::ErrorCode::IoFailed,
+                "boom",
+            )),
+        );
         assert!(paint(&browser, 140, 14).contains("Could not unarchive: boom"));
+        let unknown = crate::protocol::ApiError::new(
+            crate::protocol::ErrorCode::IoFailed,
+            "lost reply",
+        )
+        .details(
+            serde_json::json!({"request_may_have_been_applied":true,"operation_id":"archive-op"}),
+        );
+        browser.archive_result(false, Err(unknown.clone()));
+        assert!(paint(&browser, 140, 14).contains("Archive outcome unknown"));
+        assert!(paint(&browser, 140, 14).contains("archive-op"));
         let mut ja = opened(UiLanguage::Ja, vec![row("a", false)]);
+        ja.archive_result(true, Err(unknown));
+        assert!(paint(&ja, 140, 14).contains("結果は未確認"));
         ja.archive_result(true, Ok(2));
         assert!(paint(&ja, 140, 14).contains("2件の会話をアーカイブしました"));
         ja.archive_result(true, Ok(0));

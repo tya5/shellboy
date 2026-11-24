@@ -1086,7 +1086,7 @@ pub enum UiUpdate {
     },
     ThreadsArchived {
         archive: bool,
-        result: Result<usize, String>,
+        result: Result<usize, ApiError>,
     },
     Threads {
         generation: u64,

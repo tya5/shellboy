@@ -26,6 +26,13 @@ The #379 Guide pass landed; the numbered protocol notes remain canonical.
 Older preparation and qualification sections below are historical snapshots,
 not statements of branch or release status today.
 
+## Core #311 native Thread archive
+
+Thread List and management archive/unarchive use the selected native owner.
+Thread List still acts on the displayed Thread ID and its descendants, and
+reports the number of changed IDs. There is no in-process mutation fallback.
+Launch, subscriptions, disconnect and draft handling are unchanged.
+
 ## Core #311 exact-ID intervention
 
 Ctrl+B and `/background` target the foreground execution observed in the

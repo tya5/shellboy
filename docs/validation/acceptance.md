@@ -1,5 +1,15 @@
 # Validation record
 
+## Core #311 native Thread archive
+
+On macOS, the independent-owner browser witness archived and unarchived the
+selected Thread through the production adapter, refused an ID from another
+owner, and observed that the other owner remained unchanged. The separate
+notice witness distinguishes an unknown archive outcome from a refusal and
+preserves its operation ID. Formatting, all-target Clippy with warnings
+denied, test layout, and language audit passed locally. No hosted CI or
+full native disconnect cutover is established by this slice.
+
 ## Core #382 attachment replay prefixes
 
 On macOS, the attachment integration filter passed 67 tests (one opt-in
