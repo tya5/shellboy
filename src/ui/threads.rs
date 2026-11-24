@@ -4234,6 +4234,61 @@ mod tests {
         terminal.backend().buffer().clone()
     }
 
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn independent_serve_browser_close_keeps_owner_until_explicit_shutdown() {
+        use crate::{frontend::browser::NativeBrowser, protocol::ThreadListArgs};
+        use tokio_util::sync::CancellationToken;
+        crate::test_watchdog::watchdog("independent serve browser", async {
+            let root = tempfile::tempdir().unwrap();
+            let data = root.path().join("selected-owner");
+            let unused = root.path().join("not-selected");
+            let prepared = crate::owner_session::initialize(
+                None, Some(data.clone()), CancellationToken::new(),
+                tokio::sync::watch::channel(crate::app::StartupStage::Configuration).0,
+            ).await.unwrap().unwrap();
+            let instance = prepared.owner.instance_id.clone();
+            prepared.owner.db.call(|db| {
+                db.execute("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at) VALUES('wire-thread','Independent owner thread','/','','p','m','2026-01-01T00:00:00Z')", [])?;
+                Ok(())
+            }).await.unwrap();
+            let (ready, mut events) = tokio::sync::mpsc::unbounded_channel();
+            let serve = tokio::spawn(async move {
+                crate::serve::run_prepared(prepared, std::future::pending(), move |event| ready.send(event.clone()).is_ok()).await
+            });
+            let event = events.recv().await.unwrap();
+            assert_eq!(event["event"], "ready");
+            assert_eq!(event["instance_id"], instance);
+            assert_eq!(event["data_dir"], serde_json::json!(data));
+            let stop = CancellationToken::new();
+            assert!(NativeBrowser::new(&unused).list(Default::default(), &stop).await.is_err());
+            {
+                let client = NativeBrowser::new(&data);
+                let page = client.list(ThreadListArgs::default(), &stop).await.unwrap();
+                let exact = client.exact(vec!["missing".into(), "wire-thread".into()], &stop).await.unwrap();
+                assert_eq!(exact.len(), 1);
+                assert_eq!(exact[0].thread_id, "wire-thread");
+                let mut browser = ThreadBrowser::default();
+                browser.set_language(UiLanguage::En);
+                browser.open(String::new(), vec![], None);
+                assert!(browser.apply(browser.generation, 1, None, page.items,
+                    vec![], page.next_cursor, vec![], None));
+                let backend = ratatui::backend::TestBackend::new(100, 28);
+                let mut terminal = ratatui::Terminal::new(backend).unwrap();
+                terminal.draw(|frame| browser.draw(frame, frame.area(), None, true)).unwrap();
+                assert!(text(terminal.backend().buffer()).contains("Independent owner thread"));
+                stop.cancel();
+            }
+            let again = NativeBrowser::new(&data).list(Default::default(), &CancellationToken::new()).await.unwrap();
+            assert_eq!(again.items[0].thread_id, "wire-thread");
+            assert!(!serve.is_finished());
+            assert!(crate::ipc::shutdown_owner(&data, None).await.unwrap().ok);
+            let stopped = events.recv().await.unwrap();
+            assert_eq!(stopped["event"], "stopped");
+            assert_eq!(stopped["instance_id"], instance);
+            assert!(serve.await.unwrap().unwrap());
+        }).await.unwrap();
+    }
+
     fn text(buffer: &ratatui::buffer::Buffer) -> String {
         (buffer.area.y..buffer.area.bottom())
             .map(|y| {

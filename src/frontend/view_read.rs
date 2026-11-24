@@ -417,6 +417,34 @@ pub(super) fn prepare(
             .map(|result| result.map(lineage_observer::RawBatch::prepare)),
     }
 }
+pub(super) async fn prepare_native(
+    control: &Control,
+    mut raw: RawBatch,
+    sequence: u64,
+    tickets: &Tickets,
+    language: crate::config::UiLanguage,
+) -> Result<Prepared, ApiError> {
+    let browser = match raw.browser.take() {
+        Some(Ok(raw)) => Some(
+            browser::observe_native(
+                &browser::NativeBrowser::embedded(control),
+                raw,
+                tickets.browser.as_ref().expect("browser raw owns ticket"),
+                sequence,
+                language,
+            )
+            .await,
+        ),
+        Some(Err(error)) => Some(Err(error)),
+        None => None,
+    };
+    let tickets = tickets.clone();
+    let mut prepared =
+        presentation_work(move || prepare(raw, sequence, &tickets, language)).await?;
+    prepared.browser = browser;
+    Ok(prepared)
+}
+
 pub(super) async fn read(
     control: &Control,
     tickets: &Tickets,
@@ -455,9 +483,8 @@ pub(super) async fn read(
     drop(cancel_on_drop);
     drop(_permit);
     let (raw, sequence) = checked_storage(control, result).await?;
-    let project = tickets.clone();
     let language = control.store.config.ui.language;
-    let prepared = presentation_work(move || prepare(raw, sequence, &project, language)).await?;
+    let prepared = prepare_native(control, raw, sequence, tickets, language).await?;
     Ok((prepared, sequence))
 }
 
