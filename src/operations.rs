@@ -2559,6 +2559,7 @@ impl OperationId {
             | Command::CredentialsClear(_)
             | Command::ConnectionTest(_)
             | Command::IdResolve(_)
+            | Command::HistoryRecall(_)
             | Command::HistoryExport(_)
             | Command::ThreadImport(_) => return None,
             Command::Status(_) => Self::Status,

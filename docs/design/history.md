@@ -195,3 +195,17 @@ characters per row, 1 MiB of stored source JSON per admitted node, and the nativ
 frame limit. Source and response budget omission states are passed through;
 an omitted body is not an empty source. Execution link scan bounds are the
 existing `history.window` bounds, not a separate inspector query.
+
+### TUI input recall (#311 Unit 2)
+
+Up/Down reads `history.recall` for one selected Thread from the tail or an
+exact ordinal/node anchor, in the requested direction. Each read examines an
+indexed window of 200 ordinals plus one lookahead and returns at most one
+input, without copying attachments or adopting a truncated body. Tombstones
+are skipped within the window. A boundary returned by `not_in_window` includes
+the path revision and is exclusive when continuing. The TUI follows at most
+one boundary, for a total of 400 candidates and at most two lookaheads per
+keypress. A revision mismatch refuses continuation; a coverage or byte limit
+is distinct from an actual end of history. The owner admits at most 8 MiB of
+saved source JSON for the one selected input, applying both the draft byte
+limit and the existing native frame limit to the response.

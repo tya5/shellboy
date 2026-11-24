@@ -1439,6 +1439,22 @@
         {
           "properties": {
             "args": {
+              "$ref": "#/definitions/HistoryRecallArgs"
+            },
+            "command": {
+              "const": "history.recall",
+              "type": "string"
+            }
+          },
+          "required": [
+            "command",
+            "args"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "args": {
               "$ref": "#/definitions/HistoryGetArgs"
             },
             "command": {
@@ -3739,6 +3755,134 @@
       },
       "required": [
         "thread_id"
+      ],
+      "type": "object"
+    },
+    "HistoryRecallAnchor": {
+      "properties": {
+        "node_id": {
+          "type": "string"
+        },
+        "ordinal": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "ordinal",
+        "node_id"
+      ],
+      "type": "object"
+    },
+    "HistoryRecallArgs": {
+      "additionalProperties": false,
+      "properties": {
+        "anchor": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HistoryRecallAnchor"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "expected_revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "older": {
+          "type": "boolean"
+        },
+        "thread_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "thread_id",
+        "older"
+      ],
+      "type": "object"
+    },
+    "HistoryRecallResult": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "oneOf": [
+        {
+          "properties": {
+            "input": {
+              "$ref": "#/definitions/HistoryRecalledInput"
+            },
+            "status": {
+              "const": "found",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "input"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "boundary": {
+              "$ref": "#/definitions/HistoryRecallAnchor"
+            },
+            "revision": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "status": {
+              "const": "not_in_window",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "boundary",
+            "revision"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "status": {
+              "const": "end",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "type": "object"
+        }
+      ],
+      "title": "HistoryRecallResult"
+    },
+    "HistoryRecalledInput": {
+      "properties": {
+        "node_id": {
+          "type": "string"
+        },
+        "ordinal": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ordinal",
+        "node_id",
+        "text"
       ],
       "type": "object"
     },
@@ -7901,6 +8045,35 @@
             },
             "command": {
               "const": "history.window",
+              "type": "string"
+            },
+            "operation_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "origin": true,
+            "protocol_version": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "args",
+            "command",
+            "operation_id",
+            "protocol_version"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "args": {
+              "$ref": "#/definitions/HistoryRecallArgs"
+            },
+            "command": {
+              "const": "history.recall",
               "type": "string"
             },
             "operation_id": {
@@ -13278,6 +13451,62 @@
       ],
       "title": "Page",
       "type": "object"
+    },
+    "history.recall": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "oneOf": [
+        {
+          "properties": {
+            "input": {
+              "$ref": "#/definitions/HistoryRecalledInput"
+            },
+            "status": {
+              "const": "found",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "input"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "boundary": {
+              "$ref": "#/definitions/HistoryRecallAnchor"
+            },
+            "revision": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "status": {
+              "const": "not_in_window",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "boundary",
+            "revision"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "status": {
+              "const": "end",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "type": "object"
+        }
+      ],
+      "title": "HistoryRecallResult"
     },
     "history.relations": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",

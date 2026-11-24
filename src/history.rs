@@ -40,6 +40,7 @@ pub fn reachability_for_tests(db: &Connection, id: &str) -> rusqlite::Result<boo
 mod message_budget;
 mod message_provenance;
 pub(crate) mod notification;
+pub(crate) mod recall;
 mod relations;
 pub(crate) mod rpc;
 mod thread;
