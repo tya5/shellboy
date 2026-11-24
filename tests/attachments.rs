@@ -229,7 +229,7 @@ async fn unreadable_attachment_cannot_reuse_a_matching_warm_cache_entry() {
     assert_eq!(f.service.cache_stats().entries, 1);
 
     let original = std::fs::metadata(&path).unwrap();
-    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0)).unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
     let denied = std::fs::metadata(&path).unwrap();
     assert_eq!(denied.len(), original.len());
     assert_eq!(denied.modified().unwrap(), original.modified().unwrap());
