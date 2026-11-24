@@ -339,7 +339,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     },
     Migration {
         version: 64,
-        sql: include_str!("../../migrations/next_thread_cwd_partitions.sql"),
+        sql: include_str!("../../migrations/0064_thread_cwd_partitions.sql"),
         foreign_keys: None,
     },
 ];
