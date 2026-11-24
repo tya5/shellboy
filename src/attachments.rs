@@ -2,6 +2,7 @@
 //! All filesystem/clipboard work runs on bounded blocking workers, never the UI.
 pub mod clipboard;
 mod draft;
+mod draft_image;
 mod registration;
 mod selection;
 use selection::snapshot_selection_tx;
@@ -275,6 +276,7 @@ pub struct CacheStats {
 }
 #[derive(Clone)]
 pub struct AttachmentService {
+    draft_images: Arc<tokio::sync::Mutex<draft_image::DraftImages>>,
     database: DbWorker,
     config: Config,
     data_dir: PathBuf,
@@ -297,6 +299,7 @@ impl AttachmentService {
         instance_id: String,
     ) -> Self {
         Self {
+            draft_images: Default::default(),
             requester: Arc::new(tokio::sync::Mutex::new(
                 crate::storage::BackgroundRequester::new(database.clone()),
             )),
@@ -1238,6 +1241,38 @@ impl AttachmentService {
         cancel: CancellationToken,
     ) -> Result<ManagedImage, ApiError> {
         pixels.validate()?;
+        self.write_clipboard_png(move || pixels.encode_png(), cancel)
+            .await
+    }
+
+    /// Commit an encoded transfer using the same managed writer as clipboard capture.
+    pub async fn save_uploaded_clipboard_png(
+        &self,
+        bytes: Vec<u8>,
+        cancel: CancellationToken,
+    ) -> Result<ManagedImage, ApiError> {
+        let max_bytes = self.config.limits.attachment_file_bytes;
+        if bytes.len() > clipboard::MAX_CLIPBOARD_RGBA_BYTES || bytes.len() as u64 > max_bytes {
+            return Err(ApiError::new(
+                ErrorCode::InputLimit,
+                "Encoded clipboard PNG exceeds the single-attachment limit",
+            ));
+        }
+        self.write_clipboard_png(
+            move || {
+                clipboard::validate_png(&bytes)?;
+                Ok(bytes)
+            },
+            cancel,
+        )
+        .await
+    }
+
+    async fn write_clipboard_png(
+        &self,
+        encode: impl FnOnce() -> Result<Vec<u8>, ApiError> + Send + 'static,
+        cancel: CancellationToken,
+    ) -> Result<ManagedImage, ApiError> {
         if cancel.is_cancelled() {
             return Err(cancelled());
         }
@@ -1265,18 +1300,7 @@ impl AttachmentService {
             .workers
             .execute(self.deadline(), cancel.clone(), move || {
                 let _lease = worker_lease;
-                let mut bytes = Vec::new();
-                {
-                    let mut encoder = png::Encoder::new(&mut bytes, pixels.width, pixels.height);
-                    encoder.set_color(png::ColorType::Rgba);
-                    encoder.set_depth(png::BitDepth::Eight);
-                    let mut writer = encoder
-                        .write_header()
-                        .map_err(|_| io_error("Cannot initialize PNG encoding"))?;
-                    writer
-                        .write_image_data(&pixels.rgba)
-                        .map_err(|_| io_error("Cannot encode clipboard PNG"))?;
-                }
+                let bytes = encode()?;
                 if bytes.len() as u64 > limit {
                     return Err(ApiError::new(
                         ErrorCode::InputLimit,

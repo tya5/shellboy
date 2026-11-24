@@ -1203,3 +1203,27 @@ reports `model_requests: {ceiling, used}`. Refusing a further request stops the
 Run with `stop_reason: {kind: "model_request_ceiling_reached", requests_used: N}`.
 A committed reservation survives interruption and does not prove delivery to
 the provider. See [Control](control.md#per-run-model-request-ceiling-399).
+
+## Native draft image upload (#311)
+
+`draft.image` is a native-only command shared by clients; it is not a CLI or
+model operation. Every action carries the `instance_id` from Welcome and the
+client's `draft_id`. `begin` declares `encoded_bytes` and returns an opaque
+`upload_id`. `append` carries that ID, the zero-based byte `offset`, and
+standard `base64`. Only contiguous, nonempty chunks up to 1 MiB decoded are
+accepted. `commit` names the upload ID and returns an attachment `id` and
+owner-local `path`. Clients encode static PNG before transfer and do not need
+access to an owner staging directory.
+
+One unfinished transfer per owner is held in memory, bounded by the lesser of
+128 MiB and the configured single-attachment limit. After 60 seconds without
+an accepted chunk, the owner discards its buffer. Commit requires the declared
+length and validates the complete PNG and its 128 MiB decoded RGBA limit before
+writing via the managed attachment service. The owner keeps up to 256 committed
+pins until clients issue `release` with the matching draft and `attachment_id`
+after adoption or disposal. Shutdown discards the unfinished transfer and drops
+all owner-held pins. No transfer rows or staging files are created.
+
+Only commit has a durable operation receipt; after uncertain delivery, inspect
+that operation rather than replaying the upload. An old instance ID cannot
+start or modify a transfer on its replacement.
