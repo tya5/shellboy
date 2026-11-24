@@ -119,7 +119,7 @@ shellboy credentials clear --connection proxy
   connection retains restart semantics. `credentials clear` also removes the entry of a connection that is gone.
 - **`config get` states the source** per connection under `loaded.credential_source` (what this owner would use now)
   and `file.credential_source` (the file's connections): `env`, `stored` or `none`. It states presence, not that the
-  key works. `credentials_file` says whether the file exists and parses. A hand edit of `credentials.toml` is used by
+  key works. `credentials_file` says whether the file exists and parses. On Unix it warns if the opened file has broader permissions than `0600` or belongs to another user; inspection does not modify the file or block normal use. A hand edit of `credentials.toml` is used by
   requests and the TUI hints only after an owner restart; keys stored with `credentials set` apply at the next request.
 - **`connection test`** sends one GET by default for the model catalog (the request `config check` sends), for a saved connection
   or a candidate that is not saved yet (`--base-url`, with `--api-key-stdin` or `--api-key-env`; the key is used for

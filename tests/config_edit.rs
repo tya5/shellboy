@@ -1598,3 +1598,33 @@ async fn public_thread_get_resolves_live_connection_spill_with_raw_precedence() 
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
 }
+
+#[cfg(unix)]
+#[test]
+fn config_get_warns_about_open_credentials_mode_without_changing_it() {
+    use std::os::unix::fs::PermissionsExt;
+    let (_root, path, _) = fixture(FULL);
+    let credentials = path.with_file_name("credentials.toml");
+    std::fs::write(
+        &credentials,
+        "[connections.proxy]\napi_key='synthetic-key-mode-fixture'\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&credentials, std::fs::Permissions::from_mode(0o644)).unwrap();
+    let config = loaded(&path);
+    let result = read(&config).unwrap();
+    let file = &result["credentials_file"];
+    assert_eq!(file["valid"], true);
+    assert!(file["warning"].as_str().unwrap().contains("0600"));
+    assert!(!result.to_string().contains("synthetic-key-mode-fixture"));
+    assert_eq!(
+        std::fs::metadata(&credentials)
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777,
+        0o644
+    );
+    std::fs::set_permissions(&credentials, std::fs::Permissions::from_mode(0o600)).unwrap();
+    assert!(read(&config).unwrap()["credentials_file"]["warning"].is_null());
+}

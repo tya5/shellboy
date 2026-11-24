@@ -2627,6 +2627,7 @@ record!(ConfigCredentialsFileView {
     present: bool,
     valid: bool,
     error: Option<String>,
+    warning: Option<String>,
     #[serde(default, flatten)] additional_properties: std::collections::BTreeMap<String, Value>
 });
 record!(ConfigRestartView { all_fields_require_restart: bool, #[serde(default, flatten)] additional_properties: std::collections::BTreeMap<String, Value> });

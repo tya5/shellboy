@@ -2078,6 +2078,12 @@
         },
         "valid": {
           "type": "boolean"
+        },
+        "warning": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [

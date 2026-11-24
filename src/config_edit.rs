@@ -446,8 +446,8 @@ pub fn read(loaded: &Config) -> Result<Value, ApiError> {
     let parsed = parse_file(&state.bytes, &source.path);
     let (loaded_values, loaded_hidden) = view(loaded);
     let credentials_path = crate::credential_store::path_beside(&source.path);
-    let stored = crate::credential_store::stored_names(&credentials_path);
-    let stored_names = stored.as_ref().ok();
+    let stored = crate::credential_store::inspect(&credentials_path);
+    let stored_names = stored.names.as_ref().ok();
     let key_sources = |config: &Config| {
         let mut sources = Map::new();
         for (name, connection) in &config.connections {
@@ -514,9 +514,10 @@ pub fn read(loaded: &Config) -> Result<Value, ApiError> {
         // The stored-key file beside the configuration; its values are never read out.
         "credentials_file": {
             "path": credentials_path,
-            "present": credentials_path.exists(),
-            "valid": stored.is_ok(),
-            "error": stored.as_ref().err().map(ToString::to_string),
+            "present": stored.present,
+            "valid": stored.names.is_ok(),
+            "error": stored.names.as_ref().err().map(ToString::to_string),
+            "warning": stored.warning,
         },
         "differs": loaded_hash != file_hash,
         "differing_fields": differing_fields,
