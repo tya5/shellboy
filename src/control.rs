@@ -1242,9 +1242,11 @@ impl Control {
                             ));
                         }
                         let mut images = self.attachments.lock_draft_images().await;
-                        let result = self
-                            .submit_native_draft(request.operation_id.clone(), args.clone())
-                            .await?;
+                        // Keep the compose preparation future out of shared request dispatch.
+                        let result = Box::pin(
+                            self.submit_native_draft(request.operation_id.clone(), args.clone()),
+                        )
+                        .await?;
                         images.hand_off(&args.draft);
                         Ok(MutationResult {
                             result,
