@@ -222,7 +222,6 @@ pub enum MessageSendStage {
     Processing,
     Saved,
     Failed,
-    QueueFull,
 }
 #[derive(Debug, Clone, Serialize)]
 pub struct MessageSendTrace {
