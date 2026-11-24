@@ -4,7 +4,7 @@ mod admission;
 mod program_status;
 use admission::{spawn_read, spawn_work};
 mod branch_markers;
-mod browser;
+pub(crate) mod browser;
 mod browser_read;
 mod client_operations;
 mod compaction_markers;
@@ -959,16 +959,26 @@ async fn run_with_delivery(
         data_dir: owner.loaded.data_dir.clone(),
         cwd: cwd.clone(),
     };
-    let result = run_client(
-        control.clone(), actions, updates, cwd, client_context, server.failures(), clipboard,
+    let ipc_failure = server.failures();
+    let owner_control = control.clone();
+    let owner_close =
+        async move { crate::owner_session::close(owner, Some(owner_control), Some(server)).await };
+    // Only the embedded launch composition owns this policy. Its completion
+    // participates in the existing terminal grace and force-close UI.
+    run_client(
+        control,
+        actions,
+        updates,
+        cwd,
+        client_context,
+        ipc_failure,
+        clipboard,
         command_slots,
+        owner_close,
         #[cfg(test)]
         startup,
-    ).await;
-    // The embedded launcher still owns and stops Core. The client drain above
-    // is also usable without taking ownership of the listener or database.
-    let closed = crate::owner_session::close(owner, Some(control), Some(server)).await;
-    result.and(closed)
+    )
+    .await
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -981,6 +991,7 @@ async fn run_client(
     mut ipc_failure: tokio::sync::watch::Receiver<Option<ApiError>>,
     clipboard: Arc<dyn ClipboardBackend>,
     command_slots: Arc<Semaphore>,
+    after_client_close: impl Future<Output = Result<(), ApiError>>,
     #[cfg(test)] startup: Option<receipt_delivery::Startup>,
 ) -> Result<(), ApiError> {
     let language = control.store.config.ui.language;
@@ -3945,7 +3956,11 @@ async fn run_client(
         receipt_batch.finish(&mut pending, shutdown_updates).await;
         save_result
     };
-    wait_for_shutdown_delivery_localized(&mut actions, &updates, grace, shutdown, language).await
+    let finish = async {
+        let result = shutdown.await;
+        result.and(after_client_close.await)
+    };
+    wait_for_shutdown_delivery_localized(&mut actions, &updates, grace, finish, language).await
 }
 
 #[cfg(test)]
