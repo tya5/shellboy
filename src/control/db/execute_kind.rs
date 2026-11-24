@@ -81,7 +81,6 @@ named_jobs! {
 
 // Existing mutations awaiting the bounds audit in #200. This list must only shrink.
 const UNDECLARED_WRITER_BOUNDS: &[Kind] = &[
-    Kind::DraftImage,
     Kind::OwnerShutdown,
     Kind::ThreadCreate,
     Kind::ThreadFork,
@@ -158,8 +157,7 @@ impl Kind {
             | Kind::ThreadUnarchive
             | Kind::ThreadTag
             | Kind::ThreadImport => MutationDeclaredBound,
-            Kind::DraftImage
-            | Kind::OwnerShutdown
+            Kind::OwnerShutdown
             | Kind::ThreadCreate
             | Kind::ThreadFork
             | Kind::ThreadDelete
@@ -173,7 +171,8 @@ impl Kind {
             | Kind::AttachmentRemove
             | Kind::Compact
             | Kind::ContextEdit => MutationExempt,
-            Kind::ServiceStop
+            Kind::DraftImage
+            | Kind::ServiceStop
             | Kind::ServiceRemove
             | Kind::ScheduleRemove
             | Kind::ThreadDeleteSet
@@ -263,7 +262,6 @@ mod tests {
     #[test]
     fn every_writer_kind_has_a_bound_or_a_ratchet_exemption() {
         let writers = [
-            Kind::DraftImage,
             Kind::ArtifactAdd,
             Kind::ArtifactUpdate,
             Kind::ArtifactRemove,
@@ -314,7 +312,6 @@ mod tests {
         )
         .unwrap();
         let expected = [
-            Kind::DraftImage,
             Kind::OwnerShutdown,
             Kind::ThreadCreate,
             Kind::ThreadFork,
