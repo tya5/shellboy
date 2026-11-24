@@ -279,18 +279,6 @@ pub(super) async fn run(
             Ok(((receipts,visible,browser),sequence))=>(Ok(receipts),visible.map_err(snapshot::storage_error),browser.map(|result|result.map_err(snapshot::storage_error)),sequence),
             Err(error)=>(Err(error.clone()),Err(error.clone()),Some(Err(error)),0),
         };
-        if !views.is_empty() {
-            let result=match browser_result {
-                Some(Ok(raw))=>{
-                    let language=control.store.config.ui.language;
-                    super::view_read::prepare_native(&control,raw,sequence,&views,language).await.map(|prepared|(prepared,sequence))
-                },
-                Some(Err(error))=>Err(error),
-                None=>Err(ApiError::new(ErrorCode::InvalidState,"Visible observations unavailable")),
-            };
-            let result=checked_storage(&control,result).await;
-            let _=sender.send(BackgroundResult::ViewFacts {tickets:views.clone(),result:result.map(Box::new)}).await;
-        }
         let result=async {
             let raw=checked_storage(&control,visible).await?;
             // Rendering, sender/model-error JSON, decoding and timestamp work
@@ -325,6 +313,20 @@ pub(super) async fn run(
             load_failed(&updates,thread.clone(),generation,error.clone()).await;
         }
         let _=sender.send(BackgroundResult::Refreshed {thread_id:thread,receipts,progress:Some(result),epoch,generation:Some(generation)}).await;
+        // Sidebar wire reads have their own tickets. They cannot gate delivery
+        // of the selected conversation or release of its refresh slot.
+        if !views.is_empty() {
+            let result=match browser_result {
+                Some(Ok(raw))=>{
+                    let language=control.store.config.ui.language;
+                    super::view_read::prepare_native(&control,raw,sequence,&views,language).await.map(|prepared|(prepared,sequence))
+                },
+                Some(Err(error))=>Err(error),
+                None=>Err(ApiError::new(ErrorCode::InvalidState,"Visible observations unavailable")),
+            };
+            let result=checked_storage(&control,result).await;
+            let _=sender.send(BackgroundResult::ViewFacts {tickets:views,result:result.map(Box::new)}).await;
+        }
     }=>{}}
 }
 
@@ -745,6 +747,10 @@ mod tests {
         while let Ok(result) = results.try_recv() {
             match result {
                 BackgroundResult::ViewFacts { result, .. } => {
+                    assert!(
+                        receipts_seen,
+                        "selected refresh must finish before sidebar readback"
+                    );
                     let (prepared, sequence) = *result.unwrap();
                     let patch = prepared.browser.unwrap().unwrap().patch.unwrap();
                     assert_eq!(patch.read_sequence, sequence);

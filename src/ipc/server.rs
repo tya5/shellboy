@@ -417,9 +417,13 @@ impl LocalServer {
         self.failure.clone()
     }
 
-    pub(crate) async fn stop_accepting(&self) {
-        self.stop.accepting.cancel();
-        self.stop.listener_closed.cancelled().await;
+    pub(crate) fn stop_accepting(&self) -> impl std::future::Future<Output = ()> + use<> {
+        let accepting = self.stop.accepting.clone();
+        let listener_closed = self.stop.listener_closed.clone();
+        async move {
+            accepting.cancel();
+            listener_closed.cancelled().await;
+        }
     }
 
     pub async fn shutdown(self) -> Result<(), ApiError> {
