@@ -2887,6 +2887,8 @@ mod message_acknowledgement_tests {
             "wait",
             "history.list",
             "history.window",
+            "history.recall",
+            "history.received",
             "history.get",
             "history.search",
             "history.relations",
@@ -2932,7 +2934,7 @@ mod message_acknowledgement_tests {
                 "missing result schema for {name}"
             );
         }
-        assert_eq!(results.len(), 83);
+        assert_eq!(results.len(), 83 + 2); // Existing operations plus recall and received.
         for name in ["thread.create", "connection.test"] {
             assert_eq!(
                 results[name],
@@ -2962,6 +2964,17 @@ mod message_acknowledgement_tests {
         assert_eq!(
             results["config.get"]["properties"]["loaded"]["$ref"],
             "#/$defs/ConfigLoadedView"
+        );
+        let recall_states = results["history.recall"]["oneOf"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|variant| variant["properties"]["status"]["const"].as_str().unwrap())
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(recall_states, ["end", "found", "not_in_window"].into());
+        assert_eq!(
+            results["history.received"]["properties"]["items"]["type"],
+            "array"
         );
         assert_eq!(results["status"]["anyOf"].as_array().unwrap().len(), 2);
         assert_eq!(results["usage.get"]["anyOf"].as_array().unwrap().len(), 3);
