@@ -1739,6 +1739,7 @@ pub enum Command {
     HistoryWindow(HistoryWindowArgs),
     #[serde(rename = "history.recall")]
     HistoryRecall(HistoryRecallArgs),
+    #[serde(rename = "history.received")]
     HistoryReceived(HistoryReceivedArgs),
     #[serde(rename = "history.get")]
     HistoryGet(HistoryGetArgs),

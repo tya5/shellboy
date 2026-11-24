@@ -1458,7 +1458,7 @@
               "$ref": "#/definitions/HistoryReceivedArgs"
             },
             "command": {
-              "const": "HistoryReceived",
+              "const": "history.received",
               "type": "string"
             }
           },
@@ -8183,7 +8183,7 @@
               "$ref": "#/definitions/HistoryReceivedArgs"
             },
             "command": {
-              "const": "HistoryReceived",
+              "const": "history.received",
               "type": "string"
             },
             "operation_id": {
