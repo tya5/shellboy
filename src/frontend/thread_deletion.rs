@@ -434,6 +434,7 @@ mod tests {
         save_draft(
             &control,
             "thread".into(),
+            0,
             draft.clone(),
             ViewAnchor::default(),
             true,
@@ -505,9 +506,20 @@ mod tests {
         let mut late = draft;
         late.revision += 1;
         late.text = "must never return".into();
-        save_draft(&control, "thread".into(), late, ViewAnchor::default(), true)
+        assert_eq!(
+            save_draft(
+                &control,
+                "thread".into(),
+                0,
+                late,
+                ViewAnchor::default(),
+                true
+            )
             .await
-            .unwrap();
+            .unwrap_err()
+            .code,
+            ErrorCode::TargetUnavailable
+        );
         control
             .store
             .database
@@ -597,6 +609,7 @@ mod tests {
         sender
             .try_send(UiAction::SaveDraft {
                 thread_id: "thread".into(),
+                selection_revision: 0,
                 draft: draft.clone(),
                 anchor: ViewAnchor::default(),
                 follow: true,
@@ -679,6 +692,7 @@ mod tests {
         sender
             .try_send(UiAction::SaveDraft {
                 thread_id: "thread".into(),
+                selection_revision: 0,
                 draft,
                 anchor: ViewAnchor::default(),
                 follow: true,

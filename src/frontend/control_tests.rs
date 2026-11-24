@@ -92,6 +92,7 @@ async fn missing_history_targets_are_local_errors_and_do_not_stop_other_runs() {
 fn save(text: &str, revision: u64) -> UiAction {
     UiAction::SaveDraft {
         thread_id: "thread".into(),
+        selection_revision: 0,
         draft: DraftSnapshot {
             text: text.into(),
             revision,
@@ -154,6 +155,7 @@ async fn quit_bypasses_full_normal_queue_but_preserves_accepted_send_and_drafts_
     sender
         .try_send(UiAction::Send {
             generation: 0,
+            selection_revision: 0,
             now: false,
             snapshot: None,
             draft_id: "send".into(),
@@ -412,6 +414,7 @@ async fn saturated_queue_quit_persists_prior_send_and_latest_snapshot_without_st
     sender
         .try_send(UiAction::Send {
             generation: 0,
+            selection_revision: 0,
             now: false,
             snapshot: None,
             draft_id: "accepted-send".into(),
@@ -1604,6 +1607,7 @@ async fn quit_before_initial_draft_restore_cannot_mask_an_existing_saved_draft()
     super::save_draft(
         &control,
         "thread".into(),
+        0,
         DraftSnapshot {
             draft_id: "persisted".into(),
             revision: 7,
@@ -2293,3 +2297,47 @@ async fn external_refresh_failure_keeps_exact_accepted_result_and_reports_failur
 }
 
 mod db_stall;
+
+#[tokio::test]
+async fn refused_native_send_restores_the_exact_frozen_draft() {
+    use crate::protocol::{Command, Deliver, DraftSubmitArgs, ErrorCode, ThreadCreateArgs};
+    let (_root, owner, control, server) = fixture().await;
+    let operation = format!("{}:refused-compose", control.store.instance_id);
+    let draft = DraftSnapshot {
+        text: "retain this draft".into(),
+        revision: 7,
+        cursor: 4,
+        ..Default::default()
+    };
+    let refused = super::compose_call::<serde_json::Value>(
+        &control,
+        Command::DraftSubmit(DraftSubmitArgs {
+            thread_id: Some("thread".into()),
+            selection_revision: Some(99),
+            create: ThreadCreateArgs {
+                agents: None,
+                connection: None,
+                cwd: None,
+                model: None,
+                effort: None,
+                parent_id: None,
+            },
+            draft: Box::new(draft.clone()),
+            deliver: Deliver::Next,
+        }),
+        Some(operation.clone()),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(refused.code, ErrorCode::InvalidState);
+    let archive = crate::control::db::DraftSubmission::id_for_operation(&operation);
+    assert_eq!(
+        super::message_queue::restore_archive(&control, archive)
+            .await
+            .unwrap(),
+        draft
+    );
+    server.shutdown().await.unwrap();
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+}

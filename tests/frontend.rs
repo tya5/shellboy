@@ -43,6 +43,7 @@ async fn frontend_first_send_is_saved_and_later_draft_survives_shutdown() {
     actions_send
         .send(UiAction::Send {
             generation: 0,
+            selection_revision: 0,
             now: false,
             snapshot: None,
             draft_id: "first-draft".into(),
@@ -148,6 +149,7 @@ async fn frontend_first_send_is_saved_and_later_draft_survives_shutdown() {
     actions_send
         .send(UiAction::SaveDraft {
             thread_id: thread.clone(),
+            selection_revision: 0,
             draft,
             anchor: ViewAnchor::default(),
             follow: false,
@@ -531,6 +533,7 @@ async fn clipboard_image_is_leased_then_sent_atomically_and_copy_uses_original_b
     .unwrap();
     send.send(UiAction::Send {
         generation: 0,
+        selection_revision: 0,
         now: false,
         snapshot: None,
         draft_id: "image-draft".into(),
@@ -1147,6 +1150,7 @@ async fn edit_adapter_loads_full_original_then_forks_before_first_request_and_di
     observer.store.database.call(|db|{db.execute("INSERT INTO run(id,thread_id,state,created_at)VALUES('late-run','source','live','now')",[])?;Ok(())}).await.unwrap();
     send.send(UiAction::SendEdited {
         generation: 0,
+        selection_revision: 0,
         now: false,
         snapshot: None,
         draft_id: "edited".into(),
@@ -1205,6 +1209,7 @@ async fn edit_adapter_loads_full_original_then_forks_before_first_request_and_di
         .unwrap();
     send.send(UiAction::SendEdited {
         generation: 0,
+        selection_revision: 0,
         now: false,
         snapshot: None,
         draft_id: "edited".into(),
@@ -1568,6 +1573,7 @@ async fn draft_database_save_failure_stops_admission_and_owned_shell_but_retains
     .at();
     send.send(UiAction::SaveDraft {
         thread_id: thread,
+        selection_revision: 0,
         draft: ui.view().draft.clone(),
         anchor: ViewAnchor::default(),
         follow: true,
@@ -2627,6 +2633,7 @@ async fn persisted_output_identity_is_delivered_before_each_history_window() {
     ));
     send.send(UiAction::Send {
         generation: 0,
+        selection_revision: 0,
         now: false,
         snapshot: None,
         draft_id: "identity".into(),
@@ -3025,6 +3032,7 @@ async fn send_and_edited_send_keep_cwd_and_attachment_validation_order() {
         let action = if edited {
             UiAction::SendEdited {
                 generation: 0,
+                selection_revision: 0,
                 now: false,
                 snapshot: None,
                 draft_id: "edited".into(),
@@ -3041,6 +3049,7 @@ async fn send_and_edited_send_keep_cwd_and_attachment_validation_order() {
         } else {
             UiAction::Send {
                 generation: 0,
+                selection_revision: 0,
                 now: false,
                 snapshot: None,
                 draft_id: "send".into(),
@@ -3141,6 +3150,7 @@ async fn quit_accepted_before_frontend_binding_still_drains_queued_send_and_late
     let (send, receive) = shellboy::ui::actions::channel(2);
     send.try_send(UiAction::Send {
         generation: 0,
+        selection_revision: 0,
         now: false,
         snapshot: None,
         draft_id: "queued-before-quit".into(),
@@ -3156,6 +3166,7 @@ async fn quit_accepted_before_frontend_binding_still_drains_queued_send_and_late
     .unwrap();
     send.try_send(UiAction::SaveDraft {
         thread_id: thread.clone(),
+        selection_revision: 0,
         draft: DraftSnapshot {
             draft_id: "draft".into(),
             revision: 1,
@@ -3170,6 +3181,7 @@ async fn quit_accepted_before_frontend_binding_still_drains_queued_send_and_late
         send.try_send_batch(vec![
             UiAction::SaveDraft {
                 thread_id: thread.clone(),
+                selection_revision: 0,
                 draft: DraftSnapshot {
                     draft_id: "draft".into(),
                     revision: 2,
@@ -3269,6 +3281,7 @@ async fn mismatched_submission_snapshot_never_creates_receipt_attempt_or_submitt
     };
     send.send(UiAction::Send {
         generation: 0,
+        selection_revision: 0,
         now: false,
         snapshot: Some(Box::new(snapshot)),
         draft_id: "source-draft".into(),

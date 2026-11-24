@@ -1219,12 +1219,14 @@ One unfinished transfer per owner is held in memory, bounded by the lesser of
 128 MiB and the configured single-attachment limit. After 60 seconds without
 an accepted chunk, the owner discards its buffer. Commit requires the declared
 length and validates the complete PNG and its 128 MiB decoded RGBA limit before
-writing via the managed attachment service. Each committed pin belongs to its
-owning draft. The client sends `release` with that draft and `attachment_id`
-after discarding or submitting the draft (Unit 3). A different draft receives
-a typed refusal and cannot release the pin. No production client uses this
-command before that lifecycle is wired. Shutdown discards the unfinished
-transfer and drops remaining pins. No transfer rows or staging files are created.
+writing via the managed attachment service. An uploaded image stays pinned for
+up to 60 seconds while unbound. Native IPC uses one connection per command, so
+closing the commit connection cannot distinguish paste from abandonment. Once
+a committed draft row names an image, that row owns its pin. An accepted save
+releases removed images and an accepted submission releases the submitted
+revision's pins; refusal does neither. Explicit `release` applies only to an
+unbound pin owned by the named draft. Shutdown drops remaining transfers and
+pins. No transfer rows or staging files are created.
 
 All four actions are writes, but only commit has a durable operation receipt.
 After uncertain commit delivery, inspect that receipt rather than replaying the

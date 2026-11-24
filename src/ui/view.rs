@@ -1258,6 +1258,10 @@ fn receipt_english(
     retained: bool,
 ) -> String {
     match (status, message, retained) {
+        (ReceiptStatus::Unknown, message, _) => format!(
+            "Send outcome unknown: {}",
+            message.unwrap_or("Check the operation receipt before sending again")
+        ),
         (ReceiptStatus::Accepting, None, false) => "Accepting".into(),
         (ReceiptStatus::Accepting, None, true) => crate::ui::text_width::glyphs::formatted!(
             "Accepting · Current input retained (next send uses the full text)",
@@ -1413,7 +1417,10 @@ impl ThreadView {
         if pending.send.is_some()
             && pending.status == ReceiptStatus::Accepting
             && pending.source_node_id.is_none()
-            && matches!(status, ReceiptStatus::Failed | ReceiptStatus::Cancelled)
+            && matches!(
+                status,
+                ReceiptStatus::Failed | ReceiptStatus::Cancelled | ReceiptStatus::Unknown
+            )
             && pending.cleared_draft.as_ref() == Some(&self.draft)
         {
             let next = self.draft.revision + 1;

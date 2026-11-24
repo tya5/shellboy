@@ -490,6 +490,11 @@ impl Control {
     fn admit(&self, changes_context: bool) -> Result<request_admission::RequestGuard, ApiError> {
         self.admission.admit(&self.stop, changes_context)
     }
+    #[cfg(test)]
+    pub(crate) fn keep_maintenance_signals_for_test(&self) {
+        assert!(self.maintenance.set(Mutex::new(None)).is_ok());
+    }
+
     pub async fn start(self: &Arc<Self>) -> Result<(), ApiError> {
         if self.stop.is_cancelled() {
             return Err(ApiError::new(
@@ -798,7 +803,7 @@ impl Control {
         let outcome=tokio::spawn(async move{
             let _guard=control.admit(true)?;
             let references:Vec<Value>=files.iter().map(|file|json!({"path":file.path,"kind":file.kind})).collect();
-            let mut intent=json!({"kind":"edit_request","thread_id":thread,"node_id":node,"text":content.text,"files":references,"args":args,"deliver":options.deliver,"submission":options.submission});
+            let mut intent=json!({"kind":"edit_request","thread_id":thread,"node_id":node,"text":content.text,"files":references,"args":args,"deliver":options.deliver,"selection_revision":options.expected_selection_revision,"submission":options.submission});
             content.fingerprint_positions(&mut intent);
             let reservation=control.store.reserve_internal(operation_id.clone(),intent).await?;
             match reservation{db::RuntimeReservation::Saved(result)=>return result,db::RuntimeReservation::Pending=>return Err(ApiError::new(ErrorCode::InvalidState,"This edit was accepted but its result is uncertain; inspect its operation receipt")),db::RuntimeReservation::New=>{control.changed.notify_waiters();}}
@@ -1010,7 +1015,7 @@ impl Control {
             }).await?;
             (files, None)
         };
-        options.expected_selection_revision = revision;
+        options.expected_selection_revision = options.expected_selection_revision.or(revision);
         match self
             .store
             .send_draft_content(operation_id, args, thread_id, content, files, options)
@@ -1027,6 +1032,76 @@ impl Control {
                 }
                 Err(error)
             }
+        }
+    }
+
+    async fn submit_native_draft(
+        self: &Arc<Self>,
+        operation_id: String,
+        args: crate::protocol::DraftSubmitArgs,
+    ) -> Result<Value, ApiError> {
+        let expected_selection_revision = args
+            .selection_revision
+            .map(i64::try_from)
+            .transpose()
+            .map_err(|_| {
+                ApiError::new(
+                    ErrorCode::InvalidArgument,
+                    "Selected revision is out of range",
+                )
+            })?;
+        let draft = args.draft;
+        crate::ui::draft::validate_positions(&draft, self.store.config.limits.draft_bytes)?;
+        let edit = draft.edit.clone();
+        let (content, ordered) = crate::ui::draft::decode(&draft.text, draft.attachments.clone())?;
+        let files = ordered
+            .into_iter()
+            .map(|attachment| {
+                let kind =
+                    crate::protocol::AttachmentKind::parse(&attachment.kind).ok_or_else(|| {
+                        ApiError::new(ErrorCode::InvalidArgument, "Unknown draft attachment kind")
+                    })?;
+                Ok(crate::attachments::AttachmentInput {
+                    path: attachment.path,
+                    kind,
+                })
+            })
+            .collect::<Result<Vec<_>, ApiError>>()?;
+        let submission = db::DraftSubmission {
+            draft_id: db::DraftSubmission::id_for_operation(&operation_id),
+            source_draft_id: draft.draft_id.clone(),
+            revision: draft.revision,
+            snapshot: serde_json::to_value(draft).map_err(|_| {
+                ApiError::new(ErrorCode::InvalidArgument, "Draft cannot be encoded")
+            })?,
+        };
+        let options = db::DraftSendOptions {
+            deliver: args.deliver,
+            submission: Some(submission),
+            expected_selection_revision,
+            request_fingerprint: None,
+        };
+        if let Some(edit) = edit {
+            self.edit_ordered_request(
+                operation_id,
+                edit.thread_id,
+                edit.node_id,
+                content,
+                files,
+                args.create,
+                options,
+            )
+            .await
+        } else {
+            self.send_draft_inner(
+                operation_id,
+                args.create,
+                args.thread_id,
+                content,
+                files,
+                options,
+            )
+            .await
         }
     }
 
@@ -1144,6 +1219,37 @@ impl Control {
                                 result
                             }
                         }
+                    }
+                    Command::DraftSave(args) => {
+                        let mut images = self.attachments.lock_draft_images().await;
+                        if let Some(saved) = self.store.replay(&request, &origin).await? {
+                            return Ok(saved);
+                        }
+                        let draft = args.draft.clone();
+                        let result = self.store.execute(request, origin).await?;
+                        images.hand_off(&draft);
+                        self.store
+                            .database
+                            .signals()
+                            .mark(crate::maintenance::Work::Managed);
+                        Ok(result)
+                    }
+                    Command::DraftSubmit(args) => {
+                        if origin.is_some() {
+                            return Err(ApiError::new(
+                                ErrorCode::InvalidArgument,
+                                "Draft submission requires a native client",
+                            ));
+                        }
+                        let mut images = self.attachments.lock_draft_images().await;
+                        let result = self
+                            .submit_native_draft(request.operation_id.clone(), args.clone())
+                            .await?;
+                        images.hand_off(&args.draft);
+                        Ok(MutationResult {
+                            result,
+                            ..Default::default()
+                        })
                     }
                     Command::AttachmentAdd(args) => {
                         if let Some(saved) = self.store.replay(&request, &origin).await? {

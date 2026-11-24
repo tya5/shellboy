@@ -1376,7 +1376,7 @@ fn protocol_v6_handshake_and_typed_results_cover_existing_wire_modes() {
         serde_json::json!(["events.reasoning_activity", "id.resolve"])
     );
     let results = schema["operation_results"].as_object().unwrap();
-    assert_eq!(results.len(), 83 + 2); // Existing operations plus recall and received.
+    assert_eq!(results.len(), 89);
     assert!(results["history.recall"]["oneOf"].is_array());
     assert_eq!(
         results["history.received"]["properties"]["items"]["type"],

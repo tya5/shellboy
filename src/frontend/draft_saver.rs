@@ -1,7 +1,8 @@
 //! Existing autosave queue, per-Thread coalescing and worker lifetime.
 use super::*;
-type Snapshot = (String, DraftSnapshot, ViewAnchor, bool);
+type Snapshot = (String, u64, DraftSnapshot, ViewAnchor, bool);
 struct PendingSave {
+    selection_revision: u64,
     draft: DraftSnapshot,
     anchor: ViewAnchor,
     follow: bool,
@@ -16,14 +17,39 @@ pub(super) struct DraftSaver {
     closed: bool,
 }
 impl DraftSaver {
-    pub(super) fn new(control: Arc<Control>, results: mpsc::Sender<BackgroundResult>) -> Self {
+    pub(super) fn new(
+        control: Arc<Control>,
+        results: mpsc::Sender<BackgroundResult>,
+        disconnected: Arc<std::sync::atomic::AtomicBool>,
+    ) -> Self {
+        use std::sync::atomic::Ordering;
         let language = control.store.config.ui.language;
         let (sender, mut receiver) = mpsc::channel::<Snapshot>(32);
         let worker = tokio::spawn(async move {
             let mut failure = None;
-            while let Some((thread, draft, anchor, follow)) = receiver.recv().await {
-                let result = save_draft(&control, thread.clone(), draft, anchor, follow).await;
+            while let Some((thread, selection_revision, draft, anchor, follow)) =
+                receiver.recv().await
+            {
+                let result = if disconnected.load(Ordering::Acquire) {
+                    Err(ApiError::new(
+                        ErrorCode::AppNotRunning,
+                        "Composer is disconnected; draft kept",
+                    ))
+                } else {
+                    save_draft(
+                        &control,
+                        thread.clone(),
+                        selection_revision,
+                        draft,
+                        anchor,
+                        follow,
+                    )
+                    .await
+                };
                 if let Err(error) = &result {
+                    if compose_transport_error(error) {
+                        disconnected.store(true, Ordering::Release);
+                    }
                     failure = Some(error.clone());
                 }
                 let _ = results
@@ -46,6 +72,7 @@ impl DraftSaver {
     pub(super) fn enqueue(
         &mut self,
         thread: String,
+        selection_revision: u64,
         draft: DraftSnapshot,
         anchor: ViewAnchor,
         follow: bool,
@@ -56,6 +83,7 @@ impl DraftSaver {
             self.backlog.insert(
                 thread,
                 PendingSave {
+                    selection_revision,
                     draft,
                     anchor,
                     follow,
@@ -94,6 +122,7 @@ impl DraftSaver {
         }
         while let Some(thread) = self.backlog.keys().next().cloned() {
             let PendingSave {
+                selection_revision,
                 draft,
                 anchor,
                 follow,
@@ -101,13 +130,20 @@ impl DraftSaver {
             } = self.backlog.remove(&thread).unwrap();
             match self
                 .sender
-                .try_send((thread.clone(), draft, anchor, follow))
+                .try_send((thread.clone(), selection_revision, draft, anchor, follow))
             {
                 Ok(()) => {}
-                Err(mpsc::error::TrySendError::Full((_, draft, anchor, follow))) => {
+                Err(mpsc::error::TrySendError::Full((
+                    _,
+                    selection_revision,
+                    draft,
+                    anchor,
+                    follow,
+                ))) => {
                     self.backlog.insert(
                         thread,
                         PendingSave {
+                            selection_revision,
                             draft,
                             anchor,
                             follow,
@@ -116,10 +152,17 @@ impl DraftSaver {
                     );
                     break;
                 }
-                Err(mpsc::error::TrySendError::Closed((_, draft, anchor, follow))) => {
+                Err(mpsc::error::TrySendError::Closed((
+                    _,
+                    selection_revision,
+                    draft,
+                    anchor,
+                    follow,
+                ))) => {
                     self.backlog.insert(
                         thread.clone(),
                         PendingSave {
+                            selection_revision,
                             draft,
                             anchor,
                             follow,
@@ -170,6 +213,7 @@ impl DraftSaver {
         for (
             thread,
             PendingSave {
+                selection_revision,
                 draft,
                 anchor,
                 follow,
@@ -177,7 +221,10 @@ impl DraftSaver {
             },
         ) in self.backlog
         {
-            let _ = self.sender.send((thread, draft, anchor, follow)).await;
+            let _ = self
+                .sender
+                .send((thread, selection_revision, draft, anchor, follow))
+                .await;
         }
         drop(self.sender);
         self.worker
@@ -226,7 +273,7 @@ mod tests {
                     crate::frontend::control_tests::fixture_with_language(language).await
                 };
                 let (results, _incoming) = mpsc::channel(1);
-                let mut saver = DraftSaver::new(control.clone(), results);
+                let mut saver = DraftSaver::new(control.clone(), results, Default::default());
                 saver.worker.abort();
                 crate::test_watchdog::watchdog(
                     "draft worker receiver closes",
@@ -255,6 +302,7 @@ mod tests {
                     );
                     assert!(saver.enqueue(
                         thread,
+                        0,
                         draft,
                         ViewAnchor {
                             node_id: Some("anchor-source".into()),
@@ -360,10 +408,11 @@ mod tests {
     async fn full_backlog_distinguishes_stopped_worker_before_and_after_pump() {
         let (_root, owner, control, server) = crate::frontend::control_tests::fixture().await;
         let (results, _incoming) = mpsc::channel(1);
-        let mut saver = DraftSaver::new(control.clone(), results);
+        let mut saver = DraftSaver::new(control.clone(), results, Default::default());
         for number in 0..64 {
             assert!(saver.enqueue(
                 format!("thread-{number}"),
+                0,
                 DraftSnapshot::default(),
                 ViewAnchor::default(),
                 true,
@@ -372,6 +421,7 @@ mod tests {
         }
         assert!(!saver.enqueue(
             "rejected".into(),
+            0,
             DraftSnapshot::default(),
             ViewAnchor::default(),
             true,
@@ -402,6 +452,7 @@ mod tests {
         assert_eq!(saver.rejected_message(UiLanguage::Ja), stopped_message);
         assert!(!saver.enqueue(
             "rejected".into(),
+            0,
             DraftSnapshot::default(),
             ViewAnchor::default(),
             true,
@@ -409,6 +460,7 @@ mod tests {
         ));
         assert!(saver.enqueue(
             "thread-0".into(),
+            0,
             DraftSnapshot {
                 text: "new revision".into(),
                 ..Default::default()
@@ -421,6 +473,7 @@ mod tests {
         assert!(saver.pump().is_none(), "revisions must not repeat warnings");
         assert!(saver.enqueue(
             "closing".into(),
+            0,
             DraftSnapshot::default(),
             ViewAnchor::default(),
             true,
@@ -455,9 +508,10 @@ mod tests {
             );
         }
         assert!(!updates.main_ready());
-        let mut saver = DraftSaver::new(control.clone(), results);
+        let mut saver = DraftSaver::new(control.clone(), results, Default::default());
         saver.enqueue(
             "thread".into(),
+            0,
             DraftSnapshot {
                 draft_id: "autosave".into(),
                 text: "autosave despite stopped UI".into(),
@@ -504,7 +558,7 @@ mod tests {
     async fn closed_worker_projects_one_failure_across_ticks_and_keeps_newest_snapshot() {
         let (_root, owner, control, server) = crate::frontend::control_tests::fixture().await;
         let (results, _incoming) = mpsc::channel(1);
-        let mut saver = DraftSaver::new(control.clone(), results);
+        let mut saver = DraftSaver::new(control.clone(), results, Default::default());
         saver.worker.abort();
         crate::test_watchdog::watchdog("src/frontend/draft_saver.rs: closed_worker_projects_one_failure_across_ticks_and_keeps_newest_snapshot", saver.sender.closed())
             .await
@@ -514,6 +568,7 @@ mod tests {
         let updates = BufferedUpdates::new(tx);
         assert!(saver.enqueue(
             "thread".into(),
+            0,
             DraftSnapshot {
                 text: "first unsaved".into(),
                 revision: 5,
@@ -531,6 +586,7 @@ mod tests {
         assert_eq!(saver.backlog["thread"].draft.text, "first unsaved");
         assert!(saver.enqueue(
             "thread".into(),
+            0,
             DraftSnapshot {
                 text: "newest unsaved".into(),
                 revision: 6,
@@ -561,6 +617,7 @@ mod tests {
         assert!(failure.is_none());
         assert!(saver.enqueue(
             "later-thread".into(),
+            0,
             DraftSnapshot {
                 text: "another unsaved draft".into(),
                 revision: 1,
@@ -579,6 +636,7 @@ mod tests {
         );
         assert!(saver.enqueue(
             "later-thread".into(),
+            0,
             DraftSnapshot {
                 text: "latest other draft".into(),
                 revision: 2,
@@ -616,13 +674,14 @@ mod tests {
     async fn closed_worker_reports_its_unsaved_owner_and_cannot_return_success_on_shutdown() {
         let (_root, owner, control, server) = crate::frontend::control_tests::fixture().await;
         let (results, _incoming) = mpsc::channel(1);
-        let mut saver = DraftSaver::new(control.clone(), results);
+        let mut saver = DraftSaver::new(control.clone(), results, Default::default());
         saver.worker.abort();
         crate::test_watchdog::watchdog("src/frontend/draft_saver.rs: closed_worker_reports_its_unsaved_owner_and_cannot_return_success_on_shutdown", saver.sender.closed())
             .await
             .unwrap();
         assert!(saver.enqueue(
             "thread".into(),
+            0,
             DraftSnapshot {
                 text: "not saved".into(),
                 ..Default::default()

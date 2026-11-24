@@ -360,6 +360,7 @@ async fn human_chips_keep_source_positions_through_followups_edit_restore_and_ow
     actions
         .send(UiAction::SendEdited {
             generation: 0,
+            selection_revision: 0,
             now: false,
             snapshot: None,
             draft_id: "edit".into(),
@@ -418,6 +419,7 @@ async fn human_chips_keep_source_positions_through_followups_edit_restore_and_ow
     actions
         .send(UiAction::SaveDraft {
             thread_id: thread.clone(),
+            selection_revision: 0,
             draft: unsent.clone(),
             anchor: ViewAnchor::default(),
             follow: false,

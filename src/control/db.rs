@@ -1,5 +1,6 @@
 //! Durable Control operations. Runtime effects are returned only after commit.
 pub(super) mod archive;
+mod compose;
 mod execute_kind;
 mod id_resolution;
 mod reparent;
@@ -89,7 +90,7 @@ pub(crate) fn draft_send_fingerprint(
             Ok(json!({"path":path,"kind":file.kind}))
         })
         .collect::<Result<Vec<_>>>()?;
-    let mut intent = json!({"internal_operation":"draft_send_raw","args":args,"thread_id":thread,"text":content.text,"files":files,"deliver":options.deliver,"submission":options.submission});
+    let mut intent = json!({"internal_operation":"draft_send_raw","args":args,"thread_id":thread,"text":content.text,"files":files,"deliver":options.deliver,"selection_revision":options.expected_selection_revision,"submission":options.submission});
     content.fingerprint_positions(&mut intent);
     Ok(hash(serde_json::to_vec(&intent).map_err(|_| {
         error(ErrorCode::InvalidArgument, "Invalid draft request identity")
@@ -1019,6 +1020,13 @@ impl Store {
             if !pending{return Ok(Err(error(ErrorCode::InvalidState,"Edited request has no reserved operation")));}
             tx.execute_batch("SAVEPOINT edit_accept")?;
             let result=(||{
+                if let Some(expected) = options.expected_selection_revision {
+                    let current = history::selection_revision(&tx, &thread, history::ThreadScope::Live)
+                        .optional().map_err(sql_error)?;
+                    if current != Some(expected) {
+                        return Err(error(ErrorCode::OperationConflict, "Selected history changed"));
+                    }
+                }
                 let live:Option<String>=tx.query_row("SELECT id FROM run WHERE thread_id=?1 AND state IN ('live','stopping')",[&thread],|r|r.get(0)).optional().map_err(sql_error)?;
                 if let Some(run)=live{return Err(error(ErrorCode::InvalidState,"A Run is active; stop it or wait until it finishes before editing").details(json!({"run_id":run})));}
                 let user:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM node n JOIN thread_path p ON p.node_id=n.id WHERE p.thread_id=?1 AND n.id=?2 AND n.deleted_reason IS NULL AND json_extract(n.payload_json,'$.role')='user')",params![thread,node],|r|r.get(0)).map_err(sql_error)?;
@@ -1254,6 +1262,20 @@ impl Store {
                 ErrorCode::InvalidState,
                 "Draft image staging requires the owner service",
             )),
+            Command::DraftSubmit(_) => Err(error(
+                ErrorCode::InvalidState,
+                "Draft submission requires owner preparation",
+            )),
+            Command::DraftRestore(args) => MutationResult::value(compose::restore_archive(
+                tx,
+                &args.archive_id,
+                self.config.limits.draft_bytes,
+            )?),
+            Command::DraftGet(args) => MutationResult::value(compose::get(tx, &args.thread_id)?),
+            Command::DraftSave(args) => {
+                compose::save(tx, args, self.config.limits.draft_bytes, now)?;
+                MutationResult::value(crate::protocol::Accepted { accepted: true })
+            }
             Command::OwnerShutdown(args) => {
                 if args.instance_id != self.instance_id {
                     return Err(error(
@@ -4149,6 +4171,75 @@ mod receipt_wait_tests {
             "current".into(),
         );
         (root, db, store)
+    }
+
+    #[tokio::test]
+    async fn stale_draft_save_does_not_overwrite_composer_or_view() {
+        let (_root, db, store) = fixture().await;
+        let thread = store
+            .execute(
+                Request::new(
+                    "current:thread",
+                    Command::ThreadCreate(ThreadCreateArgs {
+                        connection: None,
+                        cwd: None,
+                        agents: None,
+                        model: None,
+                        effort: None,
+                        parent_id: None,
+                    }),
+                ),
+                None,
+            )
+            .await
+            .unwrap();
+        let thread_id = thread.result["thread_id"].as_str().unwrap().to_owned();
+        let target = thread_id.clone();
+        let selection_revision = db
+            .call(move |db| {
+                Ok(history::selection_revision(
+                    db,
+                    &target,
+                    history::ThreadScope::Live,
+                )?)
+            })
+            .await
+            .unwrap() as u64;
+        let mut args = crate::protocol::DraftSaveArgs {
+            thread_id,
+            selection_revision,
+            draft: Box::new(crate::ui::DraftSnapshot {
+                revision: 2,
+                text: "current".into(),
+                ..Default::default()
+            }),
+            anchor: crate::ui::ViewAnchor::default(),
+            follow_tail: false,
+        };
+        store
+            .execute(
+                Request::new("current:save", Command::DraftSave(args.clone())),
+                None,
+            )
+            .await
+            .unwrap();
+        args.draft.revision = 1;
+        args.draft.text = "stale".into();
+        args.follow_tail = true;
+        let refused = store
+            .execute(
+                Request::new("current:stale", Command::DraftSave(args)),
+                None,
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(refused.code, ErrorCode::OperationConflict);
+        let saved = db.call(|db| Ok(db.query_row(
+            "SELECT json_extract(d.body_json, '$.text'), v.follow_tail FROM draft d JOIN view_state v USING(thread_id)",
+            [], |r| Ok((r.get::<_, String>(0)?, r.get::<_, bool>(1)?)),
+        )?)).await.unwrap();
+        assert_eq!(saved, ("current".into(), false));
+        db.shutdown().await.unwrap();
     }
 
     async fn seed_pending(db: &DbWorker, old_rows: u32, last_reserved: u64) {

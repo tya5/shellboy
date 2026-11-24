@@ -1,8 +1,11 @@
-//! Managed-image leases owned by live drafts and accepted send preparations.
-use super::{ManagedImage, UiAttachment};
+//! Local image identities; managed pins remain with the owner.
+use super::{ApiError, Command, Control, UiAttachment};
+use crate::protocol::{
+    DRAFT_IMAGE_CHUNK_BYTES, DraftImageAction, DraftImageArgs, DraftImageResult, ErrorCode,
+};
+use base64::{Engine, engine::general_purpose::STANDARD};
 use std::collections::{HashMap, HashSet};
 struct Image {
-    lease: ManagedImage,
     revision: u64,
     adopted: bool,
 }
@@ -12,6 +15,8 @@ pub(super) struct DraftImages {
     owners: HashMap<String, String>,
     pending: HashMap<u64, (String, Option<String>)>,
     next_ticket: u64,
+    send_references: HashMap<(String, String), usize>,
+    releases: Vec<(String, String)>,
 }
 impl DraftImages {
     pub(super) fn associate(&mut self, draft: &str, thread: &str) {
@@ -21,6 +26,8 @@ impl DraftImages {
             return;
         }
         self.owners.insert(draft.to_owned(), thread.to_owned());
+        // Once a draft targets a Thread, committed owner writes own disposal.
+        self.images.retain(|(owner, _), _| owner != draft);
         for (owner, target) in self.pending.values_mut() {
             if owner == draft {
                 *target = Some(thread.to_owned());
@@ -38,8 +45,10 @@ impl DraftImages {
         }
         self.next_ticket
     }
-    pub(super) fn accept_image(&mut self, ticket: u64) -> bool {
-        self.pending.remove(&ticket).is_some()
+    pub(super) fn accept_image(&mut self, ticket: u64) -> Option<bool> {
+        self.pending
+            .remove(&ticket)
+            .map(|(_, thread)| thread.is_none())
     }
     pub(super) fn threads(&self) -> impl Iterator<Item = &String> {
         self.owners.values()
@@ -62,35 +71,57 @@ impl DraftImages {
                 })
                 .map(|(draft, _)| draft.clone()),
         );
-        self.images.retain(|(draft, _), _| !drafts.contains(draft));
+        self.images.retain(|key, _| {
+            if !drafts.contains(&key.0) {
+                return true;
+            }
+            self.releases.push(key.clone());
+            false
+        });
         self.owners.retain(|draft, _| !drafts.contains(draft));
         self.pending.retain(|_, (draft, _)| !drafts.contains(draft));
     }
     pub(super) fn prune_owners(&mut self) {
-        self.owners.retain(|draft, _| {
-            self.images.keys().any(|(owner, _)| owner == draft)
-                || self.pending.values().any(|(owner, _)| owner == draft)
-        });
+        self.owners
+            .retain(|draft, _| self.pending.values().any(|(owner, _)| owner == draft));
     }
-    pub(super) fn leases(&self, draft: &str, attachments: &[UiAttachment]) -> Vec<ManagedImage> {
-        attachments
+    pub(super) fn begin_send(&mut self, draft: &str, attachments: &[UiAttachment]) {
+        for attachment in attachments {
+            let key = (draft.to_owned(), attachment.id.clone());
+            if self.images.contains_key(&key) {
+                *self.send_references.entry(key).or_default() += 1;
+            }
+        }
+    }
+    pub(super) fn end_send(&mut self, draft: &str, attachments: &HashSet<String>) {
+        for id in attachments {
+            let key = (draft.to_owned(), id.clone());
+            if let Some(count) = self.send_references.get_mut(&key) {
+                *count -= 1;
+                if *count == 0 {
+                    self.send_references.remove(&key);
+                }
+            }
+        }
+    }
+    pub(super) fn next_release(&mut self) -> Option<(String, String)> {
+        let available = self
+            .releases
             .iter()
-            .filter_map(|attachment| {
-                self.images
-                    .get(&(draft.to_owned(), attachment.id.clone()))
-                    .map(|image| image.lease.clone())
-            })
-            .collect()
+            .position(|key| !self.send_references.contains_key(key))?;
+        Some(self.releases.swap_remove(available))
     }
-    pub(super) fn insert(&mut self, draft: String, revision: u64, lease: ManagedImage) {
+    pub(super) fn insert(&mut self, draft: String, revision: u64, attachment_id: String) {
         self.images.insert(
-            (draft, lease.id.clone()),
+            (draft, attachment_id),
             Image {
-                lease,
                 revision,
                 adopted: false,
             },
         );
+    }
+    pub(super) fn reject(&mut self, draft: String, attachment_id: String) {
+        self.releases.push((draft, attachment_id));
     }
     pub(super) fn sent(&mut self, draft: &str, attachments: &HashSet<String>) {
         self.images
@@ -105,15 +136,106 @@ impl DraftImages {
             }
         } else {
             self.images.remove(&key);
+            self.releases.push(key);
         }
         self.prune_owners();
     }
     pub(super) fn release(&mut self, draft: &str, revision: u64, selected: &HashSet<String>) {
-        self.images.retain(|(owner, id), image| {
-            owner != draft || !image.adopted || revision <= image.revision || selected.contains(id)
+        self.images.retain(|key, image| {
+            if key.0 != draft
+                || !image.adopted
+                || revision <= image.revision
+                || selected.contains(&key.1)
+            {
+                return true;
+            }
+            self.releases.push(key.clone());
+            false
         });
         self.prune_owners();
     }
+}
+
+async fn call(
+    control: &Control,
+    draft: &str,
+    action: DraftImageAction,
+) -> Result<DraftImageResult, ApiError> {
+    let op = matches!(action, DraftImageAction::Commit { .. })
+        .then(|| format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()));
+    super::compose_call(
+        control,
+        Command::DraftImage(DraftImageArgs {
+            instance_id: control.store.instance_id.clone(),
+            draft_id: draft.to_owned(),
+            action,
+        }),
+        op,
+    )
+    .await
+}
+
+pub(super) async fn upload(
+    control: &Control,
+    draft: &str,
+    bytes: Vec<u8>,
+) -> Result<UiAttachment, ApiError> {
+    let invalid_reply =
+        || ApiError::new(ErrorCode::ProtocolMismatch, "Invalid draft image response");
+    let DraftImageResult::Begun { upload_id } = call(
+        control,
+        draft,
+        DraftImageAction::Begin {
+            encoded_bytes: bytes.len() as u64,
+        },
+    )
+    .await?
+    else {
+        return Err(invalid_reply());
+    };
+    let mut offset = 0;
+    for chunk in bytes.chunks(DRAFT_IMAGE_CHUNK_BYTES) {
+        let reply = call(
+            control,
+            draft,
+            DraftImageAction::Append {
+                upload_id: upload_id.clone(),
+                offset,
+                base64: STANDARD.encode(chunk),
+            },
+        )
+        .await?;
+        offset += chunk.len() as u64;
+        if reply
+            != (DraftImageResult::Appended {
+                received_bytes: offset,
+            })
+        {
+            return Err(invalid_reply());
+        }
+    }
+    let DraftImageResult::Committed { attachment } =
+        call(control, draft, DraftImageAction::Commit { upload_id }).await?
+    else {
+        return Err(invalid_reply());
+    };
+    Ok(UiAttachment {
+        id: attachment.id,
+        path: attachment.path,
+        kind: "image".into(),
+        state: "ready".into(),
+        position: None,
+    })
+}
+
+pub(super) async fn release(
+    control: &Control,
+    draft: &str,
+    attachment_id: String,
+) -> Result<(), ApiError> {
+    call(control, draft, DraftImageAction::Release { attachment_id })
+        .await
+        .map(|_| ())
 }
 
 #[cfg(test)]
@@ -127,70 +249,19 @@ mod tests {
         images.associate("draft-new", "deleted");
         let unrelated = images.begin_image("draft-other", Some("kept"));
         images.forget_threads(&HashSet::from(["deleted".into()]), &[]);
-        assert!(!images.accept_image(old));
-        assert!(!images.accept_image(newly_sent));
-        assert!(images.accept_image(unrelated));
+        assert!(images.accept_image(old).is_none());
+        assert!(images.accept_image(newly_sent).is_none());
+        assert_eq!(images.accept_image(unrelated), Some(false));
         assert!(images.threads().all(|thread| thread == "kept"));
-    }
-    #[tokio::test]
-    async fn forgetting_a_deleted_thread_releases_its_managed_image_pin() {
-        let (_root, owner, control, server) = crate::frontend::control_tests::fixture().await;
-        let signals = control.store.database.signals().clone();
-        signals.take_seen();
-        let image = control
-            .attachments
-            .save_clipboard_pixels(
-                crate::attachments::clipboard::ClipboardPixels {
-                    width: 1,
-                    height: 1,
-                    rgba: vec![0, 0, 0, 255],
-                },
-                tokio_util::sync::CancellationToken::new(),
-            )
-            .await
-            .unwrap();
-        let id = image.id.clone();
-        // Producer contract (#171): a saved image marks managed retention.
-        assert!(
-            signals
-                .take_seen()
-                .contains(crate::maintenance::Work::Managed)
-        );
-        let mut images = DraftImages::default();
-        let ticket = images.begin_image("draft", Some("thread"));
-        assert!(images.accept_image(ticket));
-        images.insert("draft".into(), 1, image);
-        images.forget_threads(&HashSet::from(["thread".into()]), &[]);
-        crate::test_watchdog::watchdog("src/frontend/draft_images.rs: forgetting_a_deleted_thread_releases_its_managed_image_pin", async {
-            loop {
-                let resource = id.clone();
-                let pinned: bool = control.store.database.call(move |db| Ok(db.query_row(
-                    "SELECT EXISTS(SELECT 1 FROM runtime_pin WHERE resource_kind='managed_file' AND resource_id=?1)",
-                    [resource], |row| row.get(0))?)).await.unwrap();
-                if !pinned { break; }
-                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-            }
-        }).await.expect("discarded draft must release its managed image lease");
-        // A released pin marks managed and raw retention after its commit.
-        crate::test_watchdog::watchdog("pin release signal", async {
-            while !signals.take_seen().contains(crate::maintenance::Work::Raw) {
-                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-            }
-        })
-        .await
-        .expect("released pin must signal retention");
-        server.shutdown().await.unwrap();
-        control.shutdown().await.unwrap();
-        owner.shutdown().await.unwrap();
     }
     #[test]
     fn failed_capture_reclaims_ticket_and_owner_even_when_command_error_was_already_reported() {
         let mut images = DraftImages::default();
         let ticket = images.begin_image("draft", Some("thread"));
-        assert!(images.accept_image(ticket));
+        assert_eq!(images.accept_image(ticket), Some(false));
         images.prune_owners();
         assert!(images.pending.is_empty());
         assert_eq!(images.threads().count(), 0);
-        assert!(!images.accept_image(ticket));
+        assert!(images.accept_image(ticket).is_none());
     }
 }
