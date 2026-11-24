@@ -30,6 +30,17 @@ A wire change that a supported peer cannot safely ignore requires a protocol ver
 
 What each protocol version changed, from 5 on, is in [protocol-versions](protocol-versions/), one file `N.md` per version; a wire-changing patch adds its own file there (see [setup](../development/setup.md#protocol-number-at-landing-356)).
 
+### Core v0.16.0 upgrade from IPC 18
+
+Upgrade the owner, CLI, and RPC clients together: IPC **18 → 22**. The
+numbered change records cover [19: status and reply counts](protocol-versions/19.md),
+[20: bounded history windows](protocol-versions/20.md),
+[21: Thread search and connection diagnostics](protocol-versions/21.md), and
+[22: advisory credential-file warnings](protocol-versions/22.md). Restart
+reads with expired `status` or state-filtered `thread list` cursors without
+those cursors. See [release upgrade notes](../release-v0.16.0.md#upgrade-notes)
+for database, CLI, and configuration details.
+
 Core #294 adds `Welcome.owner_version` as optional metadata and does not bump
 protocol 7: existing Welcome decoders ignore additive fields, and older owners
 can omit it. This is the only public owner software-version source. The value

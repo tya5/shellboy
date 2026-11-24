@@ -1,5 +1,11 @@
 # Development status
 
+## Core v0.16.0 release preparation
+
+The [release notes](../release-v0.16.0.md) describe the published main source
+used for the preparation branch. Refresh them against main after the remaining
+work lands; this branch does not tag or publish a release.
+
 ## Current main contract checkpoint
 
 Owner schema 64, standalone RAG schema 5, IPC 22. See the
