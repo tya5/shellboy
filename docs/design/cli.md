@@ -55,7 +55,7 @@ shellboy storage (status|collect) [--category (raw|managed-images|history|index|
 
 添付pathは**CLIの起動cwd**基準で一度だけ絶対化し、`.`/`..` をlexicalに処理する。stat/realpath/symlink追跡/コピーは行わず、不在ファイルもパス受付の型変換を通す。送信準備時の存在検査は別責務。UTF-8にできないpathは明示invalid_argumentで、置換文字による別pathへ変更しない。Thread cwd指定は親/Thread基準でserverが解決するため、CLI cwdへ勝手に絶対化しない。
 
-`tests/cli.rs` は全35操作のmapping、global配置/default/effort解除、aliasと不在path、stdinの正確な本文/排他/不正UTF-8/byte上限、未知flag/範囲/wait構文/明示index対象、help/version、Unix非UTF-8 pathをfixture化する。これはparserの検証であり、JSON出力/exit code/IPC実通信は起動・接続統合試験で確認する。
+`tests/cli.rs` は操作のmapping、global配置/default/effort解除、aliasと不在path、stdinの正確な本文/排他/不正UTF-8/byte上限、未知flag/範囲/wait構文/明示index対象、help/version、Unix非UTF-8 pathをfixture化する。これはparserの検証であり、JSON出力/exit code/IPC実通信は起動・接続統合試験で確認する。
 
 2026-10-24検証: repoのControl driverが並行実装中のため、最初のparser検証は一時Cargo harnessから実ファイル `src/cli.rs` / `src/protocol.rs` / `tests/cli.rs` を直接参照し、8件成功を確認した。repo本体の全体build受入とは区別する。driver統合後に標準チェックで同じテストを実行する。
 

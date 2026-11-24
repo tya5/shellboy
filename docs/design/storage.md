@@ -483,7 +483,7 @@ a few milliseconds on the development Mac; this is not a guarantee.
 
 `node.import_origin_json` is nullable: native nodes have NULL; imported nodes store a flat, oldest-to-newest array of inert source provenance. Its presence also marks the stored provider reasoning expired for replay, independent of epoch equality. See [Thread export and import](thread-export.md).
 
-Current conversation schema is v27. Migration 27 adds the interrupted embedding-job recovery index (#172); Migration 26 adds the pending reply partial index; Migration 25 adds the tool-group attempt lookup index for history execution links. Migration 15 adds derived readback indexes; 16 adds Thread observation indexes; 17 adds the parent-Thread covering index; 18 accounts for summary usage; 19 adds the completed-attempt scope index; 20 adds index-source GC lookup indexes; 21 adds event-retention lookup indexes; 22 adds the logical usage counters (#171); 23 adds bounded activity lookup indexes (#172); 24 drops the #36 Revisit metadata rows and adds the `receipt_run_completion` partial index (#187). Migration12 accounts for bounded Revisit
+Historical schema checkpoint: v27. Migration 27 adds the interrupted embedding-job recovery index (#172); Migration 26 adds the pending reply partial index; Migration 25 adds the tool-group attempt lookup index for history execution links. Migration 15 adds derived readback indexes; 16 adds Thread observation indexes; 17 adds the parent-Thread covering index; 18 accounts for summary usage; 19 adds the completed-attempt scope index; 20 adds index-source GC lookup indexes; 21 adds event-retention lookup indexes; 22 adds the logical usage counters (#171); 23 adds bounded activity lookup indexes (#172); 24 drops the #36 Revisit metadata rows and adds the `receipt_run_completion` partial index (#187). Migration12 accounts for bounded Revisit
 metadata;13 records selected-path admission;14 records Turn interruption and
 indexes drafts. The existing `tool_result_node(node_id)` index from migration2
 also covers retained result-source lookup after payload GC; the earlier #41
@@ -762,7 +762,16 @@ The reviewed registry initially marks only migrations25-27 as `IndexOnly` and
 migration14 as `Tables([turn, draft])` (turn-column addition and draft indexes).
 Migration30 (#229) and migration31 (#231) are also `IndexOnly`: a nullable `ADD COLUMN` without a foreign key whose existing rows are all NULL changes no relation, so no scan is needed. Migration34 (#222 stage 3) creates the new, empty `thread_tag` table (primary key `(thread_id, tag)`, foreign key to `thread`, index `(tag, thread_id)`) and the partial `threads_cwd_updated` index; it is also `IndexOnly` because no existing row can violate a constraint of an empty table. Tags are metadata: `thread delete` removes a Thread's rows in its own transaction, and the table is not a GC root. For #397, migrations 57–60 and 62 do not change existing FK relations; migration 61 rebuilds `schedule`, and its scope includes `schedule`, `shell_execution`, and their referencing descendants. Migrations 63 and 64 only create indexes over existing columns, including partial indexes; they change no FK relation. Other undeclared entries remain full. Ledger/version writes are
 inherent migration bookkeeping, not application-table changes requiring a scan.
+An unrelated legacy orphan does not block a declared scoped upgrade; a violation
+in the checked scope does.
 
+
+## Retained columns without active producers (#395)
+
+New instruction snapshots do not persist mtime; the nullable column and old
+values remain. `view_state` writes the anchor and follow-tail state, not draft
+input. New rows use the existing `input_state_json` default; updates leave that
+column alone. Draft contents remain in `draft.body_json`. No migration is needed.
 
 ## Storage capacity thresholds in status (#265)
 

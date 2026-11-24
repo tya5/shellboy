@@ -43,7 +43,7 @@ watchdogs remain unchanged.
 
 ## Current conversation storage
 
-The current database schema is conversation version 49; see its versioned migrations and the [storage design](storage.md). The schema sequence below is additive: versions 28–31 and 35–37 are not enumerated in this summary.
+Core main uses owner schema **64**, standalone RAG schema **5**, and IPC protocol **22**. The owners are [storage](storage.md), [standalone RAG](docs-and-rag.md), and the [protocol contract](protocol.md). The numbered examples below are historical, not a complete migration ledger.
 
 Issue #170 adds schema21 derived event-retention lookup indexes and bounded
 maintenance of terminal-Run pending deliveries and unreferenced shell
@@ -59,7 +59,7 @@ operation index (22, #171; see [storage](storage.md)), bounded activity
 indexes (23, #172), and the Revisit completion-delivery index with the #36
 metadata dropped (24, #187), the history attempt index (25), the pending-reply partial index (26, #194), and the interrupted embedding-job recovery index (27, #172). Version 19 was reused without schema changes for
 [opt-in Responses cache diagnostics](cache-diagnostics.md); standalone
-RAG remains schema3. The existing migration2
+RAG was at schema 3 at that point. The existing migration2
 `tool_result_node(node_id)` index supports #41's retained-source query batching;
 no new index/migration is required for that B+C query. F separately requires
 the parent index; see [storage](storage.md). Historical version
@@ -83,6 +83,13 @@ Tags and the cwd filter are organization metadata only. See [thread organization
 Conversation schema33 (#253) adds the nullable `index_space.int8_scale` column;
 logical index bytes follow the element size. Explicit, API-free conversion of the
 active space to int8: [search and relations](search-and-relations.md#int8-conversion-253).
+
+## Current bounded reads, replay, and upgrades
+
+- #381: [status and Thread paging](protocol-versions/19.md), [bounded history observations](protocol-versions/20.md), and [Thread search and excerpts](protocol-versions/21.md) own their respective limits. Follow a nonempty cursor even on an empty page; a lower-bound count is not an exact total.
+- #382: [attachment provenance](attachment-provenance.md#attachment-replay-and-adopted-notices-382) owns original slots, authorization before reuse, and bounded adopted notices. A previously saved notice is not a new delivery status.
+- #388: [model HTTP](model-http.md) owns diagnostic sanitization; [configuration](config.md#stored-api-keys-and-connection-test-269) owns private credential-file creation and advisory permissions. Lossless exports are not a redaction surface.
+- #397: [storage](storage.md#migration-scoped-foreign-key-validation-210) owns scoped precommit and crash-persistent startup validation. This is independent of unclean-start `quick_check` and does not expose a new startup phase.
 
 ## History GC diagnostics (#225)
 
@@ -134,7 +141,9 @@ Issue #20 clarification; it does not trigger deletion or conversion of user data
 
 Adopt [Revisit](revisit.md) (#187) as an ordinary message sent with
 `--deliver complete`, released into the existing receipt path when the Thread's
-live Run would complete normally, or delivered immediately when none is live.
+live Run would complete normally, or delivered immediately when none is live. A
+held Run-completion receipt does not block subsequent ordinary input while the
+Run is active (#391).
 It replaces the #36 per-Run reservation, its commands, event kind, metadata and
 limit; schema v24 drops that metadata. Existing
 shutdown and [Thread browser](thread-browser.md) projections expose interrupted
@@ -551,7 +560,7 @@ Credential values never leave the owner, `default_connection`, `default_model`, 
 
 Stages A and B of the owner-side connection setup are adopted: `credentials.set` / `credentials.clear` keep an API key
 per connection in `credentials.toml` beside `config.toml` (plain text, `0600` on Unix, never returned or logged), the
-environment variable wins over the stored key, and `connection.test` sends one model-catalog GET and reports facts.
+environment variable wins over the stored key, and `connection.test` defaults to one model-catalog GET. An explicit `--post-model MODEL` opts into one additional conversation probe (#386).
 `config.get` states each connection's key source (`env` / `stored` / `none`). No table, worker, event, queue or
 dependency is added; no migration. Stage C (applying `connections` changes without a restart) is implemented; see
 [decisions](../development/decisions.md#d-269-connection-setup-stages-a-and-b-2026-11-07). See
