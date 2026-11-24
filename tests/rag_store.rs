@@ -91,7 +91,14 @@ async fn a_canonical_source_root_cannot_be_registered_under_two_names() {
         },
     )
     .await;
-    assert_eq!(listed["result"]["items"].as_array().unwrap().len(), 1);
+    let names = listed["result"]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|item| item["kind"] == "file")
+        .map(|item| item["name"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(names, ["notes"]);
     let found = search(root, "source:notes", "needle", SearchMode::Keyword).await;
     assert_eq!(found["result"]["items"].as_array().unwrap().len(), 1);
 }
