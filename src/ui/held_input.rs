@@ -485,9 +485,7 @@ mod tests {
                     ui.active_view_mut().held_input.active = selected;
                     let buffer = screen(ui.view(), 80, UiLanguage::En);
                     let expected = item("a").region_metadata(UiLanguage::En);
-                    let line = (0..80)
-                        .map(|x| buffer[(x, 2)].symbol())
-                        .collect::<String>();
+                    let line = (0..80).map(|x| buffer[(x, 2)].symbol()).collect::<String>();
                     assert!(line.contains(&expected), "{line}");
                     // The metadata is right-aligned; its final cell is always painted.
                     let cell = &buffer[(79, 2)];
@@ -504,7 +502,11 @@ mod tests {
     fn clipped_held_rows_keep_the_state_and_short_reason() {
         for (reason, uncertain, expected) in [
             ("recovery_wait", false, "Held | Waiting for recovery"),
-            ("uncertain_path_admission", true, "Delivery unknown | Not verified"),
+            (
+                "uncertain_path_admission",
+                true,
+                "Delivery unknown | Not verified",
+            ),
         ] {
             let mut ui = ui();
             let row = &mut ui.active_view_mut().pending_messages.items[0];
@@ -513,7 +515,10 @@ mod tests {
             row.excerpt = "long message ".repeat(20);
             let buffer = screen(ui.view(), 80, UiLanguage::En);
             let line = (0..80).map(|x| buffer[(x, 2)].symbol()).collect::<String>();
-            assert!(line.contains(super::super::text_width::glyphs::ellipsis()), "{line}");
+            assert!(
+                line.contains(super::super::text_width::glyphs::ellipsis()),
+                "{line}"
+            );
             assert!(line.ends_with(expected), "{line}");
         }
     }

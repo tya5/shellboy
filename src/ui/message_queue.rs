@@ -94,22 +94,16 @@ impl PendingMessage {
                 "中断前の未反映",
                 "Not delivered before interruption"
             ),
-            "uncertain_path_admission" => i18n::local!(
-                language,
-                "反映を確認できず",
-                "Not verified"
-            ),
+            "uncertain_path_admission" => {
+                i18n::local!(language, "反映を確認できず", "Not verified")
+            }
             "previous_instance_interrupted" => i18n::local!(
                 language,
                 "前回の終了で中断",
                 "Interrupted by previous shutdown"
             ),
             "stopped" | "stopping" => i18n::local!(language, "停止", "Stopped"),
-            "recovery_wait" => i18n::local!(
-                language,
-                "復旧待ち",
-                "Waiting for recovery"
-            ),
+            "recovery_wait" => i18n::local!(language, "復旧待ち", "Waiting for recovery"),
             "run_completion" => i18n::local!(
                 language,
                 "作業の完了時に届ける",
