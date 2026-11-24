@@ -1375,7 +1375,17 @@ fn protocol_v6_handshake_and_typed_results_cover_existing_wire_modes() {
         schema["capabilities"],
         serde_json::json!(["events.reasoning_activity", "id.resolve"])
     );
-    assert_eq!(schema["operation_results"].as_object().unwrap().len(), 83);
+    let results = schema["operation_results"].as_object().unwrap();
+    assert_eq!(results.len(), 83 + 2); // Existing operations plus recall and received.
+    assert!(results["history.recall"]["oneOf"].is_array());
+    assert_eq!(
+        results["history.received"]["properties"]["items"]["type"],
+        "array"
+    );
+    assert_eq!(
+        results["history.received"]["properties"]["next_cursor"]["type"],
+        serde_json::json!(["string", "null"])
+    );
     assert_eq!(
         schema["operation_results"]["history.export"]["type"],
         "object"
