@@ -218,10 +218,13 @@ async fn serve_connection<S: AsyncRead + AsyncWrite + Unpin>(
             ipc_failure(error, stage, reason, unapplied),
         ))
     };
-    let recovery = request
-        .as_ref()
-        .ok()
-        .map(|request| (request.command.name(), request.command.requires_receipt()));
+    let recovery = request.as_ref().ok().map(|request| {
+        (
+            request.command.name(),
+            request.command.is_read_only(),
+            request.command.requires_receipt(),
+        )
+    });
     let mut dispatched = false;
     let mut refused_wait = false;
     let mut byte = [0];
@@ -258,13 +261,13 @@ async fn serve_connection<S: AsyncRead + AsyncWrite + Unpin>(
             );
         }
         dispatched = true;
-        let (command, requires_receipt) = recovery.expect("dispatched request has a command");
+        let (command, read_only, requires_receipt) =
+            recovery.expect("dispatched request has a command");
         let uncertain = |mut outcome: ConnectionOutcome| {
             if let ConnectionOutcome::Reply(response) = &mut outcome {
-                response.error = response
-                    .error
-                    .take()
-                    .map(|error| uncertain_reply(error, &operation_id, command, requires_receipt));
+                response.error = response.error.take().map(|error| {
+                    uncertain_reply(error, &operation_id, command, read_only, requires_receipt)
+                });
             }
             outcome
         };
@@ -289,9 +292,9 @@ async fn serve_connection<S: AsyncRead + AsyncWrite + Unpin>(
         Err(error) => {
             let error = ipc_failure(error, "encode_reply", "reply_encoding_failed", !dispatched);
             let error = if dispatched {
-                let (command, requires_receipt) =
+                let (command, read_only, requires_receipt) =
                     recovery.expect("dispatched request has a command");
-                uncertain_reply(error, &operation_id, command, requires_receipt)
+                uncertain_reply(error, &operation_id, command, read_only, requires_receipt)
             } else {
                 error
             };
@@ -622,6 +625,7 @@ fn uncertain_reply(
     mut error: ApiError,
     operation_id: &str,
     command: &str,
+    read_only: bool,
     requires_receipt: bool,
 ) -> ApiError {
     let details = error.details.get_or_insert_with(|| serde_json::json!({}));
@@ -629,8 +633,9 @@ fn uncertain_reply(
         *details = serde_json::json!({"cause_details": details.take()});
     }
     details["operation_id"] = Value::String(operation_id.into());
-    details["request_may_have_been_applied"] = Value::Bool(requires_receipt);
-    if !requires_receipt {
+    details["request_may_have_been_applied"] = Value::Bool(!read_only);
+    details["read_only"] = Value::Bool(read_only);
+    if read_only {
         let cost = if command == "history.search" {
             " Semantic search may incur another query embedding charge."
         } else {
@@ -640,13 +645,14 @@ fn uncertain_reply(
             "Repeat shellboy {} with the same arguments to observe fresh state; this observation does not create an operation receipt. The same operation ID also runs a new observation.{cost}",
             command.replace('.', " ")
         ));
-        details["read_only"] = Value::Bool(true);
-    } else {
+    } else if requires_receipt {
         error.hint = Some("Use details.operation_id with shellboy operation get --operation OPERATION_ID, then inspect saved target state. A missing receipt does not prove the request was never applied; do not resubmit the mutation under a new ID".into());
         details["next_operation"] =
             serde_json::json!(Command::OperationGet(crate::protocol::OperationTarget {
                 operation_id: operation_id.into()
             }));
+    } else {
+        error.hint = Some("This draft image write has no receipt. To recover an unfinished upload, explicitly begin a replacement for the same draft; do not replay an uncertain chunk".into());
     }
     error
 }
@@ -736,6 +742,7 @@ async fn call_stream_requiring_capability<S: AsyncRead + AsyncWrite + Unpin>(
             error,
             &expected,
             request.command.name(),
+            request.command.is_read_only(),
             request.command.requires_receipt(),
         )
     };
@@ -991,6 +998,11 @@ mod frame_delivery_tests {
                 thread_ids: Vec::new(),
                 source_ids: Vec::new(),
             }),
+            Command::DraftImage(crate::protocol::DraftImageArgs {
+                instance_id: "instance".into(),
+                draft_id: "draft".into(),
+                action: crate::protocol::DraftImageAction::Begin { encoded_bytes: 10 },
+            }),
             Command::Wait(crate::protocol::WaitArgs {
                 after: None,
                 conditions: vec![crate::protocol::WaitCondition::RunEnded { run_id: "r".into() }],
@@ -1037,6 +1049,11 @@ mod frame_delivery_tests {
                 assert_eq!(details["request_may_have_been_applied"], true);
                 assert_ne!(details["read_only"], true);
                 assert!(hint.contains("do not resubmit the mutation under a new ID"));
+            } else if name == "draft.image" {
+                assert_eq!(details["read_only"], false);
+                assert_eq!(details["request_may_have_been_applied"], true);
+                assert!(details.get("next_operation").is_none());
+                assert!(hint.contains("begin a replacement for the same draft"));
             } else {
                 assert_eq!(details["read_only"], true);
                 assert_eq!(details["request_may_have_been_applied"], false);

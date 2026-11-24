@@ -1246,18 +1246,11 @@ impl AttachmentService {
     }
 
     /// Commit an encoded transfer using the same managed writer as clipboard capture.
-    pub async fn save_uploaded_clipboard_png(
+    async fn save_uploaded_clipboard_png(
         &self,
         bytes: Vec<u8>,
         cancel: CancellationToken,
     ) -> Result<ManagedImage, ApiError> {
-        let max_bytes = self.config.limits.attachment_file_bytes;
-        if bytes.len() > clipboard::MAX_CLIPBOARD_RGBA_BYTES || bytes.len() as u64 > max_bytes {
-            return Err(ApiError::new(
-                ErrorCode::InputLimit,
-                "Encoded clipboard PNG exceeds the single-attachment limit",
-            ));
-        }
         self.write_clipboard_png(
             move || {
                 clipboard::validate_png(&bytes)?;
