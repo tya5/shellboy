@@ -235,15 +235,10 @@ pub(super) fn transport_error(error: reqwest::Error, stage: &str) -> ModelError 
     let (kind, mut message) = if error.is_timeout() {
         (
             "timeout",
-            format!(
-                "HTTP connection timed out {stage} (fixed connect_timeout 30000 ms); inspect proxy connectivity and TLS settings"
-            ),
+            format!("HTTP connection timed out {stage} (fixed connect_timeout 30000 ms)"),
         )
     } else {
-        (
-            "transport",
-            format!("HTTP transport failed {stage}; inspect proxy connectivity and TLS settings"),
-        )
+        ("transport", format!("HTTP transport failed {stage}"))
     };
     use crate::model::TransportCause::*;
     let detail = match cause {
@@ -258,7 +253,7 @@ pub(super) fn transport_error(error: reqwest::Error, stage: &str) -> ModelError 
         ProxyConnect { .. } => "proxy CONNECT failed (status unavailable)",
         Unknown => "underlying transport cause unavailable",
     };
-    message.push_str("; ");
+    message.push_str("; check that the network or VPN connection to the endpoint is up, then inspect proxy connectivity and TLS settings; ");
     message.push_str(detail);
     let mut error = ModelError::new(kind, message);
     error.transport_cause = Some(cause);
@@ -342,6 +337,9 @@ mod tests {
             .unwrap();
         let error = classified(client, "http://private-host.invalid/a?key=private-query").await;
         assert_eq!(error["transport_cause"]["kind"], "dns");
+        assert!(error["message"].as_str().unwrap().contains(
+            "check that the network or VPN connection to the endpoint is up, then inspect proxy connectivity and TLS settings"
+        ));
         assert!(!error.to_string().contains("private-"));
     }
 
