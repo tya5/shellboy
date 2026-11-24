@@ -133,6 +133,7 @@ pub(super) async fn http_error_observed(
                 .collect(),
             provider_code: None,
             status: Some(status),
+            transport_cause: None,
             http_observation: None,
             usage_limit: std::str::from_utf8(&body)
                 .ok()

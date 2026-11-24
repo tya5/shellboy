@@ -162,6 +162,7 @@ impl Control {
         disconnected: CancellationToken,
     ) -> Result<Value, ApiError> {
         let config = self.store.config.clone();
+        let post_model = args.post_model.clone();
         let test = self
             .attachments
             .control_files()
@@ -176,17 +177,60 @@ impl Control {
         let Ok(client) = HttpModelClient::for_connection(name, test.connection.clone()) else {
             return Ok(test.failed("invalid_configuration", None, false));
         };
-        Ok(
-            match client.models_with_status(CancellationToken::new()).await {
-                Ok((status, models)) => test.succeeded(status, models),
-                Err(failure) => {
-                    let class = classify(&failure.error);
-                    let attempted =
-                        !matches!(class, "credential_missing" | "invalid_configuration");
-                    test.failed(class, failure.http_status, attempted)
+        let mut catalog = match client.models_with_status(CancellationToken::new()).await {
+            Ok((status, models)) => test.succeeded(status, models),
+            Err(failure) => {
+                let class = classify(&failure.error);
+                let attempted = !matches!(class, "credential_missing" | "invalid_configuration");
+                let mut result = test.failed(class, failure.http_status, attempted);
+                if let Some(cause) = failure.error.transport_cause {
+                    result["transport_cause"] = json!(cause);
                 }
-            },
-        )
+                result
+            }
+        };
+        if let Some(model) = post_model {
+            catalog["conversation"] = conversation_probe(name, test.connection, &model).await;
+        }
+        Ok(catalog)
+    }
+}
+
+/// Use the conversation encoder, headers and upload path without a Thread or retry driver.
+async fn conversation_probe(name: &str, mut connection: Connection, model: &str) -> Value {
+    connection
+        .extra_body
+        .remove(crate::model::dialect::output_limit_key(connection.api));
+    if serde_json::to_vec(&connection.extra_body).is_ok_and(|bytes| bytes.len() > 4096) {
+        return json!({"sent":false,"ok":false,"failure":"probe_body_too_large","http_status":null});
+    }
+    let Ok(client) = HttpModelClient::for_connection(name, connection) else {
+        return json!({"sent":false,"ok":false,"failure":"invalid_configuration","http_status":null});
+    };
+    let mut request = crate::model::response_request(
+        model,
+        vec![json!({"role":"user","content":"Reply OK."})],
+        None,
+        false,
+    );
+    request[crate::model::THREAD_OUTPUT_LIMIT_FIELD] = json!(32);
+    let session = uuid::Uuid::new_v4().to_string();
+    match client
+        .response_for_thread(&session, request, CancellationToken::new(), None)
+        .await
+    {
+        Ok(response) => {
+            json!({"sent":true,"ok":true,"http_status":response.response_facts.status,"failure":null,"http_observation":response.http_observation})
+        }
+        Err(failure) => {
+            let error = failure.error;
+            let status = failure.facts.status.or(error.status);
+            let mut report = json!({"sent":error.http_observation.as_ref().is_some_and(|fact| fact.network_started) || status.is_some(),"ok":false,"http_status":status,"failure":classify(&error),"http_observation":error.http_observation});
+            if let Some(cause) = error.transport_cause {
+                report["transport_cause"] = json!(cause);
+            }
+            report
+        }
     }
 }
 
@@ -226,7 +270,7 @@ fn classify(error: &crate::model::ModelError) -> &'static str {
         ("timeout", _) => "timeout",
         ("transport", _) => "unreachable",
         ("config_missing", _) => "credential_missing",
-        ("config_invalid", _) => "invalid_configuration",
+        ("config_invalid" | "invalid_config", _) => "invalid_configuration",
         _ => "response",
     }
 }

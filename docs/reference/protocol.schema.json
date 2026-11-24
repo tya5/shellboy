@@ -2303,6 +2303,13 @@
             "null"
           ]
         },
+        "post_model": {
+          "description": "Opt in to one paid synthetic conversation POST after the catalog GET.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "ssl_verify": {
           "type": [
             "boolean",

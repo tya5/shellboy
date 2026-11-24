@@ -851,6 +851,54 @@ async fn a_saved_connection_is_tested_with_one_catalog_request_and_facts_only() 
     .unwrap();
 }
 
+#[tokio::test]
+async fn connection_test_only_posts_when_explicitly_requested_and_reports_it_separately() {
+    crate::test_watchdog::watchdog("opt-in connection POST", async {
+        let root = tempfile::tempdir().unwrap();
+        let server = mock().await;
+        write_config(root.path(), "");
+        let (_owner, control) = start(root.path()).await;
+        let args = candidate(&server.url);
+        let catalog = call(&control, Command::ConnectionTest(args.clone()))
+            .await
+            .unwrap();
+        assert_eq!(catalog["ok"], true);
+        assert!(catalog.get("conversation").is_none());
+        let probe = call(
+            &control,
+            Command::ConnectionTest(ConnectionTestArgs {
+                post_model: Some("model-a".into()),
+                ..args
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(probe["ok"], true);
+        assert_eq!(probe["conversation"]["ok"], true);
+        assert_eq!(probe["conversation"]["http_status"], 200);
+        assert!(
+            probe["conversation"]["http_observation"]["request_body_bytes"]
+                .as_u64()
+                .unwrap()
+                > 0
+        );
+        let seen = server.seen();
+        assert_eq!(
+            seen.iter()
+                .map(|r| (r.method.as_str(), r.path.as_str()))
+                .collect::<Vec<_>>(),
+            [
+                ("GET", "/v1/models"),
+                ("GET", "/v1/models"),
+                ("POST", "/v1/responses")
+            ]
+        );
+        control.shutdown().await.unwrap();
+    })
+    .await
+    .unwrap();
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_candidate_is_tested_with_an_inline_key_or_a_variable_and_failures_are_classed() {
     crate::test_watchdog::watchdog("connection test candidate", async {

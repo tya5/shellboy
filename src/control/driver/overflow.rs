@@ -93,6 +93,11 @@ pub(super) async fn retry_or_recover(
         .hint("Choose an available action; retry may charge again. Saved tools are not re-executed.")
         .details(json!({"recovery":facts,"automatic_retries":automatic_retries,"retry_limit":retry_limit,
             "automatic_reduction_unavailable":reduction_unavailable,"last_failure_at":now(),"failure_kind":failure.error.kind,"http":failure.facts.http_observation}));
+    if let Some(cause) = failure.error.transport_cause
+        && let Some(details) = &mut error.details
+    {
+        details["transport_cause"] = json!(cause);
+    }
     if let Some(fact) = usage_limit {
         error.hint = Some(if control.store.config.recovery.auto_retry_usage_limit
             && fact.kind == crate::model::usage_limit::LimitKind::UsageLimitReached

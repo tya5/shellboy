@@ -69,6 +69,24 @@ pub struct OutputMismatch {
     pub field: OutputMismatchField,
 }
 
+/// Bounded transport evidence derived from the source chain, never raw error text.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum TransportCause {
+    Dns,
+    ConnectionRefused,
+    ConnectionReset,
+    TlsUnknownIssuer,
+    TlsNameMismatch,
+    TlsExpired,
+    Tls,
+    ProxyConnect {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        status: Option<u16>,
+    },
+    Unknown,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, thiserror::Error)]
 #[error("{kind}: {message}")]
 pub struct ModelError {
@@ -78,6 +96,8 @@ pub struct ModelError {
     pub provider_code: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transport_cause: Option<TransportCause>,
     #[serde(default, skip_deserializing, skip_serializing_if = "Option::is_none")]
     pub(crate) stream_provider_status: Option<StreamProviderStatus>,
     #[serde(skip)]
@@ -94,6 +114,7 @@ impl ModelError {
             message: message.into(),
             provider_code: None,
             status: None,
+            transport_cause: None,
             http_observation: None,
             usage_limit: None,
             stream_provider_status: None,
@@ -155,6 +176,7 @@ impl ModelError {
                 .collect(),
             provider_code: error.get("code").and_then(Value::as_str).map(str::to_owned),
             status,
+            transport_cause: None,
             stream_provider_status: None,
             strict_untyped_stream_error_before_done: false,
             http_observation: None,

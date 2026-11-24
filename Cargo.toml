@@ -55,6 +55,7 @@ base64 = "=0.23.1"
 uuid = { version = "=1.29.0", features = ["v4", "serde"] }
 url = { version = "=2.5.8", features = ["serde"] }
 reqwest = { version = "=0.13.5", default-features = false, features = ["json", "stream", "rustls"] }
+rustls = { version = "=0.23.46", default-features = false }
 futures-util = "=0.3.34"
 encoding_rs = "=0.8.42"
 libc = "=0.2.191"

@@ -3069,6 +3069,7 @@ dependencies = [
  "pulldown-cmark",
  "ratatui",
  "reqwest",
+ "rustls",
  "rusqlite",
  "schemars",
  "semver",

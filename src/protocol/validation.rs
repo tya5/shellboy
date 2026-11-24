@@ -563,6 +563,13 @@ impl CredentialsSetArgs {
 const MAX_TEST_URL_BYTES: usize = 2048;
 impl ConnectionTestArgs {
     fn validate(&self) -> Result<(), ApiError> {
+        if let Some(model) = &self.post_model
+            && (model.trim().is_empty() || model.len() > 256 || model.chars().any(char::is_control))
+        {
+            return Err(invalid(
+                "post_model must be a nonempty model ID of at most 256 bytes",
+            ));
+        }
         match (&self.connection, &self.base_url) {
             (Some(name), None) => {
                 crate::credential_store::check_connection_name(name)?;
@@ -573,7 +580,7 @@ impl ConnectionTestArgs {
                     || self.ssl_verify.is_some()
                 {
                     return Err(invalid(
-                        "a saved connection takes no other field; give base_url instead to test a candidate",
+                        "candidate settings require base_url, not a saved connection",
                     ));
                 }
                 Ok(())

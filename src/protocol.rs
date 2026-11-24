@@ -1363,6 +1363,9 @@ pub struct ConnectionTestArgs {
     pub api_key_header: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ssl_verify: Option<bool>,
+    /// Opt in to one paid synthetic conversation POST after the catalog GET.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub post_model: Option<String>,
 }
 impl std::fmt::Debug for ConnectionTestArgs {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1374,6 +1377,7 @@ impl std::fmt::Debug for ConnectionTestArgs {
             .field("api_key_env", &self.api_key_env)
             .field("api_key_header", &self.api_key_header)
             .field("ssl_verify", &self.ssl_verify)
+            .field("post_model", &self.post_model)
             .finish()
     }
 }

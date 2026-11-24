@@ -154,6 +154,13 @@ async fn self_signed_tls_requires_explicit_connection_opt_out_and_never_changes_
         .unwrap()
         .unwrap_err();
         assert_eq!(failure.error.kind, "transport");
+        // Platform verifiers do not always expose the underlying certificate reason.
+        assert!(matches!(
+            failure.error.transport_cause,
+            Some(
+                shellboy::model::TransportCause::Tls | shellboy::model::TransportCause::TlsUnknownIssuer
+            )
+        ));
     }
     assert_eq!(fixture.requests.load(Ordering::SeqCst), 0);
     let result = crate::test_watchdog::watchdog("tests/model_tls.rs: self_signed_tls_requires_explicit_connection_opt_out_and_never_changes_other_clients",

@@ -231,24 +231,195 @@ impl Deadline {
 }
 
 pub(super) fn transport_error(error: reqwest::Error, stage: &str) -> ModelError {
-    if error.is_timeout() {
-        ModelError::new(
+    let cause = transport_cause(&error);
+    let (kind, mut message) = if error.is_timeout() {
+        (
             "timeout",
             format!(
                 "HTTP connection timed out {stage} (fixed connect_timeout 30000 ms); inspect proxy connectivity and TLS settings"
             ),
         )
     } else {
-        ModelError::new(
+        (
             "transport",
             format!("HTTP transport failed {stage}; inspect proxy connectivity and TLS settings"),
         )
+    };
+    use crate::model::TransportCause::*;
+    let detail = match cause {
+        Dns => "DNS lookup failed",
+        ConnectionRefused => "connection refused",
+        ConnectionReset => "connection reset",
+        TlsUnknownIssuer => "TLS certificate issuer is not trusted",
+        TlsNameMismatch => "TLS certificate does not match the server name",
+        TlsExpired => "TLS certificate has expired",
+        Tls => "TLS negotiation or verification failed",
+        ProxyConnect { status: Some(407) } => "proxy CONNECT requires authentication (407)",
+        ProxyConnect { .. } => "proxy CONNECT failed (status unavailable)",
+        Unknown => "underlying transport cause unavailable",
+    };
+    message.push_str("; ");
+    message.push_str(detail);
+    let mut error = ModelError::new(kind, message);
+    error.transport_cause = Some(cause);
+    error
+}
+
+fn transport_cause(error: &(dyn std::error::Error + 'static)) -> crate::model::TransportCause {
+    use crate::model::TransportCause::*;
+    use rustls::{CertificateError, Error};
+    use std::io::ErrorKind;
+    let mut source = Some(error);
+    let mut proxy = false;
+    while let Some(error) = source {
+        if let Some(tls) = error.downcast_ref::<Error>() {
+            return match tls {
+                Error::InvalidCertificate(CertificateError::UnknownIssuer) => TlsUnknownIssuer,
+                Error::InvalidCertificate(
+                    CertificateError::NotValidForName
+                    | CertificateError::NotValidForNameContext { .. },
+                ) => TlsNameMismatch,
+                Error::InvalidCertificate(
+                    CertificateError::Expired | CertificateError::ExpiredContext { .. },
+                ) => TlsExpired,
+                _ => Tls,
+            };
+        }
+        // The pinned connector's DNS and tunnel errors are private. Match only
+        // its fixed markers; never persist or expose any source Display text.
+        let marker = error.to_string();
+        match marker.as_str() {
+            "dns error" => return Dns,
+            "tunnel error: proxy authorization required" => {
+                return ProxyConnect { status: Some(407) };
+            }
+            _ => proxy |= marker.starts_with("tunnel error: "),
+        }
+        if let Some(io) = error.downcast_ref::<std::io::Error>() {
+            match io.kind() {
+                ErrorKind::ConnectionRefused => return ConnectionRefused,
+                ErrorKind::ConnectionReset => return ConnectionReset,
+                _ => {}
+            }
+            if let Some(inner) = io.get_ref() {
+                source = Some(inner);
+                continue;
+            }
+        }
+        source = error.source();
+    }
+    if proxy {
+        ProxyConnect { status: None }
+    } else {
+        Unknown
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    async fn classified(client: reqwest::Client, url: &str) -> serde_json::Value {
+        let error = crate::test_watchdog::watchdog("transport cause", client.get(url).send())
+            .await
+            .unwrap()
+            .unwrap_err();
+        serde_json::to_value(transport_error(error, "before response headers")).unwrap()
+    }
+
+    #[tokio::test]
+    async fn transport_cause_identifies_dns_and_redacts_the_url() {
+        struct FailingDns;
+        impl reqwest::dns::Resolve for FailingDns {
+            fn resolve(&self, _: reqwest::dns::Name) -> reqwest::dns::Resolving {
+                Box::pin(async { Err(std::io::Error::other("private-resolver-info").into()) })
+            }
+        }
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .dns_resolver(std::sync::Arc::new(FailingDns))
+            .build()
+            .unwrap();
+        let error = classified(client, "http://private-host.invalid/a?key=private-query").await;
+        assert_eq!(error["transport_cause"]["kind"], "dns");
+        assert!(!error.to_string().contains("private-"));
+    }
+
+    #[tokio::test]
+    async fn transport_cause_distinguishes_refusal_and_reset() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .retry(reqwest::retry::never())
+            .build()
+            .unwrap();
+        let reset = async {
+            use tokio::io::AsyncReadExt;
+            let (mut stream, _) = listener.accept().await.unwrap();
+            assert_eq!(stream.read_u8().await.unwrap(), b'G');
+            stream.set_zero_linger().unwrap();
+        };
+        let (error, ()) = tokio::join!(classified(client.clone(), &url), reset);
+        assert_eq!(error["transport_cause"]["kind"], "connection_reset");
+        drop(listener);
+        let error = classified(client, &url).await;
+        assert_eq!(error["transport_cause"]["kind"], "connection_refused");
+    }
+
+    #[tokio::test]
+    async fn transport_cause_preserves_only_known_proxy_connect_status() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        for (returned, reported) in [
+            (407, serde_json::json!(407)),
+            (403, serde_json::Value::Null),
+        ] {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let proxy =
+                reqwest::Proxy::all(format!("http://{}", listener.local_addr().unwrap())).unwrap();
+            let client = reqwest::Client::builder().proxy(proxy).build().unwrap();
+            let respond = async {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut line = [0; 8];
+                stream.read_exact(&mut line).await.unwrap();
+                assert_eq!(&line, b"CONNECT ");
+                let mut tail = Vec::new();
+                while !tail.ends_with(b"\r\n\r\n") {
+                    tail.push(stream.read_u8().await.unwrap());
+                    assert!(tail.len() < 4096);
+                }
+                stream
+                    .write_all(
+                        format!("HTTP/1.1 {returned} private-reason\r\nContent-Length: 0\r\n\r\n")
+                            .as_bytes(),
+                    )
+                    .await
+                    .unwrap();
+                stream.shutdown().await.unwrap();
+            };
+            let (error, ()) = tokio::join!(
+                classified(client, "https://private-target.invalid"),
+                respond
+            );
+            assert_eq!(error["transport_cause"]["kind"], "proxy_connect");
+            assert_eq!(error["transport_cause"]["status"], reported);
+            assert!(!error.to_string().contains("private-"));
+        }
+    }
+
+    #[test]
+    fn transport_cause_keeps_typed_tls_certificate_reasons() {
+        use rustls::CertificateError;
+        for (source, expected) in [
+            (CertificateError::NotValidForName, "tls_name_mismatch"),
+            (CertificateError::Expired, "tls_expired"),
+            (CertificateError::UnknownIssuer, "tls_unknown_issuer"),
+        ] {
+            let io = std::io::Error::other(rustls::Error::InvalidCertificate(source));
+            let cause = serde_json::to_value(transport_cause(&io)).unwrap();
+            assert_eq!(cause["kind"], expected);
+        }
+    }
 
     #[tokio::test(start_paused = true)]
     async fn ready_permanent_headers_are_not_erased_by_a_simultaneously_expired_wait() {

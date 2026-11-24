@@ -461,6 +461,12 @@ model-catalog GET and reports `http_status`, `failure` and `models`; treat `ok: 
 catalog", never as proof the key is valid, and `failure: "auth"` as "the endpoint refused the credential" without
 guessing why. A stored key and ordinary connection edits apply to the next request. The connection used by
 `embedding.connection` keeps restart semantics so the index identity does not change mid-owner.
+On transport failure, `transport_cause` in the test and saved attempt error
+reports available DNS, connection, TLS or proxy CONNECT evidence without URLs
+or credentials. `--post-model MODEL` sends one **paid** synthetic conversation
+POST, without retries, after the catalog GET. Run it only with explicit user
+approval to use that provider; read `conversation.ok` separately from the
+catalog `ok`. A fresh probe cannot prove an existing pooled connection is good.
 Use `connection test --base-url ... --api-key-env VAR` and `credentials set`/`clear` only when asked. The credentials file is readable by any process of the user, including your shell, so never print or copy it. Your identity is recorded with the change.
 
 ## Operation tracking, saved context, and deletion preview

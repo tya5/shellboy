@@ -182,9 +182,9 @@ pub struct CredentialsOptions {
 }
 #[derive(Debug, Clone, Subcommand)]
 pub enum ConnectionCommand {
-    /// Send one model-catalog GET and report the facts; no conversation or embedding request.
+    /// Test the model catalog; a conversation POST requires explicit opt-in.
     #[command(
-        after_help = "Needs a running owner; --config does not select the file.\n  shellboy connection test --connection proxy\n  printf %s \"$KEY\" | shellboy connection test --base-url https://api.example/v1 --api-key-stdin\n  shellboy connection test --base-url http://localhost:8080/v1 --api-key-env LOCAL_KEY\n\nReports http_status, the model IDs, whether api_key_env is set in the owner's environment, and a failure class (auth, url, unreachable, timeout, ...). A successful reply means the endpoint answered with a catalog; it does not prove the key is valid for any model."
+        after_help = "Needs a running owner; --config does not select the file.\n  shellboy connection test --connection proxy\n  printf %s \"$KEY\" | shellboy connection test --base-url https://api.example/v1 --api-key-stdin\n  shellboy connection test --base-url http://localhost:8080/v1 --api-key-env LOCAL_KEY\n\nReports http_status, the model IDs, whether api_key_env is set in the owner's environment, and a failure class (auth, url, unreachable, timeout, ...). By default only the catalog is tested. --post-model MODEL additionally sends one paid synthetic conversation request."
     )]
     Test(ConnectionTestOptions),
 }
@@ -211,6 +211,9 @@ pub struct ConnectionTestOptions {
     /// Do not verify the candidate's HTTPS certificate.
     #[arg(long)]
     pub no_ssl_verify: bool,
+    /// Also send one paid synthetic conversation POST to this model; never retried.
+    #[arg(long)]
+    pub post_model: Option<String>,
 }
 const MAX_STDIN_KEY_BYTES: usize = 8 * 1024;
 /// One line from standard input; a single trailing line break is dropped.
@@ -1747,6 +1750,7 @@ impl Cli {
                     api_key_env: a.api_key_env,
                     api_key_header: a.api_key_header,
                     ssl_verify: a.no_ssl_verify.then_some(false),
+                    post_model: a.post_model,
                 })
             }
             CliCommand::Config { .. } if self.config.is_some() => {
