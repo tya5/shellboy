@@ -1798,7 +1798,7 @@ impl Form {
                 |form, _cwd| {
                     Ok(Command::ShellRead(ShellReadArgs {
                         // Stream ranges are a CLI/wire opt-in; this form reads text only.
-segments: false,
+                        segments: false,
                         execution_id: form.owned("execution")?,
                         cursor: form.optional("cursor")?,
                         encoding: form.optional("encoding")?,
