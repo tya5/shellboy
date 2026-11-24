@@ -3541,8 +3541,18 @@ fn slash_rejection_restores_the_complete_input_without_relying_on_status_text() 
         ui.event(key(KeyCode::Left));
         let original = ui.view().draft.clone();
         let actions = enter(&mut ui);
+        if command == "/background" {
+            assert!(actions.is_empty(), "no foreground execution was observed");
+            assert_eq!(
+                ui.view().draft,
+                original,
+                "local rejection preserves the draft"
+            );
+            assert!(ui.view().status.contains("No foreground shell is visible"));
+            continue;
+        }
         assert!(
-            matches!(actions[0], UiAction::SubmittedCommand { .. }),
+            matches!(actions.first(), Some(UiAction::SubmittedCommand { .. })),
             "{command}"
         );
         assert_eq!(ui.view().draft.text, "\u{fffc}");
