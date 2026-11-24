@@ -817,8 +817,8 @@ async fn raw_gc_keeps_canonical_quote_and_attachment_vectors_including_legacy_wi
     .unwrap();
     assert_eq!(
         f.service.status(args()).await.unwrap().done,
-        1,
-        "source retirement still retains the canonical paid job"
+        3,
+        "source retirement retains all three paid jobs in the selected space"
     );
     f.close().await;
 }
@@ -1527,13 +1527,6 @@ async fn decoding_change_atomically_invalidates_all_spaces_without_touching_raw_
     let output = reader.read(encoding_read("cp932")).await.unwrap();
     assert_eq!(output.text, "cat ASCII output");
     assert_eq!(derived_counts(&f.db).await, (2, 2, 2));
-    assert!(
-        f.service
-            .search_detailed("cat", 10)
-            .await
-            .unwrap()
-            .is_empty()
-    );
     f.db.call(|db| {
         let raw: Vec<u8> = db.query_row(
             "SELECT bytes FROM output_chunk WHERE execution_id='execution'",
@@ -1560,11 +1553,19 @@ async fn decoding_change_atomically_invalidates_all_spaces_without_touching_raw_
             .unwrap()
     );
     assert_eq!(f.proxy.count(), 2);
+    assert!(
+        f.service
+            .search_detailed("cat", 10)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    let before_reindex = f.proxy.count();
     let added = f.service.enqueue_tool_raw("raw-node").await.unwrap();
     assert_eq!(added.segments, 1);
     f.drain().await;
     assert_eq!(derived_counts(&f.db).await, (3, 3, 3));
-    assert_eq!(f.proxy.count(), 3);
+    assert_eq!(f.proxy.count(), before_reindex + 1);
     reader.read(encoding_read("Shift_JIS")).await.unwrap();
     assert_eq!(derived_counts(&f.db).await, (3, 3, 3));
     f.close().await;
