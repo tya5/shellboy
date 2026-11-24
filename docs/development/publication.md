@@ -49,8 +49,8 @@ three-OS Rust checks are green. Older-SHA checks, Windows-only experiments and
 successful release artifact builds are separate evidence and cannot replace
 that gate. Retain an unrelated intermittent Windows failure and any explicit
 same-SHA failed-job rerun as separate records; rerun success does not erase the
-failure or prove its cause. Existing user authorization requirements for push
-and release still apply. See the [adopted CI policy](../design/ci-test-performance.md#ci-execution-and-publication-policy-57).
+failure or prove its cause. Pushing does not require approval. Release tags and
+publication still require the user's explicit approval. See the [adopted CI policy](../design/ci-test-performance.md#ci-execution-and-publication-policy-57).
 
 ## Historical v0.3.0 preparation (#62, superseded)
 

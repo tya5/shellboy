@@ -26,6 +26,7 @@ failure alongside the rerun and do not turn retry success into a causal diagnosi
 or suppress failures with automatic retries.
 
 Release tags and releases use only a main SHA with successful ordinary three-OS
-Rust checks. Validation does not itself authorize push or release. See the
+Rust checks. Pushing does not require approval; validation does not replace the user's
+explicit approval for release tags and releases. See the
 [CI policy](../design/ci-test-performance.md#ci-execution-and-publication-policy-57)
 and [publication gates](publication.md#release-validation-gates-57).
