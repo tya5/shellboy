@@ -37,6 +37,8 @@ Before configuration is available, terminal-adapter failures also use English.
 
 Use `shellboy startup [--last N]` (default 5, maximum 20) to inspect recent startup-stage timings without starting or contacting the owner. It reads `<data-dir>/logs/shellboy.log` and rotated files, with a 16 MiB / 64-file bound. Output includes stage timestamps, elapsed milliseconds, migration versions, application versions when present, totals and incomplete-launch flags; it never emits other log fields. Logs are bounded and best-effort, so missing stages are not zero; the result explicitly warns that records may be missing. Configuration failures before a data directory and owner lock are available cannot be recorded.
 
+For support, share relevant entries from the structured owner log (`logs/shellboy.log`); raw local crash stderr, including Studio's `owner.log`, is not safe to share as is.
+
 Language changes UI captions, explanations, command diagnostics, and generated
 status notices. It does not translate or rewrite conversation text, model/tool
 messages, provider errors, paths, IDs, code, copied text, or sent attachments.
@@ -215,6 +217,11 @@ For an automatically derived header title, `名称未設定（元本文の取得
 that earlier source evidence exceeded the header's bounded read. Messages still
 exist; inspect history or assign an explicit conversation title. The display does
 not rewrite the saved title.
+
+Model-started shells inherit the owner's environment. Store API keys with
+`shellboy credentials set` instead of exporting them into that environment.
+Retained shell stdout and stderr are stored without redaction. A shortened or
+redacted preview does not make saved output or an export safe to share.
 
 Each shell call has one compact row containing its command and known outcome or
 duration. IDs and per-response call numbers are left to details. Successful

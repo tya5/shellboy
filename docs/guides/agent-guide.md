@@ -787,6 +787,11 @@ Owner binary replacement does not inherit live tools or automatically resume wor
 
 ### Shell tool parameters
 
+Model-started shells inherit the owner's environment. For provider keys,
+use `shellboy credentials set` only when asked; do not export the keys into
+that environment. Retained stdout and stderr are stored without redaction.
+Do not print credentials or share raw shell output without checking it first.
+
 Accepted parameters are `command`, `description`, `background`, `stdin_open`,
 `initial_stdin`, `input_encoding`, and `output_encoding`. Unknown parameters are always ignored with a warning; the removed
 `[shell] unknown_arguments` setting is not accepted.
