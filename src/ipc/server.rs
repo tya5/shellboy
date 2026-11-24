@@ -31,7 +31,7 @@ const MAX_CONNECTIONS: usize = MAX_WAIT_WORK
     + MAX_OBSERVATION_WORK
     + MAX_MEMORY_OBSERVATION_WORK
     + CONNECTION_HEADROOM;
-pub(crate) const MAX_IPC_WORK: usize = 24;
+const MAX_IPC_WORK: usize = 24;
 const MAX_CONTROL_WORK: usize = 2;
 const MAX_OBSERVATION_WORK: usize = 2;
 const MAX_MEMORY_OBSERVATION_WORK: usize = 1;

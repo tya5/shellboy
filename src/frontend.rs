@@ -1070,8 +1070,6 @@ async fn run_client(
         compose_disconnected.clone(),
     );
     let clipboard_slots = Arc::new(Semaphore::new(2));
-    // Leave ordinary IPC capacity for draft saves and other clients.
-    let send_slots = Arc::new(Semaphore::new(crate::ipc::MAX_IPC_WORK / 2));
     let mut render_width = 80_u16;
     let mut management = management_state::Management::default();
     let mut external_observation: Option<inspection_external::ExternalObservation> = None;
@@ -1714,43 +1712,11 @@ async fn run_client(
                         if !actions.is_closing() {
                             update(&updates, accepting).await;
                         }
-                        let permit = if actions.is_closing() {
-                            None
-                        } else {
-                            match send_slots.clone().try_acquire_owned() {
-                                Ok(permit) => Some(permit),
-                                Err(_) => {
-                                    trace_send(&diagnostics, &trace, MessageSendStage::QueueFull, thread_id.as_deref(), None);
-                                    update(
-                                        &updates,
-                                        UiUpdate::Receipt {
-                                            draft_id,
-                                            revision,
-                                            thread_id,
-                                            status: ReceiptStatus::Failed,
-                                            message: Some(
-                                                i18n::local!(language, "送信準備キューが満杯です。下書きを保持しました", "The send-preparation queue is full. Draft kept").into(),
-                                            ),
-                                        },
-                                    )
-                                    .await;
-                                    continue;
-                                }
-                            }
-                        };
-                        let send_slots = send_slots.clone();
                         let projection_stop = cancel.clone();
                         images.begin_send(&draft_id, &attachments);
                         let control = control.clone();
                         let sender = background_tx.clone();
                         send_workers.spawn(async move {
-                            let _permit = match permit {
-                                Some(permit) => permit,
-                                None => send_slots
-                                    .acquire_owned()
-                                    .await
-                                    .expect("frontend send slots remain open"),
-                            };
                             trace_send(&diagnostics, &trace, MessageSendStage::Processing, thread_id.as_deref(), None);
                             let trace_thread = thread_id.as_deref().map(str::to_owned);
                             let ids = attachments
@@ -2356,43 +2322,11 @@ async fn run_client(
                         if !actions.is_closing() {
                             update(&updates, accepting).await;
                         }
-                        let permit = if actions.is_closing() {
-                            None
-                        } else {
-                            match send_slots.clone().try_acquire_owned() {
-                                Ok(permit) => Some(permit),
-                                Err(_) => {
-                                    trace_send(&diagnostics, &trace, MessageSendStage::QueueFull, Some(source_thread_id.as_str()), None);
-                                    update(
-                                        &updates,
-                                        UiUpdate::Receipt {
-                                            draft_id,
-                                            revision,
-                                            thread_id: None,
-                                            status: ReceiptStatus::Failed,
-                                            message: Some(
-                                                i18n::local!(language, "送信準備キューが満杯です。下書きを保持しました", "The send-preparation queue is full. Draft kept").into(),
-                                            ),
-                                        },
-                                    )
-                                    .await;
-                                    continue;
-                                }
-                            }
-                        };
-                        let send_slots = send_slots.clone();
                         let projection_stop = cancel.clone();
                         images.begin_send(&draft_id, &attachments);
                         let control = control.clone();
                         let sender = background_tx.clone();
                         send_workers.spawn(async move {
-                            let _permit = match permit {
-                                Some(permit) => permit,
-                                None => send_slots
-                                    .acquire_owned()
-                                    .await
-                                    .expect("frontend send slots remain open"),
-                            };
                             trace_send(&diagnostics, &trace, MessageSendStage::Processing, Some(source_thread_id.as_str()), None);
                             let trace_thread = Some(source_thread_id.clone());
                             let ids = attachments.iter().map(|a| a.id.clone()).collect();
@@ -3479,7 +3413,7 @@ async fn run_client(
                     } else if error.code == ErrorCode::CursorExpired {
                         update(&updates, UiUpdate::DraftAnchorExpired { thread_id, anchor, message: error.to_string() }).await;
                     } else {
-                        update(&updates, UiUpdate::StorageFailed { thread_id, message: error.to_string() }).await;
+                        update(&updates, UiUpdate::StorageFailed { thread_id, message: crate::config_setup::tui_error(&error) }).await;
                     }
                 }
                 Some(BackgroundResult::DraftSaved { result: Ok(()), .. }) => {}
