@@ -164,9 +164,9 @@ mod tests {
           CREATE TABLE turn(id TEXT,thread_id TEXT,state TEXT,created_at TEXT DEFAULT 'now');
           CREATE INDEX turns_by_thread ON turn(thread_id,created_at);
           CREATE TABLE node(id TEXT,turn_id TEXT,created_at TEXT,kind TEXT,payload_json TEXT,deleted_reason TEXT);
-          CREATE TABLE receipt(turn_id TEXT,target_thread_id TEXT,message_node_id TEXT,created_at TEXT);
+          CREATE TABLE receipt(turn_id TEXT,target_thread_id TEXT,message_node_id TEXT,created_at TEXT,state TEXT NOT NULL DEFAULT 'applied');
           CREATE INDEX node_turn ON node(turn_id,id);
-          CREATE INDEX receipt_thread_order ON receipt(target_thread_id);
+          CREATE INDEX receipt_target ON receipt(target_thread_id,state,created_at);
           INSERT INTO thread VALUES('thread','UNRELATED THREAD TITLE',NULL);
           INSERT INTO turn(id,thread_id,state) VALUES('turn-a','thread','recovery_wait'),('turn-b','thread','completed'),('turn-stop','thread','stopped'),('turn-unknown','thread','unknown');").unwrap();
         db
@@ -189,7 +189,7 @@ mod tests {
             json!({"content":[{"type":"input_text","text":text}]}),
         );
         db.execute(
-            "INSERT INTO receipt VALUES(?1,'thread',?2,?3)",
+            "INSERT INTO receipt(turn_id,target_thread_id,message_node_id,created_at) VALUES(?1,'thread',?2,?3)",
             rusqlite::params![turn, id, at],
         )
         .unwrap();
@@ -374,34 +374,51 @@ mod tests {
     }
 
     #[test]
-    fn incomplete_receipt_prefix_omits_request_without_losing_the_saved_record() {
+    fn capped_receipt_prefix_keeps_proven_request_and_marks_only_unresolved_turn() {
         let db = fixture();
-        request(
-            &db,
-            "request",
-            "turn-a",
-            "plausible but not proven earliest",
-            "now",
-        );
+        // Insertion and chronological order differ. The oldest receipt also
+        // lives in another state range; the later candidate must not win.
+        request(&db, "later-a", "turn-a", "not the earliest", "03");
         for i in 0..129 {
             db.execute(
-                "INSERT INTO receipt VALUES(NULL,'thread',?1,'now')",
+                "INSERT INTO receipt(target_thread_id,message_node_id,created_at) VALUES('thread',?1,'02')",
                 [format!("other-{i}")],
             )
             .unwrap();
         }
-        record(
-            &db,
-            "response",
-            "turn-a",
-            "incomplete_response",
-            json!({"partial_text":"saved"}),
-        );
+        request(&db, "request-a", "turn-a", "short request", "01");
+        db.execute(
+            "UPDATE receipt SET state='held' WHERE message_node_id='request-a'",
+            [],
+        )
+        .unwrap();
+        request(&db, "request-b", "turn-b", "outside the prefix", "04");
+        for (node, turn) in [("response-a", "turn-a"), ("response-b", "turn-b")] {
+            record(
+                &db,
+                node,
+                turn,
+                "incomplete_response",
+                json!({"partial_text":"saved"}),
+            );
+        }
         let first = page(&db, None).unwrap();
-        assert_eq!(first.items[0].node_id, "response");
-        assert_eq!(first.items[0].excerpt.as_deref(), Some("saved"));
-        assert!(first.items[0].request_limited);
-        assert!(first.items[0].request.is_none());
+        assert_eq!(first.items.len(), 2);
+        let a = first
+            .items
+            .iter()
+            .find(|row| row.node_id == "response-a")
+            .unwrap();
+        let b = first
+            .items
+            .iter()
+            .find(|row| row.node_id == "response-b")
+            .unwrap();
+        assert_eq!(a.request.as_deref(), Some("short request"));
+        assert!(!a.request_limited);
+        assert_eq!(b.excerpt.as_deref(), Some("saved"));
+        assert!(b.request_limited);
+        assert!(b.request.is_none());
     }
 
     #[test]
