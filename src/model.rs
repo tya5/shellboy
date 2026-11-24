@@ -76,6 +76,7 @@ pub enum TransportCause {
     Dns,
     ConnectionRefused,
     ConnectionReset,
+    Unreachable,
     TlsUnknownIssuer,
     TlsNameMismatch,
     TlsExpired,

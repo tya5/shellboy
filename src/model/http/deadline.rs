@@ -245,6 +245,7 @@ pub(super) fn transport_error(error: reqwest::Error, stage: &str) -> ModelError 
         Dns => "DNS lookup failed",
         ConnectionRefused => "connection refused",
         ConnectionReset => "connection reset",
+        Unreachable => "network or host unreachable",
         TlsUnknownIssuer => "TLS certificate issuer is not trusted",
         TlsNameMismatch => "TLS certificate does not match the server name",
         TlsExpired => "TLS certificate has expired",
@@ -296,6 +297,7 @@ fn transport_cause(error: &(dyn std::error::Error + 'static)) -> crate::model::T
             match io.kind() {
                 ErrorKind::ConnectionRefused => return ConnectionRefused,
                 ErrorKind::ConnectionReset => return ConnectionReset,
+                ErrorKind::NetworkUnreachable | ErrorKind::HostUnreachable => return Unreachable,
                 _ => {}
             }
             if let Some(inner) = io.get_ref() {
@@ -404,6 +406,16 @@ mod tests {
             assert_eq!(error["transport_cause"]["kind"], "proxy_connect");
             assert_eq!(error["transport_cause"]["status"], reported);
             assert!(!error.to_string().contains("private-"));
+        }
+    }
+
+    #[test]
+    fn transport_cause_reports_unreachable_for_network_and_host_errors() {
+        use std::io::{Error, ErrorKind};
+        for kind in [ErrorKind::NetworkUnreachable, ErrorKind::HostUnreachable] {
+            let io = Error::other(Error::from(kind));
+            let cause = serde_json::to_value(transport_cause(&io)).unwrap();
+            assert_eq!(cause["kind"], "unreachable");
         }
     }
 

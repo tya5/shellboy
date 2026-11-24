@@ -121,15 +121,16 @@ shellboy credentials clear --connection proxy
   and `file.credential_source` (the file's connections): `env`, `stored` or `none`. It states presence, not that the
   key works. `credentials_file` says whether the file exists and parses. A hand edit of `credentials.toml` is used by
   requests and the TUI hints only after an owner restart; keys stored with `credentials set` apply at the next request.
-- **`connection test`** sends one GET for the model catalog (the request `config check` sends), for a saved connection
+- **`connection test`** sends one GET by default for the model catalog (the request `config check` sends), for a saved connection
   or a candidate that is not saved yet (`--base-url`, with `--api-key-stdin` or `--api-key-env`; the key is used for
-  that one request and kept nowhere). It reports facts: `http_status`, the model IDs, whether the `api_key_env`
+  the test and kept nowhere). It reports facts: `http_status`, the model IDs, whether the `api_key_env`
   variable is set in the **owner's** environment, and a `failure` class: `auth` (401/403), `url` (404 or an API root
   that fails validation: use `.../v1`, not `.../v1/responses`), `unreachable`, `timeout`, `credential_missing`
   (nothing was sent), and so on. `sent: true` means a request was attempted, not delivered: a refused connection is `sent: true` with `http_status: null`, and only a non-null `http_status` shows that a response came back (a 200 that is not a catalog is `failure: "response"` with its 200). A returned catalog does not prove the key is valid for any model, and `auth` does
   not say whether the key, its scope or a gateway rule is at fault. The reply never includes provider error text.
   Detecting a variable is the same call with the variable's name: `connection test --base-url URL --api-key-env VAR`
-  returns `credential.env_set`.
+  returns `credential.env_set`. To test the conversation path as well, explicitly pass
+  `--post-model MODEL` to send one paid synthetic POST; its result is separate from the catalog.
 - **macOS limit.** An owner started from the Dock or Finder does not inherit your shell's environment, so the
   variable check only helps when the owner was started from a terminal; paste the key instead.
 

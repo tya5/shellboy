@@ -137,8 +137,10 @@ conversation dialect, headers and upload format, without retries. It uses no
 real Thread history or tools, caps output at 32 tokens instead of the configured
 output limit, and refuses configured extra-body JSON above 4 KiB. The catalog's
 `ok` still refers only to GET. A proxy CONNECT failure reports status 407 if
-observed; other CONNECT statuses are unavailable from this transport.
-
+observed; other CONNECT statuses are unavailable from this transport. The `conversation` result
+reports `sent`, `ok`, `http_status`, and `failure`, plus `http_observation`
+and, when available, `transport_cause` and `hint`. A configured extra body
+above the probe limit returns `failure: "probe_body_too_large"` without a POST.
 
 All three need a running owner of the selected `--data-dir`, act on the file it loaded and refuse `--config`.
 `config get` adds `credential_source` (`env`, `stored` or `none` per connection) and `credentials_file`. The key is plain
