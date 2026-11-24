@@ -197,37 +197,148 @@ mod tests {
     use crate::protocol::Command;
 
     #[tokio::test]
+    async fn native_draft_image_disposes_abandoned_upload_at_idle_deadline() {
+        let (_root, owner, control, server) = crate::frontend::control_tests::fixture().await;
+        tokio::time::pause();
+        let begin = |instance_id| DraftImageArgs {
+            instance_id,
+            draft_id: "draft".into(),
+            action: DraftImageAction::Begin { encoded_bytes: 4 },
+        };
+        let stop = CancellationToken::new();
+        assert_eq!(
+            control
+                .attachments
+                .draft_image(begin("old".into()), stop.clone())
+                .await
+                .unwrap_err()
+                .code,
+            ErrorCode::ProtocolMismatch,
+        );
+        control
+            .attachments
+            .draft_image(begin(control.store.instance_id.clone()), stop)
+            .await
+            .unwrap();
+        tokio::task::yield_now().await;
+        tokio::time::advance(IDLE).await;
+        tokio::task::yield_now().await;
+        assert!(
+            control
+                .attachments
+                .draft_images
+                .lock()
+                .await
+                .transfer
+                .is_none()
+        );
+        tokio::time::resume();
+        server.shutdown().await.unwrap();
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
     async fn native_draft_image_commit_replays_one_pinned_image() {
         let (root, owner, control, server) = crate::frontend::control_tests::fixture().await;
         let data = root.path().join("data");
         let instance = control.store.instance_id.clone();
         let call = |draft: &str, action, operation| {
             let command = Command::DraftImage(DraftImageArgs {
-                instance_id: instance.clone(), draft_id: draft.into(), action,
+                instance_id: instance.clone(),
+                draft_id: draft.into(),
+                action,
             });
             crate::ipc::call(&data, command, operation, None)
         };
         let png = super::super::clipboard::ClipboardPixels {
-            width: 1, height: 1, rgba: vec![1, 2, 3, 255],
-        }.encode_png().unwrap();
-        let begun = call("draft", DraftImageAction::Begin { encoded_bytes: png.len() as u64 }, None).await.unwrap();
-        let DraftImageResult::Begun { upload_id } = serde_json::from_value(begun.result.unwrap()).unwrap() else { panic!("expected upload ID") };
-        let append = |offset| DraftImageAction::Append { upload_id: upload_id.clone(), offset, base64: STANDARD.encode(&png) };
-        assert_eq!(call("other", append(0), None).await.unwrap().error.unwrap().code, ErrorCode::TargetUnavailable);
-        assert_eq!(call("draft", append(1), None).await.unwrap().error.unwrap().code, ErrorCode::OperationConflict);
+            width: 1,
+            height: 1,
+            rgba: vec![1, 2, 3, 255],
+        }
+        .encode_png()
+        .unwrap();
+        let begun = call(
+            "draft",
+            DraftImageAction::Begin {
+                encoded_bytes: png.len() as u64,
+            },
+            None,
+        )
+        .await
+        .unwrap();
+        let DraftImageResult::Begun { upload_id } =
+            serde_json::from_value(begun.result.unwrap()).unwrap()
+        else {
+            panic!("expected upload ID")
+        };
+        let append = |offset| DraftImageAction::Append {
+            upload_id: upload_id.clone(),
+            offset,
+            base64: STANDARD.encode(&png),
+        };
+        assert_eq!(
+            call("other", append(0), None)
+                .await
+                .unwrap()
+                .error
+                .unwrap()
+                .code,
+            ErrorCode::TargetUnavailable
+        );
+        assert_eq!(
+            call("draft", append(1), None)
+                .await
+                .unwrap()
+                .error
+                .unwrap()
+                .code,
+            ErrorCode::OperationConflict
+        );
         assert!(call("draft", append(0), None).await.unwrap().ok);
         let op = format!("{instance}:upload");
-        let commit = || DraftImageAction::Commit { upload_id: upload_id.clone() };
-        let accepted = call("draft", commit(), Some(op.clone())).await.unwrap().result.unwrap();
-        assert_eq!(call("draft", commit(), Some(op)).await.unwrap().result, Some(accepted.clone()));
-        let DraftImageResult::Committed { attachment } = serde_json::from_value(accepted).unwrap() else { panic!("expected committed image") };
+        let commit = || DraftImageAction::Commit {
+            upload_id: upload_id.clone(),
+        };
+        let accepted = call("draft", commit(), Some(op.clone()))
+            .await
+            .unwrap()
+            .result
+            .unwrap();
+        assert_eq!(
+            call("draft", commit(), Some(op)).await.unwrap().result,
+            Some(accepted.clone())
+        );
+        let DraftImageResult::Committed { attachment } = serde_json::from_value(accepted).unwrap()
+        else {
+            panic!("expected committed image")
+        };
         assert_eq!(std::fs::read(&attachment.path).unwrap(), png);
         let pinned = control.attachments.draft_images.lock().await;
         assert_eq!(pinned.pins.len(), 1);
         assert!(pinned.pins.contains_key(&attachment.id));
         drop(pinned);
-        assert!(call("draft", DraftImageAction::Release { attachment_id: attachment.id }, None).await.unwrap().ok);
-        assert!(control.attachments.draft_images.lock().await.pins.is_empty());
+        assert!(
+            call(
+                "draft",
+                DraftImageAction::Release {
+                    attachment_id: attachment.id
+                },
+                None
+            )
+            .await
+            .unwrap()
+            .ok
+        );
+        assert!(
+            control
+                .attachments
+                .draft_images
+                .lock()
+                .await
+                .pins
+                .is_empty()
+        );
         server.shutdown().await.unwrap();
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();

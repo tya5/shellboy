@@ -511,6 +511,22 @@
         {
           "properties": {
             "args": {
+              "$ref": "#/definitions/DraftImageArgs"
+            },
+            "command": {
+              "const": "draft.image",
+              "type": "string"
+            }
+          },
+          "required": [
+            "command",
+            "args"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "args": {
               "$ref": "#/definitions/OwnerShutdownArgs"
             },
             "command": {
@@ -2474,6 +2490,125 @@
         "cancelled"
       ],
       "type": "string"
+    },
+    "DraftImageAction": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "encoded_bytes": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": {
+              "const": "begin",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "encoded_bytes"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "base64": {
+              "type": "string"
+            },
+            "offset": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": {
+              "const": "append",
+              "type": "string"
+            },
+            "upload_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "upload_id",
+            "offset",
+            "base64"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "commit",
+              "type": "string"
+            },
+            "upload_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "upload_id"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "attachment_id": {
+              "type": "string"
+            },
+            "type": {
+              "const": "release",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "attachment_id"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "DraftImageArgs": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "$ref": "#/definitions/DraftImageAction"
+        },
+        "draft_id": {
+          "type": "string"
+        },
+        "instance_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "instance_id",
+        "draft_id",
+        "action"
+      ],
+      "type": "object"
+    },
+    "DraftImageAttachment": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "path"
+      ],
+      "type": "object"
     },
     "Endpoint": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -6105,6 +6240,35 @@
     },
     "Request": {
       "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "args": {
+              "$ref": "#/definitions/DraftImageArgs"
+            },
+            "command": {
+              "const": "draft.image",
+              "type": "string"
+            },
+            "operation_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "origin": true,
+            "protocol_version": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "args",
+            "command",
+            "operation_id",
+            "protocol_version"
+          ],
+          "type": "object"
+        },
         {
           "additionalProperties": false,
           "properties": {
@@ -12877,6 +13041,74 @@
       ],
       "title": "CredentialsSetResult",
       "type": "object"
+    },
+    "draft.image": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "oneOf": [
+        {
+          "properties": {
+            "type": {
+              "const": "begun",
+              "type": "string"
+            },
+            "upload_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "upload_id"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "received_bytes": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": {
+              "const": "appended",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "received_bytes"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "attachment": {
+              "$ref": "#/definitions/DraftImageAttachment"
+            },
+            "type": {
+              "const": "committed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "attachment"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "released",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        }
+      ],
+      "title": "DraftImageResult"
     },
     "events.wait": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
