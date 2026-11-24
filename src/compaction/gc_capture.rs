@@ -837,3 +837,91 @@ pub(super) fn selected_source_facts(
     })
     .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn seeded_active_owner() -> (tempfile::TempDir, crate::storage::DbWorker) {
+        let root = tempfile::tempdir().unwrap();
+        let db = crate::storage::DbWorker::open(root.path().join("active-owner.db"))
+            .await
+            .unwrap();
+        let cwd = root.path().to_string_lossy().into_owned();
+        let agents = root.path().join("AGENTS.md").to_string_lossy().into_owned();
+        db.call(move |db| {
+            db.execute(
+                "INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t',?1,?2,'fixture','fixture','now')",
+                rusqlite::params![cwd, agents],
+            )?;
+            Ok(())
+        }).await.unwrap();
+        super::super::test_fixture::active_turn_fixture_seed(&db, false, false, false, "r".into())
+            .await;
+        (root, db)
+    }
+
+    fn gc_stage() -> super::super::attempt::GcStage {
+        super::super::attempt::GcStage {
+            attempt_id: "attempt".into(),
+            token: "gc-token".into(),
+            thread_id: "t".into(),
+            profile_id: "fixture".into(),
+            model_id: "fixture".into(),
+            effort: None,
+            reasoning_epoch: 0,
+            stage: "active_summary",
+        }
+    }
+
+    #[tokio::test]
+    async fn active_owner_selects_exact_complete_tool_groups_before_summary_dispatch() {
+        let (_root, db) = seeded_active_owner().await;
+        let stage = gc_stage();
+        let plan = db
+            .call(move |db| {
+                let tx = db.transaction()?;
+                plan_gc_active_turn_tx(&tx, "t", &stage, "current")
+            })
+            .await
+            .unwrap()
+            .expect("complete active source range is eligible");
+        assert!(plan.active_turn);
+        assert_eq!(
+            plan.range,
+            3..7,
+            "current request group and latest tool group bound R"
+        );
+        assert_eq!(
+            plan.sources
+                .iter()
+                .map(|source| source.group_id.as_deref())
+                .collect::<Vec<_>>(),
+            [Some("g1"), Some("g1"), Some("g2"), Some("g2")],
+            "the pre-dispatch R contains complete g1/g2 and protects latest g3"
+        );
+    }
+
+    #[tokio::test]
+    async fn completed_owner_has_typed_no_target_for_active_gc() {
+        let (_root, db) = seeded_active_owner().await;
+        let cancellation = tokio_util::sync::CancellationToken::new();
+        let stage = gc_stage();
+        let outcome = db
+            .call(move |db| {
+                db.execute("UPDATE turn SET state='completed' WHERE id='current'", [])?;
+                capture_ordinary_gc_prefix_with_receipt_tx(
+                    db,
+                    "t",
+                    &stage,
+                    "proactive_threshold",
+                    &json!({"scope":"active_turn","turn_id":"current"}),
+                    &Value::Null,
+                    &cancellation,
+                )
+            })
+            .await
+            .unwrap();
+        assert!(matches!(outcome, GcCaptureOutcome::NoTarget));
+    }
+}

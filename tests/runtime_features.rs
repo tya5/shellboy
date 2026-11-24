@@ -5746,7 +5746,7 @@ fn bx_omitted_outputs(body: &Value) -> usize {
         .count()
 }
 
-fn fresh_growth_attempts(reports: &[Value]) -> Vec<&Value> {
+fn same_a_boundary_terminal_attempts(reports: &[Value]) -> Vec<&Value> {
     let mut fresh = Vec::new();
     for report in reports {
         let Some(attempt) = report["automatic_attempt"].as_object() else {
@@ -5809,6 +5809,100 @@ fn fresh_growth_attempts(reports: &[Value]) -> Vec<&Value> {
         }
     }
     fresh
+}
+
+fn assert_growth_terminal_facts(attempts: &[Value]) {
+    let mut empty_output_failures = 0;
+    for attempt in attempts {
+        assert_eq!(
+            attempt["provisional"], false,
+            "producer drain leaves terminal facts: {attempt:#?}"
+        );
+        match attempt["outcome"].as_str() {
+            Some("failed")
+                if attempt["compaction_outcome"]["outcome"]["origin"] == "output_validation" =>
+            {
+                assert_eq!(
+                    attempt["compaction_outcome"]["outcome"]["kind"], "failed",
+                    "{attempt:#?}"
+                );
+                assert_eq!(
+                    attempt["compaction_outcome"]["outcome"]["reason"], "empty",
+                    "{attempt:#?}"
+                );
+                assert_eq!(attempt["summary"]["summary_rejected"], true, "{attempt:#?}");
+                assert_eq!(attempt["summary"]["model_requests"], 1, "{attempt:#?}");
+                empty_output_failures += 1;
+            }
+            Some("no_target") => {
+                assert_eq!(
+                    attempt["summary"]["no_target"], true,
+                    "typed planner negative: {attempt:#?}"
+                );
+                assert_eq!(
+                    attempt["summary"]["source_nodes"], 0,
+                    "no captured R: {attempt:#?}"
+                );
+                assert_eq!(
+                    attempt["summary"]["original_node_ids"],
+                    json!([]),
+                    "no captured R: {attempt:#?}"
+                );
+                assert_eq!(
+                    attempt["summary"]["summary_node_id"],
+                    Value::Null,
+                    "no Summary adopted: {attempt:#?}"
+                );
+                assert!(
+                    attempt["compaction_outcome"].is_null(),
+                    "NoTarget is not validation failure: {attempt:#?}"
+                );
+                assert!(
+                    attempt["summary"]["model_requests"].is_null(),
+                    "no provider request for planner NoTarget: {attempt:#?}"
+                );
+            }
+            Some("cancelled") => {
+                assert_eq!(
+                    attempt["compaction_outcome"]["outcome"]["reason"], "cancelled",
+                    "{attempt:#?}"
+                );
+                assert_eq!(
+                    attempt["compaction_outcome"]["outcome"]["origin"], "cancellation",
+                    "{attempt:#?}"
+                );
+            }
+            Some("failed")
+                if attempt["compaction_outcome"]["outcome"]["reason"] == "retry_suppressed" =>
+            {
+                assert_eq!(
+                    attempt["compaction_outcome"]["outcome"]["origin"], "preparation",
+                    "{attempt:#?}"
+                );
+                assert!(
+                    attempt["summary"]["model_requests"].is_null(),
+                    "suppressed retry made no request: {attempt:#?}"
+                );
+            }
+            Some("adopted") => {
+                assert!(
+                    attempt["summary"]["summary_node_id"].is_string(),
+                    "{attempt:#?}"
+                );
+                assert!(
+                    attempt["summary"]["model_requests"]
+                        .as_u64()
+                        .is_some_and(|count| count > 0),
+                    "{attempt:#?}"
+                );
+            }
+            other => panic!("unexpected automatic terminal partition {other:?}: {attempt:#?}"),
+        }
+    }
+    assert!(
+        empty_output_failures > 0,
+        "retain nonvacuous deterministic empty-output failure memory: {attempts:#?}"
+    );
 }
 
 /// #303 §6.3: a deterministic closed failure blocks only its own original
@@ -7549,7 +7643,7 @@ async fn sender_label_reaches_the_request_only_when_present_and_not_human() {
 /// spilled nor summarized by those attempts (§3).
 #[tokio::test]
 async fn proactive_deterministic_closed_failure_stays_suppressed_while_the_turn_grows() {
-    let (summaries, most, attempts, slots, spills, _, _, report_ledger) = bx_growing_turn(
+    let (summaries, attempts, slots, spills, _, _, report_ledger) = bx_growing_turn(
         true,
         true,
         (200, answer(" ")),
@@ -7569,7 +7663,7 @@ async fn proactive_deterministic_closed_failure_stays_suppressed_while_the_turn_
         (202..=218).collect::<Vec<_>>(),
         "all 17 independently named high reports remain present: {report_ledger:#?}"
     );
-    let fresh = fresh_growth_attempts(&report_ledger);
+    let same_boundary = same_a_boundary_terminal_attempts(&report_ledger);
     assert_eq!(
         attempts.len(),
         17,
@@ -7579,32 +7673,29 @@ async fn proactive_deterministic_closed_failure_stays_suppressed_while_the_turn_
         summaries, 1,
         "the original closed range posts once, then its failure memory suppresses retries"
     );
-    assert_eq!(most, 1);
     assert!(
-        attempts
-            .iter()
-            .all(|attempt| attempt["outcome"] == "failed" || attempt["outcome"] == "no_target"),
-        "stale-A no-target and fresh failure-memory records remain distinct: {attempts:#?}"
+        attempts.iter().all(|attempt| matches!(
+            attempt["outcome"].as_str(),
+            Some("failed" | "no_target" | "cancelled")
+        )),
+        "stale-A NoTarget, validation failure, and producer-drain cancellation remain distinct: {attempts:#?}"
     );
-    assert!(!fresh.is_empty());
-    assert!(
-        fresh
-            .iter()
-            .all(|report| report["automatic_attempt"]["outcome"] == "failed"),
-        "every source-current closed attempt retains the failure negative: {fresh:#?}"
-    );
+    assert!(!same_boundary.is_empty());
+    assert_growth_terminal_facts(&attempts);
     assert!(slots.0.is_some() && slots.1.is_none(), "{slots:?}");
     assert_eq!(
         spills, 0,
         "the active region is not spilled for a closed summary; attempts={attempts:#?}; slots={slots:?}"
     );
 }
-/// #303 §6.3: an active range's identity is its original first/last node, so
-/// each new tool group gives a new range; with no closed target, every
-/// eligible report retries the active summary exactly once.
+/// Keep all 17 independently supplied same-Turn report owners and their
+/// producer-closed terminal partition. Same-A-boundary freshness alone does
+/// not prove that the DB active planner selected an R or admitted a Summary;
+/// exact route multiplicity remains separately covered only where a source
+/// boundary is independently controlled.
 #[tokio::test]
-async fn proactive_growing_active_range_permits_one_summary_per_new_report() {
-    let (summaries, most, attempts, slots, _, _, _, report_ledger) = bx_growing_turn(
+async fn proactive_growing_active_range_preserves_reports_and_typed_terminals() {
+    let (_summaries, attempts, slots, _, _, _, report_ledger) = bx_growing_turn(
         false,
         false,
         (200, answer(" ")),
@@ -7624,31 +7715,554 @@ async fn proactive_growing_active_range_permits_one_summary_per_new_report() {
         (202..=218).collect::<Vec<_>>(),
         "all 17 independently named high reports remain present: {report_ledger:#?}"
     );
-    let fresh = fresh_growth_attempts(&report_ledger);
-    assert_eq!(
-        summaries as usize,
-        fresh.len(),
-        "each source-current admitted active range requests Summary; stale/coalesced reports do not: {report_ledger:#?}"
-    );
-    assert_eq!(
-        most, 1,
-        "at most one Summary request per admitted active range"
-    );
+    let same_boundary = same_a_boundary_terminal_attempts(&report_ledger);
+    assert!(!same_boundary.is_empty());
     assert!(
-        attempts
-            .iter()
-            .all(|attempt| attempt["outcome"] == "failed" || attempt["outcome"] == "no_target"),
-        "the report ledger preserves failed versus stale no-target negatives: {attempts:#?}"
+        attempts.iter().all(|attempt| matches!(
+            attempt["outcome"].as_str(),
+            Some("failed" | "no_target" | "cancelled")
+        )),
+        "the report ledger preserves failed, stale/current NoTarget, and producer-drain cancellation negatives: {attempts:#?}"
     );
-    assert!(!fresh.is_empty());
-    assert!(
-        fresh
-            .iter()
-            .all(|report| report["automatic_attempt"]["outcome"] == "failed"),
-        "fresh active ranges retain output-validation failure memory: {fresh:#?}"
-    );
+    assert_growth_terminal_facts(&attempts);
     assert!(slots.0.is_none() && slots.1.is_some(), "{slots:?}");
 }
+async fn assert_active_growth_precursor(
+    control: &Arc<Control>,
+    thread: &str,
+    turn: &str,
+    report: &ReportOwner,
+    first_a_report: &ReportOwner,
+    prior_calls: &[String],
+    threshold_report: u64,
+) {
+    assert!(report.input_tokens >= threshold_report);
+    let manifest: Value =
+        serde_json::from_str(&report.request_token).expect("saved request manifest");
+    let thread = thread.to_owned();
+    let expected_turn = turn.to_owned();
+    let turn = expected_turn.clone();
+    let calls = prior_calls
+        .iter()
+        .map(|call| (*call).to_owned())
+        .collect::<Vec<_>>();
+    let key = format!("compact.a_state.{thread}");
+    let (active, completed, boundary, groups, a_state): (
+        Vec<(String, String)>, i64, bool, Vec<(String, String, bool, bool)>, Value,
+    ) = control.store.database.call(move |db| {
+        let active = db.prepare(
+            "SELECT id,state FROM turn WHERE thread_id=?1 AND state IN ('preparing','running','waiting','recovery_wait') ORDER BY rowid",
+        )?.query_map([&thread], |row| Ok((row.get(0)?, row.get(1)?)))?
+         .collect::<rusqlite::Result<Vec<_>>>()?;
+        let completed: i64 = db.query_row(
+            "SELECT count(*) FROM turn WHERE thread_id=?1 AND state='completed'",
+            [&thread], |row| row.get(0))?;
+        let boundary: bool = db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND n.turn_id=?2 AND (json_extract(n.payload_json,'$.role')='user' OR json_extract(n.payload_json,'$.item.role')='user'))",
+            rusqlite::params![thread, turn], |row| row.get(0))?;
+        let mut groups = Vec::new();
+        for call in calls {
+            let group: (String, bool, bool, bool) = db.query_row(
+                "SELECT g.state,NOT EXISTS(SELECT 1 FROM tool_call c LEFT JOIN tool_result r ON r.group_id=c.group_id AND r.call_id=c.call_id WHERE c.group_id=g.id AND (c.state!='completed' OR r.call_id IS NULL)),EXISTS(SELECT 1 FROM thread_path p JOIN node n ON n.id=p.node_id JOIN receipt q ON q.message_node_id=n.id WHERE p.thread_id=?1 AND json_extract(n.payload_json,'$.group_id')=g.id AND q.target_thread_id=?1 AND q.state IN ('accepted','held')),EXISTS(SELECT 1 FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND json_extract(n.payload_json,'$.group_id')=g.id) FROM tool_call c JOIN tool_group g ON g.id=c.group_id WHERE c.call_id=?2",
+                rusqlite::params![thread, call], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?))
+            )?;
+            groups.push((call, group.0, group.1, !group.2 && group.3));
+        }
+        let a_state: String = db.query_row("SELECT value FROM app_meta WHERE key=?1", [key], |row| row.get(0))?;
+        Ok((active, completed, boundary, groups, serde_json::from_str(&a_state).expect("saved A state")))
+    }).await.unwrap();
+    assert_eq!(
+        active.len(),
+        1,
+        "one live Driver Turn owns the planned report: {active:?}"
+    );
+    assert_eq!(active[0].0, expected_turn);
+    assert!(matches!(active[0].1.as_str(), "running" | "waiting"));
+    assert_eq!(
+        completed, 0,
+        "no completed owner can stand in for the active source route"
+    );
+    assert!(
+        boundary,
+        "the current user node is the active planner request boundary"
+    );
+    assert_eq!(groups.len(), prior_calls.len());
+    for (call, state, complete, protected_and_present) in groups {
+        assert_eq!(
+            state, "completed",
+            "pre-existing source group {call} is complete"
+        );
+        assert!(
+            complete,
+            "pre-existing source group {call} has every result"
+        );
+        assert!(
+            protected_and_present,
+            "pre-existing source group {call} is in path and unprotected"
+        );
+    }
+    assert_eq!(manifest["scope"], a_state["scope_generation"]);
+    assert_eq!(manifest["boundary"], a_state["boundary_generation"]);
+    assert_eq!(a_state["first"]["attempt"], first_a_report.attempt_id);
+    assert_eq!(
+        a_state["first"]["input_tokens"],
+        first_a_report.input_tokens
+    );
+}
+
+async fn ordinary_report_manifest(control: &Control, turn: &str) -> Value {
+    let turn = turn.to_owned();
+    let token: String = control.store.database.call(move |db| {
+        let rows = db.prepare(
+            "SELECT json_extract(input_manifest_json,'$.compaction_report_token') FROM model_attempt WHERE turn_id=?1 AND state='inflight' ORDER BY rowid",
+        )?.query_map([turn], |row| row.get::<_, Option<String>>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        assert_eq!(rows.len(), 1, "one ordinary source report owner is in flight: {rows:?}");
+        Ok(rows.into_iter().next().flatten().expect("saved compaction report token"))
+    }).await.unwrap();
+    serde_json::from_str(&token).expect("saved report token JSON")
+}
+
+async fn assert_controlled_active_gc_source(
+    control: &Arc<Control>,
+    thread: &str,
+    turn: &str,
+    complete_calls: &[String],
+    selected_calls: &[String],
+    protected_latest_call: &str,
+    summary_body: &Value,
+) {
+    let thread = thread.to_owned();
+    let expected_turn = turn.to_owned();
+    let turn = expected_turn.clone();
+    let complete_calls = complete_calls
+        .iter()
+        .map(|call| (*call).to_owned())
+        .collect::<Vec<_>>();
+    let facts = control.store.database.call(move |db| {
+        let active: Vec<(String, String)> = db.prepare(
+            "SELECT id,state FROM turn WHERE thread_id=?1 AND state IN ('preparing','running','waiting','recovery_wait') ORDER BY rowid",
+        )?.query_map([&thread], |row| Ok((row.get(0)?, row.get(1)?)))?
+         .collect::<rusqlite::Result<Vec<_>>>()?;
+        let completed: i64 = db.query_row(
+            "SELECT count(*) FROM turn WHERE thread_id=?1 AND state='completed'",
+            [&thread], |row| row.get(0))?;
+        let boundary: bool = db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND n.turn_id=?2 AND (json_extract(n.payload_json,'$.role')='user' OR json_extract(n.payload_json,'$.item.role')='user'))",
+            rusqlite::params![thread, turn], |row| row.get(0))?;
+        let mut groups = Vec::new();
+        for call in complete_calls {
+            let (group, state, complete, protected): (String, String, bool, bool) = db.query_row(
+                "SELECT g.id,g.state,NOT EXISTS(SELECT 1 FROM tool_call c LEFT JOIN tool_result r ON r.group_id=c.group_id AND r.call_id=c.call_id WHERE c.group_id=g.id AND (c.state!='completed' OR r.call_id IS NULL)),EXISTS(SELECT 1 FROM thread_path p JOIN node n ON n.id=p.node_id JOIN receipt q ON q.message_node_id=n.id WHERE p.thread_id=?1 AND json_extract(n.payload_json,'$.group_id')=g.id AND q.target_thread_id=?1 AND q.state IN ('accepted','held')) FROM tool_call c JOIN tool_group g ON g.id=c.group_id WHERE c.call_id=?2",
+                rusqlite::params![thread, call], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?))
+            )?;
+            groups.push((call, group, state, complete, protected));
+        }
+        Ok((active, completed, boundary, groups))
+    }).await.unwrap();
+    assert_eq!(
+        facts.0.len(),
+        1,
+        "the prescribed original Turn remains the only live owner: {facts:?}"
+    );
+    assert_eq!(facts.0[0].0, expected_turn);
+    assert!(matches!(facts.0[0].1.as_str(), "running" | "waiting"));
+    assert_eq!(
+        facts.1, 0,
+        "no completed prior Turn can supply a closed-summary target"
+    );
+    assert!(
+        facts.2,
+        "the current user node is the active planner request boundary"
+    );
+    assert_eq!(
+        facts.3.len(),
+        selected_calls.len() + 1,
+        "fixture source contains exactly the two selected whole groups and latest protected group"
+    );
+    for (call, group, state, complete, protected) in &facts.3 {
+        assert!(
+            !group.is_empty(),
+            "call {call} has a complete tool-group identity"
+        );
+        assert_eq!(
+            state, "completed",
+            "call {call} belongs to a completed group"
+        );
+        assert!(*complete, "call {call} and its result are both complete");
+        assert!(
+            !protected,
+            "call {call} is not protected by an accepted/held receipt"
+        );
+    }
+    for call in selected_calls {
+        assert!(
+            summary_body["input"].to_string().contains(call),
+            "independently eligible active range includes whole source group {call}: {summary_body:#?}"
+        );
+    }
+    assert!(
+        !summary_body["input"]
+            .to_string()
+            .contains(protected_latest_call),
+        "the latest complete tool group is the protected active boundary: {summary_body:#?}"
+    );
+}
+
+async fn wait_exact_growth_finish(control: &Control, boundary: &ReportBoundary) -> Value {
+    let mut changes = control.subscribe();
+    loop {
+        let attempt = boundary.report.attempt_id.clone();
+        let token = boundary.gc_token.clone();
+        let terminal = control.store.database.call(move |db| {
+            let saved: Option<String> = db.query_row(
+                "SELECT json_extract(error_json,'$.automatic_trim_attempt') FROM model_attempt WHERE id=?1 AND json_extract(error_json,'$.automatic_trim_attempt.token')=?2",
+                rusqlite::params![attempt, token], |row| row.get(0),
+            ).optional()?;
+            Ok(saved.map(|text| serde_json::from_str::<Value>(&text).expect("automatic terminal row JSON")))
+        }).await.unwrap();
+        if let Some(record) = terminal
+            && record["provisional"] == false
+        {
+            return record;
+        }
+        match changes.recv().await {
+            Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+            Err(error) => panic!("exact same-Turn growth FINISH did not arrive: {error}"),
+        }
+    }
+}
+
+/// Two exact active R epochs in one real Driver Run/Turn. Each is independently
+/// source-eligible before its next ordinary response; empty Summary validation
+/// failure memory for R1 must not suppress the changed R2 endpoint pair.
+#[tokio::test]
+async fn proactive_active_empty_failure_retries_for_a_grown_same_turn_range() {
+    let phase = Arc::new(std::sync::Mutex::new("begin"));
+    let timeout_phase = phase.clone();
+    let result = crate::test_watchdog::watchdog("two active same-Turn growth ranges", async move {
+        let mark = |label| *phase.lock().unwrap() = label;
+        mark("owner-start-before");
+        let root = tempfile::tempdir().unwrap();
+        let (url, mut receive, server) = proxy().await;
+        let owner = proactive_owner(
+            root.path(), &url,
+            "spill=false\n[compaction]\nauto_at_tokens=200\nsummary_max_chars=4000\n",
+        ).await;
+        mark("owner-start-after");
+        let control = Control::new(&owner, root.path().into());
+        let thread = thread(&control).await;
+        mark("initial-turn-before");
+        let accepted = send_accepted(&control, &thread, "current active request").await;
+        mark("initial-turn-after");
+        let run = accepted.run_id.clone().expect("one real active Run");
+        let turn = accepted.turn_id.clone().expect("one real active Turn");
+        let tool = |call: &str, tokens: u64| json!({
+            "id":format!("response-{call}"),"status":"completed",
+            "usage":{"input_tokens":tokens,"output_tokens":1},
+            "output":[{"type":"function_call","status":"completed","call_id":call,
+                "name":"unknown-growth-tool","arguments":"{}"}]
+        });
+        let mut reports = Vec::new();
+        let mut source_calls = vec!["range-0".to_owned(), "range-1".to_owned()];
+        for (call, tokens) in [("range-0", 100_u64), ("range-1", 100)] {
+            mark("initial-source-request-before");
+            let ordinary = incoming_ordinary(&control, &mut receive).await;
+            mark("initial-source-request-after");
+            reports.push(prepared_report_from_incoming(&control, &turn, &ordinary, tokens).await.owner);
+            ordinary.reply.send((200, tool(call, tokens))).unwrap();
+        }
+        let old_a_manifest: Value =
+            serde_json::from_str(&reports[0].request_token).expect("first A report manifest");
+        let old_a_scope = old_a_manifest["scope"].as_u64().expect("A scope generation");
+        let old_a_boundary = old_a_manifest["boundary"].as_u64().expect("A boundary generation");
+        let reset_a_boundary = old_a_boundary.checked_add(1).expect("finite A boundary generation");
+
+        mark("r1-202-request-before");
+        let report_202_request = incoming_ordinary(&control, &mut receive).await;
+        mark("r1-202-request-after");
+        let report_202 = prepared_report_from_incoming(&control, &turn, &report_202_request, 202).await.owner;
+        mark("r1-202-precursor-before");
+        assert_active_growth_precursor(
+            &control, &thread, &turn, &report_202, &reports[0], &["range-0".into(),"range-1".into()], 200,
+        ).await;
+        mark("r1-202-precursor-after");
+        reports.push(report_202);
+        mark("r1-202-reply-before");
+        report_202_request.reply.send((200, tool("range-2", 202))).unwrap();
+        mark("r1-202-reply-after");
+        source_calls.push("range-2".into());
+
+        let mut first_summary = None;
+        let mut ordinary_for_growth = None;
+        while first_summary.is_none() || ordinary_for_growth.is_none() {
+            mark(match (first_summary.is_none(), ordinary_for_growth.is_none()) {
+                (true, true) => "r1-awaiting-summary-or-ordinary",
+                (true, false) => "r1-awaiting-summary",
+                (false, true) => "r1-awaiting-ordinary",
+                (false, false) => unreachable!(),
+            });
+            let incoming = receive.recv().await.expect("provider stays available during first active epoch");
+            mark("r1-first-post-or-ordinary-after");
+            match incoming.kind() {
+                ProviderRequestKind::Summary => {
+                    mark("r1-first-summary-post-seen");
+                    assert!(first_summary.replace(incoming).is_none(), "one first-epoch Summary request");
+                }
+                ProviderRequestKind::Ordinary => {
+                    mark("r1-first-ordinary-seen");
+                    assert!(ordinary_for_growth.replace(incoming).is_none(), "one next ordinary owner remains in flight");
+                }
+            }
+        }
+        let first = first_summary.unwrap();
+        let trigger = TriggerOwner { run_id: run.clone(), turn_id: turn.clone() };
+        mark("r1-post-ownership-before");
+        let first_boundary = admitted_summary_boundary(&control, &reports, trigger.clone()).await;
+        mark("r1-post-ownership-after");
+        assert_eq!(first_boundary.report.attempt_id, reports[2].attempt_id,
+            "the first observed POST is owned by the independently captured 202 report");
+        assert_eq!(first_boundary.report.row_turn_id, turn);
+        assert_controlled_active_gc_source(
+            &control, &thread, &turn,
+            &["range-0".into(),"range-1".into(),"range-2".into()],
+            &["range-0".into(),"range-1".into()], "range-2", &first.body,
+        ).await;
+        let first_body = first.body.clone();
+        let first_gc_token = first_boundary.gc_token.clone();
+        mark("r1-summary-reply-before");
+        first.reply.send((200, answer(" "))).unwrap();
+        mark("r1-summary-reply-after");
+
+        let stale_bridge = ordinary_for_growth.unwrap();
+        let stale_report = prepared_report_from_incoming(&control, &turn, &stale_bridge, 10).await.owner;
+        assert_eq!(stale_report.row_turn_id, turn, "bridge remains in the original Turn");
+        reports.push(stale_report);
+        stale_bridge.reply.send((200, tool("range-3", 10))).unwrap();
+        source_calls.push("range-3".into());
+        let mut first_new_a_report = None;
+        let mut first_finish = Box::pin(wait_exact_growth_finish(&control, &first_boundary));
+        mark("r1-finish-wait-before");
+        let first_record = loop {
+            tokio::select! {
+                biased;
+                record = &mut first_finish => {
+                    mark("r1-finish-ready");
+                    break record
+                },
+                incoming = receive.recv() => {
+                    mark("r1-foreground-received");
+                    let incoming = incoming.expect("service foreground while the captured R1 producer reacquires the Thread boundary");
+                    assert_eq!(incoming.kind(), ProviderRequestKind::Ordinary,
+                        "R1 owns exactly one Summary POST; no second high report is admitted before its FINISH");
+                    mark("r1-manifest-query-before");
+                    let manifest = ordinary_report_manifest(&control, &turn).await;
+                    mark("r1-manifest-query-after");
+                    assert_eq!(manifest["scope"].as_u64(), Some(old_a_scope),
+                        "only the triggering A scope remains in this controlled epoch");
+                    let boundary = manifest["boundary"].as_u64().expect("captured A boundary");
+                    assert!(boundary == old_a_boundary || boundary == reset_a_boundary,
+                        "only pre-FINISH or first post-FINISH manifests are valid while servicing R1: {manifest:#?}");
+                    let first_post_finish = boundary == reset_a_boundary && first_new_a_report.is_none();
+                    let usage = if first_post_finish { 100 } else { 10 };
+                    mark("r1-owner-capture-before");
+                    let bridge = prepared_report_from_incoming(&control, &turn, &incoming, usage).await.owner;
+                    mark("r1-owner-capture-after");
+                    assert_eq!(
+                        serde_json::from_str::<Value>(&bridge.request_token).expect("captured source manifest"),
+                        manifest,
+                        "the report owner retains the exact pre-response A token"
+                    );
+                    assert_eq!(bridge.row_turn_id, turn);
+                    let bridge_call = format!("range-stale-{}", reports.len());
+                    reports.push(bridge.clone());
+                    mark("r1-ordinary-reply-before");
+                    incoming.reply.send((200, tool(&bridge_call, usage))).unwrap();
+                    mark("r1-ordinary-reply-after");
+                    source_calls.push(bridge_call);
+                    if first_post_finish {
+                        first_new_a_report = Some(bridge);
+                    }
+                }
+            }
+        };
+        mark("r1-finish-observed");
+        assert_eq!(first_record["outcome"], "failed");
+        assert_eq!(first_record["compaction_outcome"]["outcome"]["origin"], "output_validation");
+        assert_eq!(first_record["compaction_outcome"]["outcome"]["reason"], "empty");
+        assert_eq!(first_record["trigger"]["a_input_tokens"], 100);
+        assert_eq!(first_record["compaction_outcome"]["phase"], "active_summary");
+        assert_eq!(first_record["summary"]["model_requests"], 1);
+        assert_eq!(first_record["summary"]["summary_rejected"], true);
+        assert_eq!(first_record["token"], first_gc_token);
+        let first_slot = bx_failure_slots(&control, &thread).await;
+        assert!(first_slot.1.is_some(), "R1's deterministic empty-output failure memory is retained");
+
+        mark("post-r1-a-read-before");
+        let current_a: Value = {
+            let key = format!("compact.a_state.{thread}");
+            control.store.database.call(move |db| {
+                let text: String = db.query_row("SELECT value FROM app_meta WHERE key=?1", [key], |row| row.get(0))?;
+                Ok(serde_json::from_str(&text).expect("post-FINISH A state"))
+            }).await.unwrap()
+        };
+        mark("post-r1-a-read-after");
+        assert_eq!(current_a["scope_generation"].as_u64(), Some(old_a_scope));
+        assert_eq!(current_a["boundary_generation"].as_u64(), Some(reset_a_boundary));
+
+        // FINISH can commit/reset A before the waiter observes its terminal row.
+        // Reconcile the saved first owner by its original attempt/token instead
+        // of assuming the slot is still null or inventing a later A seed.
+        mark("a-seed-reconcile-before");
+        let seed_report = if let Some(report) = first_new_a_report {
+            assert_eq!(report.input_tokens, 100, "the first post-FINISH manifest was assigned its prescribed A usage");
+            report
+        } else if !current_a["first"].is_null() {
+            let attempt = current_a["first"]["attempt"].as_str().expect("A first report attempt");
+            let report = reports.iter().find(|report| report.attempt_id == attempt)
+                .expect("A first report remains in the original independently captured raw ledger");
+            let manifest: Value = serde_json::from_str(&report.request_token).expect("A first report manifest");
+            assert_eq!(manifest["scope"].as_u64(), Some(old_a_scope));
+            assert_eq!(manifest["boundary"].as_u64(), Some(reset_a_boundary));
+            assert_eq!(current_a["first"]["input_tokens"].as_u64(), Some(report.input_tokens));
+            report.clone()
+        } else {
+            // No new-boundary report was serviced during the R1 wait. The
+            // first request carrying the exact reset token seeds A=100.
+            loop {
+                let ordinary = incoming_ordinary(&control, &mut receive).await;
+                let manifest = ordinary_report_manifest(&control, &turn).await;
+                assert_eq!(manifest["scope"].as_u64(), Some(old_a_scope));
+                let boundary = manifest["boundary"].as_u64().expect("captured A boundary");
+                let first_post_finish = boundary == reset_a_boundary;
+                assert!(boundary == old_a_boundary || first_post_finish,
+                    "only stale or reset-boundary reports are valid: {manifest:#?}");
+                let usage = if first_post_finish { 100 } else { 10 };
+                let candidate = prepared_report_from_incoming(&control, &turn, &ordinary, usage).await.owner;
+                assert_eq!(serde_json::from_str::<Value>(&candidate.request_token).unwrap(), manifest);
+                let call = format!("range-stale-{}", reports.len());
+                reports.push(candidate.clone());
+                ordinary.reply.send((200, tool(&call, usage))).unwrap();
+                source_calls.push(call);
+                if first_post_finish {
+                    break candidate;
+                }
+            }
+        };
+        assert_eq!(seed_report.input_tokens, 100, "R2's A baseline belongs to the independently captured first post-FINISH report");
+        mark("r2-high-request-before");
+        let high_request = incoming_ordinary(&control, &mut receive).await;
+        mark("r2-high-request-after");
+        let second_report = prepared_report_from_incoming(&control, &turn, &high_request, 203).await.owner;
+        mark("r2-pre-dispatch-witness-before");
+        assert_active_growth_precursor(
+            &control, &thread, &turn, &second_report, &seed_report, &source_calls, 200,
+        ).await;
+        reports.push(second_report.clone());
+        mark("r2-pre-dispatch-witness-after");
+        high_request.reply.send((200, tool("range-5", 203))).unwrap();
+        mark("r2-high-response-sent");
+        source_calls.push("range-5".into());
+
+        let mut second_summary = None;
+        let mut final_ordinary = None;
+        while second_summary.is_none() || final_ordinary.is_none() {
+            mark(match (second_summary.is_none(), final_ordinary.is_none()) {
+                (true, true) => "r2-awaiting-summary-or-final-ordinary",
+                (true, false) => "r2-awaiting-summary",
+                (false, true) => "r2-awaiting-final-ordinary",
+                (false, false) => unreachable!(),
+            });
+            let incoming = receive.recv().await.expect("provider stays available through second changed-R epoch");
+            mark("r2-admission-or-final-ordinary-after");
+            match incoming.kind() {
+                ProviderRequestKind::Summary => {
+                    assert!(second_summary.replace(incoming).is_none(), "one second-epoch Summary request");
+                }
+                ProviderRequestKind::Ordinary => {
+                    assert!(final_ordinary.replace(incoming).is_none(), "one final ordinary request remains in flight");
+                }
+            }
+        }
+        let second = second_summary.unwrap();
+        mark("r2-post-ownership-before");
+        let second_boundary = admitted_summary_boundary(&control, &reports, trigger).await;
+        mark("r2-post-ownership-after");
+        assert_eq!(second_boundary.report.attempt_id, second_report.attempt_id,
+            "the second observed POST is owned by the distinct fresh-A 203 report");
+        assert_eq!(second_boundary.report.row_turn_id, turn,
+            "both growing ranges belong to the same original Turn");
+        assert_ne!(second_boundary.gc_token, first_gc_token,
+            "the second active epoch owns its own original GC token");
+        let mut selected_calls = source_calls.clone();
+        selected_calls.pop();
+        assert_controlled_active_gc_source(
+            &control, &thread, &turn, &source_calls, &selected_calls, "range-5", &second.body,
+        ).await;
+        assert_ne!(first_body["input"], second.body["input"],
+            "the second POST captures a genuinely grown active source range");
+        let final_ordinary = final_ordinary.unwrap();
+        mark("final-ordinary-reply-before");
+        final_ordinary.reply.send((200, answer("natural final"))).unwrap();
+        mark("final-ordinary-settled-before");
+        settled(&control, &thread).await;
+        mark("final-ordinary-settled-after");
+        second.reply.send((200, answer(" "))).unwrap();
+        mark("r2-summary-reply-after");
+        mark("r2-finish-before");
+        let second_record = wait_exact_growth_finish(&control, &second_boundary).await;
+        mark("r2-finish-after");
+        assert_eq!(second_record["outcome"], "failed");
+        assert_eq!(second_record["compaction_outcome"]["outcome"]["origin"], "output_validation");
+        assert_eq!(second_record["compaction_outcome"]["outcome"]["reason"], "empty");
+        assert_eq!(second_record["trigger"]["a_input_tokens"], 100);
+        assert_eq!(second_record["compaction_outcome"]["phase"], "active_summary");
+        assert_eq!(second_record["summary"]["model_requests"], 1);
+        assert_eq!(second_record["summary"]["summary_rejected"], true);
+        assert_eq!(second_record["token"], second_boundary.gc_token);
+        assert_eq!(second_record["committed_stages"]["active_summary"], Value::Null,
+            "an empty response is not adopted as a summary");
+        let second_slot = bx_failure_slots(&control, &thread).await;
+        assert!(second_slot.1.is_some());
+        assert_ne!(first_slot.1, second_slot.1,
+            "deterministic active failure memory advances to the changed R identity");
+        mark("shutdown-before");
+        let mut shutdown = Box::pin(control.shutdown());
+        loop {
+            tokio::select! {
+                result = &mut shutdown => { result.unwrap(); break; }
+                incoming = receive.recv() => {
+                    let incoming = incoming.expect("Control joins any producer before returning");
+                    assert_eq!(incoming.kind(), ProviderRequestKind::Summary,
+                        "no pending Ordinary request after natural final response");
+                    panic!("unexpected third Summary POST after the two exact active epochs");
+                }
+            }
+        }
+        mark("shutdown-after");
+        assert!(receive.try_recv().is_err(), "both exact FINISH receipts close their producer requests");
+        let attempts = bx_attempts(&control, &thread).await;
+        assert_eq!(attempts.len(), 2, "exactly two admitted active report duties");
+        assert_eq!(attempts[0]["trigger"]["input_tokens"], 202);
+        assert_eq!(attempts[1]["trigger"]["input_tokens"], 203);
+        assert_eq!(attempts[0]["token"], first_gc_token);
+        assert_eq!(attempts[1]["token"], second_boundary.gc_token);
+        let shell_executions: i64 = control.store.database.call(move |db| {
+            Ok(db.query_row("SELECT count(*) FROM shell_execution", [], |row| row.get(0))?)
+        }).await.unwrap();
+        assert_eq!(shell_executions, 0, "unknown tool groups never spawn shell execution");
+        owner.shutdown().await.unwrap();
+        server.abort();
+    }).await;
+    if result.is_err() {
+        eprintln!(
+            "growth diagnostic phase: {}",
+            *timeout_phase.lock().unwrap()
+        );
+    }
+    result.unwrap();
+}
+
 #[tokio::test]
 async fn proactive_provider_500_retries_for_a_new_active_range() {
     crate::test_watchdog::watchdog("provider500 across source-prescribed A epochs", async {
@@ -7783,7 +8397,6 @@ async fn bx_growing_turn(
     report_inputs: Vec<u32>,
 ) -> (
     u32,
-    u32,
     Vec<Value>,
     (Option<String>, Option<String>),
     usize,
@@ -7810,21 +8423,18 @@ async fn bx_growing_turn(
         let current_turn = accepted.turn_id.expect("one declared growing Turn");
         // An unknown tool name returns a short error, so no spill can shrink it.
         let tool = |index: u32, tokens: u32| json!({"id":format!("grow-{index}"),"status":"completed","usage":{"input_tokens":tokens,"output_tokens":1},"output":[{"type":"function_call","call_id":format!("grow-{index}"),"name":if spilling {"shell"}else{"nope"},"arguments":if spilling {json!({"command":"printf '%02000d' 1"}).to_string()}else{"{}".into()}}]});
-        let (mut summaries, mut most) = (0, 0);
+        let mut summaries = 0;
         let mut summary_inputs=Vec::new();
         let mut prepared_reports = Vec::new();
         for (index, input_tokens) in report_inputs.iter().copied().enumerate() {
-            let mut run = 0;
             let ordinary = loop {
                 let request = incoming(&control, &mut receive).await;
                 if request.kind() == ProviderRequestKind::Ordinary { break request; }
                 summaries += 1;
-                run += 1;
                 summary_inputs.push(request.body["input"].clone());
                 assert!(summaries < 80, "unbounded automatic summary loop");
                 request.reply.send(summary_reply.clone()).unwrap();
             };
-            most = most.max(run);
             prepared_reports.push(prepared_report_from_incoming(
                 &control, &current_turn, &ordinary, input_tokens as u64,
             ).await);
@@ -7884,35 +8494,27 @@ final_request.reply.send((200, answer("finished"))).unwrap();
             }
             Ok(ledger)
         }).await.unwrap();
-        let expected_terminals = report_ledger.iter()
-            .filter(|report| report["automatic_attempt"].is_object()).count();
-        if expected_terminals > 0 {
-            let turns = [current_turn.clone()];
-            let finish_wait = automatic_attempts_finished_for_turns(&control, &turns, expected_terminals);
-            tokio::pin!(finish_wait);
-            let mut late_summaries = 0;
-            let terminals = loop {
-                tokio::select! {
-                    terminals = &mut finish_wait => break terminals,
-                    incoming = receive.recv() => {
-                        let incoming = incoming.expect("late automatic Summary remains on the owning proxy");
-                        assert_eq!(incoming.kind(), ProviderRequestKind::Summary,
-                            "only a background Summary for one of the exact report owners may follow foreground settlement");
-                        summary_inputs.push(incoming.body["input"].clone());
-                        incoming.reply.send(summary_reply.clone()).unwrap();
-                        summaries += 1;
-                        late_summaries += 1;
-                    }
+        // Close admission and join every retained producer before final raw-row
+        // readback; the pre-shutdown foreground snapshot is not a complete duty set.
+        let shutdown = control.shutdown();
+        tokio::pin!(shutdown);
+        loop {
+            tokio::select! {
+                result = &mut shutdown => {
+                    result.unwrap();
+                    break;
                 }
-            };
-            for terminal in &terminals {
-                let report = report_ledger.iter().find(|report| report["model_attempt_id"] == terminal.id)
-                    .expect("FINISH row belongs to one independently captured report ID");
-                assert_eq!(terminal.token, report["automatic_attempt"]["token"],
-                    "original GC token matches the exact report attempt");
+                incoming = receive.recv() => {
+                    let incoming = incoming.expect("proxy remains live until Control has joined every admitted producer");
+                    assert_eq!(incoming.kind(), ProviderRequestKind::Summary,
+                        "no Ordinary owner remains after natural foreground settlement");
+                    summaries += 1;
+                    summary_inputs.push(incoming.body["input"].clone());
+                    let _ = incoming.reply.send(summary_reply.clone());
+                }
             }
-            most = most.max(late_summaries);
         }
+        assert!(receive.try_recv().is_err(), "producer drain is the readback closure boundary");
         let refresh_ids: Vec<String> = report_ledger.iter()
             .map(|report| report["model_attempt_id"].as_str().unwrap().to_owned()).collect();
         let refreshed = control.store.database.call(move |db| {
@@ -7938,6 +8540,7 @@ final_request.reply.send((200, answer("finished"))).unwrap();
             .collect();
         assert_eq!(linked_attempts, attempts,
             "automatic records link to the exact captured model-attempt IDs in request order");
+        assert_growth_terminal_facts(&attempts);
         let scope_thread=target.clone();
         let scopes=control.store.database.call(move|db|Ok(db.prepare("SELECT r.id,t.id,t.generation FROM model_attempt a JOIN turn t ON t.id=a.turn_id JOIN run r ON r.id=t.run_id WHERE t.thread_id=?1 AND json_extract(a.error_json,'$.automatic_trim_attempt') IS NOT NULL ORDER BY a.rowid")?.query_map([scope_thread],|row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,i64>(2)?)))?.collect::<rusqlite::Result<Vec<_>>>()?)).await.unwrap();
         let id = target.clone();
@@ -7951,7 +8554,7 @@ final_request.reply.send((200, answer("finished"))).unwrap();
             }).await.unwrap();
             assert_eq!(shell_executions, 0, "unknown-tool active retry controls perform no shell execution");
         }
-        control.shutdown().await.unwrap(); owner.shutdown().await.unwrap(); server.abort();
-        (summaries,most,attempts,slots,spills,scopes,summary_inputs,report_ledger)
+        owner.shutdown().await.unwrap(); server.abort();
+        (summaries,attempts,slots,spills,scopes,summary_inputs,report_ledger)
     }).await.unwrap()
 }
