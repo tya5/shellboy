@@ -1667,6 +1667,9 @@ async fn f8_operation_and_saved_reference_react_to_actual_message_cancel_without
 async fn f8_history_body_retains_original_detail_while_current_source_facts_change() {
     let (root, owner, control, server) = super::control_tests::fixture_with_language("ja").await;
     owner.db.call(|db|{db.execute_batch("INSERT INTO node(id,kind,created_at,payload_revision,payload_json)VALUES('retained-history','user','now',7,'{\"role\":\"user\",\"content\":\"retained history original\"}');")?;Ok(())}).await.unwrap();
+    // Start the owner before holding the writer so the fixture tests a saved
+    // read under contention, not the first native request's startup writes.
+    control.start().await.unwrap();
     let path = control.store.database.path().to_path_buf();
     let mut ui = UiState::new(&owner.loaded.config, root.path().into());
     let (sender, receiver) = actions::channel(64);
