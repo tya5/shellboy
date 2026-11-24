@@ -41,9 +41,23 @@ def main():
         versions = set()
         bundled_links = 0
         for item in found.values():
-            guide = cli('get', '--id', item['id'], '--limit-bytes', '65536')
-            assert 'next_cursor' not in guide
-            body = guide['text'].encode()
+            get = ('get', '--id', item['id'], '--limit-bytes', '65536')
+            guide = cli(*get)
+            body = bytearray(guide['text'].encode())
+            assert (guide['start'], guide['end']) == (0, len(body)), guide['id']
+            page = guide
+            seen = set()
+            while 'next_cursor' in page:
+                cursor = page['next_cursor']
+                assert isinstance(cursor, str) and cursor and cursor not in seen, guide['id']
+                seen.add(cursor)
+                page = cli(*get, '--cursor', cursor)
+                chunk = page['text'].encode()
+                assert chunk and (page['start'], page['end']) == (len(body), len(body) + len(chunk)), guide['id']
+                for key in ('id', 'title', 'version', 'content_hash', 'total_bytes', 'section', 'sections', 'links'):
+                    assert page[key] == guide[key], (guide['id'], key)
+                body.extend(chunk)
+            assert len(body) == guide['total_bytes'], guide['id']
             assert hashlib.sha256(body).hexdigest() == guide['content_hash']
             assert guide['content_hash'] == item['content_hash']
             versions.add(guide['version'])
