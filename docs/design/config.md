@@ -311,9 +311,10 @@ It is a separate file so the rule "no key in `config.toml`" stays true and `conf
 key. The value is **plain text**: treat the file like a password in a dotfile. Unix creates it `0600` and a save
 corrects a looser mode (`permissions_tightened` says so). The save is a temporary file in the same directory created `0600` and never loosened (the replaced file's mode is not
 copied, unlike `config.toml`), `sync_all`, then the replace used by `config.set` (`rename`; `ReplaceFileW` on Windows with the same interrupted-replace recovery).
-On Windows no mode bits exist and Shellboy changes no ACL: the file gets the directory's default permissions (the user
-profile's), and an existing file keeps its ACL through `ReplaceFileW`. This is stated as a fact from the API; the
-Windows branch has not been run for this change. There is no keychain integration (decided outside this issue).
+On Windows, credential and JSONL temporary files request a protected owner-and-SYSTEM DACL (#388). If private creation
+or verification is unavailable, creation can fall back with a warning. An existing credential file can keep its ACL
+through `ReplaceFileW`; a broad or unverifiable resulting ACL is reported, not silently claimed private. There is no
+keychain integration.
 Unknown keys, a non-table `connections`, a file over 64 KiB or invalid UTF-8 make the file invalid: it is never
 rewritten, and the error names a line number only, because the TOML libraries quote source text in their messages and
 those messages are dropped.
@@ -344,7 +345,9 @@ standard input and refuses a terminal; there is no argument that carries it.
 **Key source in `config.get`.** `loaded.credential_source` and `file.credential_source` map each connection name to
 `"env"` (the variable has a value in the owner's environment), `"stored"` (an entry exists and is usable) or `"none"`.
 It states presence, never validity, value or length. `credentials_file` gives `path`, `present`, `valid` and an
-`error` that names no content. `config.get` reads the file each time; the in-memory `Config::stored_keys` (names only,
+`error` that names no content. On Unix, nullable `credentials_file.warning` uses metadata from the opened handle to
+report unexpected ownership or overly broad modes without chmod, read refusal, or a new setting (#388).
+`config.get` reads the file each time; the in-memory `Config::stored_keys` (names only,
 shared by clones) feeds `config_setup::report` so the setup hints on the UI thread need no file I/O. It starts from the
 file at load and follows `credentials.set` / `credentials.clear`; a hand edit of `credentials.toml` is seen by `config.get` at once but used by requests and the hints only after a restart.
 
@@ -352,7 +355,10 @@ file at load and follows `credentials.set` / `credentials.clear`; a hand edit of
 (`base_url`, `api`, `api_key` or `api_key_env`, `api_key_header`, `ssl_verify`). A saved name is resolved from the
 configuration **file** (what the next start will load, so a connection just added by `config.set` can be tested),
 falling back to the loaded one. It sends the same bounded model-catalog GET as `config check` once, through a fresh
-`HttpModelClient`, and nothing else. The reply holds facts: `sent`, `ok`, `http_status` (null only when no response arrived; a 200 with HTML or no `data` keeps its 200 and is `response`),
+`HttpModelClient`, by default. Explicit `post_model` (`--post-model MODEL`) also runs one synthetic conversation POST,
+without retries. It may be charged and reports a separate `conversation` result. The GET can report an optional
+redacted `transport_cause`; the [wire details](protocol-versions/21.md#connection-test-and-transport-causes) own the
+cause vocabulary. The reply holds facts: `sent`, `ok`, `http_status` (null only when no response arrived; a 200 with HTML or no `data` keeps its 200 and is `response`),
 `failure` (null, or one of `auth`, `url`, `rate_limited`, `server`, `http_status`, `timeout`, `unreachable`,
 `credential_missing`, `invalid_configuration`, `response`), `models` (the whole sorted catalogue, which the client already
 bounds at 2 MiB and 10,000 ids; `model_count` is its length), and `credential` (`source` env/stored/inline/none,

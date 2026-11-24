@@ -6,7 +6,7 @@ Before 1.0.0, release-specific backward-compatibility paths are not part of the 
 
 採用状態: 実装基準。公開wire・型・エラー・永続化境界を本書で具体化する。契約の由来となった初期仕様資料は非同梱であり、現行の採用範囲は [適用仕様](effective-spec.md) と本書を正本とする。
 
-`src/protocol.rs` がTUI/Control/CLIで共有する公開型である。CLIの空白区切り操作名はwireでは `thread.list` のようなドット区切りとする。35操作を `Command` の閉じたenumと各操作専用argsへ対応させる。shell起動はこのenumに含めず、モデル唯一のshellツール `ShellToolArgs` のみで表す。`attach` はCLIで `attachment.add` に正規化する。`--text-stdin` はCLIが読み取り `text` に正規化し、wireへOSのstdinハンドルを送らない。
+`src/protocol.rs` がTUI/Control/CLIで共有する公開型である。CLIの空白区切り操作名はwireでは `thread.list` のようなドット区切りとする。操作を `Command` の閉じたenumと各操作専用argsへ対応させる。shell起動はこのenumに含めず、モデル唯一のshellツール `ShellToolArgs` のみで表す。`attach` はCLIで `attachment.add` に正規化する。`--text-stdin` はCLIが読み取り `text` に正規化し、wireへOSのstdinハンドルを送らない。
 
 要求は `protocol_version/operation_id/command/args/origin`。未知のtop-levelとargsキーを拒否する。`Request::validate` で版、空ID、limit、wait空配列、明示index対象を検査する。宛先省略は `Option<String>` のまま有効originをControlで検証して解決する。文字列origin IDだけで所有権を与えない。`Origin` のDebugはtokenを隠す。明示別data-dir接続時のorigin除去はCLIの責務。
 
@@ -16,7 +16,7 @@ S6a automatic-spill settings (protocol v5, additive): `ThreadSetArgs.spill: Opti
 
 成功/失敗は `Response<T>`。`success/failure` を利用し、受信時 `validate` を行う。片側だけを出力し、hint/details/run_id/turn_id/next_cursor等の未確定値は省略する。`MessageAccepted::validate` はpending時のID不在と割当済み時の両ID存在を検査する。各操作のcore結果をThread/Run/Turn/Shell/History/Attachment/Index/Storageのrecordで表し、provider payloadやwait snapshotのみJSON拡張値を許す。状態enumは原文のRun/Turn/attempt/shell/message/managed/index状態に対応し、Turnのfailedは論理DDLのCHECKに合わせて含める（引継ぎの遷移表は網羅列挙ではない）。API/proxy attempt errorはこの操作errorと区別する。
 
-wait条件は `type` tagの `turn_completed/run_ended/shell_ended/shell_output` のみ。timeout既定30,000ms、0を許容、非負u64。any判定、同snapshot成立集合、呼出元Run/Turn/shell自身のID待ち拒否（循環graphなし）、登録と状態確認の直列化、停止とは独立したRPC取消しはControl実装の責務であり、型fixtureだけで検証完了とは扱わない。
+wait条件は `type` tagの `turn_completed` / `run_ended` / `shell_ended` / `shell_output` / `reply_received` / `thread_settled`。timeout既定30,000ms、0を許容、非負u64。any判定、同snapshot成立集合、呼出元Run/Turn/shell自身のID待ち拒否（依存とカーソルは [wait](wait.md) を参照）、登録と状態確認の直列化、停止とは独立したRPC取消しはControl実装の責務であり、型fixtureだけで検証完了とは扱わない。
 
 通信frameは4 byte unsigned big-endian長＋UTF-8 JSON、版はenvelopeに置く。1 frameの上限は8MiB。最大1MiBのdraft/stdinがJSONで制御文字ごと6 byteへ展開されてもmetadataと共に収まるための境界であり、入力本文上限を引き上げるものではない。prefix前EOFは正常切断、途中prefix/payload EOFはio_failed、0/超過長はinput_limit、JSON不正はinvalid_argument。長さ検査を割当より先に行う。
 
@@ -646,7 +646,7 @@ state is created. Existing ungrouped response shape is unchanged.
 ## Optional Deletion Target Marker (#122)
 
 `thread.delete` accepts the optional `args.preview_marker` additively under the
-current protocol 5 contract; older protocol-2/3 notes about the original change
+contract introduced in protocol 5; older protocol-2/3 notes about the original change
 are historical, not the current wire version. The marker contains
 `thread_count` (1..257) and `ids_hash` (64 lowercase SHA-256 hex characters).
 Old requests omitting it, or using null, retain unguarded current behavior;

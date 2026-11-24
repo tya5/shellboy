@@ -5,6 +5,13 @@ This design covers the issue body and comments through6520544888; the complete
 implementation ledger is [the delivery plan](../development/issue-41-plan.md).
 Only the next complete B+C increment is starting; D/E/F/G remain planned.
 
+## Implementation boundary for confirmation inspection (#395)
+
+The unused frontend confirmation-capture implementation was removed. Do not
+read the historical inspection proposals below as a shipped observation API.
+Actual confirmations and destructive-operation guards continue to use their
+existing owners; see [UI](ui.md) and [deletion impact](deletion-impact.md).
+
 ## Current issue ownership (2026-10-31)
 
 User decision[6539106715](https://github.com/tya5/shellboy/issues/41#issuecomment-6539106715)

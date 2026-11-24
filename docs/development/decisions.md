@@ -1,5 +1,13 @@
 # 開発判断
 
+## Scoped migration validation (#397)
+
+Use declared scopes for both the rebuild transaction and restart-persistent
+validation after upgrading. Unknown scope still requires a full check;
+unrelated legacy violations outside a declared scope do not block the upgrade.
+The audit's timing attribution is not a measured SQL cost, and progress
+reporting is deferred. See [storage](../design/storage.md#migration-scoped-foreign-key-validation-210).
+
 ## One budget for every additional Responses network attempt (#328)
 
 `response_max_retries` bounds every additional network attempt in a budget
@@ -191,6 +199,8 @@ right edge only while execution exceeds one second. Show `DB! <operation> no pro
 when the existing no-progress state is present, and show nothing otherwise.
 Provide Japanese and English text/help, keep the existing footer row count, and
 do not add a setting or persisted state. The indicator is observational only.
+#395 removed the duplicate reader: the existing activity watch supplies the
+no-progress snapshot.
 ## Reply-expected messages: finalization judgements (#194, 2026-11-03)
 
 The user answered Q2, Q11 and Q14 of the

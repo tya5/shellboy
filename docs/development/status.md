@@ -1,5 +1,24 @@
 # Development status
 
+## Current main contract checkpoint
+
+Owner schema 64, standalone RAG schema 5, IPC 22. See the
+[effective specification](../design/effective-spec.md) and numbered migrations.
+The #379 Guide pass landed; the numbered protocol notes remain canonical.
+
+- #386/#388: explicit opt-in conversation probe and typed transport evidence;
+  diagnostic secret protection and advisory credential permissions are landed.
+  This does not establish Windows device acceptance or make exports share-safe.
+- #391: held Revisit receipts do not block ordinary active-Turn input.
+- #395: unused confirmation capture and the duplicate DB no-progress reader
+  are gone; new snapshots omit mtime, and view state uses the existing input
+  column default. No schema change.
+- #397: declared scopes govern startup FK checks including rebuild precommit.
+  The source audit is not a measured SQL speedup or a startup-progress feature.
+
+Older preparation and qualification sections below are historical snapshots,
+not statements of branch or release status today.
+
 ## Core #382 attachment replay prefixes
 
 Attachment source slots no longer carry changing status text. Successfully
@@ -20,12 +39,11 @@ Window sources and execution candidates are bounded independently of response si
 
 Shell waits resolve the owning Thread like `shell get`, including service executions without a Run. The CLI help and guides now distinguish direct self-waits from dependency cycles, live config adoption from restart-only changes, owner RPC selection from startup config, and Thread wait cursors from shell read cursors. They also explain rotation recovery and quoting dotted connection names. No schema or protocol number change.
 
-## Core v0.15.0 release preparation
+## Core v0.15.0 published
 
-The version-only candidate on Core main source `a19b80c` sets the package to
-`0.15.0` without changing features, protocol, or schema. The release is not
-published by this commit: tag only the landed exact commit after the release
-gates pass. The `0.16.0-dev` bump belongs after that tag.
+Core [v0.15.0](https://github.com/tya5/shellboy/releases/tag/v0.15.0) was published
+from `318abee0609eeb3b15a3a21b74b85f816c7d3ea0`. Post-release main moved to
+`0.16.0-dev`.
 
 Core [v0.14.0](https://github.com/tya5/shellboy/releases/tag/v0.14.0) was published on 2026-11-23 from tag commit `b644b3c`; see the [release notes](release-v0.14.0-draft.md).
 - #377: skip unreadable common instruction files with typed Run warnings; hash-checked config edits reconcile stale live values without rewriting unchanged files.

@@ -111,6 +111,7 @@ foreground解除は現在call専用の単一値watchで渡す。Run共通Notify�
 stat一致だけによるTurn間cache省略は採用しない。UI threadでの読取/hashや追加RAM cacheは置かない。
 snapshot.sizeは読み取ったUTF-8本文の実byte数とし、読取前statの長さを本文の長さと偽らない。
 modifiedは読取前に観測した属性であり、読取中の編集がない保証や原子ファイルsnapshotの証明ではない。
+The in-memory field remains; new snapshots no longer persist it (#395).
 stat後の増加でも実読取8MiB上限を適用し、元の本文/hashを変更しない。将来cacheを導入する場合は、
 同size/mtimeの差替え検出を失わず、Turn固定snapshotと追加RAM予算を両立できることを再検証する。
 
