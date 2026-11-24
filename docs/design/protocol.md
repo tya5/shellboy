@@ -679,7 +679,8 @@ change is for the release after 0.6.0, not the 0.6.0 integration batch.
 ## Model recovery next actions (#400)
 
 A saved model failure is an `ApiError`: `model_auth` covers missing local credentials
-or a structured 401/403, `model_request_rejected` covers other structured 4xx,
+or a structured 401/403, `model_request_rejected` covers other structured 4xx except 408, 429, and
+recognized usage or context limits,
 and `model_request_failed` covers other failures. No provider prose is interpreted.
 `message` retains the failure evidence; `hint` is Shellboy's next action. Typed
 transport diagnostics supply the same cause-specific hint to recovery and

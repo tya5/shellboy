@@ -503,6 +503,9 @@ fn fixed_error_codes_and_persisted_state_values_are_closed() {
         "storage_limit",
         "save_failed",
         "io_failed",
+        "model_auth",
+        "model_request_rejected",
+        "model_request_failed",
     ];
     for code in codes {
         let parsed: ErrorCode = serde_json::from_value(json!(code)).unwrap();

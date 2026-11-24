@@ -108,7 +108,7 @@ Brackets mean optional; `|` means alternatives. Add common global flags and `--h
 A Turn can include `reason`, `message` (saved failure evidence) and `hint` (one next action).
 Each diagnostic is bounded; use `turn get --turn ID` to inspect the saved Turn before retrying.
 `model_auth` identifies missing local credentials or HTTP authorization refusal, not an invalid-key verdict.
-`model_request_rejected` identifies another client-error response; `model_request_failed` covers other failures.
+`model_request_rejected` identifies another client-error response that was not a timeout, rate or context limit; `model_request_failed` covers other failures.
 A typed reset, content filter or transport cause can carry more specific guidance.
 
 ### Configuration through the owner (2 commands)
@@ -473,6 +473,11 @@ Changed history path/revision or target can cause `cursor_expired`; encoding mis
 | `storage_limit` | Logical capacity limit (`details.reason=logical_limit`) or low free disk space on the data volume (`disk_free_low`, with `filesystem_free_bytes` and `disk_free_min_bytes`); inspect storage status/collect, consider unnecessary Thread deletion, explicitly retry |
 | `save_failed` | Canonical persistence failed; do not assume success, inspect acceptance/operation/storage |
 | `io_failed` | Communication/file/shell I/O failure; decide recovery from hint/details/target state |
+| `model_auth` | Missing local credentials or provider/gateway authorization refusal. Check the selected connection with `shellboy connection test --connection NAME`. |
+| `model_request_rejected` | Provider rejected the request (not a rate, timeout or context limit). Inspect the selected connection and model with `shellboy config get`. |
+| `model_request_failed` | Other saved model failures. Inspect `shellboy turn get --turn ID` before retrying, or follow the more specific hint when present. |
+
+Saved model request failures use these three codes instead of `io_failed`. Provider text is evidence, not guidance.
 
 Errors/timeouts never justify unconditional repetition under a new ID. Inspect saved acceptance, target termination/recovery wait, and the same operation's result.
 

@@ -94,6 +94,9 @@ pub(super) async fn retry_or_recover(
         .with_recovery_hint()
         .details(json!({"recovery":facts,"automatic_retries":automatic_retries,"retry_limit":retry_limit,
             "automatic_reduction_unavailable":reduction_unavailable,"last_failure_at":now(),"failure_kind":failure.error.kind,"http":failure.facts.http_observation}));
+    if failure.error.is_context_limit() {
+        error.hint = Some("Review the saved context with /compact before retrying.".into());
+    }
     if let Some(cause) = failure.error.transport_cause {
         error.hint = Some(cause.next_action().into());
         if let Some(details) = &mut error.details {
@@ -146,6 +149,10 @@ fn failure_code(error: &model::ModelError, http_status: Option<u16>) -> ErrorCod
         .map(|fact| fact.value)
         .or(error.status)
         .or(http_status);
+    if matches!(status, Some(408 | 429)) || error.usage_limit.is_some() || error.is_context_limit()
+    {
+        return ErrorCode::ModelRequestFailed;
+    }
     match (error.kind.as_str(), status) {
         ("config_missing" | "config_missing_credentials", _) | (_, Some(401 | 403)) => {
             ErrorCode::ModelAuth
@@ -166,6 +173,8 @@ mod tests {
             ("provider", Some(403), ErrorCode::ModelAuth),
             ("provider", Some(404), ErrorCode::ModelRequestRejected),
             ("provider", Some(422), ErrorCode::ModelRequestRejected),
+            ("provider", Some(408), ErrorCode::ModelRequestFailed),
+            ("provider", Some(429), ErrorCode::ModelRequestFailed),
             ("provider", Some(503), ErrorCode::ModelRequestFailed),
             ("protocol", None, ErrorCode::ModelRequestFailed),
         ] {
@@ -173,6 +182,10 @@ mod tests {
             error.status = status;
             assert_eq!(failure_code(&error, None), expected);
         }
+        let mut context = model::ModelError::new("provider", "request did not fit");
+        context.status = Some(400);
+        context.provider_code = Some("context_length_exceeded".into());
+        assert_eq!(failure_code(&context, None), ErrorCode::ModelRequestFailed);
     }
     #[test]
     fn two_stage_budget_is_shared_by_requests_and_reset_only_by_turn_or_generation() {

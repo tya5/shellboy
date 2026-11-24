@@ -61,8 +61,13 @@ fn model_list_error(error: crate::model::ModelError) -> ApiError {
         Some(status) => format!("HTTP {status}: {error}"),
         None => error.to_string(),
     };
-    ApiError::new(code, message)
-        .details(json!({"failure_kind":error.kind,"http_status":error.status}))
+    let mut details = json!({"failure_kind":error.kind,"http_status":error.status});
+    let mut reported = ApiError::new(code, message);
+    if let Some(cause) = error.transport_cause {
+        details["transport_cause"] = json!(cause);
+        reported = reported.hint(cause.next_action());
+    }
+    reported.details(details)
 }
 #[derive(Clone)]
 pub(super) struct RuntimeOperation {

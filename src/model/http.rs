@@ -699,6 +699,13 @@ impl HttpModelClient {
         cancel: CancellationToken,
         lease: RateLease,
     ) -> Result<EmbeddingResponse, ModelError> {
+        let with_transport_action = |mut error: ModelError| {
+            if let Some(cause) = error.transport_cause {
+                error.message.push(' ');
+                error.message.push_str(cause.next_action());
+            }
+            error
+        };
         validate_embedding_input(model, input, expected_dimension, requested_dimensions)?;
         let mut deadline = Deadline::new(
             ApiEndpoint::Embeddings,
@@ -718,7 +725,8 @@ impl HttpModelClient {
                 &deadline,
                 None,
             )
-            .await?;
+            .await
+            .map_err(with_transport_action)?;
         deadline.received();
         let status = response.status().as_u16();
         if !response.status().is_success() {
@@ -737,7 +745,7 @@ impl HttpModelClient {
             if complete {
                 lease.complete(status);
             }
-            return Err(error);
+            return Err(with_transport_action(error));
         }
         let raw = read_json(
             response,
@@ -751,7 +759,8 @@ impl HttpModelClient {
             },
             None,
         )
-        .await?;
+        .await
+        .map_err(with_transport_action)?;
         lease.complete(status);
         let raw = raw.into_result()?;
         let data = raw
