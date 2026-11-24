@@ -90,12 +90,17 @@ pub(super) async fn retry_or_recover(
         failure.error.to_string()
     };
     let facts = control.compactor.recovery_facts(&snapshot.thread).await?;
+    let maximum_reduction_available = facts["maximum_reduction_available"] == true;
     let mut error=ApiError::new(failure_code(&failure.error, failure.facts.status),message)
         .with_recovery_hint()
         .details(json!({"recovery":facts,"automatic_retries":automatic_retries,"retry_limit":retry_limit,
             "automatic_reduction_unavailable":reduction_unavailable,"last_failure_at":now(),"failure_kind":failure.error.kind,"http":failure.facts.http_observation}));
     if failure.error.is_context_limit() {
-        error.hint = Some("Review the saved context with /compact before retrying.".into());
+        error.hint = Some(if maximum_reduction_available {
+            "Use /compact-max to reduce the saved context without a model request before retrying."
+        } else {
+            "Review the saved context with /edit before retrying."
+        }.into());
     }
     if let Some(cause) = failure.error.transport_cause {
         error.hint = Some(cause.next_action().into());

@@ -122,6 +122,18 @@ impl IndexService {
     }
 }
 
+fn failure_hint(error: &ModelError) -> &'static str {
+    if let Some(cause) = error.transport_cause {
+        return cause.next_action();
+    }
+    let failure = error.embedding_failure();
+    if failure.credentials_or_credit || failure.invalid_configuration {
+        "Check the configured embedding connection with shellboy config check."
+    } else {
+        "Inspect the paused or failed work with shellboy index status."
+    }
+}
+
 /// Adopt failure/retry/split facts only inside the caller's existing transaction.
 fn adopt_failure_tx(
     tx: &Transaction<'_>,
@@ -143,13 +155,7 @@ fn adopt_failure_tx(
         ))
     })?;
     let failure = error.embedding_failure();
-    error_json["hint"] = json!(
-        if failure.credentials_or_credit || failure.invalid_configuration {
-            "Check the configured embedding connection with shellboy config check."
-        } else {
-            "Inspect the paused or failed work with shellboy index status."
-        }
-    );
+    error_json["hint"] = json!(failure_hint(error));
     let immediate = failure.credentials_or_credit || failure.invalid_configuration;
     let length = !immediate && failure.input_limit;
     let common = failure.transient;
@@ -263,6 +269,20 @@ fn adopt_failure_tx(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn saved_index_hint_uses_the_shared_transport_action() {
+        use crate::model::TransportCause;
+
+        let mut error = ModelError::new("transport", "opaque provider evidence");
+        for cause in [
+            TransportCause::Dns,
+            TransportCause::ProxyConnect { status: Some(407) },
+        ] {
+            error.transport_cause = Some(cause);
+            assert_eq!(failure_hint(&error), cause.next_action());
+        }
+    }
 
     #[test]
     fn cause_identity_uses_codes_or_status_classes_and_keeps_the_counter_bounded() {
