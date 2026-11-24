@@ -557,7 +557,7 @@ fn spill_tool_sources_are_identical_in_list_and_window_even_without_excerpts() {
             .zip(window_items.as_array_mut().unwrap())
         {
             let metadata = window.as_object_mut().unwrap();
-            assert_eq!(metadata.remove("execution_count_exact"), Some(json!(true)));
+            assert_eq!(metadata.get("execution_count_exact"), Some(&json!(true)));
             assert_eq!(
                 metadata.remove("payload_chars"),
                 Some(serde_json::Value::Null)

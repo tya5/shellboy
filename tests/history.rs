@@ -567,16 +567,13 @@ async fn history_metadata_links_real_executions_and_preserves_fork_origin() {
         })
         .await
         .unwrap();
-    let mut window_wire = serde_json::to_value(&window.items).unwrap();
-    for item in window_wire.as_array_mut().unwrap() {
-        let exact = item
-            .as_object_mut()
-            .unwrap()
-            .remove("execution_count_exact")
-            .unwrap();
-        assert_eq!(exact, json!(item["node_id"] != "calls"));
+    let window_wire = serde_json::to_value(&window.items).unwrap();
+    let mut list_wire = serde_json::to_value(&page.items).unwrap();
+    for item in list_wire.as_array_mut().unwrap() {
+        assert_eq!(item["execution_count_exact"], true);
+        item["execution_count_exact"] = json!(item["node_id"] != "calls");
     }
-    assert_eq!(serde_json::to_value(&page.items).unwrap(), window_wire);
+    assert_eq!(list_wire, window_wire);
 
     let mut without_descriptions = serde_json::to_value(&page).unwrap();
     for item in without_descriptions["items"].as_array_mut().unwrap() {
