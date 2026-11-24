@@ -154,6 +154,21 @@ mutationの保存失敗は既存SaveFailed診断・停止責務を保ち、captu
 別atomicのRelease/Acquireだけで双方が古い値を読むstore-buffering順序を許さない。
 
 
+`RequestAdmission` (#411 candidate 2) owns Core's closed flag, both request
+counts, and the guard. A guard retains only admission state; it does not retain
+Control, the shell supervisor, or the database. Control still orders shell-gate
+close, request close, capture, and cancellation. IPC slot admission is separate.
+The drain registers its notification before checking for zero; the guard drops
+the active and applicable context count before checking close and waking.
+
+For this extraction, the published baseline is `b0f0679997` (2,265 lines in
+`src/control.rs`), not the audit snapshot (2,219). The approved review basis is
+one owner with unchanged ordering, not the earlier 2,175-line stop. On the
+published baseline the file shrinks to 2,211 lines (-54); the mechanical change
+grows by 67 lines overall. This supersedes the sizing stop in [#411's sizing
+trace](https://github.com/tya5/shellboy/issues/411#issuecomment-7135742736);
+unrelated code is not moved to meet the old estimate.
+
 UI edits never stop the source Run; an active Run causes a retryable refusal. The existing admission guard and draft retention boundaries still apply.
 
 ## B06 状態遷移整理の順序（R1-2〜R1-6）
