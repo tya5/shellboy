@@ -150,6 +150,7 @@ async fn start(control: &Arc<Control>) -> MessageAccepted {
         command(
             control,
             Command::MessageSend(MessageSendArgs {
+                max_model_requests: None,
                 human: false,
                 resume_recovery: false,
                 sender_label: None,
@@ -189,6 +190,7 @@ async fn accepted_send_operation_id_is_projected_after_driver_admission() {
         Request::new(
             format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
             Command::MessageSend(MessageSendArgs {
+                max_model_requests: None,
                 thread_id: Some(thread_id.into()),
                 text: body.clone(),
                 deliver: Deliver::Next,
@@ -655,7 +657,7 @@ async fn foreground_additional_input_is_accepted_while_shell_lives_and_stop_reap
     let additional = crate::test_watchdog::watchdog("tests/runtime.rs: foreground_additional_input_is_accepted_while_shell_lives_and_stop_reaps_before_terminal",
         command(
             &control,
-            Command::MessageSend(MessageSendArgs { human: false, resume_recovery: false,
+            Command::MessageSend(MessageSendArgs { max_model_requests: None, human: false, resume_recovery: false,
 sender_label: None,
                 thread_id: Some(accepted.thread_id.clone()),
                 text: "while foreground waits".into(),
@@ -925,6 +927,7 @@ async fn input_accepted_during_model_request_still_interrupts_the_next_foregroun
     command(
         &control,
         Command::MessageSend(MessageSendArgs {
+            max_model_requests: None,
             human: false,
             resume_recovery: false,
             sender_label: None,
@@ -1058,6 +1061,7 @@ async fn incomplete_attempt_is_preserved_retry_reuses_turn_instruction_snapshot_
     let next = command(
         &control,
         Command::MessageSend(MessageSendArgs {
+            max_model_requests: None,
             human: false,
             resume_recovery: false,
             sender_label: None,
@@ -2637,6 +2641,7 @@ async fn graceful_shutdown_captures_real_shell_wait_once_and_replays_context_aft
     command(
         &control,
         Command::MessageSend(MessageSendArgs {
+            max_model_requests: None,
             human: false,
             resume_recovery: false,
             sender_label: None,
@@ -2733,6 +2738,7 @@ async fn graceful_context_revision_does_not_adopt_a_late_model_response() {
     command(
         &control,
         Command::MessageSend(MessageSendArgs {
+            max_model_requests: None,
             human: false,
             resume_recovery: false,
             sender_label: None,

@@ -322,6 +322,7 @@ async fn disconnecting_a_send_observer_does_not_lose_commit_effects_or_race_shut
             .request(Request::new(
                 op,
                 Command::MessageSend(crate::protocol::MessageSendArgs {
+                    max_model_requests: None,
                     resume_recovery: false,
                     human: false,
                     sender_label: None,

@@ -314,6 +314,7 @@ mod tests {
                 Request::new(
                     format!("{}:send", owner.instance_id),
                     Command::MessageSend(MessageSendArgs {
+                        max_model_requests: None,
                         resume_recovery: false,
 
                         human: false,
@@ -411,6 +412,7 @@ mod tests {
                 Request::new(
                     format!("{}:held-before-question", owner.instance_id),
                     Command::MessageSend(MessageSendArgs {
+                        max_model_requests: None,
                         resume_recovery: false,
                         human: true,
                         sender_label: None,

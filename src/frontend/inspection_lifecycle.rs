@@ -283,6 +283,8 @@ pub(super) fn prepare_in(
             (
                 thread,
                 encoded(RunDetails {
+                    model_requests: None,
+                    stop_reason: None,
                     waiting_reason: raw.waiting_reason,
                     usage_totals: None,
                     context,

@@ -156,6 +156,7 @@ async fn message(control: &Arc<Control>, thread: &str) -> MessageAccepted {
         command(
             control,
             Command::MessageSend(MessageSendArgs {
+                max_model_requests: None,
                 resume_recovery: false,
                 human: false,
                 sender_label: None,

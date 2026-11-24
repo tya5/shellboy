@@ -93,6 +93,7 @@ impl Form {
             "sender_label" => FieldId::SenderLabel,
             "deliver" => FieldId::Deliver,
             "resume_recovery" => FieldId::ResumeRecovery,
+            "max_model_requests" => FieldId::MaxModelRequests,
             "text" => FieldId::Text,
             "condition" | "target" => FieldId::Conditions,
             "settled_states" => FieldId::SettlementStates,
@@ -1266,6 +1267,7 @@ fn field_label_for(id: FieldId, language: crate::config::UiLanguage) -> &'static
         FieldId::RemoveTags => local!(language, "外すタグ", "Tags to remove"),
         FieldId::SenderLabel => local!(language, "送信者の表示名", "Sender display name"),
         FieldId::ResumeRecovery => local!(language, "復旧待ちを再開", "Resume recovery wait"),
+        FieldId::MaxModelRequests => local!(language, "モデル要求の上限", "Model request ceiling"),
         FieldId::Deliver => local!(language, "届けるとき", "Delivery timing"),
         FieldId::Text => local!(language, "入力本文", "Message text"),
         FieldId::Conditions => local!(language, "観測条件", "Observation conditions"),
@@ -1715,6 +1717,11 @@ fn field_help_for(id: FieldId, language: crate::config::UiLanguage) -> &'static 
             language,
             "通常の会話入力は復旧待ちを再開します。この操作は外部送信者の復旧再開を明示して許可します。",
             "Ordinary conversation input resumes recovery wait. This explicitly permits an external sender to resume recovery."
+        ),
+        FieldId::MaxModelRequests => local!(
+            language,
+            "新規Runだけに適用する正の要求数です。使用中のRunには送信しません。",
+            "Positive request ceiling for a new Run only. Refuses to send to an active Run."
         ),
         FieldId::Deliver => local!(
             language,

@@ -202,6 +202,7 @@ async fn lost_response_replays_original_acceptance_after_message_progress_and_re
     let req = request(
         "first",
         Command::MessageSend(MessageSendArgs {
+            max_model_requests: None,
             resume_recovery: false,
 
             human: false,
@@ -245,6 +246,7 @@ async fn lost_response_replays_original_acceptance_after_message_progress_and_re
     );
     let mut conflicting = req;
     conflicting.command = Command::MessageSend(MessageSendArgs {
+        max_model_requests: None,
         resume_recovery: false,
 
         human: false,

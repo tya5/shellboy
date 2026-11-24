@@ -902,3 +902,8 @@ CREATE INDEX threads_visible_cwd_updated ON thread(cwd,updated_at DESC,id DESC) 
 CREATE INDEX threads_archived_cwd_updated ON thread(cwd,updated_at DESC,id DESC) WHERE deleted_at IS NULL AND archived_at IS NOT NULL;
 INSERT INTO schema_migration(version,name) VALUES(64,'0064_thread_cwd_partitions');
 PRAGMA user_version=64;
+
+ALTER TABLE run ADD COLUMN max_model_requests INTEGER CHECK(max_model_requests > 0);
+ALTER TABLE run ADD COLUMN model_requests_used INTEGER NOT NULL DEFAULT 0 CHECK(model_requests_used >= 0 AND (max_model_requests IS NULL OR model_requests_used <= max_model_requests));
+INSERT INTO schema_migration(version,name) VALUES(65,'next_run_request_ceiling');
+PRAGMA user_version=65;

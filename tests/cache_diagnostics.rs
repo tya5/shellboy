@@ -31,6 +31,7 @@ async fn send(control: &Arc<Control>, thread: &str) {
     request(
         control,
         Command::MessageSend(MessageSendArgs {
+            max_model_requests: None,
             resume_recovery: false,
 
             human: false,

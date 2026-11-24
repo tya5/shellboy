@@ -971,7 +971,7 @@ impl ThreadSetArgs {
 }
 args!(MessageListArgs { #[serde(default)] owed_by: Option<String>, #[serde(default)] asked_by: Option<String>, #[serde(default)] to: Option<String>, #[serde(default = "list_limit")] limit: u32, #[serde(default)] cursor: Option<String> });
 args!(MessageAskArgs { #[serde(default, skip_serializing_if = "is_false")] human: bool, #[serde(default, skip_serializing_if = "Option::is_none")] sender_label: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] thread_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] to: Option<String>, #[serde(default, skip_serializing_if = "Deliver::is_next")] deliver: Deliver, text: String });
-args!(MessageSendArgs { #[serde(default, skip_serializing_if = "is_false")] human: bool, #[serde(default, skip_serializing_if = "is_false")] resume_recovery: bool, #[serde(default, skip_serializing_if = "Option::is_none")] sender_label: Option<String>, #[serde(default)] thread_id: Option<String>, text: String, #[serde(default, skip_serializing_if = "Deliver::is_next")] deliver: Deliver });
+args!(MessageSendArgs { #[serde(default, skip_serializing_if = "Option::is_none")] max_model_requests: Option<std::num::NonZeroU32>, #[serde(default, skip_serializing_if = "is_false")] human: bool, #[serde(default, skip_serializing_if = "is_false")] resume_recovery: bool, #[serde(default, skip_serializing_if = "Option::is_none")] sender_label: Option<String>, #[serde(default)] thread_id: Option<String>, text: String, #[serde(default, skip_serializing_if = "Deliver::is_next")] deliver: Deliver });
 /// Message delivery timing; `Complete` is Revisit.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -1926,7 +1926,18 @@ args!(
         operation_count: u64
     }
 );
-record!(RunDetails { #[serde(default, skip_serializing_if = "Option::is_none")] waiting_reason: Option<RunWaitReason>, #[serde(default, skip_serializing_if = "Option::is_none")] usage_totals: Option<Value>, context: crate::context::ExecutionContext, run_id: String, thread_id: String, state: RunState, #[serde(default, skip_serializing_if = "Option::is_none")] turn_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] end_message_node_id: Option<String>, owned_execution_ids: Vec<String>, #[serde(default, skip_serializing_if = "Option::is_none")] recovery_hint: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] revisit: Option<RevisitSummary> });
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[derive(PartialEq, Eq)]
+
+pub enum RunStopReason {
+    ModelRequestCeilingReached { requests_used: u32 },
+}
+record!(RunModelRequests {
+    ceiling: u32,
+    used: u32
+});
+record!(RunDetails { #[serde(default, skip_serializing_if = "Option::is_none")] model_requests: Option<RunModelRequests>, #[serde(default, skip_serializing_if = "Option::is_none")] stop_reason: Option<RunStopReason>, #[serde(default, skip_serializing_if = "Option::is_none")] waiting_reason: Option<RunWaitReason>, #[serde(default, skip_serializing_if = "Option::is_none")] usage_totals: Option<Value>, context: crate::context::ExecutionContext, run_id: String, thread_id: String, state: RunState, #[serde(default, skip_serializing_if = "Option::is_none")] turn_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] end_message_node_id: Option<String>, owned_execution_ids: Vec<String>, #[serde(default, skip_serializing_if = "Option::is_none")] recovery_hint: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] revisit: Option<RevisitSummary> });
 record!(TurnDetails { #[serde(default, skip_serializing_if = "Option::is_none")] usage_totals: Option<Value>, context: crate::context::ExecutionContext, turn_id: String, run_id: String, thread_id: String, state: TurnState, #[serde(default, skip_serializing_if = "Option::is_none")] end_message_node_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] recovery_hint: Option<String> });
 // Optional shell fields describe unknown/live lifecycle facts and the internal
 // output-reader snapshot, which deliberately does not load command ownership.

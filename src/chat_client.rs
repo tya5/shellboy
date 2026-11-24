@@ -242,6 +242,7 @@ impl<W: Write> Chat<'_, W> {
             })
         } else {
             Command::MessageSend(MessageSendArgs {
+                max_model_requests: None,
                 human: self.human,
                 sender_label: None,
                 thread_id,

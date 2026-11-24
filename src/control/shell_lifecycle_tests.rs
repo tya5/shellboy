@@ -110,6 +110,7 @@ pub(super) async fn start(control: &Arc<Control>) -> String {
     rpc(
         control,
         Command::MessageSend(MessageSendArgs {
+            max_model_requests: None,
             resume_recovery: false,
             human: false,
             sender_label: None,

@@ -185,6 +185,7 @@ async fn rebuilt_attempts_match_sent_bytes_and_consecutive_requests_share_the_co
     request(
         &control,
         Command::MessageSend(MessageSendArgs {
+            max_model_requests: None,
             resume_recovery: false,
 
             human: false,

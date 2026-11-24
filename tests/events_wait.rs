@@ -666,6 +666,7 @@ async fn queued_message_cancel_and_run_stop_advance_the_clock() {
     let queued = command(
         &control,
         Command::MessageSend(MessageSendArgs {
+            max_model_requests: None,
             resume_recovery: false,
 
             human: false,
@@ -1017,6 +1018,7 @@ async fn turn_created_from_queued_input_is_announced_while_the_rate_gate_is_held
     command(
         &control,
         Command::MessageSend(MessageSendArgs {
+            max_model_requests: None,
             resume_recovery: false,
 
             human: false,

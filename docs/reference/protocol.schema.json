@@ -4744,6 +4744,14 @@
         "human": {
           "type": "boolean"
         },
+        "max_model_requests": {
+          "format": "uint32",
+          "minimum": 1,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "resume_recovery": {
           "type": "boolean"
         },
@@ -8634,6 +8642,16 @@
             "null"
           ]
         },
+        "model_requests": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RunModelRequests"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "owned_execution_ids": {
           "items": {
             "type": "string"
@@ -8661,6 +8679,16 @@
         },
         "state": {
           "$ref": "#/definitions/RunState"
+        },
+        "stop_reason": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RunStopReason"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "thread_id": {
           "type": "string"
@@ -8693,6 +8721,25 @@
       "title": "RunDetails",
       "type": "object"
     },
+    "RunModelRequests": {
+      "properties": {
+        "ceiling": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "used": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "ceiling",
+        "used"
+      ],
+      "type": "object"
+    },
     "RunState": {
       "enum": [
         "live",
@@ -8702,6 +8749,28 @@
         "failed"
       ],
       "type": "string"
+    },
+    "RunStopReason": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "const": "model_request_ceiling_reached",
+              "type": "string"
+            },
+            "requests_used": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "requests_used"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "RunTarget": {
       "additionalProperties": false,
@@ -13308,6 +13377,16 @@
             "null"
           ]
         },
+        "model_requests": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RunModelRequests"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "owned_execution_ids": {
           "items": {
             "type": "string"
@@ -13335,6 +13414,16 @@
         },
         "state": {
           "$ref": "#/definitions/RunState"
+        },
+        "stop_reason": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RunStopReason"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "thread_id": {
           "type": "string"

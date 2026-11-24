@@ -245,7 +245,17 @@ Root cwd defaults to owner startup cwd; child cwd to the parent's. Relative cwd 
 
 | Operation and all specific flags | Main result and conditions |
 |---|---|
-| `message send [--thread THREAD] [--deliver now\|complete] [--resume-recovery] [--sender-label TEXT] (--text TEXT \| --text-stdin)` | message_id/thread_id/delivery_status/assignment/run_id/turn_id, plus `deliver` when not the default. `--sender-label` is self-asserted (not verified); non-human messages may include it in the derived preamble without changing saved text. Active work takes additions at safe boundaries; stopping can yield held/pending. Machine messages hold at `recovery_wait` unless `--resume-recovery` explicitly resumes; the event records `external_cli` or authenticated shell Origin. Human input/reply explicitly resumes; model-origin replies remain non-human |
+| `message send [--thread THREAD] [--deliver now\|complete] [--resume-recovery] [--max-model-requests N] [--sender-label TEXT] (--text TEXT \| --text-stdin)` | message_id/thread_id/delivery_status/assignment/run_id/turn_id, plus `deliver` when not the default. `--sender-label` is self-asserted (not verified); non-human messages may include it in the derived preamble without changing saved text. Active work takes additions at safe boundaries; stopping can yield held/pending. Machine messages hold at `recovery_wait` unless `--resume-recovery` explicitly resumes; the event records `external_cli` or authenticated shell Origin. Human input/reply explicitly resumes; model-origin replies remain non-human |
+
+`--max-model-requests N` accepts a positive count and requires a new Run; an
+active Run causes a refusal rather than receiving or queuing the message. The
+limit includes retries and automatic summaries bound to that Run, not manual
+compaction, embedding calls, or other Runs. `run get --run RUN` shows the
+ceiling and reserved count and reports `model_request_ceiling_reached` when
+it would need another request. A request reserved before an interruption can
+count even if it never reached the provider. This is not a limit on charges.
+
+
 | `message ask [--to NAME or --thread THREAD] [--deliver now\|complete] (--text TEXT or --text-stdin)` | Open one reply duty. A named recipient defaults to `human` and requires model origin. Delivery timing applies only to Thread recipients. |
 | `message list --awaiting [--owed-by THREAD or --asked-by THREAD or --to NAME] [--limit N] [--cursor C]` | Bounded read of pending replies by direction. Without a direction it lists all pending requests. Items include the credential-free saved `sender` (`MessageSender`); `asked_by` is the model Thread ID or null. `--asked-by` matches only model Thread senders. `thread get` returns bounded directional counts, not the list. |
 | `message reply --message MESSAGE (--text TEXT \| --text-stdin) [--sender-label TEXT]` | Reply once to an applied pending reply request; returns `reply_to`/reply message ID and optional delivery |

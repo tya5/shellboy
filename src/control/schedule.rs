@@ -559,6 +559,7 @@ impl ServiceSettlement {
         .collect::<Vec<_>>()
         .join(", ");
         let args = crate::protocol::MessageSendArgs {
+            max_model_requests: None,
             human: false,
             resume_recovery: false,
 
@@ -1441,6 +1442,7 @@ mod tests {
             .to_owned();
         let external = control
             .request(request(Command::MessageSend(MessageSendArgs {
+                max_model_requests: None,
                 human: false,
                 resume_recovery: false,
 

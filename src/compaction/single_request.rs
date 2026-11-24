@@ -14,6 +14,7 @@ pub(super) struct SummaryRequest<'a, 'boundary> {
     pub(super) drop_all_reasoning: bool,
     pub(super) active: Option<policy::ActiveTurnPlan>,
     pub(super) requested_limit: Option<u64>,
+    pub(super) request_run: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -231,6 +232,7 @@ pub(super) enum DispatchOwner<'a, 'b> {
 pub(super) struct DispatchRequest<'a, 'b> {
     pub(super) input: &'a SummaryMaterial<'a>,
     pub(super) owner: DispatchOwner<'a, 'b>,
+    pub(super) request_run: Option<&'a str>,
     pub(super) selected: Range<usize>,
     pub(super) limit: OutputLimit,
     pub(super) cancel: &'a CancellationToken,
@@ -345,6 +347,7 @@ impl Compactor {
             drop_all_reasoning,
             active,
             requested_limit,
+            request_run,
         } = request;
         let region = if active.is_some() {
             Region::Active
@@ -438,6 +441,7 @@ impl Compactor {
         let dispatched = self
             .dispatch_single_summary(DispatchRequest {
                 input: &material,
+                request_run: request_run.as_deref(),
                 owner: DispatchOwner::Manual {
                     boundary,
                     markers: snapshot
@@ -660,6 +664,7 @@ impl Compactor {
         let DispatchRequest {
             input,
             mut owner,
+            request_run,
             selected,
             limit,
             cancel,
@@ -721,6 +726,7 @@ impl Compactor {
                         client: &client,
                         connection,
                         kind: AttemptKind::Summary,
+                        run: request_run,
                         adapt_after_transient: false,
                     },
                     &mut caller,
@@ -741,7 +747,7 @@ impl Compactor {
                     Execution::AdaptationSuggested { .. } => {
                         unreachable!("Summary does not request Driver adaptation")
                     }
-                    Execution::InputChanged | Execution::Fenced => {
+                    Execution::InputChanged | Execution::Fenced | Execution::RunCeilingReached => {
                         return Err(discard::rejected(
                             discard::RejectionReason::Cancelled,
                             "Compaction cancelled; original path retained",

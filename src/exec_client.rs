@@ -617,6 +617,7 @@ async fn prepare(options: &ExecOptions) -> Result<(Schema, String, ThreadCreateA
         return Err("Composed request and Schema exceed128KiB".into());
     }
     Command::MessageSend(MessageSendArgs {
+        max_model_requests: None,
         human: false,
         resume_recovery: false,
         thread_id: Some("preflight".into()),
@@ -707,7 +708,7 @@ pub async fn execute(
             let command = if options.result == ResultMode::Reply {
                 Command::MessageAsk(MessageAskArgs { human:false, sender_label, thread_id, text:prompt, to:None, deliver:Deliver::Next })
             } else {
-                Command::MessageSend(MessageSendArgs { human:false, sender_label, thread_id, text:prompt, resume_recovery:false, deliver:Deliver::Next })
+                Command::MessageSend(MessageSendArgs { max_model_requests: None, human:false, sender_label, thread_id, text:prompt, resume_recovery:false, deliver:Deliver::Next })
             };
             let accepted:MessageAccepted=session.request("send",command).await?;
             session.progress.message_id=Some(accepted.message_id);session.progress.run_id=accepted.run_id;session.progress.turn_id=accepted.turn_id;

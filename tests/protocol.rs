@@ -962,6 +962,7 @@ fn current_output_and_history_results_require_observation_fields() {
 #[test]
 fn message_resume_recovery_is_optional_and_round_trips() {
     let command = Command::MessageSend(MessageSendArgs {
+        max_model_requests: None,
         human: false,
         resume_recovery: true,
         sender_label: None,
@@ -981,6 +982,7 @@ fn message_resume_recovery_is_optional_and_round_trips() {
 fn message_delivery_timing_is_one_optional_wire_field() {
     let command = |deliver| {
         Command::MessageSend(MessageSendArgs {
+            max_model_requests: None,
             resume_recovery: false,
             human: false,
             sender_label: None,

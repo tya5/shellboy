@@ -334,13 +334,16 @@ pub(super) fn complete_answer_turn(
 }
 
 /// Ownership has already been frozen, and every live handle has drained.
-pub(super) enum RunStopAdmission<'a> {
+pub(crate) const MODEL_REQUEST_CEILING_REACHED: &str = "model_request_ceiling_reached";
+
+pub(crate) enum RunStopAdmission<'a> {
     Explicit { at: &'a str },
     DriverDrain,
+    ModelRequestCeilingReached,
 }
 
 /// Fence in-flight results before releasing this transaction to the drain.
-pub(super) fn admit_run_stop_tx(
+pub(crate) fn admit_run_stop_tx(
     tx: &rusqlite::Transaction<'_>,
     run: &str,
     admission: RunStopAdmission<'_>,
@@ -349,6 +352,7 @@ pub(super) fn admit_run_stop_tx(
         RunStopAdmission::Explicit { at } => (Some("explicit_stop"), Some(at)),
         // Drain preserves a prior explicit reason; accepted receipts are settled
         // at the terminal boundary, not by a second explicit admission.
+        RunStopAdmission::ModelRequestCeilingReached => (Some(MODEL_REQUEST_CEILING_REACHED), None),
         RunStopAdmission::DriverDrain => (None, None),
     };
     tx.execute("UPDATE run SET state='stopping',stop_reason=COALESCE(?2,stop_reason) WHERE id=?1 AND state='live'",params![run,reason])?;

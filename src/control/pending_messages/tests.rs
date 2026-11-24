@@ -844,6 +844,7 @@ async fn only_explicit_unadmitted_now_input_releases_foreground_wait() {
             Request::new(
                 "fixture:queued",
                 Command::MessageSend(MessageSendArgs {
+                    max_model_requests: None,
                     resume_recovery: false,
                     human: false,
                     sender_label: None,
@@ -871,6 +872,7 @@ async fn only_explicit_unadmitted_now_input_releases_foreground_wait() {
             Request::new(
                 "fixture:now",
                 Command::MessageSend(MessageSendArgs {
+                    max_model_requests: None,
                     resume_recovery: false,
                     human: false,
                     sender_label: None,

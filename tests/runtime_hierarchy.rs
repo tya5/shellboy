@@ -132,6 +132,7 @@ async fn start(control: &Arc<Control>) -> MessageAccepted {
         command(
             control,
             Command::MessageSend(MessageSendArgs {
+                max_model_requests: None,
                 resume_recovery: false,
                 human: false,
                 sender_label: None,
@@ -527,6 +528,7 @@ async fn restart_exposes_interrupted_waits_and_assignments_only_on_explicit_new_
     let accepted = command(
         &control,
         Command::MessageSend(MessageSendArgs {
+            max_model_requests: None,
             resume_recovery: false,
 
             human: false,

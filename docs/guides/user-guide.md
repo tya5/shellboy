@@ -696,6 +696,17 @@ shellboy schedule add --thread THREAD --cron '0 * * * *' -- \
   'if test -f needs-review; then shellboy message send --thread "$SHELLBOY_THREAD_ID" --text "Review is needed"; fi'
 ```
 
+To limit model requests in a Run started by a scheduled shell, put the flag
+in the shell command (POSIX example):
+
+```sh
+shellboy schedule add --thread THREAD --cron '30 8 * * 1-5' -- \
+  'shellboy message send --thread "$SHELLBOY_THREAD_ID" --max-model-requests 8 --text "Review the inbox and report."'
+```
+
+The send refuses if the Thread already has an active Run. The limit belongs
+to the new Run, not the schedule, the scheduled shell, or child Threads.
+
 ## Thread artifacts
 
 Artifacts keep named, versioned references with a Thread. Use `shellboy artifact list --thread T` to find them and `shellboy artifact get --artifact A --version N` to retrieve an older reference. Clients determine URI formats and previews. Archive retains the references; deleting the Thread or removing the artifact deletes only metadata, not the files or other targets.

@@ -627,3 +627,21 @@ with its error and usage, gets the normal adoption disposition, and is not a
 compaction trigger sample. The Turn completes and the Run follows ordinary
 idle completion and reply-duty handling. No separate incomplete-response audit
 node is made for an adopted cut.
+
+## Per-Run model request ceiling (#399)
+
+An optional positive `message.send.max_model_requests` is accepted only when
+that transaction creates a Run. The Run row is the sole owner of the ceiling
+and consumed count. A live or stopping Run causes an atomic refusal, not a
+queued message or a change to that Run. Schedules use the same command in their
+shell text; there is no schedule policy or environment inheritance.
+
+The common provider dispatch path charges an admitted, locally valid request
+before sending it, in the same transaction as attempt admission. The count
+includes subsequent dispatches for retries and automatic summaries owned by
+that exact Run. Manual compaction and RAG/index work are excluded. A charged
+reservation is never refunded, even if a crash or concurrent cancellation
+prevents sending; it is not proof of provider receipt. A further request at
+the ceiling fences the Run through normal stop admission and the Driver drains
+it. `run.get` reads the saved ceiling, count and typed stop reason. Existing
+recovery never resets the count or starts a Run merely because it had a ceiling.

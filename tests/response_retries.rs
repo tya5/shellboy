@@ -157,6 +157,7 @@ struct FixtureSettings {
     auto_retry: Option<bool>,
     connection: &'static str,
     max_tokens: Option<u64>,
+    max_model_requests: Option<std::num::NonZeroU32>,
 }
 
 impl Fixture {
@@ -265,6 +266,7 @@ impl Fixture {
             request(
                 &control,
                 Command::MessageSend(MessageSendArgs {
+                    max_model_requests: settings.max_model_requests,
                     resume_recovery: false,
                     human: false,
                     sender_label: None,
@@ -1493,6 +1495,7 @@ async fn overflow_trim_keeps_every_user_input_of_the_active_turn() {
         request(
             &f.control,
             Command::MessageSend(MessageSendArgs {
+                max_model_requests: None,
                 resume_recovery: false,
                 human: false,
                 sender_label: Some("leader".into()),
@@ -1743,6 +1746,7 @@ async fn usage_limit_new_conversation(f: &mut Fixture) {
         request(
             &f.control,
             Command::MessageSend(MessageSendArgs {
+                max_model_requests: None,
                 resume_recovery: false,
                 human: false,
                 sender_label: None,
@@ -2146,6 +2150,7 @@ async fn concurrent_threads_record_independent_429_observations() {
         request(
             &fixture.control,
             Command::MessageSend(MessageSendArgs {
+                max_model_requests: None,
                 resume_recovery: false,
                 human: false,
                 sender_label: None,
@@ -2261,6 +2266,7 @@ async fn connection_cooldown_blocks_other_thread_and_stop_remains_responsive() {
         request(
             &fixture.control,
             Command::MessageSend(MessageSendArgs {
+                max_model_requests: None,
                 resume_recovery: false,
                 human: false,
                 sender_label: None,
@@ -2326,6 +2332,7 @@ async fn connection_cooldown_revalidates_model_before_second_thread_sends() {
         request(
             &fixture.control,
             Command::MessageSend(MessageSendArgs {
+                max_model_requests: None,
                 resume_recovery: false,
                 human: false,
                 sender_label: None,
@@ -2593,6 +2600,7 @@ async fn shared_connection_wait_is_recorded_on_successful_attempt() {
         request(
             &fixture.control,
             Command::MessageSend(MessageSendArgs {
+                max_model_requests: None,
                 resume_recovery: false,
                 human: false,
                 sender_label: None,
@@ -2762,6 +2770,7 @@ async fn owner_restart_clears_connection_cooldown_without_resuming_old_work() {
     request(
         &control,
         Command::MessageSend(MessageSendArgs {
+            max_model_requests: None,
             resume_recovery: false,
 
             human: false,
@@ -2814,6 +2823,7 @@ async fn successful_connection_probe_releases_queued_threads_without_serializing
             request(
                 &fixture.control,
                 Command::MessageSend(MessageSendArgs {
+                    max_model_requests: None,
                     resume_recovery: false,
                     human: false,
                     sender_label: None,
@@ -3825,6 +3835,7 @@ async fn human_usage_limit_resume(held: usize) {
     let thread = f.accepted.thread_id.clone();
     let send = |human, text| {
         Command::MessageSend(MessageSendArgs {
+            max_model_requests: None,
             human,
             text,
             thread_id: Some(thread.clone()),
@@ -4078,6 +4089,7 @@ async fn model_filter_changes_catalog_not_direct_model_execution() {
         request(
             &control,
             Command::MessageSend(MessageSendArgs {
+                max_model_requests: None,
                 resume_recovery: false,
                 human: false,
                 sender_label: None,
@@ -4127,4 +4139,129 @@ async fn model_filter_changes_catalog_not_direct_model_execution() {
     };
     assert_eq!(fixture.settled().await, "completed");
     fixture.close().await;
+}
+
+#[tokio::test]
+async fn model_request_ceiling_stops_before_resending() {
+    let mut f = Fixture::configured(
+        2,
+        1,
+        5_000,
+        false,
+        None,
+        "one request",
+        FixtureSettings {
+            max_model_requests: std::num::NonZeroU32::new(1),
+            ..Default::default()
+        },
+    )
+    .await;
+    let first = f.incoming().await;
+    first.reply.send(Reply::error(500, "")).ok().unwrap();
+    assert_eq!(f.settled().await, "stopped");
+    let run = request(
+        &f.control,
+        Command::RunGet(RunTarget {
+            run_id: f.accepted.run_id.clone().unwrap(),
+        }),
+    )
+    .await;
+    assert_eq!(run["state"], "stopped");
+    assert_eq!(
+        run["stop_reason"],
+        json!({"kind":"model_request_ceiling_reached","requests_used":1})
+    );
+    assert_eq!(f.attempts().await.len(), 1);
+    f.no_more_requests().await;
+    f.close().await;
+}
+
+#[tokio::test]
+async fn model_request_ceiling_allows_normal_completion() {
+    let mut f = Fixture::configured(
+        2,
+        1,
+        5_000,
+        false,
+        None,
+        "two available",
+        FixtureSettings {
+            max_model_requests: std::num::NonZeroU32::new(2),
+            ..Default::default()
+        },
+    )
+    .await;
+    f.incoming()
+        .await
+        .reply
+        .send(Reply::success())
+        .ok()
+        .unwrap();
+    assert_eq!(f.settled().await, "completed");
+    let run = request(
+        &f.control,
+        Command::RunGet(RunTarget {
+            run_id: f.accepted.run_id.clone().unwrap(),
+        }),
+    )
+    .await;
+    assert_eq!(run["model_requests"], json!({"ceiling":2,"used":1}));
+    assert!(run.get("stop_reason").is_none());
+    f.close().await;
+}
+
+#[tokio::test]
+async fn model_request_ceiling_reservation_survives_owner_restart() {
+    let mut f = Fixture::configured(
+        2,
+        1,
+        5_000,
+        false,
+        None,
+        "interrupt first request",
+        FixtureSettings {
+            max_model_requests: std::num::NonZeroU32::new(2),
+            ..Default::default()
+        },
+    )
+    .await;
+    let first = f.incoming().await;
+    let Fixture {
+        _root: root,
+        owner,
+        control,
+        mut requests,
+        server,
+        accepted,
+    } = f;
+    crate::test_watchdog::watchdog("restart owner with reserved request", async {
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+        drop(control);
+        drop(first);
+        let owner = DataOwner::start(
+            Some(root.path().join("config.toml")),
+            Some(root.path().join("data")),
+            root.path().into(),
+        )
+        .await
+        .unwrap();
+        let control = Control::new(&owner, root.path().into());
+        control.start().await.unwrap();
+        let run = request(
+            &control,
+            Command::RunGet(RunTarget {
+                run_id: accepted.run_id.unwrap(),
+            }),
+        )
+        .await;
+        assert_eq!(run["state"], "stopped");
+        assert_eq!(run["model_requests"], json!({"ceiling":2,"used":1}));
+        assert!(requests.try_recv().is_err());
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+    })
+    .await
+    .unwrap();
+    server.abort();
 }

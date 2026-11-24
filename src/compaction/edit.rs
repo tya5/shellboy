@@ -147,8 +147,15 @@ impl Compactor {
                     self.spill_snapshot(snapshot, vec![selected], cancel, false, None)
                         .await?
                 } else {
-                    self.summarize_range(snapshot, selected, cancel, boundary, None, args.max_chars)
-                        .await?
+                    self.summarize_range(
+                        snapshot,
+                        selected,
+                        cancel,
+                        boundary,
+                        None,
+                        (args.max_chars, None),
+                    )
+                    .await?
                 };
                 let after = history_characters(&self.snapshot(thread, false).await?);
                 Ok(ContextEditResult {
@@ -275,7 +282,7 @@ impl Compactor {
                     cancel,
                     boundary,
                     None,
-                    requested_limit,
+                    (requested_limit, None),
                 )
                 .await?;
             let after = history_characters(&self.snapshot(&thread, false).await?);

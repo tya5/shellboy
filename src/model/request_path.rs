@@ -480,6 +480,7 @@ pub(crate) enum Execution<T> {
     InputChanged,
     Fenced,
     BudgetExhausted,
+    RunCeilingReached,
 }
 
 pub(crate) type Observer<'a> = Box<dyn FnMut(super::http::ObservedEvent) + Send + 'a>;
@@ -520,6 +521,7 @@ pub(crate) struct RequestScope<'a> {
     pub connection: &'a crate::config::Connection,
     pub kind: AttemptKind,
     pub adapt_after_transient: bool,
+    pub run: Option<&'a str>,
 }
 
 pub(crate) async fn execute_request<C: RequestCaller>(
@@ -531,6 +533,11 @@ pub(crate) async fn execute_request<C: RequestCaller>(
 ) -> Result<Execution<C::Context>, crate::protocol::ApiError> {
     use super::http::RateReservation;
     use crate::app::storage_error;
+    enum Admission {
+        Fenced,
+        Committed,
+        RunCeilingReached,
+    }
     use crate::protocol::{ApiError, ErrorCode};
     let mut original = None;
     loop {
@@ -599,15 +606,38 @@ pub(crate) async fn execute_request<C: RequestCaller>(
         let attempt = uuid::Uuid::new_v4().to_string();
         let saved = attempt.clone();
         let token = cancel.clone();
+        let run = scope.run.map(str::to_owned).filter(|_| prepared.is_ok());
         let committed = scope
             .database
             .call(move |db| {
                 let tx = db.transaction()?;
-                if token.is_cancelled() {
-                    return Ok(false);
+                if token.is_cancelled() || !qualify(&tx, &mut row)? {
+                    return Ok(Admission::Fenced);
                 }
-                if !qualify(&tx, &mut row)? {
-                    return Ok(false);
+                if let Some(run) = run {
+                    use crate::control::state::{self, RunStopAdmission};
+                    use rusqlite::OptionalExtension;
+                    let ceiling = tx.query_row(
+                        "SELECT max_model_requests,model_requests_used FROM run WHERE id=?1 AND thread_id=?2 AND state='live'",
+                        rusqlite::params![run, row.scope.thread],
+                        |r| Ok((r.get::<_, Option<u32>>(0)?, r.get::<_, u32>(1)?)),
+                    ).optional()?;
+                    match ceiling {
+                        None => return Ok(Admission::Fenced),
+                        Some((Some(ceiling), used)) if used == ceiling => {
+                            // Qualification may prepare attempt metadata. Do not
+                            // commit it for a request that will never be admitted.
+                            tx.rollback()?;
+                            let tx = db.transaction()?;
+                            state::admit_run_stop_tx(&tx, &run, RunStopAdmission::ModelRequestCeilingReached)?;
+                            tx.commit()?;
+                            return Ok(Admission::RunCeilingReached);
+                        }
+                        Some((Some(_), _)) => {
+                            tx.execute("UPDATE run SET model_requests_used=model_requests_used+1 WHERE id=?1", [&run])?;
+                        }
+                        Some((None, _)) => {}
+                    }
                 }
                 if let Some(limit) = saved_output_limit {
                     row.manifest["output_limit"] = limit;
@@ -617,12 +647,14 @@ pub(crate) async fn execute_request<C: RequestCaller>(
                     link(&tx, &saved)?;
                 }
                 tx.commit()?;
-                Ok(true)
+                Ok(Admission::Committed)
             })
             .await
             .map_err(storage_error)?;
-        if !committed {
-            return Ok(Execution::Fenced);
+        match committed {
+            Admission::Fenced => return Ok(Execution::Fenced),
+            Admission::RunCeilingReached => return Ok(Execution::RunCeilingReached),
+            Admission::Committed => {}
         }
         let retry_wait_ms = std::mem::take(&mut charge.budget.retry_wait_ms);
         let outcome = {
@@ -943,7 +975,7 @@ mod ownership_tests {
             let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
             let connection = Connection { base_url:format!("http://{}/v1",listener.local_addr().unwrap()), response_max_retries: u32::from(kind == AttemptKind::Conversation), response_retry_max_delay_ms:1, ..Default::default() };
             let client = HttpModelClient::for_connection("fixture",connection.clone()).unwrap();
-            let scope = || RequestScope { database:&db, client:&client, connection:&connection, kind, adapt_after_transient:false };
+            let scope = || RequestScope { database:&db, client:&client, connection:&connection, kind, adapt_after_transient:false, run:None };
             let mut caller = Caller(kind,json!({"model":"fixture","input":[{"role":"user","content":"full"}]}), None);
             let cancel = CancellationToken::new();
             let mut budget = RetryBudget::default();

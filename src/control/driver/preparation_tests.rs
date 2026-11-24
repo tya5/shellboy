@@ -54,6 +54,7 @@ async fn fixture_with_policy(
             Request::new(
                 format!("{}:send", owner.instance_id),
                 Command::MessageSend(MessageSendArgs {
+                    max_model_requests: None,
                     resume_recovery: false,
                     human: false,
                     sender_label: None,
@@ -2213,6 +2214,7 @@ async fn recovery_rewind_stops_exact_waiting_run_and_preserves_held_input_body_a
             Request::new(
                 format!("{}:admitted-input", owner.instance_id),
                 Command::MessageSend(MessageSendArgs {
+                    max_model_requests: None,
                     resume_recovery: false,
                     human: true,
                     sender_label: None,
@@ -2284,6 +2286,7 @@ async fn recovery_rewind_stops_exact_waiting_run_and_preserves_held_input_body_a
             Request::new(
                 format!("{}:held", owner.instance_id),
                 Command::MessageSend(MessageSendArgs {
+                    max_model_requests: None,
                     resume_recovery: false,
                     human: false,
                     sender_label: None,
@@ -2398,6 +2401,7 @@ async fn recovery_rewind_stops_exact_waiting_run_and_preserves_held_input_body_a
             Request::new(
                 format!("{}:after-rewind", owner.instance_id),
                 Command::MessageSend(MessageSendArgs {
+                    max_model_requests: None,
                     resume_recovery: false,
                     human: true,
                     sender_label: None,
@@ -2534,6 +2538,7 @@ async fn recovery_rewind_group_boundary_failure_rolls_back_stop_path_branch_and_
             Request::new(
                 format!("{}:rollback-held", owner.instance_id),
                 Command::MessageSend(MessageSendArgs {
+                    max_model_requests: None,
                     resume_recovery: false,
                     human: false,
                     sender_label: None,
@@ -2830,6 +2835,7 @@ async fn received_attempt_fence(truncated: bool) {
             Request::new(
                 format!("{}:queued", owner.instance_id),
                 Command::MessageSend(MessageSendArgs {
+                    max_model_requests: None,
                     resume_recovery: false,
                     human: false,
                     sender_label: None,

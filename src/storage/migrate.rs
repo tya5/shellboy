@@ -342,6 +342,11 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         sql: include_str!("../../migrations/0064_thread_cwd_partitions.sql"),
         foreign_keys: Some(Impact::IndexOnly),
     },
+    Migration {
+        version: 65,
+        sql: include_str!("../../migrations/next_run_request_ceiling.sql"),
+        foreign_keys: None,
+    },
 ];
 
 pub(super) fn run(

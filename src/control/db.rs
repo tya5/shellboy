@@ -731,6 +731,7 @@ impl Store {
                     let result = store.send_content(
                         tx,
                         &MessageSendArgs {
+                            max_model_requests: None,
                             human: true,
                             resume_recovery: false,
                             sender_label: None,
@@ -1030,7 +1031,7 @@ impl Store {
                 history::select_path(&tx,&fork,1,&path,&now).map_err(storage_error)?;
                 if args.connection.is_some()||args.model.is_some()||args.effort.is_some(){store.set_thread(&tx,&ThreadSetArgs{ auto_compact_target_percent:None,summary_max_chars:None,max_tokens:None,spill:None,agents: None,thread_id:Some(fork.clone()),connection:args.connection,model:args.model,effort:args.effort,cwd:None,title:None,auto_compact_at:None,parent_id: None},None,&now)?;}
                 let revision:i64=history::selection_revision(&tx, &fork, history::ThreadScope::Any).map_err(sql_error)?;
-                let mut result=store.send_content(&tx,&MessageSendArgs { human: true, resume_recovery: false,
+                let mut result=store.send_content(&tx,&MessageSendArgs { max_model_requests: None, human: true, resume_recovery: false,
   sender_label: None,thread_id:Some(fork),text:content.text.clone(),deliver:options.deliver},None,&operation_id,&now,SendContent { reply: ReplyIntent::None, elements: content.new_source_elements(files.len())?, sender: MessageSender::recorded(None, None, true) })?;
                 let message=result.result.get("message_id").and_then(Value::as_str).ok_or_else(||error(ErrorCode::InvalidState,"Accepted edit has no source node"))?;
                 crate::attachments::add_tx(&tx,&crate::attachments::AddPlan{thread_id:result.result["thread_id"].as_str().unwrap().into(),selection_revision:revision,files},Some(message))?;
@@ -1130,6 +1131,7 @@ impl Store {
                     store.send_content(
                         tx,
                         &MessageSendArgs {
+                            max_model_requests: None,
                             human: true,
                             resume_recovery: false,
                             sender_label: None,
@@ -2058,6 +2060,7 @@ impl Store {
         self.send_content(
             tx,
             &MessageSendArgs {
+                max_model_requests: None,
                 human: args.human,
                 resume_recovery: false,
                 sender_label: None,
@@ -2176,15 +2179,7 @@ impl Store {
                 recovery_changed: false,
             }
         } else {
-            assign_message(
-                tx,
-                &id,
-                caller,
-                args.deliver,
-                args.human,
-                args.resume_recovery,
-                now,
-            )?
+            assign_message(tx, &id, caller, args, now)?
         };
         let message_id = uuid::Uuid::new_v4().to_string();
         let role = if named { "assistant" } else { "user" };
@@ -2287,11 +2282,16 @@ fn assign_message(
     tx: &Transaction<'_>,
     id: &str,
     caller: Option<&Origin>,
-    deliver: Deliver,
-    human: bool,
-    resume_recovery: bool,
+    args: &MessageSendArgs,
     now: &str,
 ) -> Result<MessageAssignment> {
+    let MessageSendArgs {
+        deliver,
+        human,
+        resume_recovery,
+        max_model_requests,
+        ..
+    } = *args;
     let _parent: Option<String> = tx
         .query_row(
             "SELECT parent_thread_id FROM thread WHERE id=?1 AND deleted_at IS NULL",
@@ -2317,6 +2317,13 @@ fn assign_message(
     let mut wake = false;
     let mut recovery_changed = false;
     if let Some((run_id, state)) = run {
+        if max_model_requests.is_some() {
+            return Err(error(
+                ErrorCode::InvalidState,
+                "Request ceiling requires a new Run",
+            )
+            .details(json!({"reason":"model_request_ceiling_requires_new_run","run_id":run_id})));
+        }
         // A Run already in recovery wait gets ordinary input, as at entry.
         let recovering: bool = tx
             .query_row(
@@ -2387,7 +2394,8 @@ fn assign_message(
             }
         }
     } else {
-        let (run_id, turn_id) = start_run_tx(tx, id, actor(caller), now).map_err(sql_error)?;
+        let (run_id, turn_id) =
+            start_run_tx(tx, id, actor(caller), now, max_model_requests).map_err(sql_error)?;
         // A human's new instruction resumes unassigned saved input.
         // An independent model send does not silently admit recovery input.
         // Previously assigned receipts keep their original Run/Turn forever.
@@ -2430,11 +2438,12 @@ pub(super) fn start_run_tx(
     thread: &str,
     source: Value,
     at: &str,
+    max_model_requests: Option<std::num::NonZeroU32>,
 ) -> rusqlite::Result<(String, String)> {
     let run = uuid::Uuid::new_v4().to_string();
     tx.execute(
-        "INSERT INTO run(id,thread_id,state,created_at) VALUES(?1,?2,'live',?3)",
-        params![run, thread, at],
+        "INSERT INTO run(id,thread_id,state,created_at,max_model_requests) VALUES(?1,?2,'live',?3,?4)",
+        params![run, thread, at, max_model_requests.map(std::num::NonZeroU32::get)],
     )?;
     super::context::record(
         tx,
@@ -2858,8 +2867,8 @@ pub(crate) fn saved_usage_for_detail(
 
 pub fn run_details(connection: &Connection, id: &str) -> Result<RunDetails> {
     let row = connection
-        .query_row("SELECT thread_id,state FROM run WHERE id=?1", [id], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        .query_row("SELECT thread_id,state,max_model_requests,model_requests_used,stop_reason FROM run WHERE id=?1", [id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, Option<u32>>(2)?, row.get::<_, u32>(3)?, row.get::<_, Option<String>>(4)?))
         })
         .optional()
         .map_err(sql_error)?
@@ -2876,6 +2885,14 @@ pub fn run_details(connection: &Connection, id: &str) -> Result<RunDetails> {
         None => recovery_hint,
     };
     Ok(RunDetails {
+        model_requests: row.2.map(|ceiling| crate::protocol::RunModelRequests {
+            ceiling,
+            used: row.3,
+        }),
+        stop_reason: (row.4.as_deref() == Some(super::state::MODEL_REQUEST_CEILING_REACHED))
+            .then_some(crate::protocol::RunStopReason::ModelRequestCeilingReached {
+                requests_used: row.3,
+            }),
         usage_totals: None,
         waiting_reason: crate::readback::run_wait_reason(connection, &row.0, id)?,
         revisit: super::revisit::summary_for_run(connection, id).map_err(sql_error)?,
@@ -5061,6 +5078,7 @@ mod agents_reference_tests {
             let accepted = store
                 .execute(
                     req(Command::MessageSend(MessageSendArgs {
+                        max_model_requests: None,
                         human: false,
                         resume_recovery: false,
                         thread_id: Some(target.clone()),
@@ -5191,6 +5209,7 @@ mod agents_reference_tests {
         let held = store
             .execute(
                 req(Command::MessageSend(MessageSendArgs {
+                    max_model_requests: None,
                     human: false,
                     resume_recovery: false,
                     thread_id: Some(target),
@@ -5296,9 +5315,15 @@ mod interrupted_message_assignment_tests {
                 &tx,
                 "child",
                 caller.as_ref(),
-                Deliver::Next,
-                true,
-                false,
+                &MessageSendArgs {
+                    deliver: Deliver::Next,
+                    human: true,
+                    resume_recovery: false,
+                    max_model_requests: None,
+                    sender_label: None,
+                    thread_id: None,
+                    text: String::new(),
+                },
                 "resume",
             )
             .unwrap();
@@ -5461,6 +5486,7 @@ mod message_acknowledgement_state_tests {
         let request = Request::new(
             "fixture:typed-ack",
             Command::MessageSend(MessageSendArgs {
+                max_model_requests: None,
                 human: false,
                 resume_recovery: false,
                 sender_label: None,
@@ -6185,6 +6211,7 @@ mod independent_run_notification_tests {
             let request = Request::new(
                 "fixture:new-child",
                 Command::MessageSend(MessageSendArgs {
+                    max_model_requests: None,
                     human: false,
                     resume_recovery: false,
                     sender_label: None,
@@ -6228,6 +6255,7 @@ mod independent_run_notification_tests {
                             Request::new(
                                 "fixture:existing-child",
                                 Command::MessageSend(MessageSendArgs {
+                                    max_model_requests: None,
                                     human: false,
                                     resume_recovery: false,
                                     sender_label: None,

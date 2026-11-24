@@ -60,6 +60,7 @@ enum Next {
     Ready(Box<Snapshot>),
     Idle,
     Recheck,
+    Drain,
     Done,
 }
 fn id() -> String {
@@ -214,6 +215,11 @@ async fn drive_inner(
         let snapshot =
             match next_with_clients(&control, &thread, &slot.run_id, clients.clone()).await? {
                 Next::Recheck => continue,
+                Next::Drain => {
+                    drop(boundary_guard);
+                    control.live.cancel_join_proactive_job(&thread, &slot).await;
+                    return drain_and_stop(&control, &slot.run_id, Some(&thread)).await;
+                }
                 Next::Done => return Ok(()),
                 Next::Idle => {
                     instructions.clear();
@@ -315,6 +321,7 @@ async fn drive_inner(
                 client: &rate_client,
                 connection,
                 kind: AttemptKind::Conversation,
+                run: Some(&slot.run_id),
                 adapt_after_transient: connection.auto_trim_on_disconnect,
             },
             &mut caller,
@@ -338,7 +345,9 @@ async fn drive_inner(
                 failure,
                 decision,
             }) => (attempt, Err(*failure), None, true, Some(decision)),
-            Ok(Execution::InputChanged | Execution::Fenced) => continue,
+            Ok(Execution::InputChanged | Execution::Fenced | Execution::RunCeilingReached) => {
+                continue;
+            }
             Ok(Execution::BudgetExhausted) => {
                 return fail_turn(
                     &control,
@@ -682,8 +691,13 @@ async fn next_with_clients(
     let result = control.store.database.call(move|db|{
         let tx=db.transaction()?;
         let mut keys = Vec::new();
-        let run:Option<String>=tx.query_row("SELECT id FROM run WHERE thread_id=?1 AND id=?2 AND state='live'",params![thread,run_id],|r|r.get(0)).optional()?;
-        let Some(run)=run else{return Ok(Next::Done);};
+        let status:Option<(String,Option<String>)>=tx.query_row("SELECT state,stop_reason FROM run WHERE thread_id=?1 AND id=?2",params![thread,run_id],|r|Ok((r.get(0)?,r.get(1)?))).optional()?;
+        match status.as_ref().map(|(state, reason)| (state.as_str(), reason.as_deref())) {
+            Some(("stopping", Some(super::state::MODEL_REQUEST_CEILING_REACHED))) => return Ok(Next::Drain),
+            Some(("live", _)) => {},
+            _ => return Ok(Next::Done),
+        }
+        let run=run_id;
         let interrupted:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM turn WHERE run_id=?1 AND state IN ('preparing','running','waiting','recovery_wait') AND interrupt_requested_at IS NOT NULL)",[&run],|r|r.get(0))?;
         if interrupted {
             // A failed earlier driver can leave an adopted group unfinished.
@@ -1429,12 +1443,13 @@ async fn spill_and_summarize(
     thread: &str,
     cancel: CancellationToken,
     boundary: Option<&mut crate::compaction::boundary::Boundary<'_>>,
+    request_run: Option<String>,
 ) -> Result<crate::compaction::CompactResult, ApiError> {
     let spill = compactor
         .spill_cancellable(thread, true, cancel.clone())
         .await?;
     let summary = compactor
-        .summarize_guarded(thread, true, cancel, boundary)
+        .summarize_guarded(thread, true, cancel, boundary, request_run)
         .await?;
     Ok(if summary.no_target && !spill.no_target {
         spill

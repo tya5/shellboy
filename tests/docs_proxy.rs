@@ -58,7 +58,7 @@ async fn luna_discovers_bundled_guides_and_observes_its_background_shell() {
             connection: None, cwd: None, model: None, effort: None, parent_id: None,
         })).await;
         let thread_id = thread["thread_id"].as_str().unwrap().to_owned();
-        request(&control, Command::MessageSend(MessageSendArgs { human: false, resume_recovery: false,
+        request(&control, Command::MessageSend(MessageSendArgs { max_model_requests: None, human: false, resume_recovery: false,
 sender_label: None,
 deliver: Deliver::Next,
             thread_id: Some(thread_id.clone()),

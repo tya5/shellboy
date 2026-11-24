@@ -1543,6 +1543,12 @@ impl Form {
                 vec![
                     thread(),
                     f("resume_recovery", "回復待ちを解除", "false".into(), Boolean),
+                    f(
+                        "max_model_requests",
+                        "Model request ceiling",
+                        String::new(),
+                        Number,
+                    ),
                     f("text", "依頼本文（Ctrl+J改行）", String::new(), Multiline),
                     f(
                         "sender_label",
@@ -1559,6 +1565,7 @@ impl Form {
                 ],
                 |form, _cwd| {
                     Ok(Command::MessageSend(MessageSendArgs {
+                        max_model_requests: form.optional_number("max_model_requests")?,
                         human: false,
                         resume_recovery: form.boolean("resume_recovery")?,
                         sender_label: form.optional("sender_label")?,

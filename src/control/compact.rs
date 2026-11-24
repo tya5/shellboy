@@ -255,11 +255,11 @@ pub(super) async fn argument_free_compact(
             .await?
     };
     let mut summary = compactor
-        .summarize_guarded(thread, false, cancel.clone(), boundary.as_deref_mut())
+        .summarize_guarded(thread, false, cancel.clone(), boundary.as_deref_mut(), None)
         .await?;
     if open && summary.no_target {
         summary = compactor
-            .summarize_active_guarded(thread, cancel, boundary, None)
+            .summarize_active_guarded(thread, cancel, boundary, None, None)
             .await?;
     }
     summary.spilled_groups += spill.spilled_groups;

@@ -1142,3 +1142,14 @@ not UUID-validated or derived from labels or titles. IDs are JSON-string escaped
 so control characters cannot add lines. Structured sender DTOs remain the client
 interface; clients must not parse the preamble. Current title lookup belongs to
 the UI and does not rewrite saved sender facts or labels.
+
+### New-Run request ceiling (#399)
+
+`message.send.max_model_requests` accepts a positive 32-bit integer, with no
+implicit limit. The send must create a new Run; an existing live or stopping
+Run causes `invalid_state` with detail `model_request_ceiling_requires_new_run`
+and `run_id`. No message is queued in that case. For a limited Run, `run.get`
+reports `model_requests: {ceiling, used}`. Refusing a further request stops the
+Run with `stop_reason: {kind: "model_request_ceiling_reached", requests_used: N}`.
+A committed reservation survives interruption and does not prove delivery to
+the provider. See [Control](control.md#per-run-model-request-ceiling-399).

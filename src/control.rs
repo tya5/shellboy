@@ -2100,6 +2100,7 @@ mod failure_tests {
             .await
             .insert(origin.token.clone(), origin.clone());
         let command = Command::MessageSend(MessageSendArgs {
+            max_model_requests: None,
             resume_recovery: false,
             human: false,
             thread_id: Some("target".into()),

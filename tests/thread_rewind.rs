@@ -320,6 +320,7 @@ async fn unadmitted_input_is_delivered_once_on_the_rewound_path() {
     let request = Request::new(
         format!("instance:{}", uuid::Uuid::new_v4()),
         Command::MessageSend(MessageSendArgs {
+            max_model_requests: None,
             human: true,
             resume_recovery: false,
             sender_label: None,

@@ -125,6 +125,7 @@ async fn upload_recovery(auto_trim: bool) {
         request(
             &control,
             Command::MessageSend(MessageSendArgs {
+                max_model_requests: None,
                 resume_recovery: false,
                 human: false,
                 sender_label: None,
@@ -298,6 +299,7 @@ async fn refused_proxy_connections_exhaust_the_finite_retry_budget() {
         request(
             &control,
             Command::MessageSend(MessageSendArgs {
+                max_model_requests: None,
                 resume_recovery: false,
                 human: false,
                 sender_label: None,

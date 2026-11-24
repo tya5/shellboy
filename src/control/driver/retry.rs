@@ -89,6 +89,7 @@ async fn open_loop_reduce(
             slot.stop.clone(),
             Some(&mut *boundary),
             None,
+            Some(snapshot.run.clone()),
         )
         .await;
     if matches!(&result, Ok(r) if r.no_target) {
@@ -99,6 +100,7 @@ async fn open_loop_reduce(
                 slot.stop.clone(),
                 Some(&mut *boundary),
                 None,
+                Some(snapshot.run.clone()),
             )
             .await;
     }
@@ -218,6 +220,7 @@ pub(super) async fn retry_or_recover(
                     &snapshot.thread,
                     slot.stop.clone(),
                     Some(boundary_guard),
+                    Some(snapshot.run.clone()),
                 )
                 .await
                 {

@@ -444,6 +444,7 @@ async fn archived_threads_stay_readable_countable_and_can_receive_messages() {
 
 fn send(thread: &str, text: &str) -> Command {
     Command::MessageSend(MessageSendArgs {
+        max_model_requests: None,
         resume_recovery: false,
 
         human: false,
@@ -570,6 +571,7 @@ async fn auto_unarchive_by_send_and_deliver_complete_wakes_the_new_run() {
         let result = full(
             &store,
             Command::MessageSend(MessageSendArgs {
+                max_model_requests: None,
                 resume_recovery: false,
                 human: false,
                 sender_label: None,
@@ -598,6 +600,7 @@ async fn auto_unarchive_by_send_and_deliver_complete_wakes_the_new_run() {
     let held = full(
         &store,
         Command::MessageSend(MessageSendArgs {
+            max_model_requests: None,
             resume_recovery: false,
 
             human: false,

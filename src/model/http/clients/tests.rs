@@ -553,6 +553,7 @@ async fn control_conversations_reuse_owner_client_for_chunked_sse() {
             .request(Request::new(
                 format!("{}:send-{n}", owner.instance_id),
                 Command::MessageSend(MessageSendArgs {
+                    max_model_requests: None,
                     resume_recovery: false,
                     human: false,
                     sender_label: None,

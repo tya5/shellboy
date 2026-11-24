@@ -128,6 +128,7 @@ async fn start(control: &Arc<Control>) -> MessageAccepted {
         command(
             control,
             Command::MessageSend(MessageSendArgs {
+                max_model_requests: None,
                 resume_recovery: false,
                 human: false,
                 sender_label: None,
@@ -191,6 +192,7 @@ async fn check(scenario: Scenario, expected: &str) {
             command(
                 &control,
                 Command::MessageSend(MessageSendArgs {
+                    max_model_requests: None,
                     resume_recovery: false,
                     human: false,
                     sender_label: None,

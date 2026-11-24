@@ -56,6 +56,7 @@ async fn historical_image_replays_at_its_source_with_local_luna() {
     request(
         &control,
         Command::MessageSend(MessageSendArgs {
+            max_model_requests: None,
             resume_recovery: false,
 
             human: false,

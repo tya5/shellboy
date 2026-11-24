@@ -858,6 +858,7 @@ mod frame_delivery_tests {
         let operation = "instance:oversized";
         let make = |text| {
             Command::MessageSend(MessageSendArgs {
+                max_model_requests: None,
                 resume_recovery: false,
                 human: false,
                 sender_label: None,
@@ -947,6 +948,7 @@ mod frame_delivery_tests {
             client,
             endpoint(),
             Command::MessageSend(MessageSendArgs {
+                max_model_requests: None,
                 resume_recovery: false,
                 human: false,
                 sender_label: None,
@@ -1157,6 +1159,7 @@ mod frame_delivery_tests {
             client,
             endpoint(),
             Command::MessageSend(MessageSendArgs {
+                max_model_requests: None,
                 resume_recovery: false,
                 human: false,
                 sender_label: None,
@@ -1450,6 +1453,7 @@ mod frame_delivery_tests {
                 .unwrap();
         });
         let command = Command::MessageSend(MessageSendArgs {
+            max_model_requests: None,
             resume_recovery: false,
             human: true,
             sender_label: None,

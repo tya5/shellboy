@@ -197,6 +197,7 @@ async fn send(control: &Arc<Control>, thread: &str, text: &str) {
     request(
         control,
         Command::MessageSend(MessageSendArgs {
+            max_model_requests: None,
             resume_recovery: false,
 
             human: false,
@@ -640,6 +641,7 @@ async fn changed_file_retry_keeps_update_identity_and_success_advances_only_that
     let accepted = request(
         &control,
         Command::MessageSend(MessageSendArgs {
+            max_model_requests: None,
             resume_recovery: false,
 
             human: false,
@@ -1230,6 +1232,7 @@ async fn compacted_attachment_source_is_replaced_without_sending_its_file_entity
     let resumed = request(
         &control,
         Command::MessageSend(MessageSendArgs {
+            max_model_requests: None,
             resume_recovery: false,
 
             human: false,
@@ -1525,6 +1528,7 @@ async fn schema49_migrated_legacy_summary_reopens_as_user_before_newer_user_in_o
     request(
         &control,
         Command::MessageSend(MessageSendArgs {
+            max_model_requests: None,
             resume_recovery: false,
             human: false,
             sender_label: None,
@@ -2021,6 +2025,7 @@ async fn issue_160_auto_compaction_detached_attachment_and_retry() {
         request(
             &control,
             Command::MessageSend(MessageSendArgs {
+                max_model_requests: None,
                 resume_recovery: false,
                 human: false,
                 sender_label: None,
@@ -2140,6 +2145,7 @@ async fn issue_160_auto_compaction_detached_attachment_and_retry() {
         let retry_acceptance = request(
             &control,
             Command::MessageSend(MessageSendArgs {
+                max_model_requests: None,
                 resume_recovery: false,
                 human: false,
                 sender_label: None,
@@ -2330,6 +2336,7 @@ async fn schema47_owner_startup_processes_first_message_and_keeps_another_thread
         let accepted = request(
             &control,
             Command::MessageSend(MessageSendArgs {
+                max_model_requests: None,
                 resume_recovery: false,
                 human: false,
                 sender_label: None,

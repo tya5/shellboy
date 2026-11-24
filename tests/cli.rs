@@ -1002,6 +1002,7 @@ async fn message_delivery_timing_replaces_now_and_revisit_commands() {
         assert_eq!(
             convert(&args).await,
             Command::MessageSend(MessageSendArgs {
+                max_model_requests: None,
                 resume_recovery: false,
                 human: false,
                 sender_label: None,

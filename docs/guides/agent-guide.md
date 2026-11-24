@@ -556,6 +556,12 @@ Use the returned execution ID with shell get/read for full command/output; a lis
 never starts a shell or fetches its output.
 
 
+For unattended work that starts a new Run, use `message send --max-model-requests N`.
+It refuses if the Thread already has an active Run. Schedules use the flag in
+their shell command, not in schedule settings. Inspect `run get` for the used
+count and a ceiling stop. It counts Run-owned requests, not tokens or charges;
+it does not limit later Runs or delegated work.
+
 ### Receipt retention and expiry
 
 Mutation and wait results can be reclaimed by internal maintenance after 24 hours from created_at, or under receipt-capacity pressure. Pending and unapplied references are protected. An `operation_expired` response to a repeated ID does not mean the mutation never happened. Expired-ID metadata remains to prevent reexecution, so inspect `operation get`'s `result_expired` and the target's state/history rather than automatically repeating the side effect under a new ID.

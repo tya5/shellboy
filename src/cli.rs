@@ -1005,6 +1005,9 @@ pub struct TextOptions {
 }
 #[derive(Debug, Clone, Args)]
 pub struct MessageSendOptions {
+    /// Maximum model requests for a new Run; refuse if the Thread already has an active Run.
+    #[arg(long)]
+    pub max_model_requests: Option<std::num::NonZeroU32>,
     /// Explicitly resume recovery; acceptance is not execution success. Track the returned Turn with wait/turn get.
     #[arg(long)]
     pub resume_recovery: bool,
@@ -1879,6 +1882,7 @@ impl Cli {
             },
             CliCommand::Message { command } => match command {
                 MessageCommand::Send(a) => C::MessageSend(wire::MessageSendArgs {
+                    max_model_requests: a.max_model_requests,
                     human: false,
                     resume_recovery: a.resume_recovery,
                     sender_label: a.sender_label,

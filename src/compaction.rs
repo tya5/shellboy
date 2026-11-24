@@ -731,7 +731,7 @@ impl Compactor {
         allow_protected_suffix: bool,
         cancel: CancellationToken,
     ) -> Result<CompactResult, ApiError> {
-        self.summarize_guarded(thread, allow_protected_suffix, cancel, None)
+        self.summarize_guarded(thread, allow_protected_suffix, cancel, None, None)
             .await
     }
     pub(crate) async fn summarize_guarded(
@@ -740,6 +740,7 @@ impl Compactor {
         allow_protected_suffix: bool,
         cancel: CancellationToken,
         boundary: Option<&mut boundary::Boundary<'_>>,
+        request_run: Option<String>,
     ) -> Result<CompactResult, ApiError> {
         let snapshot = self.snapshot(thread, true).await?;
         let Some(range) = policy::summary_range(&snapshot, allow_protected_suffix) else {
@@ -748,7 +749,7 @@ impl Compactor {
                 ..Default::default()
             });
         };
-        self.summarize_snapshot(snapshot, range, cancel, boundary, None)
+        self.summarize_snapshot(snapshot, range, cancel, boundary, None, request_run)
             .await
     }
     /// #181/#182: replace every tool round of the active Turn with one summary
@@ -763,7 +764,7 @@ impl Compactor {
         thread: &str,
         cancel: CancellationToken,
     ) -> Result<CompactResult, ApiError> {
-        self.summarize_active_guarded(thread, cancel, None, None)
+        self.summarize_active_guarded(thread, cancel, None, None, None)
             .await
     }
     pub(crate) async fn summarize_active_guarded(
@@ -772,6 +773,7 @@ impl Compactor {
         cancel: CancellationToken,
         boundary: Option<&mut boundary::Boundary<'_>>,
         automatic: Option<AutomaticStage>,
+        request_run: Option<String>,
     ) -> Result<CompactResult, ApiError> {
         let snapshot = self.snapshot(thread, true).await?;
         let Some(plan) = policy::active_turn_plan(&snapshot) else {
@@ -789,6 +791,7 @@ impl Compactor {
             ledger: &mut ledger,
             boundary,
             automatic,
+            request_run,
             drop_all_reasoning: false,
             active: Some(plan),
             requested_limit: None,
@@ -823,6 +826,7 @@ impl Compactor {
         cancel: CancellationToken,
         boundary: Option<&mut boundary::Boundary<'_>>,
         automatic: Option<AutomaticStage>,
+        request_run: Option<String>,
     ) -> Result<CompactResult, ApiError> {
         let snapshot = self.snapshot(thread, true).await?;
         let Some(range) = policy::unsummarized_prefix(&snapshot) else {
@@ -831,7 +835,7 @@ impl Compactor {
                 ..Default::default()
             });
         };
-        self.summarize_snapshot(snapshot, range, cancel, boundary, automatic)
+        self.summarize_snapshot(snapshot, range, cancel, boundary, automatic, request_run)
             .await
     }
     pub(crate) async fn tool_loop_open(&self, thread: &str) -> Result<bool, ApiError> {
@@ -951,7 +955,7 @@ impl Compactor {
                 Err(error)=>Err(error.clone()),
                 Ok(setup) if failure_memory::blocks(&setup.observed,&setup.identity,setup.provider.as_deref())=>Err(discard::failed(discard::FailureReason::RetrySuppressed,discard::FailureOrigin::Preparation,"This summary range already failed for its captured source identity; original path retained")),
                 Ok(_)=>{
-                    let request=single_request::DispatchRequest{input:&material,owner:single_request::DispatchOwner::Gc,selected:0..material_groups.len(),limit:output_limit,cancel:&cancel,ledger:&mut ledger,eligible,
+                    let request=single_request::DispatchRequest{input:&material,request_run:captured.origin_run.as_deref(),owner:single_request::DispatchOwner::Gc,selected:0..material_groups.len(),limit:output_limit,cancel:&cancel,ledger:&mut ledger,eligible,
                     };
                     let dispatched_future=compactor.dispatch_single_summary(request);tokio::pin!(dispatched_future);
                     tokio::select!{biased;_=stop_for_job.cancelled()=>{cancel.cancel();dispatched_future.as_mut().await},result=dispatched_future.as_mut()=>result}
@@ -1019,7 +1023,7 @@ impl Compactor {
         cancel: CancellationToken,
         boundary: Option<&mut boundary::Boundary<'_>>,
         automatic: Option<AutomaticStage>,
-        requested_limit: Option<u64>,
+        (requested_limit, request_run): (Option<u64>, Option<String>),
     ) -> Result<CompactResult, ApiError> {
         let mut ledger = usage::SummaryRequests::new(snapshot.current_turn.clone());
         self.summarize_single(single_request::SummaryRequest {
@@ -1029,6 +1033,7 @@ impl Compactor {
             ledger: &mut ledger,
             boundary,
             automatic,
+            request_run,
             drop_all_reasoning: false,
             active: None,
             requested_limit,
@@ -1043,9 +1048,17 @@ impl Compactor {
         cancel: CancellationToken,
         boundary: Option<&mut boundary::Boundary<'_>>,
         automatic: Option<AutomaticStage>,
+        request_run: Option<String>,
     ) -> Result<CompactResult, ApiError> {
-        self.summarize_range(snapshot, range, cancel, boundary, automatic, None)
-            .await
+        self.summarize_range(
+            snapshot,
+            range,
+            cancel,
+            boundary,
+            automatic,
+            (None, request_run),
+        )
+        .await
     }
 }
 
@@ -2388,7 +2401,7 @@ mod tests {
         let compactor = Compactor::new(db.clone(), Arc::new(config));
         let snapshot = compactor.snapshot("t", true).await.unwrap();
         let error = compactor
-            .summarize_snapshot(snapshot, 0..2, CancellationToken::new(), None, None)
+            .summarize_snapshot(snapshot, 0..2, CancellationToken::new(), None, None, None)
             .await
             .unwrap_err();
         assert_eq!(error.code, ErrorCode::InvalidState);
@@ -2508,6 +2521,7 @@ mod tests {
                     token: "synthetic-token".into(),
                     stage: "closed_summary",
                 }),
+                None,
             )
             .await
             .unwrap_err();
@@ -2576,7 +2590,7 @@ mod tests {
         let compactor = Compactor::new(db.clone(), Arc::new(summary_config(url)));
         let snapshot = compactor.snapshot("t", true).await.unwrap();
         let result = compactor
-            .summarize_snapshot(snapshot, 1..3, CancellationToken::new(), None, None)
+            .summarize_snapshot(snapshot, 1..3, CancellationToken::new(), None, None, None)
             .await
             .unwrap();
         assert_eq!(result.original_node_ids, ["middle-a", "middle-b"]);
@@ -3785,7 +3799,7 @@ mod tests {
         let compactor = Compactor::new(db.clone(), Arc::new(summary_config(url)));
         let snapshot = compactor.snapshot("t", true).await.unwrap();
         let first = compactor
-            .summarize_snapshot(snapshot, 0..2, CancellationToken::new(), None, None)
+            .summarize_snapshot(snapshot, 0..2, CancellationToken::new(), None, None, None)
             .await
             .unwrap();
         let usage = first.summary_usage.clone().unwrap();

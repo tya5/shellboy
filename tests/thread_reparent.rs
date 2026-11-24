@@ -91,6 +91,7 @@ async fn revision(store: &Store, id: &str) -> i64 {
 }
 fn send(thread: &str, text: &str) -> Command {
     Command::MessageSend(MessageSendArgs {
+        max_model_requests: None,
         resume_recovery: false,
 
         human: false,

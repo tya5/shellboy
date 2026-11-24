@@ -323,6 +323,7 @@ impl super::db::Store {
             let result = self.send(
                 tx,
                 &MessageSendArgs {
+                    max_model_requests: None,
                     human: caller.is_none(),
                     resume_recovery: saved["to_human"] == true && caller.is_none(),
                     sender_label: args.sender_label.clone(),
@@ -589,7 +590,7 @@ fn outcome_tx(
             if stopping {
                 None
             } else {
-                Some(super::db::start_run_tx(db, &thread, json!({"kind":"shellboy"}), at)?.0)
+                Some(super::db::start_run_tx(db, &thread, json!({"kind":"shellboy"}), at, None)?.0)
             }
         }
     };
