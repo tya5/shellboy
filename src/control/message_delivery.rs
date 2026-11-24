@@ -88,8 +88,9 @@ pub(crate) fn plan_admission_tx(
         if seen.contains(&question) {
             continue;
         }
+        // Revisit is a later timing class, not a barrier to current input.
         let blocked:bool=db.query_row(
-            "SELECT EXISTS(SELECT 1 FROM (SELECT r.message_node_id AS node_id,COALESCE(r.created_at,n.created_at) AS created_at,n.rowid AS source_rowid FROM receipt r JOIN node n ON n.id=r.message_node_id WHERE r.target_thread_id=?1 AND r.state IN ('accepted','held') AND r.path_admission<>'admitted' AND NOT EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id=?1 AND p.node_id=n.id) UNION ALL SELECT d.node_id AS node_id,n.created_at AS created_at,n.rowid AS source_rowid FROM attachment_delivery d JOIN node n ON n.id=d.node_id WHERE d.thread_id=?1 AND d.status IN ('accepted','held') AND NOT EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id=?1 AND p.node_id=d.node_id)) pending WHERE (pending.created_at<?2 OR (pending.created_at=?2 AND pending.source_rowid<?3)) AND pending.node_id NOT IN (SELECT value FROM json_each(?4)))",
+            "SELECT EXISTS(SELECT 1 FROM (SELECT r.message_node_id AS node_id,COALESCE(r.created_at,n.created_at) AS created_at,n.rowid AS source_rowid FROM receipt r JOIN node n ON n.id=r.message_node_id WHERE r.target_thread_id=?1 AND r.state IN ('accepted','held') AND NOT (r.state='held' AND r.hold_reason IS 'run_completion') AND r.path_admission<>'admitted' AND NOT EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id=?1 AND p.node_id=n.id) UNION ALL SELECT d.node_id AS node_id,n.created_at AS created_at,n.rowid AS source_rowid FROM attachment_delivery d JOIN node n ON n.id=d.node_id WHERE d.thread_id=?1 AND d.status IN ('accepted','held') AND NOT EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id=?1 AND p.node_id=d.node_id)) pending WHERE (pending.created_at<?2 OR (pending.created_at=?2 AND pending.source_rowid<?3)) AND pending.node_id NOT IN (SELECT value FROM json_each(?4)))",
             params![thread,created,rowid,caller_set],|r|r.get(0),
         )?;
         if blocked {

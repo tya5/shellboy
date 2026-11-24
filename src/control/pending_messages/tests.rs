@@ -420,42 +420,12 @@ async fn human_question_reply_cancel_and_attachment_frontier_preserve_fifo() {
 #[tokio::test]
 async fn held_frontier_defers_the_replied_question_and_later_attachment() {
     let (root, store) = store().await;
-    let held = store
-        .execute(
-            Request::new(
-                "fixture:held-before-question",
-                Command::MessageSend(MessageSendArgs {
-                    human: true,
-                    resume_recovery: false,
-                    sender_label: None,
-                    thread_id: Some("t".into()),
-                    text: "held H".into(),
-                    deliver: Deliver::Complete,
-                }),
-            ),
-            None,
-        )
-        .await
-        .unwrap();
-    let held_id = held.result["message_id"].as_str().unwrap().to_owned();
-    assert_eq!(
-        store
-            .database
-            .call({
-                let held_id = held_id.clone();
-                move |db| {
-                    db.query_row(
-                        "SELECT state FROM receipt WHERE message_node_id=?1",
-                        [held_id],
-                        |r| r.get::<_, String>(0),
-                    )
-                    .map_err(Into::into)
-                }
-            })
-            .await
-            .unwrap(),
-        "held"
-    );
+    // An unassigned ordinary message retained across a restart, not a Revisit.
+    let held_id = "interrupted-input".to_owned();
+    store.database.call(|db| {
+        db.execute_batch("INSERT INTO node(id,kind,created_at,payload_json) VALUES('interrupted-input','user','0','{}'); INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,hold_reason) VALUES('interrupted-input','interrupted-input','null','t','interrupted-input','held','0','previous_instance_interrupted');")?;
+        Ok(())
+    }).await.unwrap();
 
     let question = store
         .execute(

@@ -275,6 +275,88 @@ async fn live_run_receives_complete_messages_in_send_order_when_it_would_complet
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn human_reply_completes_its_turn_before_a_waiting_revisit() {
+    let mut f = fixture().await;
+    let initial = send(&f.control, &f.thread, "START_WORK", Deliver::Next).await;
+    let run = initial.run_id.unwrap();
+    let turn = initial.turn_id.unwrap();
+    let first = incoming(&mut f.receive).await;
+    let held = send(&f.control, &f.thread, "REVISIT_LATER", Deliver::Complete).await;
+    assert_eq!(held.delivery_status, DeliveryStatus::Held);
+    assert!(held.turn_id.is_none());
+    let question = f
+        .control
+        .store
+        .execute(
+            Request::new(
+                format!("{}:question", f.control.store.instance_id),
+                Command::MessageAsk(MessageAskArgs {
+                    human: false,
+                    sender_label: None,
+                    thread_id: None,
+                    to: None,
+                    deliver: Deliver::Next,
+                    text: "HUMAN_QUESTION".into(),
+                }),
+            ),
+            Some(Origin {
+                instance_id: f.control.store.instance_id.clone(),
+                thread_id: f.thread.clone(),
+                run_id: run.clone(),
+                turn_id: turn.clone(),
+                execution_id: "synthetic-shell".into(),
+                token: "synthetic".into(),
+            }),
+        )
+        .await
+        .unwrap()
+        .result;
+    let reply = request(
+        &f.control,
+        Command::MessageReply(MessageReplyArgs {
+            message_id: question["message_id"].as_str().unwrap().into(),
+            text: "HUMAN_ANSWER".into(),
+            sender_label: None,
+        }),
+    )
+    .await;
+    assert_eq!(reply["delivery"]["turn_id"], turn.as_str());
+    first.reply.send((200, answer("First answer"))).unwrap();
+
+    let follow_up = incoming(&mut f.receive).await;
+    assert_order(
+        &follow_up.body,
+        &["HUMAN_QUESTION", "HUMAN_ANSWER"],
+        &["REVISIT_LATER"],
+    );
+    follow_up.reply.send((200, json!({
+        "id":"reasoning-only", "status":"completed",
+        "output":[{"type":"reasoning","summary":[],"content":[],"encrypted_content":"opaque"}]
+    }))).unwrap();
+
+    let revisit = incoming(&mut f.receive).await;
+    assert_order(
+        &revisit.body,
+        &["HUMAN_QUESTION", "HUMAN_ANSWER", "REVISIT_LATER"],
+        &[],
+    );
+    f.control.store.database.call(move |db| {
+        let (state, revisit_turn): (String, String) = db.query_row(
+            "SELECT u.state,r.turn_id FROM turn u JOIN receipt r ON r.message_node_id=?2 WHERE u.id=?1 AND r.run_id=u.run_id",
+            [&turn, &held.message_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        assert_eq!(state, "completed");
+        assert_ne!(revisit_turn, turn);
+        Ok(())
+    }).await.unwrap();
+    revisit.reply.send((200, answer("Revisited"))).unwrap();
+    run_state(&f.control, &run, "completed").await;
+    assert!(f.receive.try_recv().is_err());
+    f.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn without_a_live_run_complete_is_delivered_immediately_like_a_normal_send() {
     let mut f = fixture().await;
     let accepted = send(&f.control, &f.thread, "IMMEDIATE", Deliver::Complete).await;
