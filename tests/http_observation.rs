@@ -53,11 +53,11 @@ fn head(status: u16, len: usize, keep: bool) -> String {
         if keep { "keep-alive" } else { "close" }
     )
 }
-fn client(listener: &TcpListener, header: u64, idle: u64) -> HttpModelClient {
+fn client(address: std::net::SocketAddr, header: u64, idle: u64) -> HttpModelClient {
     HttpModelClient::for_connection(
         "observed",
         Connection {
-            base_url: format!("http://{}/v1", listener.local_addr().unwrap()),
+            base_url: format!("http://{address}/v1"),
             response_header_timeout_ms: header,
             stream_idle_timeout_ms: idle,
             ..Default::default()
@@ -69,7 +69,7 @@ fn client(listener: &TcpListener, header: u64, idle: u64) -> HttpModelClient {
 #[tokio::test]
 async fn header_deadline_records_source_consumption_without_claiming_peer_delivery() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let client = client(&listener, 100, 1000);
+    let client = client(listener.local_addr().unwrap(), 100, 1000);
     let server = tokio::spawn(async move {
         let (mut s, _) = listener.accept().await.unwrap();
         read_body(&mut s).await;
@@ -106,7 +106,7 @@ async fn header_deadline_records_source_consumption_without_claiming_peer_delive
 #[tokio::test]
 async fn header_deadline_does_not_cut_post_header_silence_and_success_has_latency() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let client = client(&listener, 200, 2000);
+    let client = client(listener.local_addr().unwrap(), 200, 2000);
     let server = tokio::spawn(async move {
         let (mut s, _) = listener.accept().await.unwrap();
         s.set_nodelay(true).unwrap();
@@ -133,7 +133,7 @@ async fn header_deadline_does_not_cut_post_header_silence_and_success_has_latenc
 #[tokio::test]
 async fn body_stall_records_received_headers_and_uses_body_idle_setting() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let client = client(&listener, 1000, 100);
+    let client = client(listener.local_addr().unwrap(), 1000, 100);
     let server = tokio::spawn(async move {
         let (mut s, _) = listener.accept().await.unwrap();
         s.set_nodelay(true).unwrap();
@@ -163,7 +163,7 @@ async fn body_stall_records_received_headers_and_uses_body_idle_setting() {
 #[tokio::test]
 async fn stopped_request_reader_records_unconsumed_source_bytes() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let client = client(&listener, 2000, 1000);
+    let client = client(listener.local_addr().unwrap(), 2000, 1000);
     let (read_prefix, prefix_received) = tokio::sync::oneshot::channel();
     let server = tokio::spawn(async move {
         let (mut s, _) = listener.accept().await.unwrap();
@@ -205,7 +205,7 @@ async fn stopped_request_reader_records_unconsumed_source_bytes() {
 #[tokio::test]
 async fn failed_attempt_retires_keepalive_pool_and_retry_uses_fresh_generation() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let client = client(&listener, 2000, 2000);
+    let client = client(listener.local_addr().unwrap(), 2000, 2000);
     let server = tokio::spawn(async move {
         let (mut first, _) = listener.accept().await.unwrap();
         first.set_nodelay(true).unwrap();
@@ -251,9 +251,9 @@ async fn failed_attempt_retires_keepalive_pool_and_retry_uses_fresh_generation()
 
 #[tokio::test]
 async fn connection_refused_is_before_body_source_and_not_a_partial_upload() {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let client = client(&listener, 1000, 1000);
-    drop(listener);
+    let socket = tokio::net::TcpSocket::new_v4().unwrap();
+    socket.bind("127.0.0.1:0".parse().unwrap()).unwrap();
+    let client = client(socket.local_addr().unwrap(), 1000, 1000);
     for _ in 0..3 {
         let failure = crate::test_watchdog::watchdog("tests/http_observation.rs: connection_refused_is_before_body_source_and_not_a_partial_upload",
             client.response(request(), CancellationToken::new(), None),
@@ -276,7 +276,7 @@ async fn connection_refused_is_before_body_source_and_not_a_partial_upload() {
 #[tokio::test]
 async fn completed_unauthorized_response_does_not_retire_a_reusable_pool() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let client = client(&listener, 2000, 2000);
+    let client = client(listener.local_addr().unwrap(), 2000, 2000);
     let server = tokio::spawn(async move {
         let (mut stream, _) = listener.accept().await.unwrap();
         stream.set_nodelay(true).unwrap();
@@ -312,7 +312,7 @@ async fn completed_unauthorized_response_does_not_retire_a_reusable_pool() {
 #[tokio::test]
 async fn model_list_and_embedding_transport_errors_do_not_retire_responses_pool() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let client = client(&listener, 2000, 2000);
+    let client = client(listener.local_addr().unwrap(), 2000, 2000);
     let server = tokio::spawn(async move {
         for _ in 0..2 {
             let (mut stream, _) = listener.accept().await.unwrap();
@@ -355,7 +355,7 @@ async fn model_list_and_embedding_transport_errors_do_not_retire_responses_pool(
 #[tokio::test]
 async fn cancelling_a_responses_request_does_not_retire_its_profile_pool() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let client = client(&listener, 2000, 2000);
+    let client = client(listener.local_addr().unwrap(), 2000, 2000);
     let (ready, received) = tokio::sync::oneshot::channel();
     let server = tokio::spawn(async move {
         let (mut first, _) = listener.accept().await.unwrap();

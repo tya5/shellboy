@@ -857,9 +857,10 @@ async fn connection_test_reports_refusal_with_endpoint_action() {
         let root = tempfile::tempdir().unwrap();
         write_config(root.path(), "");
         let (_owner, control) = start(root.path()).await;
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let url = format!("http://{}/v1", listener.local_addr().unwrap());
-        drop(listener);
+        // Own the port until both probes finish, but never listen on it.
+        let socket = tokio::net::TcpSocket::new_v4().unwrap();
+        socket.bind("127.0.0.1:0".parse().unwrap()).unwrap();
+        let url = format!("http://{}/v1", socket.local_addr().unwrap());
         let result = call(
             &control,
             Command::ConnectionTest(ConnectionTestArgs {

@@ -288,9 +288,9 @@ async fn check_only_gets_catalog_and_preserves_status_and_base_root_hint_without
             "extra connections after the completed command"
         );
     }
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let address = listener.local_addr().unwrap();
-    drop(listener);
+    let socket = tokio::net::TcpSocket::new_v4().unwrap();
+    socket.bind("127.0.0.1:0".parse().unwrap()).unwrap();
+    let address = socket.local_addr().unwrap();
     std::fs::write(&path, configuration(&format!("http://{address}/v1"), false)).unwrap();
     let home = root.path().to_path_buf();
     let (ok, value, text) = tokio::task::spawn_blocking(move || {
