@@ -648,9 +648,10 @@ caught at send time with `invalid_config`, whose message names the key and
 
 The HTTP request tracks the values of its adopted headers, including extra
 headers. Error excerpts remove known values and parsed URL user-info and query
-before applying the display cap. A body cut at the wire limit uses a fixed marker
-rather than risking a partial credential at the boundary. The same failed
-response projection covers normal attempt persistence and user interruption,
-including nested response fields. This does not rewrite successful output,
-previously saved history, or lossless exports. Provider text is not a general
-share-safe diagnostic format.
+before applying the display cap. A body cut at the wire limit retains its
+sanitized prefix and appends a marker; an unfinished credential or URL at the
+boundary is omitted. Failed diagnostic envelopes are sanitized before storage,
+including user interruption. Partial text, reasoning, and completed items
+remain conversation data. An output-limit envelope can be adopted and replayed,
+so it is not rewritten. Previously saved history and lossless exports are not
+rewritten. Provider text is not a general share-safe diagnostic format.

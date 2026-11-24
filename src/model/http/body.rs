@@ -123,6 +123,9 @@ pub(super) async fn http_error_observed(
             break;
         }
     }
+    if !*complete {
+        trim_unfinished_suffix(&mut body, context.secrets);
+    }
     let mut error = match serde_json::from_slice::<Value>(&body) {
         Ok(raw) => ModelError::provider(Some(status), &raw),
         Err(_) => ModelError {
@@ -150,10 +153,43 @@ pub(super) async fn http_error_observed(
     }
     if truncated {
         error.usage_limit = None;
-        // A wire limit can split a credential before it can be matched.
-        error.message = "[HTTP error body truncated]".into();
     }
-    redact(error, context.secrets)
+    let mut error = redact(error, context.secrets);
+    if truncated {
+        const MARKER: &str = " [HTTP error body truncated]";
+        error.message = error
+            .message
+            .chars()
+            .take(MAX_ERROR_MESSAGE_CHARS - MARKER.len())
+            .collect();
+        error.message.push_str(MARKER);
+    }
+    error
+}
+
+fn trim_unfinished_suffix(body: &mut Vec<u8>, secrets: &[String]) {
+    // The last bytes can be only a prefix of a known credential. Keep the
+    // rest of the explanation and discard just the longest candidate suffix.
+    let split = secrets
+        .iter()
+        .filter_map(|secret| {
+            let secret = secret.as_bytes();
+            (1..secret.len().min(body.len() + 1))
+                .rev()
+                .find(|&n| body.ends_with(&secret[..n]))
+        })
+        .max()
+        .unwrap_or(0);
+    body.truncate(body.len() - split);
+    // An unfinished URL may end before its authority delimiter. It cannot be
+    // safely parsed, so omit that last token rather than exposing it as a host.
+    let last = body
+        .iter()
+        .rposition(|b| b.is_ascii_whitespace() || matches!(b, b'"' | b'\'' | b'<' | b'>' | b'`'))
+        .map_or(0, |i| i + 1);
+    if body[last..].windows(3).any(|w| w == b"://") {
+        body.truncate(last);
+    }
 }
 pub(super) fn register_secret(secrets: &mut Vec<String>, value: &str) {
     if !value.is_empty() {
@@ -205,10 +241,15 @@ fn redact_value(value: &mut Value, secrets: &[String]) {
         Value::String(text) => *text = redact_text(text, secrets),
         Value::Array(items) => items.iter_mut().for_each(|v| redact_value(v, secrets)),
         Value::Object(map) => {
-            for (key, mut child) in std::mem::take(map) {
-                redact_value(&mut child, secrets);
-                map.insert(redact_text(&key, secrets), child);
-            }
+            // Diagnostic keys can carry a reflected value too. Remove those
+            // keys rather than merging unrelated entries under one placeholder.
+            map.retain(|key, child| {
+                if redact_text(key, secrets) != *key {
+                    return false;
+                }
+                redact_value(child, secrets);
+                true
+            });
         }
         _ => {}
     }
@@ -218,12 +259,11 @@ fn redact_value(value: &mut Value, secrets: &[String]) {
 /// still available. Success and already persisted history are not rewritten.
 pub(super) fn redact_failure(failure: &mut AttemptFailure, secrets: &[String]) {
     failure.error = redact(failure.error.clone(), secrets);
-    failure.partial_text = redact_text(&failure.partial_text, secrets);
-    failure.partial_reasoning = redact_text(&failure.partial_reasoning, secrets);
-    for item in failure.completed_items.values_mut() {
-        redact_value(item, secrets);
-    }
-    if let Some(raw) = &mut failure.raw_response {
+    // Partial output and completed items are conversation data. In particular,
+    // the output-limit envelope itself can be adopted and replayed.
+    if failure.error.kind != "output_limit"
+        && let Some(raw) = &mut failure.raw_response
+    {
         redact_value(raw, secrets);
     }
 }

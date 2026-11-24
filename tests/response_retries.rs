@@ -2871,11 +2871,12 @@ async fn successful_connection_probe_releases_queued_threads_without_serializing
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn output_limit_stop_matches_wire_in_live_ends_and_saved_usage() {
+    const PARTIAL: &str = "abc https://h/p?q=1 synthetic-extra-value";
     let responses = |reason: &str, empty: bool| {
         let output = if empty {
             json!([])
         } else {
-            json!([{"type":"message","role":"assistant","status":"incomplete","content":[{"type":"output_text","text":"abc"}]}])
+            json!([{"type":"message","role":"assistant","status":"incomplete","content":[{"type":"output_text","text":PARTIAL}]}])
         };
         json!({"type":"response.incomplete","response":{
             "id":"limited","status":"incomplete","output":output,"incomplete_details":{"reason":reason}
@@ -2922,7 +2923,7 @@ async fn output_limit_stop_matches_wire_in_live_ends_and_saved_usage() {
             "model_context_window_exceeded",
         ),
         (
-            "max_tokens=5678\n",
+            "max_tokens=5678\nextra_headers={X-Feature='synthetic-extra-value'}\n",
             Some(1234),
             "max_output_tokens",
             json!(1234),
@@ -3065,6 +3066,23 @@ async fn output_limit_stop_matches_wire_in_live_ends_and_saved_usage() {
             let expected = json!({"stop":true,"sent_max_tokens":wire_limit.as_u64(),"source":source,"connection":"fixture"});
             assert_eq!(end["outcome"], "adopted");
             assert_eq!(end["output_limit"], expected);
+            if thread_limit.is_some() {
+                let attempt = attempt.to_owned();
+                let saved: String = fixture
+                    .control
+                    .store
+                    .database
+                    .call(move |db| {
+                        Ok(db.query_row(
+                            "SELECT error_json FROM model_attempt WHERE id=?1",
+                            [attempt],
+                            |row| row.get(0),
+                        )?)
+                    })
+                    .await
+                    .unwrap();
+                assert!(saved.contains(PARTIAL), "{saved}");
+            }
             let turn = fixture.accepted.turn_id.clone().unwrap();
             let node: String = fixture.control.store.database.call(move |db| {
                 let (node, tools, extra): (String, i64, i64) = db.query_row(
@@ -3093,7 +3111,12 @@ async fn output_limit_stop_matches_wire_in_live_ends_and_saved_usage() {
                     "no synthetic output item: {history}"
                 );
             } else {
-                assert!(history.to_string().contains("abc"), "{history}");
+                let expected_text = if key == "max_output_tokens" {
+                    PARTIAL
+                } else {
+                    "abc"
+                };
+                assert!(history.to_string().contains(expected_text), "{history}");
             }
             assert_eq!(usage["output_limit"], expected);
         }

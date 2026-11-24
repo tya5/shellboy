@@ -231,6 +231,7 @@ async fn error_body_is_bounded_and_secret_header_values_are_redacted() {
         .unwrap_err();
     assert_eq!(failure.error.kind, "http");
     assert!(failure.error.message.contains("truncated"));
+    assert!(failure.error.message.starts_with("upstream [redacted]"));
     assert!(!failure.error.message.contains("fake-private-key"));
     assert!(failure.error.message.len() < 17_000);
     assert_eq!(server.await.unwrap(), 1);
@@ -778,6 +779,7 @@ async fn http_error_body_marks_truncation_only_after_an_observed_excess_byte() {
             .unwrap_err();
         assert_eq!(failure.error.status, Some(502));
         assert_eq!(failure.error.provider_code.as_deref(), Some("fixture"));
+        assert!(failure.error.message.starts_with("bounded failure"));
         assert_eq!(
             failure.error.message.contains("HTTP error body truncated"),
             truncated,
