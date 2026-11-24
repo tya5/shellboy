@@ -487,6 +487,12 @@ Changed history path/revision or target can cause `cursor_expired`; encoding mis
 
 Saved model request failures use these three codes instead of `io_failed`. Provider text is evidence, not guidance.
 
+For a Windows file write that reports `io_failed` with
+`details.reason=file_in_use`, close the application holding the file and inspect
+the write result before retrying. Shellboy does not wait for the lock to clear.
+For an owner that refuses a network data directory, see
+[choosing a local data directory](user-guide.md#1-start-in-a-working-directory).
+
 Errors/timeouts never justify unconditional repetition under a new ID. Inspect saved acceptance, target termination/recovery wait, and the same operation's result.
 
 ## Implementation references

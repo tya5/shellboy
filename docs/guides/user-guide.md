@@ -35,7 +35,7 @@ configuration worker has loaded the configured language; it then uses that
 language for the remaining startup stages, cancellation, and failure screen.
 Before configuration is available, terminal-adapter failures also use English.
 
-Use `shellboy startup [--last N]` (default 5, maximum 20) to inspect recent startup-stage timings without starting or contacting the owner. It reads `<data-dir>/logs/shellboy.log` and rotated files, with a 16 MiB / 64-file bound. Output includes stage timestamps, elapsed milliseconds, migration versions, application versions when present, totals and incomplete-launch flags; it never emits other log fields. Logs are bounded and best-effort, so missing stages are not zero; the result explicitly warns that records may be missing. Configuration failures before a data directory and owner lock are available cannot be recorded.
+For startup diagnostics without connecting to the owner, see [recorded startup timings](cli-reference.md#standalone-commands).
 
 For support, share relevant entries from the structured owner log (`logs/shellboy.log`); raw local crash stderr, including Studio's `owner.log`, is not safe to share as is.
 
@@ -139,15 +139,22 @@ shellboy --config /path/to/config.toml --data-dir /path/to/shellboy-data
 
 Starting without a subcommand requires an interactive terminal. You cannot run two owners against the same data-dir. Subcommands from another terminal use the running owner; they do not start one automatically. Choose a different data-dir for an independent environment.
 
-On Windows, a redirected data folder is supported if it resolves to a local
-folder, including a locally stored OneDrive folder. Do not put the data directory
-on an SMB share or mapped network drive: SQLite WAL needs a local disk. If the
-owner reports `network_data_directory`, choose a local folder with `--data-dir`.
-The final data directory itself must not be a symbolic link.
+On Windows, local NTFS redirection and locally stored OneDrive folders are
+supported. SQLite WAL needs local storage; UNC shares and mapped network drives
+are refused with `details.reason=network_data_directory`. Select a local path
+with `shellboy --data-dir PATH`. The final data-directory component must not be
+a symbolic link. For model-shell behavior, see [Windows shell notes](shell.md#windows-shell-notes).
 
 During startup, the screen shows current preparation such as configuration, DB migration, or cleanup of previously interrupted work. Conversation input becomes available after startup completes. Esc / Ctrl+C / Ctrl+Q request exit; initialization and persistence already started proceed to a safe boundary before closing. This does not roll back a migration or immediately release the lock. If startup fails, read the reason and close with Enter or Esc.
 
 The startup migration markers count schema upgrade steps, not the fraction of startup time or work completed. A long step can remain on the same marker; no remaining time is estimated. When there is not enough room for the markers, only the step count is shown.
+
+When upgrading, stop the old owner and back up the whole data directory before
+starting the new version. Startup checks the foreign-key tables affected by
+audited migrations; migrations whose impact is unknown still get a full check.
+An unclean previous shutdown can also trigger a separate SQLite integrity
+check. No migration command is needed. To examine recorded startup timings,
+use [`shellboy startup --last 5`](cli-reference.md#standalone-commands).
 
 A new root Thread uses the startup directory as its cwd. Opening a saved Thread uses that Thread's saved cwd without overwriting it with the current startup directory. Check it with `/cwd` or F8's “会話 | 詳細” (conversation details).
 
@@ -487,8 +494,7 @@ window. `last_compaction.coverage.latest_complete=false` means an older-starting
 operation may have completed later. Use `compact list` for exact retained history.
 
 Before changing a valuable range, use `shellboy compact --dry-run --thread THREAD`
-(or add `--dry-run` to summary/spill/trim/omit/maximal). This current-main feature
-calls no model and changes no saved path. Check predicted failures and coverage
+(or add `--dry-run` to summary/spill/trim/omit/maximal). The preview calls no model and changes no saved path. Check predicted failures and coverage
 limits; generated-summary length is unknown. The preview does not authorize a
 later edit if the conversation changes. See the CLI reference for bounds.
 
