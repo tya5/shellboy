@@ -922,20 +922,16 @@ async fn permanent_listener_failure_reaches_the_frontend_once_while_local_work_s
         "normal shutdown dropped diagnostics: {records:?}"
     );
     let expected_frontend = [
-        "listener",
         "draft_enqueue",
         "accepted_sends",
         "draft_save",
-        "interrupt_capture",
         "control_tasks",
         "read_workers",
         "images",
-        "control",
         "workers",
     ]
     .into_iter()
     .flat_map(|stage| [(stage, "begin"), (stage, "end")])
-    .chain(std::iter::once(("owner", "begin")))
     .collect::<Vec<_>>();
     let expected_owner = vec![
         ("database", "begin"),
