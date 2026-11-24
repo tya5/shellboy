@@ -3371,7 +3371,10 @@ mod integrity_policy_tests {
         db.execute_batch("PRAGMA ignore_check_constraints=ON; INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,result_ref_json,created_at)VALUES('corrupt','fixture','{}','hash','failed','malformed','now');").unwrap();
         drop(db);
         assert!(open_connection(&path, None, None, true).is_ok());
-        let diagnostics = crate::diagnostics::Diagnostics::start(temp.path().join("logs"), crate::config::Logging::default());
+        let diagnostics = crate::diagnostics::Diagnostics::start(
+            temp.path().join("logs"),
+            crate::config::Logging::default(),
+        );
         let error = open_connection(&path, None, Some(&diagnostics), false)
             .unwrap_err()
             .into_api_error();

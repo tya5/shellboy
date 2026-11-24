@@ -485,7 +485,9 @@ mod tests {
                     ui.active_view_mut().held_input.active = selected;
                     let buffer = screen(ui.view(), 160, UiLanguage::En);
                     let expected = item("a").region_metadata(UiLanguage::En);
-                    let line = (0..160).map(|x| buffer[(x, 2)].symbol()).collect::<String>();
+                    let line = (0..160)
+                        .map(|x| buffer[(x, 2)].symbol())
+                        .collect::<String>();
                     assert!(line.contains(&expected), "{line}");
                     // The metadata is right-aligned; its final cell is always painted.
                     let cell = &buffer[(159, 2)];
