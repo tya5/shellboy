@@ -370,11 +370,12 @@ pub(super) async fn refresh(
 }
 
 pub(super) async fn list(
-    control: &Control,
+    data_dir: &std::path::Path,
+    language: UiLanguage,
     thread: String,
-    page: u32,
+    cursor: Option<String>,
 ) -> Result<(String, Vec<crate::presentation::PresentationField>), ApiError> {
-    list::read(control, thread, page).await
+    list::read(data_dir, language, thread, cursor).await
 }
 
 #[cfg(test)]
@@ -692,6 +693,10 @@ mod tests {
         .await
         .unwrap();
         let control = Control::new(&owner, root.path().into());
+        let (rpc, receive) = tokio::sync::mpsc::channel(16);
+        let server = crate::ipc::LocalServer::bind(&owner, rpc).await.unwrap();
+        tokio::spawn(control.clone().serve(receive));
+        let list_page = |cursor| list(&owner.loaded.data_dir, UiLanguage::En, "t".into(), cursor);
         let (tx, rx) = std::sync::mpsc::sync_channel(8);
         refresh(
             &control,
@@ -732,8 +737,8 @@ mod tests {
                 .title
                 .contains("final response confirmed")
         );
-        let (title, first) = list(&control, "t".into(), 1).await.unwrap();
-        assert!(title.contains("35 records"));
+        let (title, first) = list_page(None).await.unwrap();
+        assert!(title.contains("32+ records"));
         assert_eq!(
             first
                 .iter()
@@ -741,10 +746,20 @@ mod tests {
                 .count(),
             32
         );
-        assert!(first.iter().any(|f| f.key == "/received/page/2"));
-        let (_, second) = list(&control, "t".into(), 2).await.unwrap();
-        assert!(second.iter().any(|f| f.value == "n0"));
-        assert!(list(&control, "t".into(), 0).await.is_err());
+        let cursor = first
+            .iter()
+            .find_map(|field| field.key.strip_prefix("/received/cursor/"))
+            .unwrap();
+        let (_, second) = list_page(Some(cursor.to_owned())).await.unwrap();
+        let sources = first
+            .iter()
+            .chain(&second)
+            .filter(|field| field.key.starts_with("/received/source/"))
+            .map(|field| field.value.as_str())
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(sources.len(), 35);
+        assert!(sources.contains("n0"));
+        assert!(list_page(Some("invalid".into())).await.is_err());
         let raw = crate::history::History::new(owner.db.clone())
             .get(crate::protocol::HistoryGetArgs {
                 end_message_only: false,
@@ -796,8 +811,8 @@ mod tests {
         assert_eq!(nodes.len(), 1);
         assert_eq!(nodes[0].0, "anchor");
         assert_eq!(nodes[0].1.node_id, "n34");
-        let (title, latest) = list(&control, "t".into(), 1).await.unwrap();
-        assert!(title.contains("36 records"));
+        let (title, latest) = list_page(None).await.unwrap();
+        assert!(title.contains("32+ records"));
         let empty = latest.iter().find(|field| field.value == "empty").unwrap();
         assert_eq!(empty.displayed(), "No request text");
         refresh(
@@ -860,6 +875,7 @@ mod tests {
             })
             .await
             .unwrap();
+        server.shutdown().await.unwrap();
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
     }

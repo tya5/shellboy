@@ -1455,6 +1455,22 @@
         {
           "properties": {
             "args": {
+              "$ref": "#/definitions/HistoryReceivedArgs"
+            },
+            "command": {
+              "const": "HistoryReceived",
+              "type": "string"
+            }
+          },
+          "required": [
+            "command",
+            "args"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "args": {
               "$ref": "#/definitions/HistoryGetArgs"
             },
             "command": {
@@ -3883,6 +3899,71 @@
         "ordinal",
         "node_id",
         "text"
+      ],
+      "type": "object"
+    },
+    "HistoryReceivedArgs": {
+      "additionalProperties": false,
+      "properties": {
+        "cursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "thread_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "thread_id"
+      ],
+      "type": "object"
+    },
+    "HistoryReceivedRow": {
+      "properties": {
+        "at": {
+          "type": "string"
+        },
+        "excerpt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "excerpt_limited": {
+          "type": "boolean"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "node_id": {
+          "type": "string"
+        },
+        "request": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "request_limited": {
+          "type": "boolean"
+        },
+        "state": {
+          "type": "string"
+        },
+        "turn_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "node_id",
+        "turn_id",
+        "kind",
+        "at",
+        "state",
+        "request_limited",
+        "excerpt_limited"
       ],
       "type": "object"
     },
@@ -8074,6 +8155,35 @@
             },
             "command": {
               "const": "history.recall",
+              "type": "string"
+            },
+            "operation_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "origin": true,
+            "protocol_version": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "args",
+            "command",
+            "operation_id",
+            "protocol_version"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "args": {
+              "$ref": "#/definitions/HistoryReceivedArgs"
+            },
+            "command": {
+              "const": "HistoryReceived",
               "type": "string"
             },
             "operation_id": {
@@ -13559,6 +13669,28 @@
         }
       ],
       "title": "HistoryRecallResult"
+    },
+    "history.received": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/definitions/HistoryReceivedRow"
+          },
+          "type": "array"
+        },
+        "next_cursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "title": "HistoryReceivedPage",
+      "type": "object"
     },
     "history.relations": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",

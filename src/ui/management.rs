@@ -1047,14 +1047,10 @@ impl ManagementPopup {
             if field.key.starts_with("/received/source/") {
                 return Outcome::Original(field.value.clone());
             }
-            if let Some(page) = field
-                .key
-                .strip_prefix("/received/page/")
-                .and_then(|p| p.parse::<u32>().ok())
-            {
+            if let Some(token) = field.key.strip_prefix("/received/cursor/") {
                 return Outcome::Actions(vec![UiAction::LoadReceived {
                     thread_id: field.value.clone(),
-                    page,
+                    cursor: (!token.is_empty()).then(|| token.to_owned()),
                 }]);
             }
         }
@@ -1929,7 +1925,7 @@ mod initial_management_screen_tests {
             assert!(
                 actions
                     .iter()
-                    .any(|action| matches!(action, UiAction::LoadReceived { page: 1, .. }))
+                    .any(|action| matches!(action, UiAction::LoadReceived { cursor: None, .. }))
             );
         }
         fn expected(language: UiLanguage) -> &'static [&'static str] {

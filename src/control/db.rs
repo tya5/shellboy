@@ -1609,6 +1609,9 @@ impl Store {
             Command::HistoryList(args) => {
                 MutationResult::value(history::rpc::list(tx, args, operation_id)?)
             }
+            Command::HistoryReceived(args) => MutationResult::value(
+                history::received::read(tx, args).map_err(StorageError::into_api_error)?,
+            ),
             Command::HistoryRecall(args) => MutationResult::value(
                 history::recall::read(tx, args, self.config.current().limits.draft_bytes)
                     .map_err(StorageError::into_api_error)??,

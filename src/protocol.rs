@@ -102,6 +102,7 @@ fn operation_result_schemas(
     result!("history.list", Page<HistorySnippet>);
     result!("history.window", HistoryWindow);
     result!("history.recall", HistoryRecallResult);
+    result!("history.received", HistoryReceivedPage);
     result!("history.get", HistoryBody);
     result!("history.search", Page<SearchMatch>);
     result!("history.relations", Page<RelationItem>);
@@ -1221,6 +1222,15 @@ args!(HistoryWindowArgs { thread_id: String,
 // ordinal; `revision` is the Thread's selected-path revision (it also advances
 // on append, which keeps every earlier position valid).
 record!(HistoryWindow { thread_id: String, revision: u64, total: u64, items: Vec<HistorySnippet> });
+args!(HistoryReceivedArgs { thread_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")] cursor: Option<String>
+});
+record!(HistoryReceivedPage { items: Vec<HistoryReceivedRow>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] next_cursor: Option<String>
+});
+record!(HistoryReceivedRow { node_id: String, turn_id: String, kind: String, at: String,
+    state: String, request: Option<String>, request_limited: bool, excerpt: Option<String>, excerpt_limited: bool
+});
 args!(HistoryRecallArgs { thread_id: String, older: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")] anchor: Option<HistoryRecallAnchor>,
     #[serde(default, skip_serializing_if = "Option::is_none")] expected_revision: Option<u64>
@@ -1729,6 +1739,7 @@ pub enum Command {
     HistoryWindow(HistoryWindowArgs),
     #[serde(rename = "history.recall")]
     HistoryRecall(HistoryRecallArgs),
+    HistoryReceived(HistoryReceivedArgs),
     #[serde(rename = "history.get")]
     HistoryGet(HistoryGetArgs),
     #[serde(rename = "history.search")]

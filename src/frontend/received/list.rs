@@ -1,47 +1,58 @@
 //! Bounded human-facing received-record list projection.
 use super::*;
 
+use crate::protocol::{Command, HistoryReceivedArgs, HistoryReceivedPage, HistoryReceivedRow};
+
 pub(super) async fn read(
-    control: &Control,
+    data_dir: &std::path::Path,
+    language: UiLanguage,
     thread: String,
-    page: u32,
+    cursor: Option<String>,
 ) -> Result<(String, Vec<crate::presentation::PresentationField>), ApiError> {
-    if page == 0 {
-        return Err(ApiError::new(
-            ErrorCode::InvalidArgument,
-            "Page must be positive",
-        ));
-    }
-    let count_thread = thread.clone();
-    let (total, rows) = control
-        .store
-        .database
-        .call(move |db| Ok(query(db, &count_thread, page)?))
-        .await
-        .map_err(storage_error)?;
-    let language = control.store.config.ui.language;
+    let continued = cursor.is_some();
+    let page: HistoryReceivedPage = super::super::inspection_history::native_read(
+        data_dir,
+        Command::HistoryReceived(HistoryReceivedArgs {
+            thread_id: thread.clone(),
+            cursor,
+        }),
+    )
+    .await?;
     presentation_work(move || {
+        let title = title(
+            language,
+            page.items.len(),
+            continued || page.next_cursor.is_some(),
+        );
         let mut fields = Vec::new();
-        if page > 1 {
+        if continued {
             fields.push(crate::presentation::PresentationField {
-                key: format!("/received/page/{}", page - 1),
-                label: i18n::local!(language, "前の32件", "Previous 32").into(),
+                key: "/received/cursor/".into(),
+                label: i18n::local!(language, "最初から", "Start over").into(),
                 value: thread.clone(),
                 ..Default::default()
             });
         }
-        for row in rows {
-            let Row {
-                id,
-                turn,
-                at,
-                kind,
-                state,
-                request,
-                excerpt,
-            } = row;
+        for HistoryReceivedRow {
+            node_id,
+            turn_id,
+            at,
+            kind,
+            state,
+            request,
+            request_limited,
+            excerpt,
+            excerpt_limited,
+        } in page.items
+        {
+            let limited_request = request_limited.then(|| {
+                i18n::local!(language, "依頼本文は表示上限外", "Request preview omitted").into()
+            });
+            let limited_excerpt = excerpt_limited.then(|| {
+                i18n::local!(language, "応答本文は表示上限外", "Response preview omitted").into()
+            });
             fields.push(crate::presentation::PresentationField {
-                key: format!("/received/source/{id}"),
+                key: format!("/received/source/{node_id}"),
                 label: crate::ui::text_width::glyphs::formatted!(
                     "{} · {} · Turn {}",
                     "{} | {} | Turn {}",
@@ -52,85 +63,45 @@ pub(super) async fn read(
                     )
                     .into()),
                     classification(language, &kind, &state),
-                    turn.chars().take(8).collect::<String>(),
+                    turn_id.chars().take(8).collect::<String>(),
                 ),
-                display: Some(display(language, &request, excerpt.as_deref())),
-                value: id,
+                display: Some(display(
+                    language,
+                    &request.or(limited_request),
+                    excerpt.or(limited_excerpt).as_deref(),
+                )),
+                value: node_id,
                 ..Default::default()
             });
         }
-        if u64::from(page) * 32 < total as u64 {
+        if let Some(token) = page.next_cursor {
             fields.push(crate::presentation::PresentationField {
-                key: format!("/received/page/{}", page + 1),
-                label: i18n::local!(language, "次の32件", "Next 32").into(),
+                key: format!("/received/cursor/{token}"),
+                label: i18n::local!(language, "続き", "More").into(),
                 value: thread,
                 ..Default::default()
             });
         }
-        (title(language, total, page), fields)
+        (title, fields)
     })
     .await
 }
 
-struct Row {
-    id: String,
-    turn: String,
-    at: String,
-    kind: String,
-    state: String,
-    request: Option<String>,
-    excerpt: Option<String>,
-}
-
-fn query(db: &rusqlite::Connection, thread: &str, page: u32) -> rusqlite::Result<(i64, Vec<Row>)> {
-    let total = db.query_row("SELECT count(*) FROM node n JOIN turn u ON u.id=n.turn_id JOIN thread t ON t.id=u.thread_id WHERE u.thread_id=?1 AND t.deleted_at IS NULL AND n.kind IN ('incomplete_response','model_stream_observation') AND n.deleted_reason IS NULL", [thread], |r| r.get(0))?;
-    // The receipt assignment, not the Thread title or a nearby message, binds
-    // the request to this Turn. Multiple inputs use the first assigned receipt.
-    // Both JSON excerpts are bounded in SQLite before reaching Rust.
-    let mut statement = db.prepare(r#"SELECT n.id,u.id,n.created_at,n.kind,u.state,
-      (SELECT substr(coalesce(
-        (SELECT json_extract(c.value,'$.text') FROM json_each(m.payload_json,'$.content') c
-         WHERE json_extract(c.value,'$.type') IN ('input_text','text')
-           AND json_type(c.value,'$.text')='text' ORDER BY c.key LIMIT 1),
-        CASE WHEN json_type(m.payload_json,'$.text')='text' THEN json_extract(m.payload_json,'$.text') END),1,80)
-       FROM receipt r JOIN node m ON m.id=r.message_node_id
-       WHERE r.turn_id=u.id AND r.target_thread_id=u.thread_id AND m.deleted_reason IS NULL
-       ORDER BY r.created_at,r.rowid LIMIT 1),
-      CASE WHEN json_type(n.payload_json,'$.partial_text')='text'
-        THEN substr(json_extract(n.payload_json,'$.partial_text'),1,80) END
-      FROM node n JOIN turn u ON u.id=n.turn_id JOIN thread t ON t.id=u.thread_id
-      WHERE u.thread_id=?1 AND t.deleted_at IS NULL
-        AND n.kind IN ('incomplete_response','model_stream_observation') AND n.deleted_reason IS NULL
-      ORDER BY n.rowid DESC LIMIT 32 OFFSET ?2"#)?;
-    let rows = statement
-        .query_map(
-            rusqlite::params![thread, i64::from(page.saturating_sub(1)) * 32],
-            |r| {
-                Ok(Row {
-                    id: r.get(0)?,
-                    turn: r.get(1)?,
-                    at: r.get(2)?,
-                    kind: r.get(3)?,
-                    state: r.get(4)?,
-                    request: r.get(5)?,
-                    excerpt: r.get(6)?,
-                })
-            },
-        )?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    Ok((total, rows))
-}
-
-fn title(language: UiLanguage, total: i64, page: u32) -> String {
+fn title(language: UiLanguage, count: usize, partial: bool) -> String {
     let separator = crate::ui::text_width::glyphs::separator();
+    let plus = if partial { "+" } else { "" };
     match language {
-        UiLanguage::Ja => format!(
-            "受信記録{separator}{total}件{separator}{page}ページ{separator}Enter 原文 / Esc 閉じる"
-        ),
+        UiLanguage::Ja => {
+            format!("受信記録{separator}{count}{plus}件{separator}Enter 原文 / Esc 閉じる")
+        }
         UiLanguage::En => {
-            let records = if total == 1 { "record" } else { "records" };
+            let records = if count == 1 && !partial {
+                "record"
+            } else {
+                "records"
+            };
             format!(
-                "Received records{separator}{total} {records}{separator}page {page}{separator}Enter Original / Esc Close"
+                "Received records{separator}{count}{plus} {records}{separator}Enter Original / Esc Close"
             )
         }
     }
@@ -190,11 +161,14 @@ mod tests {
     fn fixture() -> rusqlite::Connection {
         let db = rusqlite::Connection::open_in_memory().unwrap();
         db.execute_batch("CREATE TABLE thread(id TEXT,title TEXT,deleted_at TEXT);
-          CREATE TABLE turn(id TEXT,thread_id TEXT,state TEXT);
+          CREATE TABLE turn(id TEXT,thread_id TEXT,state TEXT,created_at TEXT DEFAULT 'now');
+          CREATE INDEX turns_by_thread ON turn(thread_id,created_at);
           CREATE TABLE node(id TEXT,turn_id TEXT,created_at TEXT,kind TEXT,payload_json TEXT,deleted_reason TEXT);
           CREATE TABLE receipt(turn_id TEXT,target_thread_id TEXT,message_node_id TEXT,created_at TEXT);
+          CREATE INDEX node_turn ON node(turn_id,id);
+          CREATE INDEX receipt_thread_order ON receipt(target_thread_id);
           INSERT INTO thread VALUES('thread','UNRELATED THREAD TITLE',NULL);
-          INSERT INTO turn VALUES('turn-a','thread','recovery_wait'),('turn-b','thread','completed'),('turn-stop','thread','stopped'),('turn-unknown','thread','unknown');").unwrap();
+          INSERT INTO turn(id,thread_id,state) VALUES('turn-a','thread','recovery_wait'),('turn-b','thread','completed'),('turn-stop','thread','stopped'),('turn-unknown','thread','unknown');").unwrap();
         db
     }
 
@@ -229,8 +203,8 @@ mod tests {
             (2, "2 records"),
             (35, "35 records"),
         ] {
-            assert!(title(UiLanguage::En, total, 1).contains(expected));
-            assert!(title(UiLanguage::Ja, total, 1).contains(&format!("{total}件")));
+            assert!(title(UiLanguage::En, total, false).contains(expected));
+            assert!(title(UiLanguage::Ja, total, false).contains(&format!("{total}件")));
         }
         for state in [
             "recovery_wait",
@@ -303,10 +277,10 @@ mod tests {
             "model_stream_observation",
             json!({}),
         );
-        let (total, rows) = query(&db, "thread", 1).unwrap();
-        assert_eq!(total, 5);
-        let a = rows.iter().find(|row| row.id == "a").unwrap();
-        let b = rows.iter().find(|row| row.id == "b").unwrap();
+        let rows = page(&db, None).unwrap().items;
+        assert_eq!(rows.len(), 5);
+        let a = rows.iter().find(|row| row.node_id == "a").unwrap();
+        let b = rows.iter().find(|row| row.node_id == "b").unwrap();
         assert_eq!(a.request.as_deref(), Some("first request"));
         assert_eq!(b.request.as_deref(), Some("second request"));
         assert_eq!(
@@ -320,7 +294,7 @@ mod tests {
         assert!(
             display(UiLanguage::Ja, &a.request, a.excerpt.as_deref()).starts_with("first request")
         );
-        let stopped = rows.iter().find(|row| row.id == "stopped").unwrap();
+        let stopped = rows.iter().find(|row| row.node_id == "stopped").unwrap();
         assert_eq!(
             classification(UiLanguage::Ja, &stopped.kind, &stopped.state),
             "保存済み・中断"
@@ -329,12 +303,12 @@ mod tests {
             display(UiLanguage::Ja, &stopped.request, stopped.excerpt.as_deref()),
             "依頼本文なし"
         );
-        let unknown = rows.iter().find(|row| row.id == "unknown").unwrap();
+        let unknown = rows.iter().find(|row| row.node_id == "unknown").unwrap();
         assert_eq!(
             classification(UiLanguage::Ja, &unknown.kind, &unknown.state),
             "保存済み・状態不明"
         );
-        let difference = rows.iter().find(|row| row.id == "difference").unwrap();
+        let difference = rows.iter().find(|row| row.node_id == "difference").unwrap();
         assert_eq!(
             classification(UiLanguage::Ja, &difference.kind, &difference.state),
             "差分・最終確定済み"
@@ -359,27 +333,103 @@ mod tests {
                 json!({"partial_text":long}),
             );
         }
-        let (total, first) = query(&db, "thread", 1).unwrap();
-        let (_, second) = query(&db, "thread", 2).unwrap();
-        assert_eq!(total, 35);
-        assert_eq!(first.len(), 32);
-        assert_eq!(second.len(), 3);
-        assert_eq!(first[0].id, "record-34");
-        assert_eq!(second[2].id, "record-0");
-        for row in first.iter().chain(&second) {
-            assert_eq!(row.request.as_ref().unwrap().chars().count(), 80);
-            assert_eq!(row.excerpt.as_ref().unwrap().chars().count(), 80);
-            assert!(
-                display(UiLanguage::Ja, &row.request, row.excerpt.as_deref())
-                    .chars()
-                    .count()
-                    <= 80
-            );
-        }
-        assert!(query(&db, "thread", 3).unwrap().1.is_empty());
+        let first = page(&db, None).unwrap();
+        let second = page(&db, first.next_cursor.clone()).unwrap();
+        assert_eq!(first.items.len(), 32);
+        assert_eq!(second.items.len(), 3);
+        assert!(second.next_cursor.is_none());
+        let ids = first
+            .items
+            .iter()
+            .chain(&second.items)
+            .map(|row| &row.node_id)
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(ids.len(), 35);
+        assert!(
+            first
+                .items
+                .iter()
+                .chain(&second.items)
+                .all(|row| row.request_limited
+                    && row.excerpt_limited
+                    && row.request.is_none()
+                    && row.excerpt.is_none())
+        );
         db.execute("UPDATE thread SET deleted_at='now'", [])
             .unwrap();
-        assert_eq!(query(&db, "thread", 1).unwrap().0, 0);
+        assert!(page(&db, None).is_err());
+    }
+
+    fn page(
+        db: &rusqlite::Connection,
+        cursor: Option<String>,
+    ) -> Result<HistoryReceivedPage, crate::storage::StorageError> {
+        crate::history::received::read(
+            db,
+            &HistoryReceivedArgs {
+                thread_id: "thread".into(),
+                cursor,
+            },
+        )
+    }
+
+    #[test]
+    fn incomplete_receipt_prefix_omits_request_without_losing_the_saved_record() {
+        let db = fixture();
+        request(
+            &db,
+            "request",
+            "turn-a",
+            "plausible but not proven earliest",
+            "now",
+        );
+        for i in 0..129 {
+            db.execute(
+                "INSERT INTO receipt VALUES(NULL,'thread',?1,'now')",
+                [format!("other-{i}")],
+            )
+            .unwrap();
+        }
+        record(
+            &db,
+            "response",
+            "turn-a",
+            "incomplete_response",
+            json!({"partial_text":"saved"}),
+        );
+        let first = page(&db, None).unwrap();
+        assert_eq!(first.items[0].node_id, "response");
+        assert_eq!(first.items[0].excerpt.as_deref(), Some("saved"));
+        assert!(first.items[0].request_limited);
+        assert!(first.items[0].request.is_none());
+    }
+
+    #[test]
+    fn empty_coverage_has_a_continuation_before_the_first_match() {
+        let db = fixture();
+        for i in 0..205 {
+            record(
+                &db,
+                &format!("input-{i:03}"),
+                "turn-unknown",
+                "user",
+                json!({}),
+            );
+        }
+        record(
+            &db,
+            "received",
+            "turn-unknown",
+            "incomplete_response",
+            json!({"partial_text":"saved"}),
+        );
+        let first = page(&db, None).unwrap();
+        assert!(first.items.is_empty());
+        assert!(first.next_cursor.is_some());
+        let second = page(&db, first.next_cursor).unwrap();
+        assert_eq!(second.items[0].node_id, "received");
+        assert_eq!(second.items[0].excerpt.as_deref(), Some("saved"));
+        assert!(second.next_cursor.is_none());
     }
 
     #[test]

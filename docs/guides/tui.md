@@ -571,7 +571,7 @@ During sent-text recall with Up/Down, current unsent attachments move to the rec
 
 ## Reading saved receive records
 
-`/received` lists receive records for the current conversation newest first, 32 per page. Specify a page with `/received 2`; previous/next list-page entries also open with Enter. The list shows count/page; select an item and Enter to read its saved JSON in the existing source viewer. N continues source pages, P returns to the first, C copies the current page. No memorized ID is required.
+`/received` lists up to 32 saved receive records at a time, starting with the newest Turns. Select More and press Enter to continue, or Start over to return to the beginning. A `+` on the visible count means it is not an exact total. Select a record and press Enter to read its saved JSON in the existing source viewer. N continues source pages, P returns to the first, C copies the current page. No memorized ID is required.
 
 Failed requests display readable received reasoning/answers as `途中で切れた応答（保存済み・会話には含めない） | /received 一覧` (interrupted response, saved but excluded from conversation). Differences between streaming and final content on successful requests are marked `ストリーム差分 | 最終応答は確定済み | /received 一覧` (stream difference, final adopted). Ordinary conversation retains display windows for the latest two records; older records and omitted portions remain accessible in the list. Attention color applies only while the original Turn is in recovery wait, becoming a normal notification after recovery/stop. Local time and the same Turn's request excerpt identify records. Reselecting a conversation or restarting reconstructs display from saved records.
 

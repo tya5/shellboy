@@ -41,6 +41,7 @@ mod message_budget;
 mod message_provenance;
 pub(crate) mod notification;
 pub(crate) mod recall;
+pub(crate) mod received;
 mod relations;
 pub(crate) mod rpc;
 mod thread;
