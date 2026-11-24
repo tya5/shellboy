@@ -1,5 +1,5 @@
 {
-  "$id": "https://shellboy.dev/schema/protocol-v24.json",
+  "$id": "https://shellboy.dev/schema/protocol-v25.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "capabilities": [
     "events.reasoning_activity",
@@ -14731,6 +14731,6 @@
       "type": "object"
     }
   },
-  "protocol_version": 24,
-  "title": "Shellboy local RPC protocol v24"
+  "protocol_version": 25,
+  "title": "Shellboy local RPC protocol v25"
 }
