@@ -1023,6 +1023,15 @@ impl Command {
             Self::Wait(a) => a.validate(),
             Self::HistoryList(a) => a.validate(),
             Self::HistoryWindow(a) => a.validate(),
+            Self::HistoryReceived(a) => {
+                nonempty(&a.thread_id, "thread_id")?;
+                if a.thread_id.len() > 512
+                    || a.cursor.as_ref().is_some_and(|token| token.len() > 8192)
+                {
+                    return Err(invalid("Invalid received history scope or cursor"));
+                }
+                Ok(())
+            }
             Self::HistoryRecall(a) => {
                 nonempty(&a.thread_id, "thread_id")?;
                 if a.thread_id.len() > 512

@@ -1553,11 +1553,11 @@ async fn run_client(
                             streams.invalidate(thread);
                         }
                     }
-                    UiAction::LoadReceived{thread_id,page}=>{
-                        let control=control.clone();let sender=updates.worker();
+                    UiAction::LoadReceived{thread_id,cursor}=>{
+                        let selected_dir=client_context.data_dir.clone();let sender=updates.worker();
                         let reply_context=context.clone();
                         if !spawn_read(&mut read_workers,&read_slots,&read_cancel,async move{
-                            match received::list(&control,thread_id,page).await{
+                            match received::list(&selected_dir,language,thread_id,cursor).await{
                                 Ok((title,fields))=>management_update(&sender,reply_context,UiUpdate::ReceivedList{title,fields}).await,
                                 Err(error)=>management_status(&sender,reply_context,error).await,
                             }

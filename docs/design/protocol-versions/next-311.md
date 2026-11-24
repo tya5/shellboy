@@ -26,3 +26,20 @@ ordinary request and response are unchanged. The display projection returns
 recovery reason outside the 64 KiB allowance. Clients can localize these
 outcomes without guessing from display strings. No continuation. This is not
 an inspector or full context-usage read.
+
+## Received history page
+
+`history.received` reads one literal live Thread, in descending Turn creation
+order (Turn rowid breaks ties) and ascending node ID within a Turn. The optional
+opaque continuation seeks after the last examined position, even on a page
+with zero matches. It is scoped to this Thread and read route, not a frozen
+snapshot. Its presence means there is more candidate coverage, not that a
+further matching record is already known. No global count or OFFSET scan.
+
+One request examines up to 32 Turns and 200 node candidates, with one lookahead
+per index seek, and returns up to 32 saved records. The entire page checks at most 128 Thread receipts plus a sentinel. If the
+existing Thread index cannot prove the earliest request in that coverage, the
+request excerpt is omitted; the saved response stays reachable. Before extracting either 80-character excerpt, the owner gates
+source JSON at 64 KiB and returns explicit limit flags. Raw provider payloads
+and received reasoning are not included. Open an exact returned node through
+the existing original-source reader. No new schema or maintained index.

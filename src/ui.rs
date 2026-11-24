@@ -617,7 +617,7 @@ pub enum UiAction {
     },
     LoadReceived {
         thread_id: String,
-        page: u32,
+        cursor: Option<String>,
     },
     LoadModels {
         connection: String,
@@ -4974,17 +4974,10 @@ impl UiState {
                 let Some(thread_id) = thread_id else {
                     return self.command_error(i18n::local!(self.config.ui.language, "保存済みの会話を選択してください", "Select a saved conversation"));
                 };
-                let page = if argument.is_empty() {
-                    1
-                } else {
-                    match argument.parse::<u32>() {
-                        Ok(page) if page > 0 => page,
-                        _ => {
-                            return self
-                                .command_error(i18n::local!(self.config.ui.language, "/received または /received 1以上のページ番号", "/received or /received <page number> (1 or higher)"));
-                        }
-                    }
-                };
+                if !argument.is_empty() {
+                    return self.command_error(i18n::local!(self.config.ui.language,
+                        "/received を実行し、一覧の「続き」を選んでください", "Use /received, then select More in the list"));
+                }
                 self.invalidate_management();
                 self.management.open_text(ManagementView {
                     title: text_width::glyphs::localized!(
@@ -4998,7 +4991,7 @@ impl UiState {
                     text: String::new(),
                     scroll: 0,
                 });
-                vec![UiAction::LoadReceived { thread_id, page }]
+                vec![UiAction::LoadReceived { thread_id, cursor: None }]
             }
             "/retry" => {
                 let Some(snapshot) = &self.view().activity.snapshot else {

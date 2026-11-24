@@ -2560,6 +2560,7 @@ impl OperationId {
             | Command::ConnectionTest(_)
             | Command::IdResolve(_)
             | Command::HistoryRecall(_)
+            | Command::HistoryReceived(_)
             | Command::HistoryExport(_)
             | Command::ThreadImport(_) => return None,
             Command::Status(_) => Self::Status,
