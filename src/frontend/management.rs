@@ -46,6 +46,17 @@ impl NoticeOwner {
 pub(super) fn work_status(command: &Command) -> bool {
     matches!(command, Command::Status(args) if !args.memory)
 }
+pub(super) fn native_failure(error: ApiError) -> Value {
+    match error
+        .details
+        .as_ref()
+        .and_then(|details| details.get("operation_id"))
+    {
+        Some(id) => serde_json::json!({"request_operation_id":id,"error":error}),
+        None => serde_json::json!({"error":error}),
+    }
+}
+
 pub(super) fn completion_text(
     language: UiLanguage,
     title: &str,
@@ -66,6 +77,18 @@ pub(super) fn completion_text(
         )
         .to_owned(),
         Ok(()) => i18n::local!(language, "受付結果: 成功", "Admission result: success").to_owned(),
+        Err(error)
+            if error.details.as_ref().is_some_and(|details| {
+                details["request_may_have_been_applied"].as_bool() == Some(true)
+            }) =>
+        {
+            i18n::local!(
+                language,
+                "操作結果は未確認です。再操作の前に照会してください",
+                "Operation outcome unknown. Look up the request before retrying"
+            )
+            .to_owned()
+        }
         Err(error) => match language {
             UiLanguage::Ja => format!("受付結果: 失敗（{}）", error.message),
             UiLanguage::En => format!("Admission result: failed ({})", error.message),
@@ -1320,6 +1343,25 @@ mod opaque_filter_string_tests {
 #[cfg(test)]
 mod completion_review_tests {
     use super::*;
+    #[test]
+    fn lost_native_archive_reply_is_unknown_and_keeps_receipt_lookup() {
+        let id = "00000000-0000-4000-8000-000000000001:00000000-0000-4000-8000-000000000002";
+        let result =
+            native_failure(ApiError::new(ErrorCode::IoFailed, "lost reply").details(
+                serde_json::json!({"operation_id":id,"request_may_have_been_applied":true}),
+            ));
+        assert!(
+            matches!(follow(&result, "/request_operation_id", crate::ui::ManagementFollow::Inspect).unwrap(), Command::OperationGet(args) if args.operation_id == id)
+        );
+        let response = Ok(result);
+        let english = completion_text(UiLanguage::En, "Archive", false, &response);
+        assert!(english.contains("Operation outcome unknown") && english.contains(id));
+        assert!(!english.contains("Admission result: failed"));
+        assert!(
+            completion_text(UiLanguage::Ja, "Archive", false, &response).contains("結果は未確認")
+        );
+    }
+
     #[test]
     fn failed_admission_has_ascii_english_punctuation_and_unchanged_japanese() {
         let response = Err(ApiError::new(ErrorCode::IoFailed, "raw error"));
