@@ -155,6 +155,10 @@ fn synthetic_help_width_mismatch_leaves_residue_in_diff() {
         let mut screen = vt100::Parser::new(30, 80, 0);
         screen.process(&frame(&mut terminal, &mut ui));
         ui.slash("/help");
+        // Reach the copy shortcuts below the everyday task routes.
+        for _ in 0..8 {
+            ui.event(Event::Key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)));
+        }
         let help = frame(&mut terminal, &mut ui);
         assert!(String::from_utf8_lossy(&help).contains('→'));
         // vt100 has fixed Unicode widths. A two-cell CJK proxy models a terminal

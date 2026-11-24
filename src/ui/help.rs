@@ -126,15 +126,48 @@ impl Page {
         };
         page.section(local!(config.ui.language, "よく使う操作", "Common actions"));
         use super::key_hints::Action;
+        for action in [Action::Send, Action::Newline] {
+            page.entry(
+                &action.binding(config),
+                action.description(config.ui.language),
+            );
+        }
+        page.entry(
+            "shellboy message ask",
+            local!(
+                config.ui.language,
+                "返信が必要な依頼はCLIで --thread と --text を指定",
+                "For a required reply, use the CLI with --thread and --text"
+            ),
+        );
+        page.entry(
+            &format!("F6 / {}", Action::Stop.binding(config)),
+            local!(
+                config.ui.language,
+                "内容の詳細を確認 / Runと背景の作業を停止",
+                "Inspect content / stop the Run and its background work"
+            ),
+        );
+        let language = config.ui.language;
+        let details =
+            super::operations::catalogue_label(crate::operations::OperationId::ThreadGet, language);
+        page.entry(
+            "F8",
+            &match language {
+                crate::config::UiLanguage::Ja => {
+                    format!("操作を選ぶ（例: {details}）")
+                }
+                crate::config::UiLanguage::En => {
+                    format!("Choose an action, e.g. {details}")
+                }
+            },
+        );
         for action in [
-            Action::Help,
-            Action::Send,
-            Action::Newline,
             Action::Commands,
             Action::History,
             Action::Threads,
             Action::Interrupt,
-            Action::Stop,
+            Action::Help,
         ] {
             page.entry(
                 &action.binding(config),
@@ -1520,8 +1553,14 @@ mod tests {
         }
         fn expected(language: UiLanguage) -> &'static [&'static str] {
             match language {
-                UiLanguage::En => &["Common actions", "Copy an answer"],
-                UiLanguage::Ja => &["よく使う操作", "回答をコピーする"],
+                UiLanguage::En => &[
+                    "Common actions",
+                    "shellboy message ask",
+                    "F6 / Ctrl+C",
+                    "F8",
+                    "Conversation",
+                ],
+                UiLanguage::Ja => &["よく使う操作", "shellboy message ask", "F6 / Ctrl+C", "F8"],
             }
         }
         super::super::i18n::verify_screen(show, expected);
@@ -1537,13 +1576,20 @@ mod tests {
         let anchor = ui.view().navigation.anchor.clone();
         key(&mut ui, KeyCode::F(1));
         let first = screen(&mut ui, 80, 24);
+        let details = super::super::operations::catalogue_label(
+            crate::operations::OperationId::ThreadGet,
+            config.ui.language,
+        );
+        assert!(first.contains(&details), "{details}: {first}");
         for expected in [
             "よく使う操作",
             "Ctrl+Enter",
             "次の区切りでメッセージを渡す",
             "改行",
-            "Ctrl+C",
-            "回答をコピーする",
+            "shellboy message ask",
+            "F6 / Ctrl+C",
+            "F8",
+            "内容の詳細を確認",
             "Esc",
         ] {
             assert!(first.contains(expected), "{expected}: {first}");
@@ -1558,6 +1604,7 @@ mod tests {
             .collect::<String>();
         for expected in [
             "Ctrl+Q",
+            "回答をコピーする",
             "会話を読む・切り替える",
             "画像やファイルを添付する",
             "/image",
