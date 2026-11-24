@@ -1343,6 +1343,22 @@
         {
           "properties": {
             "args": {
+              "$ref": "#/definitions/TurnTarget"
+            },
+            "command": {
+              "const": "turn.interrupt",
+              "type": "string"
+            }
+          },
+          "required": [
+            "command",
+            "args"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "args": {
               "$ref": "#/definitions/WaitArgs"
             },
             "command": {
@@ -1523,6 +1539,22 @@
             },
             "command": {
               "const": "shell.eof",
+              "type": "string"
+            }
+          },
+          "required": [
+            "command",
+            "args"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "args": {
+              "$ref": "#/definitions/ExecutionTarget"
+            },
+            "command": {
+              "const": "shell.background",
               "type": "string"
             }
           },
@@ -7560,6 +7592,35 @@
           "additionalProperties": false,
           "properties": {
             "args": {
+              "$ref": "#/definitions/TurnTarget"
+            },
+            "command": {
+              "const": "turn.interrupt",
+              "type": "string"
+            },
+            "operation_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "origin": true,
+            "protocol_version": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "args",
+            "command",
+            "operation_id",
+            "protocol_version"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "args": {
               "$ref": "#/definitions/WaitArgs"
             },
             "command": {
@@ -7883,6 +7944,35 @@
             },
             "command": {
               "const": "shell.eof",
+              "type": "string"
+            },
+            "operation_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "origin": true,
+            "protocol_version": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "args",
+            "command",
+            "operation_id",
+            "protocol_version"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "args": {
+              "$ref": "#/definitions/ExecutionTarget"
+            },
+            "command": {
+              "const": "shell.background",
               "type": "string"
             },
             "operation_id": {
