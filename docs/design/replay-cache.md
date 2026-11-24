@@ -8,13 +8,32 @@ cacheの文脈はThread ID、selection revision、profile revision、profile/mod
 
 API itemは immutable な変換結果として保持する。reasoning itemは対応nodeのepochが現在のepochと一致するときだけ送信対象へ入れる。model A→B→Aでもepochを戻さず、旧opaqueを復活させない。送信用copyではmessage（type省略のrole形式を含む）とfunction_callの直下idだけを外す。接続先・adapter固有IDを別接続先へ持ち込まないためで、call_id、phase、status、content、未知フィールドとネストしたidは維持する。function_call_outputやreasoningのidは変更しない。event envelopeの内部event_idも従来どおり外し、DB JSONを更新しない。通常output・item wrapper・直接role・spill内outputの全経路に同じ送信変換を適用する。spillの保存JSONやsummary用の出典原文は変更しない。adapter版を2へ更新し、旧版cacheは再利用しない。cacheは非永続なので既存DBも再起動時に現行変換で読み直す。HTTP 400を理由とする自動再送は追加せず、既存の明示/retryで同じ変換を使う。暗号化reasoningを平文へ変換・索引化しない。
 
-`cache.history_bytes` を全Threadの保持entry合計へ適用し、Thread単位LRUで回収する。重みはUTF-8 serialized長だけでなく、Value配列/文字列capacity/JSON map構造とnode metadataを含む保守的なRAM見積りとする。appendで再利用したArcの本文は一回だけ数える。0は保持cache無効で、要求処理を拒否しない。entry自体が枠を超える場合も非cacheの作業領域として要求を組み立てる。
+`cache.history_bytes` を全Threadの保持entry合計へ適用し、Thread単位LRUで回収する。重みはUTF-8 serialized長だけでなく、Value配列/文字列capacity/JSON map構造とnode metadataを含む保守的なRAM見積りとする。appendで再利用したArcの本文は一回だけ数える。0は保持cache無効。entry自体が保持枠を超える場合も、下記の組み立て上限内であれば非cacheで要求を組み立てる。
 
 要求snapshotは変換結果をleaseでpinする。LRUから外しても使用中のArcを解放済みと数えず、retained/live/pinned byteを区別する。leaseのcloneは同じpin集合を共有する。lease用Vec<Arc>とHTTP request用のowned JSONは要求作業領域であり、Frameのlive/pinned byteとは区別する。HTTP完了/失敗/取消し後にleaseを解放し、背景shell collectorへ送信履歴のleaseを渡し続けない。HTTP request用のowned JSON構築は一時領域であり、保持cacheの予算とは分ける。
 
 予算の照合で、従来 `history_bytes` がAGENTS LRUとUI metadataにもそれぞれ独立適用されていた不一致を修正する。history_bytesは本ReplayCache専用とする。UIのnode metadataは本文とbody_bytesに合算し、表示anchor周辺の3nodeは従来どおり作業領域として区別する。AGENTSの保持LRUは廃止するが、Turnのimmutable instruction_snapshotと同Turn retryのDB版再利用、driver内のそのTurnのArcは維持する。この是正はroot担当のui/instructions変更と組み合わせる。
 
 DB transactionが失敗したcacheの一時entryに依存してHTTPを開始しない。次回利用時にも元経路metadataを照合するため、rollback前の新経路をcacheが権威として復活させることはない。cacheは再起動へ永続化しない。
+
+## Resend assembly limit (#385)
+
+The selected-path loader owns a per-request working allowance independent of
+`cache.history_bytes`. It uses the existing `model::MAX_RESPONSE_BYTES` model
+I/O ceiling (64 MiB) for replay working weights: path stamps, reasoning keep
+metadata, and every cached or newly converted frame. SQLite does not project a source larger than the allowance at the start of
+suffix decoding. The loader checks each source against the current remaining
+allowance before decoding it, and charges each frame before adding it to the
+lease.
+The accounting is not an allocator RSS limit or a provider token limit.
+
+A request that exceeds the allowance fails before model admission with
+`input_limit`, `details.reason = "replay_assembly_limit"`, and
+`details.limit_bytes`. The current Turn uses normal recovery with this reason.
+The loader returns no partial lease, leaves saved history unchanged, and does
+not compact, truncate, or retry on its own. Attachment expansion, read-only
+inspection and limits across concurrent drivers are separate contracts.
+History diagnostics count serialized characters over borrowed replay items.
 
 ## Turnの文脈行（#183）
 

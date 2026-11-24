@@ -26,6 +26,13 @@ The #379 Guide pass landed; the numbered protocol notes remain canonical.
 Older preparation and qualification sections below are historical snapshots,
 not statements of branch or release status today.
 
+## Core #385 resend assembly
+
+The selected-path replay loader limits working assembly independently of cache
+retention. A request beyond the bound enters existing Turn recovery with a
+typed `input_limit`; no shortened history is sent. See the
+[replay design](../design/replay-cache.md#resend-assembly-limit-385).
+
 ## Core #311 native Thread archive
 
 Thread List and management archive/unarchive use the selected native owner.

@@ -1,5 +1,9 @@
 //! Immutable Responses items with one byte-bounded LRU shared by all Threads.
-use crate::storage::StorageError;
+use crate::{
+    model::MAX_RESPONSE_BYTES,
+    protocol::{ApiError, ErrorCode},
+    storage::StorageError,
+};
 use rusqlite::Connection;
 use serde_json::Value;
 #[cfg(test)]
@@ -62,6 +66,33 @@ impl Stamp {
         Ok(())
     }
 }
+// Working allowance for a single selected replay, independent of LRU retention.
+struct AssemblyBudget(usize);
+impl AssemblyBudget {
+    fn check(&self, bytes: usize) -> Result<(), StorageError> {
+        if bytes > self.0 {
+            return Err(ApiError::new(ErrorCode::InputLimit, "Selected history exceeds the resend assembly limit")
+                .details(serde_json::json!({"reason": "replay_assembly_limit", "limit_bytes": MAX_RESPONSE_BYTES}))
+                .hint("Reduce the selected history before attempting another request")
+                .into());
+        }
+        Ok(())
+    }
+
+    fn charge(&mut self, bytes: usize) -> Result<(), StorageError> {
+        self.check(bytes)?;
+        self.0 -= bytes;
+        Ok(())
+    }
+}
+
+fn row_text<'a>(row: &'a rusqlite::Row<'_>, column: usize) -> rusqlite::Result<&'a str> {
+    let raw = row.get_ref(column)?;
+    raw.as_str().map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(column, raw.data_type(), Box::new(error))
+    })
+}
+
 #[derive(Default)]
 struct Ledger {
     live: AtomicUsize,
@@ -367,6 +398,16 @@ impl ReplayLease {
             })
         })
     }
+    pub(super) fn history_characters(&self) -> u64 {
+        // Brackets plus separators; count JSON's UTF-8 scalars without cloning
+        // the items or allocating a serialized array.
+        let mut remaining = usize::MAX;
+        self.items().enumerate().fold(2, |total, (index, item)| {
+            total
+                + u64::from(index != 0)
+                + bounded_json_characters(item, &mut remaining).expect("replay JSON is bounded")
+        })
+    }
     pub fn materialize(&self) -> Vec<Value> {
         self.items().cloned().collect()
     }
@@ -477,11 +518,33 @@ impl ReplayCache {
     /// an unchanged prefix can reuse items, and only the new suffix is decoded.
     pub fn load(&self, db: &Connection, thread: &str) -> Result<ReplayLease, StorageError> {
         let context=db.query_row("SELECT selection_revision,profile_revision,profile_id,model_id,reasoning_epoch FROM thread WHERE id=?1 AND deleted_at IS NULL",[thread],|row|Ok(Context{thread:thread.into(),selection:row.get(0)?,profile_revision:row.get(1)?,profile:row.get(2)?,model:row.get(3)?,epoch:row.get(4)?,adapter_version:ADAPTER_VERSION,tool_schema_version:TOOL_SCHEMA_VERSION}))?;
-        // Bound to `context.epoch`, so the epoch check below also covers it.
-        let keep = crate::history::reasoning_keep(db, thread, context.epoch)?;
-        let mut stamps=db.prepare("SELECT n.id,n.payload_revision,n.deleted_reason IS NOT NULL OR n.payload_json IS NULL,n.kind,n.import_origin_json IS NOT NULL FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 ORDER BY p.ordinal")?.query_map([thread],|row|Ok(Stamp{id:row.get(0)?,revision:row.get(1)?,tombstone:row.get(2)?,kind:row.get(3)?,imported:row.get(4)?,preamble:None}))?.collect::<rusqlite::Result<Vec<_>>>()?;
-        for stamp in &mut stamps {
+        let mut work = AssemblyBudget(MAX_RESPONSE_BYTES);
+        work.charge(context.bytes())?;
+        let keep = crate::history::reasoning_keep_checked(db, thread, context.epoch, |bytes| {
+            work.check(bytes)
+        })?;
+        work.charge(
+            keep.capacity() * (size_of::<String>() + size_of::<usize>())
+                + keep.iter().map(String::capacity).sum::<usize>(),
+        )?;
+        let mut statement = db.prepare("SELECT n.id,n.payload_revision,n.deleted_reason IS NOT NULL OR n.payload_json IS NULL,n.kind,n.import_origin_json IS NOT NULL FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 ORDER BY p.ordinal")?;
+        let mut rows = statement.query([thread])?;
+        let mut stamps = Vec::new();
+        while let Some(row) = rows.next()? {
+            let id = row_text(row, 0)?;
+            let kind = row_text(row, 3)?;
+            work.charge(size_of::<Stamp>() + id.len() + kind.len())?;
+            let mut stamp = Stamp {
+                id: id.to_owned(),
+                revision: row.get(1)?,
+                tombstone: row.get(2)?,
+                kind: kind.to_owned(),
+                imported: row.get(4)?,
+                preamble: None,
+            };
             stamp.read_admission(db, thread)?;
+            work.charge(stamp.preamble.as_ref().map_or(0, String::capacity))?;
+            stamps.push(stamp);
         }
         let mut state = self.state.lock().expect("replay cache poisoned");
         let previous = state.entries.remove(thread);
@@ -514,37 +577,49 @@ impl ReplayCache {
         }
         let mut frames = Vec::with_capacity(stamps.len());
         if let Some(previous) = reuse {
-            frames.extend(previous.frames.iter().cloned());
+            for frame in &previous.frames {
+                work.charge(frame.bytes + size_of::<Arc<Frame>>())?;
+                frames.push(frame.clone());
+            }
         }
         if reused < stamps.len() {
-            let mut statement=db.prepare("SELECT n.id,n.payload_json FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND p.ordinal>=?2 ORDER BY p.ordinal")?;
-            let mut rows = statement.query(rusqlite::params![thread, reused as i64])?;
+            // Don't read an oversized SQLite value into the result row at all.
+            let mut statement = db.prepare(
+                "SELECT n.id, octet_length(n.payload_json),
+                        CASE WHEN n.deleted_reason IS NULL AND octet_length(n.payload_json)<=?3 THEN n.payload_json END
+                 FROM thread_path p JOIN node n ON n.id=p.node_id
+                 WHERE p.thread_id=?1 AND p.ordinal>=?2 ORDER BY p.ordinal",
+            )?;
+            let mut rows =
+                statement.query(rusqlite::params![thread, reused as i64, work.0 as i64])?;
             let mut offset = reused;
             while let Some(row) = rows.next()? {
-                let id: String = row.get(0)?;
+                let id = row_text(row, 0)?;
                 let stamp = stamps
                     .get(offset)
                     .filter(|stamp| stamp.id == id)
                     .ok_or_else(|| {
                         StorageError::Schema("replay path changed within its DB snapshot".into())
-                    })?
-                    .clone();
-                if !stamp.tombstone {
-                    state.parsed_nodes += 1;
-                }
-                let body: Option<String> = if stamp.tombstone {
+                    })?;
+                let body = if stamp.tombstone
+                    || crate::history::is_legacy_admission_node(&stamp.id, &stamp.kind)
+                {
                     None
                 } else {
-                    Some(row.get(1)?)
+                    work.check(row.get::<_, u32>(1)? as usize)?;
+                    Some(row_text(row, 2)?)
                 };
-                frames.push(Arc::new(decode_frame(
+                state.parsed_nodes += u64::from(!stamp.tombstone);
+                let frame = decode_frame(
                     offset,
-                    stamp,
+                    stamp.clone(),
                     body,
                     context.epoch,
                     &keep,
                     &self.ledger,
-                )?));
+                )?;
+                work.charge(frame.bytes + size_of::<Arc<Frame>>())?;
+                frames.push(Arc::new(frame));
                 offset += 1;
             }
             if offset != stamps.len() {
@@ -657,7 +732,6 @@ fn outbound_item(mut item: Value) -> Value {
     }
     item
 }
-#[cfg(test)]
 fn bounded_json_characters(item: &Value, remaining: &mut usize) -> Option<u64> {
     struct Counter<'a> {
         remaining: &'a mut usize,
@@ -711,7 +785,7 @@ impl From<FrameError> for StorageError {
 fn decode_frame(
     ordinal: usize,
     stamp: Stamp,
-    body: Option<String>,
+    body: Option<&str>,
     epoch: i64,
     keep: &std::collections::HashSet<String>,
     ledger: &Arc<Ledger>,
@@ -721,7 +795,7 @@ fn decode_frame(
 fn decode_frame_checked(
     ordinal: usize,
     stamp: Stamp,
-    body: Option<String>,
+    body: Option<&str>,
     epoch: i64,
     keep: &std::collections::HashSet<String>,
     ledger: &Arc<Ledger>,
@@ -732,7 +806,7 @@ fn decode_frame_checked(
     let (group, mut items, spill_marker) = match body {
         None => (None, Vec::new(), false),
         Some(body) => {
-            let value: Value = serde_json::from_str(&body)
+            let value: Value = serde_json::from_str(body)
                 .map_err(|error| StorageError::Schema(error.to_string()))?;
             let group = value
                 .get("group_id")
@@ -868,7 +942,11 @@ fn load_uncached_mode(
             imported: row.get(5)?,
         };
         stamp.read_admission(db, thread)?;
-        let body: Option<String> = if stamp.tombstone { None } else { row.get(3)? };
+        let body = if stamp.tombstone {
+            None
+        } else {
+            Some(row_text(row, 3)?)
+        };
         match decode_frame_checked(frames.len(), stamp, body, epoch, &keep, &ledger) {
             Ok(frame) => frames.push(Arc::new(frame)),
             Err(FrameError::Tool(_)) if inspect => decode_fault = true,
@@ -1125,7 +1203,7 @@ mod tests {
                                     preamble: None,
                                     imported: false,
                                 },
-                                Some(payload.to_string()),
+                                Some(&payload.to_string()),
                                 0,
                                 &Default::default(),
                                 &ledger,
@@ -1175,7 +1253,7 @@ mod tests {
                             preamble: None,
                             imported: false,
                         },
-                        Some(payload.to_string()),
+                        Some(&payload.to_string()),
                         0,
                         &Default::default(),
                         &ledger,

@@ -330,14 +330,26 @@ pub(crate) fn reasoning_keep(
     thread_id: &str,
     epoch: i64,
 ) -> Result<HashSet<String>, StorageError> {
-    let saved: Option<String> = db
-        .query_row(
-            "SELECT value FROM app_meta WHERE key=?1",
-            [reasoning_keep_key(thread_id)],
-            |row| row.get(0),
-        )
-        .optional()?;
-    let Some(value) = saved.and_then(|body| serde_json::from_str::<Value>(&body).ok()) else {
+    reasoning_keep_checked(db, thread_id, epoch, |_| Ok(()))
+}
+
+pub(crate) fn reasoning_keep_checked(
+    db: &Connection,
+    thread_id: &str,
+    epoch: i64,
+    check: impl FnOnce(usize) -> Result<(), StorageError>,
+) -> Result<HashSet<String>, StorageError> {
+    let mut statement = db.prepare("SELECT value FROM app_meta WHERE key=?1")?;
+    let mut rows = statement.query([reasoning_keep_key(thread_id)])?;
+    let Some(row) = rows.next()? else {
+        return Ok(HashSet::new());
+    };
+    let raw = row.get_ref(0)?;
+    let bytes = raw.as_str().map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(0, raw.data_type(), Box::new(error))
+    })?;
+    check(bytes.len())?;
+    let Ok(value) = serde_json::from_str::<Value>(bytes) else {
         return Ok(HashSet::new());
     };
     if value["epoch"].as_i64() != Some(epoch) {

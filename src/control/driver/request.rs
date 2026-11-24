@@ -102,9 +102,10 @@ pub(super) async fn prepare_attempt(
         .ok()
         .flatten();
     // Record selected replay size separately from fixed instructions and files.
-    let history_characters = snapshot.input.as_ref().map_or(2, |replay| {
-        json!(replay.materialize()).to_string().chars().count() as u64
-    });
+    let history_characters = snapshot
+        .input
+        .as_ref()
+        .map_or(2, |replay| replay.history_characters());
     if slot.stop.is_cancelled() {
         return Ok(None);
     }

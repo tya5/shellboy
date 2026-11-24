@@ -2,7 +2,9 @@ use serde_json::{Value, json};
 use shellboy::{
     control::replay::{ReplayCache, ReplayLease},
     history::{append_node, select_path},
-    storage::DbWorker,
+    model::MAX_RESPONSE_BYTES,
+    protocol::ErrorCode,
+    storage::{DbWorker, StorageError},
 };
 struct Fixture {
     _root: tempfile::TempDir,
@@ -32,6 +34,13 @@ impl Fixture {
             .unwrap();
     }
     async fn load(&self, cache: &ReplayCache, thread: &str) -> ReplayLease {
+        self.try_load(cache, thread).await.unwrap()
+    }
+    async fn try_load(
+        &self,
+        cache: &ReplayCache,
+        thread: &str,
+    ) -> Result<ReplayLease, StorageError> {
         let cache = cache.clone();
         let thread = thread.to_owned();
         self.db
@@ -42,7 +51,6 @@ impl Fixture {
                 Ok(lease)
             })
             .await
-            .unwrap()
     }
 }
 fn user(text: &str) -> Value {
@@ -193,6 +201,69 @@ async fn zero_or_oversized_budget_bypasses_retention_and_accounts_for_live_reque
         drop(f.load(&cache, "t").await);
         assert_eq!(cache.stats().parsed_nodes, 2);
     }
+    f.db.shutdown().await.unwrap();
+}
+
+fn assert_assembly_refused(result: Result<ReplayLease, StorageError>) {
+    let error = match result {
+        Err(error) => error.into_api_error(),
+        Ok(_) => panic!("An over-limit path produced a lease"),
+    };
+    assert_eq!(error.code, ErrorCode::InputLimit);
+    let details = error.details.unwrap();
+    assert_eq!(details["reason"], "replay_assembly_limit");
+    assert_eq!(details["limit_bytes"], MAX_RESPONSE_BYTES);
+}
+
+#[tokio::test]
+async fn replay_assembly_rejects_one_oversized_source_before_parsing() {
+    let f = Fixture::new().await;
+    f.thread("t").await;
+    f.append("t", "large", user("small")).await;
+    // Append legal trailing JSON whitespace in SQLite without constructing the
+    // large Rust JSON value that the load path is required to avoid.
+    f.db.call(|db| {
+        db.execute(
+            "UPDATE node SET payload_json = payload_json || printf('%*s', ?1, '') WHERE id='large'",
+            [MAX_RESPONSE_BYTES as i64 + 1],
+        )?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+    let cache = ReplayCache::new(0);
+    assert_assembly_refused(f.try_load(&cache, "t").await);
+    assert_eq!(cache.stats().parsed_nodes, 0);
+    assert_eq!(cache.stats().live_bytes, 0);
+    f.db.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn replay_assembly_charges_many_small_sources_including_reused_frames() {
+    let f = Fixture::new().await;
+    f.thread("t").await;
+    let cache = ReplayCache::new(MAX_RESPONSE_BYTES as u64);
+    let items_per_half = 64;
+    let text_bytes = MAX_RESPONSE_BYTES / (2 * items_per_half);
+    let append_half = |start| {
+        f.db.call(move |db| {
+            let tx = db.transaction()?;
+            let payload = user(&"a".repeat(text_bytes));
+            for i in start..start + items_per_half {
+                append_node(&tx, "t", &format!("n{i}"), None, "fixture", &payload, "now")?;
+            }
+            tx.commit()?;
+            Ok(())
+        })
+    };
+    append_half(0).await.unwrap();
+    let lease = f.load(&cache, "t").await;
+    assert_eq!(lease.items().count(), items_per_half);
+    drop(lease);
+    append_half(items_per_half).await.unwrap();
+    assert_assembly_refused(f.try_load(&cache, "t").await);
+    assert_eq!(cache.stats().append_hits, 1);
+    assert_eq!(cache.stats().pinned_bytes, 0);
     f.db.shutdown().await.unwrap();
 }
 
