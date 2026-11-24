@@ -255,6 +255,75 @@ pub(crate) async fn fixture_with_language(
     tokio::spawn(control.clone().serve(receive));
     (root, owner, control, server)
 }
+#[tokio::test]
+async fn recurring_management_mutations_use_selected_listener_without_fallback() {
+    use crate::protocol::{Command, ScheduleAddArgs, ServiceAddArgs};
+    use tokio_util::sync::CancellationToken;
+
+    let (root, owner, control, server) = fixture().await;
+    let (_selected_root, selected, selected_control, selected_server) = fixture().await;
+    let commands = [
+        Command::ScheduleAdd(ScheduleAddArgs {
+            thread_id: Some("thread".into()),
+            cron: None,
+            at: None,
+            in_seconds: Some(3600),
+            cwd: None,
+            description: None,
+            command: "echo schedule".into(),
+        }),
+        Command::ServiceAdd(ServiceAddArgs {
+            thread_id: Some("thread".into()),
+            cwd: None,
+            description: None,
+            command: "echo service".into(),
+        }),
+    ];
+    for (command, result_key) in commands.into_iter().zip(["schedule_id", "service_id"]) {
+        let refused = super::management_request(
+            &control,
+            &root.path().join("without-listener"),
+            command.clone(),
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+        assert!(refused["error"].is_object(), "{refused}");
+        assert!(refused.get("request_operation_id").is_none());
+        let applied = super::management_request(
+            &control,
+            &selected.loaded.data_dir,
+            command,
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+        assert!(applied[result_key].is_string(), "{applied}");
+        let receipt = applied["request_operation_id"].as_str().unwrap();
+        assert_eq!(receipt.split_once(':').unwrap().0, selected.instance_id);
+    }
+    for (owner, expected) in [(&owner, 0), (&selected, 2)] {
+        let count = owner
+            .db
+            .call(|db| {
+                Ok(db.query_row(
+                    "SELECT count(*) FROM schedule WHERE thread_id='thread'",
+                    [],
+                    |r| r.get::<_, i64>(0),
+                )?)
+            })
+            .await
+            .unwrap();
+        assert_eq!(count, expected);
+    }
+    selected_server.shutdown().await.unwrap();
+    selected_control.shutdown().await.unwrap();
+    selected.shutdown().await.unwrap();
+    server.shutdown().await.unwrap();
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+}
+
 fn drain(updates: &std::sync::mpsc::Receiver<crate::ui::UiUpdate>) {
     while updates.try_recv().is_ok() {}
 }
