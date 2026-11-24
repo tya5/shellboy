@@ -170,3 +170,10 @@ the client retains at most 64 pages, 1 MiB for a code-block search (128 blocks),
 and 64 KiB for plain copy or clipboard output. No automatic history scan is
 performed. Optional provenance can be omitted under the existing frame budget;
 canonical body text must not be omitted silently.
+
+An explicit body inspection uses the same owner read, but obtains only the
+requested page (one node, at most 64 KiB of text and the native frame limit).
+Its continuation stays bound to the original source revision. A failed, stale,
+or tombstoned source cannot become a successful page of replacement text. The
+report may omit displayed text under its existing field budget; detail retains
+its separately bounded view of the captured page, not a fresh source lookup.
