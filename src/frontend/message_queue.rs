@@ -1,6 +1,6 @@
 //! Bounded current-input reads and source-backed draft restoration.
 use super::*;
-use rusqlite::{Connection, OptionalExtension};
+use rusqlite::Connection;
 use std::sync::atomic::{AtomicU64, Ordering};
 static READ_REVISION: AtomicU64 = AtomicU64::new(1);
 pub(super) fn read_revision() -> u64 {
@@ -142,7 +142,7 @@ pub(super) fn submission_snapshot(
             "Submission snapshot does not match the sent draft; retain the original draft",
         ));
     }
-    validate_snapshot_positions(&snapshot, limit)?;
+    crate::ui::draft::validate_positions(&snapshot, limit)?;
     Ok(snapshot)
 }
 pub(super) async fn archives(
@@ -167,70 +167,15 @@ pub(super) async fn restore_archive(
     control: &Control,
     id: String,
 ) -> Result<DraftSnapshot, ApiError> {
-    let result = restore_archive_inner(control, id).await;
-    checked_storage(control, result).await
-}
-async fn restore_archive_inner(control: &Control, id: String) -> Result<DraftSnapshot, ApiError> {
-    let submission_fence = crate::control::submission_retention::fence(
-        "json_extract(current.body_json,'$._submission.source_draft_id')",
-        "json_extract(current.body_json,'$._submission.source_revision')",
-        "current.thread_id",
-    );
-    let value=control.store.database.call(move|db|Ok(db.query_row(&format!("SELECT body_json FROM draft current WHERE id=?1 AND state IN ('archived','submitting') AND (current.thread_id IS NULL OR EXISTS(SELECT 1 FROM thread t WHERE t.id=current.thread_id AND t.deleted_at IS NULL)) AND (state<>'submitting' OR NOT {submission_fence})"),[id],|r|r.get::<_,String>(0)).optional()?)).await.map_err(storage_error)?.ok_or_else(||ApiError::new(ErrorCode::TargetUnavailable,"Restorable draft not found"))?;
-    let value: Value = serde_json::from_str(&value)
-        .map_err(|_| ApiError::new(ErrorCode::InvalidState, "Archived draft is malformed"))?;
-    let snapshot = if value["kind"] == "cancelled_message" {
-        let source = value["source_message_id"]
-            .as_str()
-            .ok_or_else(|| ApiError::new(ErrorCode::InvalidState, "Archived source is missing"))?;
-        let (text, attachments) = restore_snapshot(control, source.into()).await?;
-        let operation = value["source_operation_id"]
-            .as_str()
-            .unwrap_or("")
-            .to_owned();
-        let frozen=control.store.database.call(move|db|Ok(db.query_row("SELECT body_json FROM draft WHERE state='submitted' AND json_extract(body_json,'$._submission.operation_id')=?1 LIMIT 1",[operation],|row|row.get::<_,String>(0)).optional()?)).await.map_err(storage_error)?;
-        let mut snapshot = frozen
-            .and_then(|body| serde_json::from_str::<DraftSnapshot>(&body).ok())
-            .filter(|snapshot| snapshot.text == text)
-            .unwrap_or_default();
-        snapshot.text = text;
-        snapshot.cursor = snapshot.text.len();
-        snapshot.attachments = attachments;
-        snapshot.edit = None;
-        snapshot.literal_paste = true;
-        snapshot
-    } else {
-        serde_json::from_value::<DraftSnapshot>(value)
-            .map_err(|_| ApiError::new(ErrorCode::InvalidState, "Frozen draft is malformed"))?
-    };
-    validate_restore(&snapshot, control.store.config.limits.draft_bytes)?;
-    Ok(snapshot)
-}
-fn validate_snapshot_positions(snapshot: &DraftSnapshot, limit: u64) -> Result<(), ApiError> {
-    if snapshot.text.len() as u64 > limit {
-        return Err(ApiError::new(
-            ErrorCode::InputLimit,
-            "Draft exceeds the current input budget",
-        ));
-    }
-    if snapshot.cursor > snapshot.text.len()
-        || !snapshot.text.is_char_boundary(snapshot.cursor)
-        || snapshot.folds.iter().any(|fold| {
-            fold.start > fold.end
-                || fold.end > snapshot.text.len()
-                || !snapshot.text.is_char_boundary(fold.start)
-                || !snapshot.text.is_char_boundary(fold.end)
-        })
-    {
-        return Err(ApiError::new(
-            ErrorCode::InvalidState,
-            "Saved draft positions are malformed",
-        ));
-    }
-    Ok(())
+    compose_call(
+        control,
+        Command::DraftRestore(crate::protocol::DraftRestoreArgs { archive_id: id }),
+        None,
+    )
+    .await
 }
 fn validate_restore(snapshot: &DraftSnapshot, limit: u64) -> Result<(), ApiError> {
-    validate_snapshot_positions(snapshot, limit)?;
+    crate::ui::draft::validate_positions(snapshot, limit)?;
     crate::ui::draft::decode(&snapshot.text, snapshot.attachments.clone()).map_err(|_| {
         ApiError::new(
             ErrorCode::InvalidState,
@@ -1091,9 +1036,7 @@ mod retention_tests {
             .collect(StorageCategory::History, chrono::Utc::now())
             .await
             .unwrap();
-        let snapshot = restore_archive_inner(&control, archive.clone())
-            .await
-            .unwrap();
+        let snapshot = restore_archive(&control, archive.clone()).await.unwrap();
         assert_eq!(
             snapshot.text,
             format!("before{}after", crate::ui::draft::MARKER)
@@ -1154,7 +1097,7 @@ mod retention_tests {
                 .any(|(id, _)| id == "older-submitting")
         );
         assert!(
-            restore_archive_inner(&control, "older-submitting".into())
+            restore_archive(&control, "older-submitting".into())
                 .await
                 .is_err()
         );
@@ -1170,15 +1113,20 @@ mod retention_tests {
                 text: "late autosave".into(),
                 ..Default::default()
             };
-            crate::frontend::save_draft(
+            let result = crate::frontend::save_draft(
                 &control,
                 "thread".into(),
+                0,
                 draft,
                 ViewAnchor::default(),
                 true,
             )
-            .await
-            .unwrap();
+            .await;
+            if revision == 7 {
+                assert_eq!(result.unwrap_err().code, ErrorCode::OperationConflict);
+            } else {
+                result.unwrap();
+            }
             let exists=owner.db.call(move|db|Ok(db.query_row("SELECT EXISTS(SELECT 1 FROM draft WHERE id='retention-composer' AND state='editing' AND revision=?1)",[revision as i64],|r|r.get::<_,bool>(0))?)).await.unwrap();
             assert_eq!(exists, revision == 8);
         }

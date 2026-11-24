@@ -543,6 +543,70 @@
         {
           "properties": {
             "args": {
+              "$ref": "#/definitions/DraftSaveArgs"
+            },
+            "command": {
+              "const": "draft.save",
+              "type": "string"
+            }
+          },
+          "required": [
+            "command",
+            "args"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "args": {
+              "$ref": "#/definitions/DraftGetArgs"
+            },
+            "command": {
+              "const": "draft.get",
+              "type": "string"
+            }
+          },
+          "required": [
+            "command",
+            "args"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "args": {
+              "$ref": "#/definitions/DraftRestoreArgs"
+            },
+            "command": {
+              "const": "draft.restore",
+              "type": "string"
+            }
+          },
+          "required": [
+            "command",
+            "args"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "args": {
+              "$ref": "#/definitions/DraftSubmitArgs"
+            },
+            "command": {
+              "const": "draft.submit",
+              "type": "string"
+            }
+          },
+          "required": [
+            "command",
+            "args"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "args": {
               "$ref": "#/definitions/StatusArgs"
             },
             "command": {
@@ -2523,6 +2587,18 @@
       ],
       "type": "string"
     },
+    "DraftGetArgs": {
+      "additionalProperties": false,
+      "properties": {
+        "thread_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "thread_id"
+      ],
+      "type": "object"
+    },
     "DraftImageAction": {
       "oneOf": [
         {
@@ -2639,6 +2715,174 @@
       "required": [
         "id",
         "path"
+      ],
+      "type": "object"
+    },
+    "DraftRestoreArgs": {
+      "additionalProperties": false,
+      "properties": {
+        "archive_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "archive_id"
+      ],
+      "type": "object"
+    },
+    "DraftSaveArgs": {
+      "additionalProperties": false,
+      "properties": {
+        "anchor": {
+          "$ref": "#/definitions/ViewAnchor"
+        },
+        "draft": {
+          "$ref": "#/definitions/DraftSnapshot"
+        },
+        "follow_tail": {
+          "type": "boolean"
+        },
+        "selection_revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "thread_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "thread_id",
+        "selection_revision",
+        "draft",
+        "anchor",
+        "follow_tail"
+      ],
+      "type": "object"
+    },
+    "DraftSnapshot": {
+      "properties": {
+        "attachments": {
+          "items": {
+            "$ref": "#/definitions/UiAttachment"
+          },
+          "type": "array"
+        },
+        "cursor": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "draft_id": {
+          "type": "string"
+        },
+        "edit": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/EditRequestTarget"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "folds": {
+          "items": {
+            "$ref": "#/definitions/PasteFold"
+          },
+          "type": "array"
+        },
+        "literal_paste": {
+          "type": "boolean"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "draft_id",
+        "revision",
+        "text",
+        "cursor",
+        "attachments",
+        "folds",
+        "literal_paste"
+      ],
+      "type": "object"
+    },
+    "DraftSubmitArgs": {
+      "additionalProperties": false,
+      "properties": {
+        "create": {
+          "$ref": "#/definitions/ThreadCreateArgs"
+        },
+        "deliver": {
+          "$ref": "#/definitions/Deliver",
+          "default": "next"
+        },
+        "draft": {
+          "$ref": "#/definitions/DraftSnapshot"
+        },
+        "selection_revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "thread_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "create",
+        "draft"
+      ],
+      "type": "object"
+    },
+    "DraftView": {
+      "properties": {
+        "anchor": {
+          "$ref": "#/definitions/ViewAnchor"
+        },
+        "follow_tail": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "anchor",
+        "follow_tail"
+      ],
+      "type": "object"
+    },
+    "EditRequestTarget": {
+      "properties": {
+        "node_id": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "thread_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "thread_id",
+        "node_id"
       ],
       "type": "object"
     },
@@ -6266,6 +6510,35 @@
       },
       "type": "object"
     },
+    "PasteFold": {
+      "properties": {
+        "end": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "expanded": {
+          "type": "boolean"
+        },
+        "id": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "start": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "start",
+        "end",
+        "expanded"
+      ],
+      "type": "object"
+    },
     "PendingReplyCount": {
       "properties": {
         "count": {
@@ -6502,6 +6775,122 @@
             },
             "command": {
               "const": "owner.shutdown",
+              "type": "string"
+            },
+            "operation_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "origin": true,
+            "protocol_version": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "args",
+            "command",
+            "operation_id",
+            "protocol_version"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "args": {
+              "$ref": "#/definitions/DraftSaveArgs"
+            },
+            "command": {
+              "const": "draft.save",
+              "type": "string"
+            },
+            "operation_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "origin": true,
+            "protocol_version": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "args",
+            "command",
+            "operation_id",
+            "protocol_version"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "args": {
+              "$ref": "#/definitions/DraftGetArgs"
+            },
+            "command": {
+              "const": "draft.get",
+              "type": "string"
+            },
+            "operation_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "origin": true,
+            "protocol_version": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "args",
+            "command",
+            "operation_id",
+            "protocol_version"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "args": {
+              "$ref": "#/definitions/DraftRestoreArgs"
+            },
+            "command": {
+              "const": "draft.restore",
+              "type": "string"
+            },
+            "operation_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "origin": true,
+            "protocol_version": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "args",
+            "command",
+            "operation_id",
+            "protocol_version"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "args": {
+              "$ref": "#/definitions/DraftSubmitArgs"
+            },
+            "command": {
+              "const": "draft.submit",
               "type": "string"
             },
             "operation_id": {
@@ -11695,6 +12084,38 @@
       ],
       "type": "object"
     },
+    "UiAttachment": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "position": {
+          "description": "Byte position of the owned marker. Metadata awaiting marker placement\nuses explicit null; a sendable draft must contain a concrete position.",
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "state": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "path",
+        "kind",
+        "state"
+      ],
+      "type": "object"
+    },
     "UsageActive": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": true,
@@ -12529,6 +12950,25 @@
       "required": [
         "status",
         "reason"
+      ],
+      "type": "object"
+    },
+    "ViewAnchor": {
+      "properties": {
+        "char_offset": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "node_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "char_offset"
       ],
       "type": "object"
     },
@@ -13377,6 +13817,41 @@
       "title": "CredentialsSetResult",
       "type": "object"
     },
+    "draft.get": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "draft": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/DraftSnapshot"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "selection_revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "view": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/DraftView"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "selection_revision"
+      ],
+      "title": "DraftState",
+      "type": "object"
+    },
     "draft.image": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "oneOf": [
@@ -13444,6 +13919,129 @@
         }
       ],
       "title": "DraftImageResult"
+    },
+    "draft.restore": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "attachments": {
+          "items": {
+            "$ref": "#/definitions/UiAttachment"
+          },
+          "type": "array"
+        },
+        "cursor": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "draft_id": {
+          "type": "string"
+        },
+        "edit": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/EditRequestTarget"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "folds": {
+          "items": {
+            "$ref": "#/definitions/PasteFold"
+          },
+          "type": "array"
+        },
+        "literal_paste": {
+          "type": "boolean"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "draft_id",
+        "revision",
+        "text",
+        "cursor",
+        "attachments",
+        "folds",
+        "literal_paste"
+      ],
+      "title": "DraftSnapshot",
+      "type": "object"
+    },
+    "draft.save": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "accepted": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "accepted"
+      ],
+      "title": "Accepted",
+      "type": "object"
+    },
+    "draft.submit": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "assignment": {
+          "$ref": "#/definitions/Assignment"
+        },
+        "deliver": {
+          "$ref": "#/definitions/Deliver"
+        },
+        "delivery_status": {
+          "$ref": "#/definitions/DeliveryStatus"
+        },
+        "expect_reply": {
+          "type": "boolean"
+        },
+        "hint": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "message_id": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "thread_id": {
+          "type": "string"
+        },
+        "to_human": {
+          "type": "boolean"
+        },
+        "turn_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "message_id",
+        "thread_id",
+        "delivery_status",
+        "assignment"
+      ],
+      "title": "MessageAccepted",
+      "type": "object"
     },
     "events.wait": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",

@@ -125,7 +125,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct UiAttachment {
     pub id: String,
     pub path: PathBuf,
@@ -136,20 +138,26 @@ pub struct UiAttachment {
     #[serde(deserialize_with = "serde::Deserialize::deserialize")]
     pub position: Option<usize>,
 }
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct PasteFold {
     pub id: u64,
     pub start: usize,
     pub end: usize,
     pub expanded: bool,
 }
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct EditRequestTarget {
     pub thread_id: String,
     pub node_id: String,
     pub run_id: Option<String>,
 }
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct DraftSnapshot {
     pub draft_id: String,
     pub revision: u64,
@@ -189,7 +197,9 @@ pub struct StreamRebase {
     pub source: UiNode,
     pub anchor: ViewAnchor,
 }
-#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct ViewAnchor {
     pub node_id: Option<String>,
     pub char_offset: usize,
@@ -487,6 +497,7 @@ impl UiNode {
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ReceiptStatus {
     Accepting,
+    Unknown,
     Accepted,
     Preparing,
     Held,
@@ -676,6 +687,7 @@ pub enum UiAction {
     },
     Send {
         generation: u64,
+        selection_revision: u64,
         now: bool,
         snapshot: Option<Box<DraftSnapshot>>,
         draft_id: String,
@@ -708,6 +720,7 @@ pub enum UiAction {
     },
     SendEdited {
         generation: u64,
+        selection_revision: u64,
         now: bool,
         snapshot: Option<Box<DraftSnapshot>>,
         draft_id: String,
@@ -818,6 +831,7 @@ pub enum UiAction {
     },
     SaveDraft {
         thread_id: String,
+        selection_revision: u64,
         draft: DraftSnapshot,
         anchor: ViewAnchor,
         follow: bool,
@@ -844,6 +858,7 @@ pub enum UiAction {
         thread_id: String,
         execution_id: String,
     },
+    ReconnectCompose,
     Quit,
     ForceQuit,
     WaitForShutdown,
@@ -3315,6 +3330,7 @@ impl UiState {
                         } else {
                             self.deferred_actions.push(UiAction::SaveDraft {
                                 thread_id: thread,
+                                selection_revision: view.selection_revision,
                                 draft: view.draft.clone(),
                                 anchor: view.navigation.anchor.clone(),
                                 follow: view.navigation.follow(),
@@ -4413,6 +4429,7 @@ impl UiState {
             .map(|thread_id| {
                 vec![UiAction::SaveDraft {
                     thread_id: thread_id.clone(),
+                    selection_revision: view.selection_revision,
                     draft: view.draft.clone(),
                     anchor: view.navigation.anchor.clone(),
                     follow: view.navigation.follow(),
@@ -4857,6 +4874,19 @@ impl UiState {
         let text = self.view().draft.text.clone();
         let now = std::mem::take(&mut self.send_now);
         let view = self.active_view_mut();
+        if view
+            .pending
+            .values()
+            .any(|pending| pending.status == ReceiptStatus::Unknown)
+        {
+            view.status = i18n::local!(
+                language,
+                "送信結果を確認してから再送してください",
+                "Check the unconfirmed operation receipt before sending again"
+            )
+            .into();
+            return vec![];
+        }
         if text.trim().is_empty() && view.draft.attachments.is_empty() {
             return vec![];
         }
@@ -4920,6 +4950,7 @@ impl UiState {
         if let Some(edit) = draft.edit {
             return vec![UiAction::SendEdited {
                 generation: view.generation,
+                selection_revision: view.selection_revision,
                 now,
                 snapshot,
                 draft_id: draft.draft_id,
@@ -4936,6 +4967,7 @@ impl UiState {
         }
         vec![UiAction::Send {
             generation: view.generation,
+            selection_revision: view.selection_revision,
             now,
             snapshot,
             draft_id: draft.draft_id,
@@ -5476,6 +5508,7 @@ cursor: None,
                 None if thread_id.is_some() => self.command_error(self.no_foreground_shell()),
                 None => vec![],
             },
+            "/reconnect" if argument.is_empty() => vec![UiAction::ReconnectCompose],
             "/quit" => {
                 self.lifecycle.begin();
                 self.selection_mode = false;
@@ -6408,6 +6441,7 @@ fn valid_draft(draft: &DraftSnapshot) -> bool {
 fn receipt_label(status: &ReceiptStatus) -> &'static str {
     match status {
         ReceiptStatus::Accepting => "受付処理中",
+        ReceiptStatus::Unknown => "送信結果不明",
         ReceiptStatus::Accepted => "受付済み",
         ReceiptStatus::Preparing => "受付済み／準備中",
         ReceiptStatus::Held => "保留",

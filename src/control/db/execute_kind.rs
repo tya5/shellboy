@@ -57,7 +57,7 @@ macro_rules! named_jobs {
 
 // The exhaustive match ensures every future protocol variant gets a fixed label.
 named_jobs! {
-    DraftImage => draft_image, OwnerShutdown => owner_shutdown, Status => status, ModelList => model_list,
+    DraftImage => draft_image, DraftSubmit => draft_submit, DraftSave => draft_save, DraftGet => draft_get, DraftRestore => draft_restore, OwnerShutdown => owner_shutdown, Status => status, ModelList => model_list,
     ThreadList => thread_list, ThreadGet => thread_get, ThreadBranches => thread_branches, UsageGet => usage_get,
     ArtifactAdd => artifact_add, ArtifactUpdate => artifact_update, ArtifactList => artifact_list, ArtifactGet => artifact_get, ArtifactRemove => artifact_remove,
     ServiceAdd => service_add, ServiceList => service_list, ServiceStart => service_start, ServiceStop => service_stop, ServiceRemove => service_remove,
@@ -110,7 +110,9 @@ impl Kind {
     fn classification(self) -> Classification {
         use Classification::*;
         match self {
-            Kind::Status
+            Kind::DraftGet
+            | Kind::DraftRestore
+            | Kind::Status
             | Kind::ThreadList
             | Kind::ArtifactList
             | Kind::ArtifactGet
@@ -143,7 +145,8 @@ impl Kind {
             // Bounded closure (65,536 sources) in one transaction; see history::prune.
             // Rewind refuses paths over history::rewind::PATH_LIMIT nodes.
             // Archive: at most 200 IDs, descendants walk capped at 256 (control::archive).
-            Kind::ArtifactAdd
+            Kind::DraftSave
+            | Kind::ArtifactAdd
             | Kind::ArtifactUpdate
             | Kind::ArtifactRemove
             | Kind::ServiceAdd
@@ -174,6 +177,7 @@ impl Kind {
             | Kind::Compact
             | Kind::ContextEdit => MutationExempt,
             Kind::DraftImage
+            | Kind::DraftSubmit
             | Kind::ServiceStop
             | Kind::ServiceRemove
             | Kind::ScheduleRemove
@@ -261,7 +265,7 @@ mod tests {
         }
         assert_eq!(
             Kind::ALL.len(),
-            82 + service_kinds.len() + intervention_kinds.len() + bounded_history_kinds.len(),
+            86 + service_kinds.len() + intervention_kinds.len() + bounded_history_kinds.len(),
             "classify new kinds and update this ratchet"
         );
     }
@@ -269,6 +273,7 @@ mod tests {
     #[test]
     fn every_writer_kind_has_a_bound_or_a_ratchet_exemption() {
         let writers = [
+            Kind::DraftSave,
             Kind::ArtifactAdd,
             Kind::ArtifactUpdate,
             Kind::ArtifactRemove,

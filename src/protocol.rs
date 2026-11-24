@@ -49,6 +49,10 @@ fn operation_result_schemas(
     }
     result!("draft.image", DraftImageResult);
     result!("owner.shutdown", Accepted);
+    result!("draft.save", Accepted);
+    result!("draft.get", DraftState);
+    result!("draft.restore", crate::ui::DraftSnapshot);
+    result!("draft.submit", MessageAccepted);
     result!("status", StatusResult);
     result!("model.list", ModelListResult);
     result!("thread.list", Page<ThreadSummary>);
@@ -1572,6 +1576,13 @@ pub enum WaitCondition {
     },
 }
 
+args!(DraftSubmitArgs {
+    thread_id: Option<String>,
+    selection_revision: Option<u64>,
+    create: ThreadCreateArgs,
+    draft: Box<crate::ui::DraftSnapshot>,
+    #[serde(default)] deliver: Deliver,
+});
 pub const DRAFT_IMAGE_CHUNK_BYTES: usize = 1024 * 1024;
 
 args!(DraftImageArgs {
@@ -1613,6 +1624,25 @@ record!(DraftImageAttachment {
     path: std::path::PathBuf
 });
 
+args!(DraftGetArgs { thread_id: String });
+args!(DraftRestoreArgs { archive_id: String });
+record!(DraftState {
+    selection_revision: u64,
+    draft: Option<crate::ui::DraftSnapshot>,
+    view: Option<DraftView>,
+});
+record!(DraftView {
+    anchor: crate::ui::ViewAnchor,
+    follow_tail: bool
+});
+args!(DraftSaveArgs {
+    thread_id: String,
+    selection_revision: u64,
+    draft: Box<crate::ui::DraftSnapshot>,
+    anchor: crate::ui::ViewAnchor,
+    follow_tail: bool,
+});
+
 args!(OwnerShutdownArgs {
     instance_id: String
 });
@@ -1624,6 +1654,14 @@ pub enum Command {
     DraftImage(DraftImageArgs),
     #[serde(rename = "owner.shutdown")]
     OwnerShutdown(OwnerShutdownArgs),
+    #[serde(rename = "draft.save")]
+    DraftSave(DraftSaveArgs),
+    #[serde(rename = "draft.get")]
+    DraftGet(DraftGetArgs),
+    #[serde(rename = "draft.restore")]
+    DraftRestore(DraftRestoreArgs),
+    #[serde(rename = "draft.submit")]
+    DraftSubmit(DraftSubmitArgs),
     #[serde(rename = "status")]
     Status(StatusArgs),
     #[serde(rename = "model.list")]
@@ -2853,6 +2891,10 @@ mod message_acknowledgement_tests {
             "artifact.remove",
             "draft.image",
             "owner.shutdown",
+            "draft.save",
+            "draft.get",
+            "draft.restore",
+            "draft.submit",
             "status",
             "model.list",
             "thread.list",
@@ -2934,7 +2976,7 @@ mod message_acknowledgement_tests {
                 "missing result schema for {name}"
             );
         }
-        assert_eq!(results.len(), 83 + 2); // Existing operations plus recall and received.
+        assert_eq!(results.len(), 89);
         for name in ["thread.create", "connection.test"] {
             assert_eq!(
                 results[name],

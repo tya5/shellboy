@@ -367,6 +367,20 @@ pub(crate) async fn call_selected(
     connect(read_endpoint(data_dir).await?, command, None, None).await
 }
 
+/// A connected composer never addresses a replacement owner implicitly.
+pub(crate) async fn call_selected_operation(
+    data_dir: &Path,
+    instance: &str,
+    command: Command,
+    operation_id: Option<String>,
+) -> Result<Response<Value>, ApiError> {
+    let endpoint = read_endpoint(data_dir).await?;
+    if endpoint.instance_id != instance {
+        return Err(endpoint_mismatch());
+    }
+    connect(endpoint, command, operation_id, None).await
+}
+
 /// The CLI retries only a definite wait admission refusal, on the same owner.
 pub async fn call_cli_wait(
     data_dir: &Path,
@@ -981,6 +995,108 @@ mod frame_delivery_tests {
         assert_eq!(details["request_may_have_been_applied"], true);
         assert_eq!(details["next_operation"]["command"], "operation.get");
         task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn accepted_draft_with_lost_reply_is_reconciled_without_a_second_message() {
+        let root = tempfile::tempdir().unwrap();
+        let config = root.path().join("config.toml");
+        std::fs::write(&config, "default_connection='fixture'\ndefault_model='synthetic'\n[connections.fixture]\nbase_url='http://127.0.0.1:1/v1'\nresponse_max_retries=0\n").unwrap();
+        let owner = crate::app::DataOwner::start(
+            Some(config),
+            Some(root.path().join("data")),
+            root.path().into(),
+        )
+        .await
+        .unwrap();
+        let control = crate::control::Control::new(&owner, root.path().into());
+        let mut selected = endpoint();
+        selected.instance_id.clone_from(&control.store.instance_id);
+        let operation = format!("{}:lost-draft", selected.instance_id);
+        let submit = Command::DraftSubmit(crate::protocol::DraftSubmitArgs {
+            thread_id: None,
+            selection_revision: None,
+            create: crate::protocol::ThreadCreateArgs {
+                agents: None,
+                connection: None,
+                cwd: None,
+                model: None,
+                effort: None,
+                parent_id: None,
+            },
+            draft: Box::new(crate::ui::DraftSnapshot {
+                revision: 1,
+                text: "draft kept by the client".into(),
+                ..Default::default()
+            }),
+            deliver: crate::protocol::Deliver::Next,
+        });
+        let (client, mut peer) = tokio::io::duplex(4096);
+        let backend = control.clone();
+        let server = tokio::spawn(async move {
+            read_frame::<_, Hello>(&mut peer).await.unwrap().unwrap();
+            write_frame(
+                &mut peer,
+                &Welcome {
+                    owner_version: None,
+                    protocol_version: PROTOCOL_VERSION,
+                    capabilities: Vec::new(),
+                    instance_id: backend.store.instance_id.clone(),
+                },
+            )
+            .await
+            .unwrap();
+            let request = read_frame::<_, Request>(&mut peer).await.unwrap().unwrap();
+            let accepted = backend.request(request).await;
+            assert!(accepted.ok, "{:?}", accepted.error);
+            // Close the transport after commit, without handing the reply to the client.
+            accepted.result.unwrap()
+        });
+        let error = call_stream(
+            client,
+            selected,
+            submit.clone(),
+            Some(operation.clone()),
+            None,
+        )
+        .await
+        .unwrap_err();
+        let details = error.details.unwrap();
+        assert_eq!(details["request_may_have_been_applied"], true);
+        assert_eq!(details["operation_id"], operation);
+        let accepted = server.await.unwrap();
+        let lookup = serde_json::from_value::<Command>(details["next_operation"].clone()).unwrap();
+        let readback = control.request(Request::new("readback", lookup)).await;
+        assert_eq!(
+            readback.result.unwrap()["outcome"]["result"]["message_id"],
+            accepted["message_id"]
+        );
+        let replay = control
+            .request(Request::new(operation.clone(), submit))
+            .await;
+        assert_eq!(replay.result.unwrap(), accepted);
+        let counts = control
+            .store
+            .database
+            .call(move |db| {
+                Ok((
+                    db.query_row(
+                        "SELECT count(*) FROM operation_receipt WHERE operation_id=?1",
+                        [&operation],
+                        |r| r.get::<_, i64>(0),
+                    )?,
+                    db.query_row(
+                        "SELECT count(*) FROM receipt WHERE client_operation_id=?1",
+                        [&operation],
+                        |r| r.get::<_, i64>(0),
+                    )?,
+                ))
+            })
+            .await
+            .unwrap();
+        assert_eq!(counts, (1, 1));
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
     }
 
     #[tokio::test]

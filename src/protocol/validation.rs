@@ -889,6 +889,27 @@ impl Command {
                 optional_nonempty(a.run_id.as_deref(), "run_id")?;
                 optional_nonempty(a.turn_id.as_deref(), "turn_id")
             }
+            Self::DraftSubmit(a) => {
+                nonempty(&a.draft.draft_id, "draft_id")?;
+                optional_nonempty(a.thread_id.as_deref(), "thread_id")?;
+                if a.thread_id.is_some() != a.selection_revision.is_some()
+                    || a.draft.edit.as_ref().is_some_and(|edit| {
+                        Some(edit.thread_id.as_str()) != a.thread_id.as_deref()
+                            || edit.node_id.is_empty()
+                    })
+                {
+                    return Err(invalid(
+                        "Draft submission needs a matching Thread and selected revision",
+                    ));
+                }
+                Self::ThreadCreate(a.create.clone()).validate()
+            }
+            Self::DraftRestore(a) => nonempty(&a.archive_id, "archive_id"),
+            Self::DraftGet(a) => nonempty(&a.thread_id, "thread_id"),
+            Self::DraftSave(a) => {
+                nonempty(&a.thread_id, "thread_id")?;
+                nonempty(&a.draft.draft_id, "draft_id")
+            }
             Self::ModelList(a) => a.validate(),
             Self::ThreadList(a) => a.validate(),
             Self::ThreadGet(a) => optional_nonempty(a.thread_id.as_deref(), "thread_id"),

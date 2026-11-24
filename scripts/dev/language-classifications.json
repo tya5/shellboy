@@ -6247,22 +6247,22 @@
   "src/ui/view.rs:96e61934f7a4902e:1": {
     "category": "a",
     "reason": "Restore guidance is rendered in the Japanese branch of ThreadView::on_receipt. receipt_english provides the matching English restore message; receipt_delivery now leaves generated guidance to that locale-aware view.",
-    "source_tokens_sha256": "22375690425d78c2df854bd7f161f8d8b1b9f631c21c73acd8d0b4b7a01f027e"
+    "source_tokens_sha256": "c4a95f984c591fc89f25037c2b9771649fa5f34938c3bc8fa2d19006994566ca"
   },
   "src/ui/view.rs:f63545560e66db13:1": {
     "category": "a",
     "reason": "Restore guidance is rendered in the Japanese branch of ThreadView::on_receipt. receipt_english provides the matching English restore message; receipt_delivery now leaves generated guidance to that locale-aware view.",
-    "source_tokens_sha256": "22375690425d78c2df854bd7f161f8d8b1b9f631c21c73acd8d0b4b7a01f027e"
+    "source_tokens_sha256": "c4a95f984c591fc89f25037c2b9771649fa5f34938c3bc8fa2d19006994566ca"
   },
   "src/ui/view.rs:0266ccfd3bcf7ec9:1": {
     "category": "a",
     "reason": "Retained-composer hint is rendered only in ThreadView::on_receipt Japanese branch; receipt_english has the English Current input retained sentence. User-provided receipt message remains opaque.",
-    "source_tokens_sha256": "22375690425d78c2df854bd7f161f8d8b1b9f631c21c73acd8d0b4b7a01f027e"
+    "source_tokens_sha256": "c4a95f984c591fc89f25037c2b9771649fa5f34938c3bc8fa2d19006994566ca"
   },
   "src/ui/view.rs:9a6bd1ff2a02edef:1": {
     "category": "a",
     "reason": "Retained-composer hint is rendered only in ThreadView::on_receipt Japanese branch; receipt_english has the English Current input retained sentence. User-provided receipt message remains opaque.",
-    "source_tokens_sha256": "22375690425d78c2df854bd7f161f8d8b1b9f631c21c73acd8d0b4b7a01f027e"
+    "source_tokens_sha256": "c4a95f984c591fc89f25037c2b9771649fa5f34938c3bc8fa2d19006994566ca"
   },
   "src/presentation/events.rs:7346b96eb637e521:1": {
     "category": "a",
@@ -6332,42 +6332,42 @@
   "src/ui.rs:49d819cd993ade59:1": {
     "category": "a",
     "reason": "Japanese ReceiptStatus label; the same exhaustive ReceiptStatus enum is rendered by receipt_english in English mode.",
-    "source_tokens_sha256": "c859011042a1420f4f97d2bdf9dfd24c09924b7041af472aeffeff33b5e3e955"
+    "source_tokens_sha256": "175c70a023014408ac9b71b3ca4c3782cbd36715e9141f7f24aed2323ce21979"
   },
   "src/ui.rs:bb218f39139f8fc9:1": {
     "category": "a",
     "reason": "Japanese ReceiptStatus label; the same exhaustive ReceiptStatus enum is rendered by receipt_english in English mode.",
-    "source_tokens_sha256": "c859011042a1420f4f97d2bdf9dfd24c09924b7041af472aeffeff33b5e3e955"
+    "source_tokens_sha256": "175c70a023014408ac9b71b3ca4c3782cbd36715e9141f7f24aed2323ce21979"
   },
   "src/ui.rs:59639bbf3ec67029:1": {
     "category": "a",
     "reason": "Japanese ReceiptStatus label; the same exhaustive ReceiptStatus enum is rendered by receipt_english in English mode.",
-    "source_tokens_sha256": "c859011042a1420f4f97d2bdf9dfd24c09924b7041af472aeffeff33b5e3e955"
+    "source_tokens_sha256": "175c70a023014408ac9b71b3ca4c3782cbd36715e9141f7f24aed2323ce21979"
   },
   "src/ui.rs:dc05d06eedde6a37:1": {
     "category": "a",
     "reason": "Japanese ReceiptStatus label; the same exhaustive ReceiptStatus enum is rendered by receipt_english in English mode.",
-    "source_tokens_sha256": "c859011042a1420f4f97d2bdf9dfd24c09924b7041af472aeffeff33b5e3e955"
+    "source_tokens_sha256": "175c70a023014408ac9b71b3ca4c3782cbd36715e9141f7f24aed2323ce21979"
   },
   "src/ui.rs:86b86ee263bb3e7c:1": {
     "category": "a",
     "reason": "Japanese ReceiptStatus label; the same exhaustive ReceiptStatus enum is rendered by receipt_english in English mode.",
-    "source_tokens_sha256": "c859011042a1420f4f97d2bdf9dfd24c09924b7041af472aeffeff33b5e3e955"
+    "source_tokens_sha256": "175c70a023014408ac9b71b3ca4c3782cbd36715e9141f7f24aed2323ce21979"
   },
   "src/ui.rs:608fe041d34bd512:1": {
     "category": "a",
     "reason": "Japanese ReceiptStatus label; the same exhaustive ReceiptStatus enum is rendered by receipt_english in English mode.",
-    "source_tokens_sha256": "c859011042a1420f4f97d2bdf9dfd24c09924b7041af472aeffeff33b5e3e955"
+    "source_tokens_sha256": "175c70a023014408ac9b71b3ca4c3782cbd36715e9141f7f24aed2323ce21979"
   },
   "src/ui.rs:6277ca836a850b9f:1": {
     "category": "a",
     "reason": "Japanese ReceiptStatus label; the same exhaustive ReceiptStatus enum is rendered by receipt_english in English mode.",
-    "source_tokens_sha256": "c859011042a1420f4f97d2bdf9dfd24c09924b7041af472aeffeff33b5e3e955"
+    "source_tokens_sha256": "175c70a023014408ac9b71b3ca4c3782cbd36715e9141f7f24aed2323ce21979"
   },
   "src/ui.rs:9d0518dbe7e7b83c:1": {
     "category": "a",
     "reason": "Japanese ReceiptStatus label; the same exhaustive ReceiptStatus enum is rendered by receipt_english in English mode.",
-    "source_tokens_sha256": "c859011042a1420f4f97d2bdf9dfd24c09924b7041af472aeffeff33b5e3e955"
+    "source_tokens_sha256": "175c70a023014408ac9b71b3ca4c3782cbd36715e9141f7f24aed2323ce21979"
   },
   "src/frontend/notices.rs:7f713b9b0bf08ff6:1": {
     "category": "a",
@@ -7266,5 +7266,10 @@
     "category": "a",
     "reason": "The short archive notice is stored as a Japanese/English pair and F1 details show the full operation ID separately.",
     "source_tokens_sha256": "d05f586dec95fb05e75b55c3c97aaec2e876ae380477113f49f4cac2cd810009"
+  },
+  "src/ui.rs:21a336d018b67b3b:1": {
+    "category": "a",
+    "reason": "Called only for Japanese receipt rendering; the English branch uses receipt_english in ui/view.rs.",
+    "source_tokens_sha256": "175c70a023014408ac9b71b3ca4c3782cbd36715e9141f7f24aed2323ce21979"
   }
 }

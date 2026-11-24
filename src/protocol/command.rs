@@ -12,6 +12,10 @@ impl Command {
     fn name_and_route(&self) -> (&'static str, CommandRoute) {
         match self {
             Self::DraftImage(_) => ("draft.image", CommandRoute::Database),
+            Self::DraftSubmit(_) => ("draft.submit", CommandRoute::Database),
+            Self::DraftRestore(_) => ("draft.restore", CommandRoute::Database),
+            Self::DraftGet(_) => ("draft.get", CommandRoute::Database),
+            Self::DraftSave(_) => ("draft.save", CommandRoute::Database),
             Self::OwnerShutdown(_) => ("owner.shutdown", CommandRoute::Database),
             Self::Status(a) => (
                 "status",
@@ -131,6 +135,10 @@ impl Command {
     /// May owner shutdown drop the runtime action before receipt finalization?
     pub(crate) fn runtime_cancellable(&self) -> bool {
         match self {
+            Self::DraftSave(_)
+            | Self::DraftGet(_)
+            | Self::DraftRestore(_)
+            | Self::DraftSubmit(_) => false,
             Self::ArtifactAdd(_)
             | Self::ArtifactUpdate(_)
             | Self::ArtifactRemove(_)
@@ -226,6 +234,10 @@ impl Command {
     /// Late runtime cleanup allowed after cancellation; not the IPC reserved lane.
     pub(crate) fn runtime_allowed_while_stopping(&self) -> bool {
         match self {
+            Self::DraftSave(_)
+            | Self::DraftGet(_)
+            | Self::DraftRestore(_)
+            | Self::DraftSubmit(_) => false,
             Self::ArtifactAdd(_)
             | Self::ArtifactUpdate(_)
             | Self::ArtifactRemove(_)
@@ -320,6 +332,8 @@ impl Command {
     /// Must finish admission before the graceful-shutdown context capture?
     pub(crate) fn changes_context(&self) -> bool {
         match self {
+            Self::DraftSave(_) | Self::DraftGet(_) | Self::DraftRestore(_) => false,
+            Self::DraftSubmit(_) => true,
             Self::ArtifactAdd(_)
             | Self::ArtifactUpdate(_)
             | Self::ArtifactRemove(_)
@@ -416,6 +430,8 @@ impl Command {
     pub fn is_read_only(&self) -> bool {
         match self {
             Self::TurnInterrupt(_) | Self::ShellBackground(_) => false,
+            Self::DraftGet(_) | Self::DraftRestore(_) => true,
+            Self::DraftSave(_) | Self::DraftSubmit(_) => false,
             Self::ArtifactAdd(_)
             | Self::ArtifactUpdate(_)
             | Self::ArtifactRemove(_)

@@ -289,6 +289,30 @@ fn move_vertical(draft: &mut DraftSnapshot, down: bool) {
     }
 }
 
+pub(crate) fn validate_positions(snapshot: &DraftSnapshot, limit: u64) -> Result<(), ApiError> {
+    if snapshot.text.len() as u64 > limit {
+        return Err(ApiError::new(
+            ErrorCode::InputLimit,
+            "Draft exceeds the current input budget",
+        ));
+    }
+    if snapshot.cursor > snapshot.text.len()
+        || !snapshot.text.is_char_boundary(snapshot.cursor)
+        || snapshot.folds.iter().any(|fold| {
+            fold.start > fold.end
+                || fold.end > snapshot.text.len()
+                || !snapshot.text.is_char_boundary(fold.start)
+                || !snapshot.text.is_char_boundary(fold.end)
+        })
+    {
+        return Err(ApiError::new(
+            ErrorCode::InvalidState,
+            "Saved draft positions are malformed",
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

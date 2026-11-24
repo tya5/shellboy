@@ -16,10 +16,33 @@ use tokio_util::sync::CancellationToken;
 const IDLE: Duration = Duration::from_secs(60);
 
 #[derive(Default)]
-pub(super) struct DraftImages {
+pub(crate) struct DraftImages {
     transfer: Option<Transfer>,
     pins: HashMap<String, (String, ManagedImage)>,
 }
+impl DraftImages {
+    pub(crate) fn hand_off(&mut self, draft: &crate::ui::DraftSnapshot) {
+        // The committed draft/attachment reference now protects the file from
+        // retention. No second runtime pin or client release is needed.
+        for attachment in &draft.attachments {
+            if self
+                .pins
+                .get(&attachment.id)
+                .is_some_and(|(owner, _)| owner == &draft.draft_id)
+            {
+                self.pins.remove(&attachment.id);
+            }
+        }
+    }
+}
+
+async fn expire_unbound(state: Weak<Mutex<DraftImages>>, id: String, deadline: Instant) {
+    tokio::time::sleep_until(deadline).await;
+    if let Some(state) = state.upgrade() {
+        state.lock().await.pins.remove(&id);
+    }
+}
+
 struct Transfer {
     id: String,
     draft: String,
@@ -183,23 +206,34 @@ impl AttachmentService {
                     path: image.path.clone(),
                 };
                 state.pins.insert(image.id.clone(), (args.draft_id, image));
+                // Native IPC opens one connection per command, so closing Commit
+                // is not evidence that its caller abandoned the composer.
+                tokio::spawn(expire_unbound(
+                    Arc::downgrade(&self.draft_images),
+                    attachment.id.clone(),
+                    Instant::now() + IDLE,
+                ));
                 Ok(DraftImageResult::Committed { attachment })
             }
             DraftImageAction::Release { attachment_id } => {
                 if state
                     .pins
                     .get(&attachment_id)
-                    .is_some_and(|(draft, _)| *draft != args.draft_id)
+                    .is_some_and(|(owner, _)| owner != &args.draft_id)
                 {
                     return Err(ApiError::new(
                         ErrorCode::TargetUnavailable,
-                        "Image is not pinned to this draft",
+                        "Only an unbound image pinned to this draft can be released",
                     ));
                 }
                 state.pins.remove(&attachment_id);
                 Ok(DraftImageResult::Released)
             }
         }
+    }
+
+    pub(crate) async fn lock_draft_images(&self) -> tokio::sync::MutexGuard<'_, DraftImages> {
+        self.draft_images.lock().await
     }
 
     pub(crate) async fn clear_draft_images(&self) {
@@ -243,6 +277,8 @@ mod tests {
     #[tokio::test]
     async fn native_draft_image_commit_replays_one_pinned_image() {
         let (root, owner, control, server) = crate::frontend::control_tests::fixture().await;
+        // The fixture, not the maintenance worker, consumes the wake permit.
+        control.keep_maintenance_signals_for_test();
         let data = root.path().join("data");
         let instance = control.store.instance_id.clone();
         let stale_owner = crate::ipc::call(
@@ -383,18 +419,59 @@ mod tests {
                 .pins
                 .contains_key(&attachment.id)
         );
-        assert!(
-            call(
-                "draft",
-                DraftImageAction::Release {
-                    attachment_id: attachment.id
-                },
-                None
-            )
-            .await
-            .unwrap()
-            .ok
-        );
+        use crate::protocol::{DraftGetArgs, DraftSaveArgs, ThreadCreateArgs};
+        let native = |command| crate::ipc::call(&data, command, None, None);
+        let created = native(Command::ThreadCreate(ThreadCreateArgs {
+            connection: None,
+            cwd: None,
+            agents: None,
+            model: None,
+            effort: None,
+            parent_id: None,
+        }))
+        .await
+        .unwrap()
+        .result
+        .unwrap();
+        let thread_id = created["thread_id"].as_str().unwrap().to_owned();
+        let selected = native(Command::DraftGet(DraftGetArgs {
+            thread_id: thread_id.clone(),
+        }))
+        .await
+        .unwrap()
+        .result
+        .unwrap();
+        let mut save = DraftSaveArgs {
+            thread_id,
+            selection_revision: selected["selection_revision"].as_u64().unwrap(),
+            draft: Box::new(crate::ui::DraftSnapshot {
+                draft_id: "draft".into(),
+                revision: 2,
+                attachments: vec![crate::ui::UiAttachment {
+                    id: attachment.id.clone(),
+                    path: attachment.path,
+                    kind: "image".into(),
+                    state: "ready".into(),
+                    position: None,
+                }],
+                ..Default::default()
+            }),
+            anchor: Default::default(),
+            follow_tail: true,
+        };
+        let signals = control.store.database.signals();
+        signals.take_seen();
+        assert!(native(Command::DraftSave(save.clone())).await.unwrap().ok);
+        crate::test_watchdog::watchdog(
+            "upload runtime pin is released after durable adoption",
+            async {
+                while !signals.take_seen().contains(crate::maintenance::Work::Raw) {
+                    signals.changed().await;
+                }
+            },
+        )
+        .await
+        .unwrap();
         assert!(
             control
                 .attachments
@@ -404,6 +481,37 @@ mod tests {
                 .pins
                 .is_empty()
         );
+        let protected = || {
+            let id = attachment.id.clone();
+            control.store.database.call(move |db| {
+                let mut stmt = db.prepare(super::super::MANAGED_PAGE)?;
+                let rows = stmt.query_map(rusqlite::params!["ready", "", "", 100], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, bool>(5)?))
+                })?;
+                for row in rows {
+                    let (candidate, protected) = row?;
+                    if candidate == id {
+                        return Ok(protected);
+                    }
+                }
+                panic!("uploaded image must be in the managed retention page");
+            })
+        };
+        save.draft.attachments.clear();
+        save.draft.revision = 1;
+        assert_eq!(
+            native(Command::DraftSave(save.clone()))
+                .await
+                .unwrap()
+                .error
+                .unwrap()
+                .code,
+            ErrorCode::OperationConflict
+        );
+        assert!(protected().await.unwrap());
+        save.draft.revision = 3;
+        assert!(native(Command::DraftSave(save)).await.unwrap().ok);
+        assert!(!protected().await.unwrap());
         server.shutdown().await.unwrap();
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();

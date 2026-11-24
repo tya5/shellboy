@@ -82,10 +82,7 @@ use crate::ui::i18n;
 mod ui_diagnostics;
 use crate::{
     app::DataOwner,
-    attachments::{
-        AttachmentInput, ManagedImage,
-        clipboard::{ClipboardAdapter, ClipboardPixels, CopyOutcome},
-    },
+    attachments::clipboard::{ClipboardAdapter, ClipboardPixels, CopyOutcome},
     config::CopyBackend,
     control::{Control, EngineEvent},
     diagnostics::{DiagnosticIds, Diagnostics, MessageSendStage, MessageSendTrace},
@@ -99,7 +96,11 @@ use std::{
     future::Future,
     path::{Path, PathBuf},
     pin::Pin,
-    sync::{Arc, mpsc::SyncSender},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+        mpsc::SyncSender,
+    },
 };
 use tokio::{
     sync::{Semaphore, mpsc},
@@ -463,6 +464,19 @@ enum ThreadPageResult {
     List(Page<ThreadSummary>, Vec<ThreadDisplayTime>, u64),
     Watch(watch_page::PreparedPage),
 }
+enum UnknownCompose {
+    Save,
+    Send {
+        draft_id: String,
+        revision: u64,
+        generation: u64,
+        attachments: HashSet<String>,
+    },
+    Image {
+        draft_id: String,
+    },
+}
+
 enum BackgroundResult {
     DraftIndexPause(Result<Option<crate::index::PauseReason>, ApiError>),
     InspectionPhysical {
@@ -540,7 +554,7 @@ enum BackgroundResult {
         revision: u64,
         position: usize,
         error_reported: bool,
-        result: Result<ManagedImage, ApiError>,
+        result: Result<UiAttachment, ApiError>,
     },
     Copied {
         scope: CopyScope,
@@ -688,26 +702,6 @@ async fn prepare_management(
     .await
 }
 
-/// Decode chips once for both send paths. Callers retain their cwd validation order.
-fn draft_input(
-    text: &str,
-    attachments: Vec<UiAttachment>,
-) -> Result<(crate::attachments::DraftContent, Vec<AttachmentInput>), ApiError> {
-    let (content, attachments) = crate::ui::draft::decode(text, attachments)?;
-    let files = attachments
-        .into_iter()
-        .map(|attachment| {
-            let kind = AttachmentKind::parse(&attachment.kind).ok_or_else(|| {
-                ApiError::new(ErrorCode::InvalidArgument, "Unknown draft attachment kind")
-            })?;
-            Ok(AttachmentInput {
-                path: attachment.path,
-                kind,
-            })
-        })
-        .collect::<Result<Vec<_>, ApiError>>()?;
-    Ok((content, files))
-}
 /// One page of the branch tree for the panel (#237); the DB worker does the reads.
 async fn load_branches(
     control: &Control,
@@ -1068,7 +1062,12 @@ async fn run_client(
     let mut descendants = lineage_observer::Observer::default();
     let mut view_read_next: Option<tokio::time::Instant> = None;
     let mut refreshing: HashSet<String> = HashSet::new();
-    let mut draft_saver = draft_saver::DraftSaver::new(control.clone(), background_tx.clone());
+    let compose_disconnected = Arc::new(AtomicBool::new(false));
+    let mut draft_saver = draft_saver::DraftSaver::new(
+        control.clone(),
+        background_tx.clone(),
+        compose_disconnected.clone(),
+    );
     let clipboard_slots = Arc::new(Semaphore::new(2));
     let send_slots = Arc::new(Semaphore::new(32));
     let mut render_width = 80_u16;
@@ -1109,7 +1108,15 @@ async fn run_client(
     let mut draft_pause_running = false;
     let mut initialize = Some(UiUpdate::Initialize { cwd });
     let mut draft_failure = None;
+    let mut compose_unknown = HashMap::<String, UnknownCompose>::new();
     loop {
+        while !compose_disconnected.load(Ordering::Acquire)
+            && let Some((draft, attachment)) = images.next_release()
+        {
+            if let Err(error) = draft_images::release(&control, &draft, attachment).await {
+                status(&updates, None, error).await;
+            }
+        }
         if let Some(submission) = management.inspection.take_retired_submission() {
             command_outcome::<()>(
                 &updates,
@@ -1173,7 +1180,9 @@ async fn run_client(
         if initialize.is_none() {
             receipt_batch.drain(&mut pending, &updates);
         }
-        draft_saver.pump_delivery(&mut draft_failure, &updates);
+        if !compose_disconnected.load(Ordering::Acquire) {
+            draft_saver.pump_delivery(&mut draft_failure, &updates);
+        }
 
         while !updates.backpressured() {
             let Some(thread) = dirty_threads
@@ -1534,7 +1543,72 @@ async fn run_client(
                 };
                 let has_submission = submission.is_some();
                 #[cfg(test)] stream_metrics::FRONTEND_ACTIONS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                if compose_disconnected.load(Ordering::Acquire) && !matches!(action, UiAction::ReconnectCompose | UiAction::Quit | UiAction::ForceQuit | UiAction::WaitForShutdown) {
+                    let text = i18n::local!(language, "接続が切れました。/reconnect または /quit を使用してください", "Disconnected. Use /reconnect or /quit");
+                    match &action {
+                        UiAction::Send { draft_id, revision, .. } | UiAction::SendEdited { draft_id, revision, .. } => {
+                            update(&updates, UiUpdate::Receipt { draft_id: draft_id.clone(), revision: *revision, thread_id: None, status: ReceiptStatus::Failed, message: Some(text.into()) }).await;
+                        }
+                        UiAction::SaveDraft { thread_id, .. } => {
+                            update(&updates, UiUpdate::StorageFailed { thread_id: thread_id.clone(), message: text.into() }).await;
+                        }
+                        _ => status(&updates, None, text).await,
+                    }
+                    continue;
+                }
                 match action {
+                    UiAction::ReconnectCompose => {
+                        if !compose_disconnected.load(Ordering::Acquire) { continue; }
+                        let result: Result<(), ApiError> = async {
+                            if compose_unknown.is_empty() {
+                                let _: Value = compose_call(&control, Command::Status(StatusArgs::default()), None).await?;
+                            }
+                            let operations: Vec<_> = compose_unknown.keys().cloned().collect();
+                            for operation in operations {
+                                let receipt: Value = compose_call(&control, Command::OperationGet(crate::protocol::OperationTarget { operation_id: operation.clone() }), None).await?;
+                                let outcome = match receipt["state"].as_str() {
+                                    Some("completed") => receipt["outcome"].get("result").cloned().map(Ok),
+                                    Some("failed") => receipt["outcome"].get("error").cloned().and_then(|error| serde_json::from_value::<ApiError>(error).ok()).map(Err),
+                                    _ => None,
+                                }.ok_or_else(|| ApiError::new(ErrorCode::InvalidState, format!("Operation {operation} is still unconfirmed")))?;
+                                match compose_unknown.remove(&operation).expect("known operation") {
+                                    UnknownCompose::Save => {},
+                                    UnknownCompose::Image { draft_id } => {
+                                        if let Ok(value) = outcome && let Ok(crate::protocol::DraftImageResult::Committed { attachment }) = serde_json::from_value(value) {
+                                            // A lost paste reply never inserted a chip into the composer.
+                                            images.reject(draft_id, attachment.id);
+                                        }
+                                    }
+                                    UnknownCompose::Send { draft_id, revision, generation, attachments } => {
+                                        images.end_send(&draft_id, &attachments);
+                                        match outcome {
+                                            Ok(value) => {
+                                                images.sent(&draft_id, &attachments);
+                                                if let Some(thread_id) = value["thread_id"].as_str() {
+                                                    update(&updates, UiUpdate::SavedMessagePending { draft_id: draft_id.clone(), revision, generation, thread_id: thread_id.into() }).await;
+                                                    if let Some(node_id) = value["message_id"].as_str() {
+                                                        update(&updates, UiUpdate::ReceiptSource { draft_id: draft_id.clone(), revision, node_id: node_id.into() }).await;
+                                                    }
+                                                    update(&updates, UiUpdate::Receipt { draft_id: draft_id.clone(), revision, thread_id: Some(thread_id.into()), status: ReceiptStatus::Accepted, message: None }).await;
+                                                    selection.sent(thread_id, &draft_id);
+                                                    dirty_threads.insert(thread_id.into());
+                                                }
+                                            }
+                                            Err(error) => update(&updates, UiUpdate::Receipt { draft_id, revision, thread_id: None, status: ReceiptStatus::Failed, message: Some(error.to_string()) }).await,
+                                        }
+                                    }
+                                }
+                            }
+                            Ok(())
+                        }.await;
+                        match result {
+                            Ok(()) => {
+                                compose_disconnected.store(false, Ordering::Release);
+                                status(&updates, None, i18n::local!(language, "再接続しました。未確認の操作は再送していません", "Reconnected. Unconfirmed writes were not replayed")).await;
+                            }
+                            Err(error) => status(&updates, None, format!("/reconnect: {:?}: {}", error.code, error.message)).await,
+                        }
+                    }
                     UiAction::CopySelected { .. } | UiAction::ConfirmedIndex { .. } => unreachable!("selection normalized before dispatch"),
                     UiAction::SubmittedCommand { .. } | UiAction::ManagementIntent { .. } => {
                         unreachable!("only one UI submission wrapper is emitted")
@@ -1649,7 +1723,7 @@ async fn run_client(
                         }) {status(&updates,rejected,i18n::local!(language, "下書き一覧の取得キューが満杯です", "The draft-list read queue is full")).await;}
                     }
                     UiAction::Send {
-                        generation, now, snapshot,
+                        generation, selection_revision, now, snapshot,
                         draft_id,
                         revision,
                         thread_id,
@@ -1705,11 +1779,10 @@ async fn run_client(
                         };
                         let send_slots = send_slots.clone();
                         let projection_stop = cancel.clone();
-                        let image_leases = images.leases(&draft_id, &attachments);
+                        images.begin_send(&draft_id, &attachments);
                         let control = control.clone();
                         let sender = background_tx.clone();
                         send_workers.spawn(async move {
-                            let _image_leases = image_leases;
                             let _permit = match permit {
                                 Some(permit) => permit,
                                 None => send_slots
@@ -1731,26 +1804,15 @@ async fn run_client(
                                     )
                                 })?;
                                 let snapshot=message_queue::submission_snapshot(snapshot,&draft_id,revision,&text,&attachments,None,control.store.config.limits.draft_bytes)?;
-                                let (content, files) = draft_input(&snapshot.text,snapshot.attachments.clone())?;
-                                let submission=crate::control::db::DraftSubmission {draft_id:crate::control::db::DraftSubmission::id_for_operation(&trace.operation_id),source_draft_id:draft_id.clone(),revision,snapshot:serde_json::to_value(&snapshot).map_err(|_|ApiError::new(ErrorCode::InvalidState,"Cannot preserve draft"))?};
-                                control.store.prepare_draft_submission(&trace.operation_id,thread_id.as_deref(),&submission).await?;
-                                let options=crate::control::db::DraftSendOptions {deliver:if now {crate::protocol::Deliver::Now} else {crate::protocol::Deliver::Next},submission:Some(submission),..Default::default()};
-                                control
-                                    .send_ordered_draft(
-                                        trace.operation_id.clone(),
-                                        ThreadCreateArgs { agents: None,
-                                            connection,
-                                            cwd: Some(cwd),
-                                            model,
-                                            effort,
-                                            parent_id: None,
-                                        },
+                                compose_call(&control,
+                                    Command::DraftSubmit(crate::protocol::DraftSubmitArgs {
+                                        selection_revision: thread_id.as_ref().map(|_| selection_revision),
                                         thread_id,
-                                        content,
-                                        files,
-                                        options,
-                                    )
-                                    .await
+                                        create: ThreadCreateArgs { agents: None, connection, cwd: Some(cwd), model, effort, parent_id: None },
+                                        draft: Box::new(snapshot),
+                                        deliver: if now { crate::protocol::Deliver::Now } else { crate::protocol::Deliver::Next },
+                                    }), Some(trace.operation_id.clone()),
+                                ).await
                             }
                             .await;
                             trace_send(
@@ -2302,7 +2364,7 @@ async fn run_client(
                         });
                     }
                     UiAction::SendEdited {
-                        generation, now, snapshot,
+                        generation, selection_revision, now, snapshot,
                         draft_id,
                         revision,
                         source_thread_id,
@@ -2359,11 +2421,10 @@ async fn run_client(
                         };
                         let send_slots = send_slots.clone();
                         let projection_stop = cancel.clone();
-                        let image_leases = images.leases(&draft_id, &attachments);
+                        images.begin_send(&draft_id, &attachments);
                         let control = control.clone();
                         let sender = background_tx.clone();
                         send_workers.spawn(async move {
-                            let _image_leases = image_leases;
                             let _permit = match permit {
                                 Some(permit) => permit,
                                 None => send_slots
@@ -2376,33 +2437,19 @@ async fn run_client(
                             let ids = attachments.iter().map(|a| a.id.clone()).collect();
                             let result = async {
                                 let snapshot=message_queue::submission_snapshot(snapshot,&draft_id,revision,&text,&attachments,Some((&source_thread_id,&source_node_id)),control.store.config.limits.draft_bytes)?;
-                                let (content, files) = draft_input(&snapshot.text,snapshot.attachments.clone())?;
                                 let cwd = cwd.into_os_string().into_string().map_err(|_| {
                                     ApiError::new(
                                         ErrorCode::InvalidArgument,
                                         "Thread cwd must be valid Unicode",
                                     )
                                 })?;
-                                let submission=crate::control::db::DraftSubmission {draft_id:crate::control::db::DraftSubmission::id_for_operation(&trace.operation_id),source_draft_id:draft_id.clone(),revision,snapshot:serde_json::to_value(&snapshot).map_err(|_|ApiError::new(ErrorCode::InvalidState,"Cannot preserve draft"))?};
-                                control.store.prepare_draft_submission(&trace.operation_id,Some(&source_thread_id),&submission).await?;
-                                let options=crate::control::db::DraftSendOptions {deliver:if now {crate::protocol::Deliver::Now} else {crate::protocol::Deliver::Next},submission:Some(submission),..Default::default()};
-                                control
-                                    .edit_ordered_request(
-                                        trace.operation_id.clone(),
-                                        source_thread_id,
-                                        source_node_id,
-                                        content,
-                                        files,
-                                        ThreadCreateArgs { agents: None,
-                                            cwd: Some(cwd),
-                                            connection,
-                                            model,
-                                            effort,
-                                            parent_id: None,
-                                        },
-                                        options,
-                                    )
-                                    .await
+                                compose_call(&control, Command::DraftSubmit(crate::protocol::DraftSubmitArgs {
+                                    thread_id: Some(source_thread_id),
+                                    selection_revision: Some(selection_revision),
+                                    create: ThreadCreateArgs { agents: None, cwd: Some(cwd), connection, model, effort, parent_id: None },
+                                    draft: Box::new(snapshot),
+                                    deliver: if now { crate::protocol::Deliver::Now } else { crate::protocol::Deliver::Next },
+                                }), Some(trace.operation_id.clone())).await
                             }
                             .await;
                             trace_send(
@@ -2923,22 +2970,15 @@ async fn run_client(
                     }
                     UiAction::SaveDraft {
                         thread_id,
+                        selection_revision,
                         draft,
                         anchor,
                         follow,
                     } => {
                         images.associate(&draft.draft_id, &thread_id);
-                        images.release(
-                            &draft.draft_id,
-                            draft.revision,
-                            &draft
-                                .attachments
-                                .iter()
-                                .map(|attachment| attachment.id.clone())
-                                .collect(),
-                        );
                         if draft_saver.enqueue(
                             thread_id.clone(),
+                            selection_revision,
                             draft,
                             anchor,
                             follow,
@@ -3007,15 +3047,16 @@ async fn run_client(
                         .await;
                         let ticket = images.begin_image(&draft_id, thread_id.as_deref());
                         let clipboard = clipboard.clone();
-                        let attachments = control.attachments.clone();
+                        let control = control.clone();
                         let timeout = control.store.config.io.file_prepare_timeout_ms;
                         let cancel = cancel.child_token();
                         let sender = background_tx.clone();
                         let outcomes = updates.worker();
                         spawn_work(&mut workers, permit, async move {
                             let result = async {
-                                let pixels = clipboard.capture(timeout, cancel.clone()).await?;
-                                attachments.save_clipboard_pixels(pixels, cancel).await
+                                let pixels = clipboard.capture(timeout, cancel).await?;
+                                let png = presentation_work(move || pixels.encode_png()).await??;
+                                draft_images::upload(&control, &draft_id, png).await
                             }
                             .await.map_err(|error| image_acquisition_error(error, language));
                             command_outcome(&outcomes, submission, &result).await;
@@ -3465,21 +3506,17 @@ async fn run_client(
                         Err(error) => status(&updates, Some(ticket.thread), error).await,
                     }
                 }
-                Some(BackgroundResult::DraftSaved {
-                    thread_id,
-                    result: Err(error),
-                }) => {
-                    if error.is_storage_failure() {
+                Some(BackgroundResult::DraftSaved { thread_id, result: Err(error) }) => {
+                    if compose_transport_error(&error) {
+                        compose_disconnected.store(true, Ordering::Release);
+                        if let Some(operation) = unknown_compose_operation(&error) {
+                            compose_unknown.insert(operation.into(), UnknownCompose::Save);
+                        }
+                        update(&updates, UiUpdate::StorageFailed { thread_id, message: compose_disconnected_message(&error) }).await;
+                    } else if error.is_storage_failure() {
                         update(&updates,UiUpdate::StorageFailed{thread_id,message:ui_diagnostics::save_failed(language, error)}).await;
                     } else {
-                        update(
-                            &updates,
-                            UiUpdate::DraftSaveFailed {
-                                thread_id,
-                                message: error.to_string(),
-                            },
-                        )
-                        .await;
+                        update(&updates, UiUpdate::DraftSaveFailed { thread_id, message: error.to_string() }).await;
                     }
                 }
                 Some(BackgroundResult::DraftSaved { result: Ok(()), .. }) => {}
@@ -3571,7 +3608,11 @@ async fn run_client(
                     revision,
                     attachments,
                     result,
-                }) => match result {
+                }) => {
+                    if !result.as_ref().err().is_some_and(|error| unknown_compose_operation(error).is_some()) {
+                        images.end_send(&draft_id, &attachments);
+                    }
+                    match result {
                     Ok(value) => {
                         images.sent(&draft_id, &attachments);
                         let thread = value
@@ -3601,17 +3642,22 @@ async fn run_client(
                         }
                     }
                     Err(error) => {
+                        if compose_transport_error(&error) { compose_disconnected.store(true, Ordering::Release); }
+                        if let Some(operation) = unknown_compose_operation(&error) {
+                            compose_unknown.insert(operation.into(), UnknownCompose::Send { draft_id: draft_id.clone(), revision, generation, attachments });
+                        }
                         update(
                             &updates,
                             UiUpdate::Receipt {
                                 draft_id,
                                 revision,
                                 thread_id: None,
-                                status: ReceiptStatus::Failed,
-                                message: Some(crate::config_setup::tui_error(&error)),
+                                status: if unknown_compose_operation(&error).is_some() { ReceiptStatus::Unknown } else { ReceiptStatus::Failed },
+                                message: Some(if compose_transport_error(&error) { compose_disconnected_message(&error) } else { crate::config_setup::tui_error(&error) }),
                             },
                         )
                         .await;
+                    }
                     }
                 },
                 Some(BackgroundResult::Image {
@@ -3622,17 +3668,21 @@ async fn run_client(
                     error_reported,
                     result,
                 }) => {
-                    if !images.accept_image(ticket) { continue; }
+                    if let Err(error) = &result && compose_transport_error(error) {
+                        compose_disconnected.store(true, Ordering::Release);
+                        if let Some(operation) = unknown_compose_operation(error) {
+                            compose_unknown.insert(operation.into(), UnknownCompose::Image { draft_id: draft_id.clone() });
+                        }
+                        status(&updates, None, compose_disconnected_message(error)).await;
+                    }
+                    let Some(threadless) = images.accept_image(ticket) else {
+                        if let Ok(attachment) = result { images.reject(draft_id, attachment.id); }
+                        continue;
+                    };
                     match result {
-                    Ok(image) => {
-                        let attachment = UiAttachment {
-                            id: image.id.clone(),
-                            path: image.path.clone(),
-                            kind: "image".into(),
-                            state: "ready".into(),
-                            position: Some(position),
-                        };
-                        images.insert(draft_id.clone(), revision, image);
+                    Ok(mut attachment) => {
+                        attachment.position = Some(position);
+                        if threadless { images.insert(draft_id.clone(), revision, attachment.id.clone()); }
                         update(
                             &updates,
                             UiUpdate::ClipboardAttachment {
@@ -3958,7 +4008,6 @@ async fn run_client(
                 u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
             )
         };
-        before_client_drain.await;
         // Coalesced autosaves retain the newest snapshot per Thread; FIFO
         // database admission within each Thread is preserved on shutdown too.
         trace(Stage::DraftEnqueue, Edge::Begin);
@@ -3974,6 +4023,7 @@ async fn run_client(
             .map_err(|_| ApiError::new(ErrorCode::SaveFailed, "Draft save worker failed"))
             .and_then(|result| result);
         trace(Stage::DraftSave, Edge::End);
+        before_client_drain.await;
         before_control_task_drain.await;
         trace(Stage::ControlTasks, Edge::Begin);
         while control_tasks.join_next().await.is_some() {}
@@ -4125,20 +4175,88 @@ async fn finish_shutdown_updates(
     result
 }
 
+fn compose_data_dir(control: &Control) -> &std::path::Path {
+    control
+        .store
+        .database
+        .path()
+        .parent()
+        .expect("owner database has a directory")
+}
+
+fn unknown_compose_operation(error: &ApiError) -> Option<&str> {
+    let details = error.details.as_ref()?;
+    if details["request_may_have_been_applied"].as_bool() != Some(true)
+        || details["next_operation"]["command"].as_str() != Some("operation.get")
+    {
+        return None;
+    }
+    details["operation_id"].as_str()
+}
+
+fn compose_transport_error(error: &ApiError) -> bool {
+    error
+        .details
+        .as_ref()
+        .and_then(|details| details["request_may_have_been_applied"].as_bool())
+        == Some(true)
+        || matches!(
+            error.code,
+            ErrorCode::AppNotRunning | ErrorCode::ProtocolMismatch
+        )
+}
+
+fn compose_disconnected_message(error: &ApiError) -> String {
+    let mut message = format!("{:?}: {}. /reconnect | /quit", error.code, error.message);
+    if let Some(operation) = unknown_compose_operation(error) {
+        message.push_str(&format!(" ({operation})"));
+    }
+    message
+}
+
+async fn compose_call<T: serde::de::DeserializeOwned>(
+    control: &Control,
+    command: Command,
+    operation: Option<String>,
+) -> Result<T, ApiError> {
+    let reply = crate::ipc::call_selected_operation(
+        compose_data_dir(control),
+        &control.store.instance_id,
+        command,
+        operation,
+    )
+    .await?;
+    if let Some(error) = reply.error {
+        return Err(error);
+    }
+    let invalid = || ApiError::new(ErrorCode::ProtocolMismatch, "Invalid compose response");
+    serde_json::from_value(reply.result.ok_or_else(invalid)?).map_err(|_| invalid())
+}
+
 async fn save_draft(
     control: &Control,
-    thread: String,
+    thread_id: String,
+    selection_revision: u64,
     draft: DraftSnapshot,
     anchor: ViewAnchor,
-    follow: bool,
+    follow_tail: bool,
 ) -> Result<(), ApiError> {
-    let submission_fence = crate::control::submission_retention::fence("?1", "?3", "?2");
-    let result = async {
-    control.store.database.call(move|db|{let tx=db.transaction()?;let live:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM thread WHERE id=?1 AND deleted_at IS NULL)",[&thread],|row|row.get(0))?;if !live{return Ok(());}let body=serde_json::to_string(&draft).map_err(|error|crate::storage::StorageError::Configuration(error.to_string()))?;tx.execute(&format!("INSERT INTO draft(id,thread_id,revision,body_json,state,updated_at) SELECT ?1,?2,?3,?4,'editing',?5 WHERE NOT {submission_fence} ON CONFLICT(id)DO UPDATE SET revision=excluded.revision,body_json=excluded.body_json,updated_at=excluded.updated_at WHERE excluded.revision>=draft.revision"),rusqlite::params![draft.draft_id,thread,draft.revision as i64,body,chrono::Utc::now().to_rfc3339()])?;tx.execute("INSERT INTO view_state(thread_id,anchor_node_id,anchor_offset,follow_tail)VALUES(?1,?2,?3,?4)ON CONFLICT(thread_id)DO UPDATE SET anchor_node_id=excluded.anchor_node_id,anchor_offset=excluded.anchor_offset,follow_tail=excluded.follow_tail",rusqlite::params![thread,anchor.node_id,anchor.char_offset as i64,follow])?;tx.commit()?;Ok(())}).await.map_err(storage_error)
-
-    }.await;
-    checked_storage(control, result).await
+    let operation = format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4());
+    compose_call::<crate::protocol::Accepted>(
+        control,
+        Command::DraftSave(crate::protocol::DraftSaveArgs {
+            thread_id,
+            selection_revision,
+            draft: Box::new(draft),
+            anchor,
+            follow_tail,
+        }),
+        Some(operation),
+    )
+    .await
+    .map(|_| ())
 }
+
 async fn native_header(data_dir: &Path, thread: &str) -> Result<header::RawHeader, ApiError> {
     let details: ThreadDetails = inspection_history::native_read(
         data_dir,
@@ -4166,50 +4284,58 @@ async fn select_thread(
     render_width: u16,
 ) -> Result<(), ApiError> {
     let result = async {
-    // Selection still runs in the embedded composition; this path belongs to
-    // the selected owner, never the inherited invocation endpoint.
-    let data_dir = control.store.database.path().parent().ok_or_else(||
-        ApiError::new(ErrorCode::InvalidState, "Selected owner has no data directory"))?;
-    let header = native_header(data_dir, thread).await?;
-    let target = thread.to_owned();
-    let submission_fence = crate::control::submission_retention::fence("current.id", "current.revision", "?1");
-    let (draft,view)=control.store.database.call(move|db|{use rusqlite::OptionalExtension;let body:Option<String>=db.query_row(&format!("SELECT body_json FROM draft current WHERE thread_id=?1 AND state='editing' AND NOT {submission_fence} ORDER BY updated_at DESC LIMIT 1"),[&target],|r|r.get(0)).optional()?;let view=db.query_row("SELECT anchor_node_id,anchor_offset,follow_tail FROM view_state WHERE thread_id=?1",[target],|r|Ok((ViewAnchor{node_id:r.get(0)?,char_offset:r.get::<_,i64>(1)? as usize},r.get::<_,bool>(2)?))).optional()?;Ok((body,view))}).await.map_err(storage_error)?;
-    let language = control.store.config.ui.language;
-    let (details,draft)=presentation_work(move || (header.prepare_for_ui(language),draft.and_then(|body|serde_json::from_str::<DraftSnapshot>(&body).ok()))).await?;
-    update(
-        updates,
-        UiUpdate::Thread {
-            generation,
-            details,
-            draft,
-        },
-    )
-    .await;
-    let restore = known_view.is_none();
-    if let Some((anchor, follow)) = known_view.or(view) {
-        if restore {
-            update(
-                updates,
-                UiUpdate::ViewState {
-                    thread_id: thread.into(),
-                    generation,
-                    view_revision,
-                    anchor: anchor.clone(),
-                    follow,
-                },
-            )
-            .await;
-        }
-        HistoryReader::new(control, updates, render_width).page(
-            &Reply::new(thread,generation), None, if follow {None} else {Some(anchor)}
+        let header = native_header(compose_data_dir(control), thread).await?;
+        let state: crate::protocol::DraftState = compose_call(
+            control,
+            Command::DraftGet(crate::protocol::DraftGetArgs {
+                thread_id: thread.into(),
+            }),
+            None,
         )
         .await?;
-    } else {
-        HistoryReader::new(control, updates, render_width).page(&Reply::new(thread, generation), None, None).await?;
+        let draft = state.draft;
+        let view = state.view.map(|view| (view.anchor, view.follow_tail));
+        let language = control.store.config.ui.language;
+        let details = presentation_work(move || header.prepare_for_ui(language)).await?;
+        update(
+            updates,
+            UiUpdate::Thread {
+                generation,
+                details,
+                draft,
+            },
+        )
+        .await;
+        let restore = known_view.is_none();
+        if let Some((anchor, follow)) = known_view.or(view) {
+            if restore {
+                update(
+                    updates,
+                    UiUpdate::ViewState {
+                        thread_id: thread.into(),
+                        generation,
+                        view_revision,
+                        anchor: anchor.clone(),
+                        follow,
+                    },
+                )
+                .await;
+            }
+            HistoryReader::new(control, updates, render_width)
+                .page(
+                    &Reply::new(thread, generation),
+                    None,
+                    if follow { None } else { Some(anchor) },
+                )
+                .await?;
+        } else {
+            HistoryReader::new(control, updates, render_width)
+                .page(&Reply::new(thread, generation), None, None)
+                .await?;
+        }
+        Ok(())
     }
-    Ok(())
-
-    }.await;
+    .await;
     checked_storage(control, result).await
 }
 /// Publish saved progress facts; return whether foreground polling is needed.
