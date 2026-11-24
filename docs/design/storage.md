@@ -266,8 +266,8 @@ no new indicator or protocol status is introduced.
     `db_job_budget` (`kind`, `steps`, `queue_ms`, `run_ms`; at most 10 per
     60 s).
   - After `NO_PROGRESS_DEFERRALS = 2` consecutive deferrals of one kind with no
-    completed unit in between, it emits `db_job_no_progress` and exposes the
-    kind in `DbWorker::background_no_progress()` for a later status surface.
+    completed unit in between, it emits `db_job_no_progress` and publishes the
+    kind through the DB worker activity watch used by the TUI.
     Two is structural: every deferral already consumed a full budget slot, and
     the retry starts from the same committed state, so a second deferral shows
     the unit does not fit.

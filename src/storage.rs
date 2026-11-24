@@ -441,8 +441,6 @@ struct Shared {
     /// Admitted foreground jobs not yet taken by the worker. The background
     /// progress handler reads it to decide whether to interrupt.
     foreground_waiting: Arc<AtomicUsize>,
-    #[cfg_attr(not(test), allow(dead_code))]
-    no_progress: NoProgress,
     active_job: ActiveJob,
     activity_updates: watch::Sender<DbWorkerActivity>,
     slow_limit: Arc<Mutex<SlowJobLimit>>,
@@ -796,7 +794,7 @@ impl DbWorker {
         let worker = WorkerState {
             diagnostics: diagnostics.clone(),
             foreground_waiting: foreground_waiting.clone(),
-            no_progress: no_progress.clone(),
+            no_progress,
             active_job: active_job.clone(),
             activity_updates: activity_updates.clone(),
             slow_limit: slow_limit.clone(),
@@ -838,7 +836,6 @@ impl DbWorker {
                     background,
                 })),
                 foreground_waiting,
-                no_progress,
                 active_job,
                 activity_updates,
                 slow_limit,
@@ -1033,24 +1030,6 @@ impl DbWorker {
         counters
             .counter_scope
             .map(|_| (counters.vm_steps, counters.sample_all_profiles))
-    }
-
-    /// Background kinds currently deferred at least [`NO_PROGRESS_DEFERRALS`]
-    /// consecutive times without a completed job of the same kind in between.
-    /// Read-only state for a later status surface; bounded by call sites.
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) fn background_no_progress(&self) -> Vec<(&'static str, u32)> {
-        let mut kinds: Vec<_> = self
-            .shared
-            .no_progress
-            .lock()
-            .expect("DB no-progress mutex poisoned")
-            .iter()
-            .filter(|(_, count)| **count >= NO_PROGRESS_DEFERRALS)
-            .map(|(kind, count)| (*kind, *count))
-            .collect();
-        kinds.sort_unstable();
-        kinds
     }
 
     #[cfg(test)]
@@ -3202,30 +3181,20 @@ mod lane_budget_tests {
             let mut activity_rx = db.subscribe_activity();
             let _ = activity_rx.borrow_and_update();
             assert!(matches!(stuck_unit(&db, true).await, Background::Deferred));
-            assert!(
-                db.background_no_progress().is_empty(),
-                "one deferral is not evidence"
-            );
             let after_first = wait_for_activity(&mut activity_rx, |activity| {
                 activity.active.is_none() && activity.no_progress.is_empty()
             })
             .await;
             assert!(after_first.no_progress.is_empty());
             assert!(matches!(stuck_unit(&db, true).await, Background::Deferred));
-            let stuck = db.background_no_progress();
-            assert_eq!(stuck.len(), 1);
-            assert!(stuck[0].0.contains("stuck_unit"), "{stuck:?}");
-            assert_eq!(stuck[0].1, NO_PROGRESS_DEFERRALS);
             let activity = wait_for_activity(&mut activity_rx, |activity| {
-                activity.no_progress.len() == 1
-                    && activity.no_progress[0].kind == stuck[0].0
-                    && activity.active.is_none()
+                activity.no_progress.len() == 1 && activity.active.is_none()
             })
             .await;
+            assert!(activity.no_progress[0].kind.contains("stuck_unit"));
             assert_eq!(activity.no_progress[0].deferrals, NO_PROGRESS_DEFERRALS);
             // A completed job of the same kind is progress and clears the state.
             assert!(matches!(stuck_unit(&db, false).await, Background::Done(())));
-            assert!(db.background_no_progress().is_empty());
             let cleared = wait_for_activity(&mut activity_rx, |activity| {
                 activity.active.is_none() && activity.no_progress.is_empty()
             })
