@@ -423,9 +423,13 @@ async fn recovery_turn_interrupt_is_idempotent_and_stale_target_cannot_stop_repl
         .unwrap();
     let old_turn = accepted.turn_id.clone().unwrap();
     saved_state(&control, "turn", &old_turn, "recovery_wait").await;
-    let first = control.interrupt_turn(old_turn.clone()).await.unwrap();
+    let request = Request::new(
+        format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
+        Command::TurnInterrupt(TurnTarget { turn_id: old_turn.clone() }),
+    );
+    let first = control.request(request.clone()).await.result.unwrap();
     assert_eq!(first["requested"], true);
-    let _ = control.interrupt_turn(old_turn.clone()).await.unwrap();
+    assert_eq!(control.request(request).await.result.unwrap(), first);
     saved_state(
         &control,
         "run",
@@ -448,8 +452,12 @@ async fn recovery_turn_interrupt_is_idempotent_and_stale_target_cannot_stop_repl
     )
     .await;
     let next = incoming(&mut requests).await;
-    let stale = control.interrupt_turn(old_turn.clone()).await.unwrap();
-    assert_eq!(stale["requested"], false);
+    let stale = control.request(Request::new(
+        format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
+        Command::TurnInterrupt(TurnTarget { turn_id: old_turn.clone() }),
+    )).await.error.unwrap();
+    assert_eq!(stale.code, ErrorCode::InvalidState);
+    assert_eq!(stale.details.unwrap()["reason"], "already_finished");
     let thread = accepted.thread_id;
     control.store.database.call(move|db|{
         assert_eq!(db.query_row("SELECT generation FROM turn WHERE id=?1",[old_turn],|r|r.get::<_,i64>(0))?,1);
