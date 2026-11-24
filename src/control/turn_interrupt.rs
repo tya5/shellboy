@@ -424,6 +424,14 @@ mod tests {
             .await
             .unwrap();
         let held_id = held.result["message_id"].as_str().unwrap().to_owned();
+        // Seed a retained ordinary hold; waiting Revisit input is not a barrier.
+        owner.db.call({
+            let held_id = held_id.clone();
+            move |db| {
+                assert_eq!(db.execute("UPDATE receipt SET hold_reason='previous_instance_interrupted' WHERE message_node_id=?1 AND state='held' AND turn_id IS NULL", [&held_id])?, 1);
+                Ok(())
+            }
+        }).await.unwrap();
         let origin = crate::protocol::Origin {
             instance_id: control.store.instance_id.clone(),
             thread_id: thread.clone(),
