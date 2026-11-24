@@ -148,12 +148,28 @@ pub(super) async fn drive(
     let mut overflow = OverflowBudget::default();
     let mut retry_budget = retry::RetryBudget::default();
     let mut instructions = Instructions::default();
+    let mut proactive_job: Option<
+        tokio::task::JoinHandle<Result<proactive::ProactiveOutcome, ApiError>>,
+    > = None;
     loop {
         if slot.stop.is_cancelled() {
             return drain_and_stop(&control, &slot.run_id, Some(&thread)).await;
         }
         let _ = slot.nudge.notified().now_or_never();
         let boundary_guard = tokio::select! {biased;_=slot.stop.cancelled()=>return drain_and_stop(&control,&slot.run_id,Some(&thread)).await,guard=boundary.lock()=>guard};
+        if proactive_job.as_ref().is_some_and(|task| task.is_finished()) {
+            let task = proactive_job.take().expect("finished proactive task present");
+            match task.await {
+                Ok(Ok(proactive::ProactiveOutcome::Finished { path_changed: true })) => {
+                    instructions.clear();
+                    drop(boundary_guard);
+                    continue;
+                }
+                Ok(Ok(_)) => {}
+                Ok(Err(error)) => return Err(error),
+                Err(_) => return Err(invalid("background proactive compaction task panicked")),
+            }
+        }
         super::turn_interrupt::acknowledge(&control, &thread, &slot.run_id).await?;
         let snapshot =
             match next_with_clients(&control, &thread, &slot.run_id, clients.clone()).await? {
@@ -182,34 +198,20 @@ pub(super) async fn drive(
         // flight. A reported input over the threshold compacts here, one step
         // after the large request; the new snapshot is then read again.
         let mut snapshot = snapshot;
-        let mut compact_boundary =
-            crate::compaction::boundary::Boundary::new(&boundary, boundary_guard);
-        let compacted = proactive::maybe_compact_with_run_stop(
-            &control,
-            &mut snapshot,
-            &request_slot,
-            &mut compact_boundary,
-            slot.stop.clone(),
-        )
-        .await;
-        if let Err(error) = &compacted
-            && error.is_storage_failure()
-        {
-            return Err(error.clone());
-        }
-        let Some(boundary_guard) = compact_boundary.into_guard() else {
-            if slot.stop.is_cancelled() {
-                return drain_and_stop(&control, &slot.run_id, Some(&thread)).await;
-            }
-            if turn_binding.cancel.is_cancelled() {
-                continue;
-            }
-            return Err(invalid(
-                "Compaction released its Thread boundary unexpectedly",
+        let mut boundary_guard = boundary_guard;
+        if proactive_job.is_none() {
+            drop(boundary_guard);
+            proactive_job = Some(proactive::spawn_background(
+                control.clone(),
+                snapshot.clone(),
+                slot.clone(),
+                boundary.clone(),
             ));
-        };
-        if compacted? {
-            continue;
+            boundary_guard = tokio::select! {biased;
+                _=slot.stop.cancelled()=>return drain_and_stop(&control,&slot.run_id,Some(&thread)).await,
+                _=turn_binding.cancel.cancelled()=>continue,
+                guard=boundary.lock()=>guard,
+            };
         }
         let refreshed = instructions
             .refresh(&control, snapshot, &request_slot)
@@ -458,6 +460,7 @@ pub(super) async fn drive(
                     failure,
                     &mut retry_budget,
                     &mut overflow,
+                    &mut proactive_job,
                     &boundary,
                     boundary_guard,
                 )

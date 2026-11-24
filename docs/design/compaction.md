@@ -1646,3 +1646,82 @@ classification. Missing, malformed or ambiguous code yields no pair. HTTP status
 and stream provider status remain independent. The immutable S1b producer/parser,
 first-terminal byte boundary, closed pair schema and retry-preservation contract is
 documented in [the recording contract](../development/issue-301-s1-recording-contract.md#s1b-stream-error-provenance-extension-of-the-same-fact).
+
+## Core automatic compaction v2.1 (current source contract)
+
+This section supersedes the historical proactive-await and captured-prefix
+proposals above for automatic summary adoption and execution. Historical
+migration 40 is unchanged; migration 47 removes its retired runtime generation
+column and column-dependent triggers. Schema 47 retains the independent
+`selection_thread_conflict` trigger. Implementation and full qualification are
+tracked separately; this design text is not evidence that either has completed.
+
+### Adoption authority and path edit
+
+Automatic, manual, and overflow/retry summaries use one writer-owned final
+transaction. The immutable request result fixes the ordered R node IDs and
+summary payload text; it does not own the path prefix, suffix, ordinal, cursor,
+profile, model, epoch, Run, Turn, or generation. In that transaction, locate the
+exact ordered contiguous R IDs in the current selected path, verify their
+current facts (payload revision/content hash, attachments, pending-receipt
+protection, tool-group completion and closure, and prune state), and splice the
+current path as `current_prefix + S + current_suffix`. The existing cancellation
+token is the only cancellation veto. R mutation, a missing/deleted target
+Thread, or a pruned source rejects atomically; R-external context changes alone
+do not.
+
+The history path-edit transaction remains responsible for positional reasoning
+invalidation. The summary wrapper's active-turn `reasoning_epoch` and
+`kept_reasoning_node_ids` are derived from the transaction-current proposed
+path and current `reasoning.keep` state; the captured epoch is not an adoption
+guard. Later rounds and messages remain the untouched current suffix. Their
+replay projection and kept-reasoning set are calculated by the ordinary current
+path/replay machinery; they are neither folded into the fixed summary text nor
+summarized a second time.
+
+### Driver and job ordering
+
+At a safe request boundary, a threshold-triggered summary job may continue in
+the background while the Driver refreshes and sends its next normal request.
+The existing per-Thread boundary lock is the adoption barrier: the task may
+adopt only after an in-flight request releases it, and `history::select_path`
+then makes the next replay use the current path. Natural Turn/Run completion
+does not cancel a job. The originating Run's explicit Stop token and owner
+shutdown retain their existing cancellation and join responsibility. Completion
+is associated exactly once with its writer job ID; lifecycle, producer join,
+panic recovery, attempt FINISH, and slot retirement remain writer-owned.
+
+A provider context-limit response waits for the same already-active job before
+using the established overflow/retry policy. It must not launch a duplicate
+summary or resend the identical POST after an adoption. If no job exists, the
+existing overflow policy is unchanged. Selective trims/spills still obey their
+current open-tool-loop and transaction-boundary rules; this asynchronous path
+does not add a broader edit point.
+
+### Rejected alternatives, risks, and acceptance oracles
+
+- Keeping the Driver's normal-path await chain preserves the current stall and
+does not satisfy background continuation. Polling captured-prefix, profile,
+  epoch, Run, Turn, or generation witnesses before each DB reply duplicates
+  final authority and rejects valid R-preserving edits. Rebuilding from the
+  captured path would discard later current suffix work. A second coordinator
+  or writer/job engine would duplicate existing ownership, cancellation, and
+  shutdown semantics. These alternatives are rejected.
+- Background work can consume provider capacity even when the next ordinary
+  request succeeds; an in-flight request may still encounter a context limit
+  before the summary is ready. These are semantic tradeoffs, not reasons to add
+  an open-loop veto, benchmark requirement, telemetry, or provider/runtime
+  comparison. Existing records may support attributed scale estimates only;
+  they do not establish causal latency benefit. The approximate 93-minute
+  configuration-derived exposure is not a hard upper bound.
+- Deterministic acceptance uses barriers, not elapsed-time thresholds: hold a
+  synthetic summary response and prove the next ordinary request reaches the
+  mock provider first; prove the in-flight request prevents path adoption; then
+  release the summary and assert exact current-prefix + S + current-suffix
+  contents. A separate same-job context-limit test proves wait/continue without
+  a second summary or identical POST. Positive and negative R tests assert
+  exact transaction rollback, source/token/FINISH identity, cancellation,
+  suffix, tool-call/result closure, and replay keep. Lifecycle tests cover
+  completion-once, job-ID isolation, owner shutdown, producer panic/join, and
+  natural completion. Full normal, independent unit review, and required CI
+  remain one qualification set on the frozen U1 or U2 SHA.

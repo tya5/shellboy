@@ -28,6 +28,12 @@ mod spill_route_tests {
 
 pub(super) const REASON: &str = "proactive_threshold";
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ProactiveOutcome {
+    NotStarted,
+    Finished { path_changed: bool },
+}
+
 fn terminal_attempt_outcome(
     result: &Result<crate::compaction::CompactResult, ApiError>,
     no_target: bool,
@@ -360,7 +366,7 @@ pub(super) async fn maybe_compact_with_run_stop(
     slot: &DriverSlot,
     boundary: &mut crate::compaction::boundary::Boundary<'_>,
     run_stop: tokio_util::sync::CancellationToken,
-) -> Result<bool, ApiError> {
+) -> Result<ProactiveOutcome, ApiError> {
     // One decision per fresh provider report; no character forecast or marks.
     let thread = snapshot.thread.clone();
     let config = control.store.config.clone();
@@ -421,17 +427,17 @@ pub(super) async fn maybe_compact_with_run_stop(
     )
     .target_percent;
     if threshold == 0 {
-        return Ok(false);
+        return Ok(ProactiveOutcome::NotStarted);
     }
     let report = &data.1["last_successful_attempt"];
     let (Some(input), Some(attempt)) = (
         report["input_tokens"].as_u64(),
         report["attempt_id"].as_str(),
     ) else {
-        return Ok(false);
+        return Ok(ProactiveOutcome::NotStarted);
     };
     if input < threshold || report["next_request_pending"] == true {
-        return Ok(false);
+        return Ok(ProactiveOutcome::NotStarted);
     }
     let a = data.3;
     let target = ((threshold as u128 * percent as u128) / 100) as u64;
@@ -489,7 +495,7 @@ pub(super) async fn maybe_compact_with_run_stop(
         tx.commit()?;Ok(Some(captured_trigger))
     }).await.map_err(storage_error)?;
     let Some(captured_trigger) = can_run else {
-        return Ok(false);
+        return Ok(ProactiveOutcome::NotStarted);
     };
     control.diagnostics.record(
         crate::diagnostics::DiagnosticEvent::AutomaticCompactionStarted,
@@ -608,6 +614,10 @@ pub(super) async fn maybe_compact_with_run_stop(
             .map(|_| compacted),
         Err(error) => Err(error),
     };
+    let path_changed = committed_spill
+        .as_ref()
+        .is_some_and(|spill| !spill.no_target)
+        || result.as_ref().is_ok_and(|summary| !summary.no_target);
     // Aggregate of every stage this attempt adopted: the committed spill plus
     // the summary. A spill committed before a failed summary stays adopted.
     let summary = match (&result, committed_spill) {
@@ -689,5 +699,32 @@ pub(super) async fn maybe_compact_with_run_stop(
     {
         return Err(error);
     }
-    Ok(true)
+    Ok(ProactiveOutcome::Finished { path_changed })
+}
+pub(super) fn spawn_background(
+    control: Arc<Control>,
+    mut snapshot: Snapshot,
+    slot: DriverSlot,
+    boundary: Arc<tokio::sync::Mutex<()>>,
+) -> tokio::task::JoinHandle<Result<ProactiveOutcome, ApiError>> {
+    let run_stop = slot.stop.clone();
+    tokio::spawn(async move {
+        let guard = tokio::select! {
+            biased;
+            _ = run_stop.cancelled() => return Ok(ProactiveOutcome::NotStarted),
+            guard = boundary.lock() => guard,
+        };
+        let mut boundary_owner = crate::compaction::boundary::Boundary::new(&boundary, guard);
+        let result = maybe_compact_with_run_stop(
+            &control,
+            &mut snapshot,
+            &slot,
+            &mut boundary_owner,
+            run_stop,
+        )
+        .await;
+        drop(boundary_owner.into_guard());
+        slot.nudge.notify_one();
+        result
+    })
 }
