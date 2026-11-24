@@ -47,36 +47,23 @@ async fn source(
     budget: usize,
     language: UiLanguage,
 ) -> Result<String, ApiError> {
-    let data_dir = control
-        .store
-        .database
-        .path()
-        .parent()
-        .expect("owner database has a directory");
     let mut text = String::new();
     let mut cursor = None;
     let mut revision = None;
     let mut seen = std::collections::HashSet::new();
     for _ in 0..SOURCE_PAGES {
-        let response = crate::ipc::call_selected(
-            data_dir,
-            Command::HistoryGet(HistoryGetArgs {
+        let body = super::inspection_history::native_body(
+            control,
+            HistoryGetArgs {
                 end_message_only: false,
                 parts: false,
                 node_id: node_id.clone(),
                 limit_bytes: MAX_BODY_BYTES,
                 cursor,
                 encoding: DEFAULT_ENCODING.into(),
-            }),
+            },
         )
         .await?;
-        let malformed =
-            || ApiError::new(ErrorCode::ProtocolMismatch, "Invalid history.get response");
-        if !response.ok {
-            return Err(response.error.unwrap_or_else(malformed));
-        }
-        let body: HistoryBody = serde_json::from_value(response.result.ok_or_else(malformed)?)
-            .map_err(|_| malformed())?;
         if body.node_id != node_id {
             return Err(CopyError::ReferenceChanged.error(language));
         }
