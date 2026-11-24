@@ -69,7 +69,7 @@ use std::{
     path::PathBuf,
     sync::{
         Arc,
-        atomic::{AtomicBool, AtomicUsize, Ordering},
+        atomic::{AtomicBool, Ordering},
     },
 };
 use tokio::sync::{Mutex, Notify, broadcast, mpsc};
@@ -156,7 +156,7 @@ struct AutomaticFault {
 
 pub struct Control {
     #[cfg(test)]
-    memory_samples: AtomicUsize,
+    memory_samples: std::sync::atomic::AtomicUsize,
     #[cfg(test)]
     automatic_fault: std::sync::Mutex<Option<AutomaticFault>>,
     pub store: Store,
@@ -447,7 +447,7 @@ impl Control {
         let changed = Arc::new(Notify::new());
         Arc::new(Self {
             #[cfg(test)]
-            memory_samples: AtomicUsize::new(0),
+            memory_samples: std::sync::atomic::AtomicUsize::new(0),
             #[cfg(test)]
             automatic_fault: std::sync::Mutex::new(None),
             store,
