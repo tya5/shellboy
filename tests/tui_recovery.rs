@@ -458,11 +458,14 @@ async fn multiple_calls_keep_source_order_numbers_commands_background_and_cancel
         ))
         .unwrap();
     // Wait for the second real process; the first result has already been saved.
-    timeout(Duration::from_secs(15),async {
+    let execution_id = timeout(Duration::from_secs(15),async {
         loop {
             while let Ok(update)=incoming.try_recv(){ui.apply(update);deliver(&sender,ui.take_deferred_actions());}
-            let running=control.store.database.call(|db|Ok(db.query_row("SELECT EXISTS(SELECT 1 FROM tool_call c JOIN shell_execution s ON s.id=c.operation_id WHERE c.call_id='two' AND s.state='running')",[],|row|row.get::<_,bool>(0))?)).await.unwrap();
-            if running {break;}
+            let running=control.store.database.call(|db| {
+                use rusqlite::OptionalExtension;
+                Ok(db.query_row("SELECT s.id FROM tool_call c JOIN shell_execution s ON s.id=c.operation_id WHERE c.call_id='two' AND s.state='running'",[],|row|row.get::<_,String>(0)).optional()?)
+            }).await.unwrap();
+            if let Some(id)=running {break id;}
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
     }).await.unwrap();
@@ -471,6 +474,7 @@ async fn multiple_calls_keep_source_order_numbers_commands_background_and_cancel
         &sender,
         vec![UiAction::Background {
             thread_id: thread.clone(),
+            execution_id,
         }],
     );
     let next = request_with_ui(&mut requests, &incoming, &mut ui, &sender).await;

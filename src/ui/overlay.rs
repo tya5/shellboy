@@ -395,14 +395,7 @@ impl UiState {
         }
         if key.modifiers.contains(KeyModifiers::CONTROL) {
             match key.code {
-                KeyCode::Char('b') => {
-                    return self
-                        .view()
-                        .thread_id
-                        .clone()
-                        .map(|thread_id| vec![UiAction::Background { thread_id }])
-                        .unwrap_or_default();
-                }
+                KeyCode::Char('b') => return self.background_visible_shell(),
                 KeyCode::Char('t') => {
                     return self.slash(
                         if self.thread_browser.mode() == watch::BrowserMode::Watch {

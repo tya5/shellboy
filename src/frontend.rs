@@ -97,7 +97,7 @@ use serde_json::Value;
 use std::{
     collections::{HashMap, HashSet},
     future::Future,
-    path::PathBuf,
+    path::{Path, PathBuf},
     pin::Pin,
     sync::{Arc, mpsc::SyncSender},
 };
@@ -182,6 +182,18 @@ async fn request(control: &Arc<Control>, command: Command) -> Result<Value, ApiE
         }))
     }
 }
+async fn native_request<T: serde::de::DeserializeOwned>(
+    data_dir: &Path,
+    command: Command,
+) -> Result<T, ApiError> {
+    let response = crate::ipc::call_selected(data_dir, command).await?;
+    let malformed = || ApiError::new(ErrorCode::ProtocolMismatch, "Invalid owner response");
+    if !response.ok {
+        return Err(response.error.unwrap_or_else(malformed));
+    }
+    serde_json::from_value(response.result.ok_or_else(malformed)?).map_err(|_| malformed())
+}
+
 async fn management_request(
     control: &Arc<Control>,
     command: Command,
@@ -1545,8 +1557,11 @@ async fn run_with_delivery(
                     }
                     UiAction::InterruptTurn {thread_id,turn_id} => {
                         if !control_tasks.is_empty() {status(&updates,Some(thread_id),i18n::local!(language, "中断操作を処理中です。状態を確認して再操作してください", "An interrupt is being processed. Check its state, then try again")).await;continue;}
-                        let control=control.clone();
-                        control_tasks.spawn(async move {let result=control.interrupt_turn(turn_id).await.map(|_|());(thread_id,result)});
+                        let data_dir=client_context.data_dir.clone();
+                        control_tasks.spawn(async move {
+                            let result=native_request::<TurnInterruptResult>(&data_dir,Command::TurnInterrupt(TurnTarget {turn_id})).await.map(|_|());
+                            (thread_id,result)
+                        });
                     }
                     UiAction::CancelMessages {message_ids,target} => {
                         let Ok(permit)=command_slots.clone().try_acquire_owned() else {status(&updates,target.thread_id.clone(),i18n::local!(language, "取消キューが満杯です。未受付です", "The cancel queue is full. Request not accepted")).await;continue;};
@@ -3265,7 +3280,7 @@ async fn run_with_delivery(
                             (thread_id, result)
                         });
                     }
-                    UiAction::Background { thread_id } => {
+                    UiAction::Background { thread_id, execution_id } => {
                         let Ok(permit) = command_slots.clone().try_acquire_owned() else {
                             command_outcome::<()>(
                                 &updates,
@@ -3286,10 +3301,12 @@ async fn run_with_delivery(
                             }
                             continue;
                         };
-                        let control = control.clone();
+                        let data_dir = client_context.data_dir.clone();
                         let updates = updates.worker();
                         spawn_work(&mut workers, permit, async move {
-                            let result = control.background(&thread_id, None).await;
+                            let result = native_request::<ShellBackgroundResult>(
+                                &data_dir, Command::ShellBackground(ExecutionTarget { execution_id }),
+                            ).await;
                             command_outcome(&updates, submission, &result).await;
                             if let Err(error) = result
                                 && !has_submission

@@ -841,6 +841,7 @@ pub enum UiAction {
     },
     Background {
         thread_id: String,
+        execution_id: String,
     },
     Quit,
     ForceQuit,
@@ -1903,6 +1904,18 @@ impl RenderPreflight {
 }
 
 impl UiState {
+    fn background_visible_shell(&self) -> Vec<UiAction> {
+        match (&self.view().thread_id, motion::select(self.view())) {
+            (Some(thread_id), Some(motion::MotionTarget::Shell { execution_id })) => {
+                vec![UiAction::Background {
+                    thread_id: thread_id.clone(),
+                    execution_id,
+                }]
+            }
+            _ => Vec::new(),
+        }
+    }
+
     pub fn threads(&self) -> &[ThreadSummary] {
         self.thread_browser.items()
     }
@@ -5446,9 +5459,7 @@ cursor: None,
             "/cancel" => thread_id
                 .map(|thread_id| vec![UiAction::Cancel { thread_id }])
                 .unwrap_or_default(),
-            "/background" => thread_id
-                .map(|thread_id| vec![UiAction::Background { thread_id }])
-                .unwrap_or_default(),
+            "/background" => self.background_visible_shell(),
             "/quit" => {
                 self.lifecycle.begin();
                 self.selection_mode = false;
