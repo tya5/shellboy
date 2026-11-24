@@ -129,12 +129,20 @@ async fn incomplete_character_is_replaced_only_at_true_eof_and_exactly_once() {
         .await
         .unwrap();
     assert_eq!(eof.text, "�");
+    assert_eq!(eof.raw_bytes, 0);
+    assert_eq!(
+        serde_json::to_value(&eof.segments).unwrap(),
+        serde_json::json!([
+            {"stream":"stdout","start_byte":0,"end_byte":3},
+        ])
+    );
     assert!(eof.decode_errors);
     let again = reader
         .read(args(Some(eof.cursor), "UTF-8", 10))
         .await
         .unwrap();
     assert_eq!(again.text, "");
+    assert!(again.segments.is_empty());
     assert!(!again.decode_errors);
 }
 #[tokio::test]
@@ -146,6 +154,30 @@ async fn cp932_redecode_keeps_raw_unchanged_and_decoders_are_independent_per_str
     finish(&db).await;
     let first = reader.read(args(None, "CP932", 64)).await.unwrap();
     assert_eq!(first.text, "あ日");
+    assert_eq!(first.raw_bytes, 4);
+    assert_eq!(
+        serde_json::to_value(&first.segments).unwrap(),
+        serde_json::json!([
+            {"stream":"stderr","start_byte":0,"end_byte":3},
+            {"stream":"stdout","start_byte":3,"end_byte":6},
+        ])
+    );
+    let prefix = reader.read(args(None, "CP932", 1)).await.unwrap();
+    assert!(prefix.text.is_empty());
+    assert!(
+        serde_json::to_value(&prefix)
+            .unwrap()
+            .get("segments")
+            .is_none()
+    );
+    let rest = reader
+        .read(args(Some(prefix.cursor), "CP932", 3))
+        .await
+        .unwrap();
+    assert_eq!(rest.raw_bytes, 3);
+    assert_eq!(rest.text, first.text);
+    assert_eq!(rest.segments, first.segments);
+    assert_eq!(rest.cursor, first.cursor);
     assert_eq!(first.encoding, "Shift_JIS");
     assert!(!first.decode_errors);
     let inherited = reader

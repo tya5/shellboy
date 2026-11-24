@@ -2031,9 +2031,16 @@ record!(CredentialsClearResult {
     #[schemars(schema_with = "nullable_origin_identity")]
     changed_by: Option<OriginIdentity>,
 });
+record!(ShellOutputSegment {
+    stream: crate::shell::OutputStream,
+    start_byte: u32,
+    end_byte: u32,
+});
 record!(ShellOutput {
     execution_id: String,
     text: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    segments: Vec<ShellOutputSegment>,
     encoding: String,
     cursor: String,
     raw_bytes: u64,

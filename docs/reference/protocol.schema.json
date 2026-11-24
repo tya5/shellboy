@@ -5800,6 +5800,13 @@
       ],
       "type": "string"
     },
+    "OutputStream": {
+      "enum": [
+        "stdout",
+        "stderr"
+      ],
+      "type": "string"
+    },
     "OwnerShutdownArgs": {
       "additionalProperties": false,
       "properties": {
@@ -9437,6 +9444,12 @@
           "minimum": 0,
           "type": "integer"
         },
+        "segments": {
+          "items": {
+            "$ref": "#/definitions/ShellOutputSegment"
+          },
+          "type": "array"
+        },
         "stderr_start_offset": {
           "format": "uint64",
           "minimum": 0,
@@ -9467,6 +9480,29 @@
         "decode_errors"
       ],
       "title": "ShellOutput",
+      "type": "object"
+    },
+    "ShellOutputSegment": {
+      "properties": {
+        "end_byte": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "start_byte": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "stream": {
+          "$ref": "#/definitions/OutputStream"
+        }
+      },
+      "required": [
+        "stream",
+        "start_byte",
+        "end_byte"
+      ],
       "type": "object"
     },
     "ShellReadArgs": {
@@ -13868,6 +13904,12 @@
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
+        },
+        "segments": {
+          "items": {
+            "$ref": "#/definitions/ShellOutputSegment"
+          },
+          "type": "array"
         },
         "stderr_start_offset": {
           "format": "uint64",

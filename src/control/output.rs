@@ -4,8 +4,10 @@ pub(crate) mod preview;
 
 use crate::{
     protocol::{
-        ApiError, ErrorCode, MAX_BODY_BYTES, ShellDetails, ShellOutput, ShellReadArgs, ShellState,
+        ApiError, ErrorCode, MAX_BODY_BYTES, ShellDetails, ShellOutput, ShellOutputSegment,
+        ShellReadArgs, ShellState,
     },
+    shell::OutputStream,
     storage::{DbWorker, StorageError},
 };
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
@@ -136,19 +138,60 @@ impl Decoders {
         }
         (text, errors)
     }
+    fn finish_parts(
+        &mut self,
+        streams: StreamSelection,
+    ) -> impl Iterator<Item = (&'static str, String, bool)> {
+        ["stdout", "stderr"]
+            .into_iter()
+            .filter(move |stream| streams.includes(stream))
+            .map(move |stream| {
+                let (text, bad) = self.decode(stream, &[], true);
+                (stream, text, bad)
+            })
+    }
     pub(crate) fn finish(&mut self, streams: StreamSelection) -> (String, bool) {
         let mut text = String::new();
         let mut errors = false;
-        for stream in ["stdout", "stderr"] {
-            if streams.includes(stream) {
-                let (part, bad) = self.decode(stream, &[], true);
-                text.push_str(&part);
-                errors |= bad;
-            }
+        for (_, part, bad) in self.finish_parts(streams) {
+            text.push_str(&part);
+            errors |= bad;
         }
         (text, errors)
     }
 }
+
+fn append_segment(
+    text: &mut String,
+    segments: &mut Vec<ShellOutputSegment>,
+    stream: &str,
+    part: &str,
+) {
+    if part.is_empty() {
+        return;
+    }
+    let stream = if stream == "stdout" {
+        OutputStream::Stdout
+    } else {
+        OutputStream::Stderr
+    };
+    // A decoded page is bounded by its 64 KiB raw budget plus decoder carry.
+    let start_byte = text.len() as u32;
+    text.push_str(part);
+    let end_byte = text.len() as u32;
+    if let Some(last) = segments.last_mut()
+        && last.stream == stream
+    {
+        last.end_byte = end_byte;
+    } else {
+        segments.push(ShellOutputSegment {
+            stream,
+            start_byte,
+            end_byte,
+        });
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct DecodedOutputPage {
     pub text: String,
@@ -419,6 +462,7 @@ impl ShellOutputReader {
         }
         let mut eof_flushed = old.as_ref().is_some_and(|c| c.eof_flushed);
         let mut text = String::new();
+        let mut segments = Vec::new();
         let mut raw_bytes = 0;
         let mut decode_errors = false;
         while position.sequence < state.saved && raw_bytes < args.limit_bytes as u64 {
@@ -432,7 +476,7 @@ impl ShellOutputReader {
                 .await?;
             if streams.includes(&page.stream) {
                 let (part, bad) = decoders.decode(&page.stream, &page.bytes, false);
-                text.push_str(&part);
+                append_segment(&mut text, &mut segments, &page.stream, &part);
                 decode_errors |= bad;
                 raw_bytes += page.bytes.len() as u64;
             }
@@ -440,9 +484,10 @@ impl ShellOutputReader {
             tokio::task::yield_now().await;
         }
         if state.terminal() && position.sequence == state.saved && !eof_flushed {
-            let (part, bad) = decoders.finish(streams);
-            text.push_str(&part);
-            decode_errors |= bad;
+            for (stream, part, bad) in decoders.finish_parts(streams) {
+                append_segment(&mut text, &mut segments, stream, &part);
+                decode_errors |= bad;
+            }
             eof_flushed = true;
         }
         // An already-flushed cursor must not flush reconstructed pending bytes
@@ -461,6 +506,7 @@ impl ShellOutputReader {
         Ok(ShellOutput {
             execution_id: args.execution_id.clone(),
             text,
+            segments,
             encoding: encoding.name().into(),
             cursor,
             raw_bytes,

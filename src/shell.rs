@@ -47,7 +47,7 @@ pub mod windows_command;
 #[cfg(windows)]
 mod windows_stdin;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum OutputStream {
     Stdout,
