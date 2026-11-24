@@ -65,9 +65,15 @@
         Write-Output 'If an owner is running, restart it to use the new binary.'
         Write-Output 'Before first startup: stop the owner and back up the data directory.'
         Write-Output 'First startup may upgrade databases; older versions cannot open them.'
-        Write-Output 'First setup: shellboy config init -> edit the reported config path and set api_key_env -> shellboy config check -> shellboy'
-        Write-Output 'Keep API key values in the environment, not the config file. Use the same --config path for every step.'
-        Write-Output 'Guide: shellboy docs get --id shellboy/configuration'
+        $quoted = (Get-Item -LiteralPath $destination).FullName.Replace("'", "''")
+        Write-Output 'First setup (the full path works before PATH is updated):'
+        Write-Output "  & '$quoted' config init"
+        Write-Output '  Open the reported config_path and set your provider API root, format, and model.'
+        Write-Output '  api_key_env is the variable name. Set its value in this terminal, not in TOML.'
+        Write-Output "  & '$quoted' config check"
+        Write-Output "  & '$quoted'"
+        Write-Output 'Use the same --config path at every step if you choose a custom file.'
+        Write-Output "First-run guide: https://github.com/tya5/shellboy/blob/$version/docs/guides/configuration.md#first-setup-without-an-owner"
         Write-Output 'For older releases without config init/check, follow the bundled configuration guide manually.'
         Write-Output "Read upgrade details: https://github.com/tya5/shellboy/releases/tag/$version"
     } finally {

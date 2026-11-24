@@ -63,8 +63,16 @@ printf '%s\n' \
     'First startup may upgrade databases; older versions cannot open them.' \
     "Read upgrade details: https://github.com/tya5/shellboy/releases/tag/$version"
 
+# Single-quote the path so it can be pasted into a shell even with spaces.
+absolute_dir=$(cd -- "$dir" && pwd)
+quoted=$(printf '%s' "$absolute_dir/shellboy" | sed "s/'/'\\\\''/g")
 printf '%s\n' \
-    'First setup: shellboy config init -> edit the reported config path and set api_key_env -> shellboy config check -> shellboy' \
-    'Keep API key values in the environment, not the config file. Use the same --config path for every step.' \
-    'Guide: shellboy docs get --id shellboy/configuration' \
+    'First setup (the full path works before PATH is updated):' \
+    "  '$quoted' config init" \
+    '  Open the reported config_path and set your provider API root, format, and model.' \
+    '  api_key_env is the variable name. Set its value in this terminal, not in TOML.' \
+    "  '$quoted' config check" \
+    "  '$quoted'" \
+    'Use the same --config path at every step if you choose a custom file.' \
+    "First-run guide: https://github.com/tya5/shellboy/blob/$version/docs/guides/configuration.md#first-setup-without-an-owner" \
     'For older releases without config init/check, follow the bundled configuration guide manually.'
