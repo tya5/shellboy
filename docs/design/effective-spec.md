@@ -89,6 +89,7 @@ active space to int8: [search and relations](search-and-relations.md#int8-conver
 - #381: [status and Thread paging](protocol-versions/19.md), [bounded history observations](protocol-versions/20.md), and [Thread search and excerpts](protocol-versions/21.md) own their respective limits. Follow a nonempty cursor even on an empty page; a lower-bound count is not an exact total.
 - #382: [attachment provenance](attachment-provenance.md#attachment-replay-and-adopted-notices-382) owns original slots, authorization before reuse, and bounded adopted notices. A previously saved notice is not a new delivery status.
 - #388: [model HTTP](model-http.md) owns diagnostic sanitization; [configuration](config.md#stored-api-keys-and-connection-test-269) owns private credential-file creation and advisory permissions. Lossless exports are not a redaction surface.
+- #392: [storage](storage.md#windows-owner-directory-392) owns resolved local Windows owner paths and the typed refusal of network storage.
 - #397: [storage](storage.md#migration-scoped-foreign-key-validation-210) owns scoped precommit and crash-persistent startup validation. This is independent of unclean-start `quick_check` and does not expose a new startup phase.
 
 ## History GC diagnostics (#225)

@@ -10,6 +10,8 @@ The #379 Guide pass landed; the numbered protocol notes remain canonical.
   diagnostic secret protection and advisory credential permissions are landed.
   This does not establish Windows device acceptance or make exports share-safe.
 - #391: held Revisit receipts do not block ordinary active-Turn input.
+- #392: Windows local redirection, network-directory refusal, sharing-conflict
+  diagnostics, and effective shell PATH handling are landed.
 - #395: unused confirmation capture and the duplicate DB no-progress reader
   are gone; new snapshots omit mtime, and view state uses the existing input
   column default. No schema change.
