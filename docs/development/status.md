@@ -4,7 +4,7 @@
 
 State-filtered Thread pages have a bounded candidate scan, status chooses SQL
 page keys before projection, and list reply counts disclose lower bounds.
-See [the protocol changes](../design/protocol-versions/next-381.md).
+See [the protocol changes](../design/protocol-versions/19.md).
 
 ## Core #379 CLI and guide audit fixes
 

@@ -9,5 +9,5 @@ CREATE INDEX status_message_pending ON receipt(target_thread_id,run_id) WHERE st
 CREATE INDEX status_run_pending ON run(thread_id) WHERE state NOT IN ('completed','stopped','failed');
 CREATE INDEX status_shell_pending ON shell_execution(owner_run_id) WHERE state NOT IN ('exited','failed','stopped');
 CREATE INDEX status_turn_pending ON turn(thread_id,run_id) WHERE state NOT IN ('completed','stopped','failed');
-INSERT INTO schema_migration(version,name) VALUES(63,'next_thread_reply_summary');
+INSERT INTO schema_migration(version,name) VALUES(63,'0063_thread_reply_summary');
 PRAGMA user_version=63;

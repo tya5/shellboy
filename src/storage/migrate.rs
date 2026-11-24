@@ -334,7 +334,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     },
     Migration {
         version: 63,
-        sql: include_str!("../../migrations/next_thread_reply_summary.sql"),
+        sql: include_str!("../../migrations/0063_thread_reply_summary.sql"),
         foreign_keys: None,
     },
 ];
