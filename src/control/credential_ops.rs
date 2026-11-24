@@ -183,9 +183,7 @@ impl Control {
                 let class = classify(&failure.error);
                 let attempted = !matches!(class, "credential_missing" | "invalid_configuration");
                 let mut result = test.failed(class, failure.http_status, attempted);
-                if let Some(cause) = failure.error.transport_cause {
-                    result["transport_cause"] = json!(cause);
-                }
+                add_transport_diagnosis(&mut result, &failure.error);
                 result
             }
         };
@@ -226,11 +224,16 @@ async fn conversation_probe(name: &str, mut connection: Connection, model: &str)
             let error = failure.error;
             let status = failure.facts.status.or(error.status);
             let mut report = json!({"sent":error.http_observation.as_ref().is_some_and(|fact| fact.network_started) || status.is_some(),"ok":false,"http_status":status,"failure":classify(&error),"http_observation":error.http_observation});
-            if let Some(cause) = error.transport_cause {
-                report["transport_cause"] = json!(cause);
-            }
+            add_transport_diagnosis(&mut report, &error);
             report
         }
+    }
+}
+
+fn add_transport_diagnosis(result: &mut Value, error: &crate::model::ModelError) {
+    if let Some(cause) = error.transport_cause {
+        result["transport_cause"] = json!(cause);
+        result["hint"] = json!(crate::model::http::TRANSPORT_HINT);
     }
 }
 

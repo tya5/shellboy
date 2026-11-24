@@ -20,6 +20,8 @@ pub(crate) enum RateReservation {
 mod response;
 use body::read_json;
 use deadline::{Deadline, transport_error};
+
+pub(crate) const TRANSPORT_HINT: &str = "Check that the network or VPN connection to this endpoint is up, then inspect proxy connectivity and TLS settings.";
 use reqwest::{
     Client, Response,
     header::{HeaderMap, HeaderName, HeaderValue},

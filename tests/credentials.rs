@@ -852,6 +852,26 @@ async fn a_saved_connection_is_tested_with_one_catalog_request_and_facts_only() 
 }
 
 #[tokio::test]
+async fn connection_test_puts_network_or_vpn_before_proxy_and_tls() {
+    crate::test_watchdog::watchdog("connection test transport hint", async {
+        let root = tempfile::tempdir().unwrap();
+        write_config(root.path(), "");
+        let (_owner, control) = start(root.path()).await;
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/v1", listener.local_addr().unwrap());
+        drop(listener);
+        let result = call(&control, Command::ConnectionTest(ConnectionTestArgs {
+            post_model: Some("model-a".into()), ..candidate(&url)
+        })).await.unwrap();
+        for report in [&result, &result["conversation"]] {
+            assert_eq!(report["transport_cause"]["kind"], "connection_refused");
+            assert_eq!(report["hint"], "Check that the network or VPN connection to this endpoint is up, then inspect proxy connectivity and TLS settings.");
+        }
+        control.shutdown().await.unwrap();
+    }).await.unwrap();
+}
+
+#[tokio::test]
 async fn connection_test_only_posts_when_explicitly_requested_and_reports_it_separately() {
     crate::test_watchdog::watchdog("opt-in connection POST", async {
         let root = tempfile::tempdir().unwrap();
