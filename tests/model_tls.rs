@@ -158,7 +158,8 @@ async fn self_signed_tls_requires_explicit_connection_opt_out_and_never_changes_
         assert!(matches!(
             failure.error.transport_cause,
             Some(
-                shellboy::model::TransportCause::Tls | shellboy::model::TransportCause::TlsUnknownIssuer
+                shellboy::model::TransportCause::Tls
+                    | shellboy::model::TransportCause::TlsUnknownIssuer
             )
         ));
     }
