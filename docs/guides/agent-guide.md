@@ -787,10 +787,11 @@ Owner binary replacement does not inherit live tools or automatically resume wor
 
 ### Shell tool parameters
 
-Model-started shells inherit the owner's environment. For provider keys,
-use `shellboy credentials set` only when asked; do not export the keys into
-that environment. Retained stdout and stderr are stored without redaction.
-Do not print credentials or share raw shell output without checking it first.
+Model-started shells inherit the owner's environment, including API keys set
+there. A key stored in `credentials.toml` need not be in that environment, but
+the shell runs as the same OS user and can read the file. Neither method hides
+keys from the shell. Do not print or copy keys. Retained stdout and stderr are
+stored without redaction; check raw shell output before sharing it.
 
 Accepted parameters are `command`, `description`, `background`, `stdin_open`,
 `initial_stdin`, `input_encoding`, and `output_encoding`. Unknown parameters are always ignored with a warning; the removed

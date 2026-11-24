@@ -218,8 +218,10 @@ that earlier source evidence exceeded the header's bounded read. Messages still
 exist; inspect history or assign an explicit conversation title. The display does
 not rewrite the saved title.
 
-Model-started shells inherit the owner's environment. Store API keys with
-`shellboy credentials set` instead of exporting them into that environment.
+Model-started shells inherit the owner's environment, including any API keys
+exported there. `shellboy credentials set` keeps the key out of the inherited
+environment if you leave the variable unset, but the shell runs as your OS user
+and can also read `credentials.toml`. Neither method hides the key from the shell.
 Retained shell stdout and stderr are stored without redaction. A shortened or
 redacted preview does not make saved output or an export safe to share.
 

@@ -314,7 +314,7 @@ api_key_env = "SHELLBOY_PROXY_API_KEY"
 # model = "YOUR_EMBEDDING_MODEL_ID"
 ```
 
-Set the process environment with `export SHELLBOY_PROXY_API_KEY='…'` in Bash or `$env:SHELLBOY_PROXY_API_KEY = '…'` in PowerShell. Choose a method appropriate to your environment that avoids leaving secrets in history or shared configuration. The binary does not automatically read `credentials.env`.
+If you supply the key through `SHELLBOY_PROXY_API_KEY`, every model-started shell inherits that environment value. To keep the key out of the inherited environment, leave the variable unset and store the key with `shellboy credentials set`; a model-started shell can still read that same-user file. Avoid placing key values in shell history or shared configuration. Shellboy does not automatically read `credentials.env`.
 
 `base_url` is the HTTP(S) API root; Shellboy appends the selected conversation path (`/responses`, `/chat/completions`, or `/messages`), `/models`, or `/embeddings`. URLs containing username/password, query, fragment, or an already appended endpoint suffix are rejected. `api_key_env` is the **name** of an environment variable; its value is read immediately before sending a request. By default it is sent as `Authorization: Bearer ...`. Optional `api_key_header` sends that value **unchanged**, without a Bearer prefix, in the named header instead (for example `x-api-key`, Azure's `api-key`, or a gateway-specific name). This setting works for every dialect; without `api_key_env` it carries a key stored with `credentials set`. Unset, empty, or newline-containing credential values are errors. Header names must be valid HTTP tokens, at most 256 bytes, and cannot be transport-owned names.
 
@@ -338,7 +338,7 @@ default_model = "YOUR_CLAUDE_MODEL_ID"
 [connections.claude]
 api = "anthropic_messages"
 base_url = "https://api.anthropic.com/v1"
-api_key_env = "ANTHROPIC_API_KEY" # Set this environment variable before starting Shellboy.
+api_key_env = "ANTHROPIC_API_KEY" # Optional; model shells inherit its value if set.
 api_key_header = "x-api-key"     # Raw key value, not Authorization: Bearer.
 # max_tokens = 32768
 # prompt_caching = true   # Default: Shellboy places the cache markers itself.
@@ -377,8 +377,11 @@ synthetic fixtures are not evidence of a real provider cache hit.
 - `max_tokens` (positive integer) defaults to 32768 for this dialect,
   below the 128K output cap documented for current models. Raise it for very long
   answers; a turn that reaches it is reported as incomplete, not as a success.
-- Authentication: prefer `api_key_env = "ANTHROPIC_API_KEY"` with
-  `api_key_header = "x-api-key"`, as in the example. No key is pasted into TOML.
+- Authentication: use `api_key_header = "x-api-key"` with a key stored via
+  `shellboy credentials set`, or use `api_key_env = "ANTHROPIC_API_KEY"` to
+  supply it through the owner environment. Model shells inherit environment
+  keys and can also read stored keys as the same OS user. Do not paste keys
+  into `config.toml`.
   Omitting `api_key_header` retains the default Bearer path; whether that path
   authenticates a real Anthropic key has not been verified here.
 - Context Shellboy inserts mid-conversation (event notices) is sent as a user
