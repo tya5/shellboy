@@ -103,7 +103,8 @@ impl AttachmentService {
                     return Err(ApiError::new(
                         ErrorCode::InvalidState,
                         "An image upload is already in progress",
-                    ));
+                    )
+                    .hint("Wait for the other draft's upload to finish or expire, then start a new upload"));
                 }
                 let upload_id = super::id();
                 let timer = stop.child_token();
@@ -284,10 +285,9 @@ mod tests {
         };
         let refused = call("other", begin(), None).await.unwrap().error.unwrap();
         assert_eq!(refused.code, ErrorCode::InvalidState);
-        assert!(
-            refused.hint.is_none(),
-            "unexpected advice: {:?}",
-            refused.hint
+        assert_eq!(
+            refused.hint.as_deref(),
+            Some("Wait for the other draft's upload to finish or expire, then start a new upload")
         );
         let DraftImageResult::Begun { upload_id } =
             serde_json::from_value(call("draft", begin(), None).await.unwrap().result.unwrap())
