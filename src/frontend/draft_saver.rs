@@ -41,6 +41,18 @@ impl DraftSaver {
                         // A later save for this Thread supersedes a refused view.
                         refused_anchors.remove(&thread);
                     }
+                    // A committed send already consumed this snapshot. Do not
+                    // resurrect it, report a save failure, or clear anchor refusals.
+                    Err(error)
+                        if error.code == ErrorCode::OperationConflict
+                            && error
+                                .details
+                                .as_ref()
+                                .and_then(|details| details["reason"].as_str())
+                                == Some("draft_revision_submitted") =>
+                    {
+                        continue;
+                    }
                     Err(error) if error.code == ErrorCode::CursorExpired => {
                         refused_anchors.insert(thread.clone(), error.clone());
                     }
@@ -464,6 +476,72 @@ mod tests {
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
     }
+    #[tokio::test]
+    async fn save_consumed_by_submit_does_not_fail_quit_or_replace_view() {
+        let (_root, owner, control, server) = crate::frontend::control_tests::fixture().await;
+        let draft = DraftSnapshot {
+            text: "input accepted before autosave".into(),
+            revision: 7,
+            ..Default::default()
+        };
+        let thread = "thread".to_owned();
+        save_draft(
+            &control,
+            thread.clone(),
+            draft.clone(),
+            ViewAnchor::default(),
+            false,
+        )
+        .await
+        .unwrap();
+        let operation = format!("{}:accepted-before-save", control.store.instance_id);
+        compose_call::<serde_json::Value>(
+            &control,
+            Command::DraftSubmit(Box::new(DraftSubmitArgs {
+                thread_id: Some(thread.clone()),
+                selection_revision: Some(0),
+                create: ThreadCreateArgs {
+                    agents: None,
+                    connection: None,
+                    cwd: None,
+                    model: None,
+                    effort: None,
+                    parent_id: None,
+                },
+                draft: Box::new(draft.clone()),
+                deliver: Deliver::Next,
+            })),
+            Some(operation),
+        )
+        .await
+        .unwrap();
+        let (results, mut incoming) = mpsc::channel(1);
+        let mut saver = DraftSaver::new(control.clone(), results, Default::default());
+        assert!(saver.enqueue(thread.clone(), draft, ViewAnchor::default(), true, true));
+        let worker = saver.finish().await;
+        crate::test_watchdog::watchdog("obsolete save does not fail shutdown", worker)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert!(incoming.recv().await.is_none());
+        let state: DraftState = compose_call(
+            &control,
+            Command::DraftGet(DraftGetArgs { thread_id: thread }),
+            None,
+        )
+        .await
+        .unwrap();
+        assert!(state.draft.is_none(), "must not resurrect submitted input");
+        assert!(
+            !state.view.unwrap().follow_tail,
+            "must not commit view alone"
+        );
+        server.shutdown().await.unwrap();
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+    }
+
     #[tokio::test]
     async fn successful_same_thread_save_supersedes_refused_anchor_at_quit() {
         let (_root, owner, control, server) = crate::frontend::control_tests::fixture().await;

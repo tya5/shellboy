@@ -1243,4 +1243,8 @@ a save. A follow-tail view needs no selected node; a named reading anchor
 must still occur on the selected path. A displaced anchor returns
 `cursor_expired` without changing either row. The client keeps input and uses
 the bounded history rebase to display a fresh anchor; it does not replay the
-refused write. `draft.submit` keeps its separate selected-revision fence.
+refused write. A save of a revision already consumed by an accepted send
+returns `operation_conflict` with reason `draft_revision_submitted`; neither
+row changes. The client drops that obsolete autosave without treating it as
+a shutdown failure. Newer, unconsumed snapshots still use the normal save
+fence. `draft.submit` keeps its separate selected-revision fence.
