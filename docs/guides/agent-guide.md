@@ -147,6 +147,9 @@ Reply once to that specific applied message; an ordinary progress message or a
 Turn end message is not its reply. Reply only to a request this Thread received,
 never on behalf of a child or to a request you sent. To withdraw your own
 request, use `message cancel`. Do not reply after cancellation.
+After context loss, run `shellboy message list --awaiting --owed-by THREAD_ID`
+to find duties this Thread owes; `thread get` shows the `pending_replies` counts.
+
 If the target is unavailable, check `error.details.pending_duty_ids` for up to
 16 duties this Thread owes, not questions it sent. A missing ID prefix can
 return the same suggestions with `not_found`. Verify the intended duty before
