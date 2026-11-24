@@ -81,6 +81,7 @@ named_jobs! {
 
 // Existing mutations awaiting the bounds audit in #200. This list must only shrink.
 const UNDECLARED_WRITER_BOUNDS: &[Kind] = &[
+    Kind::DraftImage,
     Kind::OwnerShutdown,
     Kind::ThreadCreate,
     Kind::ThreadFork,
@@ -254,7 +255,7 @@ mod tests {
         }
         assert_eq!(
             Kind::ALL.len(),
-            81 + service_kinds.len() + intervention_kinds.len(),
+            82 + service_kinds.len() + intervention_kinds.len(),
             "classify new kinds and update this ratchet"
         );
     }
@@ -312,6 +313,7 @@ mod tests {
         )
         .unwrap();
         let expected = [
+            Kind::DraftImage,
             Kind::OwnerShutdown,
             Kind::ThreadCreate,
             Kind::ThreadFork,
