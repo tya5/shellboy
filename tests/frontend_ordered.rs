@@ -172,6 +172,29 @@ fn ordered_wire(body: &Value) -> [Value; 2] {
     })
 }
 
+fn first_inclusion_notice(body: &Value, metadata: &[Value; 2]) -> usize {
+    let expected = metadata.each_ref().map(|entry| {
+        let id = entry["attachment_id"].as_str().unwrap();
+        let source = entry["source_node_id"].as_str().unwrap();
+        assert!(entry.get("first_inclusion").is_none());
+        format!("Shellboy attachment first inclusion: id={id} source={source}")
+    });
+    let input = body["input"].as_array().unwrap();
+    let mut notices = input.iter().enumerate().filter(|(_, item)| {
+        item["role"] == "developer"
+            && item["content"].as_array().is_some_and(|parts| {
+                expected.iter().all(|text| {
+                    parts
+                        .iter()
+                        .any(|part| part["text"].as_str() == Some(text.as_str()))
+                })
+            })
+    });
+    let (index, _) = notices.next().expect("first-inclusion notice missing");
+    assert!(notices.next().is_none(), "first-inclusion notice repeated");
+    index
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn human_chips_keep_source_positions_through_followups_edit_restore_and_owner_restart() {
     use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
@@ -234,7 +257,12 @@ async fn human_chips_keep_source_positions_through_followups_edit_restore_and_ow
         actions.send(action).await.unwrap();
     }
     let first = incoming(&mut requests).await;
-    ordered_wire(&first.body);
+    let original_wire = ordered_wire(&first.body);
+    let notice_index = first_inclusion_notice(&first.body, &original_wire);
+    assert_eq!(
+        notice_index + 1,
+        first.body["input"].as_array().unwrap().len()
+    );
     let thread = update(&events, |value| match value {
         UiUpdate::Receipt {
             status: ReceiptStatus::Accepted,
@@ -258,11 +286,10 @@ async fn human_chips_keep_source_positions_through_followups_edit_restore_and_ow
     for text in ["次1", "次2"] {
         send(&observer, &thread, text).await;
         let next = incoming(&mut requests).await;
-        let metadata = ordered_wire(&next.body);
-        assert!(
-            metadata
-                .iter()
-                .all(|value| value["first_inclusion"] == false)
+        assert_eq!(ordered_wire(&next.body), original_wire);
+        assert_eq!(
+            first_inclusion_notice(&next.body, &original_wire),
+            notice_index
         );
         assert!(
             next.body["input"]
@@ -349,10 +376,9 @@ async fn human_chips_keep_source_positions_through_followups_edit_restore_and_ow
         .unwrap();
     let edited = incoming(&mut requests).await;
     let metadata = ordered_wire(&edited.body);
-    assert!(
-        metadata
-            .iter()
-            .all(|value| value["first_inclusion"] == true)
+    assert_eq!(
+        first_inclusion_notice(&edited.body, &metadata) + 1,
+        edited.body["input"].as_array().unwrap().len()
     );
     assert!(ids.iter().all(|id| !edited.body.to_string().contains(id)));
     edited.reply.send(()).unwrap();
@@ -429,11 +455,8 @@ async fn human_chips_keep_source_positions_through_followups_edit_restore_and_ow
     assert_eq!(saved.attachments, snapshot.attachments);
     send(&control, &thread, "再起動後").await;
     let rebuilt = incoming(&mut requests).await;
-    assert!(
-        ordered_wire(&rebuilt.body)
-            .iter()
-            .all(|value| value["first_inclusion"] == false)
-    );
+    assert_eq!(ordered_wire(&rebuilt.body), original_wire);
+    first_inclusion_notice(&rebuilt.body, &original_wire);
     rebuilt.reply.send(()).unwrap();
     settled(&control, &thread).await;
     control.shutdown().await.unwrap();
