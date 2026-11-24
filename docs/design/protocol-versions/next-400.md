@@ -1,4 +1,4 @@
-# Delivery, startup, and storage next actions (#400)
+# Protocol next (#400)
 
 Held messages, restart-required edits, and skipped instructions can include a `hint`.
 Terminal startup errors can include `details.startup_stage`; `storage.status`
