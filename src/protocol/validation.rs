@@ -812,6 +812,33 @@ impl IndexArgs {
 impl Command {
     pub fn validate(&self) -> Result<(), ApiError> {
         match self {
+            Self::DraftImage(a) => {
+                nonempty(&a.instance_id, "instance_id")?;
+                nonempty(&a.draft_id, "draft_id")?;
+                match &a.action {
+                    super::DraftImageAction::Begin { encoded_bytes } if *encoded_bytes == 0 => {
+                        Err(invalid("Image upload must contain bytes"))
+                    }
+                    super::DraftImageAction::Begin { .. } => Ok(()),
+                    super::DraftImageAction::Append {
+                        upload_id, base64, ..
+                    } => {
+                        nonempty(upload_id, "upload_id")?;
+                        if base64.is_empty()
+                            || base64.len() > super::DRAFT_IMAGE_CHUNK_BYTES.div_ceil(3) * 4
+                        {
+                            return Err(invalid("Invalid image upload chunk size"));
+                        }
+                        Ok(())
+                    }
+                    super::DraftImageAction::Commit { upload_id } => {
+                        nonempty(upload_id, "upload_id")
+                    }
+                    super::DraftImageAction::Release { attachment_id } => {
+                        nonempty(attachment_id, "attachment_id")
+                    }
+                }
+            }
             Self::OwnerShutdown(a) => nonempty(&a.instance_id, "instance_id"),
             Self::Status(a) => a.validate(),
             Self::CompactList(a) => a.validate(),

@@ -57,7 +57,7 @@ macro_rules! named_jobs {
 
 // The exhaustive match ensures every future protocol variant gets a fixed label.
 named_jobs! {
-    OwnerShutdown => owner_shutdown, Status => status, ModelList => model_list,
+    DraftImage => draft_image, OwnerShutdown => owner_shutdown, Status => status, ModelList => model_list,
     ThreadList => thread_list, ThreadGet => thread_get, ThreadBranches => thread_branches, UsageGet => usage_get,
     ArtifactAdd => artifact_add, ArtifactUpdate => artifact_update, ArtifactList => artifact_list, ArtifactGet => artifact_get, ArtifactRemove => artifact_remove,
     ServiceAdd => service_add, ServiceList => service_list, ServiceStart => service_start, ServiceStop => service_stop, ServiceRemove => service_remove,
@@ -157,7 +157,8 @@ impl Kind {
             | Kind::ThreadUnarchive
             | Kind::ThreadTag
             | Kind::ThreadImport => MutationDeclaredBound,
-            Kind::OwnerShutdown
+            Kind::DraftImage
+            | Kind::OwnerShutdown
             | Kind::ThreadCreate
             | Kind::ThreadFork
             | Kind::ThreadDelete

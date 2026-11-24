@@ -11,6 +11,7 @@ pub(crate) enum CommandRoute {
 impl Command {
     fn name_and_route(&self) -> (&'static str, CommandRoute) {
         match self {
+            Self::DraftImage(_) => ("draft.image", CommandRoute::Database),
             Self::OwnerShutdown(_) => ("owner.shutdown", CommandRoute::Database),
             Self::Status(a) => (
                 "status",
@@ -120,7 +121,10 @@ impl Command {
     /// Observations are evaluated afresh and never consume durable receipts.
     /// Wait remains stateful: it owns registration and changes caller activity.
     pub(crate) fn requires_receipt(&self) -> bool {
-        !self.is_read_only()
+        match self {
+            Self::DraftImage(args) => matches!(args.action, super::DraftImageAction::Commit { .. }),
+            _ => !self.is_read_only(),
+        }
     }
     /// May owner shutdown drop the runtime action before receipt finalization?
     pub(crate) fn runtime_cancellable(&self) -> bool {
@@ -155,6 +159,7 @@ impl Command {
             | Self::ConnectionTest(_)
             | Self::ConfigGet(_) => true,
             Self::TurnInterrupt(_) | Self::ShellBackground(_) => false,
+            Self::DraftImage(_) => false,
             Self::OwnerShutdown(_)
             | Self::ThreadList(_)
             | Self::ThreadGet(_)
@@ -231,6 +236,7 @@ impl Command {
             | Self::ServiceRemove(_) => false,
             Self::TurnInterrupt(_) | Self::ShellBackground(_) => false,
             Self::ShellEof(_) | Self::ShellStop(_) => true,
+            Self::DraftImage(_) => false,
             Self::OwnerShutdown(_)
             | Self::Status(_)
             | Self::ModelList(_)
@@ -341,6 +347,7 @@ impl Command {
             | Self::ThreadArchive(_)
             | Self::ThreadTag(_)
             | Self::ThreadUnarchive(_) => true,
+            Self::DraftImage(_) => false,
             Self::OwnerShutdown(_)
             | Self::Status(_)
             | Self::ModelList(_)
@@ -451,6 +458,7 @@ impl Command {
             | Self::StorageStatus(_)
             | Self::ConnectionTest(_)
             | Self::ConfigGet(_) => true,
+            Self::DraftImage(_) => false,
             Self::OwnerShutdown(_)
             | Self::ThreadImport(_)
             | Self::ThreadCreate(_)

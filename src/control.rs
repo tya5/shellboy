@@ -1144,6 +1144,53 @@ impl Control {
                     })
                 }
                 CommandRoute::Database | CommandRoute::StatusProjection => match &request.command {
+                    Command::DraftImage(args) => {
+                        if origin.is_some() {
+                            return Err(ApiError::new(
+                                ErrorCode::InvalidArgument,
+                                "Draft image staging requires a native client",
+                            ));
+                        }
+                        if !request.command.requires_receipt() {
+                            return MutationResult::value(
+                                self.attachments
+                                    .draft_image(args.clone(), self.stop.clone())
+                                    .await?,
+                            );
+                        }
+                        let intent = serde_json::to_value(&request.command)
+                            .expect("serializable draft image command");
+                        let id = &request.operation_id;
+                        match self.store.reserve_internal(id.clone(), intent).await? {
+                            db::RuntimeReservation::Saved(outcome) => {
+                                outcome.map(|result| MutationResult {
+                                    result,
+                                    ..Default::default()
+                                })
+                            }
+                            db::RuntimeReservation::Pending => Err(ApiError::new(
+                                ErrorCode::InvalidState,
+                                "Image commit is pending; inspect its operation receipt",
+                            )),
+                            db::RuntimeReservation::New => {
+                                let result = self
+                                    .attachments
+                                    .draft_image(args.clone(), self.stop.clone())
+                                    .await
+                                    .and_then(MutationResult::value);
+                                self.store
+                                    .finalize_internal(
+                                        id.clone(),
+                                        result
+                                            .as_ref()
+                                            .map(|result| result.result.clone())
+                                            .map_err(Clone::clone),
+                                    )
+                                    .await?;
+                                result
+                            }
+                        }
+                    }
                     Command::AttachmentAdd(args) => {
                         if let Some(saved) = self.store.replay(&request, &origin).await? {
                             return Ok(saved);
@@ -1596,6 +1643,7 @@ impl Control {
             }
             notified.await;
         }
+        self.attachments.clear_draft_images().await;
         // An admitted startup may have published workers while shutdown first
         // inspected its OnceCell. Drain any such late publication as well.
         if let Some(worker) = self.maintenance.get()

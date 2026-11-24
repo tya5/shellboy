@@ -1250,6 +1250,10 @@ impl Store {
         now: &str,
     ) -> Result<MutationResult> {
         match command {
+            Command::DraftImage(_) => Err(error(
+                ErrorCode::InvalidState,
+                "Draft image staging requires the owner service",
+            )),
             Command::OwnerShutdown(args) => {
                 if args.instance_id != self.instance_id {
                     return Err(error(

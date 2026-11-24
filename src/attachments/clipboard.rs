@@ -36,7 +36,62 @@ impl ClipboardPixels {
         }
         Ok(())
     }
+    pub fn encode_png(&self) -> Result<Vec<u8>, ApiError> {
+        self.validate()?;
+        let mut bytes = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut bytes, self.width, self.height);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            let failed = |_| ApiError::new(ErrorCode::IoFailed, "Cannot encode clipboard PNG");
+            let mut writer = encoder.write_header().map_err(failed)?;
+            writer.write_image_data(&self.rgba).map_err(failed)?;
+            writer.finish().map_err(failed)?;
+        }
+        Ok(bytes)
+    }
 }
+/// Fully decode one static PNG before admitting its unchanged encoded bytes.
+pub(super) fn validate_png(bytes: &[u8]) -> Result<(), ApiError> {
+    let malformed = |_| {
+        ApiError::new(
+            ErrorCode::InvalidArgument,
+            "Uploaded clipboard image must be a valid static PNG",
+        )
+    };
+    let too_large = || {
+        ApiError::new(
+            ErrorCode::InputLimit,
+            "Decoded clipboard image exceeds the RGBA size limit",
+        )
+    };
+    let mut decoder = png::Decoder::new(std::io::Cursor::new(bytes));
+    decoder.set_limits(png::Limits {
+        bytes: MAX_CLIPBOARD_RGBA_BYTES,
+    });
+    let info = decoder.read_header_info().map_err(malformed)?;
+    let rgba = (info.width as usize)
+        .checked_mul(info.height as usize)
+        .and_then(|pixels| pixels.checked_mul(4));
+    if !rgba.is_some_and(|bytes| bytes <= MAX_CLIPBOARD_RGBA_BYTES) {
+        return Err(too_large());
+    }
+    let mut reader = decoder.read_info().map_err(malformed)?;
+    if reader.info().animation_control.is_some() {
+        return Err(ApiError::new(
+            ErrorCode::InvalidArgument,
+            "Uploaded clipboard image must be a static PNG",
+        ));
+    }
+    let size = reader
+        .output_buffer_size()
+        .filter(|&size| size <= MAX_CLIPBOARD_RGBA_BYTES)
+        .ok_or_else(too_large)?;
+    reader.next_frame(&mut vec![0; size]).map_err(malformed)?;
+    reader.finish().map_err(malformed)?;
+    Ok(())
+}
+
 #[derive(Debug)]
 pub enum CopyOutcome {
     OsCopied,

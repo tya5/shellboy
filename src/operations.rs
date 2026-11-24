@@ -2550,7 +2550,8 @@ impl OperationId {
     pub(crate) fn from_owner_command(command: &crate::protocol::Command) -> Option<Self> {
         use crate::protocol::Command;
         Some(match command {
-            Command::OwnerShutdown(_)
+            Command::DraftImage(_)
+            | Command::OwnerShutdown(_)
             | Command::EventsWait(_)
             | Command::ConfigGet(_)
             | Command::ConfigSet(_)
