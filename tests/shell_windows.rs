@@ -46,6 +46,41 @@ async fn collect(mut execution: ShellExecution) -> (Vec<u8>, Vec<u8>, ShellCompl
     .unwrap()
 }
 #[tokio::test]
+async fn invalid_native_launch_paths_identify_the_failed_field() {
+    let root = tempfile::tempdir().unwrap();
+    let file = root.path().join("not a directory.txt");
+    std::fs::write(&file, b"not executable").unwrap();
+    for (cwd, executable, field, code) in [
+        (file.clone(), None, "cwd", ErrorCode::InvalidArgument),
+        (
+            root.path().to_owned(),
+            Some(root.path().join("missing.exe")),
+            "executable",
+            ErrorCode::ConfigInvalid,
+        ),
+    ] {
+        let mut cfg = config();
+        cfg.shell.executable = executable;
+        let error = match ShellSupervisor::new(&cfg)
+            .spawn(
+                "invalid-windows-path".into(),
+                cwd,
+                args("exit 0"),
+                BTreeMap::new(),
+            )
+            .await
+        {
+            Ok(_) => panic!("invalid launch path started a shell"),
+            Err(error) => error,
+        };
+        assert_eq!(error.code, code);
+        let details = error.details.unwrap();
+        assert_eq!(details["reason"], "windows_shell_launch_path");
+        assert_eq!(details["field"], field);
+    }
+}
+
+#[tokio::test]
 async fn powershell_starts_with_hidden_environment_entries() {
     let environment = [
         ("=::", r"::\"),
@@ -91,7 +126,7 @@ async fn powershell_literal_command_quoting_stdout_stderr_and_exit_are_preserved
 #[tokio::test]
 async fn stdin_and_eof_use_pipe_without_consuming_powershell_command_source() {
     let mut a = args(
-        "[Console]::InputEncoding=[Text.UTF8Encoding]::new($false); [Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); [Console]::Out.Write([Console]::In.ReadToEnd())",
+        "[Console]::Out.Write([Console]::In.ReadToEnd()); [Console]::Error.Write('標準エラー')",
     );
     a.stdin_open = true;
     a.initial_stdin = Some("initial:".into());
@@ -119,8 +154,9 @@ async fn stdin_and_eof_use_pipe_without_consuming_powershell_command_source() {
             .code,
         ErrorCode::InvalidState
     );
-    let (out, _, done) = collect(execution).await;
+    let (out, err, done) = collect(execution).await;
     assert_eq!(out, "initial:日本語".as_bytes());
+    assert_eq!(err, "標準エラー".as_bytes());
     assert!(done.output_complete);
 }
 #[tokio::test]

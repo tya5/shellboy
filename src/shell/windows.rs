@@ -16,22 +16,27 @@ use std::{
 };
 use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
 use windows_sys::Win32::{
-    Foundation::{GENERIC_WRITE, HANDLE, INVALID_HANDLE_VALUE, WAIT_OBJECT_0, WAIT_TIMEOUT},
+    Foundation::{
+        ERROR_ACCESS_DENIED, ERROR_BAD_EXE_FORMAT, ERROR_DIRECTORY, ERROR_FILE_NOT_FOUND,
+        ERROR_FILENAME_EXCED_RANGE, ERROR_INVALID_NAME, ERROR_NOT_ENOUGH_QUOTA,
+        ERROR_PATH_NOT_FOUND, ERROR_PROCESS_IN_JOB, GENERIC_WRITE, HANDLE, INVALID_HANDLE_VALUE,
+        WAIT_OBJECT_0, WAIT_TIMEOUT,
+    },
     Globalization::CompareStringOrdinal,
     Security::SECURITY_ATTRIBUTES,
     Storage::FileSystem::{CreateFileW, FILE_ATTRIBUTE_NORMAL, OPEN_EXISTING, SearchPathW},
     System::{
         Environment::{FreeEnvironmentStringsW, GetEnvironmentStringsW},
         JobObjects::{
-            CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+            CreateJobObjectW, IsProcessInJob, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
             JOBOBJECT_BASIC_ACCOUNTING_INFORMATION, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
             JobObjectBasicAccountingInformation, JobObjectExtendedLimitInformation,
             QueryInformationJobObject, SetInformationJobObject, TerminateJobObject,
         },
         Threading::{
             CREATE_NO_WINDOW, CREATE_UNICODE_ENVIRONMENT, CreateProcessW,
-            DeleteProcThreadAttributeList, EXTENDED_STARTUPINFO_PRESENT, GetExitCodeProcess,
-            InitializeProcThreadAttributeList, LPPROC_THREAD_ATTRIBUTE_LIST,
+            DeleteProcThreadAttributeList, EXTENDED_STARTUPINFO_PRESENT, GetCurrentProcess,
+            GetExitCodeProcess, InitializeProcThreadAttributeList, LPPROC_THREAD_ATTRIBUTE_LIST,
             PROC_THREAD_ATTRIBUTE_HANDLE_LIST, PROC_THREAD_ATTRIBUTE_JOB_LIST, PROCESS_INFORMATION,
             STARTF_USESTDHANDLES, STARTUPINFOEXW, UpdateProcThreadAttribute, WaitForSingleObject,
         },
@@ -55,6 +60,70 @@ fn wide(value: &OsStr) -> Result<Vec<u16>, ApiError> {
     value.push(0);
     Ok(value)
 }
+#[derive(Clone, Copy)]
+enum LaunchPath {
+    Cwd,
+    Executable,
+}
+impl LaunchPath {
+    fn error(self, os_error: Option<i32>) -> ApiError {
+        let (code, field, hint) = match self {
+            Self::Cwd => (
+                ErrorCode::InvalidArgument,
+                "cwd",
+                "choose an existing absolute working directory supported by CreateProcessW",
+            ),
+            Self::Executable => (
+                ErrorCode::ConfigInvalid,
+                "executable",
+                "check shell.executable and the effective PATH for a native Windows executable",
+            ),
+        };
+        ApiError::new(code, format!("invalid Windows shell launch {field}"))
+            .hint(hint)
+            .details(serde_json::json!({"reason":"windows_shell_launch_path", "field":field, "os_error":os_error}))
+    }
+
+    fn prepare(self, path: &std::path::Path) -> Result<Vec<u16>, ApiError> {
+        if !path.is_absolute() {
+            return Err(self.error(None));
+        }
+        wide(path.as_os_str()).map_err(|_| self.error(None))
+    }
+}
+
+fn create_process_error(cause: std::io::Error) -> ApiError {
+    let raw = cause.raw_os_error();
+    match raw.map(|code| code as u32) {
+        Some(ERROR_DIRECTORY) => return LaunchPath::Cwd.error(raw),
+        Some(ERROR_FILE_NOT_FOUND | ERROR_BAD_EXE_FORMAT) => {
+            return LaunchPath::Executable.error(raw);
+        }
+        Some(ERROR_PATH_NOT_FOUND | ERROR_INVALID_NAME | ERROR_FILENAME_EXCED_RANGE) => {
+            return ApiError::new(ErrorCode::InvalidArgument, "Windows rejected a shell launch path")
+                .hint("check the working directory and shell.executable, including their native path length")
+                .details(serde_json::json!({"reason":"windows_shell_launch_path", "os_error":raw}));
+        }
+        Some(ERROR_ACCESS_DENIED | ERROR_NOT_ENOUGH_QUOTA | ERROR_PROCESS_IN_JOB) => {
+            let mut in_job = 0;
+            // Capture the original error before querying Job membership. An access
+            // denial while in a Job is not proof that the Job caused the denial.
+            if unsafe { IsProcessInJob(GetCurrentProcess(), null_mut(), &mut in_job) } != 0
+                && in_job != 0
+            {
+                return ApiError::new(ErrorCode::IoFailed, "Windows denied shell creation while the owner is in a parent Job")
+                    .hint("check executable permissions and whether the owner launcher permits nested Jobs and another process")
+                    .details(serde_json::json!({"reason":"windows_parent_job_launch_denied", "os_error":raw}));
+            }
+        }
+        _ => {}
+    }
+    ApiError::new(
+        ErrorCode::IoFailed,
+        format!("create shell in execution Job: {cause}"),
+    )
+}
+
 fn take_handle(handle: HANDLE, action: &str) -> Result<OwnedHandle, ApiError> {
     if handle.is_null() || handle == INVALID_HANDLE_VALUE {
         Err(os_error(action))
@@ -171,15 +240,10 @@ fn resolve_program(
         }
     } else {
         let mut path = env_value(env, "PATH")?
-            .ok_or_else(|| {
-                ApiError::new(
-                    ErrorCode::IoFailed,
-                    "shell executable is not absolute and PATH is unavailable",
-                )
-            })?
+            .ok_or_else(|| LaunchPath::Executable.error(None))?
             .to_vec();
         path.push(0);
-        let program = wide(program.as_os_str())?;
+        let program = wide(program.as_os_str()).map_err(|_| LaunchPath::Executable.error(None))?;
         let extension: Vec<u16> = ".exe\0".encode_utf16().collect();
         let needed = unsafe {
             SearchPathW(
@@ -192,7 +256,9 @@ fn resolve_program(
             )
         };
         if needed == 0 {
-            return Err(os_error("resolve shell executable in configured PATH"));
+            return Err(
+                LaunchPath::Executable.error(std::io::Error::last_os_error().raw_os_error())
+            );
         }
         let mut buffer = vec![0; needed as usize + 1];
         let written = unsafe {
@@ -206,17 +272,13 @@ fn resolve_program(
             )
         };
         if written == 0 || written as usize >= buffer.len() {
-            return Err(os_error("resolve shell executable"));
+            return Err(
+                LaunchPath::Executable.error(std::io::Error::last_os_error().raw_os_error())
+            );
         }
         buffer.truncate(written as usize);
         PathBuf::from(OsString::from_wide(&buffer))
     };
-    if !resolved.is_absolute() {
-        return Err(ApiError::new(
-            ErrorCode::InvalidArgument,
-            "shell executable must resolve to an absolute path",
-        ));
-    }
     // The Windows inbox bash.exe is a WSL launcher, not the Git Bash adapter.
     if config.shell.kind == ShellKind::Bash
         && let Some(windir) = env_value(env, "WINDIR")?
@@ -243,8 +305,21 @@ fn arguments(kind: ShellKind, command: &str) -> Vec<Vec<u16>> {
             .map(str::to_owned)
             .collect(),
         ShellKind::Powershell => {
+            // Parse user code separately so script-level param/using directives
+            // are not displaced by the I/O initialization statements.
+            let mut source = String::with_capacity(command.len());
+            for ch in command.chars() {
+                // PowerShell also recognizes typographic single quotes.
+                if matches!(ch, '\'' | '\u{2018}' | '\u{2019}' | '\u{201a}' | '\u{201b}') {
+                    source.push(ch);
+                }
+                source.push(ch);
+            }
+            let script = format!(
+                "[Console]::InputEncoding=[Console]::OutputEncoding=$OutputEncoding=[Text.UTF8Encoding]::new($false); . ([scriptblock]::Create('{source}'))",
+            );
             let encoded = STANDARD.encode(
-                command
+                script
                     .encode_utf16()
                     .flat_map(u16::to_le_bytes)
                     .collect::<Vec<_>>(),
@@ -464,21 +539,15 @@ impl ShellSupervisor {
         gate: Option<Arc<tokio::sync::Mutex<bool>>>,
         owner: SpawnOwner,
     ) -> Result<ShellExecution, ApiError> {
+        let native_cwd = LaunchPath::Cwd.prepare(&cwd)?;
         let entries = environment(&self.config, env)?;
         let executable = resolve_program(&self.config, &cwd, &entries)?;
-        let exe = wide(executable.as_os_str())?;
+        let exe = LaunchPath::Executable.prepare(&executable)?;
         let mut line = windows_command::command_line(
             &exe[..exe.len() - 1],
             &arguments(self.config.shell.kind, &args.command),
         )?;
         let env_block = windows_command::environment_block(&entries)?;
-        if !cwd.is_absolute() {
-            return Err(ApiError::new(
-                ErrorCode::InvalidArgument,
-                "shell cwd must be absolute",
-            ));
-        }
-        let cwd = wide(cwd.as_os_str())?;
         let (stdin_parent, stdin_child) = super::windows_stdin::input_pipe().await?;
         let stdout = output_pipe().await?;
         let stderr = output_pipe().await?;
@@ -524,15 +593,13 @@ impl ShellSupervisor {
                 1,
                 EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW,
                 env_block.as_ptr().cast::<c_void>(),
-                cwd.as_ptr(),
+                native_cwd.as_ptr(),
                 &startup.StartupInfo,
                 &mut info,
             )
         } == 0
         {
-            return Err(os_error(
-                "create shell in execution Job (Windows 10+ required)",
-            ));
+            return Err(create_process_error(std::io::Error::last_os_error()));
         }
         let process = take_handle(info.hProcess, "own shell process handle")?;
         let thread = take_handle(info.hThread, "own shell thread handle")?;

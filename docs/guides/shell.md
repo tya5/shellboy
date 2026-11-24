@@ -237,9 +237,20 @@ Stop's `accepted:true` means the request was accepted. Confirm terminal state be
 
 Run-owned shells stop at the raw output limit and record the reason and incompleteness. Thread-owned shells (timed schedules and services) instead rotate their oldest output at `shell_raw_bytes` without stopping the process or renumbering retained chunks. An evicted cursor returns `output_expired`; start without a cursor to read the retained window. Any caller, including a model, may write/EOF/stop any shell (no authority check; an unknown execution ID is still an error). Check the execution ID first so you do not disturb another Run's work. After an application restart, old PIDs are not used to stop processes.
 
+On Windows, model shells use redirected pipes without a console. A stop forces
+termination of the owned Job rather than sending a graceful Unix-style signal;
+child cleanup handlers and final output are not guaranteed. If process creation
+is denied while the owner is in a parent Job, check both the executable's
+permissions and the launcher's Job policy. Shellboy never starts an untracked
+child to bypass that policy.
+
 ## PowerShell arguments
 
 Windows uses the configured PowerShell. Write tool commands in PowerShell syntax, for example `Write-Output 'ready'`. CLI environment variable references use forms such as `$env:SHELLBOY_RUN_ID`. Bash's `$SHELLBOY_RUN_ID`, `printf`, and here-documents do not have the same meaning.
+
+Shellboy initializes Windows PowerShell input and output to UTF-8 without a BOM.
+This does not transcode a native program's raw output or normalize CRLF. Use the
+appropriate `shell read --encoding` for programs that emit another encoding.
 
 Windows PowerShell 5.1 and newer pwsh differ in quoting JSON passed to native commands. Even for small JSON examples, check `shellboy --help` and argument passing in the shell in use. With Windows PowerShell 5.1's stop-parsing syntax, for example, insert actual IDs directly without variable expansion:
 

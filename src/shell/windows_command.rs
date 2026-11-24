@@ -42,7 +42,8 @@ pub fn command_line(executable: &[u16], args: &[Vec<u16>]) -> Result<Vec<u16>, A
         return Err(ApiError::new(
             ErrorCode::InputLimit,
             "Windows command line exceeds 32767 UTF-16 units including terminator",
-        ));
+        )
+        .hint("put the script in a file and invoke it with a shorter command"));
     }
     line.push(0);
     Ok(line)

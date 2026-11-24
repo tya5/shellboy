@@ -211,6 +211,10 @@ Every summary carries `created_at`; for Threads created before schema 54,
 created_at is the earliest recorded activity. If none was recorded, it is null.
 Creation order puts null last and breaks ties by descending Thread ID.
 
+`thread list --cwd PATH` matches the saved path spelling after lexical cleanup.
+On Windows, a differently cased spelling of the same folder is a different
+filter value. Use the spelling returned by `thread cwds`.
+
 ### Read the conversation
 
 Your messages form full-width bands, with the saved time at the right when there
