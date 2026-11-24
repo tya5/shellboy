@@ -282,9 +282,8 @@ pub(super) async fn run(
         if !views.is_empty() {
             let result=match browser_result {
                 Some(Ok(raw))=>{
-                    let project=views.clone();
                     let language=control.store.config.ui.language;
-                    presentation_work(move||super::view_read::prepare(raw,sequence,&project,language)).await.map(|prepared|(prepared,sequence))
+                    super::view_read::prepare_native(&control,raw,sequence,&views,language).await.map(|prepared|(prepared,sequence))
                 },
                 Some(Err(error))=>Err(error),
                 None=>Err(ApiError::new(ErrorCode::InvalidState,"Visible observations unavailable")),
@@ -679,6 +678,12 @@ mod tests {
             tx.commit()?;Ok(())
         }).await.unwrap();
         let control = Control::new(&owner, root.path().into());
+        let (rpc, dispatcher) = tokio::sync::mpsc::channel(16);
+        let server = crate::ipc::LocalServer::bind(&owner, rpc).await.unwrap();
+        let dispatcher = tokio::spawn(control.clone().serve(dispatcher));
+        // The first native request initializes Control via the writer. Hold
+        // the writer only after readiness, as the embedded launcher does.
+        control.start().await.unwrap();
         let (entered, ready) = tokio::sync::oneshot::channel();
         let (release, blocked) = std::sync::mpsc::channel::<()>();
         let pending = owner
@@ -789,6 +794,8 @@ mod tests {
         assert_eq!(Some(read_revision), browser_sequence);
         assert_eq!(pending.items[0].message_id, "held-paired");
         assert_eq!(slots.available_permits(), 1);
+        server.shutdown().await.unwrap();
+        dispatcher.await.unwrap();
         drop(control);
         owner.shutdown().await.unwrap();
     }
