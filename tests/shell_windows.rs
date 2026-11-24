@@ -81,6 +81,91 @@ async fn invalid_native_launch_paths_identify_the_failed_field() {
 }
 
 #[tokio::test]
+async fn restricted_parent_job_reports_shell_launch_denial() {
+    use std::{
+        os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle},
+        ptr::null,
+    };
+    use windows_sys::Win32::System::{
+        JobObjects::{
+            AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_ACTIVE_PROCESS,
+            JOBOBJECT_BASIC_LIMIT_INFORMATION, JobObjectBasicLimitInformation,
+            SetInformationJobObject,
+        },
+        Threading::GetCurrentProcess,
+    };
+
+    // Restrict only a disposable test process, never the shared test runner.
+    const CHILD: &str = "SHELLBOY_TEST_RESTRICTED_PARENT_JOB";
+    if std::env::var_os(CHILD).is_none() {
+        let child = tokio::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "shell_windows::restricted_parent_job_reports_shell_launch_denial",
+            ])
+            .env(CHILD, "1")
+            .kill_on_drop(true)
+            .output();
+        let output = crate::test_watchdog::watchdog("restricted Windows parent Job", child)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            output.status.success() && String::from_utf8_lossy(&output.stdout).contains("1 passed"),
+            "child stdout: {}; stderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
+        return;
+    }
+
+    let job = unsafe { CreateJobObjectW(null(), null()) };
+    assert!(!job.is_null(), "{}", std::io::Error::last_os_error());
+    let job = unsafe { OwnedHandle::from_raw_handle(job) };
+    let limits = JOBOBJECT_BASIC_LIMIT_INFORMATION {
+        LimitFlags: JOB_OBJECT_LIMIT_ACTIVE_PROCESS,
+        ActiveProcessLimit: 1,
+        ..Default::default()
+    };
+    assert_ne!(
+        unsafe {
+            SetInformationJobObject(
+                job.as_raw_handle(),
+                JobObjectBasicLimitInformation,
+                std::ptr::from_ref(&limits).cast(),
+                size_of::<JOBOBJECT_BASIC_LIMIT_INFORMATION>() as u32,
+            )
+        },
+        0,
+        "{}",
+        std::io::Error::last_os_error()
+    );
+    assert_ne!(
+        unsafe { AssignProcessToJobObject(job.as_raw_handle(), GetCurrentProcess()) },
+        0,
+        "{}",
+        std::io::Error::last_os_error()
+    );
+    let error = match ShellSupervisor::new(&config())
+        .spawn(
+            "restricted-job-test".into(),
+            std::env::current_dir().unwrap(),
+            args("exit 0"),
+            BTreeMap::new(),
+        )
+        .await
+    {
+        Ok(_) => panic!("restricted parent Job unexpectedly allowed shell launch"),
+        Err(error) => error,
+    };
+    assert_eq!(error.code, ErrorCode::IoFailed);
+    assert_eq!(
+        error.details.unwrap()["reason"],
+        "windows_parent_job_launch_denied"
+    );
+}
+
+#[tokio::test]
 async fn powershell_starts_with_hidden_environment_entries() {
     let environment = [
         ("=::", r"::\"),
@@ -126,7 +211,7 @@ async fn powershell_literal_command_quoting_stdout_stderr_and_exit_are_preserved
 #[tokio::test]
 async fn stdin_and_eof_use_pipe_without_consuming_powershell_command_source() {
     let mut a = args(
-        "[Console]::Out.Write([Console]::In.ReadToEnd()); [Console]::Error.Write('標準エラー')",
+        "[Console]::Out.Write([Console]::In.ReadToEnd()); [Console]::Error.WriteLine('標準エラー')",
     );
     a.stdin_open = true;
     a.initial_stdin = Some("initial:".into());
@@ -156,7 +241,7 @@ async fn stdin_and_eof_use_pipe_without_consuming_powershell_command_source() {
     );
     let (out, err, done) = collect(execution).await;
     assert_eq!(out, "initial:日本語".as_bytes());
-    assert_eq!(err, "標準エラー".as_bytes());
+    assert_eq!(err, "標準エラー\r\n".as_bytes());
     assert!(done.output_complete);
 }
 #[tokio::test]

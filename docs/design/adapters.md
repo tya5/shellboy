@@ -27,6 +27,8 @@ fixtureは空回答、commentary正常完了、reasoning/phase replay、複数ca
 | Bash | `--noprofile --norc -c COMMAND`。stdinはコマンドソースへ転用しない。BASH_ENVは継承 | 実行ごとprocess group。TERM→猶予→KILL→reap、shell終了時も残存群を停止 |
 | PowerShell | `-NoLogo -NoProfile -NonInteractive -OutputFormat Text -EncodedCommand BASE64_UTF16LE` | Windows生成時Job所属、KILL_ON_JOB_CLOSE、Job handle非継承。未所属spawnを成功にしない |
 
+Windows PowerShellはコンソールウィンドウなしで起動し、コマンド本文の前に1文を追加して `[Console]::InputEncoding`、`[Console]::OutputEncoding` と `$OutputEncoding` をBOMなしUTF-8に設定する。本文の引用符や改行は変更せず、全体をUTF-16LE/Base64で渡す。PowerShellがネイティブプログラムの出力をテキストとして取り込む際はUTF-8としてデコードするため、CP932固定の出力は文字が失われ得る。その場合はツールを呼ぶ前に `[Console]::OutputEncoding = [Text.Encoding]::GetEncoding(932)` で日本語OEMコードページに戻す。取得層はpipeに届いたbyteとCRLFをそのまま保存し、PowerShell内で既に失われた文字は復元できない。
+
 shellの実際のexit codeを使う。勝手なset -e、exit LASTEXITCODE、構文補正なし。stdout/stderrは別byte stream、受信sequenceは保存順。文字コードは指定値で再デコードでき、ページ端の不完全文字を終端と誤認しない。
 
 試験条件はstdin閉鎖/追加入力/部分write、UTF-8分断/CP932/改行なし、孫のpipe保持、TERM無視、出力洪水、停止重複、spawnとstop競合、保存失敗。WindowsはPowerShell5.1/pwsh/Git Bash、UnixはmacOS/Linuxを分ける。脱離daemon・本体強制終了後のUnix孤児完全回収は初版保証外。再起動時に古いPIDでkillしない。

@@ -8,6 +8,8 @@
 
 入力は全体を指定encodingに変換できることと、**変換後byte数**がshell_stdin_bytes以下であることを確認してからpipeへ書く。UTF-8、明示UTF-16LE/BE、encoding_rsの既知legacy encodingを使用し、CP932/windows-31j/ms932はShift_JISへ対応する。UTF-16無指定byte orderは拒否し、encoding_rsのUTF-16 encodeがUTF-8を返す仕様に依存せず明示的にu16をbyte化する。表現不能文字を置換して送らない。timeout後は `StdinWriteResult` の実受渡しbyte数とstatusを返し自動再送しない。初期stdinの不完全受渡しはexecutionを失敗として停止する。出力は再decode可能なraw bytesを保ち、output_encodingは起動前に既知labelだけを検査する。stream別のdecoder/checkpointとraw cursorは取得層の責務。
 
+Windows PowerShellはコンソールウィンドウなしで起動し、コマンド本文の前に1文を追加して `[Console]::InputEncoding`、`[Console]::OutputEncoding` と `$OutputEncoding` をBOMなしUTF-8に設定する。本文の引用符や改行は変更せず、全体をUTF-16LE/Base64で渡す。PowerShellがネイティブプログラムの出力をテキストとして取り込む際はUTF-8としてデコードするため、CP932固定の出力は文字が失われ得る。その場合はツールを呼ぶ前に `[Console]::OutputEncoding = [Text.Encoding]::GetEncoding(932)` で日本語OEMコードページに戻す。取得層はpipeに届いたbyteとCRLFをそのまま保存し、PowerShell内で既に失われた文字は復元できない。
+
 Bashは `--noprofile --norc -c -- <command>`、PowerShellは `-NoLogo -NoProfile -NonInteractive -OutputFormat Text -EncodedCommand`。PowerShell引数はUTF-16LE/Base64で、stdinをcommand sourceに使わない。`set -e`、`exit $LASTEXITCODE`、引用符修正は加えない。Bashのoption終端をcommandの前に固定し、先頭がdashの本文もoptionにせずそのまま一つのscript引数で渡す（S8）。UnixとWindows Git Bashは同じprivate argv helperを使い、本文への空白追加や書換えで回避しない。cwdは起動snapshot。親環境を継承しBASH_ENVを除去しない。設定envの後に呼出し元envを重ね、origin識別値を優先する。shellboy実行ファイルの親PATH追加、origin token発行/検証はControlが行う。
 
 stdout/stderrは別pump。各pipeに最大8KiBの固定read bufferを一つ持ち、それ以外の未保存出力はoutput_buffer_bytesの共有semaphoreで制限する。予算をread前に全予約すると片streamの無出力で他streamが停止するため、read後に実byte数のpermitを取得する。最小予算でも両streamが読める。bufferの固定overheadは最大16KiBで、設定予算に比例して増えない。送信は単一publisher順序でsequenceを付け、同時書込みの因果順を主張しない。

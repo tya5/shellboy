@@ -29,12 +29,20 @@ fn crt_quoting_preserves_empty_spaces_quotes_backslashes_and_unicode() {
         s(&line[..line.len() - 1]),
         r#""C:\Program Files\shell.exe" "-c" "printf 'a b'" """#
     );
-    assert_eq!(
-        command_line(&w("shell.exe"), &[vec![b'x' as u16; 32767]])
-            .unwrap_err()
-            .code,
-        ErrorCode::InputLimit
-    );
+}
+
+#[test]
+fn command_line_accepts_32767_utf16_units_including_terminator_but_not_one_more() {
+    let executable = w("shell.exe");
+    let prefix = command_line(&executable, &[Vec::new()]).unwrap().len();
+    let mut arg = vec![u16::from(b'x'); 32767 - prefix];
+    let line = command_line(&executable, std::slice::from_ref(&arg)).unwrap();
+    assert_eq!(line.len(), 32767);
+    assert_eq!(line.last(), Some(&0));
+    arg.push(u16::from(b'x'));
+    let error = command_line(&executable, &[arg]).unwrap_err();
+    assert_eq!(error.code, ErrorCode::InputLimit);
+    assert!(error.hint.unwrap().contains("shorter command"));
 }
 #[test]
 fn unicode_environment_preserves_hidden_entries_and_case_insensitive_override() {

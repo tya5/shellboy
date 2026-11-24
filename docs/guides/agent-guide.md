@@ -640,6 +640,12 @@ Use semantic search for meaning in what was said, not for exact strings in tool 
 
 Executable blocks in this guide use Bash. In PowerShell, use `$env:SHELLBOY_RUN_ID` for the current Run and `$env:SHELLBOY_THREAD_ID` for the current Thread; do not copy `$SHELLBOY_RUN_ID` unchanged. JSON argument quoting differs by shell; use the [Shell guide](shell.md) examples. The Windows native adapter has been implemented and cross-codechecked; these usage examples have not been verified on physical Windows hardware.
 
+Windows PowerShell starts without a console window and uses UTF-8 for stdin
+and output. If a native tool always emits CP932 and PowerShell reads it as
+text, set `[Console]::OutputEncoding = [Text.Encoding]::GetEncoding(932)` before
+invoking it. `shell read --encoding cp932` can decode retained CP932 bytes but
+cannot undo a lossy conversion by PowerShell.
+
 ## Resolve saved model response items
 
 For a durable `status` attempt, `response_nodes` links each saved assistant output item to `history.window` by `node_id`. The list preserves output order and item kind/phase; distinct items may share a node ID. The query inspects at most 256 output-item candidates and returns at most 64 eligible refs. `response_nodes_truncated=true` means uninspected candidates or eligible refs remain possible; it does not assert that an omitted response node definitely exists. An empty list with this flag false is complete for the attempt; an empty list with it true is unknown/incomplete, not proof that nothing was saved. There is no continuation cursor in this field. `end_message_node_id` remains only the Turn's final answer reference, not an intermediate attempt response.

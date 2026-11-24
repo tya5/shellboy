@@ -305,18 +305,8 @@ fn arguments(kind: ShellKind, command: &str) -> Vec<Vec<u16>> {
             .map(str::to_owned)
             .collect(),
         ShellKind::Powershell => {
-            // Parse user code separately so script-level param/using directives
-            // are not displaced by the I/O initialization statements.
-            let mut source = String::with_capacity(command.len());
-            for ch in command.chars() {
-                // PowerShell also recognizes typographic single quotes.
-                if matches!(ch, '\'' | '\u{2018}' | '\u{2019}' | '\u{201a}' | '\u{201b}') {
-                    source.push(ch);
-                }
-                source.push(ch);
-            }
             let script = format!(
-                "[Console]::InputEncoding=[Console]::OutputEncoding=$OutputEncoding=[Text.UTF8Encoding]::new($false); . ([scriptblock]::Create('{source}'))",
+                "[Console]::InputEncoding=[Console]::OutputEncoding=$OutputEncoding=[Text.UTF8Encoding]::new($false);\n{command}",
             );
             let encoded = STANDARD.encode(
                 script
