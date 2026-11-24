@@ -618,13 +618,16 @@ pub(crate) async fn execute_request<C: RequestCaller>(
                     use crate::control::state::{self, RunStopAdmission};
                     use rusqlite::OptionalExtension;
                     let ceiling = tx.query_row(
-                        "SELECT max_model_requests,model_requests_used FROM run WHERE id=?1 AND thread_id=?2 AND state='live'",
+                        "SELECT max_model_requests,model_requests_used,state='live' FROM run WHERE id=?1 AND thread_id=?2",
                         rusqlite::params![run, row.scope.thread],
-                        |r| Ok((r.get::<_, Option<u32>>(0)?, r.get::<_, u32>(1)?)),
+                        |r| Ok((r.get::<_, Option<u32>>(0)?, r.get::<_, u32>(1)?, r.get::<_, bool>(2)?)),
                     ).optional()?;
                     match ceiling {
-                        None => return Ok(Admission::Fenced),
-                        Some((Some(ceiling), used)) if used == ceiling => {
+                        None | Some((Some(_), _, false)) => return Ok(Admission::Fenced),
+                        // Uncapped Runs keep the existing request qualification,
+                        // including a proactive retry after its Run has finished.
+                        Some((None, _, _)) => {}
+                        Some((Some(ceiling), used, true)) if used == ceiling => {
                             // Qualification may prepare attempt metadata. Do not
                             // commit it for a request that will never be admitted.
                             tx.rollback()?;
@@ -633,10 +636,9 @@ pub(crate) async fn execute_request<C: RequestCaller>(
                             tx.commit()?;
                             return Ok(Admission::RunCeilingReached);
                         }
-                        Some((Some(_), _)) => {
+                        Some((Some(_), _, true)) => {
                             tx.execute("UPDATE run SET model_requests_used=model_requests_used+1 WHERE id=?1", [&run])?;
                         }
-                        Some((None, _)) => {}
                     }
                 }
                 if let Some(limit) = saved_output_limit {

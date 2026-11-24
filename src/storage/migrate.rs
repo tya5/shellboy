@@ -345,7 +345,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     Migration {
         version: 65,
         sql: include_str!("../../migrations/next_run_request_ceiling.sql"),
-        foreign_keys: None,
+        foreign_keys: Some(Impact::IndexOnly),
     },
 ];
 
