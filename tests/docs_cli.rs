@@ -234,7 +234,7 @@ async fn bundled_agent_guide_explains_thread_wait_continuation_without_an_owner(
                 "--id",
                 "shellboy/agent-guide",
                 "--section",
-                "wait-for-any-child-thread",
+                "explicit-inspection-of-thread-completion",
             ])
             .output()
             .await

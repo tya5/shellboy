@@ -540,8 +540,9 @@ shellboy history get --node REPLY_NODE_ID
 
 The reply arrives in a model sender's conversation: finish the sending Turn
 when only the reply remains. External callers can use the bounded wait shown
-here; read `reply.node_id` for the reply body. `satisfied` includes `replied`, `ignored`, `cancelled`, and
-`recipient_deleted`; inspect the snapshot. Timeouts do not cancel the request.
+here; read `reply.node_id` for the reply body. `satisfied` includes `replied`,
+`ignored`, `cancelled`, and `recipient_deleted`; inspect the snapshot. Timeouts
+do not cancel the request.
 An unanswered applied request gets one Run-end reminder, then `ignored` if still
 unanswered. Stopping or failing the recipient Run resolves an unanswered
 applied request as `ignored` and notifies the sender. `recovery_wait` and

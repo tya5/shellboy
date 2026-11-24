@@ -284,7 +284,9 @@ Keep `result.cursor` even on timeout and pass it with unchanged conditions.
 Read `result.snapshot.changes`; `snapshot.more` means continue with that cursor.
 This also catches a finish/restart or recovery/resume between calls and survives
 owner restart. `satisfied` does not imply success or authorize recovery/retry; `recovery_wait`
-is a reported settled state, not a terminal Run.
+is a reported settled state, not a terminal Run. Do not automatically replay
+an interrupted wait; inspect the current state and continue from the saved
+cursor with unchanged conditions if observation is still needed.
 ThreadList/Get expose `last_end_message` separately from `last_input`, including the
 latter's saved sender and self-asserted label. See [Delegation](delegation.md#waiting-for-several-threads)
 for bounds, current-state baselines and result/original-content inspection.
