@@ -28,10 +28,18 @@ impl RequestAdmission {
         stop: &CancellationToken,
         changes_context: bool,
     ) -> Result<RequestGuard, ApiError> {
+        self.admit_checking(changes_context, || stop.is_cancelled())
+    }
+
+    fn admit_checking(
+        self: &Arc<Self>,
+        changes_context: bool,
+        mut is_cancelled: impl FnMut() -> bool,
+    ) -> Result<RequestGuard, ApiError> {
         // Close and the context count share a SeqCst order: either this guard is
         // counted before capture, or the second close check rejects admission.
         // Acquire/Release alone on the two atomics permits store buffering.
-        if stop.is_cancelled() || self.admission_closed.load(Ordering::SeqCst) {
+        if is_cancelled() || self.admission_closed.load(Ordering::SeqCst) {
             return Err(ApiError::new(
                 ErrorCode::InvalidState,
                 "Owner is shutting down",
@@ -45,7 +53,7 @@ impl RequestAdmission {
             admission: self.clone(),
             changes_context,
         };
-        if stop.is_cancelled() || self.admission_closed.load(Ordering::SeqCst) {
+        if is_cancelled() || self.admission_closed.load(Ordering::SeqCst) {
             drop(guard);
             return Err(ApiError::new(
                 ErrorCode::InvalidState,
@@ -119,3 +127,6 @@ impl Drop for RequestGuard {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;
