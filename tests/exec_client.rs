@@ -1829,8 +1829,9 @@ async fn chat_and_exec_resolve_thread_and_parent_prefixes_before_targeting() {
                 .control
                 .request(Request::new(
                     format!("{}:prefix-child-check", fixture.owner.instance_id),
-                    Command::ThreadGet(ThreadTarget {
+                    Command::ThreadGet(shellboy::protocol::ThreadGetArgs {
                         thread_id: Some(selected.as_str().unwrap().into()),
+                        display: false,
                     }),
                 ))
                 .await;

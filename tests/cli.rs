@@ -1562,7 +1562,7 @@ async fn shared_id_resolver_rewrites_every_supported_cli_target_kind() {
 
 #[tokio::test]
 async fn shared_id_resolver_passes_full_ids_and_rejects_short_inputs_before_lookup() {
-    use shellboy::protocol::{RunTarget, ThreadTarget};
+    use shellboy::protocol::RunTarget;
 
     let full_id = "12345678-1234-4234-8234-123456789abc".to_owned();
     let resolved = shellboy::cli::resolve_id_arguments(
@@ -1576,8 +1576,9 @@ async fn shared_id_resolver_passes_full_ids_and_rejects_short_inputs_before_look
     assert!(matches!(resolved, Command::RunGet(RunTarget { run_id }) if run_id == full_id));
 
     let error = shellboy::cli::resolve_id_arguments(
-        Command::ThreadGet(ThreadTarget {
+        Command::ThreadGet(shellboy::protocol::ThreadGetArgs {
             thread_id: Some("1234567".into()),
+            display: false,
         }),
         |_, _| async { panic!("short input must be rejected before id.resolve") },
     )

@@ -891,9 +891,8 @@ impl Command {
             }
             Self::ModelList(a) => a.validate(),
             Self::ThreadList(a) => a.validate(),
-            Self::ThreadGet(a) | Self::Compact(a) => {
-                optional_nonempty(a.thread_id.as_deref(), "thread_id")
-            }
+            Self::ThreadGet(a) => optional_nonempty(a.thread_id.as_deref(), "thread_id"),
+            Self::Compact(a) => optional_nonempty(a.thread_id.as_deref(), "thread_id"),
             Self::AttachmentList(a) => {
                 optional_nonempty(a.thread_id.as_deref(), "thread_id")?;
                 if a.limit == 0 || a.limit > crate::protocol::MAX_LIST_LIMIT {

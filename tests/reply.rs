@@ -397,8 +397,9 @@ async fn cancellation_releases_duty_and_lists_no_longer_awaiting() {
         let id = accepted["message_id"].as_str().unwrap().to_owned();
         let details = store
             .execute(
-                request(Command::ThreadGet(ThreadTarget {
+                request(Command::ThreadGet(shellboy::protocol::ThreadGetArgs {
                     thread_id: Some("recipient".into()),
+                    display: false,
                 })),
                 None,
             )
@@ -460,8 +461,9 @@ async fn cancellation_releases_duty_and_lists_no_longer_awaiting() {
         );
         let details = store
             .execute(
-                request(Command::ThreadGet(ThreadTarget {
+                request(Command::ThreadGet(shellboy::protocol::ThreadGetArgs {
                     thread_id: Some("recipient".into()),
+                    display: false,
                 })),
                 None,
             )
@@ -536,8 +538,9 @@ async fn models_can_request_and_reply_across_threads() {
     for (thread, direction) in [("recipient", "owed_by"), ("sender", "asked_by")] {
         let details = store
             .execute(
-                request(Command::ThreadGet(ThreadTarget {
+                request(Command::ThreadGet(shellboy::protocol::ThreadGetArgs {
                     thread_id: Some(thread.into()),
+                    display: false,
                 })),
                 None,
             )
@@ -1209,8 +1212,9 @@ async fn id_resolve_is_a_receipt_free_observation() {
     let operation_id = resolve_request.operation_id.clone();
     let direct_prefix = store
         .execute(
-            request(Command::ThreadGet(ThreadTarget {
+            request(Command::ThreadGet(shellboy::protocol::ThreadGetArgs {
                 thread_id: Some("recipien".into()),
+                display: false,
             })),
             None,
         )

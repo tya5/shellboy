@@ -1827,8 +1827,9 @@ impl Cli {
                     thread_ids: a.thread_ids,
                     descendants: a.descendants,
                 }),
-                ThreadCommand::Get(a) => C::ThreadGet(wire::ThreadTarget {
+                ThreadCommand::Get(a) => C::ThreadGet(crate::protocol::ThreadGetArgs {
                     thread_id: a.thread_id,
+                    display: false,
                 }),
                 ThreadCommand::Create(a) => C::ThreadCreate(wire::ThreadCreateArgs {
                     agents: path_option(a.agents)?,

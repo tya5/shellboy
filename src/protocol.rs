@@ -847,6 +847,21 @@ pub enum ArtifactGetResult {
     History(ArtifactHistory),
 }
 
+args!(ThreadGetArgs {
+    #[serde(default)] thread_id: Option<String>,
+    #[serde(default, skip_serializing_if = "is_false")] display: bool
+});
+record!(ThreadDisplayCoverage {
+    #[serde(default, skip_serializing_if = "Option::is_none")] title: Option<ThreadTitleFallback>,
+    #[serde(default, skip_serializing_if = "is_false")] recovery_limited: bool,
+});
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ThreadTitleFallback {
+    Limited,
+    Untitled,
+    NotSent,
+}
 args!(ThreadTarget { #[serde(default)] thread_id: Option<String> });
 args!(AttachmentListArgs { #[serde(default)] thread_id: Option<String>, #[serde(default = "list_limit")] limit: u32, #[serde(default)] cursor: Option<String> });
 args!(#[derive(Default)] UsageGetArgs { #[serde(default)] attempt_id: Option<Box<str>>, #[serde(default)] since: Option<Box<str>>, #[serde(default)] since_node_id: Option<Box<str>>, #[serde(default)] until: Option<String>, #[serde(default)] thread_id: Option<Box<str>>, #[serde(default)] run_id: Option<String>, #[serde(default)] turn_id: Option<String>, #[serde(default)] include_children: bool, #[serde(default)] group_by: Option<Box<str>>, #[serde(default)] timezone: Option<Box<str>>, #[serde(default)] limit: Option<u32>, #[serde(default)] cursor: Option<Box<str>> });
@@ -1606,7 +1621,7 @@ pub enum Command {
     #[serde(rename = "thread.list")]
     ThreadList(ThreadListArgs),
     #[serde(rename = "thread.get")]
-    ThreadGet(ThreadTarget),
+    ThreadGet(ThreadGetArgs),
     #[serde(rename = "thread.branches")]
     ThreadBranches(ThreadBranchesArgs),
     #[serde(rename = "usage.get")]
@@ -2014,7 +2029,7 @@ record!(InstructionWarning {
     reason: InstructionWarningReason,
     #[serde(default, skip_serializing_if = "Option::is_none")] hint: Option<String>
 });
-record!(ThreadDetails { #[serde(default, skip_serializing_if = "Vec::is_empty")] instruction_warnings: Vec<InstructionWarning>, #[serde(default, skip_serializing_if = "Option::is_none")] instruction_sources: Option<Value>, #[serde(default)] auto_compact_at: Option<u64>, #[serde(default, skip_serializing_if = "Option::is_none")] effective_auto_compact_at: Option<u64>, #[serde(default)] auto_compact_target_percent: Option<u64>, #[serde(default)] summary_max_chars: Option<u64>, #[serde(default,skip_serializing_if="Option::is_none")] effective_auto_compact_target_percent: Option<u64>, #[serde(default,skip_serializing_if="Option::is_none")] effective_summary_max_chars: Option<u64>, #[serde(default)] max_tokens: Option<u64>, #[serde(default)] spill: Option<bool>, #[serde(default = "default_true")] effective_spill: bool, #[serde(default,skip_serializing_if="Option::is_none")] effective_max_tokens: Option<u64>, #[serde(default)] pending_replies: PendingReplyCounts, #[serde(default)] last_end_message: Option<Value>, #[serde(default)] last_input: Option<Value>, #[serde(default,skip_serializing_if="Option::is_none")] last_compaction:Option<Value>, summarizing: bool, agents_path: String, #[serde(default, skip_serializing_if = "Option::is_none")] context_usage: Option<Value>, #[serde(default, skip_serializing_if = "Option::is_none")] context: Option<crate::context::ExecutionContext>, thread_id: String, title: String, cwd: String, connection: String, model: String, #[serde(default, skip_serializing_if = "Option::is_none")] effort: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] parent_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] run_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] turn_id: Option<String>, shells_count: u64, #[serde(default, skip_serializing_if = "Option::is_none")] archived_at: Option<String>, #[serde(default, skip_serializing_if = "Vec::is_empty")] tags: Vec<String>, #[serde(default, skip_serializing_if = "Option::is_none")] recovery_reason: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] parent_change: Option<ParentChange> });
+record!(ThreadDetails { #[serde(default, skip_serializing_if = "Option::is_none")] display_coverage: Option<ThreadDisplayCoverage>, #[serde(default, skip_serializing_if = "Vec::is_empty")] instruction_warnings: Vec<InstructionWarning>, #[serde(default, skip_serializing_if = "Option::is_none")] instruction_sources: Option<Value>, #[serde(default)] auto_compact_at: Option<u64>, #[serde(default, skip_serializing_if = "Option::is_none")] effective_auto_compact_at: Option<u64>, #[serde(default)] auto_compact_target_percent: Option<u64>, #[serde(default)] summary_max_chars: Option<u64>, #[serde(default,skip_serializing_if="Option::is_none")] effective_auto_compact_target_percent: Option<u64>, #[serde(default,skip_serializing_if="Option::is_none")] effective_summary_max_chars: Option<u64>, #[serde(default)] max_tokens: Option<u64>, #[serde(default)] spill: Option<bool>, #[serde(default = "default_true")] effective_spill: bool, #[serde(default,skip_serializing_if="Option::is_none")] effective_max_tokens: Option<u64>, #[serde(default)] pending_replies: PendingReplyCounts, #[serde(default)] last_end_message: Option<Value>, #[serde(default)] last_input: Option<Value>, #[serde(default,skip_serializing_if="Option::is_none")] last_compaction:Option<Value>, summarizing: bool, agents_path: String, #[serde(default, skip_serializing_if = "Option::is_none")] context_usage: Option<Value>, #[serde(default, skip_serializing_if = "Option::is_none")] context: Option<crate::context::ExecutionContext>, thread_id: String, title: String, cwd: String, connection: String, model: String, #[serde(default, skip_serializing_if = "Option::is_none")] effort: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] parent_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] run_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] turn_id: Option<String>, shells_count: u64, #[serde(default, skip_serializing_if = "Option::is_none")] archived_at: Option<String>, #[serde(default, skip_serializing_if = "Vec::is_empty")] tags: Vec<String>, #[serde(default, skip_serializing_if = "Option::is_none")] recovery_reason: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] parent_change: Option<ParentChange> });
 
 // Present only in the result of a `thread set --parent` that moved the Thread: where it was and which live Run still answers to its previous owner (#222).
 record!(ParentChange { #[serde(default)] previous_parent_id: Option<String>, #[serde(default)] live_run_id: Option<String> });

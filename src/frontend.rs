@@ -11,7 +11,7 @@ mod compaction_markers;
 mod copying;
 mod draft_images;
 mod draft_saver;
-mod header;
+use crate::thread_header as header;
 mod history_reader;
 mod input_history;
 mod inspection_attachments;
@@ -1210,6 +1210,7 @@ async fn run_client(
             stream_metrics::FRONTEND_RELOADS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             read_workers.spawn(refresh::run(
                 refresh::Query {
+                    data_dir: client_context.data_dir.clone(),
                     thread,
                     ids,
                     generation,
@@ -4129,6 +4130,23 @@ async fn save_draft(
     }.await;
     checked_storage(control, result).await
 }
+async fn native_header(data_dir: &Path, thread: &str) -> Result<header::RawHeader, ApiError> {
+    let details: ThreadDetails = inspection_history::native_read(
+        data_dir,
+        Command::ThreadGet(ThreadGetArgs {
+            thread_id: Some(thread.to_owned()),
+            display: true,
+        }),
+    )
+    .await?;
+    if details.thread_id != thread || details.display_coverage.is_none() {
+        return Err(ApiError::new(
+            ErrorCode::InvalidState,
+            "Native Thread header response did not match its display request",
+        ));
+    }
+    Ok(header::RawHeader::from_native(details))
+}
 async fn select_thread(
     control: &Arc<Control>,
     updates: &dyn UpdateTarget,
@@ -4139,12 +4157,11 @@ async fn select_thread(
     render_width: u16,
 ) -> Result<(), ApiError> {
     let result = async {
-    let metadata_target=thread.to_owned();
-    let header=control.store.database.call(move|db| {
-        let tx=db.transaction()?;
-        let header=header::read_tx(&tx,&metadata_target)?;
-        tx.commit()?;Ok(header)
-    }).await.map_err(storage_error)?;
+    // Selection still runs in the embedded composition; this path belongs to
+    // the selected owner, never the inherited invocation endpoint.
+    let data_dir = control.store.database.path().parent().ok_or_else(||
+        ApiError::new(ErrorCode::InvalidState, "Selected owner has no data directory"))?;
+    let header = native_header(data_dir, thread).await?;
     let target = thread.to_owned();
     let submission_fence = crate::control::submission_retention::fence("current.id", "current.revision", "?1");
     let (draft,view)=control.store.database.call(move|db|{use rusqlite::OptionalExtension;let body:Option<String>=db.query_row(&format!("SELECT body_json FROM draft current WHERE thread_id=?1 AND state='editing' AND NOT {submission_fence} ORDER BY updated_at DESC LIMIT 1"),[&target],|r|r.get(0)).optional()?;let view=db.query_row("SELECT anchor_node_id,anchor_offset,follow_tail FROM view_state WHERE thread_id=?1",[target],|r|Ok((ViewAnchor{node_id:r.get(0)?,char_offset:r.get::<_,i64>(1)? as usize},r.get::<_,bool>(2)?))).optional()?;Ok((body,view))}).await.map_err(storage_error)?;

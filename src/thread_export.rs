@@ -2,7 +2,6 @@
 use crate::atomic_file::AtomicFile;
 use crate::protocol::{
     ApiError, Command, ErrorCode, HistoryExportArgs, HistoryExportPage, Origin, PROTOCOL_VERSION,
-    ThreadTarget,
 };
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -23,15 +22,17 @@ pub async fn execute(
     data_dir: &Path,
     origin: Option<Origin>,
 ) -> Result<Value, ApiError> {
-    let target = Command::ThreadGet(ThreadTarget {
+    let target = Command::ThreadGet(crate::protocol::ThreadGetArgs {
         thread_id: Some(options.thread_id),
+        display: false,
     });
     let target = crate::cli::resolve_id_arguments(target, |kind, prefix| {
         crate::cli::resolve_owner_prefix(data_dir, origin.as_ref(), kind, prefix, false)
     })
     .await?;
-    let Command::ThreadGet(ThreadTarget {
+    let Command::ThreadGet(crate::protocol::ThreadGetArgs {
         thread_id: Some(thread_id),
+        ..
     }) = &target
     else {
         unreachable!()

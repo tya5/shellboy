@@ -1231,7 +1231,7 @@ impl Control {
                             self.change_clock.thread_position(&thread).into();
                         Ok(result)
                     }
-                    Command::ThreadGet(_) => {
+                    Command::ThreadGet(args) if !args.display => {
                         let mut effects = self.store.execute(request, origin).await?;
                         if let Some(thread) = effects
                             .result

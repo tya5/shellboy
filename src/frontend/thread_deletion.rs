@@ -875,8 +875,9 @@ mod tests {
         assert!(
             request(
                 &control,
-                Command::ThreadGet(ThreadTarget {
-                    thread_id: Some(child)
+                Command::ThreadGet(crate::protocol::ThreadGetArgs {
+                    thread_id: Some(child),
+                    display: false,
                 })
             )
             .await

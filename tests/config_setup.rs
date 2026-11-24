@@ -519,9 +519,8 @@ language = 'ja'
     let reason = crate::test_watchdog::watchdog("tests/config_setup.rs: missing_key_recovery_has_setup_details_and_never_opens_an_http_connection", async {
         loop {
             let reply = control
-                .request(request(Command::ThreadGet(ThreadTarget {
-                    thread_id: Some(thread.clone()),
-                })))
+                .request(request(Command::ThreadGet(shellboy::protocol::ThreadGetArgs {
+                    thread_id: Some(thread.clone()), display: false, })))
                 .await;
             let value = reply.result.unwrap();
             if let Some(reason) = value["recovery_reason"].as_str() {

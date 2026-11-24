@@ -171,8 +171,9 @@ async fn stopping_thread_remains_observable_when_context_metrics_are_temporarily
     let details = control
         .request(request(
             &owner.instance_id,
-            Command::ThreadGet(ThreadTarget {
+            Command::ThreadGet(shellboy::protocol::ThreadGetArgs {
                 thread_id: Some(thread.clone()),
+                display: false,
             }),
         ))
         .await;
@@ -526,8 +527,9 @@ async fn measure_current_instance_receipt_sizes() {
     let commands = vec![
         (
             "thread.get (one thread)",
-            Command::ThreadGet(ThreadTarget {
+            Command::ThreadGet(shellboy::protocol::ThreadGetArgs {
                 thread_id: Some(id.clone()),
+                display: false,
             }),
         ),
         (

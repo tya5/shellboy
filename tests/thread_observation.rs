@@ -69,7 +69,7 @@ thread_id:Some(thread.clone()),text:"first input".into(),sender_label:Some("init
         call(&control,Command::MessageSend(MessageSendArgs{ max_model_requests: None, human: false, resume_recovery: false,
 thread_id:Some(thread.clone()),text:"new input".into(),sender_label:Some("self-asserted-reviewer".into()),deliver: Deliver::Next})).await;
         let release=incoming.recv().await.unwrap();
-        let details=call(&control,Command::ThreadGet(ThreadTarget{thread_id:Some(thread.clone())})).await;
+        let details=call(&control,Command::ThreadGet(shellboy::protocol::ThreadGetArgs {thread_id:Some(thread.clone()), display: false, })).await;
         assert_eq!(details["last_end_message"]["excerpt"],"first answer");
         assert!(details["last_end_message"]["turn_id"].is_string());assert!(details["last_end_message"]["at"].is_string());
         assert_eq!(details["last_input"]["excerpt"],"new input");
@@ -79,7 +79,7 @@ thread_id:Some(thread.clone()),text:"new input".into(),sender_label:Some("self-a
         assert_eq!(page["items"][0]["last_end_message"],details["last_end_message"]);
         assert_eq!(page["items"][0]["last_input"],details["last_input"]);
         release.send(()).unwrap();call(&control,settled(vec![thread.clone()])).await;
-        let latest=call(&control,Command::ThreadGet(ThreadTarget{thread_id:Some(thread)})).await;
+        let latest=call(&control,Command::ThreadGet(shellboy::protocol::ThreadGetArgs {thread_id:Some(thread), display: false, })).await;
         assert_eq!(latest["last_end_message"]["excerpt"],"second answer");
         assert_eq!(latest["last_input"]["excerpt"],"new input");
         server.await.unwrap();control.shutdown().await.unwrap();owner.shutdown().await.unwrap();

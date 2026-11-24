@@ -551,8 +551,9 @@ fn follow_in(
         "run_id" | "owner_run_id" => Ok(Command::RunGet(RunTarget { run_id: id })),
         "turn_id" => Ok(Command::TurnGet(TurnTarget { turn_id: id })),
         "thread_id" | "origin_thread_id" | "parent_thread_id" => {
-            Ok(Command::ThreadGet(ThreadTarget {
+            Ok(Command::ThreadGet(crate::protocol::ThreadGetArgs {
                 thread_id: Some(id),
+                display: false,
             }))
         }
         "message_id" => Ok(Command::MessageGet(MessageTarget { message_id: id })),
@@ -870,9 +871,12 @@ mod tests {
         assert!(!work_status(&Command::OperationGet(OperationTarget {
             operation_id: "fixture:receipt".into(),
         })));
-        assert!(!work_status(&Command::ThreadGet(ThreadTarget {
-            thread_id: Some("thread".into())
-        })));
+        assert!(!work_status(&Command::ThreadGet(
+            crate::protocol::ThreadGetArgs {
+                thread_id: Some("thread".into()),
+                display: false,
+            }
+        )));
     }
     #[test]
     fn explicit_observation_completion_and_repeat_route_survive_field_budget() {
