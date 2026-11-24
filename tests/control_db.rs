@@ -946,10 +946,16 @@ async fn model_request_ceiling_refuses_live_and_stopping_runs_without_assigning_
         assert_eq!(details["reason"], "model_request_ceiling_requires_new_run");
         assert_eq!(details["run_id"], run_id);
         assert_eq!(store.database.call(counts).await.unwrap(), before_counts);
-        assert_eq!(
-            execute(&store, Command::RunGet(target())).await.result,
-            before
-        );
+        let after = execute(&store, Command::RunGet(target())).await.result;
+        // Active usage ages between reads; the refusal must preserve the saved Run.
+        for field in [
+            "context",
+            "model_requests",
+            "owned_execution_ids",
+            "stop_reason",
+        ] {
+            assert_eq!(after[field], before[field], "changed {field} while {state}");
+        }
     }
     store.database.shutdown().await.unwrap();
 }
