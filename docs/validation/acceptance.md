@@ -5,8 +5,10 @@
 On macOS, the independent-owner browser witness archived and unarchived the
 selected Thread through the production adapter, refused an ID from another
 owner, and observed that the other owner remained unchanged. The separate
-notice witness at 80 columns renders the full owner-prefixed operation ID in
-F1 details, even after the list becomes empty, in both languages. The management
+notice witness at 80 columns renders both full owner-prefixed operation IDs
+from an archive and an unarchive lost reply in F1 details, with an empty list
+and in both languages. The display keeps up to the existing 32-command capacity
+in completion order and explicitly marks older omissions. The management
 witness distinguishes unknown from refused and follows the exact receipt ID.
 Formatting, all-target Clippy with warnings
 denied, test layout, and language audit passed locally. No hosted CI or

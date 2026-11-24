@@ -6890,32 +6890,32 @@
   "src/ui/threads.rs:2f1710c9e60fe0f0:1": {
     "category": "a",
     "reason": "Reviewed ThreadBrowser::archive_result: each match arm builds an explicit (Japanese, English) pair; both are stored and notice_for_language selects the English text for En and the Japanese text for Ja. The count and error values are interpolated unchanged.",
-    "source_tokens_sha256": "c01c308d7c58c2812ed9df54bad69444da02d3f080b6c065ef75c86ad5683b55"
+    "source_tokens_sha256": "d05f586dec95fb05e75b55c3c97aaec2e876ae380477113f49f4cac2cd810009"
   },
   "src/ui/threads.rs:08696790bd9da988:1": {
     "category": "a",
     "reason": "Reviewed ThreadBrowser::archive_result: each match arm builds an explicit (Japanese, English) pair; both are stored and notice_for_language selects the English text for En and the Japanese text for Ja. The count and error values are interpolated unchanged.",
-    "source_tokens_sha256": "c01c308d7c58c2812ed9df54bad69444da02d3f080b6c065ef75c86ad5683b55"
+    "source_tokens_sha256": "d05f586dec95fb05e75b55c3c97aaec2e876ae380477113f49f4cac2cd810009"
   },
   "src/ui/threads.rs:5be5c8473c1ff414:1": {
     "category": "a",
     "reason": "Reviewed ThreadBrowser::archive_result: each match arm builds an explicit (Japanese, English) pair; both are stored and notice_for_language selects the English text for En and the Japanese text for Ja. The count and error values are interpolated unchanged.",
-    "source_tokens_sha256": "c01c308d7c58c2812ed9df54bad69444da02d3f080b6c065ef75c86ad5683b55"
+    "source_tokens_sha256": "d05f586dec95fb05e75b55c3c97aaec2e876ae380477113f49f4cac2cd810009"
   },
   "src/ui/threads.rs:300f8932417faf80:1": {
     "category": "a",
     "reason": "Reviewed ThreadBrowser::archive_result: each match arm builds an explicit (Japanese, English) pair; both are stored and notice_for_language selects the English text for En and the Japanese text for Ja. The count and error values are interpolated unchanged.",
-    "source_tokens_sha256": "c01c308d7c58c2812ed9df54bad69444da02d3f080b6c065ef75c86ad5683b55"
+    "source_tokens_sha256": "d05f586dec95fb05e75b55c3c97aaec2e876ae380477113f49f4cac2cd810009"
   },
   "src/ui/threads.rs:853c3837481db4a0:1": {
     "category": "a",
     "reason": "Reviewed ThreadBrowser::archive_result: each match arm builds an explicit (Japanese, English) pair; both are stored and notice_for_language selects the English text for En and the Japanese text for Ja. The count and error values are interpolated unchanged.",
-    "source_tokens_sha256": "c01c308d7c58c2812ed9df54bad69444da02d3f080b6c065ef75c86ad5683b55"
+    "source_tokens_sha256": "d05f586dec95fb05e75b55c3c97aaec2e876ae380477113f49f4cac2cd810009"
   },
   "src/ui/threads.rs:b21ef148b46a63a7:1": {
     "category": "a",
     "reason": "Reviewed ThreadBrowser::archive_result: each match arm builds an explicit (Japanese, English) pair; both are stored and notice_for_language selects the English text for En and the Japanese text for Ja. The count and error values are interpolated unchanged.",
-    "source_tokens_sha256": "c01c308d7c58c2812ed9df54bad69444da02d3f080b6c065ef75c86ad5683b55"
+    "source_tokens_sha256": "d05f586dec95fb05e75b55c3c97aaec2e876ae380477113f49f4cac2cd810009"
   },
   "src/presentation/events.rs:a34d8382cdc112cb:1": {
     "category": "a",
@@ -7265,6 +7265,6 @@
   "src/ui/threads.rs:8b86bd1c37313140:1": {
     "category": "a",
     "reason": "The short archive notice is stored as a Japanese/English pair and F1 details show the full operation ID separately.",
-    "source_tokens_sha256": "c01c308d7c58c2812ed9df54bad69444da02d3f080b6c065ef75c86ad5683b55"
+    "source_tokens_sha256": "d05f586dec95fb05e75b55c3c97aaec2e876ae380477113f49f4cac2cd810009"
   }
 }
