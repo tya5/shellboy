@@ -663,3 +663,13 @@ including user interruption. Partial text, reasoning, and completed items
 remain conversation data. An output-limit envelope can be adopted and replayed,
 so it is not rewritten. Previously saved history and lossless exports are not
 rewritten. Provider text is not a general share-safe diagnostic format.
+
+### Stable context and compact records (#393)
+
+A saved context line describes settings when it was recorded. A new Run or
+Turn alone does not add another line; a settings change or a missing context
+on the selected path does. Request inspection makes the same decision. New
+Run/Turn start and recovery events carry compact lifecycle facts, and new reply
+reminders reference duty IDs. These records do not change when later requests
+replay them; the event ledger retains the original facts. New spill and trim
+records use original-node pointers instead of repeating retrieval instructions.

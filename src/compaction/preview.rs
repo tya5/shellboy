@@ -665,7 +665,7 @@ fn make_plan(loaded: &Loaded, args: &CompactPreviewArgs, config: &Config) -> Pla
             args.action,
             Some(ContextEditAction::Trim | ContextEditAction::Omit | ContextEditAction::Maximal)
         ) {
-            let (projected, ids) = edit::preview_trim(snapshot, args, config)?;
+            let (projected, ids) = edit::preview_trim(snapshot, args)?;
             plan.projected = projected;
             plan.source_nodes = ids.len();
             plan.targets.extend(ids);

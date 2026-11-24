@@ -1,6 +1,6 @@
 //! Canonical notification admission. Generic history append has no marker argument.
 use rusqlite::{OptionalExtension, Transaction, params};
-use serde_json::json;
+use serde_json::{Value, json};
 
 struct PendingNotification<'a> {
     thread: &'a str,
@@ -73,13 +73,14 @@ pub(super) fn admit_notification_tx(
             AdmissionOutcome::Conflict
         });
     }
+    let record = compact_record(payload).unwrap_or_else(|| payload.to_owned());
     crate::history::append_node(
         tx,
         thread,
         &node,
         Some(turn),
         "event",
-        &json!({"role":"developer","content":[{"type":"input_text","text":format!("Shellboy event v1: {payload}")}],"event_id":event}),
+        &json!({"role":"developer","content":[{"type":"input_text","text":format!("Shellboy event v1: {record}")}],"event_id":event}),
         at,
     )?;
     tx.execute(
@@ -87,6 +88,34 @@ pub(super) fn admit_notification_tx(
         params![node, event],
     )?;
     Ok(AdmissionOutcome::Inserted)
+}
+
+// Project once at admission, not according to mutable state at replay time.
+// Full lifecycle and reminder facts remain in the event ledger.
+fn compact_record(payload: &str) -> Option<String> {
+    let envelope: Value = serde_json::from_str(payload).ok()?;
+    let event = envelope.get("event_id")?.as_str()?;
+    let fact = envelope.get("payload")?;
+    let record = match envelope.get("kind")?.as_str()? {
+        "context_changed" => match fact.get("kind")?.as_str()? {
+            kind @ ("run_started" | "turn_started" | "recovery_resumed") => {
+                json!({"event_id":event,"kind":kind,"at":fact.get("observed_at"),
+                    "timezone":fact.get("timezone"),"change":fact.get("change")})
+            }
+            _ => return None,
+        },
+        "reply_reminder" => {
+            let ids = fact
+                .get("messages")?
+                .as_array()?
+                .iter()
+                .map(|message| message.get("message_id")?.as_str())
+                .collect::<Option<Vec<_>>>()?;
+            json!({"event_id":event,"kind":"reply_reminder","message_ids":ids})
+        }
+        _ => return None,
+    };
+    Some(record.to_string())
 }
 
 #[cfg(test)]

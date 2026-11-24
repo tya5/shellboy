@@ -1114,7 +1114,7 @@ fn spill_payload(group: &Group) -> Option<Value> {
                     .and_then(|s| serde_json::from_str::<Value>(s).ok())
                     .unwrap_or(Value::Null);
                 let output_bytes = item.get("output").and_then(Value::as_str).map(str::len);
-                let omitted = json!({"omitted":true,"call_id":call,"output_bytes":output_bytes,"status":body.get("status"),"execution_id":body.get("execution_id"),"exit_code":body.get("exit_code"),"original_node_id":source.id,"retrieve":"shellboy history get --node <original_node_id>"});
+                let omitted = json!({"omitted":true,"call_id":call,"output_bytes":output_bytes,"status":body.get("status"),"execution_id":body.get("execution_id"),"exit_code":body.get("exit_code"),"original_node_id":source.id});
                 output.push(json!({"type":"function_call_output","call_id":call,"output":omitted.to_string()}));
             } else {
                 output.push(item.clone());
@@ -2062,7 +2062,7 @@ mod tests {
             assert_eq!(output[1],json!({"role":"user","id":"chatcmpl-spilled-human","content":"PRESERVE-HUMAN"}));
             assert_eq!(output[2]["type"],"function_call_output");
             let placeholder:Value=serde_json::from_str(output[2]["output"].as_str().unwrap()).unwrap();
-            assert_eq!(placeholder["retrieve"], "shellboy history get --node <original_node_id>");
+            assert!(placeholder.get("retrieve").is_none());
             assert_eq!(output[0]["id"],"chatcmpl-spilled-call");
             let lease=crate::control::replay::ReplayCache::new(1_000_000).load(db,"t")?;
             let projected=lease.materialize();

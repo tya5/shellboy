@@ -237,6 +237,22 @@ pub(crate) fn last_saved_context(
     Ok(saved.and_then(|payload| serde_json::from_str(&payload).ok()))
 }
 
+/// Run and Turn identify when a line was recorded, not a settings change.
+pub(crate) fn same_context(saved: &Value, current: &Value) -> bool {
+    fn fields(item: &Value) -> Option<(&str, &str)> {
+        let text = item.pointer("/content/0/text")?.as_str()?;
+        let (thread, rest) = text
+            .strip_prefix("Shellboy context v1: thread=")?
+            .split_once(" run=")?;
+        let (_, rest) = rest.split_once(" turn=")?;
+        let (_, settings) = rest.split_once(" cwd=")?;
+        Some((thread, settings))
+    }
+    fields(saved)
+        .zip(fields(current))
+        .is_some_and(|(a, b)| a == b)
+}
+
 impl Snapshot {
     fn context(&self) -> Value {
         context_item(&ContextLine {
@@ -251,7 +267,7 @@ impl Snapshot {
         })
     }
     /// Keep the current context in the saved history (#183). It is appended
-    /// once at the Turn start, again when a field changes (cwd, connection,
+    /// only when first observed, when a field changes (cwd, connection,
     /// model, effort), and again when a replacement (summary, spill, omission)
     /// removed it from the selected path. Each append is at the tail, so the
     /// requests of a Turn stay strict continuations of each other, and the
@@ -262,7 +278,7 @@ impl Snapshot {
         now: &str,
     ) -> Result<(), crate::storage::StorageError> {
         let item = self.context();
-        if last_saved_context(tx, &self.thread)?.as_ref() == Some(&item) {
+        if last_saved_context(tx, &self.thread)?.is_some_and(|saved| same_context(&saved, &item)) {
             return Ok(());
         }
         history::append_node(

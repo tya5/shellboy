@@ -15,7 +15,9 @@ use model::request_path::{
     AttemptKind, Execution, PreparedInput, RequestCaller, RequestScope, execute_request,
 };
 use overflow::OverflowBudget;
-pub(crate) use request::{ContextLine, context_item, last_saved_context, leading_items};
+pub(crate) use request::{
+    ContextLine, context_item, last_saved_context, leading_items, same_context,
+};
 use request::{Instructions, model_client, prepare_attempt, stream_observer};
 use tools::run_tool_group;
 

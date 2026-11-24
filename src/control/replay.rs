@@ -280,7 +280,7 @@ impl ReplayLease {
                         && item.get("type").and_then(Value::as_str) == Some("function_call_output")
                     {
                         let call = item.get("call_id").and_then(Value::as_str).unwrap_or("");
-                        let minimum = json!({"omitted":true,"call_id":call,"output_bytes":0,"status":0,"execution_id":0,"exit_code":0,"original_node_id":frame.stamp.id,"retrieve":"shellboy history get --node <original_node_id>"});
+                        let minimum = json!({"omitted":true,"call_id":call,"output_bytes":0,"status":0,"execution_id":0,"exit_code":0,"original_node_id":frame.stamp.id});
                         let replacement = json!({"type":"function_call_output","call_id":call,"output":minimum.to_string()});
                         let Some(chars) = bounded_json_characters(&replacement, &mut remaining)
                         else {

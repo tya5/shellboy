@@ -8,7 +8,7 @@ use crate::{
     control::replay::{PathWitness, load_for_inspection},
     control::request_parts::{
         ContextLine, context_item, has_attachment_ref, last_saved_context, leading_items,
-        strip_local,
+        same_context, strip_local,
     },
     model::http::HttpModelClient,
 };
@@ -447,7 +447,7 @@ fn assemble(config: &Config, tx: &Connection, plan: Plan) -> Result<Assembled> {
             effort: plan.effort.as_deref(),
             agents: &plan.agents,
         });
-        if last_saved_context(tx, &plan.thread)?.as_ref() != Some(&item) {
+        if !last_saved_context(tx, &plan.thread)?.is_some_and(|saved| same_context(&saved, &item)) {
             parts.push(Part::Known(item));
         }
     }

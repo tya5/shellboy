@@ -6987,14 +6987,11 @@ async fn turn_requests_strictly_append_and_mid_turn_changes_are_appended() {
     assert_current_context_once(&fourth.body, &model_changed, "mid-Turn model change");
     fourth.reply.send((200, answer("done"))).unwrap();
     settled(&control, &thread).await;
-    // The next Turn appends after the completed one, with its own context.
-    let next_accepted = send_accepted(&control, &thread, "next turn").await;
-    let next_turn_id = next_accepted.turn_id.expect("accepted next Turn");
+    // The next Turn appends without re-announcing unchanged settings.
+    send_accepted(&control, &thread, "next turn").await;
     let fifth = incoming(&control, &mut receive).await;
     assert_strict_append(&fourth.body, &fifth.body, "next Turn");
-    let next_turn = current_context(&control, &next_turn_id).await;
-    assert_ne!(next_turn, model_changed);
-    assert_current_context_once(&fifth.body, &next_turn, "next Turn");
+    assert_eq!(context_lines(&fifth.body), context_lines(&fourth.body));
     // An automatic retry resends exactly the same input.
     fifth
         .reply
@@ -7010,6 +7007,38 @@ async fn turn_requests_strictly_append_and_mid_turn_changes_are_appended() {
     );
     retried.reply.send((200, answer("finished"))).unwrap();
     settled(&control, &thread).await;
+    // Compare the exact new suffix at each of several unchanged Turn boundaries.
+    let mut previous = retried.body;
+    let mut suffix_sizes = Vec::new();
+    for _ in 0..16 {
+        send(&control, &thread, "same settings").await;
+        let request = incoming(&control, &mut receive).await;
+        assert_strict_append(&previous, &request.body, "unchanged Turn");
+        assert_eq!(context_lines(&request.body), context_lines(&previous));
+        let start = previous["input"].as_array().unwrap().len();
+        let suffix = &request.body["input"].as_array().unwrap()[start..];
+        let start_fact = suffix
+            .iter()
+            .flat_map(|item| item["content"].as_array().into_iter().flatten())
+            .filter_map(|part| part["text"].as_str()?.strip_prefix("Shellboy event v1: "))
+            .filter_map(|text| serde_json::from_str::<Value>(text).ok())
+            .find(|fact| fact["kind"] == "turn_started")
+            .expect("compact Turn start");
+        assert!(start_fact.get("payload").is_none());
+        // Normalize only clock-dependent fields; the added Turn record must
+        // stay the same size regardless of how many records already replay.
+        let mut record = start_fact;
+        record["at"] = json!("timestamp");
+        record["change"]["previous_turn_ended_at"] = json!("timestamp");
+        suffix_sizes.push(serde_json::to_vec(&record).unwrap().len());
+        request.reply.send((200, answer("finished"))).unwrap();
+        settled(&control, &thread).await;
+        previous = request.body;
+    }
+    assert!(
+        suffix_sizes.windows(2).all(|pair| pair[0] == pair[1]),
+        "{suffix_sizes:?}"
+    );
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
     server.abort();
