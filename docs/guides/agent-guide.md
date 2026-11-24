@@ -495,9 +495,12 @@ ordinary inspection commands; they are facts, not permission to stop/retry work.
 
 An optional `--sender-label 'reviewer'` is a self-asserted name (at most 64 Unicode
 characters, no controls/newlines), not a verified role or authority.
-Only `message send` and `message reply` accept `--sender-label`; `message ask` does not. Across data directories,
-Origin is stripped across owners, so the receiver sees `external_cli` plus that
-unverified name, not your authenticated model identity.
+Use it on `message send` or `message ask`. Across data directories,
+Origin is stripped, so the receiver sees `external_cli` plus that
+unverified name, not your authenticated model identity. Do not supply a label
+when replying: a named duty provides its own display name, and a Thread reply
+with verified Origin identifies its Thread. Answers to a human-addressed
+duty remain recorded as human.
 
 ### Recorded Message Sender
 

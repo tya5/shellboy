@@ -5327,6 +5327,7 @@
           "type": "boolean"
         },
         "sender_label": {
+          "description": "Self-asserted sender name; at most 64 Unicode characters, without controls or line separators.",
           "type": [
             "string",
             "null"
@@ -5587,6 +5588,7 @@
           "type": "string"
         },
         "sender_label": {
+          "description": "Accepted for existing callers; does not override the saved addressee.",
           "type": [
             "string",
             "null"

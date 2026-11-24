@@ -380,6 +380,15 @@ fn parser_errors_identify_known_arguments_without_echoing_rejected_values() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn cross_data_directory_sender_label_survives_but_model_origin_is_stripped() {
+    cross_data_directory_sender_label("send").await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cli_ask_records_the_sender_label_and_opens_a_reply_duty() {
+    cross_data_directory_sender_label("ask").await;
+}
+
+async fn cross_data_directory_sender_label(verb: &str) {
     use shellboy::protocol::*;
     let root = tempfile::tempdir().unwrap();
     let config = root.path().join("config.toml");
@@ -438,7 +447,7 @@ async fn cross_data_directory_sender_label_survives_but_model_origin_is_stripped
         .arg(&owner.loaded.data_dir)
         .args([
             "message",
-            "send",
+            verb,
             "--thread",
             &thread,
             "--sender-label",
@@ -462,6 +471,10 @@ async fn cross_data_directory_sender_label_survives_but_model_origin_is_stripped
         String::from_utf8_lossy(&output.stdout)
     );
     let accepted = responder.await.unwrap();
+    assert_eq!(
+        accepted["expect_reply"].as_bool().unwrap_or(false),
+        verb == "ask"
+    );
     let detail = control
         .store
         .execute(

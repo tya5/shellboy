@@ -1017,7 +1017,15 @@ impl ThreadSetArgs {
     }
 }
 args!(MessageListArgs { #[serde(default)] owed_by: Option<String>, #[serde(default)] asked_by: Option<String>, #[serde(default)] to: Option<String>, #[serde(default = "list_limit")] limit: u32, #[serde(default)] cursor: Option<String> });
-args!(MessageAskArgs { #[serde(default, skip_serializing_if = "is_false")] human: bool, #[serde(default, skip_serializing_if = "Option::is_none")] sender_label: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] thread_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] to: Option<String>, #[serde(default, skip_serializing_if = "Deliver::is_next")] deliver: Deliver, text: String });
+args!(MessageAskArgs {
+    #[serde(default, skip_serializing_if = "is_false")] human: bool,
+    /// Self-asserted sender name; at most 64 Unicode characters, without controls or line separators.
+    #[serde(default, skip_serializing_if = "Option::is_none")] sender_label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] thread_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] to: Option<String>,
+    #[serde(default, skip_serializing_if = "Deliver::is_next")] deliver: Deliver,
+    text: String,
+});
 args!(MessageSendArgs { #[serde(default, skip_serializing_if = "Option::is_none")] max_model_requests: Option<std::num::NonZeroU32>, #[serde(default, skip_serializing_if = "is_false")] human: bool, #[serde(default, skip_serializing_if = "is_false")] resume_recovery: bool, #[serde(default, skip_serializing_if = "Option::is_none")] sender_label: Option<String>, #[serde(default)] thread_id: Option<String>, text: String, #[serde(default, skip_serializing_if = "Deliver::is_next")] deliver: Deliver });
 /// Message delivery timing; `Complete` is Revisit.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -1045,7 +1053,12 @@ impl Deliver {
         *self == Self::Next
     }
 }
-args!(MessageReplyArgs { message_id: String, text: String, #[serde(default, skip_serializing_if = "Option::is_none")] sender_label: Option<String> });
+args!(MessageReplyArgs {
+    message_id: String,
+    text: String,
+    /// Accepted for existing callers; does not override the saved addressee.
+    #[serde(default, skip_serializing_if = "Option::is_none")] sender_label: Option<String>,
+});
 args!(MessageCancelArgs { message_ids: Vec<String> });
 states!(MessageCancelOutcome {
     ReplyCancelled,

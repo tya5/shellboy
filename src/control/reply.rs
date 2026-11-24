@@ -1,5 +1,8 @@
 //! Durable reply facts and outcome notices, inside the caller's transaction.
-use super::wait::wakes::Key;
+use super::{
+    db::{ReplyIntent, SendContent},
+    wait::wakes::Key,
+};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::{Value, json};
 
@@ -278,7 +281,17 @@ impl super::db::Store {
                 "reply exceeds draft byte limit",
             ));
         }
-        let by = MessageSender::recorded(caller, args.sender_label.clone(), caller.is_none());
+        let by = match saved["ask_name"].as_str() {
+            Some("human") => MessageSender::recorded(None, args.sender_label.clone(), true),
+            Some(name) => MessageSender::named_reply(name),
+            None if saved["to_human"] == true => {
+                MessageSender::recorded(None, args.sender_label.clone(), true)
+            }
+            None if caller.is_none() => {
+                MessageSender::recorded(None, args.sender_label.clone(), false)
+            }
+            None => MessageSender::recorded(caller, None, false),
+        };
         if let Some(sender_thread) = target
             && tx
                 .query_row(
@@ -326,13 +339,13 @@ impl super::db::Store {
             _ => None,
         };
         let (mut result, node, delivery) = if let Some(target) = target {
-            let result = self.send(
+            let result = self.send_content(
                 tx,
                 &MessageSendArgs {
                     max_model_requests: None,
-                    human: caller.is_none(),
-                    resume_recovery: saved["to_human"] == true && caller.is_none(),
-                    sender_label: args.sender_label.clone(),
+                    human: false,
+                    resume_recovery: caller.is_none(),
+                    sender_label: None,
                     thread_id: Some(target.into()),
                     text: args.text.clone(),
                     deliver: Deliver::Next,
@@ -340,6 +353,11 @@ impl super::db::Store {
                 caller,
                 operation,
                 at,
+                SendContent {
+                    reply: ReplyIntent::None,
+                    elements: vec![json!({"type":"input_text","text":args.text})],
+                    sender: by.clone(),
+                },
             )?;
             let node = result.result["message_id"]
                 .as_str()

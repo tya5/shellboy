@@ -30,16 +30,16 @@ use crate::{
     storage::{DbWorker, StorageError},
 };
 
-enum ReplyIntent<'a> {
+pub(super) enum ReplyIntent<'a> {
     None,
     Thread,
     Named(&'a str),
 }
 
-struct SendContent<'a> {
-    reply: ReplyIntent<'a>,
-    elements: Vec<Value>,
-    sender: MessageSender,
+pub(super) struct SendContent<'a> {
+    pub(super) reply: ReplyIntent<'a>,
+    pub(super) elements: Vec<Value>,
+    pub(super) sender: MessageSender,
 }
 
 use super::receipt::Admission;
@@ -2141,7 +2141,7 @@ impl Store {
         )
     }
 
-    fn send_content(
+    pub(super) fn send_content(
         &self,
         tx: &Transaction<'_>,
         args: &MessageSendArgs,

@@ -246,10 +246,10 @@ Root cwd defaults to owner startup cwd; child cwd to the parent's. Relative cwd 
 
 | Operation and all specific flags | Main result and conditions |
 |---|---|
-| `message send [--thread THREAD] [--deliver now\|complete] [--resume-recovery] [--max-model-requests N] [--sender-label TEXT] (--text TEXT \| --text-stdin)` | message_id/thread_id/delivery_status/assignment/run_id/turn_id, plus `deliver` when not the default and `hint` when held. `--sender-label` is self-asserted (not verified); non-human messages may include it in the derived preamble without changing saved text. Active work takes additions at safe boundaries; stopping can yield held/pending. Machine messages hold at `recovery_wait` unless `--resume-recovery` explicitly resumes; the event records `external_cli` or authenticated shell Origin. Human input/reply explicitly resumes; model-origin replies remain non-human |
-| `message ask [--to NAME or --thread THREAD] [--deliver now\|complete] (--text TEXT or --text-stdin)` | Open one reply duty. A named recipient defaults to `human` and requires model origin. Delivery timing applies only to Thread recipients. |
+| `message send [--thread THREAD] [--deliver now\|complete] [--resume-recovery] [--max-model-requests N] [--sender-label TEXT] (--text TEXT \| --text-stdin)` | message_id/thread_id/delivery_status/assignment/run_id/turn_id, plus `deliver` when not the default and `hint` when held. `--sender-label` is self-asserted (not verified); non-human messages may include it in the derived preamble without changing saved text. Active work takes additions at safe boundaries; stopping can yield held/pending. Machine messages hold at `recovery_wait` unless `--resume-recovery` explicitly resumes; the event records `external_cli` or authenticated shell Origin. Human input explicitly resumes; replies without model Origin retain their recovery behavior independent of sender display |
+| `message ask [--to NAME or --thread THREAD] [--sender-label TEXT] [--deliver now\|complete] (--text TEXT or --text-stdin)` | Open one reply duty. A named recipient defaults to `human` and requires model origin. Delivery timing applies only to Thread recipients. |
 | `message list --awaiting [--owed-by THREAD or --asked-by THREAD or --to NAME] [--limit N] [--cursor C]` | Bounded read of pending replies by direction. Without a direction it lists all pending requests. Items include the credential-free saved `sender` (`MessageSender`); `asked_by` is the model Thread ID or null. `--asked-by` matches only model Thread senders. `thread get` returns bounded directional counts, not the list. |
-| `message reply --message MESSAGE (--text TEXT \| --text-stdin) [--sender-label TEXT]` | Reply once to an applied pending reply request; returns `reply_to`/reply message ID and optional delivery |
+| `message reply --message MESSAGE (--text TEXT \| --text-stdin)` | Reply once to an applied pending reply request; returns `reply_to`/reply message ID and optional delivery |
 | `message get --message MESSAGE` | Original immutable assignment, current delivery_status, `hint` when held, sender facts, and `expect_reply`, `reply` state/node, or `reply_to` when applicable; `end_message_node_id` remains available when present |
 | `message cancel --message MESSAGE [--message MESSAGE ...]` | Cancel 1..128 fixed message IDs. Queued input can be archived; an admitted pending reply duty returns `reply_cancelled` without removing history. Other outcomes are `cancelled`/`already_cancelled`/`already_admitted`/`not_found`/`forbidden`/`unavailable`. Does not wake the model |
 | `operation get --operation ID` | operation_id/state/outcome, instance_id/created_at/current_instance, result_uncertain/result_expired/replay_policy/targets, target-dependent downstream. Global `--operation-id` identifies this query; `--operation` identifies its target |
@@ -282,14 +282,20 @@ appended to an already-running Run. Legacy null sender records are `unknown`
 in these sender facts: old records cannot distinguish a TUI sender from an
 external CLI.
 
-`--sender-label TEXT` adds an optional self-asserted name: at most 64 Unicode
+`message send` and `message ask` accept `--sender-label TEXT`, an optional self-asserted name: at most 64 Unicode
 characters, without newlines, control characters or line/paragraph separators.
 It is returned as `sender.label`, separate from verified identity. The label
 never grants ownership. Explicitly
 connecting to another data directory still strips model Origin; only the name
 survives, as `external_cli`. TUI F6 message details display it as `名乗り：…`,
 not as verified identity. F6 also explains `unknown` as missing sender evidence,
-including old records. The conversation's source bands are a separate display
+including old records. For replies, the saved duty supplies the display identity:
+a named addressee becomes an external CLI label (controls and line separators
+removed, capped at 64 characters); a verified Thread reply keeps its model
+Origin; an originless Thread reply is external CLI. The older reply label flag
+can still label an originless Thread reply but cannot override the duty or a
+verified sender. A reply to a duty addressed to `human` is still recorded as
+human, including when it came from the CLI. The conversation's source bands are a separate display
 convention: legacy null records keep the existing human band so old conversations
 do not all change appearance, whereas new `external_cli` records use the existing
 generic input band rather than the human band. That legacy human band is not

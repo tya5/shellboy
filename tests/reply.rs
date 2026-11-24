@@ -86,17 +86,77 @@ async fn named_ask_leaves_only_its_recipient_list_after_reply() {
         serde_json::json!([])
     );
     store
-        .execute(request(ask(None)), Some(origin))
+        .execute(request(ask(None)), Some(origin.clone()))
         .await
         .unwrap();
     let reply = request(Command::MessageReply(MessageReplyArgs {
         message_id: named.result["message_id"].as_str().unwrap().into(),
         text: "Choose A".into(),
-        sender_label: None,
+        sender_label: Some("not the addressee".into()),
     }));
     let answer = store.execute(reply.clone(), None).await.unwrap().result;
     assert_eq!(answer["reply_to"], named.result["message_id"]);
     assert_eq!(store.execute(reply, None).await.unwrap().result, answer);
+    let history = |id: &str| {
+        request(
+            serde_json::from_value(serde_json::json!({
+                "command":"history.get", "args":{"node_id":id}
+            }))
+            .unwrap(),
+        )
+    };
+    let answer_node = store
+        .execute(history(answer["message_id"].as_str().unwrap()), None)
+        .await
+        .unwrap()
+        .result;
+    assert_eq!(
+        answer_node["provenance"]["sender"],
+        serde_json::json!({"kind":"external_cli","label":"claude"})
+    );
+    let exact = format!("clau\nde\u{2028}{}", "x".repeat(80));
+    let special_ask = store
+        .execute(request(ask(Some(&exact))), Some(origin.clone()))
+        .await
+        .unwrap()
+        .result;
+    let ask_id = special_ask["message_id"].as_str().unwrap();
+    let duty = store
+        .execute(
+            request(Command::MessageList(MessageListArgs {
+                to: Some(exact),
+                owed_by: None,
+                asked_by: None,
+                limit: DEFAULT_LIST_LIMIT,
+                cursor: None,
+            })),
+            None,
+        )
+        .await
+        .unwrap()
+        .result;
+    assert_eq!(duty["items"][0]["message_id"], ask_id);
+    let answer = store
+        .execute(
+            request(Command::MessageReply(MessageReplyArgs {
+                message_id: ask_id.into(),
+                text: "answer".into(),
+                sender_label: None,
+            })),
+            None,
+        )
+        .await
+        .unwrap()
+        .result;
+    let answer_node = store
+        .execute(history(answer["message_id"].as_str().unwrap()), None)
+        .await
+        .unwrap()
+        .result;
+    assert_eq!(
+        answer_node["provenance"]["sender"],
+        serde_json::json!({"kind":"external_cli","label":format!("claude{}", "x".repeat(58))})
+    );
     assert_eq!(
         store.execute(list("claude"), None).await.unwrap().result["items"],
         serde_json::json!([])
@@ -104,6 +164,32 @@ async fn named_ask_leaves_only_its_recipient_list_after_reply() {
     assert_eq!(
         store.execute(list("human"), None).await.unwrap().result["items"][0]["thread_id"],
         "sender"
+    );
+    let duty = store
+        .execute(request(ask(Some("human"))), Some(origin.clone()))
+        .await
+        .unwrap()
+        .result;
+    let answer = store
+        .execute(
+            request(Command::MessageReply(MessageReplyArgs {
+                message_id: duty["message_id"].as_str().unwrap().into(),
+                text: "answer".into(),
+                sender_label: None,
+            })),
+            None,
+        )
+        .await
+        .unwrap()
+        .result;
+    let answer_node = store
+        .execute(history(answer["message_id"].as_str().unwrap()), None)
+        .await
+        .unwrap()
+        .result;
+    assert_eq!(
+        answer_node["provenance"]["sender"],
+        serde_json::json!({"kind":"human"})
     );
     store.database.shutdown().await.unwrap();
 }
@@ -191,8 +277,8 @@ async fn reply_requires_applied_pending_and_is_idempotent() {
 }
 
 #[tokio::test]
-async fn human_reply_resumes_recovery_but_model_reply_does_not() {
-    for human_reply in [true, false] {
+async fn originless_thread_duty_reply_resumes_recovery_but_model_reply_does_not() {
+    for originless in [true, false] {
         let (_root, store) = fixture().await;
         let model = Origin {
             instance_id: "fixture".into(),
@@ -214,7 +300,7 @@ async fn human_reply_resumes_recovery_but_model_reply_does_not() {
             db.execute_batch("INSERT INTO run(id,thread_id,state,created_at)VALUES('sender-run','sender','live','now'); INSERT INTO turn(id,thread_id,run_id,state,created_at,recovery_reason_json)VALUES('sender-turn','sender','sender-run','recovery_wait','now','{}');")?;
             Ok(())
         }).await.unwrap();
-        let caller = (!human_reply).then(|| Origin {
+        let caller = (!originless).then(|| Origin {
             thread_id: "recipient".into(),
             ..model
         });
@@ -232,7 +318,7 @@ async fn human_reply_resumes_recovery_but_model_reply_does_not() {
             .result;
         assert_eq!(
             result["delivery"]["delivery_status"],
-            if human_reply { "accepted" } else { "held" }
+            if originless { "accepted" } else { "held" }
         );
         let reply_message = store
             .execute(
@@ -246,7 +332,7 @@ async fn human_reply_resumes_recovery_but_model_reply_does_not() {
             .result;
         assert_eq!(
             reply_message["sender"]["kind"],
-            if human_reply { "human" } else { "model" }
+            if originless { "external_cli" } else { "model" }
         );
         let state = store
             .database
@@ -261,7 +347,7 @@ async fn human_reply_resumes_recovery_but_model_reply_does_not() {
             .unwrap();
         assert_eq!(
             state,
-            if human_reply {
+            if originless {
                 "preparing"
             } else {
                 "recovery_wait"

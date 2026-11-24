@@ -1147,6 +1147,9 @@ pub struct MessageListOptions {
 }
 #[derive(Debug, Clone, Args)]
 pub struct MessageAskOptions {
+    /// Self-asserted name (at most 64 Unicode characters); grants no authority.
+    #[arg(long)]
+    pub sender_label: Option<String>,
     /// Named recipient; defaults to human when no Thread is given.
     #[arg(long, conflicts_with = "thread_id")]
     pub to: Option<String>,
@@ -1163,7 +1166,7 @@ pub struct MessageReplyOptions {
     /// ID from a received message's `Reply expected` preamble. Withdraw your own requests with message cancel.
     #[arg(long = "message")]
     pub message_id: String,
-    #[arg(long)]
+    #[arg(long, hide = true)]
     pub sender_label: Option<String>,
     #[command(flatten)]
     pub text: TextOptions,
@@ -2004,7 +2007,7 @@ impl Cli {
                 }),
                 MessageCommand::Ask(a) => C::MessageAsk(wire::MessageAskArgs {
                     human: false,
-                    sender_label: None,
+                    sender_label: a.sender_label,
                     thread_id: a.thread_id,
                     to: a.to,
                     deliver: a.deliver.unwrap_or_default(),

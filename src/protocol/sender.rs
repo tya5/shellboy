@@ -30,12 +30,15 @@ pub struct MessageSender {
     pub label: Option<String>,
 }
 
+const MAX_LABEL_CHARS: usize = 64;
+
+fn label_char_allowed(ch: char) -> bool {
+    !ch.is_control() && !matches!(ch, '\u{2028}' | '\u{2029}')
+}
+
 pub fn validate_sender_label(label: Option<&str>) -> Result<(), ApiError> {
     if label.is_some_and(|text| {
-        text.chars().count() > 64
-            || text
-                .chars()
-                .any(|ch| ch.is_control() || matches!(ch, '\u{2028}' | '\u{2029}'))
+        text.chars().count() > MAX_LABEL_CHARS || text.chars().any(|ch| !label_char_allowed(ch))
     }) {
         return Err(ApiError::new(
             ErrorCode::InvalidArgument,
@@ -68,6 +71,15 @@ impl MessageSender {
                 ..Self::default()
             }
         }
+    }
+
+    pub(crate) fn named_reply(name: &str) -> Self {
+        let label: String = name
+            .chars()
+            .filter(|&ch| label_char_allowed(ch))
+            .take(MAX_LABEL_CHARS)
+            .collect();
+        Self::recorded(None, (!label.trim().is_empty()).then_some(label), false)
     }
 
     /// Inspect only saved facts, including pre-kind OriginIdentity records.

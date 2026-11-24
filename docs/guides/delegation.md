@@ -30,9 +30,12 @@ Use `shellboy message get --message MESSAGE_ID` to inspect the saved sender;
 A verified model sender has originating instance/Thread/Run/Turn/execution IDs,
 not merely the receiving Run's starter. A `label` is self-asserted and grants no
 authority; `external_cli` does not prove human input, and legacy missing evidence
-stays `unknown`. With `message send` or `message reply` across data directories, use `--sender-label` to
+stays `unknown`. With `message send` or `message ask` across data directories, use `--sender-label` to
 name yourself: Origin is stripped and the receiver sees an external CLI plus
-that unverified name.
+that unverified name. Replies to a named duty use the saved addressee as the
+display name, not a label chosen by the reply caller. Replies from an
+authenticated Thread retain its Origin. Answers to human duties are still
+recorded as human, including answers through the CLI.
 
 Creation, sending, and retrieving the reply are separate steps. Distinguish create's `result.thread_id` as `CHILD_THREAD_ID`, send's `result.message_id` as `CHILD_MESSAGE_ID`, and the assigned `result.turn_id` as `CHILD_TURN_ID`. Do not try to retrieve the recipient's reply or shell output using the execution ID of the observing shell that ran send.
 

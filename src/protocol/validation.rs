@@ -989,7 +989,8 @@ impl Command {
                 if let Some(name) = &a.to {
                     validate_recipient_name(name)?;
                 }
-                nonempty(&a.text, "text")
+                nonempty(&a.text, "text")?;
+                validate_sender_label(a.sender_label.as_deref())
             }
             Self::IdResolve(a) => {
                 let chars = a.prefix.chars().count();
