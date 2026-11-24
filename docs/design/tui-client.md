@@ -125,6 +125,14 @@ Neither a stale refusal nor a lost reply is retried against another identity.
 The typed acknowledgment is not completion; saved readback still determines
 what happened to the shell or Turn.
 
+### Recurring work mutations
+
+Schedule and Service mutations from the TUI management surface go through
+the selected native listener. Saved target IDs and receipts keep their
+existing meaning. A lost reply retains the operation ID for lookup and is
+not retried or presented as a refusal. Schedule and Service reads are
+unchanged by this slice.
+
 ### Draft save and selected view
 
 `draft.save` checks the live Thread and editing draft revision, then commits

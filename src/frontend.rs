@@ -274,7 +274,17 @@ async fn management_request_trigger(
     let is_read_projection = !command.requires_receipt();
     let response = if matches!(
         command,
-        Command::ThreadArchive(_) | Command::ThreadUnarchive(_)
+        Command::ThreadArchive(_)
+            | Command::ThreadUnarchive(_)
+            | Command::ScheduleAdd(_)
+            | Command::ScheduleSet(_)
+            | Command::ScheduleEnable(_)
+            | Command::ScheduleDisable(_)
+            | Command::ScheduleRemove(_)
+            | Command::ServiceAdd(_)
+            | Command::ServiceStart(_)
+            | Command::ServiceStop(_)
+            | Command::ServiceRemove(_)
     ) {
         match crate::ipc::call_selected(data_dir, command).await {
             Ok(response) => response,
