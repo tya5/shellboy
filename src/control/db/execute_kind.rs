@@ -263,6 +263,7 @@ mod tests {
     #[test]
     fn every_writer_kind_has_a_bound_or_a_ratchet_exemption() {
         let writers = [
+            Kind::DraftImage,
             Kind::ArtifactAdd,
             Kind::ArtifactUpdate,
             Kind::ArtifactRemove,
