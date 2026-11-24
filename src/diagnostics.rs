@@ -273,17 +273,13 @@ pub(crate) enum ShutdownStage {
     TerminalLost,
     SignalForce,
     SignalDeadline,
-    Listener,
     DraftEnqueue,
     AcceptedSends,
     DraftSave,
-    InterruptCapture,
     ControlTasks,
     ReadWorkers,
     Images,
-    Control,
     Workers,
-    Owner,
     Database,
     Endpoint,
     Diagnostics,
@@ -1206,7 +1202,8 @@ impl Diagnostics {
     }
     /// Fixed product classification only; never queue the underlying DB/OS
     /// error message, path, or provider text after terminal presentation is lost.
-    pub(crate) fn record_shutdown_result(
+    #[cfg(test)]
+    fn record_shutdown_result(
         &self,
         scope: ShutdownScope,
         stage: ShutdownStage,
@@ -1622,7 +1619,7 @@ mod shutdown_result_tests {
         );
         diagnostics.record_shutdown_result(
             ShutdownScope::Frontend,
-            ShutdownStage::Control,
+            ShutdownStage::ControlTasks,
             42,
             Some(crate::protocol::ErrorCode::SaveFailed),
         );
