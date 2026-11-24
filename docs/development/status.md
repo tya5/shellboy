@@ -21,6 +21,15 @@ The #379 Guide pass landed; the numbered protocol notes remain canonical.
 Older preparation and qualification sections below are historical snapshots,
 not statements of branch or release status today.
 
+## Core #311 exact-ID intervention
+
+Ctrl+B and `/background` target the foreground execution observed in the
+current conversation; Esc targets the observed Turn. Both dispatch native
+#402 commands to the selected owner. If no foreground execution is observed,
+backgrounding reports a local failure and makes no owner request; a rejected
+slash command keeps the original input. This slice does not change launch,
+subscription, or disconnect behavior.
+
 ## Core #382 attachment replay prefixes
 
 Attachment source slots no longer carry changing status text. Successfully

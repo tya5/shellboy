@@ -1904,16 +1904,23 @@ impl RenderPreflight {
 }
 
 impl UiState {
-    fn background_visible_shell(&self) -> Vec<UiAction> {
-        match (&self.view().thread_id, motion::select(self.view())) {
-            (Some(thread_id), Some(motion::MotionTarget::Shell { execution_id })) => {
-                vec![UiAction::Background {
-                    thread_id: thread_id.clone(),
-                    execution_id,
-                }]
-            }
-            _ => Vec::new(),
-        }
+    fn background_visible_shell(&self) -> Option<UiAction> {
+        let thread_id = self.view().thread_id.clone()?;
+        let motion::MotionTarget::Shell { execution_id } = motion::select(self.view())? else {
+            return None;
+        };
+        Some(UiAction::Background {
+            thread_id,
+            execution_id,
+        })
+    }
+
+    fn no_foreground_shell(&self) -> &'static str {
+        i18n::local!(
+            self.config.ui.language,
+            "前景で実行中のシェルが確認できません",
+            "No foreground shell is visible"
+        )
     }
 
     pub fn threads(&self) -> &[ThreadSummary] {
@@ -5459,7 +5466,11 @@ cursor: None,
             "/cancel" => thread_id
                 .map(|thread_id| vec![UiAction::Cancel { thread_id }])
                 .unwrap_or_default(),
-            "/background" => self.background_visible_shell(),
+            "/background" => match self.background_visible_shell() {
+                Some(action) => vec![action],
+                None if thread_id.is_some() => self.command_error(self.no_foreground_shell()),
+                None => vec![],
+            },
             "/quit" => {
                 self.lifecycle.begin();
                 self.selection_mode = false;
@@ -6147,13 +6158,16 @@ cursor: None,
     }
     fn command_error(&mut self, message: &str) -> Vec<UiAction> {
         self.command_rejected = true;
+        self.show_command_error(message);
+        vec![]
+    }
+    fn show_command_error(&mut self, message: &str) {
         self.active_view_mut().status = format!(
             "{}: {message}",
             i18n::local!(self.config.ui.language, "コマンドエラー", "Command error")
         );
         self.active_view_mut()
             .promote_status_notice(history_interaction::NoticeKind::Failure);
-        vec![]
     }
     fn open_descendant_watch(&mut self) -> Vec<UiAction> {
         let Some(root) = self.view().thread_id.clone() else {
