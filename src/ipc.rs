@@ -19,7 +19,6 @@ use tokio_util::sync::CancellationToken;
 mod peer;
 mod server;
 pub use server::LocalServer;
-pub(crate) use server::MAX_IPC_WORK;
 #[cfg(test)]
 pub(crate) use server::tests::Fixture as TestServer;
 pub(crate) use server::{AdmissionRefusals, MAX_WAIT_WORK, is_wait};

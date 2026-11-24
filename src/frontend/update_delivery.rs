@@ -477,13 +477,14 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn real_frontend_cancel_quit_and_one_force_survive_full_reserve_and_retained_batch() {
         let (root, owner, control, server) = control_tests::fixture().await;
+        const CLOSING_SENDS: i64 = 16;
         let _held_projections = hold_projection_slots().await;
         // Isolate delivery pressure from same-Thread selection-revision CAS:
         // each queued request has a distinct existing recovery-wait owner and
         // stays held, so this fixture starts no model HTTP request.
         owner.db.call(|db| {
             let tx = db.transaction()?;
-            for n in 0..40 {
+            for n in 0..CLOSING_SENDS {
                 let thread = format!("closing-thread-{n}");
                 let run = format!("closing-run-{n}");
                 tx.execute("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at) SELECT ?1,?1,cwd,agents_path,profile_id,model_id,'now' FROM thread WHERE id='thread'", [&thread])?;
@@ -558,9 +559,9 @@ mod tests {
             observer.delivery.pending.lock().unwrap().critical.len(),
             CRITICAL_LIMIT
         );
-        // Closing sends persist before any UI result wait. More sends than
-        // reserved slots must still reach Quit without consuming UI capacity.
-        for revision in 0..40 {
+        // Keep the workload below owner IPC capacity: this witness saturates
+        // UI delivery, not owner admission. Durable work must not wait for UI results.
+        for revision in 0..CLOSING_SENDS {
             sender
                 .try_send(UiAction::Send {
                     generation: 0,
@@ -568,7 +569,7 @@ mod tests {
                     now: false,
                     snapshot: None,
                     draft_id: format!("closing-{revision}"),
-                    revision,
+                    revision: u64::try_from(revision).unwrap(),
                     thread_id: Some(format!("closing-thread-{revision}")),
                     cwd: closing_cwd.clone(),
                     text: "synthetic queued closing request".into(),
@@ -607,7 +608,7 @@ mod tests {
                 attempted.as_mut().enable();
                 let saved: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM draft WHERE id='closing-draft' AND revision=99)", [], |r| r.get(0)).unwrap();
                 let sent: i64 = db.query_row("SELECT count(*) FROM receipt r JOIN node n ON n.id=r.message_node_id WHERE n.kind='user' AND r.target_thread_id GLOB 'closing-thread-*' AND n.payload_json LIKE '%synthetic queued closing request%'", [], |r| r.get(0)).unwrap();
-                if saved && sent == 40 { break; }
+                if saved && sent == CLOSING_SENDS { break; }
                 assert!(!bridge.is_finished(), "shutdown must retain pending UI results");
                 tokio::select! {
                     _=&mut attempted=>{},

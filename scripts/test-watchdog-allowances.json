@@ -930,7 +930,7 @@
   {
     "file": "src/frontend/update_delivery.rs",
     "rule": "raw-timeout",
-    "fingerprint": "07ecc41f202f42a05857f3c184e7bac80b37b4bfac757565336ed87b688b5d7a",
+    "fingerprint": "174d1a2b5a01c1face6b613f5b6ab95b16aa71a7b191963941fd6407b3c92af1",
     "function": "real_frontend_cancel_quit_and_one_force_survive_full_reserve_and_retained_batch",
     "count": 1,
     "reason": "Issue124: unchanged existing phase/shutdown diagnostic bound around concrete state/delivery completion; receive_until keeps one original caller deadline, not a renewed per-update timeout. No latency success criterion or increased duration."
