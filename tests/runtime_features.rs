@@ -6872,16 +6872,31 @@ async fn current_context(control: &Control, turn: &str) -> String {
         )),
     )?)).await.unwrap()
 }
-/// The current context is present exactly once and is the latest context line.
+/// The current settings appear once and are the latest saved context. Run/Turn
+/// IDs identify the original observation, not the request carrying it.
 #[track_caller]
 fn assert_current_context_once(body: &Value, expected: &str, label: &str) {
+    fn settings(line: &str) -> (&str, &str) {
+        let (thread, ids) = line.split_once(" run=").unwrap();
+        let (_, turn) = ids.split_once(" turn=").unwrap();
+        let (_, rest) = turn.split_once(" cwd=").unwrap();
+        (thread, rest)
+    }
     let lines = context_lines(body);
+    let expected_settings = settings(expected);
     assert_eq!(
-        lines.iter().filter(|line| *line == expected).count(),
+        lines
+            .iter()
+            .filter(|line| settings(line) == expected_settings)
+            .count(),
         1,
-        "{label}: current context must appear exactly once; expected {expected:?}; got {lines:#?}"
+        "{label}: current settings must appear exactly once; expected {expected:?}; got {lines:#?}"
     );
-    assert_eq!(lines.last().map(String::as_str), Some(expected), "{label}");
+    assert_eq!(
+        lines.last().map(|line| settings(line)),
+        Some(expected_settings),
+        "{label}"
+    );
 }
 #[track_caller]
 fn assert_strict_append(previous: &Value, next: &Value, label: &str) {
@@ -7085,7 +7100,7 @@ async fn mid_turn_omission_reemits_the_current_context_once() {
     assert!(
         after.body["input"]
             .to_string()
-            .contains("was omitted after"),
+            .contains("Note: intermediate work in the current Turn was also omitted."),
         "the omission is adopted before this request: {}",
         after.body["input"]
     );
