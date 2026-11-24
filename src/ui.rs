@@ -4970,6 +4970,10 @@ impl UiState {
         self.active_view_mut().operation_notice = None;
         let thread_id = self.view().thread_id.clone();
         match command {
+            "/schedule" | "/service" => match crate::cli::scheduled_work_slash(&text[1..]) {
+                Ok(command) => self.execute_operation(command),
+                Err(error) => self.command_error(error.trim()),
+            },
             "/actions" | "/operations" => {
                 self.open_operations(None);
                 vec![]
@@ -9202,6 +9206,8 @@ mod tool_refresh_tests {
 
 #[cfg(test)]
 mod management_tests;
+#[cfg(test)]
+mod scheduled_work_slash_tests;
 
 #[cfg(test)]
 mod reader_tests;

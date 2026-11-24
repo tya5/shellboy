@@ -267,6 +267,7 @@ Replace `ID` and connection names below with real values. `/attach` and `/cwd`, 
 | `/actions`, `/operations` | Typed action forms |
 | `/cancel-wait` | Cancel observation of a TUI-started wait, without stopping its target |
 | `/new` | New draft |
+| `/schedule list\|add\|set\|enable\|disable\|remove` and `/service list\|add\|start\|stop\|remove` | Same arguments as the [CLI](cli-reference.md); quote values with spaces, for example `/service add --command 'echo hello'`. Schedule add takes its command after `--`. |
 | `/threads [FILTER]` | Threads and unsent drafts |
 | `/threads active` | Watch saved work across conversations |
 | `/threads descendants` | Watch descendants of the selected conversation |

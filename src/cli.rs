@@ -633,6 +633,103 @@ pub struct ScheduleAddOptions {
     command: Vec<String>,
 }
 
+impl From<ServiceCommand> for wire::Command {
+    fn from(command: ServiceCommand) -> Self {
+        match command {
+            ServiceCommand::Add {
+                thread_id,
+                cwd,
+                description,
+                command,
+            } => Self::ServiceAdd(wire::ServiceAddArgs {
+                thread_id,
+                cwd,
+                description,
+                command,
+            }),
+            ServiceCommand::List { thread_id } => {
+                Self::ServiceList(wire::ThreadTarget { thread_id })
+            }
+            ServiceCommand::Start { service_id } => {
+                Self::ServiceStart(wire::ServiceTarget { service_id })
+            }
+            ServiceCommand::Stop { service_id } => {
+                Self::ServiceStop(wire::ServiceTarget { service_id })
+            }
+            ServiceCommand::Remove { service_id } => {
+                Self::ServiceRemove(wire::ServiceTarget { service_id })
+            }
+        }
+    }
+}
+
+impl From<ScheduleCommand> for wire::Command {
+    fn from(command: ScheduleCommand) -> Self {
+        match command {
+            ScheduleCommand::Add(a) => Self::ScheduleAdd(wire::ScheduleAddArgs {
+                thread_id: a.thread_id,
+                cron: a.cron,
+                at: a.at,
+                in_seconds: a.delay,
+                cwd: a.cwd,
+                description: a.description,
+                command: a.command.join(" "),
+            }),
+            ScheduleCommand::Set {
+                schedule_id,
+                description,
+            } => Self::ScheduleSet(wire::ScheduleSetArgs {
+                schedule_id,
+                description,
+            }),
+            ScheduleCommand::Enable { schedule_id } => {
+                Self::ScheduleEnable(wire::ScheduleTarget { schedule_id })
+            }
+            ScheduleCommand::Disable { schedule_id } => {
+                Self::ScheduleDisable(wire::ScheduleTarget { schedule_id })
+            }
+            ScheduleCommand::Remove { schedule_id } => {
+                Self::ScheduleRemove(wire::ScheduleTarget { schedule_id })
+            }
+            ScheduleCommand::List { thread_id } => {
+                Self::ScheduleList(wire::ThreadTarget { thread_id })
+            }
+        }
+    }
+}
+
+#[derive(Parser)]
+#[command(name = "", disable_help_subcommand = true)]
+struct ScheduledWorkSlash {
+    #[command(subcommand)]
+    command: ScheduledWorkCommand,
+}
+
+#[derive(Subcommand)]
+enum ScheduledWorkCommand {
+    Schedule {
+        #[command(subcommand)]
+        command: ScheduleCommand,
+    },
+    Service {
+        #[command(subcommand)]
+        command: ServiceCommand,
+    },
+}
+
+pub(crate) fn scheduled_work_slash(text: &str) -> Result<wire::Command, String> {
+    // Tokenize only; no shell, expansion, or execution takes place here.
+    let words = shlex::split(text).ok_or_else(|| "Unclosed quote or escape".to_owned())?;
+    let parsed = ScheduledWorkSlash::try_parse_from(
+        std::iter::once("/").chain(words.iter().map(String::as_str)),
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(match parsed.command {
+        ScheduledWorkCommand::Schedule { command } => command.into(),
+        ScheduledWorkCommand::Service { command } => command.into(),
+    })
+}
+
 fn parse_schedule_delay(input: &str) -> Result<u64, String> {
     let value = input.trim_end_matches(['s', 'm', 'h', 'd']);
     let scale = match &input[value.len()..] {
@@ -2048,61 +2145,8 @@ impl Cli {
                     C::ArtifactRemove(wire::ArtifactRemoveArgs { artifact_id })
                 }
             },
-            CliCommand::Service { command } => match command {
-                ServiceCommand::Add {
-                    thread_id,
-                    cwd,
-                    description,
-                    command,
-                } => C::ServiceAdd(wire::ServiceAddArgs {
-                    thread_id,
-                    cwd,
-                    description,
-                    command,
-                }),
-                ServiceCommand::List { thread_id } => {
-                    C::ServiceList(wire::ThreadTarget { thread_id })
-                }
-                ServiceCommand::Start { service_id } => {
-                    C::ServiceStart(wire::ServiceTarget { service_id })
-                }
-                ServiceCommand::Stop { service_id } => {
-                    C::ServiceStop(wire::ServiceTarget { service_id })
-                }
-                ServiceCommand::Remove { service_id } => {
-                    C::ServiceRemove(wire::ServiceTarget { service_id })
-                }
-            },
-            CliCommand::Schedule { command } => match command {
-                ScheduleCommand::Add(a) => C::ScheduleAdd(wire::ScheduleAddArgs {
-                    thread_id: a.thread_id,
-                    cron: a.cron,
-                    at: a.at,
-                    in_seconds: a.delay,
-                    cwd: a.cwd,
-                    description: a.description,
-                    command: a.command.join(" "),
-                }),
-                ScheduleCommand::Set {
-                    schedule_id,
-                    description,
-                } => C::ScheduleSet(wire::ScheduleSetArgs {
-                    schedule_id,
-                    description,
-                }),
-                ScheduleCommand::Enable { schedule_id } => {
-                    C::ScheduleEnable(wire::ScheduleTarget { schedule_id })
-                }
-                ScheduleCommand::Disable { schedule_id } => {
-                    C::ScheduleDisable(wire::ScheduleTarget { schedule_id })
-                }
-                ScheduleCommand::Remove { schedule_id } => {
-                    C::ScheduleRemove(wire::ScheduleTarget { schedule_id })
-                }
-                ScheduleCommand::List { thread_id } => {
-                    C::ScheduleList(wire::ThreadTarget { thread_id })
-                }
-            },
+            CliCommand::Service { command } => command.into(),
+            CliCommand::Schedule { command } => command.into(),
             CliCommand::Shell { command } => match command {
                 ShellCommand::List(a) => C::ShellList(wire::ShellListArgs {
                     thread_id: a.thread_id,

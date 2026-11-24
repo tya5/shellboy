@@ -98,6 +98,16 @@ impl CommandHint {
                 "受信記録（失敗・ストリーム差分）を読む",
                 "Read received records and stream diffs"
             ),
+            "/schedule" => local!(
+                language,
+                "CLIと同じ引数で予定を操作",
+                "Manage schedules with CLI flags"
+            ),
+            "/service" => local!(
+                language,
+                "CLIと同じ引数でサービスを操作",
+                "Manage services with CLI flags"
+            ),
             "/status" => local!(
                 language,
                 "作業状態・背景コマンドを確認",
@@ -220,6 +230,8 @@ impl CommandHint {
 const COMMANDS: &[CommandHint] = &[
     CommandHint { name: "/agents" },
     CommandHint { name: "/received" },
+    CommandHint { name: "/schedule" },
+    CommandHint { name: "/service" },
     CommandHint { name: "/status" },
     CommandHint { name: "/help" },
     CommandHint { name: "/new" },
