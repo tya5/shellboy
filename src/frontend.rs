@@ -196,11 +196,13 @@ async fn native_request<T: serde::de::DeserializeOwned>(
 
 async fn management_request(
     control: &Arc<Control>,
+    data_dir: &Path,
     command: Command,
     cancel: CancellationToken,
 ) -> Result<Value, ApiError> {
     management_request_trigger(
         control,
+        data_dir,
         command,
         cancel,
         crate::usage_totals::UsageTrigger::Open,
@@ -209,6 +211,7 @@ async fn management_request(
 }
 async fn management_request_trigger(
     control: &Arc<Control>,
+    data_dir: &Path,
     command: Command,
     cancel: CancellationToken,
     trigger: crate::usage_totals::UsageTrigger,
@@ -262,7 +265,7 @@ async fn management_request_trigger(
         command,
         Command::HistoryGet(_) | Command::HistoryList(_) | Command::HistoryWindow(_)
     ) {
-        return match inspection_history::request(control, command, cancel).await {
+        return match inspection_history::request(data_dir, command, cancel).await {
             Ok(value) => Ok(value),
             Err(error) => Ok(serde_json::json!({"error":error})),
         };
@@ -2066,10 +2069,11 @@ async fn run_client(
                                 let previous = inspection_external::retained_result(&external_observation, &identity, kind);
                                 (identity, kind, previous)
                             })).flatten();
+                        let data_dir = client_context.data_dir.clone();
                         spawn_work(&mut workers, permit, async move {
                             let retained_command=inspection_history::capture_command(&command);
                             let list_command=inspection_lists::capture_command(&command);
-                            let mut response = management_request(&control, command, observe).await;
+                            let mut response = management_request(&control, &data_dir, command, observe).await;
                             if memory_observation && let Ok(value) = &mut response {
                                 value["client_observation"] = serde_json::json!({
                                     "completed_at": chrono::Utc::now().to_rfc3339(),
@@ -2233,8 +2237,9 @@ async fn run_client(
                         let observe = management.observe(&command);
                         let control = control.clone();
                         let outcomes = updates.worker();
+                        let data_dir = client_context.data_dir.clone();
                         spawn_work(&mut workers, permit, async move {
-                            let response = management_request(&control, command, observe).await;
+                            let response = management_request(&control, &data_dir, command, observe).await;
                             let result = management_outcome(&response).map(|()| response.unwrap_or_default());
                             command_outcome(&outcomes, submission, &result).await;
                             update(&outcomes, UiUpdate::RewindResult { request_id, args, result: result.map_err(|error| error.message) }).await;
@@ -3032,9 +3037,10 @@ async fn run_client(
                         let sender = updates.worker();
                         let read_node = node_id.clone();
                         if cancel.is_cancelled() { continue; }
+                        let data_dir = client_context.data_dir.clone();
                         if !spawn_read(&mut read_workers, &read_slots, &read_cancel, async move {
                             tokio::select! { biased; _=cancel.cancelled()=>{}, _=async {
-                                let result = checked_storage(&control, copying::choices(&control, read_node.clone()).await).await
+                                let result = checked_storage(&control, copying::choices(&control, &data_dir, read_node.clone()).await).await
                                     .map_err(|error| error.to_string());
                                 update(&sender, UiUpdate::CopyChoices { node_id: read_node, request_id, result }).await;
                             } => {} }
@@ -3112,6 +3118,7 @@ async fn run_client(
                         let control = control.clone();
                         let sender = background_tx.clone();
                         let follow_updates = updates.worker();
+                        let data_dir = client_context.data_dir.clone();
                         spawn_work(&mut workers, permit, async move {
                             let result =
                                 presentation_work(move || management::follow_target_in(
@@ -3144,7 +3151,7 @@ async fn run_client(
                                 management::FollowTarget::Command(command)=> {
                                     let title=command_title(&command, language);
                                     let work_status=management::work_status(&command);
-                                    (title,work_status,management_request(&control,*command,CancellationToken::new()).await)
+                                    (title,work_status,management_request(&control, &data_dir,*command,CancellationToken::new()).await)
                                 },
                                 management::FollowTarget::Attachment {thread_id,attachment_id}=> {
                                     (i18n::local!(language, "添付の参照", "Attachment references").into(),false,inspection_attachments::request(&control,thread_id,Some(attachment_id),CancellationToken::new()).await)
@@ -3292,9 +3299,10 @@ async fn run_client(
                         let sender = background_tx.clone();
                         let outcomes = updates.worker();
                         let cancel = cancel.child_token();
+                        let data_dir = client_context.data_dir.clone();
                         spawn_work(&mut workers, permit, async move {
                             let result = async {
-                                let text = checked_storage(&control, copying::text(&control, node_id, code_block, expected_copy_hash).await).await?;
+                                let text = checked_storage(&control, copying::text(&control, &data_dir, node_id, code_block, expected_copy_hash).await).await?;
                                 let characters = text.chars().count();
                                 clipboard
                                     .copy(
@@ -4538,7 +4546,19 @@ pub async fn copy_source(
 ) -> Result<String, ApiError> {
     checked_storage(
         control,
-        copying::text(control, node_id, code_block, None).await,
+        copying::text(
+            control,
+            control
+                .store
+                .database
+                .path()
+                .parent()
+                .expect("owner database has a directory"),
+            node_id,
+            code_block,
+            None,
+        )
+        .await,
     )
     .await
 }

@@ -34,22 +34,16 @@ pub(super) fn capture_saved(command: &CapturedCommand, value: &Value) -> Option<
     }
 }
 pub(super) async fn native_body(
-    control: &crate::control::Control,
+    data_dir: &std::path::Path,
     args: HistoryGetArgs,
 ) -> Result<HistoryBody, ApiError> {
-    native_read(control, Command::HistoryGet(args)).await
+    native_read(data_dir, Command::HistoryGet(args)).await
 }
 
 async fn native_read<T: serde::de::DeserializeOwned>(
-    control: &crate::control::Control,
+    data_dir: &std::path::Path,
     command: Command,
 ) -> Result<T, ApiError> {
-    let data_dir = control
-        .store
-        .database
-        .path()
-        .parent()
-        .expect("owner database has a directory");
     let response = crate::ipc::call_selected(data_dir, command).await?;
     let malformed = || {
         ApiError::new(
@@ -64,7 +58,7 @@ async fn native_read<T: serde::de::DeserializeOwned>(
 }
 
 pub(super) async fn request(
-    control: &std::sync::Arc<crate::control::Control>,
+    data_dir: &std::path::Path,
     command: Command,
     stop: tokio_util::sync::CancellationToken,
 ) -> Result<Value, crate::protocol::ApiError> {
@@ -73,15 +67,15 @@ pub(super) async fn request(
         result = async {
             match command {
                 Command::HistoryGet(args) => {
-                    let body = native_body(control, args).await?;
+                    let body = native_body(data_dir, args).await?;
                     super::presentation_work(move || serialize(body)).await?
                 }
                 command @ Command::HistoryList(_) => {
-                    let page: Page<HistorySnippet> = native_read(control, command).await?;
+                    let page: Page<HistorySnippet> = native_read(data_dir, command).await?;
                     super::presentation_work(move || serialize(page)).await?
                 }
                 command @ Command::HistoryWindow(_) => {
-                    let window: HistoryWindow = native_read(control, command).await?;
+                    let window: HistoryWindow = native_read(data_dir, command).await?;
                     super::presentation_work(move || serialize(window)).await?
                 }
                 _ => Err(ApiError::new(ErrorCode::InvalidArgument, "Not a retained history read")),
@@ -141,6 +135,77 @@ mod tests {
     use crate::protocol::HistoryListArgs;
     use serde_json::json;
     #[tokio::test]
+    async fn native_list_inspection_continues_and_rejects_changed_path() {
+        let (_root, owner, control, server) = super::super::control_tests::fixture().await;
+        owner
+            .db
+            .call(|db| {
+                let tx = db.transaction()?;
+                for node in ["list-a", "list-b", "list-c"] {
+                    crate::history::append_node(
+                        &tx,
+                        "thread",
+                        node,
+                        None,
+                        "user",
+                        &json!({"role":"user","content":node}),
+                        "2026-11-24T00:00:00Z",
+                    )?;
+                }
+                tx.commit()?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let read = |cursor| {
+            request(
+                &owner.loaded.data_dir,
+                Command::HistoryList(HistoryListArgs {
+                    thread_id: "thread".into(),
+                    limit: 1,
+                    cursor,
+                    excerpt_chars: 32,
+                    run_id: None,
+                    since: None,
+                    state: None,
+                }),
+                tokio_util::sync::CancellationToken::new(),
+            )
+        };
+        let mut cursor = None;
+        let mut first = None;
+        for expected in ["list-a", "list-b", "list-c"] {
+            let page = read(cursor).await.unwrap();
+            let items = page["items"].as_array().unwrap();
+            assert_eq!(items.len(), 1);
+            assert_eq!(items[0]["node_id"], expected);
+            cursor = page["next_cursor"].as_str().map(str::to_owned);
+            if expected == "list-a" {
+                first = Some(cursor.clone().unwrap());
+            }
+        }
+        assert!(cursor.is_none());
+        owner
+            .db
+            .call(|db| {
+                db.execute(
+                    "UPDATE thread SET selection_revision=selection_revision+1 WHERE id='thread'",
+                    [],
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            read(first).await.unwrap_err().code,
+            ErrorCode::CursorExpired
+        );
+        server.shutdown().await.unwrap();
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
     async fn native_body_inspection_continues_and_rejects_changed_revision() {
         let (_root, owner, control, server) = super::super::control_tests::fixture().await;
         owner
@@ -163,7 +228,7 @@ mod tests {
             .unwrap();
         let read = |cursor| {
             request(
-                &control,
+                &owner.loaded.data_dir,
                 Command::HistoryGet(HistoryGetArgs {
                     node_id: "inspection-source".into(),
                     cursor,
@@ -216,7 +281,7 @@ mod tests {
             .await
             .unwrap();
         let report = request(
-            &control,
+            &owner.loaded.data_dir,
             Command::HistoryWindow(crate::protocol::HistoryWindowArgs {
                 thread_id: "thread".into(),
                 ordinal: None,

@@ -42,18 +42,17 @@ fn limit(language: UiLanguage) -> ApiError {
     CopyError::Limit.error(language)
 }
 async fn source(
-    control: &Control,
+    data_dir: &std::path::Path,
     node_id: String,
     budget: usize,
     language: UiLanguage,
 ) -> Result<String, ApiError> {
     let mut text = String::new();
     let mut cursor = None;
-    let mut revision = None;
     let mut seen = std::collections::HashSet::new();
     for _ in 0..SOURCE_PAGES {
         let body = super::inspection_history::native_body(
-            control,
+            data_dir,
             HistoryGetArgs {
                 end_message_only: false,
                 parts: false,
@@ -63,15 +62,16 @@ async fn source(
                 encoding: DEFAULT_ENCODING.into(),
             },
         )
-        .await?;
+        .await
+        .map_err(|error| {
+            if error.code == ErrorCode::CursorExpired {
+                CopyError::SourceChanged.error(language)
+            } else {
+                error
+            }
+        })?;
         if body.node_id != node_id {
             return Err(CopyError::ReferenceChanged.error(language));
-        }
-        if revision
-            .replace(body.provenance.source_revision)
-            .is_some_and(|old| old != body.provenance.source_revision)
-        {
-            return Err(CopyError::SourceChanged.error(language));
         }
         if let Some(reason) = body.tombstone_reason {
             return Err(CopyError::Unavailable(reason).error(language));
@@ -118,9 +118,13 @@ fn summaries(text: &str, language: UiLanguage) -> Result<Vec<CopyBlock>, ApiErro
 pub(super) fn source_hash(text: &str) -> String {
     crate::digest::sha256_hex(text.as_bytes())
 }
-pub(super) async fn choices(control: &Control, node_id: String) -> Result<CopyOffer, ApiError> {
+pub(super) async fn choices(
+    control: &Control,
+    data_dir: &std::path::Path,
+    node_id: String,
+) -> Result<CopyOffer, ApiError> {
     let language = control.store.config.ui.language;
-    let text = source(control, node_id, SOURCE_BYTES, language).await?;
+    let text = source(data_dir, node_id, SOURCE_BYTES, language).await?;
     presentation_work(move || {
         Ok(CopyOffer {
             source_hash: source_hash(&text),
@@ -131,6 +135,7 @@ pub(super) async fn choices(control: &Control, node_id: String) -> Result<CopyOf
 }
 pub(super) async fn text(
     control: &Control,
+    data_dir: &std::path::Path,
     node_id: String,
     block: Option<usize>,
     expected_hash: Option<String>,
@@ -140,7 +145,7 @@ pub(super) async fn text(
         return Err(limit(language));
     }
     let text = source(
-        control,
+        data_dir,
         node_id,
         if block.is_some() {
             SOURCE_BYTES
@@ -243,14 +248,22 @@ mod tests {
             let dispatcher = tokio::spawn(control.clone().serve(requests));
             assert_eq!(control.store.config.ui.language, language);
             let expected = limit(language);
-            let rejected = text(&control, "plain".into(), Some(BLOCKS), None)
-                .await
-                .unwrap_err();
+            let rejected = text(
+                &control,
+                &owner.loaded.data_dir,
+                "plain".into(),
+                Some(BLOCKS),
+                None,
+            )
+            .await
+            .unwrap_err();
             assert_eq!(
                 (rejected.code, rejected.message),
                 (expected.code, expected.message.clone())
             );
-            let rejected = choices(&control, "blocks".into()).await.unwrap_err();
+            let rejected = choices(&control, &owner.loaded.data_dir, "blocks".into())
+                .await
+                .unwrap_err();
             assert_eq!(
                 (rejected.code, rejected.message),
                 (expected.code, expected.message.clone())
@@ -262,15 +275,23 @@ mod tests {
                 (rejected.code, rejected.message),
                 (expected.code, expected.message)
             );
-            let rejected = text(&control, "plain".into(), None, Some("stale".into()))
-                .await
-                .unwrap_err();
+            let rejected = text(
+                &control,
+                &owner.loaded.data_dir,
+                "plain".into(),
+                None,
+                Some("stale".into()),
+            )
+            .await
+            .unwrap_err();
             assert_eq!(
                 rejected.message,
                 CopyError::SourceChanged.error(language).message
             );
             assert_eq!(
-                text(&control, "plain".into(), None, None).await.unwrap(),
+                text(&control, &owner.loaded.data_dir, "plain".into(), None, None)
+                    .await
+                    .unwrap(),
                 original
             );
             server.shutdown().await.unwrap();
