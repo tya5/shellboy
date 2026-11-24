@@ -23,8 +23,8 @@ macro_rules! routes {
 
 routes! {
     schedule_list: "/schedule list --thread thread-a" => Command::ScheduleList(ThreadTarget { thread_id: Some("thread-a".into()) });
-    schedule_add: "/schedule add --thread thread-a --in 10m --cwd '/a path' --description 'later today' -- printf '%s' 'hello world'" => Command::ScheduleAdd(ScheduleAddArgs {
-        thread_id: Some("thread-a".into()), cron: None, at: None, in_seconds: Some(600), cwd: Some("/a path".into()), description: Some("later today".into()), command: "printf %s hello world".into(),
+    schedule_add: "/schedule add --thread thread-a --in 10m --cwd '/a path' --description 'later today' -- \"printf '%s' 'hello world'\"" => Command::ScheduleAdd(ScheduleAddArgs {
+        thread_id: Some("thread-a".into()), cron: None, at: None, in_seconds: Some(600), cwd: Some("/a path".into()), description: Some("later today".into()), command: "printf '%s' 'hello world'".into(),
     });
     schedule_set: "/schedule set --schedule sched-a --description 'updated text'" => Command::ScheduleSet(ScheduleSetArgs { schedule_id: "sched-a".into(), description: "updated text".into() });
     schedule_enable: "/schedule enable --schedule sched-a" => Command::ScheduleEnable(ScheduleTarget { schedule_id: "sched-a".into() });
