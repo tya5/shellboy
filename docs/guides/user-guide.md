@@ -506,6 +506,14 @@ a wait can also settle when the duty ends without a reply.
 
 See [Reply to a request](agent-guide.md#reply-to-a-request) for how a model closes a duty.
 
+### Check delivery without sending twice
+
+Send and Ask return a flat `MessageAccepted`; keep the input's `message_id`. Reply returns `MessageReplied`: the answer `message_id`, the original `reply_to`, and `delivery` only for a routed reply. A held `delivery` is not a failed reply; inspect the answer ID with `message get` before acting.
+
+For example, after sending a worker a correction, observe that message with `shellboy wait --conditions-json '[{"type":"message_delivered","message_id":"MESSAGE_ID"}]' --timeout-ms 30000`. A match for that ID confirms application, not an answer. If it times out, read `message get`; only a `foreground_shell` `held_by` identifies a shell that can be targeted for Background. If you need the worker to continue while that shell runs, use `shellboy shell background --execution EXECUTION_ID` with that exact ID, then check the original message again. Do not resend the correction or choose a different shell from a list. See the [worked intervention](agent-guide.md#observe-application-and-identify-an-exact-blocker).
+
+If instead you lost the Send or Ask response, look up the original receipt with `shellboy operation get --operation ID` only when the typed error directs you there. Use the supplied ID on the same owner data directory. The receipt may give you the exact message to inspect; a missing receipt does not prove that nothing happened. See [Operation evidence](cli-reference.md#operation-evidence).
+
 ## 5. Delegate to a child
 
 Simply saying "use subagents" does not guarantee that the model understands Shellboy's child-Thread operations. Guides are bundled with the executable; the model receives a short entry-point instruction and reads the guides itself when needed, not their full text in every prompt. No checkout or repository path is required. To explicitly request the procedures, name the guide IDs:
@@ -734,6 +742,10 @@ redraw with either value. `shellboy config check` validates the boolean setting.
 Synthetic terminal tests verify emitted clear/erase sequences and modeled cells,
 not font pixels. Windows hardware is unverified; please check your own terminal
 and font and report whether this option helps.
+
+### Read the recent end of a command log
+
+Use `shellboy shell read --execution EXECUTION_ID --tail` to see the recent end of a long build's saved output without reading the whole log first. It uses the saved encoding and a bounded suffix. If `tail_skipped` is set, earlier output was omitted; `decode_uncertain` means the tail may lack decoding context. To read later output, pass the returned cursor to `shell read --execution EXECUTION_ID --cursor CURSOR` without `--tail`. Check `shell get` for the saved exit state; the tail is not a test verdict. See [the build-log recipe](agent-guide.md#start-at-the-end-of-a-long-shell-log).
 
 ### Keep a command running
 

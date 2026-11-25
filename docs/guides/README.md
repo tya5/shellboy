@@ -19,6 +19,9 @@ Operation guides for people using Shellboy and models working inside it. Start w
 | Retrieve history, originals, forks, search, or compaction | [History and search](history-and-search.md) |
 | Attach files or images | [Attachments](attachments.md) |
 | Recover, stop, reclaim capacity, or diagnose errors | [Recovery and storage](recovery-and-storage.md) |
+| Check whether an instruction was applied, or release its exact foreground blocker | [Message application and Background](agent-guide.md#observe-application-and-identify-an-exact-blocker) |
+| Track Ask acceptance, routed Reply, or an uncertain write | [Ask and Reply results](cli-reference.md#message-ask) · [Operation evidence](cli-reference.md#operation-evidence) |
+| Read the end of a long shell log and continue from its cursor | [Shell tail recipe](agent-guide.md#start-at-the-end-of-a-long-shell-log) |
 | Look up command syntax and returned JSON | [CLI reference](cli-reference.md) |
 | Read memory/startup observations and reproduce the fake-model workload | [Resource usage](resource-usage.md) |
 
