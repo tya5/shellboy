@@ -52,7 +52,10 @@ pub(crate) fn project_display(
         Node::HiddenAdmission | Node::Received => return p,
         Node::Trim { .. } => set_trim_title(&mut p),
         Node::Reclaimed { reason } => set_reclaimed_title(&mut p, reason),
-        Node::Summary { source_node_ids, structured: parts } => {
+        Node::Summary {
+            source_node_ids,
+            structured: parts,
+        } => {
             structured = *parts;
             set_summary_title(&mut p, source_node_ids.len(), structured);
         }
@@ -74,13 +77,20 @@ pub(crate) fn project_display(
         envelopes: Vec::new(),
         omitted_chars: 0,
     };
-    let offsets = text.char_indices().map(|(offset, _)| offset)
-        .chain(std::iter::once(text.len())).collect::<Vec<_>>();
+    let offsets = text
+        .char_indices()
+        .map(|(offset, _)| offset)
+        .chain(std::iter::once(text.len()))
+        .collect::<Vec<_>>();
     for block in &outline.blocks {
         let start = block.range.start as usize;
         let end = block.range.end as usize;
-        let Some((&lo, &hi)) = offsets.get(start.saturating_sub(base))
-            .zip(offsets.get(end.saturating_sub(base))) else { continue };
+        let Some((&lo, &hi)) = offsets
+            .get(start.saturating_sub(base))
+            .zip(offsets.get(end.saturating_sub(base)))
+        else {
+            continue;
+        };
         let role = match block.role {
             Role::Plain => BlockKind::Plain,
             Role::Prose => BlockKind::Prose,
@@ -102,7 +112,11 @@ pub(crate) fn project_display(
                 command: saved.command.clone().unwrap_or_default(),
                 description: crate::tool_description::label(saved.description.as_deref()),
                 status: saved.status.clone().unwrap_or_else(|| {
-                    if is_call { "requested".into() } else { String::new() }
+                    if is_call {
+                        "requested".into()
+                    } else {
+                        String::new()
+                    }
                 }),
                 exit_code: saved.exit_code,
                 ..Default::default()
@@ -115,7 +129,13 @@ pub(crate) fn project_display(
     p.blocks = walk.blocks;
     p.links = walk.links;
     for link in &outline.links {
-        add_link(&mut p.links, &link.label, &link.url, link.range.start as usize, link.range.end as usize);
+        add_link(
+            &mut p.links,
+            &link.label,
+            &link.url,
+            link.range.start as usize,
+            link.range.end as usize,
+        );
     }
     p.metadata_limited = outline.limited;
     limits::markdown(&mut p);
@@ -198,7 +218,9 @@ fn set_trim_title(p: &mut NodePresentation) {
 }
 
 fn set_reclaimed_title(p: &mut NodePresentation, reason: &str) {
-    p.ui_messages.title = Some(messages::Message::Reclaimed { reason: short(reason, 256) });
+    p.ui_messages.title = Some(messages::Message::Reclaimed {
+        reason: short(reason, 256),
+    });
     p.title = crate::ui::text_width::glyphs::formatted!(
         "原文回収済み · {reason}",
         "原文回収済み | {reason}"
@@ -321,7 +343,8 @@ fn set_summary_title(p: &mut NodePresentation, count: usize, replaced: bool) {
         crate::ui::text_width::glyphs::formatted!(
             "要約 · 置換{}件 · 出典{}件 · F6→O 原文",
             "要約 | 置換{}件 | 出典{}件 | F6>O 原文",
-            count, count
+            count,
+            count
         )
     } else {
         crate::ui::text_width::glyphs::formatted!(
