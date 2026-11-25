@@ -67,6 +67,7 @@ fn cli_parse_error(error: &clap::Error) -> ApiError {
         .or_else(|| Some(Cli::command().render_usage().to_string()));
     let kind = format!("{:?}", error.kind());
     let scheduled = shellboy::cli::scheduled_command_argument_error(
+        Cli::command(),
         error,
         &std::env::args_os()
             .skip(1)

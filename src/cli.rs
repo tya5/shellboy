@@ -494,7 +494,7 @@ pub enum MessageCommand {
     List(MessageListOptions),
     /// Reply once to a received reply-expected message.
     #[command(
-        after_help = "If ordinary input already answered a human Ask in its Thread, a later reply returns invalid_state: reply is already terminal."
+        after_help = "Do not reply to your own Ask. If ordinary input already answered a human Ask in its Thread, a later otherwise-authorized reply returns invalid_state: reply is already terminal."
     )]
     Reply(MessageReplyOptions),
     /// Inspect saved delivery facts; read the original body separately with history read.
@@ -774,7 +774,8 @@ pub(crate) fn scheduled_work_slash(text: &str) -> Result<wire::Command, String> 
         std::iter::once("/").chain(words.iter().map(String::as_str)),
     )
     .map_err(|error| {
-        scheduled_command_argument_error(&error, &words).unwrap_or_else(|| error.to_string())
+        scheduled_command_argument_error(ScheduledWorkSlash::command(), &error, &words)
+            .unwrap_or_else(|| error.to_string())
     })?;
     Ok(match parsed.command {
         ScheduledWorkCommand::Schedule { command } => command.into(),
@@ -783,41 +784,35 @@ pub(crate) fn scheduled_work_slash(text: &str) -> Result<wire::Command, String> 
 }
 
 /// Explain rejected positional input without echoing unrelated flag values.
-pub fn scheduled_command_argument_error(error: &clap::Error, words: &[String]) -> Option<String> {
+pub fn scheduled_command_argument_error(
+    mut grammar: clap::Command,
+    error: &clap::Error,
+    words: &[String],
+) -> Option<String> {
     use clap::error::{ContextKind, ContextValue, ErrorKind};
     if error.kind() != ErrorKind::UnknownArgument {
-        return None;
-    }
-    let usage = error.get(ContextKind::Usage)?.to_string();
-    let command = usage.split_whitespace().collect::<Vec<_>>();
-    if !command
-        .windows(2)
-        .any(|pair| matches!(pair, ["schedule" | "service", "add"]))
-    {
         return None;
     }
     let ContextValue::String(argument) = error.get(ContextKind::InvalidArg)? else {
         return None;
     };
-    let root = Cli::command();
+    grammar.build();
     let mut words = words.iter();
-    let command = loop {
-        let word = words.next()?;
-        if skip_scheduled_option(&root, word, &mut words) {
-            continue;
-        }
-        break root.find_subcommand(word)?;
-    };
-    let add = command.find_subcommand(words.next()?)?;
+    let work = scheduled_subcommand(&grammar, &mut words)?;
+    if !matches!(work.get_name(), "schedule" | "service") {
+        return None;
+    }
+    let add = scheduled_subcommand(work, &mut words)?;
+    if add.get_name() != "add" {
+        return None;
+    }
     let mut received = Vec::new();
     while let Some(word) = words.next() {
         if word == "--" {
             received.extend(words);
             break;
         }
-        if !skip_scheduled_option(add, word, &mut words)
-            && !skip_scheduled_option(&root, word, &mut words)
-        {
+        if !skip_scheduled_option(add, word, &mut words) {
             received.push(word);
         }
     }
@@ -827,6 +822,18 @@ pub fn scheduled_command_argument_error(error: &clap::Error, words: &[String]) -
     Some(format!(
         "Unexpected positional arguments: {received:?}. Pass the entire shell program as --command '...'"
     ))
+}
+
+fn scheduled_subcommand<'a>(
+    command: &'a clap::Command,
+    words: &mut std::slice::Iter<'_, String>,
+) -> Option<&'a clap::Command> {
+    while let Some(word) = words.next() {
+        if !skip_scheduled_option(command, word, words) {
+            return command.find_subcommand(word);
+        }
+    }
+    None
 }
 
 // Scheduled Add and the global options have one value per flag. Consult Clap's
