@@ -627,6 +627,7 @@ impl<'a> HistoryReader<'a> {
             message_metadata::enrich(self.control, Some(viewed_thread), std::slice::from_mut(&mut node)).await?;
             streams::enrich(self.control, std::slice::from_mut(&mut node), self.width).await?;
             stamp_source(&mut node, read_revision);
+            node.presentation.anchor_window = true;
             Ok(node)
         }
         .await;

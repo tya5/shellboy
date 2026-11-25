@@ -2214,7 +2214,6 @@ impl UiState {
                     }
                     needed |= block.rendered.as_ref().is_none_or(|r| r.width != width)
                         || (preflight.initializing
-                            && !node.presentation.anchor_window
                             && block.source_exact
                             && offset > block.source_start
                             && offset < block.source_end);
@@ -7808,6 +7807,7 @@ mod layout_cache_tests {
         ui.view_mut().navigation.view_revision += 1;
         ui.prepare_visible_render_width(76, &BTreeSet::from([0]), RenderPreflight::new(ui.view()));
         assert!(ui.take_deferred_actions().is_empty());
+        value.presentation.anchor_window = true;
         // The old response is not installed after a navigation revision change.
         ui.apply(UiUpdate::NodeWindow {
             thread_id: "t".into(),
@@ -7828,6 +7828,46 @@ mod layout_cache_tests {
             ui.take_deferred_actions()
                 .iter()
                 .all(|action| !matches!(action, UiAction::LoadNodeWindow { .. }))
+        );
+    }
+
+    #[test]
+    fn a_bounded_markdown_window_does_not_skip_initializing_a_different_anchor() {
+        let source = "First **paragraph** with an interior anchor.";
+        let mut value = node("answer", source);
+        value.total_chars = source.len();
+        value.presentation = crate::presentation::project(
+            "assistant",
+            &serde_json::json!({"text":source}),
+            source,
+            0,
+        );
+        crate::presentation::render_markdown(&mut value.presentation, 76);
+        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+        ui.select_thread("t".into());
+        *ui.view_mut().nodes_mut_for_test() = vec![value.clone()];
+        ui.view_mut().total_nodes = 1;
+        ui.render_width = 76;
+        // Simulate an accepted bounded read at the start of the source.
+        value.presentation.anchor_window = true;
+        ui.apply(UiUpdate::NodeWindow {
+            thread_id: "t".into(),
+            generation: ui.view().generation,
+            view_revision: ui.view().navigation.view_revision,
+            node: value,
+        });
+        ui.view_mut().navigation.select_reading();
+        ui.view_mut().navigation.anchor = ViewAnchor {
+            node_id: Some("answer".into()),
+            char_offset: 20,
+        };
+        ui.prepare_visible_render_width(76, &BTreeSet::from([0]), RenderPreflight::new(ui.view()));
+        assert!(
+            ui.take_deferred_actions()
+                .iter()
+                .any(|action| matches!(action,
+                    UiAction::LoadNodeWindow { node_id, char_offset: 20, .. } if node_id == "answer"
+                ))
         );
     }
 
@@ -7960,7 +8000,11 @@ mod layout_cache_tests {
                         thread_id,
                         generation,
                         view_revision,
-                        node: window(char_offset),
+                        node: {
+                            let mut node = window(char_offset);
+                            node.presentation.anchor_window = true;
+                            node
+                        },
                     });
                     requests.extend(ui.take_deferred_actions());
                 }
