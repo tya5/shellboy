@@ -2163,6 +2163,40 @@ async fn real_shell_cli_backgrounds_only_the_execution_named_by_the_message_hold
     let target = blocker(&control, &pending).await;
     let other = blocker(&control, &other_pending).await;
     assert_ne!(target, other);
+    async fn assert_foreground(
+        control: &Arc<Control>,
+        thread: &str,
+        execution: &str,
+        expected: bool,
+    ) {
+        let get = command(
+            control,
+            Command::ShellGet(ExecutionTarget {
+                execution_id: execution.into(),
+            }),
+        )
+        .await;
+        assert_eq!(get["state"], "running");
+        assert_eq!(get["foreground"], expected);
+        for scope in [Some(thread), None] {
+            let list = command(
+                control,
+                Command::ShellList(
+                    serde_json::from_value(json!({"thread_id":scope,"state":"running"})).unwrap(),
+                ),
+            )
+            .await;
+            let row = list["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|row| row["execution_id"] == execution)
+                .unwrap();
+            assert_eq!(row["foreground"], expected);
+        }
+    }
+    assert_foreground(&control, &recipient.thread_id, &target, true).await;
+    assert_foreground(&control, &sender.thread_id, &other, true).await;
     // The real CLI receives the sender's shell-issued Origin through IPC.
     command(
         &control,
@@ -2217,6 +2251,8 @@ async fn real_shell_cli_backgrounds_only_the_execution_named_by_the_message_hold
         .await["state"],
         "running"
     );
+    assert_foreground(&control, &recipient.thread_id, &target, false).await;
+    assert_foreground(&control, &sender.thread_id, &other, true).await;
     let stale = control
         .request(Request::new(
             format!("{}:old-foreground", control.store.instance_id),

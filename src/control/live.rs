@@ -326,14 +326,11 @@ impl LiveRegistry {
         drivers.remove(thread);
     }
 
-    /// Called on the DB worker. Never wait for a driver lock there: some
-    /// lifecycle transitions hold it across their database commit.
-    pub(super) fn foreground_observation(
-        &self,
+    fn foreground_in(
+        drivers: &HashMap<String, DriverSlot>,
         thread: &str,
         run: &str,
     ) -> Result<Option<String>, ()> {
-        let drivers = self.drivers.try_lock().map_err(|_| ())?;
         match drivers.get(thread) {
             Some(slot)
                 if slot.run_id == run
@@ -344,6 +341,49 @@ impl LiveRegistry {
             }
             Some(_) => Err(()),
             None => Ok(None),
+        }
+    }
+
+    /// Called on the DB worker. Never wait for a driver lock there: some
+    /// lifecycle transitions hold it across their database commit.
+    pub(super) fn foreground_observation(
+        &self,
+        thread: &str,
+        run: &str,
+    ) -> Result<Option<String>, ()> {
+        let drivers = self.drivers.try_lock().map_err(|_| ())?;
+        Self::foreground_in(&drivers, thread, run)
+    }
+
+    /// Project only returned rows, after the saved read releases its transaction.
+    pub(super) async fn project_shell_foreground<'a>(
+        &self,
+        rows: impl IntoIterator<Item = &'a mut serde_json::Value>,
+    ) {
+        let drivers = self.drivers.lock().await;
+        let mut by_run = HashMap::new();
+        for row in rows {
+            if row["state"] != "running" {
+                continue;
+            }
+            let foreground = match (
+                row["thread_id"].as_str(),
+                row["run_id"].as_str(),
+                row["turn_id"].as_str(),
+                row["execution_id"].as_str(),
+            ) {
+                (Some(thread), Some(run), Some(_), Some(execution)) => {
+                    by_run
+                        .entry((thread.to_owned(), run.to_owned()))
+                        .or_insert_with(|| {
+                            Self::foreground_in(&drivers, thread, run).ok().flatten()
+                        })
+                        .as_deref()
+                        == Some(execution)
+                }
+                _ => false,
+            };
+            row["foreground"] = foreground.into();
         }
     }
 

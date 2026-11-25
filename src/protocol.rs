@@ -2251,6 +2251,7 @@ record!(TurnDetails { #[serde(default, skip_serializing_if = "Option::is_none")]
 // output-reader snapshot, which deliberately does not load command ownership.
 // They are not an older-owner protocol compatibility contract.
 record!(ShellDetails {
+    #[serde(default, skip_serializing_if = "Option::is_none")] foreground: Option<bool>,
     execution_id: String, run_id: Option<String>, state: ShellState, output_complete: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")] schedule_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")] started_at: Option<String>,
@@ -2556,6 +2557,7 @@ record!(StorageAdvisory {
 });
 record!(StorageStatus { #[serde(default, skip_serializing_if = "Vec::is_empty")] advisories: Vec<StorageAdvisory>, logical_live_bytes: u64, reclaimable_bytes: u64, db_bytes: u64, wal_bytes: u64, managed_bytes: u64, log_bytes: u64, #[serde(default, skip_serializing_if = "Option::is_none")] filesystem_free_bytes: Option<u64>, warning_bytes: u64, limit_bytes: u64 });
 record!(ShellListItem {
+    #[serde(default, skip_serializing_if = "Option::is_none")] foreground: Option<bool>,
     execution_id: String,
     run_id: String,
     thread_id: String,

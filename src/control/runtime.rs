@@ -406,11 +406,17 @@ impl Control {
                 self.runtime_wait(request.operation_id, args, caller, disconnected)
                     .await
             }
-            Command::ShellGet(args) => encode_result(
-                reader.get(&args.execution_id).await?,
-                ErrorCode::IoFailed,
-                "Cannot encode shell details",
-            ),
+            Command::ShellGet(args) => {
+                let mut result = encode_result(
+                    reader.get(&args.execution_id).await?,
+                    ErrorCode::IoFailed,
+                    "Cannot encode shell details",
+                )?;
+                self.live
+                    .project_shell_foreground(std::iter::once(&mut result))
+                    .await;
+                Ok(result)
+            }
             Command::ShellRead(args) => encode_result(
                 reader.read(args).await?,
                 ErrorCode::IoFailed,

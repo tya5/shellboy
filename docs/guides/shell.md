@@ -320,6 +320,8 @@ Do not expect `$env:...` to expand normally after `--%`. This PowerShell example
 
 ### Observing long-running shells (Issue #45)
 
+Running `shell list` rows and `shell get` results report `foreground`: true only while the current Turn waits on that execution.
+
 `shell get --execution ID` and shell entries in `status` expose saved
 `started_at`, nullable `last_output_at` (latest retained output sequence),
 and `elapsed_ms`. While starting/running/stopping, elapsed_ms is calculated
