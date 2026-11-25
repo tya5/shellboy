@@ -2,10 +2,12 @@
 
 ## Core #311 saved change delivery
 
-Two focused macOS tests passed: a native cursor gap retired a stale browser
-page ticket and the production first-page reader kept its continuation; a
-saved usage update refreshed the scoped management observation. Neither is a
-terminal attachment or replacement-owner acceptance test.
+Two focused macOS tests passed. A real native cursor gap reached the TUI
+through `BrowserResync`, by which time the old page ticket was cancelled. The
+UI's deferred-action path requested exactly one bounded first page with a
+continuation. A separate saved usage update refreshed the scoped management
+observation. Neither test covers wait-pool saturation, terminal attachment, or
+replacement-owner acceptance.
 
 ## Core #311 native Thread archive
 
