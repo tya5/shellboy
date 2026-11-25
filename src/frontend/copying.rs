@@ -54,6 +54,7 @@ async fn source(
         let body = super::inspection_history::native_body(
             data_dir,
             HistoryReadArgs {
+                display: None,
                 end_message_only: false,
                 parts: false,
                 node_id: node_id.clone(),

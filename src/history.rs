@@ -22,6 +22,8 @@ mod window;
 pub(crate) use window::NODE_SQL as SELECTED_NODE_ORDINAL_SQL;
 pub use window::{STATEMENTS_FOR_TESTS as WINDOW_STATEMENTS_FOR_TESTS, window};
 mod body_page;
+#[doc(hidden)]
+pub mod display_source;
 mod node_row;
 pub(crate) mod observation;
 mod window_links;
@@ -58,7 +60,7 @@ use crate::{
     protocol::{
         ApiError, ErrorCode, HistoryBody, HistoryExecutionLink, HistoryListArgs,
         HistoryListFilters, HistoryListPage, HistoryReadArgs, HistorySelection, HistorySnippet,
-        MAX_BODY_BYTES, MAX_LIST_LIMIT, PageCursor, RecordPage, ThreadForkArgs,
+        MAX_LIST_LIMIT, PageCursor, RecordPage, ThreadForkArgs,
     },
     storage::{DbWorker, StorageError},
 };
@@ -771,12 +773,7 @@ fn read_node(
     connection: &Connection,
     args: &HistoryReadArgs,
 ) -> Result<(HistoryBody, Option<Value>), ApiError> {
-    if args.limit_bytes == 0 || args.limit_bytes > MAX_BODY_BYTES {
-        return Err(ApiError::new(
-            ErrorCode::InvalidArgument,
-            "history body limit must be in 1..=65536",
-        ));
-    }
+    args.validate()?;
     let (rowid, kind, revision, deleted_reason, has_payload): (i64, String, i64, Option<String>, bool) = connection
         .query_row(
             "SELECT rowid,kind,payload_revision,deleted_reason,typeof(payload_json)='text' FROM node WHERE id=?1",
@@ -805,7 +802,9 @@ fn read_node(
     } else {
         args.encoding.as_str()
     };
-    let cursor_scope = if args.parts {
+    let cursor_scope = if args.display.is_some() {
+        "history.read.display"
+    } else if args.parts {
         if kind != "summary" {
             return Err(ApiError::new(
                 ErrorCode::InvalidArgument,
@@ -824,11 +823,15 @@ fn read_node(
     } else {
         "history.read"
     };
+    let display_filter = args.display.as_ref().map(|display| {
+        serde_json::to_string(&(&args.node_id, display)).expect("display selector serializes")
+    });
+    let cursor_filter = display_filter.as_deref().unwrap_or(&args.node_id);
     let (start, cursor_watermark) = if let Some(token) = &args.cursor {
         let cursor = PageCursor::decode(
             token,
             cursor_scope,
-            &args.node_id,
+            cursor_filter,
             revision as u64,
             Some(encoding),
         )?;
@@ -848,12 +851,25 @@ fn read_node(
     }
     let mut parts_info = None;
     let limit = args.limit_bytes as usize;
-    let (text, total_bytes) = if has_payload
+    let mut display_page = None;
+    let (text, total_bytes, start) = if let Some(display) = &args.display {
+        let (text, page, start, end) = display_source::read_page(
+            connection,
+            args,
+            &kind,
+            display,
+            cursor_watermark.map(|mark| (start, mark)),
+        )?;
+        display_page = Some(page);
+        (text, end, start)
+    } else if has_payload
         && matches!(
             kind.as_str(),
             "incomplete_response" | "model_stream_observation"
-        ) {
-        body_page::saved_json(connection, rowid, start, limit)?
+        )
+    {
+        let (text, total) = body_page::saved_json(connection, rowid, start, limit)?;
+        (text, total, start)
     } else {
         let payload = if has_payload {
             NodeRow::load_payload(connection, &args.node_id)
@@ -901,7 +917,8 @@ fn read_node(
         } else {
             String::new()
         };
-        body_page::projected(&text, start, limit)?
+        let (text, total) = body_page::projected(&text, start, limit)?;
+        (text, total, start)
     };
     let end = start + text.len();
     let next_cursor = if end < total_bytes {
@@ -909,7 +926,7 @@ fn read_node(
             PageCursor {
                 version: 1,
                 scope: cursor_scope.into(),
-                filter: args.node_id.clone(),
+                filter: cursor_filter.into(),
                 last_sort_key: end.to_string(),
                 watermark: total_bytes as u64,
                 revision: revision as u64,
@@ -936,6 +953,7 @@ fn read_node(
         &args.node_id,
     )?;
     let body = HistoryBody {
+        display: display_page,
         context: crate::context::for_node(connection, &args.node_id)?,
         provenance: relations::projected_provenance(connection, &args.node_id, None)?,
         node_id: args.node_id.clone(),

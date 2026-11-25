@@ -1347,6 +1347,15 @@ pub struct HistoryReadOptions {
     /// For a summary node: list its saved summary parts (map then reduce) with per-part range, stage, usage and paged bodies.
     #[arg(long, conflicts_with = "end_message_only")]
     pub parts: bool,
+    /// Read the bounded display-source tail, rather than original text.
+    #[arg(long, conflicts_with_all = ["offset", "from_end", "parts", "end_message_only"])]
+    pub display: bool,
+    /// Read the display source around this absolute character offset.
+    #[arg(long, conflicts_with_all = ["from_end", "parts", "end_message_only"])]
+    pub offset: Option<u64>,
+    /// Read the display source around this character offset from its end.
+    #[arg(long, conflicts_with_all = ["parts", "end_message_only"])]
+    pub from_end: Option<u64>,
     #[arg(long = "node")]
     pub node_id: String,
     #[arg(long,default_value_t=wire::MAX_BODY_BYTES)]
@@ -2154,6 +2163,18 @@ impl Cli {
                     excerpt_chars: a.excerpt_chars,
                 }),
                 HistoryCommand::Read(a) => C::HistoryRead(wire::HistoryReadArgs {
+                    display: a
+                        .offset
+                        .map(|offset| wire::HistoryDisplayPosition::Absolute { offset })
+                        .or_else(|| {
+                            a.from_end
+                                .map(|offset| wire::HistoryDisplayPosition::FromEnd { offset })
+                        })
+                        .or(a.display.then_some(wire::HistoryDisplayPosition::Tail))
+                        .map(|position| wire::HistoryDisplayRead {
+                            position,
+                            selection: None,
+                        }),
                     end_message_only: a.end_message_only,
                     parts: a.parts,
                     node_id: a.node_id,
