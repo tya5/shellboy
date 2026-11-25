@@ -581,8 +581,16 @@ impl ThreadView {
                 return None;
             }
             node.presentation.blocks.iter().rev().find_map(|block| {
-                let tool = block.tool.as_ref().filter(|_| block.kind == BlockKind::ToolResult)?;
-                let released = matches!(tool.reason_kind, ToolReasonKind::ShellBackgrounded | ToolReasonKind::HumanBackgrounded | ToolReasonKind::AdditionalInput);
+                let tool = block
+                    .tool
+                    .as_ref()
+                    .filter(|_| block.kind == BlockKind::ToolResult)?;
+                let released = matches!(
+                    tool.reason_kind,
+                    ToolReasonKind::ShellBackgrounded
+                        | ToolReasonKind::HumanBackgrounded
+                        | ToolReasonKind::AdditionalInput
+                );
                 (released || tool.status == "cancelled").then_some((ordinal, tool))
             })
         });
@@ -593,8 +601,10 @@ impl ThreadView {
         }
     }
 
-    pub(super) fn retire_saved_preview(&mut self, read_revision: u64) -> Vec<UiAction> {
-        self.preview_retired_at = self.preview_retired_at.max(read_revision);
+    pub(super) fn retire_saved_preview(&mut self) -> Vec<UiAction> {
+        // The view owns the transition, including frames staged after the
+        // saved read but before its delivery. Rendering never restamps them.
+        self.preview_retired_at = crate::frontend::saved_view_sequence();
         self.activity.clear_receive_observation();
         self.settle_other_streams("")
     }
