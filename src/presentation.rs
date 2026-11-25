@@ -31,6 +31,7 @@ mod markdown_links;
 pub mod messages;
 mod projection;
 pub mod rows;
+pub(crate) use projection::display_outline;
 pub use projection::project;
 pub mod branch_marker;
 pub mod compaction_marker;

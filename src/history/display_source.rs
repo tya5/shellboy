@@ -194,7 +194,7 @@ pub(super) fn read_page(
         [&args.node_id],
         |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
     ).map_err(super::sql_error)?;
-    let (_, source, mut reasoning) = decode(kind, payload.as_deref(), reason.as_deref());
+    let (decoded, source, mut reasoning) = decode(kind, payload.as_deref(), reason.as_deref());
     let total = source.chars().count();
     if kind == "reasoning" && total > 0 {
         reasoning = vec![(0, total)];
@@ -230,11 +230,22 @@ pub(super) fn read_page(
             (start < end).then_some(HistoryDisplayRange { start, end })
         })
         .collect();
+    let range = HistoryDisplayRange {
+        start: char_at(extent.start),
+        end: char_at(extent.end),
+    };
+    let outline = continuation.is_none().then(|| {
+        crate::presentation::display_outline(
+            &args.node_id,
+            kind,
+            &decoded,
+            &source[extent.clone()],
+            &range,
+        )
+    });
     let projection = HistoryDisplayPage {
-        extent: HistoryDisplayRange {
-            start: char_at(extent.start),
-            end: char_at(extent.end),
-        },
+        outline,
+        extent: range,
         page,
         total_chars: total as u64,
         reasoning,
