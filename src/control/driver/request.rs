@@ -343,11 +343,6 @@ pub(super) async fn stream_observer<'a>(
         live_text.received(observed_at, notify);
         if notify {
             last_receive_notice = Some(observed_at);
-            control.publish_event(EngineEvent::ModelReceive {
-                thread_id: thread.into(),
-                attempt_id: attempt.into(),
-                observed_at,
-            });
         }
         let Some(event) = event else {
             return;
@@ -361,14 +356,7 @@ pub(super) async fn stream_observer<'a>(
         {
             let stream_char_offset = stream_chars;
             stream_chars += delta.chars().count();
-            control.stream_admitted_delta(
-                &live_text,
-                thread,
-                attempt,
-                delta,
-                reasoning,
-                stream_char_offset,
-            );
+            live_text.record(stream_char_offset as u64, delta, reasoning);
         }
     })
 }

@@ -1115,7 +1115,7 @@ async fn saved_tool_result_notifies_its_selected_history_only_after_commit() {
         }
         // The adopted call's notification has already happened. Only the saved
         // result can make this subscription observe another history change.
-        let mut subscription = control.subscribe_ui();
+        let mut subscription = control.subscribe();
         let result = save_tool_result(
             &control,
             &snapshot,
@@ -1127,16 +1127,16 @@ async fn saved_tool_result_notifies_its_selected_history_only_after_commit() {
         if rollback {
             assert!(result.is_err());
             assert!(matches!(
-                subscription.receiver.try_recv(),
+                subscription.try_recv(),
                 Err(tokio::sync::broadcast::error::TryRecvError::Empty)
             ));
         } else {
             result.unwrap();
             assert!(
-                matches!(subscription.receiver.try_recv(), Ok(EngineEvent::Changed {thread_id,recovery:false}) if thread_id==accepted.thread_id)
+                matches!(subscription.try_recv(), Ok(EngineEvent::Changed {thread_id,recovery:false}) if thread_id==accepted.thread_id)
             );
             assert!(matches!(
-                subscription.receiver.try_recv(),
+                subscription.try_recv(),
                 Err(tokio::sync::broadcast::error::TryRecvError::Empty)
             ));
         }

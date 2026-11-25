@@ -931,12 +931,31 @@ async fn stalled_permanent_error_body_is_not_retried() {
             hold_open:true,
         }).ok().unwrap();
         crate::test_watchdog::watchdog("permanent response headers observed", async {
+            let mut after = None;
             loop {
-                if let EngineEvent::ModelReceive { thread_id, .. } = events.recv().await.unwrap()
-                    && thread_id == fixture.accepted.thread_id
+                let page: EventsWaitResult = serde_json::from_value(
+                    request(
+                        &fixture.control,
+                        Command::EventsWait(EventsWaitArgs {
+                            after,
+                            thread_ids: vec![fixture.accepted.thread_id.clone()],
+                            timeout_ms: 1_000,
+                            include_text: true,
+                            include_reasoning_activity: false,
+                        }),
+                    )
+                    .await,
+                )
+                .unwrap();
+                if page
+                    .live_text
+                    .into_iter()
+                    .flatten()
+                    .any(|attempt| attempt.receive_age_ms.is_some())
                 {
                     break;
                 }
+                after = Some(page.cursor);
             }
         })
         .await

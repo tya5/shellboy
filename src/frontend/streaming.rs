@@ -203,11 +203,6 @@ impl Display {
         }
     }
 
-    pub fn forget_attempt(&mut self, thread: &str, attempt: &str) {
-        self.windows
-            .retain(|w| w.thread != thread || w.attempt != attempt);
-    }
-
     pub fn invalidate(&mut self, thread: &str) {
         for window in self.windows.iter_mut().filter(|w| w.thread == thread) {
             window.body.dirty = true;

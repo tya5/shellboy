@@ -2626,7 +2626,6 @@ async fn persisted_output_identity_is_delivered_before_each_history_window() {
     .unwrap();
     let control = Control::new(&owner, root.path().into());
     let observer = control.clone();
-    let mut observations = observer.subscribe();
     let (rpc_send, rpc_receive) = tokio::sync::mpsc::channel(8);
     let server = LocalServer::bind(&owner, rpc_send).await.unwrap();
     tokio::spawn(control.clone().serve(rpc_receive));
@@ -2731,9 +2730,9 @@ async fn persisted_output_identity_is_delivered_before_each_history_window() {
                 ack.notify_one();
             }
             if text.ends_with(" 後半") {
-                assert_eq!(text, "ordinary prose考え 後半");
-                assert_eq!((base_char_offset, total_chars), (0, 19));
-                assert_eq!(reasoning_ranges, [(14, 16)]);
+                assert_eq!(text, "ordinary prose 後半");
+                assert_eq!((base_char_offset, total_chars), (0, 17));
+                assert!(reasoning_ranges.is_empty());
                 Some(())
             } else {
                 None
@@ -2742,25 +2741,6 @@ async fn persisted_output_identity_is_delivered_before_each_history_window() {
         _ => None,
     })
     .await;
-    let mut offsets = Vec::new();
-    while let Ok(event) = observations.try_recv() {
-        if let shellboy::control::EngineEvent::Stream {
-            stream_char_offset,
-            text,
-            ..
-        } = event
-        {
-            offsets.push((stream_char_offset, text));
-        }
-    }
-    assert_eq!(
-        offsets,
-        [
-            (0, "ordinary prose".into()),
-            (14, "考え".into()),
-            (16, " 後半".into())
-        ]
-    );
     complete.send(()).unwrap();
     let mut observed = None;
     let (node, revision, total) = next_state_update(&mut incoming, |update| match update {

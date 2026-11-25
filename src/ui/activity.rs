@@ -497,6 +497,11 @@ impl ActivityView {
         self.receive_at(attempt, Instant::now());
     }
 
+    pub(super) fn clear_receive_observation(&mut self) {
+        self.receive = None;
+        self.early_receive = None;
+    }
+
     /// Headers and any body bytes are liveness observations, not assistant text.
     /// Keep one candidate when an observation precedes its saved projection.
     pub fn receive_at(&mut self, attempt: &str, at: Instant) -> bool {
