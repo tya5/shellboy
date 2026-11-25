@@ -878,7 +878,6 @@ impl ReplyState {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PreviewSource {
     pub input_through_node_id: Option<String>,
-    pub page_seq: u64,
 }
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NodePresentation {

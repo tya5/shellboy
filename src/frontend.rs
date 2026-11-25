@@ -1022,7 +1022,9 @@ async fn run_client(
     owner_signal.as_mut().enable();
     let mut watch_ipc_failure = true;
     let mut control_tasks = JoinSet::new();
+    updates.order_previews(true);
     let mut streams = streaming::Display::default();
+    let mut preview_adoption = streaming::Adoption::default();
     let mut stream_inflight = false;
     let mut stream_retry: Option<Box<streaming::Prepared>> = None;
     let mut stream_next = tokio::time::Instant::now();
@@ -1290,6 +1292,7 @@ async fn run_client(
                 .map(|generation| (thread.clone(), *generation))
         });
         if preview_scope != selected_preview {
+            preview_adoption = Default::default();
             preview_scope = selected_preview;
             preview_events = preview_scope.as_ref().map(|(thread, _)| {
                 Box::pin(saved_events::wait_scoped(
@@ -1473,10 +1476,12 @@ async fn run_client(
                 }
             },
             _=updates.notified()=> {
-                updates.flush();delivery_next=tokio::time::Instant::now()+Duration::from_millis(5);
+                updates.flush_preview(&mut |value| preview_adoption.reconcile(preview_scope.as_ref(), &mut streams, value));
+                delivery_next=tokio::time::Instant::now()+Duration::from_millis(5);
             },
             _=tokio::time::sleep_until(delivery_next),if updates.pending()=> {
-                updates.flush();delivery_next=tokio::time::Instant::now()+Duration::from_millis(5);
+                updates.flush_preview(&mut |value| preview_adoption.reconcile(preview_scope.as_ref(), &mut streams, value));
+                delivery_next=tokio::time::Instant::now()+Duration::from_millis(5);
             },
             action=actions.recv_with_admission(!updates.backpressured())=> {
                 let Some(action) = action else {
@@ -3783,20 +3788,13 @@ async fn run_client(
                 let (thread, generation) = preview_scope.as_ref().expect("guarded selected Thread");
                 match event {
                     Ok(page) => {
-                        let page_seq = match crate::protocol::EventCursor::decode(&page.cursor) {
-                            Ok(cursor) => cursor.seq,
-                            Err(error) => {
-                                preview_events = None;
-                                status(&updates, Some(thread.clone()), error).await;
-                                continue;
-                            }
-                        };
                         let live_text = page.live_text.unwrap_or_default();
                         let resync = page.status == crate::protocol::EventsWaitStatus::ResyncRequired;
                         if resync || live_text.iter().any(|live| &live.thread_id == thread && live.gap) {
                             // With no frame in flight, this ordered update retires any
                             // already displayed preview before a retained suffix can arrive.
                             streams.clear();
+                            preview_adoption.gap();
                             stream_retry = None;
                             dirty_threads.insert(thread.clone());
                             update(&updates, UiUpdate::PreviewGap {
@@ -3806,12 +3804,14 @@ async fn run_client(
                         let ended = page.attempt_ends.unwrap_or_default();
                         for end in ended.iter().filter(|end| &end.thread_id == thread) {
                             dirty_threads.insert(end.thread_id.clone());
-                            streams.retire(thread, &end.attempt_id);
-                            update(&updates, UiUpdate::StreamSettled {
-                                thread_id: thread.clone(), generation: *generation,
-                                attempt_id: end.attempt_id.clone(), owner_end_seq: Some(end.seq),
-                                received_source: None, ack: None,
-                            }).await;
+                            let staged = streams.retire(thread, &end.attempt_id);
+                            let visible = preview_adoption.retire(&end.attempt_id);
+                            if staged || visible {
+                                update(&updates, UiUpdate::StreamSettled {
+                                    thread_id: thread.clone(), generation: *generation,
+                                    attempt_id: end.attempt_id.clone(), received_source: None, ack: None,
+                                }).await;
+                            }
                         }
                         for live in live_text.into_iter().filter(|live| &live.thread_id == thread) {
                             if ended.iter().any(|end| &end.thread_id == thread && end.attempt_id == live.attempt_id) {
@@ -3819,7 +3819,6 @@ async fn run_client(
                             }
                             let source = crate::presentation::PreviewSource {
                                 input_through_node_id: live.input_through_node_id,
-                                page_seq,
                             };
                             if let Some(age) = live.receive_age_ms
                                 && let Some(observed_at) = std::time::Instant::now().checked_sub(Duration::from_millis(age)) {
@@ -3845,7 +3844,7 @@ async fn run_client(
                     }
                 }
             },
-            _=tokio::time::sleep_until(stream_next),if !stream_inflight && (stream_retry.is_some() || streams.pending())=> {
+            _=tokio::time::sleep_until(stream_next),if !stream_inflight && (stream_retry.is_some() || streams.pending(&preview_adoption))=> {
                 let retry = stream_retry
                     .take()
                     .filter(|frame| streams.current(&frame.ticket, render_width));
@@ -3854,7 +3853,7 @@ async fn run_client(
                         .active_thread
                         .as_ref()
                         .and_then(|thread| selection.generations.get(thread))
-                        .and_then(|generation| streams.take(*generation, render_width))
+                        .and_then(|generation| streams.take_eligible(*generation, render_width, &preview_adoption))
                 });
                 if let Some(frame) = frame {
                     stream_inflight = true;
@@ -3882,6 +3881,7 @@ async fn run_client(
             _=send_workers.join_next(),if !send_workers.is_empty()=> {},
         }
     }
+    updates.order_previews(false);
     drop(saved_events);
     drop(preview_events);
     read_cancel.cancel();

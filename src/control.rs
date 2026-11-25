@@ -562,6 +562,15 @@ impl Control {
         self.change_clock.live_text_guard(thread, "fixture-attempt")
     }
     #[cfg(test)]
+    pub(crate) fn fixture_end_live_text(&self, thread: &str) {
+        self.change_clock.record_attempt_end(
+            thread,
+            "fixture-attempt",
+            crate::protocol::EventAttemptOutcome::NotAdopted,
+            None,
+        );
+    }
+    #[cfg(test)]
     pub(crate) fn expire_saved_event_cursor_for_test(&self) {
         for i in 0..=change_clock::MAX_CHANGE_THREADS {
             self.change_clock.record(&format!("fixture-gap-{i}"));
