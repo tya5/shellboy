@@ -3781,10 +3781,279 @@
       "title": "HistoryBody",
       "type": "object"
     },
+    "HistoryDisplayBlock": {
+      "properties": {
+        "event_kind": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fields": {
+          "items": {
+            "$ref": "#/definitions/HistoryDisplayField"
+          },
+          "type": "array"
+        },
+        "range": {
+          "$ref": "#/definitions/HistoryDisplayRange"
+        },
+        "role": {
+          "$ref": "#/definitions/HistoryDisplayRole"
+        },
+        "tool": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HistoryDisplayTool"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "range",
+        "role"
+      ],
+      "type": "object"
+    },
+    "HistoryDisplayField": {
+      "properties": {
+        "omitted": {
+          "type": "boolean"
+        },
+        "path": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "value",
+        "omitted"
+      ],
+      "type": "object"
+    },
+    "HistoryDisplayLink": {
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "range": {
+          "$ref": "#/definitions/HistoryDisplayRange"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "range",
+        "url",
+        "label"
+      ],
+      "type": "object"
+    },
+    "HistoryDisplayNode": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "const": "ordinary",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "reclaimed",
+              "type": "string"
+            },
+            "reason": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "reason"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "hidden_admission",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "received",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "spill",
+              "type": "string"
+            },
+            "source_node_ids": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "kind",
+            "source_node_ids"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "first_node_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "kind": {
+              "const": "trim",
+              "type": "string"
+            },
+            "last_node_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "omitted_nodes": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "reason": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "summary",
+              "type": "string"
+            },
+            "source_node_ids": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "structured": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "kind",
+            "source_node_ids",
+            "structured"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "interruption",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "HistoryDisplayOutline": {
+      "properties": {
+        "blocks": {
+          "items": {
+            "$ref": "#/definitions/HistoryDisplayBlock"
+          },
+          "type": "array"
+        },
+        "fields": {
+          "items": {
+            "$ref": "#/definitions/HistoryDisplayField"
+          },
+          "type": "array"
+        },
+        "limited": {
+          "type": "boolean"
+        },
+        "links": {
+          "items": {
+            "$ref": "#/definitions/HistoryDisplayLink"
+          },
+          "type": "array"
+        },
+        "node": {
+          "$ref": "#/definitions/HistoryDisplayNode"
+        }
+      },
+      "required": [
+        "node",
+        "blocks",
+        "fields",
+        "links",
+        "limited"
+      ],
+      "type": "object"
+    },
     "HistoryDisplayPage": {
       "properties": {
         "extent": {
           "$ref": "#/definitions/HistoryDisplayRange"
+        },
+        "outline": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HistoryDisplayOutline"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "output_limited": {
           "type": "boolean"
@@ -3913,6 +4182,17 @@
       ],
       "type": "object"
     },
+    "HistoryDisplayRole": {
+      "enum": [
+        "plain",
+        "prose",
+        "reasoning",
+        "tool_call",
+        "tool_result",
+        "event"
+      ],
+      "type": "string"
+    },
     "HistoryDisplaySelection": {
       "additionalProperties": false,
       "properties": {
@@ -3929,6 +4209,62 @@
         "thread_id",
         "revision"
       ],
+      "type": "object"
+    },
+    "HistoryDisplayTool": {
+      "properties": {
+        "call_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "command": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "execution_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "exit_code": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "group_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ordinal": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "status": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
       "type": "object"
     },
     "HistoryExecutionLink": {

@@ -11,3 +11,7 @@ invalidates continuation. Display pages carry their half-open character range,
 the full extent's range, total characters, reasoning ranges, and saved node
 projection facts. Each page contains at most 8 KiB of source bytes; the named
 extent preserves the original source geometry and contains at most 64 KiB.
+
+The first page also carries `display.outline`, typed immutable source facts
+scoped to that extent; continuations omit it. No TUI layout or raw payload
+is added.
