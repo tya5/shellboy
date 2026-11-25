@@ -272,7 +272,7 @@ waiting on an interactive prompt; it is not by itself proof. Stop it with
 
 Use `shellboy shell background --execution ID` to release a Turn’s foreground
 shell wait without stopping the process. The tool result remains `running` with
-reason `human_backgrounded`; later unexecuted calls in that group are cancelled.
+reason `shell_backgrounded`; later unexecuted calls in that group are cancelled.
 Use `shellboy turn interrupt --turn ID` for the same Turn-only interruption as
 Esc (`human_turn_interrupted`), not `run stop`. Confirm the saved outcome with
 `shell get`, `turn get`, or `history read`; acknowledgment is not completion.
@@ -470,6 +470,26 @@ read, not by repeating Send or Background. The launched process keeps its Run
 ownership. A model woken by Background should read the message, then use
 `shell get` and bounded `shell read` before deciding whether to keep observing,
 continue other work, or stop that exact command.
+
+For example, to ask a reviewer to skip an optional test:
+
+```text
+shellboy message send --thread REVIEWER --text 'Skip the optional test and continue the review.'
+# Save the returned message_id as SKIP_MSG.
+shellboy wait --conditions-json '[{"type":"message_delivered","message_id":"SKIP_MSG"}]' --timeout-ms 30000
+# This observation timed out; application is not confirmed.
+shellboy message get --message SKIP_MSG
+# held_by: {"kind":"foreground_shell","execution_id":"TEST_EXEC"}
+shellboy shell background --execution TEST_EXEC
+# requested: true acknowledges the request only.
+```
+
+If the reviewer receives `shell_backgrounded`, they read the instruction and
+inspect `TEST_EXEC` with `shell get` and `shell read`. If this is the optional
+test and the instruction authorizes skipping it, they stop that ID, verify its
+terminal state, and report it as skipped, not passed. The Background result
+itself does not identify the message or its sender. For work of unknown
+duration, see [worked background-and-wait examples](shell.md#worked-background-and-wait-examples).
 
 If the target is in `recovery_wait`, a normal machine send (including this one) is held and does not resume it. Inspect the saved reason with `run get`; use `run retry` when recovery should reprepare the same Turn. Use `message send --resume-recovery` only when this new message is itself the reviewed instruction to resume; the `recovery_resumed` event records `external_cli` for an explicit external CLI resume and preserves an authenticated shell Origin when present. The TUI message-send form exposes the same explicit choice. A human TUI/chat instruction or caller-less human `message reply` resumes explicitly; a model-origin reply does not impersonate a human and remains held at recovery wait.
 

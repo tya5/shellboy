@@ -21,7 +21,7 @@ the process remains alive when another consumer reads the history.
 | `previous_call_failed` | The prerequisite failed or stopped, or shell admission/execution returned a non-storage error. |
 | `previous_output_incomplete` | The prerequisite's saved output is incomplete. |
 | `previous_wait_released_by_new_input` | New accepted input released the prerequisite's foreground wait; that shell was still running. |
-| `previous_wait_released_by_human_background` | A human released the prerequisite's foreground wait; that shell was still running. |
+| `previous_wait_released_by_shell_background` | An explicit Background released the prerequisite's foreground wait; that shell was still running. |
 | `previous_wait_released` | The shell's saved CLI wait-release outcome halted the group; preserve that outcome separately. |
 | `tool_group_validation_failed` | Preflight rejected another call before any OS side effect. |
 | `owner_shutdown_before_call` | Owner shutdown closed new starts before this call. |
@@ -41,8 +41,9 @@ existing error result; other cancelled calls receive the structured explanation.
 Storage errors and admission OperationConflict still propagate rather than
 manufacturing results or completing a pre-existing call.
 
-The prerequisite result itself is unchanged, including `additional_input` and
-`human_backgrounded`. Completed results are persisted through the existing
+The prerequisite result records `shell_backgrounded` for explicit Background.
+Saved `human_backgrounded` results are not rewritten, and immediate delivery
+still records `additional_input`. Completed results are persisted through the existing
 save_tool_result transaction and replayed without rewriting historical results.
 Frontends project reason/message/prerequisite from the saved results, retaining
 raw details. The existing group-completion Notice still reports only its current

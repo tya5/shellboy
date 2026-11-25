@@ -1697,77 +1697,77 @@
   "src/presentation.rs:bedb4ba4242d9729:1": {
     "category": "a",
     "reason": "Retained Japanese tool-reason wording for the Ja renderer; English UI rendering uses the typed ToolReasonKind mapping in presentation.messages::tool_reason.",
-    "source_tokens_sha256": "4856848a037c0dd47e4ae48a7f7e276ed6578d4de977aa571159b5d1d429124b"
+    "source_tokens_sha256": "3fbe57676a6b14a9e239c30604bb334dce781f304812ef6b0291c61e16dc9b7a"
   },
   "src/presentation.rs:b3d77f4d0c997828:1": {
     "category": "a",
     "reason": "Retained Japanese tool-reason wording for the Ja renderer; English UI rendering uses the typed ToolReasonKind mapping in presentation.messages::tool_reason.",
-    "source_tokens_sha256": "4856848a037c0dd47e4ae48a7f7e276ed6578d4de977aa571159b5d1d429124b"
+    "source_tokens_sha256": "3fbe57676a6b14a9e239c30604bb334dce781f304812ef6b0291c61e16dc9b7a"
   },
   "src/presentation.rs:10a35ec4a4297807:1": {
     "category": "a",
     "reason": "Retained Japanese tool-reason wording for the Ja renderer; English UI rendering uses the typed ToolReasonKind mapping in presentation.messages::tool_reason.",
-    "source_tokens_sha256": "4856848a037c0dd47e4ae48a7f7e276ed6578d4de977aa571159b5d1d429124b"
+    "source_tokens_sha256": "3fbe57676a6b14a9e239c30604bb334dce781f304812ef6b0291c61e16dc9b7a"
   },
   "src/presentation.rs:3916621351a3ee23:1": {
     "category": "a",
     "reason": "Retained Japanese tool-reason wording for the Ja renderer; English UI rendering uses the typed ToolReasonKind mapping in presentation.messages::tool_reason.",
-    "source_tokens_sha256": "4856848a037c0dd47e4ae48a7f7e276ed6578d4de977aa571159b5d1d429124b"
+    "source_tokens_sha256": "3fbe57676a6b14a9e239c30604bb334dce781f304812ef6b0291c61e16dc9b7a"
   },
   "src/presentation.rs:0798da5ffeae2564:1": {
     "category": "a",
     "reason": "Retained Japanese tool-reason wording for the Ja renderer; English UI rendering uses the typed ToolReasonKind mapping in presentation.messages::tool_reason.",
-    "source_tokens_sha256": "4856848a037c0dd47e4ae48a7f7e276ed6578d4de977aa571159b5d1d429124b"
+    "source_tokens_sha256": "3fbe57676a6b14a9e239c30604bb334dce781f304812ef6b0291c61e16dc9b7a"
   },
   "src/presentation.rs:a09ef1424b4120d0:1": {
     "category": "a",
     "reason": "Retained Japanese tool-reason wording for the Ja renderer; English UI rendering uses the typed ToolReasonKind mapping in presentation.messages::tool_reason.",
-    "source_tokens_sha256": "4856848a037c0dd47e4ae48a7f7e276ed6578d4de977aa571159b5d1d429124b"
+    "source_tokens_sha256": "3fbe57676a6b14a9e239c30604bb334dce781f304812ef6b0291c61e16dc9b7a"
   },
   "src/presentation.rs:316d69e56b430c80:1": {
     "category": "a",
     "reason": "Retained Japanese tool-reason wording for the Ja renderer; English UI rendering uses the typed ToolReasonKind mapping in presentation.messages::tool_reason.",
-    "source_tokens_sha256": "4856848a037c0dd47e4ae48a7f7e276ed6578d4de977aa571159b5d1d429124b"
+    "source_tokens_sha256": "3fbe57676a6b14a9e239c30604bb334dce781f304812ef6b0291c61e16dc9b7a"
   },
   "src/presentation.rs:0dde46f4b858b396:1": {
     "category": "a",
     "reason": "Retained Japanese tool-reason wording for the Ja renderer; English UI rendering uses the typed ToolReasonKind mapping in presentation.messages::tool_reason.",
-    "source_tokens_sha256": "4856848a037c0dd47e4ae48a7f7e276ed6578d4de977aa571159b5d1d429124b"
+    "source_tokens_sha256": "3fbe57676a6b14a9e239c30604bb334dce781f304812ef6b0291c61e16dc9b7a"
   },
   "src/presentation.rs:4a15576ae920bf68:1": {
     "category": "a",
     "reason": "Retained Japanese tool-reason wording for the Ja renderer; English UI rendering uses the typed ToolReasonKind mapping in presentation.messages::tool_reason.",
-    "source_tokens_sha256": "4856848a037c0dd47e4ae48a7f7e276ed6578d4de977aa571159b5d1d429124b"
+    "source_tokens_sha256": "3fbe57676a6b14a9e239c30604bb334dce781f304812ef6b0291c61e16dc9b7a"
   },
   "src/presentation.rs:3bca2f3d9e15bbe3:1": {
     "category": "a",
     "reason": "Retained Japanese tool-reason wording for the Ja renderer; English UI rendering uses the typed ToolReasonKind mapping in presentation.messages::tool_reason.",
-    "source_tokens_sha256": "4856848a037c0dd47e4ae48a7f7e276ed6578d4de977aa571159b5d1d429124b"
+    "source_tokens_sha256": "3fbe57676a6b14a9e239c30604bb334dce781f304812ef6b0291c61e16dc9b7a"
   },
   "src/presentation.rs:c5f8481a7ae19b2b:1": {
     "category": "a",
     "reason": "Retained Japanese tool-reason wording for the Ja renderer; English UI rendering uses the typed ToolReasonKind mapping in presentation.messages::tool_reason.",
-    "source_tokens_sha256": "4856848a037c0dd47e4ae48a7f7e276ed6578d4de977aa571159b5d1d429124b"
+    "source_tokens_sha256": "3fbe57676a6b14a9e239c30604bb334dce781f304812ef6b0291c61e16dc9b7a"
   },
   "src/presentation.rs:dbd73782127c9df8:1": {
     "category": "a",
     "reason": "Retained Japanese tool-reason wording for the Ja renderer; English UI rendering uses the typed ToolReasonKind mapping in presentation.messages::tool_reason.",
-    "source_tokens_sha256": "4856848a037c0dd47e4ae48a7f7e276ed6578d4de977aa571159b5d1d429124b"
+    "source_tokens_sha256": "3fbe57676a6b14a9e239c30604bb334dce781f304812ef6b0291c61e16dc9b7a"
   },
   "src/presentation.rs:092c58f55e5aa3d2:1": {
     "category": "a",
     "reason": "Retained Japanese tool-reason wording for the Ja renderer; English UI rendering uses the typed ToolReasonKind mapping in presentation.messages::tool_reason.",
-    "source_tokens_sha256": "4856848a037c0dd47e4ae48a7f7e276ed6578d4de977aa571159b5d1d429124b"
+    "source_tokens_sha256": "3fbe57676a6b14a9e239c30604bb334dce781f304812ef6b0291c61e16dc9b7a"
   },
   "src/presentation.rs:8d8d281a5173215d:1": {
     "category": "a",
     "reason": "Retained Japanese tool-reason wording for the Ja renderer; English UI rendering uses the typed ToolReasonKind mapping in presentation.messages::tool_reason.",
-    "source_tokens_sha256": "4856848a037c0dd47e4ae48a7f7e276ed6578d4de977aa571159b5d1d429124b"
+    "source_tokens_sha256": "3fbe57676a6b14a9e239c30604bb334dce781f304812ef6b0291c61e16dc9b7a"
   },
   "src/presentation.rs:fb0a29460c2a7489:1": {
     "category": "a",
     "reason": "Retained Japanese tool-reason wording for the Ja renderer; English UI rendering uses the typed ToolReasonKind mapping in presentation.messages::tool_reason.",
-    "source_tokens_sha256": "4856848a037c0dd47e4ae48a7f7e276ed6578d4de977aa571159b5d1d429124b"
+    "source_tokens_sha256": "3fbe57676a6b14a9e239c30604bb334dce781f304812ef6b0291c61e16dc9b7a"
   },
   "src/ui/operations.rs:029f6b93dce69082:1": {
     "category": "a",
@@ -6427,7 +6427,7 @@
   "src/presentation/messages.rs:38065c90cf3e6e78:1": {
     "category": "a",
     "reason": "Fixed Japanese error-detail sentinel maps to Error details: F6 in English tool_reason; arbitrary provider/error prefixes remain unchanged.",
-    "source_tokens_sha256": "1be06d669c2418d1427eb9f3bc8adc476a69a7630caa6243b3ac9940f9407fd6"
+    "source_tokens_sha256": "f397df7b2cc11d0cc92c8bb4780c58264b425c949490e435eebb0bbb7df89743"
   },
   "src/presentation/projection/envelopes.rs:be056047f0b0912f:1": {
     "category": "a",
@@ -6555,12 +6555,12 @@
   "src/presentation/messages.rs:68938f9d1e4cc943:1": {
     "category": "a",
     "reason": "Japanese terminal-width variant for the generated F6 details suffix; English tool_reason maps this exact suffix to F6 details and preserves the preceding error text.",
-    "source_tokens_sha256": "1be06d669c2418d1427eb9f3bc8adc476a69a7630caa6243b3ac9940f9407fd6"
+    "source_tokens_sha256": "f397df7b2cc11d0cc92c8bb4780c58264b425c949490e435eebb0bbb7df89743"
   },
   "src/presentation/messages.rs:8cfbf51c65edaa9f:1": {
     "category": "a",
     "reason": "Japanese terminal-width variant for the generated F6 details suffix; English tool_reason maps this exact suffix to F6 details and preserves the preceding error text.",
-    "source_tokens_sha256": "1be06d669c2418d1427eb9f3bc8adc476a69a7630caa6243b3ac9940f9407fd6"
+    "source_tokens_sha256": "f397df7b2cc11d0cc92c8bb4780c58264b425c949490e435eebb0bbb7df89743"
   },
   "src/presentation/projection/envelopes.rs:c668cd43e018cc79:1": {
     "category": "a",
@@ -7271,5 +7271,15 @@
     "category": "a",
     "reason": "Called only for Japanese receipt rendering; the English branch uses receipt_english in ui/view.rs.",
     "source_tokens_sha256": "175c70a023014408ac9b71b3ca4c3782cbd36715e9141f7f24aed2323ce21979"
+  },
+  "src/presentation.rs:f569412f5c07b340:1": {
+    "category": "a",
+    "reason": "Japanese tool-reason wording for the Ja renderer; presentation.messages::tool_reason supplies typed English wording.",
+    "source_tokens_sha256": "3fbe57676a6b14a9e239c30604bb334dce781f304812ef6b0291c61e16dc9b7a"
+  },
+  "src/presentation.rs:a09960b7634327bd:1": {
+    "category": "a",
+    "reason": "Japanese tool-reason wording for the Ja renderer; presentation.messages::tool_reason supplies typed English wording.",
+    "source_tokens_sha256": "3fbe57676a6b14a9e239c30604bb334dce781f304812ef6b0291c61e16dc9b7a"
   }
 }
