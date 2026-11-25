@@ -443,6 +443,17 @@ changes to the parent do not change an existing child.
 Off is not a complete compaction disable: the intended policy keeps automatic
 summary work and skips automatic spill stages. The effective setting drives the automatic route.
 
+## Keep reusable procedures
+
+Put each reusable procedure and its scripts in a folder under the project's
+`knowledge/` directory. In the project's `AGENTS.md`, index each procedure on
+one line: `name — when to use it — path`. For example:
+`Check a bridge — when verifying a Thread service — knowledge/check-bridge/README.md`.
+The model sees the index each Turn and reads the procedure body only when
+relevant. A person can invoke a procedure by asking for it by name. There is
+no separate skills registry; revisit a dedicated short index only if these
+lists become too long in practice.
+
 ## Ask and reply
 
 An **Ask** opens a reply duty: Shellboy saves the question, its delivery state,
