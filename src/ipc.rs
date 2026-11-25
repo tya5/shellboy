@@ -1052,9 +1052,15 @@ mod frame_delivery_tests {
             // Close the transport after commit, without handing the reply to the client.
             accepted.result.unwrap()
         });
-        let error = call_stream(client, selected, submit, Some(operation.clone()), None)
-            .await
-            .unwrap_err();
+        let error = call_stream(
+            client,
+            selected,
+            submit.clone(),
+            Some(operation.clone()),
+            None,
+        )
+        .await
+        .unwrap_err();
         let details = error.details.unwrap();
         assert_eq!(details["request_may_have_been_applied"], true);
         assert_eq!(details["operation_id"], operation);
@@ -1069,10 +1075,8 @@ mod frame_delivery_tests {
             evidence.outcome["result"]["message_id"],
             accepted["message_id"]
         );
-        let counts = control
-            .store
-            .database
-            .call(move |db| {
+        let counts = |operation: String| {
+            control.store.database.call(move |db| {
                 Ok((
                     db.query_row(
                         "SELECT count(*) FROM operation_receipt WHERE operation_id=?1",
@@ -1086,9 +1090,8 @@ mod frame_delivery_tests {
                     )?,
                 ))
             })
-            .await
-            .unwrap();
-        assert_eq!(counts, (1, 1));
+        };
+        assert_eq!(counts(operation.clone()).await.unwrap(), (1, 1));
         assert!(
             control
                 .request(Request::new(
@@ -1101,6 +1104,13 @@ mod frame_delivery_tests {
                 .error
                 .is_some_and(|e| e.code == ErrorCode::OperationNotFound)
         );
+        // Reconcile by lookup first; deliberate same-ID replay remains idempotent.
+        let replay = control
+            .request(Request::new(operation.clone(), submit))
+            .await;
+        assert!(replay.ok, "{:?}", replay.error);
+        assert_eq!(replay.result.unwrap(), accepted);
+        assert_eq!(counts(operation).await.unwrap(), (1, 1));
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
     }
