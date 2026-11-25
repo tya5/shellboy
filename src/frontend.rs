@@ -3840,8 +3840,13 @@ async fn run_client(
                                     attempt_id: live.attempt_id.clone(), observed_at,
                                 }).await;
                             }
+                            if live.gap {
+                                // A gap can contain only omitted reasoning; retain its
+                                // provenance even when there is no answer to render yet.
+                                streams.observe_answer(thread, &live.attempt_id, "", true);
+                            }
                             for delta in live.deltas.into_iter().filter(|delta| !delta.reasoning) {
-                                streams.observe_answer(thread, &live.attempt_id, &delta.text, live.gap);
+                                streams.observe_answer(thread, &live.attempt_id, &delta.text, false);
                             }
                         }
                         for ended in page.attempt_ends.unwrap_or_default().into_iter().filter(|ended| &ended.thread_id == thread) {

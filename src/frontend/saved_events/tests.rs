@@ -166,6 +166,15 @@ pub(in crate::frontend) async fn install_preview_attempt(control: &crate::contro
 
 #[tokio::test]
 async fn native_preview_resync_without_replacement_retires_displayed_suffix() {
+    preview_gap(false).await;
+}
+
+#[tokio::test]
+async fn native_empty_answer_gap_keeps_the_next_live_suffix_marked_incomplete() {
+    preview_gap(true).await;
+}
+
+async fn preview_gap(still_live: bool) {
     let (root, owner, control, server) = control_tests::fixture().await;
     install_preview_attempt(&control).await;
     let live = control.fixture_live_text("thread");
@@ -196,8 +205,17 @@ async fn native_preview_resync_without_replacement_retires_displayed_suffix() {
             }
             tokio::task::yield_now().await;
         }
-        drop(live);
-        control.expire_saved_event_cursor_for_test();
+        let live = if still_live {
+            // A single oversized reasoning delta evicts the earlier answer.
+            // The owner omits all retained reasoning from the native page.
+            let reasoning = "r".repeat(128 * 1024);
+            assert!(live.record("provisional suffix".len() as u64, &reasoning, true));
+            Some(live)
+        } else {
+            drop(live);
+            control.expire_saved_event_cursor_for_test();
+            None
+        };
         loop {
             if let Ok(update) = incoming.try_recv() {
                 let gap = matches!(&update, UiUpdate::PreviewGap { thread_id, generation }
@@ -214,6 +232,33 @@ async fn native_preview_resync_without_replacement_retires_displayed_suffix() {
                 }
             } else {
                 tokio::task::yield_now().await;
+            }
+        }
+        if let Some(live) = live {
+            assert!(live.record(
+                ("provisional suffix".len() + 128 * 1024) as u64,
+                "later answer",
+                false
+            ));
+            loop {
+                if let Ok(update) = incoming.try_recv() {
+                    ui.apply(update);
+                    if let Some(node) = ui
+                        .view()
+                        .nodes()
+                        .iter()
+                        .find(|node| node.text == "later answer")
+                    {
+                        assert_eq!(node.node_id, "fixture-attempt");
+                        assert!(
+                            node.presentation.body_extent_unknown,
+                            "missing answer prefix must stay unknown"
+                        );
+                        break;
+                    }
+                } else {
+                    tokio::task::yield_now().await;
+                }
             }
         }
     })
