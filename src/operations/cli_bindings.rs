@@ -544,6 +544,7 @@ const MEANINGS: &[Meaning] = &[
             ("encoding", FieldId::Encoding),
             ("limit_bytes", FieldId::LimitBytes),
             ("segments", FieldId::ShellSegments),
+            ("tail", FieldId::ShellTail),
         ],
         None,
     ),

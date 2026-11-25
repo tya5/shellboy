@@ -757,7 +757,13 @@ impl HistoryRelationsArgs {
 }
 
 impl ShellReadArgs {
-    fn validate(&self) -> Result<(), ApiError> {
+    pub(crate) fn validate(&self) -> Result<(), ApiError> {
+        if self.tail && self.cursor.is_some() {
+            return Err(ApiError::new(
+                ErrorCode::InvalidArgument,
+                "tail cannot be combined with cursor",
+            ));
+        }
         nonempty(&self.execution_id, "execution_id")?;
         optional_nonempty(self.encoding.as_deref(), "encoding")?;
         limit(self.limit_bytes, MAX_BODY_BYTES)?;

@@ -358,6 +358,7 @@ async fn performance_shell_raw_backpressure_and_read() {
                 let now = Instant::now();
                 let page = reader
                     .read(ShellReadArgs {
+                        tail: false,
                         segments: false,
                         execution_id: "raw-shell".into(),
                         cursor: Some(cursor),

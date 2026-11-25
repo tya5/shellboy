@@ -1254,6 +1254,7 @@ mod registered_reader_tests {
             ),
             (
                 Command::ShellRead(ShellReadArgs {
+                    tail: false,
                     segments: false,
                     execution_id: "e".into(),
                     cursor: None,

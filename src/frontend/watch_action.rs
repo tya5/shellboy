@@ -28,6 +28,7 @@ pub(super) async fn execute(
         return request(
             control,
             Command::ShellRead(ShellReadArgs {
+                tail: false,
                 segments: false,
                 execution_id: execution,
                 cursor: None,

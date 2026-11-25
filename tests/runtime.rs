@@ -464,6 +464,7 @@ async fn background_read_keeps_target_raw_separate_from_message_send_and_observe
     let observer_read = command(
         &control,
         Command::ShellRead(ShellReadArgs {
+            tail: false,
             segments: false,
             execution_id: observer.into(),
             cursor: None,
@@ -1546,6 +1547,7 @@ async fn shell_output_wait_wakes_after_commit_while_shell_and_model_remain_block
     );
     let empty = reader
         .read(ShellReadArgs {
+            tail: false,
             segments: false,
             execution_id: execution.clone(),
             cursor: None,
@@ -3284,6 +3286,7 @@ async fn thread_service_file_trigger_sends_through_ipc_and_drains() {
                 let read = command(
                     &control,
                     Command::ShellRead(ShellReadArgs {
+                        tail: false,
                         segments: false,
                         execution_id: execution.clone(),
                         cursor: None,
@@ -3352,6 +3355,7 @@ async fn thread_service_file_trigger_sends_through_ipc_and_drains() {
     let read = command(
         &control,
         Command::ShellRead(ShellReadArgs {
+            tail: false,
             segments: false,
             execution_id: execution.clone(),
             cursor: None,
@@ -3368,6 +3372,7 @@ async fn thread_service_file_trigger_sends_through_ipc_and_drains() {
         .request(Request::new(
             format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
             Command::ShellRead(ShellReadArgs {
+                tail: false,
                 segments: false,
                 execution_id: execution,
                 cursor: Some(old_cursor),

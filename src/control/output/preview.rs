@@ -1,4 +1,4 @@
-//! Independent, read-only display tails. CLI cursors and read pins are untouched.
+//! Bounded, indexed retained-output suffixes for previews and shell.read.
 use super::*;
 pub(crate) mod live;
 
@@ -60,12 +60,17 @@ fn end(rows: &[Chunk]) -> usize {
         .map_or(0, |row| row.offset.saturating_add(row.len))
 }
 
-fn suffix(
+struct Fragment {
+    sequence: i64,
+    bytes: Vec<u8>,
+}
+
+fn suffix_fragments(
     db: &Connection,
     execution: &str,
     rows: &[Chunk],
     budget: usize,
-) -> Result<(Vec<u8>, usize)> {
+) -> Result<(Vec<Fragment>, usize)> {
     let mut pieces = Vec::new();
     let mut remaining = budget;
     let mut start = end(rows);
@@ -77,13 +82,150 @@ fn suffix(
         let bytes: Vec<u8> = db.query_row("SELECT substr(bytes,?3+1,?4) FROM output_chunk WHERE execution_id=?1 AND sequence=?2", params![execution,row.sequence,(row.len-count) as i64,count as i64], |r|r.get(0)).map_err(sql_error)?;
         remaining -= bytes.len();
         start = row.offset + row.len - bytes.len();
-        pieces.push(bytes);
+        pieces.push(Fragment {
+            sequence: row.sequence,
+            bytes,
+        });
     }
-    let mut bytes = Vec::with_capacity(budget - remaining);
-    for piece in pieces.into_iter().rev() {
-        bytes.extend_from_slice(&piece);
+    pieces.reverse();
+    Ok((pieces, start))
+}
+
+fn suffix(
+    db: &Connection,
+    execution: &str,
+    rows: &[Chunk],
+    budget: usize,
+) -> Result<(Vec<u8>, usize)> {
+    let (pieces, start) = suffix_fragments(db, execution, rows, budget)?;
+    Ok((
+        pieces.into_iter().flat_map(|piece| piece.bytes).collect(),
+        start,
+    ))
+}
+
+fn indexed_tail(
+    db: &Connection,
+    execution: &str,
+    streams: StreamSelection,
+) -> Result<[Vec<Chunk>; 2]> {
+    const MAX_ROWS: usize = 128;
+    let stderr = if streams.includes("stderr") {
+        tail_rows(
+            db,
+            execution,
+            "stderr",
+            if streams == StreamSelection::Both {
+                MAX_ROWS / 2
+            } else {
+                MAX_ROWS
+            },
+        )?
+    } else {
+        Vec::new()
+    };
+    let stdout = if streams.includes("stdout") {
+        tail_rows(db, execution, "stdout", MAX_ROWS - stderr.len())?
+    } else {
+        Vec::new()
+    };
+    Ok([stdout, stderr])
+}
+
+fn tail_budgets(ends: [usize; 2], budget: usize) -> [usize; 2] {
+    let stderr_reserve = ends[1].min(budget.min(1024));
+    let stdout = ends[0].min(budget - stderr_reserve);
+    [stdout, ends[1].min(budget - stdout)]
+}
+
+const MAX_TAIL_BYTES: usize = 16 * 1024;
+
+pub(super) fn read_tail(
+    db: &Connection,
+    args: &ShellReadArgs,
+    state: &Snapshot,
+    streams: StreamSelection,
+) -> Result<ShellOutput> {
+    let execution = &args.execution_id;
+    let encoding = canonical_encoding(&state.encoding)?;
+    let rows = indexed_tail(db, execution, streams)?;
+    let budgets = tail_budgets(
+        [end(&rows[0]), end(&rows[1])],
+        (args.limit_bytes as usize).min(MAX_TAIL_BYTES),
+    );
+    let mut fragments = Vec::new();
+    let mut raw_bytes = 0;
+    let mut skipped = false;
+    let mut decode_uncertain = false;
+    for (i, stream) in ["stdout", "stderr"].into_iter().enumerate() {
+        let (parts, start) = suffix_fragments(db, execution, &rows[i], budgets[i])?;
+        skipped |= start != 0;
+        raw_bytes += parts
+            .iter()
+            .map(|part| part.bytes.len() as u64)
+            .sum::<u64>();
+        // A character at the boundary can span chunks; inspect only its first few bytes.
+        let head: Vec<_> = parts
+            .iter()
+            .flat_map(|part| part.bytes.iter().copied())
+            .take(4)
+            .collect();
+        let (mut cut, uncertain) = boundary_cut(&head, start, encoding);
+        decode_uncertain |= uncertain && !head.is_empty();
+        for part in parts {
+            let skip = cut.min(part.bytes.len());
+            cut -= skip;
+            fragments.push((part.sequence, stream, part.bytes, skip));
+        }
     }
-    Ok((bytes, start))
+    fragments.sort_unstable_by_key(|part| part.0);
+    let mut text = String::new();
+    let mut segments = Vec::new();
+    let mut decode_errors = false;
+    let mut decoders = Decoders::new(encoding);
+    let mut append = |stream, part: String, bad| {
+        if args.segments {
+            append_segment(&mut text, &mut segments, stream, &part);
+        } else {
+            text.push_str(&part);
+        }
+        decode_errors |= bad;
+    };
+    for (_, stream, bytes, skip) in fragments {
+        let (part, bad) = decoders.decode(stream, &bytes[skip..], false);
+        append(stream, part, bad);
+    }
+    let terminal = state.terminal();
+    if terminal {
+        for (stream, part, bad) in decoders.finish_parts(streams) {
+            append(stream, part, bad);
+        }
+    }
+    Ok(ShellOutput {
+        execution_id: execution.clone(),
+        text,
+        segments,
+        encoding: state.encoding.clone(),
+        cursor: OutputCursor {
+            version: 1,
+            execution_id: execution.clone(),
+            sequence: state.saved,
+            byte_offset: 0,
+            retention_generation: state.generation,
+            encoding: state.encoding.clone(),
+            streams,
+            eof_flushed: terminal,
+        }
+        .encode()?,
+        raw_bytes,
+        oldest_sequence: (state.oldest != 0).then_some(state.oldest),
+        stdout_start_offset: state.stdout_start_offset,
+        stderr_start_offset: state.stderr_start_offset,
+        output_complete: state.details.output_complete,
+        decode_errors,
+        tail_skipped: skipped,
+        decode_uncertain,
+    })
 }
 
 fn boundary_cut(bytes: &[u8], start: usize, encoding: &'static Encoding) -> (usize, bool) {
@@ -134,15 +276,11 @@ pub(crate) fn preview_tail(
     }
     let state = snapshot(&tx, execution)?;
     let encoding = canonical_encoding(&state.encoding)?;
-    let budget = limits.bytes.clamp(1, 16 * 1024);
-    // The two indexed metadata ranges together inspect at most 128 rows.
-    let stderr = tail_rows(&tx, execution, "stderr", 64)?;
-    let stdout = tail_rows(&tx, execution, "stdout", 128 - stderr.len())?;
-    let stderr_end = end(&stderr);
-    let stdout_end = end(&stdout);
-    let reserved = stderr_end.min(budget.min(1024));
-    let stdout_budget = stdout_end.min(budget - reserved);
-    let stderr_budget = stderr_end.min(budget - stdout_budget);
+    let [stdout, stderr] = indexed_tail(&tx, execution, StreamSelection::Both)?;
+    let [stdout_budget, stderr_budget] = tail_budgets(
+        [end(&stdout), end(&stderr)],
+        limits.bytes.clamp(1, MAX_TAIL_BYTES),
+    );
     let (out, out_start) = suffix(&tx, execution, &stdout, stdout_budget)?;
     let (err, err_start) = suffix(&tx, execution, &stderr, stderr_budget)?;
     let (stdout_text, stdout_errors, stdout_uncertain) = decode(&out, out_start, encoding);

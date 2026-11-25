@@ -215,6 +215,20 @@ shellboy shell read --execution EXECUTION_ID --cursor CURSOR --limit-bytes 65536
 
 Inspect `text`, `raw_bytes`, `encoding`, `cursor`, `decode_errors`, and `output_complete`. After rotation, `oldest_sequence` identifies the first retained chunk; `stdout_start_offset` and `stderr_start_offset` identify the first retained raw byte offset for each stream with remaining output. These fields are optional. A cursor is opaque and binds information including execution ID, position, retention generation, and encoding. Do not edit it. To reread from the beginning with another encoding, specify that encoding without a cursor. Mixing a different encoding with an old cursor produces `cursor_encoding_mismatch`. Explicit encoding changes invalidate the associated index; explicitly reindex if needed.
 
+Use `shell read --execution EXECUTION_ID --tail` (`tail: true` on the wire)
+for a bounded snapshot of recent output from a running or finished execution.
+The indexed tail reads at most 128 chunk entries and the smaller of
+`--limit-bytes` and 16 KiB of raw output, sharing the budget between stdout and
+stderr. `tail_skipped: true` means earlier bytes were omitted;
+`decode_uncertain: true` means the bounded suffix may lack decoder context from
+an earlier byte sequence. These flags are omitted when false. Tail does not change retention.
+
+Do not combine `--tail` with `--cursor`. Continue at the returned `cursor` using
+ordinary `shell read --cursor`, without `--tail`; the reader reconstructs the
+exact decoder context from retained bytes. The unchanged `shell_output` wait
+accepts that cursor, so a running execution does not need polling. `output_complete`
+still describes the end of saved output, not whether the tail included everything.
+
 Use `shell read --segments` (wire `segments: true`) to include stream ranges; the default response has no `segments` key. The TUI shell-read form always uses the default; this option is available only through the CLI or wire request. The optional `segments` list identifies which stream produced each part of `text`. Each entry has `stream` (`stdout` or `stderr`) and a half-open `start_byte` / `end_byte` range in the UTF-8 bytes of that page's `text`, not in the raw output or UTF-16 code units. Adjacent text from the same stream shares a range. The order is the existing decoded display order, not a guarantee of relative process write times across two pipes. Segments do not change the byte limit or cursor.
 
 CP932/windows-31j/ms932 are treated as Shift_JIS variants. For UTF-16, specify `UTF-16LE` / `UTF-16BE` with known byte order. Do not rely on ambiguous UTF-16 input conversion. For invalid output bytes, inspect `decode_errors` and reread the raw output with an appropriate encoding.
