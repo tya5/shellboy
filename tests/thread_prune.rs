@@ -28,6 +28,7 @@ fn scalar(db: &Connection, sql: &str) -> rusqlite::Result<i64> {
 }
 fn get(node: &str) -> HistoryReadArgs {
     HistoryReadArgs {
+        display: None,
         end_message_only: false,
         parts: false,
         node_id: node.into(),

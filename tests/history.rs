@@ -36,6 +36,7 @@ async fn append(database: &DbWorker, id: &str, kind: &str, payload: Value) {
 
 fn body(node: &str, limit: u32, cursor: Option<String>) -> HistoryReadArgs {
     HistoryReadArgs {
+        display: None,
         end_message_only: false,
         parts: false,
         node_id: node.into(),
@@ -970,6 +971,7 @@ async fn final_answer_projection_excludes_reasoning_and_binds_its_own_cursor_sco
     assert!(default.text.contains("private reasoning"));
     assert!(default.text.contains("later commentary"));
     let request = HistoryReadArgs {
+        display: None,
         end_message_only: true,
         parts: false,
         ..body("final-node", 8, None)
@@ -981,6 +983,7 @@ async fn final_answer_projection_excludes_reasoning_and_binds_its_own_cursor_sco
     while let Some(next) = cursor {
         let part = history
             .read(HistoryReadArgs {
+                display: None,
                 cursor: Some(next),
                 ..request.clone()
             })
@@ -1000,6 +1003,7 @@ async fn final_answer_projection_excludes_reasoning_and_binds_its_own_cursor_sco
     assert!(
         history
             .read(HistoryReadArgs {
+                display: None,
                 cursor: ordinary.next_cursor,
                 ..request
             })
@@ -1163,4 +1167,94 @@ async fn fork_override_snapshot_is_independent_and_rolls_back_atomically() {
         }).await.unwrap();
         db.shutdown().await.unwrap();
     }
+}
+
+#[tokio::test]
+async fn positioned_display_pages_preserve_fences_and_reject_displaced_selection() {
+    use shellboy::protocol::{HistoryDisplayPosition, HistoryDisplayRead, HistoryDisplaySelection};
+    let (_root, db, history) = repository().await;
+    let prefix = "ordinary text\n".repeat(900);
+    let code_line = "let value = 42;\n";
+    let text = format!(
+        "{prefix}```rust\n{}\n```\n{}",
+        code_line.repeat(400),
+        "after code\n".repeat(9000)
+    );
+    let anchor = (prefix.len() + "```rust\n".len() + 200 * code_line.len()) as u64;
+    append(&db, "fence", "assistant_response", json!({"text":text})).await;
+    let revision = db
+        .call(|db| {
+            Ok(db.query_row(
+                "SELECT selection_revision FROM thread WHERE id='thread'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )?)
+        })
+        .await
+        .unwrap();
+    let mut read = body("fence", 64 * 1024, None);
+    read.display = Some(HistoryDisplayRead {
+        position: HistoryDisplayPosition::Absolute { offset: anchor },
+        selection: Some(HistoryDisplaySelection {
+            thread_id: "thread".into(),
+            revision: u64::try_from(revision).unwrap(),
+        }),
+    });
+    let first = history.read(read.clone()).await.unwrap();
+    let first_page = first.display.as_ref().unwrap();
+    assert_eq!(first_page.page.start, prefix.len() as u64);
+    assert_eq!(first.text.len(), 8 * 1024);
+    assert!(first.text.starts_with("```rust\n"));
+    assert!(first.text.contains("\n```\n"));
+    read.cursor = first.next_cursor.clone();
+    assert!(read.cursor.is_some());
+    let second = history.read(read.clone()).await.unwrap();
+    let second_page = second.display.unwrap();
+    assert_eq!(second_page.page.start, first_page.page.end);
+    assert_eq!(second_page.extent, first_page.extent);
+    assert_eq!(second_page.page.end, first_page.extent.end);
+    assert_eq!(
+        format!("{}{}", first.text, second.text),
+        text[first_page.extent.start as usize..first_page.extent.end as usize]
+    );
+    assert!(second.next_cursor.is_none());
+    assert_eq!(
+        history
+            .read(body("fence", 8192, read.cursor.clone()))
+            .await
+            .unwrap_err()
+            .code,
+        ErrorCode::CursorExpired
+    );
+    append(&db, "later", "user", json!({"text":"next"})).await;
+    assert_eq!(
+        history.read(read).await.unwrap_err().code,
+        ErrorCode::CursorExpired
+    );
+}
+
+#[tokio::test]
+async fn positioned_display_offsets_and_ranges_use_unicode_characters() {
+    use shellboy::protocol::{HistoryDisplayPosition, HistoryDisplayRange, HistoryDisplayRead};
+    let (_root, db, history) = repository().await;
+    let text = "\u{754c}".repeat(4500);
+    append(&db, "thought", "reasoning", json!({"text":text})).await;
+    let mut read = body("thought", 8192, None);
+    read.display = Some(HistoryDisplayRead {
+        position: HistoryDisplayPosition::FromEnd { offset: 100 },
+        selection: None,
+    });
+    let result = history.read(read).await.unwrap();
+    let display = result.display.unwrap();
+    assert_eq!(display.total_chars, 4500);
+    assert_eq!(
+        display.page,
+        HistoryDisplayRange {
+            start: 3888,
+            end: 4500
+        }
+    );
+    assert_eq!(display.reasoning, vec![display.page]);
+    assert_eq!(result.text, "\u{754c}".repeat(612));
+    assert!(result.next_cursor.is_none());
 }

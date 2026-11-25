@@ -1744,6 +1744,7 @@ impl Form {
                 ],
                 |form, _cwd| {
                     Ok(Command::HistoryRead(HistoryReadArgs {
+                        display: None,
                         end_message_only: form.boolean("end_message_only")?,
                         parts: form.boolean("parts")?,
                         node_id: form.owned("node")?,
