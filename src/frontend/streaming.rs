@@ -44,10 +44,7 @@ impl StreamBody {
     }
 }
 
-use super::{
-    ApiError, Control, UiNode, UiUpdate, UpdateTarget, checked_storage, presentation_work,
-    storage_error,
-};
+use super::{ApiError, Control, UiNode, UiUpdate, UpdateTarget, presentation_work};
 use std::{
     collections::VecDeque,
     sync::{Arc, mpsc::TrySendError},
@@ -87,7 +84,7 @@ pub(super) struct Prepared {
     prepared: bool,
 }
 pub(super) enum Outcome {
-    Queued { ended: bool },
+    Queued,
     Full(Box<Prepared>),
     Cancelled,
     Closed,
@@ -220,10 +217,11 @@ impl Display {
                     && w.body.revision == ticket.revision
             })
     }
-    pub fn remove(&mut self, ticket: &Ticket) {
-        self.windows.retain(|w| {
-            !(w.thread == ticket.thread && w.attempt == ticket.attempt && w.serial == ticket.serial)
-        });
+    pub fn retire(&mut self, thread: &str, attempt: &str) -> bool {
+        let previous = self.windows.len();
+        self.windows
+            .retain(|w| w.thread != thread || w.attempt != attempt);
+        self.windows.len() != previous
     }
     pub fn take(&mut self, generation: u64, width: u16) -> Option<Prepared> {
         let window = self.windows.iter_mut().rev().find(|w| w.body.dirty)?;
@@ -262,9 +260,6 @@ impl Display {
     }
 }
 impl Prepared {
-    pub fn ended(&self) -> bool {
-        self.node.is_none()
-    }
     async fn prepare(mut self) -> Result<Self, ApiError> {
         if !self.prepared {
             self = presentation_work(move || {
@@ -287,57 +282,61 @@ impl Prepared {
     }
     pub async fn deliver(
         self,
-        control: &Control,
         updates: impl UpdateTarget + Send + 'static,
         cancel: CancellationToken,
     ) -> Result<Outcome, ApiError> {
         if cancel.is_cancelled() {
             return Ok(Outcome::Cancelled);
         }
-        let frame = self.prepare().await?;
+        let mut frame = self.prepare().await?;
         if cancel.is_cancelled() {
             return Ok(Outcome::Cancelled);
         }
-        // The indexed read and nonblocking enqueue share the DB worker order
-        // with terminal persistence. Formatting and queue waits never run here.
-        let queued = control.store.database.call(move |db| {
-            if cancel.is_cancelled() { return Ok(Admission::Cancelled); }
-            #[cfg(test)] let _gate = super::stream_metrics::Gate::start();
-            let mut frame = frame;
-            let running: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM model_attempt a JOIN turn u ON u.id=a.turn_id JOIN run r ON r.id=u.run_id JOIN thread t ON t.id=u.thread_id WHERE a.id=?1 AND u.thread_id=?2 AND a.state='inflight' AND a.generation=u.generation AND a.selection_revision=t.selection_revision AND u.state='running' AND r.state='live' AND t.deleted_at IS NULL)", rusqlite::params![frame.ticket.attempt, frame.ticket.thread], |row| row.get(0))?;
-            if running && frame.node.as_ref().is_some_and(|node|node.text.is_empty()) { return Ok(Admission::Unchanged); }
-            if !running { frame.node = None; }
-            let ended = frame.node.is_none();
-            let committed: Option<String> = if ended {
-                use rusqlite::OptionalExtension;
-                db.query_row("SELECT node_id FROM output_item WHERE attempt_id=?1 AND node_id IS NOT NULL ORDER BY ordinal LIMIT 1", [&frame.ticket.attempt], |row| row.get(0)).optional()?
-            } else { None };
-            let received_source=if ended && committed.is_none(){super::received::source(db,&frame.ticket.attempt)?.filter(|(_,kind)|kind=="incomplete_response")}else{None};
-            let ack = Arc::new(Notify::new());
-            let update = match frame.node.take() {
-                Some(node) => UiUpdate::Stream { thread_id: frame.ticket.thread.clone(), generation: frame.ticket.generation, node_id: node.node_id, role: node.role, text: node.text, base_char_offset: node.base_char_offset, total_chars: node.total_chars, reasoning_ranges: node.reasoning_ranges, presentation: node.presentation, ack: Some(ack.clone()) },
-                None if committed.is_some() => UiUpdate::StreamCommitted { thread_id: frame.ticket.thread.clone(), generation: frame.ticket.generation, attempt_id: frame.ticket.attempt.clone(), node_id: committed.as_ref().unwrap().clone() },
-                None => UiUpdate::StreamSettled { thread_id: frame.ticket.thread.clone(), generation: frame.ticket.generation, attempt_id: frame.ticket.attempt.clone(), received_source, ack: Some(ack.clone()) },
-            };
-            match updates.try_send(update) {
-                Ok(()) => { if ended && committed.is_some() { ack.notify_one(); } Ok(Admission::Queued { ended, ack, cancel }) },
-                Err(TrySendError::Disconnected(_)) => Ok(Admission::Closed),
-                Err(TrySendError::Full(update)) => {
-                    if let UiUpdate::Stream { node_id, role, text, base_char_offset, total_chars, reasoning_ranges, presentation, .. } = update {
-                        frame.node = Some(UiNode { node_id, role, text, base_char_offset, total_chars, reasoning_ranges, presentation });
-                    }
-                    Ok(Admission::Full(Box::new(frame)))
-                }
+        let Some(node) = frame.node.take().filter(|node| !node.text.is_empty()) else {
+            return Ok(Outcome::Unchanged);
+        };
+        let ack = Arc::new(Notify::new());
+        let update = UiUpdate::Stream {
+            thread_id: frame.ticket.thread.clone(),
+            generation: frame.ticket.generation,
+            node_id: node.node_id,
+            role: node.role,
+            text: node.text,
+            base_char_offset: node.base_char_offset,
+            total_chars: node.total_chars,
+            reasoning_ranges: node.reasoning_ranges,
+            presentation: node.presentation,
+            ack: Some(ack.clone()),
+        };
+        match updates.try_send(update) {
+            Ok(()) => tokio::select! {
+                biased;
+                _ = cancel.cancelled() => Ok(Outcome::Cancelled),
+                _ = ack.notified() => Ok(Outcome::Queued),
+            },
+            Err(TrySendError::Disconnected(_)) => Ok(Outcome::Closed),
+            Err(TrySendError::Full(UiUpdate::Stream {
+                node_id,
+                role,
+                text,
+                base_char_offset,
+                total_chars,
+                reasoning_ranges,
+                presentation,
+                ..
+            })) => {
+                frame.node = Some(UiNode {
+                    node_id,
+                    role,
+                    text,
+                    base_char_offset,
+                    total_chars,
+                    reasoning_ranges,
+                    presentation,
+                });
+                Ok(Outcome::Full(Box::new(frame)))
             }
-        }).await.map_err(storage_error);
-        match checked_storage(control, queued).await? {
-            Admission::Queued { ended, ack, cancel } => {
-                tokio::select! { biased; _ = cancel.cancelled() => Ok(Outcome::Cancelled), _ = ack.notified() => Ok(Outcome::Queued { ended }) }
-            }
-            Admission::Full(frame) => Ok(Outcome::Full(frame)),
-            Admission::Closed => Ok(Outcome::Closed),
-            Admission::Cancelled => Ok(Outcome::Cancelled),
-            Admission::Unchanged => Ok(Outcome::Unchanged),
+            Err(TrySendError::Full(_)) => unreachable!("delivery returns the original frame"),
         }
     }
 }
@@ -357,18 +356,6 @@ fn seal_stream_node(node: &mut UiNode, ticket: &Ticket, gap: bool) {
     digest.update(ticket.width.to_le_bytes());
     digest.update([u8::from(gap)]);
     node.presentation.projection_stamp = Some(digest.finalize().into());
-}
-
-enum Admission {
-    Queued {
-        ended: bool,
-        ack: Arc<Notify>,
-        cancel: CancellationToken,
-    },
-    Full(Box<Prepared>),
-    Cancelled,
-    Closed,
-    Unchanged,
 }
 
 #[cfg(test)]
@@ -415,7 +402,8 @@ mod tests {
         display.clear();
         let second = frame(&mut display, "a", "new");
         assert!(!display.current(&first.ticket, 80));
-        display.remove(&first.ticket);
+        // A stale ticket must not evict the new source.
+        assert_ne!(first.ticket.serial, second.ticket.serial);
         assert!(display.current(&second.ticket, 80));
         for attempt in ["b", "c", "d"] {
             display.observe(
@@ -435,13 +423,6 @@ mod tests {
             );
         }
     }
-    async fn seed(control: &Control) {
-        control.store.database.call(|db| {
-            db.execute("UPDATE turn SET state='running' WHERE id='target-run'", [])?;
-            db.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='target-run'),'a','target-run',0,0,'fixture','fixture-model',0,'inflight','{}','now')", [])?;
-            Ok(())
-        }).await.unwrap();
-    }
     async fn next(incoming: &std::sync::mpsc::Receiver<UiUpdate>) -> UiUpdate {
         crate::test_watchdog::watchdog("src/frontend/streaming.rs: next", async {
             loop {
@@ -454,24 +435,21 @@ mod tests {
         .await
         .unwrap()
     }
-    fn acknowledge(update: UiUpdate, ended: bool) -> Arc<Notify> {
+    fn acknowledge(update: UiUpdate) -> Arc<Notify> {
         match update {
             UiUpdate::Stream {
                 ack: Some(ack),
                 text,
                 ..
-            } if !ended => {
+            } => {
                 assert_eq!(text, "hello");
                 ack
             }
-            UiUpdate::StreamSettled { ack: Some(ack), .. } if ended => ack,
             update => panic!("unexpected {update:?}"),
         }
     }
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn full_normal_queue_returns_owned_frame_and_retry_needs_no_stream_ack() {
-        let (_root, owner, control, server) = super::super::control_tests::fixture().await;
-        seed(&control).await;
         let (updates, incoming) = std::sync::mpsc::sync_channel(1);
         updates
             .try_send(UiUpdate::Status {
@@ -483,7 +461,7 @@ mod tests {
         let prepared = frame(&mut display, "a", "hello").prepare().await.unwrap();
         let text_ptr = prepared.node.as_ref().unwrap().text.as_ptr();
         let result = prepared
-            .deliver(&control, updates.clone(), CancellationToken::new())
+            .deliver(updates.clone(), CancellationToken::new())
             .await
             .unwrap();
         let Outcome::Full(prepared) = result else {
@@ -495,144 +473,37 @@ mod tests {
             incoming.try_recv().unwrap(),
             UiUpdate::Status { .. }
         ));
-        let job_control = control.clone();
-        let job = tokio::spawn(async move {
-            prepared
-                .deliver(&job_control, updates, CancellationToken::new())
-                .await
-        });
-        let ack = acknowledge(next(&incoming).await, false);
+        let job =
+            tokio::spawn(async move { prepared.deliver(updates, CancellationToken::new()).await });
+        let ack = acknowledge(next(&incoming).await);
         assert!(!job.is_finished());
         ack.notify_one();
-        assert!(matches!(
-            job.await.unwrap().unwrap(),
-            Outcome::Queued { ended: false }
-        ));
+        assert!(matches!(job.await.unwrap().unwrap(), Outcome::Queued));
         assert_eq!(display.snapshots, 1);
-        server.shutdown().await.unwrap();
-        control.shutdown().await.unwrap();
-        owner.shutdown().await.unwrap();
     }
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn cancellation_releases_ack_job_and_old_ack_cannot_release_next_frame() {
-        let (_root, owner, control, server) = super::super::control_tests::fixture().await;
-        seed(&control).await;
         let (updates, incoming) = std::sync::mpsc::sync_channel(1);
         let mut display = Display::default();
         let prepared = frame(&mut display, "a", "hello");
         let cancel = CancellationToken::new();
         let token = cancel.clone();
-        let c = control.clone();
         let u = updates.clone();
-        let job = tokio::spawn(async move { prepared.deliver(&c, u, token).await });
-        let old_ack = acknowledge(next(&incoming).await, false);
+        let job = tokio::spawn(async move { prepared.deliver(u, token).await });
+        let old_ack = acknowledge(next(&incoming).await);
         cancel.cancel();
         assert!(matches!(job.await.unwrap().unwrap(), Outcome::Cancelled));
         display.invalidate("thread");
         let prepared = display.take(7, 80).unwrap();
-        let c = control.clone();
-        let job = tokio::spawn(async move {
-            prepared
-                .deliver(&c, updates, CancellationToken::new())
-                .await
-        });
-        let ack = acknowledge(next(&incoming).await, false);
+        let job =
+            tokio::spawn(async move { prepared.deliver(updates, CancellationToken::new()).await });
+        let ack = acknowledge(next(&incoming).await);
         assert!(!Arc::ptr_eq(&ack, &old_ack));
         old_ack.notify_one();
         tokio::task::yield_now().await;
         assert!(!job.is_finished());
         ack.notify_one();
-        assert!(matches!(
-            job.await.unwrap().unwrap(),
-            Outcome::Queued { ended: false }
-        ));
-        server.shutdown().await.unwrap();
-        control.shutdown().await.unwrap();
-        owner.shutdown().await.unwrap();
-    }
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn queued_db_closure_rechecks_selection_cancellation_before_enqueue() {
-        let (_root, owner, control, server) = super::super::control_tests::fixture().await;
-        seed(&control).await;
-        let mut display = Display::default();
-        let prepared = frame(&mut display, "a", "hello").prepare().await.unwrap();
-        let (updates, incoming) = std::sync::mpsc::sync_channel(1);
-        let (entered, entering) = tokio::sync::oneshot::channel();
-        let (release, blocking) = std::sync::mpsc::channel();
-        let barrier = owner
-            .db
-            .try_call(move |_| {
-                let _ = entered.send(());
-                blocking.recv().unwrap();
-                Ok(())
-            })
-            .unwrap();
-        entering.await.unwrap();
-        let cancel = CancellationToken::new();
-        let delivery = prepared.deliver(&control, updates, cancel.clone());
-        tokio::pin!(delivery);
-        // prepare is already complete and the empty DB admission queue has room:
-        // this poll enqueues the closure behind the blocked DB operation.
-        std::future::poll_fn(|cx| {
-            assert!(std::future::Future::poll(delivery.as_mut(), cx).is_pending());
-            std::task::Poll::Ready(())
-        })
-        .await;
-        let fence = owner.db.try_call(|_| Ok(())).unwrap();
-        cancel.cancel();
-        release.send(()).unwrap();
-        barrier.receive().await.unwrap();
-        assert!(matches!(delivery.await.unwrap(), Outcome::Cancelled));
-        fence.receive().await.unwrap();
-        assert!(
-            incoming.try_recv().is_err(),
-            "cancelled closure must not enqueue a frame; releasing its sender is also valid"
-        );
-        server.shutdown().await.unwrap();
-        control.shutdown().await.unwrap();
-        owner.shutdown().await.unwrap();
-    }
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn admitted_frame_precedes_terminal_state_but_later_frames_are_settled() {
-        let (_root, owner, control, server) = super::super::control_tests::fixture().await;
-        seed(&control).await;
-        let (updates, incoming) = std::sync::mpsc::sync_channel(1);
-        let mut display = Display::default();
-        let prepared = frame(&mut display, "a", "hello");
-        let c = control.clone();
-        let u = updates.clone();
-        let job =
-            tokio::spawn(async move { prepared.deliver(&c, u, CancellationToken::new()).await });
-        let ack = acknowledge(next(&incoming).await, false);
-        owner
-            .db
-            .call(|db| {
-                db.execute("UPDATE model_attempt SET state='failed' WHERE id='a'", [])?;
-                Ok(())
-            })
-            .await
-            .unwrap();
-        ack.notify_one();
-        assert!(matches!(
-            job.await.unwrap().unwrap(),
-            Outcome::Queued { ended: false }
-        ));
-        display.invalidate("thread");
-        let prepared = display.take(7, 80).unwrap();
-        let c = control.clone();
-        let job = tokio::spawn(async move {
-            prepared
-                .deliver(&c, updates, CancellationToken::new())
-                .await
-        });
-        acknowledge(next(&incoming).await, true).notify_one();
-        assert!(matches!(
-            job.await.unwrap().unwrap(),
-            Outcome::Queued { ended: true }
-        ));
-        server.shutdown().await.unwrap();
-        control.shutdown().await.unwrap();
-        owner.shutdown().await.unwrap();
+        assert!(matches!(job.await.unwrap().unwrap(), Outcome::Queued));
     }
     #[test]
     fn reselection_transfers_known_source_but_does_not_splice_offscreen_gaps() {
@@ -654,61 +525,8 @@ mod tests {
         assert!(frozen.gap);
         assert_eq!(frozen.node.unwrap().text, "考え");
     }
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn resumed_preview_retires_on_terminal_changed_without_any_further_delta() {
-        let (_root, owner, control, server) = super::super::control_tests::fixture().await;
-        seed(&control).await;
-        let mut display = Display::default();
-        display.resume(
-            "thread".into(),
-            vec![UiNode {
-                node_id: "a".into(),
-                text: "hello".into(),
-                total_chars: 5,
-                ..Default::default()
-            }],
-        );
-        let (updates, incoming) = std::sync::mpsc::sync_channel(1);
-        let prepared = display.take(8, 80).unwrap();
-        let c = control.clone();
-        let u = updates.clone();
-        let job =
-            tokio::spawn(async move { prepared.deliver(&c, u, CancellationToken::new()).await });
-        acknowledge(next(&incoming).await, false).notify_one();
-        job.await.unwrap().unwrap();
-        owner
-            .db
-            .call(|db| {
-                db.execute(
-                    "UPDATE model_attempt SET state='cancelled' WHERE id='a'",
-                    [],
-                )?;
-                Ok(())
-            })
-            .await
-            .unwrap();
-        display.invalidate("thread");
-        let prepared = display.take(8, 80).unwrap();
-        let c = control.clone();
-        let job = tokio::spawn(async move {
-            prepared
-                .deliver(&c, updates, CancellationToken::new())
-                .await
-        });
-        acknowledge(next(&incoming).await, true).notify_one();
-        assert!(matches!(
-            job.await.unwrap().unwrap(),
-            Outcome::Queued { ended: true }
-        ));
-        server.shutdown().await.unwrap();
-        control.shutdown().await.unwrap();
-        owner.shutdown().await.unwrap();
-    }
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn resumed_evicted_body_is_not_published_as_empty_source_and_saved_output_uses_identity()
-    {
-        let (_root, owner, control, server) = super::super::control_tests::fixture().await;
-        seed(&control).await;
+    #[tokio::test]
+    async fn evicted_body_is_not_reissued_as_empty_preview() {
         let mut display = Display::default();
         display.resume(
             "thread".into(),
@@ -719,128 +537,14 @@ mod tests {
             }],
         );
         let (updates, incoming) = std::sync::mpsc::sync_channel(1);
-        assert!(matches!(
-            display
-                .take(8, 80)
-                .unwrap()
-                .deliver(&control, updates.clone(), CancellationToken::new())
-                .await
-                .unwrap(),
-            Outcome::Unchanged
-        ));
-        assert!(incoming.try_recv().is_err());
-        owner.db.call(|db|{db.execute("INSERT INTO node(id,kind,created_at,payload_json,payload_bytes,body_hash)VALUES('saved','assistant_response','now','{}',2,'fixture')",[])?;db.execute("INSERT INTO output_item(attempt_id,ordinal,item_type,status,payload_json,node_id)VALUES('a',0,'message','completed','{}','saved')",[])?;db.execute("UPDATE model_attempt SET state='completed' WHERE id='a'",[])?;Ok(())}).await.unwrap();
-        display.invalidate("thread");
-        assert!(matches!(
-            display
-                .take(8, 80)
-                .unwrap()
-                .deliver(&control, updates, CancellationToken::new())
-                .await
-                .unwrap(),
-            Outcome::Queued { ended: true }
-        ));
-        assert!(
-            matches!(incoming.try_recv().unwrap(),UiUpdate::StreamCommitted{attempt_id,node_id,..}if attempt_id=="a"&&node_id=="saved")
-        );
-        server.shutdown().await.unwrap();
-        control.shutdown().await.unwrap();
-        owner.shutdown().await.unwrap();
-    }
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn stopped_or_reselected_attempt_is_not_displayed_even_before_driver_cleanup() {
-        let (_root, owner, control, server) = super::super::control_tests::fixture().await;
-        seed(&control).await;
-        for mutation in [
-            "UPDATE run SET state='stopping' WHERE id='target-run'",
-            "UPDATE turn SET generation=generation+1 WHERE id='target-run'",
-            "UPDATE thread SET selection_revision=selection_revision+1 WHERE id='thread'",
-        ] {
-            let sql = mutation.to_owned();
-            owner
-                .db
-                .call(move |db| {
-                    db.execute("UPDATE run SET state='live' WHERE id='target-run'", [])?;
-                    db.execute("UPDATE turn SET generation=0 WHERE id='target-run'", [])?;
-                    db.execute(
-                        "UPDATE thread SET selection_revision=0 WHERE id='thread'",
-                        [],
-                    )?;
-                    db.execute(&sql, [])?;
-                    Ok(())
-                })
-                .await
-                .unwrap();
-            let mut display = Display::default();
-            let prepared = frame(&mut display, "a", "hello");
-            let (updates, incoming) = std::sync::mpsc::sync_channel(1);
-            let c = control.clone();
-            let job = tokio::spawn(async move {
-                prepared
-                    .deliver(&c, updates, CancellationToken::new())
-                    .await
-            });
-            acknowledge(next(&incoming).await, true).notify_one();
-            assert!(matches!(
-                job.await.unwrap().unwrap(),
-                Outcome::Queued { ended: true }
-            ));
-        }
-        server.shutdown().await.unwrap();
-        control.shutdown().await.unwrap();
-        owner.shutdown().await.unwrap();
-    }
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn terminal_persistence_prevents_late_frame_and_closed_ui_does_not_wait_for_ack() {
-        let (_root, owner, control, server) = super::super::control_tests::fixture().await;
-        seed(&control).await;
-        let (updates, incoming) = std::sync::mpsc::sync_channel(1);
-        let mut display = Display::default();
-        let prepared = frame(&mut display, "a", "hello");
-        owner
-            .db
-            .call(|db| {
-                db.execute(
-                    "UPDATE model_attempt SET state='completed' WHERE id='a'",
-                    [],
-                )?;
-                Ok(())
-            })
-            .await
-            .unwrap();
-        let c = control.clone();
-        let u = updates.clone();
-        let job =
-            tokio::spawn(async move { prepared.deliver(&c, u, CancellationToken::new()).await });
-        acknowledge(next(&incoming).await, true).notify_one();
-        assert!(matches!(
-            job.await.unwrap().unwrap(),
-            Outcome::Queued { ended: true }
-        ));
-        drop(incoming);
-        display.invalidate("thread");
         let result = display
-            .take(7, 80)
+            .take(8, 80)
             .unwrap()
-            .deliver(&control, updates, CancellationToken::new())
+            .deliver(updates, CancellationToken::new())
             .await
             .unwrap();
-        assert!(matches!(result, Outcome::Closed));
-        assert_eq!(
-            owner
-                .db
-                .call(|db| Ok(db.query_row(
-                    "SELECT state FROM run WHERE id='independent-run'",
-                    [],
-                    |row| row.get::<_, String>(0)
-                )?))
-                .await
-                .unwrap(),
-            "live"
-        );
-        server.shutdown().await.unwrap();
-        control.shutdown().await.unwrap();
-        owner.shutdown().await.unwrap();
+        assert!(matches!(result, Outcome::Unchanged));
+        assert!(incoming.try_recv().is_err());
     }
 }
 

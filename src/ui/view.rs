@@ -562,6 +562,40 @@ impl ThreadView {
     }
 }
 
+// Report one newly observed saved result, not an inferred whole-group outcome.
+pub(super) fn saved_tool_notice(
+    nodes: &[UiNode],
+    first_new: u64,
+    language: crate::config::UiLanguage,
+) -> Option<String> {
+    use crate::presentation::{BlockKind, ToolReasonKind};
+    nodes
+        .get(usize::try_from(first_new).ok()?..)?
+        .iter()
+        .rev()
+        .find_map(|node| {
+            if node.presentation.provisional_stream {
+                return None;
+            }
+            node.presentation.blocks.iter().rev().find_map(|block| {
+                if block.kind != BlockKind::ToolResult {
+                    return None;
+                }
+                let tool = block.tool.as_ref()?;
+                let released = matches!(
+                    tool.reason_kind,
+                    ToolReasonKind::HumanBackgrounded | ToolReasonKind::AdditionalInput
+                ) || tool.reason_code == "shell_backgrounded";
+                if !released && tool.status != "cancelled" {
+                    return None;
+                }
+                Some(crate::presentation::messages::tool_heading(
+                    tool, false, language,
+                ))
+            })
+        })
+}
+
 impl ThreadView {
     pub(super) fn on_thread(&mut self, details: ThreadDetails, draft: Option<DraftSnapshot>) {
         self.draft_restore_pending = false;
