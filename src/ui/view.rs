@@ -47,11 +47,8 @@ pub struct ThreadView {
     // Last applied saved-history window, distinct from newer input requests.
     pub(super) received_window_revision: Option<u64>,
     pub total_nodes: u64,
-    saved_tail: Option<(u64, u64, Option<String>)>,
+    notice_tail: Option<(u64, u64, Option<String>)>,
     notice_anchor: Option<(u64, u64, String)>,
-    preview_suspended: bool,
-    ended_attempts: std::collections::VecDeque<(String, u64)>,
-    attempt_end_floor: u64,
     pub status: String,
     pub pending: BTreeMap<u64, PendingSend>,
     pub pending_messages: PendingMessages,
@@ -376,11 +373,8 @@ impl ThreadView {
             received_revision: 0,
             received_window_revision: None,
             total_nodes: 0,
-            saved_tail: None,
+            notice_tail: None,
             notice_anchor: None,
-            preview_suspended: false,
-            ended_attempts: Default::default(),
-            attempt_end_floor: 0,
             status: crate::ui::i18n::local!(config.ui.language, "入力できます", "Ready for input")
                 .into(),
             pending: BTreeMap::new(),
@@ -573,21 +567,21 @@ impl ThreadView {
 }
 
 impl ThreadView {
-    fn observe_saved_tail(&mut self, nodes: &[UiNode], first: u64, revision: u64, total: u64) {
-        // Tail identity comes from the accepted saved page, never from the
+    fn observe_notice_tail(&mut self, nodes: &[UiNode], first: u64, revision: u64, total: u64) {
+        // Notice baseline identity comes from the accepted saved page, never from the
         // rendered list (which may contain pinned audit and live rows).
         if (total == 0 || !nodes.is_empty()) && first.saturating_add(nodes.len() as u64) == total {
-            self.saved_tail = Some((
+            self.notice_tail = Some((
                 revision,
                 total,
                 nodes.last().map(|node| node.node_id.clone()),
             ));
         } else if self
-            .saved_tail
+            .notice_tail
             .as_ref()
             .is_some_and(|(r, n, _)| (*r, *n) != (revision, total))
         {
-            self.saved_tail = None;
+            self.notice_tail = None;
         }
     }
 
@@ -599,9 +593,9 @@ impl ThreadView {
         total: u64,
     ) {
         use crate::presentation::{BlockKind, ToolReasonKind};
-        self.observe_saved_tail(nodes, first, revision, total);
+        self.observe_notice_tail(nodes, first, revision, total);
         let Some((previous_revision, ordinal, id)) = self.notice_anchor.as_ref() else {
-            if let Some((_, _, Some(id))) = &self.saved_tail {
+            if let Some((_, _, Some(id))) = &self.notice_tail {
                 self.notice_anchor = Some((revision, total - 1, id.clone()));
             }
             return;
@@ -616,7 +610,7 @@ impl ThreadView {
             // A path rewrite (or a newer page without proof of the prefix)
             // supplies a baseline, not a reason to replay its saved results.
             if revision > *previous_revision {
-                self.notice_anchor = self.saved_tail.as_ref().and_then(|(_, total, id)| {
+                self.notice_anchor = self.notice_tail.as_ref().and_then(|(_, total, id)| {
                     id.as_ref().map(|id| (revision, total - 1, id.clone()))
                 });
             }
@@ -654,39 +648,6 @@ impl ThreadView {
         }
     }
 
-    pub(super) fn accepts_preview(
-        &self,
-        attempt: &str,
-        source: &crate::presentation::PreviewSource,
-    ) -> bool {
-        !self.preview_suspended
-            && self
-                .saved_tail
-                .as_ref()
-                .is_some_and(|(_, _, id)| id == &source.input_through_node_id)
-            && source.page_seq > self.attempt_end_floor
-            && !self.ended_attempts.iter().any(|(id, _)| id == attempt)
-    }
-
-    pub(super) fn observe_attempt_end(&mut self, attempt: &str, seq: u64) {
-        // Match an end to its own attempt, not to another attempt in the same
-        // page. The bounded floor only covers evicted owner observations.
-        if seq > self.attempt_end_floor && !self.ended_attempts.iter().any(|(id, _)| id == attempt)
-        {
-            if self.ended_attempts.len() == 256
-                && let Some((_, oldest)) = self.ended_attempts.pop_front()
-            {
-                self.attempt_end_floor = oldest;
-            }
-            self.ended_attempts.push_back((attempt.into(), seq));
-        }
-    }
-
-    pub(super) fn retire_saved_preview(&mut self) -> Vec<UiAction> {
-        self.activity.clear_receive_observation();
-        self.settle_other_streams("")
-    }
-
     pub(super) fn on_thread(&mut self, details: ThreadDetails, draft: Option<DraftSnapshot>) {
         self.draft_restore_pending = false;
         self.agents_path = details.agents_path;
@@ -697,7 +658,6 @@ impl ThreadView {
         self.auto_compact_at = details.auto_compact_at;
         self.title = details.title;
         self.run_id = details.run_id;
-        self.preview_suspended = details.turn_id.is_none() || details.recovery_reason.is_some();
         self.turn_id = details.turn_id;
         self.state = if details.recovery_reason.is_some() {
             crate::ui::i18n::local!(self.language, "復旧待ち", "Waiting for recovery").into()
@@ -3318,7 +3278,6 @@ mod received_tests {
             thread_id: "t".into(),
             generation,
             attempt_id: "a".into(),
-            owner_end_seq: None,
             received_source: Some(("audit".into(), "incomplete_response".into())),
             ack: None,
         });

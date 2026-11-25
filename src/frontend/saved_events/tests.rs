@@ -282,6 +282,25 @@ async fn preview_gap(still_live: bool) {
                     tokio::task::yield_now().await;
                 }
             }
+            control.fixture_end_live_text("thread");
+            loop {
+                if let Ok(update) = incoming.try_recv() {
+                    let ended = matches!(&update, UiUpdate::StreamSettled { attempt_id, .. }
+                        if attempt_id == "fixture-attempt");
+                    ui.apply(update);
+                    if ended {
+                        assert!(
+                            !ui.view()
+                                .nodes()
+                                .iter()
+                                .any(|node| node.node_id == "fixture-attempt")
+                        );
+                        break;
+                    }
+                } else {
+                    tokio::task::yield_now().await;
+                }
+            }
         }
     })
     .await
