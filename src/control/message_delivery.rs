@@ -10,28 +10,33 @@ use crate::{
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde_json::{Value, json};
 
-// Shared starting set for next-request admission and exact hold observation.
-pub(super) const TURN_INPUT_CANDIDATES: &str = "receipt WHERE turn_id=?1 AND state='accepted'";
+mod hold;
+pub(crate) use hold::MessageHolds;
 
-pub(super) fn exact_input_candidate(
+pub(super) fn plan_turn_input(
     db: &Connection,
     thread: &str,
     turn: &str,
-    message: &str,
-) -> rusqlite::Result<bool> {
-    let candidate = db.query_row(
-        &format!("SELECT EXISTS(SELECT 1 FROM {TURN_INPUT_CANDIDATES} AND message_node_id=?2 AND target_thread_id=?3)"),
-        params![turn, message, thread], |row| row.get::<_, bool>(0),
+    at: &str,
+) -> rusqlite::Result<(Vec<String>, AdmissionPlan)> {
+    let mut statement = db.prepare(
+        "SELECT id,message_node_id FROM receipt WHERE turn_id=?1 AND state='accepted' ORDER BY created_at,rowid",
     )?;
-    if !candidate {
-        return Ok(false);
-    }
-    // Prove this node can cross the existing admission frontier. An earlier
-    // caller absent from this single-target proof may make attribution unknown.
-    Ok(plan_admission_tx(db, thread, &[message.to_owned()], "")?
-        .admitted_callers
-        .iter()
-        .any(|id| id == message))
+    let rows = statement.query_map([turn], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+    let (receipts, nodes): (Vec<_>, Vec<_>) = rows
+        .collect::<rusqlite::Result<Vec<_>>>()?
+        .into_iter()
+        .unzip();
+    let plan = plan_admission_tx(db, thread, &nodes, at)?;
+    let admitted: std::collections::HashSet<_> = plan.admitted_callers.iter().collect();
+    let receipts = receipts
+        .into_iter()
+        .zip(&nodes)
+        .filter_map(|(receipt, node)| admitted.contains(node).then_some(receipt))
+        .collect();
+    Ok((receipts, plan))
 }
 
 pub(crate) fn held_hint(reason: Option<&str>) -> &'static str {

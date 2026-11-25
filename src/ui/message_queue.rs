@@ -40,6 +40,7 @@ pub struct SubmittedMessage {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PendingMessage {
+    pub held_by: Option<crate::protocol::MessageHeldBy>,
     pub message_id: String,
     pub operation_id: String,
     pub sender_thread: Option<String>,
@@ -87,6 +88,23 @@ impl PendingMessage {
         }
     }
     fn reason(&self, language: UiLanguage) -> Option<&str> {
+        match &self.held_by {
+            Some(crate::protocol::MessageHeldBy::ForegroundShell { .. }) => {
+                return Some(i18n::local!(
+                    language,
+                    "フォアグラウンドのシェル待ち",
+                    "Waiting for foreground shell"
+                ));
+            }
+            Some(crate::protocol::MessageHeldBy::ResponseGeneration) => {
+                return Some(i18n::local!(
+                    language,
+                    "応答生成待ち",
+                    "Waiting for response generation"
+                ));
+            }
+            _ => {}
+        }
         let reason = self.hold_reason.as_deref()?;
         Some(match reason {
             "terminal_before_path_admission" => i18n::local!(
@@ -586,6 +604,7 @@ mod tests {
     }
     fn queued(id: &str) -> PendingMessage {
         PendingMessage {
+            held_by: None,
             sender_kind: crate::protocol::SenderKind::Human,
             completion_scheduled: false,
             expect_reply: false,
@@ -1269,6 +1288,7 @@ mod language_tests {
     }
     fn item(id: &str) -> PendingMessage {
         PendingMessage {
+            held_by: None,
             sender_kind: crate::protocol::SenderKind::Human,
             completion_scheduled: false,
             expect_reply: false,

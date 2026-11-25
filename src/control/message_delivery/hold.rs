@@ -1,15 +1,25 @@
 //! Exact-message admission and owner-side foreground observation.
-use super::*;
+use super::super::*;
+use crate::control::state::now;
+use std::collections::{HashMap, HashSet};
+
+#[derive(Clone)]
+pub(crate) struct MessageHolds(Arc<LiveRegistry>);
+type TurnDecisions = HashMap<(String, String, String), (HashSet<String>, Option<MessageHeldBy>)>;
 use crate::protocol::MessageHeldBy;
 use rusqlite::{OptionalExtension, params};
 
 impl Control {
-    pub(super) async fn message_with_hold(
+    pub(crate) fn message_holds(&self) -> MessageHolds {
+        MessageHolds(self.live.clone())
+    }
+
+    pub(in crate::control) async fn message_with_hold(
         self: &Arc<Self>,
         id: &str,
     ) -> Result<MutationResult, ApiError> {
         let target = id.to_owned();
-        let owner = Arc::clone(self);
+        let holds = self.message_holds();
         let detail = self
             .store
             .database
@@ -19,20 +29,35 @@ impl Control {
                     Ok(detail) => detail,
                     Err(error) => return Ok(Err(error)),
                 };
-                detail.held_by = owner.read_message_hold(&tx, &target)?;
+                detail.held_by = holds.read(&tx, [&*target])?.pop().flatten();
                 Ok(Ok(detail))
             })
             .await
             .map_err(storage_error)??;
         MutationResult::value(detail)
     }
+}
 
-    /// Used by native reads and live inspection on their existing DB snapshot.
-    /// A missing, contended or conflicting binding never supplies a target.
-    pub(crate) fn read_message_hold(
+impl MessageHolds {
+    /// Project only the supplied rows, reusing the driver's ordered admission
+    /// plan and one live binding observation per Turn in this read snapshot.
+    pub(crate) fn read<'a>(
+        &self,
+        db: &rusqlite::Connection,
+        messages: impl IntoIterator<Item = &'a str>,
+    ) -> rusqlite::Result<Vec<Option<MessageHeldBy>>> {
+        let mut turns = TurnDecisions::new();
+        messages
+            .into_iter()
+            .map(|id| self.read_one(db, id, &mut turns))
+            .collect()
+    }
+
+    fn read_one(
         &self,
         db: &rusqlite::Connection,
         message: &str,
+        turns: &mut TurnDecisions,
     ) -> rusqlite::Result<Option<MessageHeldBy>> {
         let row = db
             .query_row(
@@ -69,13 +94,24 @@ impl Control {
         let (Some(run), Some(turn)) = (run, turn) else {
             return Ok(Some(MessageHeldBy::Unknown));
         };
-        if !message_delivery::exact_input_candidate(db, &thread, &turn, message)? {
-            return Ok(Some(MessageHeldBy::Unknown));
-        }
-        let Ok(execution) = self.live.foreground_observation(&thread, &run) else {
-            return Ok(Some(MessageHeldBy::Unknown));
+        use std::collections::hash_map::Entry;
+        let decision = match turns.entry((thread, run, turn)) {
+            Entry::Occupied(entry) => entry.into_mut(),
+            Entry::Vacant(entry) => {
+                let (thread, run, turn) = entry.key();
+                let (_, plan) = super::plan_turn_input(db, thread, turn, &now())?;
+                let blocker = match self.0.foreground_observation(thread, run) {
+                    Ok(execution) => phase(db, thread, run, turn, execution)?,
+                    Err(()) => Some(MessageHeldBy::Unknown),
+                };
+                entry.insert((plan.admitted_callers.into_iter().collect(), blocker))
+            }
         };
-        phase(db, &thread, &run, &turn, execution)
+        Ok(if decision.0.contains(message) {
+            decision.1.clone()
+        } else {
+            Some(MessageHeldBy::Unknown)
+        })
     }
 }
 

@@ -406,6 +406,7 @@ mod tests {
 
     fn item(id: &str) -> PendingMessage {
         PendingMessage {
+            held_by: None,
             message_id: id.into(),
             operation_id: format!("op:{id}"),
             sender_thread: None,
