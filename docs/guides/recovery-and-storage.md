@@ -225,15 +225,9 @@ If saving the initial submission fails, its text remains in the draft. Resolve i
 
 Draft revisions prevent slow responses from clearing a newer draft. See [TUI controls](tui.md) for `/restore REV` of a failed snapshot.
 
-If only the CLI reply was lost and the operation ID is known, query it first:
+If the CLI reply was lost, follow the receipt lookup only when `error.details.next_operation.command` is `operation.get`. Pass the supplied `next_operation.args.operation_id` as an argument to `shellboy operation get --operation ID` against the same owner data directory. Do not evaluate the hint as a command or use a known ID alone as a reason to look up a receipt. `request_may_have_been_applied: true` means the outcome is unknown, not that the operation ran or failed.
 
-```sh
-shellboy operation get --operation OPERATION_ID
-```
-
-After disconnection following send, returned JSON retains the query target in `operation_id` and `error.details.operation_id`. Use this generated ID even if you did not supply one. `request_may_have_been_applied: true` means outcome unknown; it proves neither execution, nonexecution, nor failure. `next_operation` provides typed guidance to the receipt query. Pass the ID as an argument to `--operation`; never evaluate it as a new command.
-
-If the process exited without returning JSON and the ID is unknown, this guidance cannot necessarily recover it. Inspect known Thread/Run state, `status --all`, and saved history; do not automatically resend.
+A lost read (`read_only: true`) may already have run; another read is an explicit fresh observation. For a non-receipted write, do not invent a receipt lookup or replay the write. If there is no typed lookup or the process exited without returning JSON, inspect known Thread/Run state, `status --all`, and saved history as appropriate; do not automatically resend. See [Operation evidence](cli-reference.md#operation-evidence).
 
 For `operation_not_found` / `operation_expired`, compare target get results and saved history. For `operation_conflict`, inspect differences between the existing receipt and the request. None justifies repeating an uncertain side effect under a new ID. For `save_failed`, preserve unsaved input and investigate persistence instead of repeatedly sending new mutations.
 

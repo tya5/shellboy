@@ -498,6 +498,38 @@ mod tests {
             super::super::db::operation_details(&db, "current:missing", "current").unwrap_err();
         assert_eq!(missing.code, ErrorCode::OperationNotFound);
         assert_eq!(db.total_changes(), before);
+
+        db.execute_batch(
+            r#"INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,hold_reason,created_at)
+               VALUES('delivery','current:saved','{}','fixture-thread','m','held','fixture hold','now');
+               INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,created_at,result_ref_json,reserved_bytes)
+               VALUES('current:compact-queued','current','null','hash','completed','now','{"result":{"status":"queued","operation_id":"current:compact-queued","thread_id":"fixture-thread"}}',0),
+                     ('current:compact-settled','current','null','hash','completed','now','{"result":{"status":"queued","operation_id":"current:compact-settled","thread_id":"fixture-thread"}}',0);
+               INSERT INTO app_meta VALUES('compact.pending.fixture-thread','["current:compact-queued"]'),
+                   ('compact.result.current:compact-settled','{"kind":"compact","state":"completed","ended_at":"now","outcome":{"result":{"summary_node_id":"fixture-summary"}}}');"#,
+        ).unwrap();
+        for (id, downstream) in [
+            (
+                "current:saved",
+                json!({"kind":"message","state":"held","hold_reason":"fixture hold"}),
+            ),
+            (
+                "current:compact-queued",
+                json!({"kind":"compact","state":"queued"}),
+            ),
+            (
+                "current:compact-settled",
+                json!({"kind":"compact","state":"completed","ended_at":"now","outcome":{"result":{"summary_node_id":"fixture-summary"}}}),
+            ),
+        ] {
+            let before = db.total_changes();
+            let value = super::super::db::operation_details(&db, id, "current").unwrap();
+            assert_eq!(value["downstream"], downstream);
+            assert!(validator.is_valid(&value), "{value}");
+            let decoded: OperationReceiptDetails = serde_json::from_value(value.clone()).unwrap();
+            assert_eq!(serde_json::to_value(decoded).unwrap(), value);
+            assert_eq!(db.total_changes(), before);
+        }
     }
 
     fn scanned_usage(db: &Connection, instance: &str) -> u64 {
