@@ -7817,11 +7817,10 @@ mod layout_cache_tests {
             .collect::<String>();
         let payload = serde_json::json!({"text":source});
         let window = |offset: usize| {
-            let start = offset.saturating_sub(2048);
-            let end = (start + 4 * 1024).min(source.len());
-            let mut value = node("answer", &source[start..end]);
+            let (text, start, total) = crate::frontend::window(&source, Some(offset));
+            let mut value = node("answer", &text);
             value.base_char_offset = start;
-            value.total_chars = source.len();
+            value.total_chars = total;
             value.presentation =
                 crate::presentation::project("assistant_response", &payload, &value.text, start);
             crate::presentation::render_markdown(&mut value.presentation, 76);
@@ -7839,7 +7838,7 @@ mod layout_cache_tests {
         let mut terminal = Terminal::new(TestBackend::new(80, 28)).unwrap();
         let mut previous = 0;
         let mut read_count = 0;
-        for step in 0..100 {
+        for step in 0..180 {
             terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
             let buffer = terminal.backend().buffer();
             let viewport = ui.view().navigation.scroll.area.unwrap();
