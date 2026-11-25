@@ -18,7 +18,8 @@
 
 ## Guides and reliability
 
-- **Getting started (#410, #417):** The README opens with a quickstart for the downloaded binary. Offline guide verification follows continuation pages and checks both link targets and complete guide bodies.
+- **Getting started (#410, #417):** The README includes a quickstart for the downloaded binary. Offline guide verification follows continuation pages and checks both link targets and complete guide bodies.
+- **README (#425):** The README now introduces Shellboy and explains how unanswered reply duties stay visible and can be followed up before showing the quickstart.
 - **Delivering results (#424):** The Agent Guide shows how to register an output as a Thread artifact, update that artifact on revision, and mention it in the final reply.
 - **Recovery guidance (#400):** Saved indexing failures use the same model transport guidance as conversation failures. The guidance does not rerun work.
 - **Replay budget (#385):** A selected resend that exceeds the assembly budget is refused before provider admission. The history retained for future resend is not reduced by this check.
@@ -26,7 +27,7 @@
 ## Upgrade notes
 
 - **Backup and compatibility:** Back up the entire data directory before upgrading. Upgrade the owner, CLI, and RPC clients together. There are no owner database migrations in this release. After upgrading, restart history body reads without a cursor; cursors from `history.get`, `history.get.parts`, and `history.get.end_message` are not accepted at the new route.
-- **Protocol:** **26 -> 34**. Versions 27-29 cover native draft uploads, bounded history reads, and draft persistence; 30 normalizes page and exactness fields; 31 updates message sender attribution; 32 renames selectors and Thread parent fields; 33 renames history body reads; 34 publishes branch selection revisions.
+- **Protocol:** **26 -> 36**. Versions 27-29 cover native draft uploads, bounded history reads, and draft persistence; 30 normalizes page and exactness fields; 31 updates message sender attribution; 32 renames selectors and Thread parent fields; 33 renames history body reads; 34 publishes branch selection revisions; 35 registers the existing Ask acceptance result; 36 registers the existing Reply result.
 
 The renamed interfaces below have no aliases. Update scripts and client decoders before upgrading.
 
