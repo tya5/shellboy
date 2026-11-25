@@ -92,163 +92,6 @@ pub(super) enum Outcome {
     Closed,
     Unchanged,
 }
-/// Reconciles the selected saved projection and native stream at one ordered
-/// delivery point. Before the first saved tail, the native preview is usable.
-#[derive(Default)]
-pub(super) struct Adoption {
-    saved: Option<SavedPosition>,
-    turn: Option<String>,
-    settled: bool,
-    visible: Option<(String, Option<String>)>,
-}
-#[derive(PartialEq, Eq)]
-struct SavedPosition {
-    read: u64,
-    revision: u64,
-    total: u64,
-    tail: Option<Option<String>>,
-}
-impl Adoption {
-    fn allows(&self, source: &crate::presentation::PreviewSource) -> bool {
-        !self.settled
-            && self
-                .saved
-                .as_ref()
-                .is_none_or(|saved| saved.tail.as_ref() == Some(&source.input_through_node_id))
-    }
-    pub(super) fn retire(&mut self, attempt: &str) -> bool {
-        if self.visible.as_ref().is_some_and(|(id, _)| id == attempt) {
-            self.visible = None;
-            return true;
-        }
-        false
-    }
-    pub(super) fn gap(&mut self) {
-        self.visible = None;
-    }
-    pub(super) fn reconcile(
-        &mut self,
-        scope: Option<&(String, u64)>,
-        streams: &mut Display,
-        value: UiUpdate,
-    ) -> Option<UiUpdate> {
-        if let UiUpdate::Stream {
-            thread_id,
-            generation: g,
-            node_id,
-            presentation,
-            ack,
-            ..
-        } = &value
-            && let Some(source) = presentation.preview_source.as_ref()
-        {
-            if !scope.is_some_and(|(thread, generation)| thread_id == thread && g == generation)
-                || !self.allows(source)
-            {
-                if let Some(ack) = ack {
-                    ack.notify_one();
-                }
-                return None;
-            }
-            self.visible = Some((node_id.clone(), source.input_through_node_id.clone()));
-            return Some(value);
-        }
-        let Some((thread, generation)) = scope else {
-            return Some(value);
-        };
-        let (history, details) = match &value {
-            UiUpdate::CurrentView {
-                history, details, ..
-            } => (history.as_ref(), Some(details)),
-            UiUpdate::SavedMessage { history, .. } => (history.as_ref(), None),
-            _ => (&value, None),
-        };
-        let (id, g, nodes, read, first, revision, total) = match history {
-            UiUpdate::History {
-                thread_id,
-                generation,
-                nodes,
-                read_revision,
-                first_ordinal,
-                selection_revision,
-                total_nodes,
-                append: false,
-                ..
-            }
-            | UiUpdate::HistoryWindow {
-                thread_id,
-                generation,
-                nodes,
-                read_revision,
-                first_ordinal,
-                selection_revision,
-                total_nodes,
-                ..
-            } => (
-                thread_id,
-                generation,
-                nodes,
-                *read_revision,
-                *first_ordinal,
-                *selection_revision,
-                *total_nodes,
-            ),
-            _ => return Some(value),
-        };
-        if id != thread
-            || g != generation
-            || self
-                .saved
-                .as_ref()
-                .is_some_and(|s| read < s.read || revision < s.revision)
-        {
-            return Some(value);
-        }
-        let tail = if (total == 0 || !nodes.is_empty())
-            && first.saturating_add(nodes.len() as u64) == total
-        {
-            Some(nodes.last().map(|node| node.node_id.clone()))
-        } else {
-            self.saved
-                .as_ref()
-                .filter(|s| (s.revision, s.total) == (revision, total))
-                .and_then(|s| s.tail.clone())
-        };
-        let advanced = self
-            .saved
-            .as_ref()
-            .is_some_and(|s| (revision, total) != (s.revision, s.total));
-        let turn_settled = details.is_some_and(|d| {
-            self.turn.is_some() && (self.turn != d.turn_id || d.recovery_reason.is_some())
-        });
-        if let Some(d) = details {
-            self.turn.clone_from(&d.turn_id);
-            if turn_settled || d.turn_id.is_some() {
-                self.settled = d.turn_id.is_none() || d.recovery_reason.is_some();
-            }
-        }
-        let retire = self.visible.as_ref().is_some_and(|(_, input)| {
-            turn_settled || tail.as_ref().map_or(advanced, |tail| tail != input)
-        });
-        if retire && let Some((id, _)) = self.visible.take() {
-            streams.retire(thread, &id);
-        }
-        self.saved = Some(SavedPosition {
-            read,
-            revision,
-            total,
-            tail,
-        });
-        if retire || turn_settled {
-            return Some(UiUpdate::PreviewReconciled {
-                thread_id: thread.clone(),
-                generation: *generation,
-                saved: Box::new(value),
-            });
-        }
-        Some(value)
-    }
-}
 impl Display {
     pub fn clear(&mut self) {
         self.windows.clear();
@@ -372,14 +215,8 @@ impl Display {
             window.body.dirty = true;
         }
     }
-    pub fn pending(&self, adoption: &Adoption) -> bool {
-        self.windows.iter().any(|w| {
-            w.body.dirty
-                && w.body
-                    .source
-                    .as_ref()
-                    .is_none_or(|source| adoption.allows(source))
-        })
+    pub fn pending(&self) -> bool {
+        self.windows.iter().any(|w| w.body.dirty)
     }
     pub fn current(&self, ticket: &Ticket, width: u16) -> bool {
         ticket.width == width
@@ -390,37 +227,12 @@ impl Display {
                     && w.body.revision == ticket.revision
             })
     }
-    pub fn retire(&mut self, thread: &str, attempt: &str) -> bool {
-        let before = self.windows.len();
+    pub fn retire(&mut self, thread: &str, attempt: &str) {
         self.windows
             .retain(|w| w.thread != thread || w.attempt != attempt);
-        self.windows.len() != before
     }
-    #[cfg(test)]
     pub fn take(&mut self, generation: u64, width: u16) -> Option<Prepared> {
-        self.take_matching(generation, width, |_| true)
-    }
-    pub(super) fn take_eligible(
-        &mut self,
-        generation: u64,
-        width: u16,
-        adoption: &Adoption,
-    ) -> Option<Prepared> {
-        self.take_matching(generation, width, |s| {
-            s.is_none_or(|source| adoption.allows(source))
-        })
-    }
-    fn take_matching(
-        &mut self,
-        generation: u64,
-        width: u16,
-        allowed: impl Fn(Option<&crate::presentation::PreviewSource>) -> bool,
-    ) -> Option<Prepared> {
-        let window = self
-            .windows
-            .iter_mut()
-            .rev()
-            .find(|w| w.body.dirty && allowed(w.body.source.as_ref()))?;
+        let window = self.windows.iter_mut().rev().find(|w| w.body.dirty)?;
         window.body.dirty = false;
         #[cfg(test)]
         {
