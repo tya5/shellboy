@@ -159,9 +159,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Preserve the Windows-only experiment and two-thread all-OS diagnostic.
-        # Ordinary task branches use Linux by default; landing branches always use all OSes.
-        os: ${{ fromJSON(inputs.windows_test_threads == '4' && '["windows-latest"]' || (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/land/') || startsWith(github.ref, 'refs/heads/integration/') || inputs.all_oses || inputs.windows_test_threads == '2') && '["ubuntu-latest","macos-latest","windows-latest"]' || '["ubuntu-latest"]') }}
+        # Preserve existing Linux/Windows selection; split macOS only on full qualification runs.
+        include: ${{ fromJSON(inputs.windows_test_threads == '4' && '[{"os":"windows-latest","job":"check (windows-latest)"}]' || (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/land/') || startsWith(github.ref, 'refs/heads/integration/') || inputs.all_oses || inputs.windows_test_threads == '2') && '[{"os":"ubuntu-latest","job":"check (ubuntu-latest)"},{"os":"macos-latest","job":"check (macos-latest)","shard":"1"},{"os":"macos-latest","job":"check (macos-latest shard 2)","shard":"2"},{"os":"windows-latest","job":"check (windows-latest)"}]' || '[{"os":"ubuntu-latest","job":"check (ubuntu-latest)"}]') }}
+    name: ${{ matrix.job }}
     runs-on: ${{ matrix.os }}
     # macOS full checks take 26-27 min on green landing batches (2026-11-23 runs 45152727775, 45173718882);
     # a 4-patch batch hit the 30-min cap twice. 45 leaves margin without hiding a real hang for long.
@@ -214,6 +214,7 @@ jobs:
       - name: Format
         run: cargo fmt --all -- --check
       - name: Clippy
+        if: runner.os != 'macOS' || matrix.shard == '1'
         run: cargo clippy --locked --all-targets --keep-going -- -D warnings
       - name: Diagnose native Windows overflow recovery
         if: runner.os == 'Windows' && inputs.diagnostics == true
@@ -224,15 +225,38 @@ jobs:
         env:
           SELECTED_TEST_THREADS: ${{ inputs.windows_test_threads == '2' && '2' || '4' }}
         run: '"RUST_TEST_THREADS=$env:SELECTED_TEST_THREADS" >> $env:GITHUB_ENV'
+      - name: Verify macOS target shards
+        if: runner.os == 'macOS'
+        run: python scripts/check-macos-test-shards.py
       - name: Tests
+        if: runner.os != 'macOS'
         run: python scripts/test-timings.py --output .local/ci-timings
+      - name: Build macOS test shard
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          MACOS_TEST_SHARD: ${{ matrix.shard }}
+        run: |
+          set -euo pipefail
+          target_args=$(python scripts/check-macos-test-shards.py --shard "$MACOS_TEST_SHARD")
+          read -r -a targets <<< "$target_args"
+          mkdir -p .local/ci-timings
+          cargo test --locked "${targets[@]}" --no-run --message-format=json \
+            > .local/ci-timings/cargo-artifacts.jsonl \
+            2> .local/ci-timings/build.log
+      - name: Run macOS test shard with timing records
+        if: runner.os == 'macOS'
+        env:
+          MACOS_TEST_SHARD: ${{ matrix.shard }}
+        run: python scripts/test-timings.py --artifacts .local/ci-timings/cargo-artifacts.jsonl --output .local/ci-timings/shard-${{ matrix.shard }}
       - name: Verify real CLI against fallback Unix namespace
-        if: runner.os != 'Windows'
+        if: runner.os != 'Windows' && (runner.os != 'macOS' || matrix.shard == '1')
         shell: bash
         run: |
           # Tests already built the default-feature CLI for integration tests.
           SHELLBOY_TEST_CLI_BINARY="$PWD/target/debug/shellboy" cargo test --locked --lib ipc::server::endpoint::tests::denied_temporary_bases_use_data_directory_and_cli_locator -- --exact
       - name: Verify integration DB observation build
+        if: runner.os != 'macOS' || matrix.shard == '1'
         run: cargo test --locked --features test-db-observation --test db_observation_feature
       - name: Observe closed-proxy retry phases and timings
         if: inputs.diagnostics == true
@@ -249,7 +273,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: native-test-timings-${{ runner.os }}
+          name: native-test-timings-${{ runner.os }}${{ runner.os == 'macOS' && format('-shard-{0}', matrix.shard) || '' }}
           path: .local/ci-timings
           include-hidden-files: true
   measure:
