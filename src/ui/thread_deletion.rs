@@ -434,6 +434,8 @@ impl UiState {
             .retain(|action| !targets_deleted(action, &deleted, &draft_ids));
         self.render_pending
             .retain(|(thread, _, _, _, _, _)| !deleted.contains(thread));
+        self.omitted_render_retries
+            .retain(|attempt| !deleted.contains(&attempt.thread));
         self.layout_cache = HistoryLayoutCache::default();
         self.visible_links.clear();
         let mut list_ids = ids.to_vec();

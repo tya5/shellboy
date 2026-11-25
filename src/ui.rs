@@ -1882,7 +1882,7 @@ pub struct UiState {
     painted_body_nodes: Option<(String, u64, Vec<String>)>,
     render_width: u16,
     render_pending: BTreeSet<(String, u64, u64, String, u16, usize)>,
-    omitted_render_retries: BTreeSet<(String, u64, u64, String, u16, usize)>,
+    omitted_render_retries: BTreeSet<OmittedRenderAttempt>,
     details: Option<details::Details>,
     operations: Option<operations::Operations>,
     models: Option<models::ModelPicker>,
@@ -1904,6 +1904,27 @@ pub struct UiState {
     thread_deletions_inflight: BTreeMap<String, u64>,
     command_rejected: bool,
 }
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct OmittedRenderAttempt {
+    thread: String,
+    generation: u64,
+    node: String,
+    start: usize,
+    bytes: usize,
+    total: usize,
+    stamp: Option<[u8; 32]>,
+}
+impl OmittedRenderAttempt {
+    fn matches_source(&self, node: &UiNode) -> bool {
+        self.node == node.node_id
+            && self.start == node.base_char_offset
+            && self.bytes == node.text.len()
+            && self.total == node.total_chars
+            && self.stamp == node.presentation.projection_stamp
+            && !node.presentation.body_evicted
+    }
+}
+
 // Preserve source-window I/O intent before viewport reconciliation initializes
 // or clamps the display row. These facts live for this draw only.
 #[derive(Clone, Copy)]
@@ -2140,11 +2161,14 @@ impl UiState {
         }
         let view = self.view();
         let Some(thread) = view.thread_id.clone() else {
+            self.omitted_render_retries.clear();
             return;
         };
         if view.navigation.request().is_some() {
             return;
         }
+        let mut retained_attempts = std::mem::take(&mut self.omitted_render_retries);
+        let view = self.view();
         let mut working = working_node_ids(view);
         working.extend(
             visible
@@ -2155,7 +2179,12 @@ impl UiState {
         working.dedup();
         let generation = view.generation;
         let revision = view.navigation.view_revision;
-        let mut requests = view
+        retained_attempts.retain(|attempt| {
+            attempt.thread == thread
+                && attempt.generation == generation
+                && view.nodes().iter().any(|node| attempt.matches_source(node))
+        });
+        let requests = view
             .nodes()
             .iter()
             .filter(|node| working.contains(&node.node_id) && !view.closed_tool_source(node))
@@ -2173,54 +2202,53 @@ impl UiState {
                     && (offset < node.base_char_offset
                         || (offset >= node.base_char_offset + node.text.chars().count()
                             && offset < node.total_chars));
-                let omitted_key = (
-                    thread.clone(),
-                    generation,
-                    revision,
-                    node.node_id.clone(),
-                    width,
-                    offset,
-                );
-                let needed = node.presentation.body_evicted
-                    || outside
-                    || node.presentation.blocks.iter().any(|block| {
-                        matches!(
-                            block.kind,
-                            crate::presentation::BlockKind::Prose
-                                | crate::presentation::BlockKind::Reasoning
-                        ) && (block.rendered.as_ref().is_none_or(|rendered| {
-                            rendered.width != width
-                                || (rendered.omitted
-                                    && !self.omitted_render_retries.contains(&omitted_key))
-                        }) || (preflight.initializing
+                let mut needed = outside || node.presentation.body_evicted;
+                let mut omitted = false;
+                for block in &node.presentation.blocks {
+                    if !matches!(
+                        block.kind,
+                        crate::presentation::BlockKind::Prose
+                            | crate::presentation::BlockKind::Reasoning
+                    ) {
+                        continue;
+                    }
+                    needed |= block.rendered.as_ref().is_none_or(|r| r.width != width)
+                        || (preflight.initializing
+                            && !node.presentation.anchor_window
                             && block.source_exact
                             && offset > block.source_start
-                            && offset < block.source_end))
+                            && offset < block.source_end);
+                    omitted |= block.rendered.as_ref().is_some_and(|r| r.omitted);
+                }
+                let attempt =
+                    (omitted && !node.presentation.anchor_window).then(|| OmittedRenderAttempt {
+                        thread: thread.clone(),
+                        generation,
+                        node: node.node_id.clone(),
+                        start: node.base_char_offset,
+                        bytes: node.text.len(),
+                        total: node.total_chars,
+                        stamp: node.presentation.projection_stamp,
                     });
-                let omitted = node.presentation.blocks.iter().any(|block| {
-                    block
-                        .rendered
+                (needed
+                    || attempt
                         .as_ref()
-                        .is_some_and(|rendered| rendered.omitted)
-                });
-                needed.then(|| {
+                        .is_some_and(|key| !retained_attempts.contains(key)))
+                .then(|| {
                     (
                         node.node_id.clone(),
                         offset,
                         outside || node.presentation.body_evicted,
-                        omitted,
+                        attempt,
                     )
                 })
             })
             .collect::<Vec<_>>();
-        requests.sort_by_key(|(node, _, _, _)| !working.contains(node));
+        self.omitted_render_retries = retained_attempts;
         self.render_pending.retain(|(t, g, r, _, w, _)| {
             t == &thread && *g == generation && *r == revision && *w == width
         });
-        self.omitted_render_retries.retain(|(t, g, r, _, w, _)| {
-            t == &thread && *g == generation && *r == revision && *w == width
-        });
-        for (node_id, char_offset, missing_source, omitted) in requests {
+        for (node_id, char_offset, missing_source, attempt) in requests {
             if self.render_pending.len() >= 3 {
                 break;
             }
@@ -2232,9 +2260,9 @@ impl UiState {
                 width,
                 char_offset,
             );
-            if self.render_pending.insert(request_key.clone()) {
-                if omitted {
-                    self.omitted_render_retries.insert(request_key);
+            if self.render_pending.insert(request_key) {
+                if let Some(attempt) = attempt {
+                    self.omitted_render_retries.insert(attempt);
                 }
                 if missing_source {
                     self.active_view_mut().navigation.set_loading(true);
@@ -7777,6 +7805,18 @@ mod layout_cache_tests {
             1
         );
 
+        ui.view_mut().navigation.view_revision += 1;
+        ui.prepare_visible_render_width(76, &BTreeSet::from([0]), RenderPreflight::new(ui.view()));
+        assert!(ui.take_deferred_actions().is_empty());
+        // The old response is not installed after a navigation revision change.
+        ui.apply(UiUpdate::NodeWindow {
+            thread_id: "t".into(),
+            generation,
+            view_revision: revision,
+            node: value.clone(),
+        });
+        assert!(!ui.view().nodes()[0].presentation.anchor_window);
+        let revision = ui.view().navigation.view_revision;
         ui.apply(UiUpdate::NodeWindow {
             thread_id: "t".into(),
             generation,
@@ -7793,6 +7833,15 @@ mod layout_cache_tests {
 
     #[test]
     fn completed_markdown_single_rows_remain_monotonic_across_body_reloads() {
+        markdown_single_row_witness(false);
+    }
+
+    #[test]
+    fn compact_viewport_scrolls_omitted_markdown_without_reloading_each_row() {
+        markdown_single_row_witness(true);
+    }
+
+    fn markdown_single_row_witness(compact: bool) {
         use ratatui::{Terminal, backend::TestBackend};
         let source = (0..2500)
             .map(|i| {
@@ -7814,7 +7863,8 @@ mod layout_cache_tests {
         let payload = serde_json::json!({"text":source});
         let window = |offset: usize| {
             let start = offset.saturating_sub(512);
-            let end = (start + 4 * 1024).min(source.len());
+            let bytes = if compact { 8 * 1024 } else { 4 * 1024 };
+            let end = (start + bytes).min(source.len());
             let mut value = node("answer", &source[start..end]);
             value.base_char_offset = start;
             value.total_chars = source.len();
@@ -7825,21 +7875,39 @@ mod layout_cache_tests {
         };
         let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
         ui.select_thread("t".into());
-        *ui.view_mut().nodes_mut_for_test() = vec![window(64_000)];
+        let initial = window(64_000);
+        if compact {
+            assert!(initial.presentation.blocks.iter().any(|block| {
+                block
+                    .rendered
+                    .as_ref()
+                    .is_some_and(|rendered| rendered.omitted)
+            }));
+        }
+        *ui.view_mut().nodes_mut_for_test() = vec![initial];
         ui.view_mut().total_nodes = 1;
         ui.view_mut().navigation.select_reading();
         ui.view_mut().navigation.anchor = ViewAnchor {
             node_id: Some("answer".into()),
             char_offset: 64_000,
         };
-        // Keep the previously characterized ten-row conversation viewport.
-        let mut terminal = Terminal::new(TestBackend::new(80, 20)).unwrap();
+        // Preserve the original ten-row witness and independently characterize 18 rows.
+        let mut terminal = Terminal::new(TestBackend::new(80, if compact { 28 } else { 20 })).unwrap();
+        if compact {
+            // Exercise the same 18 conversation rows before and after compact headings land.
+            terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
+            let height = ui.view().navigation.scroll.height;
+            terminal = Terminal::new(TestBackend::new(80, 28 + 18 - height)).unwrap();
+        }
         let mut previous = 0;
         let mut read_count = 0;
         for step in 0..100 {
             terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
             let buffer = terminal.backend().buffer();
             let viewport = ui.view().navigation.scroll.area.unwrap();
+            if compact {
+                assert_eq!(ui.view().navigation.scroll.height, 18);
+            }
             let text = (viewport.y + 1..viewport.bottom() - 1)
                 .map(|y| (1..79).map(|x| buffer[(x, y)].symbol()).collect::<String>())
                 .collect::<Vec<_>>()
@@ -7859,8 +7927,19 @@ mod layout_cache_tests {
             );
             previous = first;
             let mut requests = std::collections::VecDeque::from(ui.take_deferred_actions());
-            requests.extend(ui.scroll(1));
-            while let Some(action) = requests.pop_front() {
+            if !compact {
+                requests.extend(ui.scroll(1));
+            }
+            let mut scroll_pending = compact;
+            let mut requested_offsets = BTreeSet::new();
+            loop {
+                let Some(action) = requests.pop_front() else {
+                    if std::mem::take(&mut scroll_pending) {
+                        requests.extend(ui.scroll(1));
+                        continue;
+                    }
+                    break;
+                };
                 if let UiAction::LoadNodeWindow {
                     thread_id,
                     generation,
@@ -7869,6 +7948,12 @@ mod layout_cache_tests {
                     ..
                 } = action
                 {
+                    if compact {
+                        assert!(
+                            requested_offsets.insert(char_offset),
+                            "duplicate read at {char_offset}"
+                        );
+                    }
                     read_count += 1;
                     assert!(read_count < 30, "bounded navigation must converge");
                     ui.apply(UiUpdate::NodeWindow {

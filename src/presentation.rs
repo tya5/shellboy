@@ -899,6 +899,9 @@ pub struct NodePresentation {
     /// Ephemeral cache state, distinct from a legitimately empty source body.
     #[serde(skip)]
     pub body_evicted: bool,
+    /// The installed source was already read as a bounded anchor window.
+    #[serde(skip)]
+    pub(crate) anchor_window: bool,
     /// Serialized DB-read ordering for this source window; not semantic identity.
     #[serde(skip)]
     pub read_revision: u64,
