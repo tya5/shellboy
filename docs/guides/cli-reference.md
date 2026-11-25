@@ -493,6 +493,19 @@ List/get/read cursors are opaque continuation tokens. Pass the exact returned st
 
 Changed history path/revision or target can cause `cursor_expired`; encoding mismatch yields `cursor_encoding_mismatch`. Restart from the beginning. Shell cursors bind execution, raw retention generation, sequence/byte position, and decoder state. An evicted cursor or reclaimed raw yields `output_expired`, not empty output. After rotation, read without a cursor and check `oldest_sequence` and the retained stream offsets. Explicitly changing read encoding invalidates the old cursor. `decode_errors=true` indicates invalid bytes during conversion; consider rereading raw with the correct encoding.
 
+## Operation evidence
+
+**Decide from operation evidence, not the error code, exit status, or hint alone.**
+
+| Observation | Safe next step |
+| --- | --- |
+| CLI parse/local failure, handshake before sending, or typed owner refusal (`phase: admission`, `request_may_have_been_applied: false`) | Correct the input or inspect the reported condition. A known ID does not imply admission, and `false` alone does not prove non-delivery. |
+| Response lost after sending; `read_only: true`, `request_may_have_been_applied: false` | The read may have run. Explicitly read again only for fresh state; data and cost can differ (for example, query embedding). No receipt lookup is offered. |
+| Response lost after sending a receipt-backed mutation; `details.next_operation.command` is `operation.get` | Follow the supplied lookup ID against the same owner data directory. `shellboy operation get --operation ID` observes the original receipt; it does not execute the mutation. |
+| Receipt is saved, pending (including an old-owner pending row), expired, or missing | Use the saved outcome and exact targets if present. Pending, expiry, and `operation_not_found` are not evidence of no effects; inspect target state. Do not start a new mutation just because the observation failed. |
+| Uncertain non-receipted write; no `next_operation` | Do not invent a lookup or replay the write. For draft images, use the explicit replacement flow if needed. |
+| Structured `exec` fails or loses output | Keep validated stdout separate from stderr diagnostics and exit status. Inspect typed diagnostics and reported IDs; no output is not proof the action never ran. |
+
 ## Error codes
 
 | Code | Meaning / next action |

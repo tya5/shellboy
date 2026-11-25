@@ -245,6 +245,7 @@ async fn parked_waits_leave_ordinary_and_stop_admission_available() {
     let details = error.details.unwrap();
     assert_eq!(details["phase"], "admission");
     assert_eq!(details["request_may_have_been_applied"], false);
+    assert!(details.get("next_operation").is_none());
     let eof = crate::test_watchdog::watchdog(
         "refused wait closes",
         read_frame::<_, Response<serde_json::Value>>(&mut rejected),
@@ -338,6 +339,7 @@ async fn refused_wait_frame_survives_native_pipe_close() {
     let details = error.details.unwrap();
     assert_eq!(details["phase"], "admission");
     assert_eq!(details["request_may_have_been_applied"], false);
+    assert!(details.get("next_operation").is_none());
     served.await.unwrap().unwrap();
     assert!(incoming.try_recv().is_err());
 }

@@ -1,0 +1,9 @@
+# Operation evidence (#421, Unit 2)
+
+`operation.get` now registers `OperationReceiptDetails` in the public result
+schema. Its existing owner payload is unchanged: opaque nullable `outcome`,
+stored `state`, sparse string `targets`, optional message or compaction
+`downstream`, and the existing replay-policy strings. Missing remains
+`operation_not_found`. The typed `details.next_operation` remains the safe
+lookup after uncertain receipt-backed mutations. No receipt storage or replay
+change, new error code, automatic replay, or Studio adoption is included.

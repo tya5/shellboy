@@ -419,6 +419,87 @@ mod tests {
         db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
         db
     }
+    #[test]
+    fn operation_evidence_matches_public_schema_without_writes() {
+        use crate::protocol::{OperationReceiptDetails, OperationReplayPolicy::*};
+        let mut schema: Value = serde_json::from_str(&crate::protocol::schema_json()).unwrap();
+        assert_eq!(
+            schema["operation_results"]["operation.get"]["title"],
+            "OperationReceiptDetails"
+        );
+        schema["$ref"] = json!("#/operation_results/operation.get");
+        let validator = jsonschema::validator_for(&schema).unwrap();
+        let db = fixture();
+        let body = r#"{"result":{"message_id":"m","run_id":42,"new_field":[false]}}"#;
+        for (instance, suffix, state, saved, policy) in [
+            ("current", "pending", "pending", None, DoNotReexecute),
+            ("old", "pending", "pending", None, DoNotReexecute),
+            (
+                "current",
+                "saved",
+                "completed",
+                Some(body),
+                ReturnSavedOutcome,
+            ),
+            ("old", "saved", "completed", Some(body), ReturnSavedOutcome),
+            (
+                "current",
+                "expired",
+                "completed",
+                Some(EXPIRED_OUTCOME),
+                OperationExpired,
+            ),
+        ] {
+            let id = format!("{instance}:{suffix}");
+            db.execute("INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,created_at,result_ref_json,reserved_bytes) VALUES(?1,?2,'null','hash',?3,'2000-01-01',?4,0)",params![id,instance,state,saved]).unwrap();
+            let before = db.total_changes();
+            let value = super::super::db::operation_details(&db, &id, "current").unwrap();
+            assert!(validator.is_valid(&value), "{value}");
+            for field in [
+                "operation_id",
+                "instance_id",
+                "created_at",
+                "current_instance",
+                "state",
+                "outcome",
+                "result_uncertain",
+                "result_expired",
+                "replay_policy",
+                "targets",
+            ] {
+                let mut absent = value.clone();
+                absent.as_object_mut().unwrap().remove(field);
+                assert!(!validator.is_valid(&absent), "{field} must be required");
+            }
+            let decoded: OperationReceiptDetails = serde_json::from_value(value.clone()).unwrap();
+            assert_eq!(decoded.operation_id, id);
+            assert_eq!(decoded.instance_id, instance);
+            assert_eq!(decoded.current_instance, instance == "current");
+            assert_eq!(decoded.state, state);
+            assert_eq!(decoded.result_uncertain, suffix == "pending");
+            assert_eq!(decoded.result_expired, suffix == "expired");
+            assert_eq!(decoded.replay_policy, policy);
+            match suffix {
+                "pending" => assert!(decoded.outcome.is_null()),
+                "expired" => assert_eq!(decoded.outcome["error"]["code"], "operation_expired"),
+                _ => {
+                    assert_eq!(
+                        decoded.outcome,
+                        serde_json::from_str::<Value>(body).unwrap()
+                    );
+                    assert_eq!(value["targets"], json!({"message_id":"m"}));
+                }
+            }
+            assert_eq!(serde_json::to_value(decoded).unwrap(), value);
+            assert_eq!(db.total_changes(), before);
+        }
+        let before = db.total_changes();
+        let missing =
+            super::super::db::operation_details(&db, "current:missing", "current").unwrap_err();
+        assert_eq!(missing.code, ErrorCode::OperationNotFound);
+        assert_eq!(db.total_changes(), before);
+    }
+
     fn scanned_usage(db: &Connection, instance: &str) -> u64 {
         db.query_row("SELECT COALESCE(SUM(length(CAST(operation_id AS BLOB))+length(CAST(instance_id AS BLOB))+length(CAST(origin_json AS BLOB))+length(CAST(request_hash AS BLOB))+length(CAST(created_at AS BLOB))+COALESCE(length(CAST(result_ref_json AS BLOB)),0)+512+CASE WHEN instance_id=?1 AND state='pending' THEN reserved_bytes ELSE 0 END),0) FROM operation_receipt",[instance],|r|r.get::<_,i64>(0)).unwrap() as u64
     }
