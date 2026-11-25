@@ -31,7 +31,7 @@ Add a `message_delivered` condition to existing `wait`:
 {"type":"message_delivered","message_id":"MESSAGE_ID"}
 ```
 
-Satisfy only on durable application of this exact model-target message (`applied`), using Core's existing application boundary. This does not promise provider processing, a response, or a reply. Acceptance, staging, path/attachment evidence alone, or applying another message are not success. Already-applied model input satisfies immediately; cancelled, unavailable and non-model targets are not success and use typed terminal/unavailable or invalid-target handling. Define those cases in the existing wait result model; do not keep waiting for a known impossible target or return a hold hint in the wait. Reply observation remains `reply_received`.
+Satisfy only on durable application of this exact model-target message (`applied`), using Core's existing application boundary. This does not promise provider processing, a response, or a reply. Acceptance, staging, path/attachment evidence alone, or applying another message are not success. Already-applied model input matches immediately. A cancelled message or a message that becomes unavailable after registration never matches and produces `status: unavailable` if no condition matches. An unknown or unavailable target at initial validation returns `TargetUnavailable`; a known non-model target returns `InvalidArgument`. Preserve the existing ANY rule: an otherwise valid wait can return `status: satisfied` for another condition even when this message is cancelled or has become unavailable. Confirm application only if `matched` contains `message_delivered` with this exact message ID. Do not keep waiting for a known impossible target or return a hold hint in the wait. Reply observation remains `reply_received`.
 
 Use the existing owner wait admission, deadlines, cancellation, and keyed read/subscribe/recheck discipline. Read the exact delivery identity using the existing ID lookup; register before the initial snapshot, publish after committed transitions relevant to this predicate (including cancellation and target loss), and recheck durable state rather than trusting a notification. No polling, full scan, new timer service, or sample-based delivery guess. Preserve the current wait envelope and distinguish a satisfied predicate from observation timeout and refusal; CLI exit success alone does not mean the message applied. Timeout has no effect on the input or the recipient.
 
@@ -42,7 +42,7 @@ Use the existing owner wait admission, deadlines, cancellation, and keyed read/s
 | Accepted send, then `message_delivered` satisfied | Do not intervene. No reply is implied. |
 | Wait timed out and `message get` proves `held_by.kind = foreground_shell` | Explicitly call `shell background --execution` for **only** the reported ID, if intervention is still wanted. |
 | Response generation, Revisit, recovery, unknown, cancelled or no longer held | Do not background anything. Normal delivery, existing hold rules, or a terminal result apply. |
-| Exact Background succeeds | That foreground wait is released; the original process remains owned by its Run. Other work is untouched. Recheck this message if delivery confirmation is still needed. |
+| Exact Background acknowledges `requested: true` | Only the exact request was accepted. The driver can still observe completion or Stop before consuming the release. The acknowledgement proves neither release nor application. Use the exact-message wait or read to confirm application. |
 | Exact Background refuses or outcome is unknown | Inspect the original target and known receipt. Do not resend, automatically retry, or resolve to another execution. |
 
 Send, wait, read and Background are separate operations. A message may apply naturally before the read, the named shell may finish, or the recipient may move on before Background. The operation revalidates the exact live target independently; it does not rebind a stale ID or guarantee message application. Any Thread on the connected owner may request Background for another Thread's shell, with no same-Thread, role, or ownership gate. Keep endpoint admission and exact execution, Run and live foreground checks. The current runtime dispatch resolves the target Thread and Run from the execution ID rather than the caller Thread; verify the full path with genuine Thread origin and remove any upstream Thread-based refusal for Background only. Person Background is unchanged. Foreground completion, interruption and shutdown keep their existing paths.
@@ -67,7 +67,7 @@ Historical `now` inputs, delivery metadata, receipts and `additional_input` resu
 
 Ship matching `docs/guides/agent-guide.md` text and a `docs/guides/shell.md` cross-link with each implementation unit. Update the CLI reference and quick lookup as features land; remove `--deliver now` advice when removal lands. The new field, predicate, and neutral release reason below are proposed syntax.
 
-**Routine reports need only Send.** If timely application matters, track the message. Check the wait verdict, not its exit status. On timeout, read `held_by`; intervene only if it names the exact foreground execution and intervention is still useful.
+**Routine reports need only Send.** If timely application matters, track the message. Check `matched` for this exact message condition, not the top-level status or CLI exit code alone. On timeout, read `held_by`; intervene only if it names the exact foreground execution and intervention is still useful.
 
 ```text
 Sender -> shellboy message send --thread RECIPIENT --text 'Skip the optional test and continue the review.'
@@ -77,6 +77,8 @@ Observed: the wait timed out; application is not confirmed.
 Sender -> shellboy message get --message SKIP_MSG
 Observed: held_by is {"kind":"foreground_shell","execution_id":"TEST_EXEC"}.
 Sender -> shellboy shell background --execution TEST_EXEC
+Observed: requested: true. This acknowledges the request only.
+In this example the driver consumes the release.
 Woken model: shell_backgrounded for TEST_EXEC; the skip instruction arrives at the normal boundary.
 Woken model -> shellboy shell get --execution TEST_EXEC
 Woken model -> shellboy message get --message SKIP_MSG
@@ -108,6 +110,6 @@ Choose the wait interval for when it is useful to reconsider, not to impose a pr
 ## Independently landable units
 
 1. **Typed message readback.** Add `held_by` to the relevant live message reads without changing delivery or wake behavior. Witness exact foreground attribution, another running shell on the same Thread, generation, Revisit/recovery, application and cancellation, and stale or ambiguous live state. Studio #159 can adopt the typed pending-row line independently. Guide: interpret each variant and do not guess a target.
-2. **Delivery observation.** Add `message_delivered` through existing wait admission. Witness already-applied and pending input, application across registration/commit races, unrelated input, timeout, cancellation and target loss, and no delivery side effects. Guide: retain the message ID and use bounded wait without confusing application with replies.
+2. **Delivery observation.** Add `message_delivered` through existing wait admission. Witness already-applied and pending input, application across registration/commit races, unrelated input, timeout, cancellation and target loss, and no delivery side effects. Include a mixed wait where another condition matches while the cancelled message does not: the result is `satisfied`, but `matched` excludes the exact message condition. Guide: retain the message ID and use bounded wait without confusing application with replies.
 3. **Explicit exact-ID intervention.** Verify cross-Thread Background, remove a caller-based refusal only if found, and use the neutral reason for commands without known person provenance. Witness only the named wait released, its process still running, later calls cancelled, stale IDs refused and normal input application. Keep `now` available in this unit. Guide: send, wait, read the held reason, Background only its ID, and inspect before deciding. Include the worked background-and-wait examples.
 4. **Remove `now`.** Once the replacement is available, remove new `now` sends/asks from CLI/wire/TUI and remove the legacy wake path once outstanding delivery and replay witnesses pass. Preserve history and `complete`; no alias. Observe ordinary send not waking. Guide: remove old advice and retain the separate explicit steps. TUI and Studio retain exact-ID person Background; Studio adopts removal with the landed contract. Number public wire changes at landing; this design does not authorize a pin.
