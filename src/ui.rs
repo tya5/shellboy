@@ -1219,10 +1219,10 @@ pub enum UiUpdate {
         // of an unrelated history page. This is not a canonical ordinal.
         nodes: Vec<(String, UiNode)>,
     },
-    PreviewReconciled {
+    PreviewEnded {
         thread_id: String,
         generation: u64,
-        saved: Box<UiUpdate>,
+        attempts: Vec<String>,
     },
     PreviewGap {
         thread_id: String,
@@ -2359,19 +2359,6 @@ impl UiState {
         std::mem::take(&mut self.terminal_requests)
     }
     pub fn apply(&mut self, update: UiUpdate) {
-        if let UiUpdate::PreviewReconciled {
-            thread_id,
-            generation,
-            saved,
-        } = update
-        {
-            self.apply_inner(UiUpdate::PreviewGap {
-                thread_id,
-                generation,
-            });
-            self.apply(*saved);
-            return;
-        }
         if let UiUpdate::CurrentView {
             generation,
             details,
@@ -2578,6 +2565,8 @@ impl UiState {
         {
             return;
         }
+        let settled = view.turn_id.is_some()
+            && (view.turn_id != details.turn_id || details.recovery_reason.is_some());
         let read_revision = *read_revision;
         // Children have all been checked before any mutation. Retain paid stream
         // bindings before the canonical page and trim once after the whole frame.
@@ -2601,6 +2590,10 @@ impl UiState {
             });
         }
         self.apply_inner(history);
+        if settled && let Some(view) = self.view_for(&thread, generation) {
+            let retired = view.reconcile_saved_preview(true, None);
+            self.deferred_actions.extend(retired);
+        }
         if let Some(received) = received {
             self.apply_inner(*received);
         }
@@ -2916,7 +2909,7 @@ impl UiState {
                 execute,
                 result,
             } => self.apply_thread_deletion(request_id, args, execute, result),
-            UiUpdate::PreviewReconciled { .. } | UiUpdate::SavedMessage { .. } => {
+            UiUpdate::SavedMessage { .. } => {
                 unreachable!("handled as atomic saved projection")
             }
             UiUpdate::ProgramStatus(_) => {
@@ -3367,6 +3360,10 @@ impl UiState {
                 view.delivery_read_revision = read_revision;
                 view.pending_messages = pending;
                 view.reconcile_saved_inputs();
+                if !append {
+                    let retired = view.reconcile_saved_preview(false, None);
+                    self.deferred_actions.extend(retired);
+                }
             }
             UiUpdate::StreamCommitted {
                 thread_id,
@@ -3406,6 +3403,14 @@ impl UiState {
                 let Some(view) = self.view_for(&thread_id, generation) else {
                     return;
                 };
+                if verified
+                    && presentation
+                        .preview_source
+                        .as_ref()
+                        .is_some_and(|source| !view.accepts_preview(source))
+                {
+                    return;
+                }
                 let retired = if verified {
                     view.settle_other_streams(&node_id)
                 } else {
@@ -3470,6 +3475,19 @@ impl UiState {
                     view.activity.clear_receive_observation();
                     let retired = view.settle_other_streams("");
                     self.deferred_actions.extend(retired);
+                }
+            }
+            UiUpdate::PreviewEnded {
+                thread_id,
+                generation,
+                attempts,
+            } => {
+                if let Some(view) = self.view_for(&thread_id, generation) {
+                    let actions = attempts
+                        .iter()
+                        .filter_map(|attempt| view.settle_stream(attempt))
+                        .collect::<Vec<_>>();
+                    self.deferred_actions.extend(actions);
                 }
             }
             UiUpdate::StreamSettled {
@@ -3681,9 +3699,13 @@ impl UiState {
                         first_ordinal,
                         selection_revision,
                         total_nodes,
-                        anchor,
+                        anchor.clone(),
                         window_reply.is_some(),
                     );
+                    if !refresh_tail {
+                        let retired = view.reconcile_saved_preview(false, Some(anchor));
+                        self.deferred_actions.extend(retired);
+                    }
                     if refresh_tail {
                         self.deferred_actions.push(UiAction::LoadHistory {
                             thread_id,
@@ -8877,6 +8899,96 @@ mod tool_refresh_tests {
             nodes: nodes.clone(),
         }
     }
+    #[test]
+    fn saved_window_retires_an_anchored_preview_only_after_eligible_install() {
+        let (send, receive) = crate::frontend::test_outbox();
+        let mut ui = UiState::new(&Config::default(), PathBuf::from("/"));
+        ui.select_thread("t".into());
+        let generation = ui.view().generation;
+        let thread_id = "t".to_owned();
+        let ack = Arc::new(tokio::sync::Notify::new());
+        let frame = || UiUpdate::Stream {
+            thread_id: thread_id.clone(),
+            generation,
+            node_id: "preview".into(),
+            role: "assistant".into(),
+            text: "one chunk".into(),
+            base_char_offset: 0,
+            total_chars: 9,
+            reasoning_ranges: vec![],
+            presentation: NodePresentation {
+                preview_source: Some(crate::presentation::PreviewSource {
+                    input_through_node_id: None,
+                }),
+                ..Default::default()
+            },
+            ack: Some(ack.clone()),
+        };
+        send(frame());
+        ui.apply(receive());
+        assert_eq!(ui.view().nodes()[0].text, "one chunk");
+        let anchor = ViewAnchor {
+            node_id: Some("preview".into()),
+            char_offset: 2,
+        };
+        ui.view_mut().on_view_state(anchor.clone(), false);
+        let superseded = ui.view().navigation.view_revision;
+        ui.view_mut().navigation.on_event(NavEvent::ScrollInitiated);
+        let current = ui.view().navigation.view_revision;
+        assert_ne!(current, superseded);
+        let saved_anchor = ViewAnchor {
+            node_id: Some("saved".into()),
+            char_offset: 1,
+        };
+        let window = |view_revision, read_revision, id: &str| UiUpdate::HistoryWindow {
+            thread_id: thread_id.clone(),
+            generation,
+            view_revision,
+            nodes: vec![UiNode {
+                node_id: id.into(),
+                role: "assistant".into(),
+                text: "saved answer".into(),
+                total_chars: 12,
+                ..Default::default()
+            }],
+            read_revision,
+            selection_revision: read_revision,
+            total_nodes: 1,
+            first_ordinal: 0,
+            pending: Default::default(),
+            anchor: saved_anchor.clone(),
+        };
+        send(window(superseded, 4, "superseded"));
+        ui.apply(receive());
+        assert_eq!(ui.view().navigation.anchor, anchor);
+        assert_eq!(ui.view().nodes()[0].node_id, "preview");
+        assert_eq!(ui.view().delivery_read_revision, 0);
+        assert!(ui.take_deferred_actions().is_empty());
+        send(window(current, 3, "saved"));
+        send(frame()); // An already rendered old frame arrives after the new window.
+        ui.apply(receive());
+        assert_eq!(ui.view().navigation.anchor, saved_anchor);
+        assert_eq!(ui.view().navigation.view_revision, current);
+        assert_eq!(
+            ui.view()
+                .nodes()
+                .iter()
+                .map(|node| node.node_id.as_str())
+                .collect::<Vec<_>>(),
+            ["saved"]
+        );
+        assert!(
+            ui.take_deferred_actions().is_empty(),
+            "viewport replacement needs no second read"
+        );
+        ui.apply(receive());
+        assert_eq!(
+            ui.view().nodes().len(),
+            1,
+            "late frame cannot restore the retired preview"
+        );
+    }
+
     #[test]
     fn saved_tail_notices_skip_baseline_and_repeated_reads() {
         saved_notices(false);

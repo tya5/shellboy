@@ -48,6 +48,8 @@ pub(crate) use saved_events::tests::{
 mod snapshot;
 mod thread_deletion;
 mod update_delivery;
+#[cfg(test)]
+pub(crate) use update_delivery::test_outbox;
 mod view_read;
 mod watch_action;
 use history_reader::{HistoryReader, Reply, WindowReply, WindowRequest};
@@ -1024,9 +1026,7 @@ async fn run_client(
     owner_signal.as_mut().enable();
     let mut watch_ipc_failure = true;
     let mut control_tasks = JoinSet::new();
-    updates.order_previews(true);
     let mut streams = streaming::Display::default();
-    let mut preview_adoption = streaming::Adoption::default();
     let mut stream_inflight = false;
     let mut stream_retry: Option<Box<streaming::Prepared>> = None;
     let mut stream_next = tokio::time::Instant::now();
@@ -1294,7 +1294,6 @@ async fn run_client(
                 .map(|generation| (thread.clone(), *generation))
         });
         if preview_scope != selected_preview {
-            preview_adoption = Default::default();
             preview_scope = selected_preview;
             preview_events = preview_scope.as_ref().map(|(thread, _)| {
                 Box::pin(saved_events::wait_scoped(
@@ -1478,11 +1477,11 @@ async fn run_client(
                 }
             },
             _=updates.notified()=> {
-                updates.flush_preview(&mut |value| preview_adoption.reconcile(preview_scope.as_ref(), &mut streams, value));
+                updates.flush();
                 delivery_next=tokio::time::Instant::now()+Duration::from_millis(5);
             },
             _=tokio::time::sleep_until(delivery_next),if updates.pending()=> {
-                updates.flush_preview(&mut |value| preview_adoption.reconcile(preview_scope.as_ref(), &mut streams, value));
+                updates.flush();
                 delivery_next=tokio::time::Instant::now()+Duration::from_millis(5);
             },
             action=actions.recv_with_admission(!updates.backpressured())=> {
@@ -3796,27 +3795,27 @@ async fn run_client(
                             // With no frame in flight, this ordered update retires any
                             // already displayed preview before a retained suffix can arrive.
                             streams.clear();
-                            preview_adoption.gap();
                             stream_retry = None;
                             dirty_threads.insert(thread.clone());
                             update(&updates, UiUpdate::PreviewGap {
                                 thread_id: thread.clone(), generation: *generation,
                             }).await;
                         }
-                        let ended = page.attempt_ends.unwrap_or_default();
-                        for end in ended.iter().filter(|end| &end.thread_id == thread) {
-                            dirty_threads.insert(end.thread_id.clone());
-                            let staged = streams.retire(thread, &end.attempt_id);
-                            let visible = preview_adoption.retire(&end.attempt_id);
-                            if staged || visible {
-                                update(&updates, UiUpdate::StreamSettled {
-                                    thread_id: thread.clone(), generation: *generation,
-                                    attempt_id: end.attempt_id.clone(), received_source: None, ack: None,
-                                }).await;
-                            }
+                        let ended = page.attempt_ends.unwrap_or_default().into_iter()
+                            .filter(|end| &end.thread_id == thread).map(|end| end.attempt_id)
+                            .collect::<Vec<_>>();
+                        for attempt in &ended {
+                            streams.retire(thread, attempt);
+                        }
+                        if !ended.is_empty() {
+                            dirty_threads.insert(thread.clone());
+                            update(&updates, UiUpdate::PreviewEnded {
+                                thread_id: thread.clone(), generation: *generation,
+                                attempts: ended.clone(),
+                            }).await;
                         }
                         for live in live_text.into_iter().filter(|live| &live.thread_id == thread) {
-                            if ended.iter().any(|end| &end.thread_id == thread && end.attempt_id == live.attempt_id) {
+                            if ended.contains(&live.attempt_id) {
                                 continue;
                             }
                             let source = crate::presentation::PreviewSource {
@@ -3846,7 +3845,7 @@ async fn run_client(
                     }
                 }
             },
-            _=tokio::time::sleep_until(stream_next),if !stream_inflight && (stream_retry.is_some() || streams.pending(&preview_adoption))=> {
+            _=tokio::time::sleep_until(stream_next),if !stream_inflight && (stream_retry.is_some() || streams.pending())=> {
                 let retry = stream_retry
                     .take()
                     .filter(|frame| streams.current(&frame.ticket, render_width));
@@ -3855,7 +3854,7 @@ async fn run_client(
                         .active_thread
                         .as_ref()
                         .and_then(|thread| selection.generations.get(thread))
-                        .and_then(|generation| streams.take_eligible(*generation, render_width, &preview_adoption))
+                        .and_then(|generation| streams.take(*generation, render_width))
                 });
                 if let Some(frame) = frame {
                     stream_inflight = true;
@@ -3883,7 +3882,6 @@ async fn run_client(
             _=send_workers.join_next(),if !send_workers.is_empty()=> {},
         }
     }
-    updates.order_previews(false);
     drop(saved_events);
     drop(preview_events);
     read_cancel.cancel();
