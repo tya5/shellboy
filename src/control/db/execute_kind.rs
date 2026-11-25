@@ -256,8 +256,12 @@ mod tests {
             assert_eq!(kind.classification(), expected, "{kind:?}");
             assert!(!UNDECLARED_WRITER_BOUNDS.contains(&kind));
         }
-        let intervention_kinds = [Kind::ShellBackground, Kind::TurnInterrupt];
-        for kind in intervention_kinds {
+        let runtime_kinds = [
+            Kind::ShellBackground,
+            Kind::TurnInterrupt,
+            Kind::AttachmentReload,
+        ];
+        for kind in runtime_kinds {
             assert_eq!(kind.classification(), Runtime, "{kind:?}");
             assert!(!UNDECLARED_WRITER_BOUNDS.contains(&kind));
         }
