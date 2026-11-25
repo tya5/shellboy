@@ -68,8 +68,9 @@ async fn named_ask_leaves_only_its_recipient_list_after_reply() {
             ..Default::default()
         }))
     };
+    let named_request = request(ask(Some("claude")));
     let named = store
-        .execute(request(ask(Some("claude"))), Some(origin.clone()))
+        .execute(named_request.clone(), Some(origin.clone()))
         .await
         .unwrap();
     crate::operation_result_schema::assert_result("message.ask", &named.result);
@@ -77,6 +78,14 @@ async fn named_ask_leaves_only_its_recipient_list_after_reply() {
     assert!(named_acceptance.expect_reply && named_acceptance.to_human);
     assert_eq!(named_acceptance.thread_id, "sender");
     assert_eq!(named_acceptance.assignment, Assignment::Pending);
+    assert_eq!(named_acceptance.run_id, None);
+    assert_eq!(named_acceptance.turn_id, None);
+    crate::saved_acceptance::assert_saved_acceptance(
+        &store,
+        named_request.operation_id,
+        &named_acceptance,
+    )
+    .await;
     assert!(
         named
             .changed_threads
@@ -102,6 +111,9 @@ async fn named_ask_leaves_only_its_recipient_list_after_reply() {
     let answer = store.execute(reply.clone(), None).await.unwrap().result;
     crate::operation_result_schema::assert_result("message.send", &answer["delivery"]);
     assert_eq!(answer["message_id"], answer["delivery"]["message_id"]);
+    let delivery: MessageAccepted = serde_json::from_value(answer["delivery"].clone()).unwrap();
+    crate::saved_acceptance::assert_saved_acceptance(&store, reply.operation_id.clone(), &delivery)
+        .await;
     assert_eq!(answer["reply_to"], named.result["message_id"]);
     assert_eq!(store.execute(reply, None).await.unwrap().result, answer);
     let history = |id: &str| {
@@ -503,15 +515,20 @@ async fn delivered_cross_thread_ask_can_be_withdrawn_only_by_its_sender_or_owner
 async fn cancellation_releases_duty_and_lists_no_longer_awaiting() {
     for admitted in [false, true] {
         let (_root, store) = fixture().await;
-        let accepted = store
-            .execute(request(send(true)), None)
-            .await
-            .unwrap()
-            .result;
+        let ask = request(send(true));
+        let accepted = store.execute(ask.clone(), None).await.unwrap().result;
         crate::operation_result_schema::assert_result("message.ask", &accepted);
         let thread_acceptance: MessageAccepted = serde_json::from_value(accepted.clone()).unwrap();
         assert!(thread_acceptance.expect_reply && !thread_acceptance.to_human);
         assert_eq!(thread_acceptance.thread_id, "recipient");
+        assert_eq!(thread_acceptance.assignment, Assignment::NewRun);
+        assert!(thread_acceptance.run_id.is_some() && thread_acceptance.turn_id.is_some());
+        crate::saved_acceptance::assert_saved_acceptance(
+            &store,
+            ask.operation_id,
+            &thread_acceptance,
+        )
+        .await;
         let id = thread_acceptance.message_id;
         let details = store
             .execute(

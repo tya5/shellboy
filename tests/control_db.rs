@@ -994,23 +994,28 @@ async fn held_message_actions_agree_on_send_and_readback() {
             )
             .await;
         }
-        let accepted: MessageAccepted = serde_json::from_value(
-            execute(
-                &store,
-                Command::MessageSend(MessageSendArgs {
-                    max_model_requests: None,
-                    human: false,
-                    resume_recovery: false,
-                    sender_label: None,
-                    deliver,
-                    thread_id: Some(thread.thread_id),
-                    text: "held input".into(),
-                }),
-            )
-            .await
-            .result,
-        )
-        .unwrap();
+        let held = request(Command::MessageSend(MessageSendArgs {
+            max_model_requests: None,
+            human: false,
+            resume_recovery: false,
+            sender_label: None,
+            deliver,
+            thread_id: Some(thread.thread_id),
+            text: "held input".into(),
+        }));
+        let result = store.execute(held.clone(), None).await.unwrap().result;
+        crate::operation_result_schema::assert_result("message.send", &result);
+        let accepted: MessageAccepted = serde_json::from_value(result).unwrap();
+        crate::saved_acceptance::assert_saved_acceptance(&store, held.operation_id, &accepted)
+            .await;
+        if state == "recovery_wait" {
+            assert_eq!(accepted.assignment, Assignment::ExistingTurn);
+            assert!(accepted.run_id.is_some() && accepted.turn_id.is_some());
+        } else {
+            assert_eq!(accepted.assignment, Assignment::Pending);
+            assert_eq!(accepted.run_id, None);
+            assert_eq!(accepted.turn_id, None);
+        }
         assert_eq!(accepted.delivery_status, DeliveryStatus::Held);
         assert_eq!(accepted.hint.as_deref(), Some(action));
         let message_id = accepted.message_id;
