@@ -969,6 +969,20 @@ async fn edit_adapter_loads_full_original_then_forks_before_first_request_and_di
     assert_eq!(field(&before, "/sent"), "false");
     let before_hash = field(&before, "/attachments/0/content_hash");
     assert!(!before_hash.is_empty());
+    let reload = || {
+        observer.request(Request::new(
+            "reload-observation-witness",
+            Command::AttachmentReload(AttachmentReloadArgs {
+                thread_id: "source".into(),
+            }),
+        ))
+    };
+    let before_owner: AttachmentReloadResult =
+        serde_json::from_value(reload().await.result.unwrap()).unwrap();
+    assert_eq!(
+        before_owner.attachments[0].content_hash.as_deref(),
+        Some(before_hash.as_str())
+    );
     std::fs::write(&file, "bravo").unwrap();
     std::fs::File::options()
         .write(true)
@@ -990,6 +1004,22 @@ async fn edit_adapter_loads_full_original_then_forks_before_first_request_and_di
     .await;
     assert_ne!(field(&after, "/attachments/0/content_hash"), before_hash);
     assert_eq!(field(&after, "/sent"), "false");
+    let after_owner: AttachmentReloadResult =
+        serde_json::from_value(reload().await.result.unwrap()).unwrap();
+    assert_eq!(after_owner.thread_id, "source");
+    assert_eq!(
+        after_owner.selection_revision,
+        before_owner.selection_revision
+    );
+    assert_ne!(
+        after_owner.attachments[0].content_hash,
+        before_owner.attachments[0].content_hash
+    );
+    assert_eq!(
+        after_owner.attachments[0].content_hash.as_deref(),
+        Some(field(&after, "/attachments/0/content_hash").as_str())
+    );
+    assert!(!after_owner.sent);
     observer
         .store
         .database
@@ -1008,6 +1038,7 @@ async fn edit_adapter_loads_full_original_then_forks_before_first_request_and_di
                     .get::<_, i64>(0))?,
                 0
             );
+            assert_eq!(db.query_row("SELECT COUNT(*) FROM operation_receipt WHERE operation_id='reload-observation-witness'", [], |r| r.get::<_, i64>(0))?, 0);
             Ok(())
         })
         .await

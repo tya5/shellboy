@@ -205,7 +205,7 @@ impl Selected {
         })
     }
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AttachmentManifest {
     pub attachment_id: String,
     pub source_node_id: String,

@@ -127,6 +127,7 @@ fn operation_result_schemas(
     result!("shell.stop", ShellStopResult);
     result!("attachment.add", AttachmentDetails);
     result!("attachment.list", RecordPage<AttachmentDetails, ThreadScopeFilter>);
+    result!("attachment.reload", AttachmentReloadResult);
     result!("attachment.remove", AttachmentRemoveResult);
     opaque!("compact.preview");
     opaque!("compact");
@@ -924,6 +925,18 @@ pub enum ThreadTitleFallback {
     Untitled,
     NotSent,
 }
+args!(AttachmentReloadArgs { thread_id: String });
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct AttachmentReloadResult {
+    pub thread_id: String,
+    pub selection_revision: i64,
+    pub attachments: Vec<crate::attachments::AttachmentManifest>,
+    pub notices: Vec<String>,
+    pub would_exclude: Vec<String>,
+    pub sent: bool,
+}
+
 args!(ThreadTarget { #[serde(default)] thread_id: Option<String> });
 args!(AttachmentListArgs { #[serde(default)] thread_id: Option<String>, #[serde(default = "list_limit")] limit: u32, #[serde(default)] cursor: Option<String> });
 args!(#[derive(Default)] UsageGetArgs { #[serde(default)] attempt_id: Option<Box<str>>, #[serde(default)] since: Option<Box<str>>, #[serde(default)] since_node_id: Option<Box<str>>, #[serde(default)] until: Option<String>, #[serde(default)] thread_id: Option<Box<str>>, #[serde(default)] run_id: Option<String>, #[serde(default)] turn_id: Option<String>, #[serde(default)] include_children: bool, #[serde(default)] group_by: Option<Box<str>>, #[serde(default)] timezone: Option<Box<str>>, #[serde(default)] limit: Option<u32>, #[serde(default)] cursor: Option<Box<str>> });
@@ -2117,6 +2130,8 @@ pub enum Command {
     AttachmentAdd(AttachmentAddArgs),
     #[serde(rename = "attachment.list")]
     AttachmentList(AttachmentListArgs),
+    #[serde(rename = "attachment.reload")]
+    AttachmentReload(AttachmentReloadArgs),
     #[serde(rename = "attachment.remove")]
     AttachmentRemove(AttachmentRemoveArgs),
     #[serde(rename = "compact.preview")]
