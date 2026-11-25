@@ -47,6 +47,8 @@ pub struct ThreadView {
     // Last applied saved-history window, distinct from newer input requests.
     pub(super) received_window_revision: Option<u64>,
     pub total_nodes: u64,
+    pub(super) preview_retired_at: u64,
+    notice_before: Option<u64>,
     pub status: String,
     pub pending: BTreeMap<u64, PendingSend>,
     pub pending_messages: PendingMessages,
@@ -371,6 +373,8 @@ impl ThreadView {
             received_revision: 0,
             received_window_revision: None,
             total_nodes: 0,
+            preview_retired_at: 0,
+            notice_before: None,
             status: crate::ui::i18n::local!(config.ui.language, "入力できます", "Ready for input")
                 .into(),
             pending: BTreeMap::new(),
@@ -562,41 +566,39 @@ impl ThreadView {
     }
 }
 
-// Report one newly observed saved result, not an inferred whole-group outcome.
-pub(super) fn saved_tool_notice(
-    nodes: &[UiNode],
-    first_new: u64,
-    language: crate::config::UiLanguage,
-) -> Option<String> {
-    use crate::presentation::{BlockKind, ToolReasonKind};
-    nodes
-        .get(usize::try_from(first_new).ok()?..)?
-        .iter()
-        .rev()
-        .find_map(|node| {
-            if node.presentation.provisional_stream {
+impl ThreadView {
+    // A saved ordinal is independent of which reader first observed it. A
+    // window that omits the result must not consume its notice.
+    fn observe_saved_tool_results(&mut self, nodes: &[UiNode], first: u64, total: u64) {
+        use crate::presentation::{BlockKind, ToolReasonKind};
+        let Some(before) = self.notice_before else {
+            self.notice_before = Some(total);
+            return;
+        };
+        let found = nodes.iter().enumerate().rev().find_map(|(index, node)| {
+            let ordinal = first.saturating_add(index as u64);
+            if ordinal < before || ordinal >= total || node.presentation.provisional_stream {
                 return None;
             }
             node.presentation.blocks.iter().rev().find_map(|block| {
-                if block.kind != BlockKind::ToolResult {
-                    return None;
-                }
-                let tool = block.tool.as_ref()?;
-                let released = matches!(
-                    tool.reason_kind,
-                    ToolReasonKind::HumanBackgrounded | ToolReasonKind::AdditionalInput
-                ) || tool.reason_code == "shell_backgrounded";
-                if !released && tool.status != "cancelled" {
-                    return None;
-                }
-                Some(crate::presentation::messages::tool_heading(
-                    tool, false, language,
-                ))
+                let tool = block.tool.as_ref().filter(|_| block.kind == BlockKind::ToolResult)?;
+                let released = matches!(tool.reason_kind, ToolReasonKind::ShellBackgrounded | ToolReasonKind::HumanBackgrounded | ToolReasonKind::AdditionalInput);
+                (released || tool.status == "cancelled").then_some((ordinal, tool))
             })
-        })
-}
+        });
+        if let Some((ordinal, tool)) = found {
+            self.notice_before = Some(ordinal + 1);
+            self.status = crate::presentation::messages::tool_heading(tool, false, self.language);
+            self.promote_status_notice(super::history_interaction::NoticeKind::Info);
+        }
+    }
 
-impl ThreadView {
+    pub(super) fn retire_saved_preview(&mut self, read_revision: u64) -> Vec<UiAction> {
+        self.preview_retired_at = self.preview_retired_at.max(read_revision);
+        self.activity.clear_receive_observation();
+        self.settle_other_streams("")
+    }
+
     pub(super) fn on_thread(&mut self, details: ThreadDetails, draft: Option<DraftSnapshot>) {
         self.draft_restore_pending = false;
         self.agents_path = details.agents_path;
@@ -672,6 +674,9 @@ impl ThreadView {
                         .max(incoming.presentation.read_revision);
                 }
             }
+        }
+        if !append {
+            self.observe_saved_tool_results(&nodes, first_ordinal, total_nodes);
         }
         let mut source_changed = false;
         if self.navigation.follow() && !self.navigation.is_rebasing() {
@@ -1154,6 +1159,7 @@ impl ThreadView {
             self.on_incomplete_responses(received);
             return false;
         }
+        self.observe_saved_tool_results(&nodes, first_ordinal, total_nodes);
         let received = self.take_received_previews(&received_bindings);
         // Rebase is an ordinal update, not proof that a committed stream's
         // canonical body was fetched. Retire only verified loaded sources.
