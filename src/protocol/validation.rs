@@ -1093,7 +1093,9 @@ impl Command {
                 optional_nonempty(a.asked_by_thread_id.as_deref(), "asked_by_thread_id")?;
                 optional_nonempty(a.owed_by_thread_id.as_deref(), "owed_by_thread_id")?;
                 if a.owed_by_thread_id.is_some() && a.to.is_some() {
-                    return Err(invalid("owed_by_thread_id selects unnamed duties and cannot be combined with to"));
+                    return Err(invalid(
+                        "owed_by_thread_id selects unnamed duties and cannot be combined with to",
+                    ));
                 }
                 if let Some(name) = a.to.as_deref() {
                     validate_recipient_name(name)?;
