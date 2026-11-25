@@ -169,6 +169,14 @@ pub(super) struct DisplayExtent {
 }
 
 impl DisplayExtent {
+    pub(super) fn project(&self) -> crate::presentation::NodePresentation {
+        let mut projection = crate::presentation::project_display(
+            &self.kind, &self.text, self.range.start as usize, &self.outline,
+        );
+        projection.output_limited = self.output_limited;
+        projection
+    }
+
     fn new(
         kind: String,
         source_revision: i64,
@@ -312,6 +320,11 @@ mod tests {
         let selected = window.selection;
         let extent = &window.nodes[0].display;
         assert_eq!(extent.text, text);
+        let projection = extent.project();
+        assert_eq!(projection.blocks.len(), 1);
+        assert_eq!(projection.blocks[0].kind, crate::presentation::BlockKind::Reasoning);
+        assert_eq!(projection.blocks[0].text, text);
+        assert_eq!((projection.blocks[0].source_start, projection.blocks[0].source_end), (0, 4500));
         assert_eq!(extent.outline.blocks.len(), 1);
         assert_eq!(
             extent.outline.blocks[0].role,
