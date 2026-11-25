@@ -711,6 +711,9 @@ async fn models_can_request_and_reply_across_threads() {
             Some("human"),
             vec![human_ask["message_id"].as_str().unwrap()],
         ),
+        (None, Some("sender"), Some("human"), vec![human_ask["message_id"].as_str().unwrap()]),
+        (None, Some("recipient"), Some("human"), vec![]),
+        (Some("recipient"), Some("sender"), None, vec![message_id.as_str()]),
     ] {
         let page = store
             .execute(
@@ -732,6 +735,10 @@ async fn models_can_request_and_reply_across_threads() {
             .iter()
             .map(|item| item["message_id"].as_str().unwrap())
             .collect();
+        assert_eq!(page["filters"]["owed_by_thread_id"].as_str(), owed_by);
+        assert_eq!(page["filters"]["asked_by_thread_id"].as_str(), asked_by);
+        assert_eq!(page["filters"]["to_omitted"].as_bool(), to.map(|_| true));
+        assert!(page["filters"].get("to").is_none());
         assert_eq!(ids.len(), expected.len());
         assert!(expected.iter().all(|id| ids.contains(id)));
         for item in page["items"].as_array().unwrap() {
@@ -753,6 +760,18 @@ async fn models_can_request_and_reply_across_threads() {
             }
         }
     }
+    let mut asked = MessageListArgs {
+        owed_by_thread_id: None,
+        asked_by_thread_id: Some("sender".into()),
+        to: None,
+        limit: 1,
+        cursor: None,
+    };
+    let first = store.execute(request(Command::MessageList(asked.clone())), None).await.unwrap().result;
+    asked.cursor = Some(first["next_cursor"].as_str().expect("two duties from sender").into());
+    asked.to = Some("human".into());
+    assert_eq!(store.execute(request(Command::MessageList(asked)), None).await.unwrap_err().code, ErrorCode::CursorExpired);
+
     let not_applied = store
         .execute(
             request(Command::MessageReply(MessageReplyArgs {

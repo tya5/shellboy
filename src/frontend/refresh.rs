@@ -862,6 +862,10 @@ mod tests {
         assert_eq!(observation.pending.total, 1);
         assert!(observation.pending.total_exact);
         assert_eq!(observation.pending.items[0].message_id, "held-paired");
+        assert_eq!(observation.pending.items[0].created_at, "held-paired");
+        assert_eq!(observation.pending.items[0].excerpt, "held-paired");
+        assert!(!observation.pending.items[0].excerpt_truncated);
+        assert_eq!(observation.pending.items[0].attachment_count, 0);
         assert_eq!(
             observation.pending.items[0].held_by,
             Some(crate::protocol::MessageHeldBy::Unknown)

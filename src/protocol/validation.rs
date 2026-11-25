@@ -1027,17 +1027,8 @@ impl Command {
                 optional_nonempty(a.cursor.as_deref(), "cursor")?;
                 optional_nonempty(a.asked_by_thread_id.as_deref(), "asked_by_thread_id")?;
                 optional_nonempty(a.owed_by_thread_id.as_deref(), "owed_by_thread_id")?;
-                if [
-                    a.asked_by_thread_id.is_some(),
-                    a.owed_by_thread_id.is_some(),
-                    a.to.is_some(),
-                ]
-                .into_iter()
-                .filter(|set| *set)
-                .count()
-                    > 1
-                {
-                    return Err(invalid("message.list accepts at most one direction filter"));
+                if a.owed_by_thread_id.is_some() && a.to.is_some() {
+                    return Err(invalid("owed_by_thread_id selects unnamed duties and cannot be combined with to"));
                 }
                 if let Some(name) = a.to.as_deref() {
                     validate_recipient_name(name)?;

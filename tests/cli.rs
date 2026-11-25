@@ -1710,6 +1710,16 @@ async fn exact_target_cli_names_reject_retired_selectors() {
     }
 }
 
+#[tokio::test]
+async fn message_list_cli_combines_asked_by_and_named_recipient() {
+    let command = convert(&["message", "list", "--awaiting", "--asked-by-thread", "t", "--to", "human"]).await;
+    assert!(command.validate().is_ok());
+    let Command::MessageList(args) = command else { panic!("wrong command") };
+    assert_eq!(args.asked_by_thread_id.as_deref(), Some("t"));
+    assert_eq!(args.to.as_deref(), Some("human"));
+    assert!(Cli::try_parse_from(["shellboy", "message", "list", "--awaiting", "--owed-by-thread", "t", "--to", "human"]).is_err());
+}
+
 #[test]
 fn retired_history_get_verb_is_rejected() {
     let error = Cli::try_parse_from(["shellboy", "history", "get", "--node", "n"]).unwrap_err();

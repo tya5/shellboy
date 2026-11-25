@@ -1780,9 +1780,10 @@ async fn run_client(
                             continue;
                         };
                         let data_dir = client_context.data_dir.clone();
+                        let instance = control.store.instance_id.clone();
                         let sender = updates.worker();
                         spawn_work(&mut workers, permit, async move {
-                            let result = browser::NativeBrowser::new(&data_dir)
+                            let result = browser::NativeBrowser::new(&data_dir, &instance)
                                 .set_archived(thread_id, archive).await;
                             update(&sender, UiUpdate::ThreadsArchived { archive, result }).await;
                         });
@@ -4228,7 +4229,7 @@ async fn native_header(
         data_dir,
         instance: instance_id,
     }
-    .read(request)
+    .call(request)
     .await?;
     if details.thread_id != thread || details.display_coverage.is_none() {
         return Err(ApiError::new(

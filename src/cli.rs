@@ -1174,10 +1174,10 @@ pub struct MessageListOptions {
     #[arg(long, required = true)]
     pub awaiting: bool,
     /// Requests that this Thread must answer (excludes named questions).
-    #[arg(long = "owed-by-thread", conflicts_with_all = ["asked_by_thread_id", "to"])]
+    #[arg(long = "owed-by-thread", conflicts_with = "to")]
     pub owed_by_thread_id: Option<String>,
-    /// Requests this model Thread sent, including its human questions.
-    #[arg(long = "asked-by-thread", conflicts_with = "to")]
+    /// Requests this model Thread sent; combine with --to human for its human questions.
+    #[arg(long = "asked-by-thread")]
     pub asked_by_thread_id: Option<String>,
     /// Questions addressed to this named recipient.
     #[arg(long)]

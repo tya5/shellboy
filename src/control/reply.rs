@@ -74,7 +74,23 @@ pub(super) fn list_pending(
         args.to.as_deref(),
     );
     let scope = "message.list.pending";
-    let filter = json!([index, key]).to_string();
+    // A combined cursor belongs to both selectors, not the driving index alone.
+    let (extra, value) = match (&args.owed_by_thread_id, &args.asked_by_thread_id, &args.to) {
+        (Some(_), Some(sender), None) => (
+            " AND json_extract(r.sender_json,'$.thread_id')=?5 AND json_extract(r.sender_json,'$.kind')='model'",
+            Some(sender),
+        ),
+        (None, Some(_), Some(recipient)) => (
+            " AND json_extract(r.result_json,'$.ask_name')=?5",
+            Some(recipient),
+        ),
+        _ => ("", None),
+    };
+    let filter = if let Some(value) = value {
+        json!([index, key, value])
+    } else {
+        json!([index, key])
+    }.to_string();
     let (time, id): (String, String) = if let Some(token) = &args.cursor {
         let cursor = PageCursor::decode_live(token, scope, &filter, 0, None)?;
         serde_json::from_str(&cursor.last_sort_key)
@@ -83,10 +99,16 @@ pub(super) fn list_pending(
         (String::new(), String::new())
     };
     let sql = format!(
-        "SELECT r.created_at,r.id,r.message_node_id,r.target_thread_id,json_extract(r.result_json,'$.ask_name'),r.sender_json,n.payload_json FROM receipt r INDEXED BY {index} LEFT JOIN node n ON n.id=r.message_node_id WHERE json_extract(r.result_json,'$.reply.state')='pending' AND {predicate} AND (r.created_at,r.id)>(?2,?3) ORDER BY r.created_at,r.id LIMIT ?4"
+        "SELECT r.created_at,r.id,r.message_node_id,r.target_thread_id,json_extract(r.result_json,'$.ask_name'),r.sender_json,n.payload_json FROM receipt r INDEXED BY {index} LEFT JOIN node n ON n.id=r.message_node_id WHERE json_extract(r.result_json,'$.reply.state')='pending' AND {predicate}{extra} AND (r.created_at,r.id)>(?2,?3) ORDER BY r.created_at,r.id LIMIT ?4"
     );
     let read = || -> rusqlite::Result<Vec<_>> {
-        db.prepare(&sql)?.query_map(params![key,time,id,i64::from(args.limit)+1], |row| {
+        let mut stmt = db.prepare(&sql)?;
+        let limit = i64::from(args.limit) + 1;
+        let mut params: Vec<&dyn rusqlite::ToSql> = vec![&key, &time, &id, &limit];
+        if let Some(value) = value {
+            params.push(value);
+        }
+        stmt.query_map(params.as_slice(), |row| {
             let time: String = row.get(0)?;
             let id: String = row.get(1)?;
             let thread: String = row.get(3)?;
