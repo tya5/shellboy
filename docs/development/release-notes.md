@@ -22,11 +22,14 @@ the TUI no longer reports a group-wide cancellation count from that feed.
 Asynchronous errors that were never saved no longer appear as transient TUI
 notices (#431). Typed operation refusals and saved recovery remain visible.
 The provisional answer clears when saved history advances or the Turn settles;
-saved answers and received responses remain available in history.
+saved answers and received responses remain available in history. If the
+accepted saved tail cannot yet prove the attempt's input boundary, provisional
+text stays hidden until a tail read and live frame establish the match.
 
 TUI のツール通知は、非公開の通知経路ではなく、新たに確認した保存済み結果に
 基づきます。上限付きの履歴取得ではグループ内の全呼出しを取得できるとは限らない
 ため、旧通知経路によるグループ全体の取消件数は表示しません。保存されなかった
 非同期エラーは一時通知に表示しません（#431）。型付きの操作拒否と保存済みの
 復旧情報は引き続き表示します。保存済み履歴が進むか Turn が終了すると暫定回答を
-消去します。保存済みの回答と受信内容は履歴で引き続き確認できます。
+消去します。保存済みの回答と受信内容は履歴で引き続き確認できます。試行の入力末尾と
+保存済み履歴の末尾が一致すると確認できるまでは、暫定回答を表示しません。

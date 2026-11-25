@@ -185,7 +185,6 @@ async fn preview_gap(still_live: bool) {
     let (root, owner, control, server) = control_tests::fixture().await;
     install_preview_attempt(&control).await;
     let live = control.fixture_live_text("thread");
-    assert!(live.record(0, "provisional suffix", false));
     let mut ui = UiState::new(&control.store.config, root.path().into());
     let (send, receive) = actions::channel(32);
     let (updates, incoming) = std::sync::mpsc::sync_channel(128);
@@ -201,6 +200,22 @@ async fn preview_gap(still_live: bool) {
         send.try_send(action).unwrap();
     }
     crate::test_watchdog::watchdog("native preview resync without replacement", async {
+        // This attempt has an empty selected input. Adopt that saved tail
+        // before emitting the single provisional frame.
+        loop {
+            if let Ok(update) = incoming.try_recv() {
+                let tail = matches!(&update, UiUpdate::History {
+                    thread_id, generation, append: false, total_nodes: 0, ..
+                } if thread_id == "thread" && *generation == ui.view().generation);
+                ui.apply(update);
+                if tail && ui.view().turn_id.as_deref() == Some("target-run") {
+                    break;
+                }
+            } else {
+                tokio::task::yield_now().await;
+            }
+        }
+        assert!(live.record(0, "provisional suffix", false));
         while !ui
             .view()
             .nodes()

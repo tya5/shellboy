@@ -47,8 +47,11 @@ pub struct ThreadView {
     // Last applied saved-history window, distinct from newer input requests.
     pub(super) received_window_revision: Option<u64>,
     pub total_nodes: u64,
-    pub(super) preview_retired_at: u64,
-    notice_before: Option<u64>,
+    saved_tail: Option<(u64, u64, Option<String>)>,
+    notice_anchor: Option<(u64, u64, String)>,
+    preview_suspended: bool,
+    ended_attempts: std::collections::VecDeque<(String, u64)>,
+    attempt_end_floor: u64,
     pub status: String,
     pub pending: BTreeMap<u64, PendingSend>,
     pub pending_messages: PendingMessages,
@@ -373,8 +376,11 @@ impl ThreadView {
             received_revision: 0,
             received_window_revision: None,
             total_nodes: 0,
-            preview_retired_at: 0,
-            notice_before: None,
+            saved_tail: None,
+            notice_anchor: None,
+            preview_suspended: false,
+            ended_attempts: Default::default(),
+            attempt_end_floor: 0,
             status: crate::ui::i18n::local!(config.ui.language, "入力できます", "Ready for input")
                 .into(),
             pending: BTreeMap::new(),
@@ -567,17 +573,58 @@ impl ThreadView {
 }
 
 impl ThreadView {
-    // A saved ordinal is independent of which reader first observed it. A
-    // window that omits the result must not consume its notice.
-    fn observe_saved_tool_results(&mut self, nodes: &[UiNode], first: u64, total: u64) {
+    fn observe_saved_tail(&mut self, nodes: &[UiNode], first: u64, revision: u64, total: u64) {
+        // Tail identity comes from the accepted saved page, never from the
+        // rendered list (which may contain pinned audit and live rows).
+        if (total == 0 || !nodes.is_empty()) && first.saturating_add(nodes.len() as u64) == total {
+            self.saved_tail = Some((
+                revision,
+                total,
+                nodes.last().map(|node| node.node_id.clone()),
+            ));
+        } else if self
+            .saved_tail
+            .as_ref()
+            .is_some_and(|(r, n, _)| (*r, *n) != (revision, total))
+        {
+            self.saved_tail = None;
+        }
+    }
+
+    fn observe_saved_tool_results(
+        &mut self,
+        nodes: &[UiNode],
+        first: u64,
+        revision: u64,
+        total: u64,
+    ) {
         use crate::presentation::{BlockKind, ToolReasonKind};
-        let Some(before) = self.notice_before else {
-            self.notice_before = Some(total);
+        self.observe_saved_tail(nodes, first, revision, total);
+        let Some((previous_revision, ordinal, id)) = self.notice_anchor.as_ref() else {
+            if let Some((_, _, Some(id))) = &self.saved_tail {
+                self.notice_anchor = Some((revision, total - 1, id.clone()));
+            }
             return;
         };
-        let found = nodes.iter().enumerate().rev().find_map(|(index, node)| {
-            let ordinal = first.saturating_add(index as u64);
-            if ordinal < before || ordinal >= total || node.presentation.provisional_stream {
+        let offset = ordinal
+            .checked_sub(first)
+            .and_then(|index| usize::try_from(index).ok());
+        let extends = offset
+            .and_then(|index| nodes.get(index))
+            .is_some_and(|node| &node.node_id == id);
+        if !extends {
+            // A path rewrite (or a newer page without proof of the prefix)
+            // supplies a baseline, not a reason to replay its saved results.
+            if revision > *previous_revision {
+                self.notice_anchor = self.saved_tail.as_ref().and_then(|(_, total, id)| {
+                    id.as_ref().map(|id| (revision, total - 1, id.clone()))
+                });
+            }
+            return;
+        }
+        let first_new = offset.expect("saved anchor is in the page") + 1;
+        let found = nodes[first_new..].iter().rev().find_map(|node| {
+            if node.presentation.provisional_stream {
                 return None;
             }
             node.presentation.blocks.iter().rev().find_map(|block| {
@@ -591,20 +638,51 @@ impl ThreadView {
                         | ToolReasonKind::HumanBackgrounded
                         | ToolReasonKind::AdditionalInput
                 );
-                (released || tool.status == "cancelled").then_some((ordinal, tool))
+                (released || tool.status == "cancelled").then_some(tool)
             })
         });
-        if let Some((ordinal, tool)) = found {
-            self.notice_before = Some(ordinal + 1);
+        if let Some(tool) = found {
             self.status = crate::presentation::messages::tool_heading(tool, false, self.language);
             self.promote_status_notice(super::history_interaction::NoticeKind::Info);
+        }
+        if let Some(node) = nodes.last() {
+            self.notice_anchor = Some((
+                revision,
+                first + nodes.len() as u64 - 1,
+                node.node_id.clone(),
+            ));
+        }
+    }
+
+    pub(super) fn accepts_preview(
+        &self,
+        attempt: &str,
+        source: &crate::presentation::PreviewSource,
+    ) -> bool {
+        !self.preview_suspended
+            && self
+                .saved_tail
+                .as_ref()
+                .is_some_and(|(_, _, id)| id == &source.input_through_node_id)
+            && source.page_seq > self.attempt_end_floor
+            && !self.ended_attempts.iter().any(|(id, _)| id == attempt)
+    }
+
+    pub(super) fn observe_attempt_end(&mut self, attempt: &str, seq: u64) {
+        // Match an end to its own attempt, not to another attempt in the same
+        // page. The bounded floor only covers evicted owner observations.
+        if seq > self.attempt_end_floor && !self.ended_attempts.iter().any(|(id, _)| id == attempt)
+        {
+            if self.ended_attempts.len() == 256
+                && let Some((_, oldest)) = self.ended_attempts.pop_front()
+            {
+                self.attempt_end_floor = oldest;
+            }
+            self.ended_attempts.push_back((attempt.into(), seq));
         }
     }
 
     pub(super) fn retire_saved_preview(&mut self) -> Vec<UiAction> {
-        // The view owns the transition, including frames staged after the
-        // saved read but before its delivery. Rendering never restamps them.
-        self.preview_retired_at = crate::frontend::saved_view_sequence();
         self.activity.clear_receive_observation();
         self.settle_other_streams("")
     }
@@ -619,6 +697,7 @@ impl ThreadView {
         self.auto_compact_at = details.auto_compact_at;
         self.title = details.title;
         self.run_id = details.run_id;
+        self.preview_suspended = details.turn_id.is_none() || details.recovery_reason.is_some();
         self.turn_id = details.turn_id;
         self.state = if details.recovery_reason.is_some() {
             crate::ui::i18n::local!(self.language, "復旧待ち", "Waiting for recovery").into()
@@ -686,7 +765,7 @@ impl ThreadView {
             }
         }
         if !append {
-            self.observe_saved_tool_results(&nodes, first_ordinal, total_nodes);
+            self.observe_saved_tool_results(&nodes, first_ordinal, selection_revision, total_nodes);
         }
         let mut source_changed = false;
         if self.navigation.follow() && !self.navigation.is_rebasing() {
@@ -1170,7 +1249,7 @@ impl ThreadView {
             self.on_incomplete_responses(received);
             return false;
         }
-        self.observe_saved_tool_results(&nodes, first_ordinal, total_nodes);
+        self.observe_saved_tool_results(&nodes, first_ordinal, selection_revision, total_nodes);
         let received = self.take_received_previews(&received_bindings);
         // Rebase is an ordinal update, not proof that a committed stream's
         // canonical body was fetched. Retire only verified loaded sources.
@@ -3239,6 +3318,7 @@ mod received_tests {
             thread_id: "t".into(),
             generation,
             attempt_id: "a".into(),
+            owner_end_seq: None,
             received_source: Some(("audit".into(), "incomplete_response".into())),
             ack: None,
         });
