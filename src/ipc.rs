@@ -660,7 +660,7 @@ fn uncertain_reply(
             command.replace('.', " ")
         ));
     } else if requires_receipt {
-        error.hint = Some("Use details.operation_id with shellboy operation get --operation OPERATION_ID, then inspect saved target state. A missing receipt does not prove the request was never applied; do not resubmit the mutation under a new ID".into());
+        error.hint = Some("Follow details.next_operation: run shellboy operation get --operation OPERATION_ID with the supplied ID against the same owner data directory, then inspect the saved target state. A missing receipt does not prove the request was never applied; do not resubmit the mutation under a new ID".into());
         details["next_operation"] =
             serde_json::json!(Command::OperationGet(crate::protocol::OperationTarget {
                 operation_id: operation_id.into()
@@ -1052,29 +1052,23 @@ mod frame_delivery_tests {
             // Close the transport after commit, without handing the reply to the client.
             accepted.result.unwrap()
         });
-        let error = call_stream(
-            client,
-            selected,
-            submit.clone(),
-            Some(operation.clone()),
-            None,
-        )
-        .await
-        .unwrap_err();
+        let error = call_stream(client, selected, submit, Some(operation.clone()), None)
+            .await
+            .unwrap_err();
         let details = error.details.unwrap();
         assert_eq!(details["request_may_have_been_applied"], true);
         assert_eq!(details["operation_id"], operation);
         let accepted = server.await.unwrap();
         let lookup = serde_json::from_value::<Command>(details["next_operation"].clone()).unwrap();
         let readback = control.request(Request::new("readback", lookup)).await;
+        let evidence: crate::protocol::OperationReceiptDetails =
+            serde_json::from_value(readback.result.unwrap()).unwrap();
+        assert_eq!(evidence.operation_id, operation);
+        assert!(evidence.current_instance);
         assert_eq!(
-            readback.result.unwrap()["outcome"]["result"]["message_id"],
+            evidence.outcome["result"]["message_id"],
             accepted["message_id"]
         );
-        let replay = control
-            .request(Request::new(operation.clone(), submit))
-            .await;
-        assert_eq!(replay.result.unwrap(), accepted);
         let counts = control
             .store
             .database
@@ -1095,6 +1089,18 @@ mod frame_delivery_tests {
             .await
             .unwrap();
         assert_eq!(counts, (1, 1));
+        assert!(
+            control
+                .request(Request::new(
+                    "verify:no-query-receipt",
+                    Command::OperationGet(crate::protocol::OperationTarget {
+                        operation_id: "readback".into()
+                    })
+                ))
+                .await
+                .error
+                .is_some_and(|e| e.code == ErrorCode::OperationNotFound)
+        );
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
     }

@@ -360,6 +360,8 @@ fn parser_errors_identify_known_arguments_without_echoing_rejected_values() {
         let value: Value = serde_json::from_str(&text).unwrap();
         assert_eq!(value["error"]["code"], "invalid_argument");
         assert_eq!(value["error"]["details"]["parser_kind"], kind, "{value}");
+        assert!(value.get("operation_id").is_none());
+        assert!(value["error"]["details"].get("next_operation").is_none());
         assert!(
             value["error"]["hint"].as_str().unwrap().contains("Usage:"),
             "{value}"

@@ -1,5 +1,9 @@
 # Validation record
 
+## Core #421 Unit 2: operation evidence
+
+Witnesses cover synthetic pending/current/old/expired/missing receipts, lost read and mutation responses, non-receipted writes, parse/prewrite and admission refusals, and structured exec channels. No Studio adoption or real provider behavior is covered.
+
 ## Core #311 native recurring-work lists
 
 Two focused macOS tests passed. Schedule and Service lists returned the exact

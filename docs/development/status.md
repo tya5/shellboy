@@ -1,5 +1,9 @@
 # Development status
 
+## Core #421 Unit 2: operation evidence
+
+The public result registry describes the existing `operation.get` envelope as `OperationReceiptDetails`. Receipt storage and replay are unchanged; Studio adoption is separate.
+
 ## Core v0.16.0 release preparation
 
 The [release notes](../release-v0.16.0.md) describe the published main source

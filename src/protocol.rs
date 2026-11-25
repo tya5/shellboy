@@ -99,7 +99,7 @@ fn operation_result_schemas(
     result!("message.get", MessageDetails);
     result!("message.list", MessageListPage);
     result!("message.cancel", MessageCancelResult);
-    opaque!("operation.get");
+    result!("operation.get", OperationReceiptDetails);
     result!("run.get", RunDetails);
     opaque!("run.retry");
     opaque!("run.stop");
@@ -165,6 +165,50 @@ pub struct TurnInterruptResult {
 #[serde(rename_all = "snake_case")]
 pub enum TurnInterruptState {
     InterruptRequested,
+}
+
+/// Existing `operation.get` projection; saved outcomes are operation-specific JSON.
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct OperationReceiptDetails {
+    pub operation_id: String,
+    pub instance_id: String,
+    pub created_at: String,
+    pub current_instance: bool,
+    pub state: String,
+    pub outcome: Value,
+    pub result_uncertain: bool,
+    pub result_expired: bool,
+    pub replay_policy: OperationReplayPolicy,
+    pub targets: std::collections::BTreeMap<String, String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub downstream: Option<OperationReceiptDownstream>,
+}
+
+#[derive(Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum OperationReplayPolicy {
+    DoNotReexecute,
+    OperationExpired,
+    ReturnSavedOutcome,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum OperationReceiptDownstream {
+    Message {
+        state: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        hold_reason: Option<String>,
+    },
+    Compact {
+        state: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        outcome: Option<Value>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        ended_at: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        result_uncertain: Option<bool>,
+    },
 }
 
 pub fn schema_json() -> String {

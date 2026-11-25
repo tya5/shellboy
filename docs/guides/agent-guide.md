@@ -556,7 +556,18 @@ or deleting a Thread does not rewrite the saved sender ID. Clients use structure
 
 CLI `ok:true` means the requested command reached its own success boundary, not that downstream work succeeded or a reply arrived. In `message send` results, inspect `message_id`, `delivery_status`, `assignment`, and optional `run_id` / `turn_id`. Do not equate `accepted` with `applied`; track `held` / `pending` using `message get`.
 
-If a connection drops and the result is uncertain, first query your saved `operation_id` with `shellboy operation get --operation OPERATION_ID`. After a post-send connection failure, even an automatically generated ID remains in the returned JSON's `operation_id` / `error.details.operation_id`. A missing receipt is not proof that the operation never executed. Do not unconditionally repeat the same side effect with a new operation ID; inspect the target's state and original text. get/list/search/preview/status do not persist receipts and observe again even with the same query ID. History semantic search may incur query-embedding cost again. Retain the original operation IDs of mutations and `wait` requests to correlate their results. See [Recovery](recovery-and-storage.md) and [CLI reference](cli-reference.md).
+**Decide from operation evidence, not the error code, exit status, or hint alone.**
+
+| Observation | Safe next step |
+| --- | --- |
+| CLI parse/local failure, handshake before sending, or typed owner refusal (`phase: admission`, `request_may_have_been_applied: false`) | Correct the input or inspect the reported condition. A known ID does not imply admission, and `false` alone does not prove non-delivery. |
+| Response lost after sending; `read_only: true`, `request_may_have_been_applied: false` | The read may have run. Explicitly read again only for fresh state; data and cost can differ (for example, query embedding). No receipt lookup is offered. |
+| Response lost after sending a receipt-backed mutation; `details.next_operation.command` is `operation.get` | Follow the supplied lookup ID against the same owner data directory. `shellboy operation get --operation ID` observes the original receipt; it does not execute the mutation. |
+| Receipt is saved, pending (including an old-owner pending row), expired, or missing | Use the saved outcome and exact targets if present. Pending, expiry, and `operation_not_found` are not evidence of no effects; inspect target state. Do not start a new mutation just because the observation failed. |
+| Uncertain non-receipted write; no `next_operation` | Do not invent a lookup or replay the write. For draft images, use the explicit replacement flow if needed. |
+| Structured `exec` fails or loses output | Keep validated stdout separate from stderr diagnostics and exit status. Inspect typed diagnostics and reported IDs; no output is not proof the action never ran. |
+
+Retain original mutation and wait operation IDs for correlation. See [Recovery](recovery-and-storage.md) and [CLI reference](cli-reference.md).
 
 Rate observations in `usage get` come from the authoritative saved attempt and
 summary records, not the owner log. Completed request observations are recorded
