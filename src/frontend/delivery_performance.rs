@@ -23,7 +23,6 @@ async fn performance_slow_ui_bridge_action_and_event_progress() {
             generation: 0,
             view_revision: 0,
             known_view: None,
-            preview_sources: vec![],
         })
         .unwrap();
     for _ in 0..30 {

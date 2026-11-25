@@ -286,7 +286,6 @@ async fn activity_delivery_rejects_a_previous_thread_after_a_slow_database_read(
         server,
     ));
     send.send(UiAction::SelectThread {
-        preview_sources: vec![],
         thread_id: "a".into(),
         generation: 1,
         view_revision: 0,
@@ -325,7 +324,6 @@ async fn activity_delivery_rejects_a_previous_thread_after_a_slow_database_read(
     tokio::time::sleep(Duration::from_millis(550)).await; // existing 500ms progress request is now blocked
     while incoming.try_recv().is_ok() {}
     send.send(UiAction::SelectThread {
-        preview_sources: vec![],
         thread_id: "b".into(),
         generation: 2,
         view_revision: 0,
@@ -534,7 +532,6 @@ async fn failed_activity_read_stops_the_real_frontend_with_storage_error() {
         server,
     ));
     send.send(UiAction::SelectThread {
-        preview_sources: vec![],
         thread_id: "a".into(),
         generation: 1,
         view_revision: 0,

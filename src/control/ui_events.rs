@@ -28,9 +28,6 @@ pub(crate) struct UiSubscription {
     pub(crate) receiver: broadcast::Receiver<EngineEvent>,
 }
 impl UiSubscription {
-    pub(crate) fn belongs_to(&self, owner: u64) -> bool {
-        self.owner == owner
-    }
     pub(crate) fn select(&self, thread: Option<&str>) {
         let mut selected = self
             .control
@@ -49,28 +46,6 @@ impl Drop for UiSubscription {
     }
 }
 impl Control {
-    pub(super) async fn memory_ui_snapshot(
-        &self,
-        disconnected: CancellationToken,
-    ) -> Option<Value> {
-        if disconnected.is_cancelled()
-            || self.stop.is_cancelled()
-            || self.ui_events.sender.receiver_count() == 0
-        {
-            return None;
-        }
-        let owner = self.ui_events.owner.lock().expect("UI subscription lock").0;
-        let (reply, receive) = crate::memory::UiMemoryReply::new();
-        self.ui_events
-            .sender
-            .send(EngineEvent::MemoryProbe { owner, reply })
-            .ok()?;
-        tokio::select! { biased;
-            _ = self.stop.cancelled() => None,
-            _ = disconnected.cancelled() => None,
-            result = receive => result.ok(),
-        }
-    }
     pub(crate) fn subscribe_ui(self: &Arc<Self>) -> UiSubscription {
         let mut selected = self.ui_events.owner.lock().expect("UI subscription lock");
         selected.0 = selected.0.wrapping_add(1);

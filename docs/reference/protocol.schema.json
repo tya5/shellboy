@@ -3229,6 +3229,14 @@
             "null"
           ]
         },
+        "receive_age_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "thread_id": {
           "type": "string"
         }
@@ -3267,6 +3275,23 @@
         "thread_id",
         "attempt_id",
         "elapsed_ms"
+      ],
+      "type": "object"
+    },
+    "EventRecoveryTransition": {
+      "properties": {
+        "seq": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "thread_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "thread_id",
+        "seq"
       ],
       "type": "object"
     },
@@ -3361,6 +3386,12 @@
           "default": [],
           "items": {
             "$ref": "#/definitions/EventReasoningActivity"
+          },
+          "type": "array"
+        },
+        "recovery_transitions": {
+          "items": {
+            "$ref": "#/definitions/EventRecoveryTransition"
           },
           "type": "array"
         },
@@ -14706,6 +14737,12 @@
           "default": [],
           "items": {
             "$ref": "#/definitions/EventReasoningActivity"
+          },
+          "type": "array"
+        },
+        "recovery_transitions": {
+          "items": {
+            "$ref": "#/definitions/EventRecoveryTransition"
           },
           "type": "array"
         },

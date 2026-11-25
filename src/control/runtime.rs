@@ -548,7 +548,8 @@ impl Control {
                       config_changed,
                       text,
                       reasoning_activity,
-                      attempt_ends| {
+                      attempt_ends,
+                      recovery_transitions| {
             let cursor = EventCursor {
                 v: 1,
                 instance_id: self.store.instance_id.clone(),
@@ -565,6 +566,7 @@ impl Control {
                         .collect(),
                     more,
                     config_changed,
+                    recovery_transitions,
                     live_text: include_text.then_some(text),
                     reasoning_activity,
                     attempt_ends: include_text.then_some(attempt_ends),
@@ -588,6 +590,7 @@ impl Control {
                 text,
                 activity,
                 vec![],
+                vec![],
             );
         };
         let after = EventCursor::decode(token)?;
@@ -605,6 +608,7 @@ impl Control {
                 false,
                 text,
                 activity,
+                vec![],
                 vec![],
             );
         }
@@ -658,6 +662,7 @@ impl Control {
                         text,
                         reasoning_activity,
                         vec![],
+                        vec![],
                     );
                 }
                 Some(Poll::Ready {
@@ -667,10 +672,12 @@ impl Control {
                     text,
                     reasoning_activity,
                     reasoning_changed,
+                    receive_changed,
+                    recovery_transitions,
                     config_changed,
                     attempt_ends,
                 }) => {
-                    if !changes.is_empty() || config_changed {
+                    if !changes.is_empty() || config_changed || !recovery_transitions.is_empty() {
                         return result(
                             EventsWaitStatus::Changed,
                             cursor,
@@ -680,9 +687,10 @@ impl Control {
                             text,
                             reasoning_activity,
                             attempt_ends,
+                            recovery_transitions,
                         );
                     }
-                    if reasoning_changed || !attempt_ends.is_empty() {
+                    if reasoning_changed || receive_changed || !attempt_ends.is_empty() {
                         return result(
                             EventsWaitStatus::Text,
                             cursor,
@@ -692,6 +700,7 @@ impl Control {
                             text,
                             reasoning_activity,
                             attempt_ends,
+                            recovery_transitions,
                         );
                     }
                     if text.iter().any(|attempt| !attempt.deltas.is_empty()) {
@@ -704,6 +713,7 @@ impl Control {
                             text,
                             reasoning_activity,
                             attempt_ends,
+                            recovery_transitions,
                         );
                     }
                     if deadline.is_some_and(|at| tokio::time::Instant::now() >= at) {
@@ -716,6 +726,7 @@ impl Control {
                             text,
                             reasoning_activity,
                             attempt_ends,
+                            recovery_transitions,
                         );
                     }
                 }

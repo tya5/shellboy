@@ -68,6 +68,7 @@ struct Window {
     thread: String,
     attempt: String,
     body: StreamBody,
+    source_gap: bool,
     serial: u64,
 }
 #[derive(Default)]
@@ -96,6 +97,7 @@ impl Display {
     pub fn clear(&mut self) {
         self.windows.clear();
     }
+    #[cfg(test)]
     pub fn resume(&mut self, thread: String, sources: Vec<UiNode>) {
         // Selection transfers only the latest two known source windows, never
         // rendered metadata. Later primary offsets detect offscreen gaps.
@@ -127,6 +129,7 @@ impl Display {
                 attempt: source.node_id,
                 serial: self.serial,
                 body,
+                source_gap: false,
             });
         }
     }
@@ -155,6 +158,7 @@ impl Display {
                     thread,
                     attempt,
                     body: StreamBody::default(),
+                    source_gap: false,
                     serial: self.serial,
                 });
                 self.windows.len() - 1
@@ -181,6 +185,29 @@ impl Display {
         body.revision = body.revision.wrapping_add(1);
         body.dirty = true;
     }
+    pub fn observe_answer(&mut self, thread: &str, attempt: &str, text: &str, gap: bool) {
+        // Provisional answer coordinates exclude all private reasoning bytes.
+        let offset = self
+            .windows
+            .iter()
+            .find(|w| w.thread == thread && w.attempt == attempt)
+            .map_or(0, |w| w.body.total);
+        self.observe(thread.to_owned(), attempt.to_owned(), offset, text, false);
+        if gap
+            && let Some(window) = self
+                .windows
+                .iter_mut()
+                .find(|w| w.thread == thread && w.attempt == attempt)
+        {
+            window.source_gap = true;
+        }
+    }
+
+    pub fn forget_attempt(&mut self, thread: &str, attempt: &str) {
+        self.windows
+            .retain(|w| w.thread != thread || w.attempt != attempt);
+    }
+
     pub fn invalidate(&mut self, thread: &str) {
         for window in self.windows.iter_mut().filter(|w| w.thread == thread) {
             window.body.dirty = true;
@@ -217,7 +244,7 @@ impl Display {
                 + window.body.reasoning_ranges.len() * std::mem::size_of::<(usize, usize)>();
         }
         Some(Prepared {
-            gap: window.body.gap,
+            gap: window.body.gap || window.source_gap,
             ticket: Ticket {
                 thread: window.thread.clone(),
                 attempt: window.attempt.clone(),
