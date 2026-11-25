@@ -2163,7 +2163,8 @@ fn derived_tool_excerpt_moves_by_visible_rows() {
         tool.execution_id = Some("excerpt-execution".into());
     }
     let mut ui = scroll_fixture(vec![node], 0, 1);
-    let mut terminal = Terminal::new(TestBackend::new(60, 22)).unwrap();
+    // Keep the viewport shorter than the bounded excerpt so a wheel step can move it.
+    let mut terminal = Terminal::new(TestBackend::new(60, 15)).unwrap();
     let closed = scroll_cells(&mut ui, &mut terminal);
     assert!(
         !closed

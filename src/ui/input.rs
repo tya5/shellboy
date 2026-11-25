@@ -441,8 +441,8 @@ mod tests {
             .unwrap();
         assert_eq!(
             ui.view().navigation.scroll.area.unwrap().height,
-            5,
-            "expanded input keeps its quarter-screen cap beside both regions"
+            13,
+            "expanded input keeps its quarter-screen cap beside both empty headings"
         );
         let actions = ui.event(key(KeyCode::Enter, KeyModifiers::NONE));
         assert!(
