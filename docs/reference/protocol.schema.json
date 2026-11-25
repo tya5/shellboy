@@ -15290,53 +15290,21 @@
     "message.reply": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
-        "assignment": {
-          "$ref": "#/definitions/Assignment"
-        },
-        "deliver": {
-          "$ref": "#/definitions/Deliver"
-        },
-        "delivery_status": {
-          "$ref": "#/definitions/DeliveryStatus"
-        },
-        "expect_reply": {
-          "type": "boolean"
-        },
-        "hint": {
-          "type": [
-            "string",
-            "null"
-          ]
+        "delivery": {
+          "$ref": "#/definitions/MessageAccepted"
         },
         "message_id": {
           "type": "string"
         },
-        "run_id": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "thread_id": {
+        "reply_to": {
           "type": "string"
-        },
-        "to_human": {
-          "type": "boolean"
-        },
-        "turn_id": {
-          "type": [
-            "string",
-            "null"
-          ]
         }
       },
       "required": [
         "message_id",
-        "thread_id",
-        "delivery_status",
-        "assignment"
+        "reply_to"
       ],
-      "title": "MessageAccepted",
+      "title": "MessageReplied",
       "type": "object"
     },
     "message.send": {

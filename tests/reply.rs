@@ -109,7 +109,7 @@ async fn named_ask_leaves_only_its_recipient_list_after_reply() {
         sender_label: Some("not the addressee".into()),
     }));
     let answer = store.execute(reply.clone(), None).await.unwrap().result;
-    crate::operation_result_schema::assert_result("message.send", &answer["delivery"]);
+    crate::operation_result_schema::assert_result("message.reply", &answer);
     assert_eq!(answer["message_id"], answer["delivery"]["message_id"]);
     let delivery: MessageAccepted = serde_json::from_value(answer["delivery"].clone()).unwrap();
     crate::saved_acceptance::assert_saved_acceptance(&store, reply.operation_id.clone(), &delivery)
@@ -265,6 +265,10 @@ async fn reply_requires_applied_pending_and_is_idempotent() {
     // The rejected operation is durably replayable; retry with a new operation.
     let reply = request(reply.command.clone());
     let result = store.execute(reply.clone(), None).await.unwrap().result;
+    crate::operation_result_schema::assert_result("message.reply", &result);
+    let replied: MessageReplied = serde_json::from_value(result.clone()).unwrap();
+    assert!(replied.delivery.is_none());
+    assert!(result.get("delivery").is_none());
     assert_eq!(result["reply_to"], id);
     assert_eq!(store.execute(reply, None).await.unwrap().result, result);
     let details = store

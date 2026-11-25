@@ -94,7 +94,7 @@ fn operation_result_schemas(
     result!("thread.set", ThreadDetails);
     result!("id.resolve", IdResolveResult);
     result!("message.ask", MessageAccepted);
-    result!("message.reply", MessageAccepted);
+    result!("message.reply", MessageReplied);
     result!("message.send", MessageAccepted);
     result!("message.get", MessageDetails);
     result!("message.list", MessageListPage);
@@ -1877,6 +1877,17 @@ impl ShellToolArgs {
     }
 }
 record!(MessageAccepted { #[serde(default, skip_serializing_if = "is_false")] to_human: bool, #[serde(default, skip_serializing_if = "is_false")] expect_reply: bool, message_id: String, thread_id: String, delivery_status: DeliveryStatus, #[serde(default, skip_serializing_if = "Option::is_none")] hint: Option<String>, assignment: Assignment, #[serde(default, skip_serializing_if = "Deliver::is_next")] deliver: Deliver, #[serde(default, skip_serializing_if = "Option::is_none")] run_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] turn_id: Option<String> });
+// Reply omits delivery when the answer is not delivered to an asking Thread.
+fn reply_delivery_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    generator.subschema_for::<MessageAccepted>()
+}
+record!(MessageReplied {
+    message_id: String,
+    reply_to: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "reply_delivery_schema")]
+    delivery: Option<MessageAccepted>,
+});
 impl MessageAccepted {
     pub fn validate(&self) -> Result<(), ApiError> {
         nonempty(&self.message_id, "message_id")?;
