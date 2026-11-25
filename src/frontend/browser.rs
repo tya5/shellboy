@@ -387,6 +387,7 @@ impl Browser {
         }
         self.dirty.insert(id.into());
     }
+    #[cfg(test)]
     pub fn request_resync(&mut self, reason: &str) {
         self.request_resync_with_english(reason, None);
     }

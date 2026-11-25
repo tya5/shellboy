@@ -133,6 +133,23 @@ existing meaning. A lost reply retains the operation ID for lookup and is
 not retried or presented as a refusal. Schedule and Service reads are
 unchanged by this slice.
 
+### Saved change delivery (Unit 4)
+
+The embedded client consumes owner-wide saved-change metadata from one
+instance-fenced `events.wait` at a time. The list and status need changes to
+Threads not yet visible, so this wait deliberately does not filter Thread IDs;
+it never requests text or reasoning. Changes feed existing view scopes and
+receipt observers. A gap resets the current browser generation and schedules
+normal bounded first-page and selected reads, not a walk through old pages.
+The first baseline also refreshes any view already shown before it arrived.
+
+No worker or queued event buffer is added; dropping the pending wait drops its
+connection. Definite wait-class admission refusal can wait and retry the same
+cursor. Other errors stop the wait and use the existing reconnect/quit gate;
+explicit reconnect must validate the same instance before resuming the cursor.
+This slice does not remove the remaining private live preview, recovery bell,
+or diagnostics paths, or implement reattachment to a replacement owner.
+
 ### Draft save and selected view
 
 `draft.save` checks the live Thread and editing draft revision, then commits

@@ -38,6 +38,7 @@ mod message_queue;
 mod preview_reads;
 mod receipt_delivery;
 mod received;
+mod saved_events;
 mod snapshot;
 mod thread_deletion;
 mod update_delivery;
@@ -1092,6 +1093,14 @@ async fn run_client(
     let mut pending_deletion: Option<u64> = None;
     let cancel = CancellationToken::new();
     let mut ui_subscription = control.subscribe_ui();
+    let event_instance = &control.store.instance_id;
+    let event_directory = &client_context.data_dir;
+    let mut saved_events = Some(Box::pin(saved_events::wait(
+        event_directory,
+        event_instance,
+        None,
+        false,
+    )));
     let mut tick = tokio::time::interval(Duration::from_millis(500));
     tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
     let mut gc_diagnostics_rx = control.gc.subscribe_history_diagnostics();
@@ -1573,6 +1582,9 @@ async fn run_client(
                         let result = reconcile_compose(&control, &updates, &mut compose_unknown, &mut images, &mut selection, &mut dirty_threads).await;
                         match result {
                             Ok(()) => {
+                                if saved_events.is_none() {
+                                    saved_events = Some(Box::pin(saved_events::wait(event_directory, event_instance, None, false)));
+                                }
                                 compose_disconnected.store(false, Ordering::Release);
                                 status(&updates, None, i18n::local!(language, "再接続しました。未確認の操作は再送していません", "Reconnected. Unconfirmed writes were not replayed")).await;
                             }
@@ -3769,23 +3781,50 @@ async fn run_client(
                 },
                 None => {}
             },
+            event = async { saved_events.as_mut().expect("guarded native wait").await }, if saved_events.is_some() => {
+                match event {
+                    Ok(page) => {
+                        if saved_events::schedule_reload(&page, &mut browser) {
+                            status_dirty |= status_enabled;
+                            management.inspection.resync();
+                            descendants.resync();
+                            for receipt in pending.values_mut() { receipt.repeat = true; }
+                            dirty_threads.extend(pending.values().map(|value| value.thread.clone()));
+                            if let Some(thread) = &selection.active_thread {
+                                streams.invalidate(thread);
+                                dirty_threads.insert(thread.clone());
+                            }
+                        }
+                        for change in page.changes {
+                            let thread_id = change.thread_id;
+                            status_dirty |= status_enabled;
+                            browser.changed(&thread_id);
+                            descendants.changed(&thread_id);
+                            management.inspection.changed(&thread_id);
+                            streams.invalidate(&thread_id);
+                            selection.changed(&thread_id);
+                            receipt_delivery::changed(&mut pending, &thread_id);
+                            if selection.active_thread.as_deref() == Some(&thread_id)
+                                || pending.values().any(|receipt| receipt.thread == thread_id) {
+                                dirty_threads.insert(thread_id);
+                            }
+                        }
+                        saved_events = Some(Box::pin(saved_events::wait(event_directory, event_instance, Some(page.cursor), page.more)));
+                    }
+                    Err(error) => {
+                        saved_events = None;
+                        compose_disconnected.store(true, Ordering::Release);
+                        status(&updates, None, compose_disconnected_message(&error)).await;
+                    }
+                }
+            },
             event=ui_subscription.receiver.recv()=> match event {
                 Ok(EngineEvent::MemoryProbe {owner,reply}) => {
                     if ui_subscription.belongs_to(owner) && !reply.is_closed() { update(&updates, UiUpdate::MemoryProbe(reply)).await; }
                 },
-                Ok(EngineEvent::Changed { thread_id, recovery }) => {
-                    status_dirty |= status_enabled;
+                Ok(EngineEvent::Changed { recovery, .. }) => {
                     if recovery && control.store.config.ui.bell {
                         update(&updates, UiUpdate::RecoveryBell).await;
-                    }
-                    browser.changed(&thread_id);descendants.changed(&thread_id);
-                    management.inspection.changed(&thread_id);
-                    streams.invalidate(&thread_id);
-                    selection.changed(&thread_id);
-                    receipt_delivery::changed(&mut pending, &thread_id);
-                    if selection.active_thread.as_deref()==Some(&thread_id)
-                        || pending.values().any(|receipt|receipt.thread==thread_id) {
-                        dirty_threads.insert(thread_id);
                     }
                 }
                 Ok(EngineEvent::Stream {
@@ -3823,16 +3862,9 @@ async fn run_client(
                     status(&updates, Some(thread_id), tool_group_notice(release, cancelled_calls, language)).await
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                    status_dirty |= status_enabled;
-                    management.inspection.resync();
-                    descendants.resync();browser.request_resync(i18n::local!(language, "会話一覧の変更通知を取りこぼしました。最新のページから再取得します", "Conversation-list changes were missed. Reloading from the newest page"));
                     #[cfg(test)] stream_metrics::FRONTEND_LAGGED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     if let Some(thread) = &selection.active_thread {
                         streams.invalidate(thread);
-                    }
-                    for receipt in pending.values_mut() { receipt.repeat = true; }
-                    dirty_threads.extend(pending.values().map(|value| value.thread.clone()));
-                    if let Some(thread) = &selection.active_thread {
                         dirty_threads.insert(thread.clone());
                     }
                 }
@@ -3882,6 +3914,7 @@ async fn run_client(
             _=send_workers.join_next(),if !send_workers.is_empty()=> {},
         }
     }
+    drop(saved_events);
     drop(ui_subscription);
     read_cancel.cancel();
     drop(live_output);
