@@ -155,7 +155,6 @@ async fn quit_bypasses_full_normal_queue_but_preserves_accepted_send_and_drafts_
         .try_send(UiAction::Send {
             generation: 0,
             selection_revision: 0,
-            now: false,
             snapshot: None,
             draft_id: "send".into(),
             revision: 0,
@@ -562,7 +561,6 @@ async fn saturated_queue_quit_persists_prior_send_and_latest_snapshot_without_st
         .try_send(UiAction::Send {
             generation: 0,
             selection_revision: 0,
-            now: false,
             snapshot: None,
             draft_id: "accepted-send".into(),
             revision: 1,

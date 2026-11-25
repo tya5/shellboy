@@ -624,47 +624,53 @@ async fn accepted_message_proxy_shell_final_and_reopen_preserve_original() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn foreground_additional_input_is_accepted_while_shell_lives_and_stop_reaps_before_terminal()
-{
+async fn ordinary_input_does_not_wake_foreground_and_stop_reaps_background_shell() {
     let (url, mut requests, server) = proxy().await;
     let (_directory, owner, control) = runtime(&url).await;
     let accepted = start(&control).await;
     incoming(&mut requests)
         .await
         .reply
-        .send(tool("sleep 10; printf unexpected", false))
+        .send(Reply::json(json!({"id":"group","status":"completed","output":[{"type":"function_call","id":"first","call_id":"first-call","name":"shell","arguments":json!({"command":"cat","stdin_open":true}).to_string()}]})))
         .ok()
         .unwrap();
-    crate::test_watchdog::watchdog("tests/runtime.rs: foreground_additional_input_is_accepted_while_shell_lives_and_stop_reaps_before_terminal", async {
-        loop {
-            let running = control
-                .store
-                .database
-                .call(|db| {
-                    Ok(db.query_row(
-                        "SELECT EXISTS(SELECT 1 FROM shell_execution WHERE state='running')",
-                        [],
-                        |row| row.get::<_, bool>(0),
-                    )?)
-                })
-                .await
-                .unwrap();
-            if running {
-                break;
+    crate::test_watchdog::watchdog(
+        "tests/runtime.rs: ordinary_input_does_not_wake_foreground_and_stop_reaps_background_shell",
+        async {
+            loop {
+                let running = control
+                    .store
+                    .database
+                    .call(|db| {
+                        Ok(db.query_row(
+                            "SELECT EXISTS(SELECT 1 FROM shell_execution WHERE state='running')",
+                            [],
+                            |row| row.get::<_, bool>(0),
+                        )?)
+                    })
+                    .await
+                    .unwrap();
+                if running {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
             }
-            tokio::time::sleep(Duration::from_millis(5)).await;
-        }
-    })
+        },
+    )
     .await
     .unwrap();
-    let additional = crate::test_watchdog::watchdog("tests/runtime.rs: foreground_additional_input_is_accepted_while_shell_lives_and_stop_reaps_before_terminal",
+    let additional = crate::test_watchdog::watchdog(
+        "tests/runtime.rs: ordinary_input_does_not_wake_foreground_and_stop_reaps_background_shell",
         command(
             &control,
-            Command::MessageSend(MessageSendArgs { max_model_requests: None, human: false, resume_recovery: false,
-sender_label: None,
+            Command::MessageSend(MessageSendArgs {
+                max_model_requests: None,
+                human: false,
+                resume_recovery: false,
+                sender_label: None,
                 thread_id: Some(accepted.thread_id.clone()),
                 text: "while foreground waits".into(),
-                deliver: Deliver::Now,
+                deliver: Deliver::Next,
             }),
         ),
     )
@@ -674,9 +680,29 @@ sender_label: None,
         additional["turn_id"],
         accepted.turn_id.as_ref().unwrap().as_str()
     );
+    let message_id = additional["message_id"].as_str().unwrap();
+    let held = command(
+        &control,
+        Command::MessageGet(MessageTarget {
+            message_id: message_id.into(),
+        }),
+    )
+    .await;
+    let execution = held["held_by"]["execution_id"]
+        .as_str()
+        .expect("ordinary input must remain held by the foreground shell");
+    assert_eq!(held["held_by"]["kind"], "foreground_shell");
+    assert!(requests.try_recv().is_err());
+    command(
+        &control,
+        Command::ShellBackground(ExecutionTarget {
+            execution_id: execution.into(),
+        }),
+    )
+    .await;
     let second = incoming(&mut requests).await;
     assert!(second.body.to_string().contains("while foreground waits"));
-    assert!(second.body.to_string().contains("additional_input"));
+    assert!(second.body.to_string().contains("shell_backgrounded"));
     let released = second.body["input"]
         .as_array()
         .unwrap()
@@ -684,7 +710,7 @@ sender_label: None,
         .find(|item| item["type"] == "function_call_output")
         .unwrap();
     let released: Value = serde_json::from_str(released["output"].as_str().unwrap()).unwrap();
-    assert_eq!(released["command"], "sleep 10; printf unexpected");
+    assert_eq!(released["command"], "cat");
     assert_eq!(released["thread_id"], accepted.thread_id);
     assert_eq!(released["turn_id"], accepted.turn_id.as_deref().unwrap());
     second
@@ -918,61 +944,6 @@ async fn retry_executes_both_foreground_calls_without_a_spurious_interrupt() {
         "completed",
     )
     .await;
-    close(control, owner, server).await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn input_accepted_during_model_request_still_interrupts_the_next_foreground_call() {
-    let (url, mut requests, server) = proxy().await;
-    let (_directory, owner, control) = runtime(&url).await;
-    let accepted = start(&control).await;
-    let model_request = incoming(&mut requests).await;
-    command(
-        &control,
-        Command::MessageSend(MessageSendArgs {
-            max_model_requests: None,
-            human: false,
-            resume_recovery: false,
-            sender_label: None,
-            thread_id: Some(accepted.thread_id.clone()),
-            text: "new input before shell starts".into(),
-            deliver: Deliver::Now,
-        }),
-    )
-    .await;
-    model_request.reply.send(Reply::json(json!({"id":"early-input-group","status":"completed","output":[
-        {"type":"function_call","id":"first","call_id":"early-first-call","name":"shell","arguments":json!({"command":"cat","stdin_open":true,"background":false}).to_string()},
-        {"type":"function_call","id":"second","call_id":"early-second-call","name":"shell","arguments":json!({"command":"printf must-not-run","background":false}).to_string()}
-    ]}))).ok().unwrap();
-    let next = incoming(&mut requests).await;
-    let results: Vec<Value> = next.body["input"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter(|item| item["type"] == "function_call_output")
-        .map(|item| serde_json::from_str(item["output"].as_str().unwrap()).unwrap())
-        .collect();
-    assert_eq!(results.len(), 2);
-    assert_eq!(results[0]["reason"], "additional_input");
-    assert_eq!(results[1]["status"], "cancelled");
-    assert!(
-        next.body
-            .to_string()
-            .contains("new input before shell starts")
-    );
-    control
-        .store
-        .database
-        .call(|db| {
-            assert_eq!(
-                db.query_row("SELECT COUNT(*) FROM shell_execution", [], |row| row
-                    .get::<_, i64>(0))?,
-                1
-            );
-            Ok(())
-        })
-        .await
-        .unwrap();
     close(control, owner, server).await;
 }
 

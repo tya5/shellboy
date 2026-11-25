@@ -44,7 +44,7 @@ async fn frontend_first_send_is_saved_and_later_draft_survives_shutdown() {
         .send(UiAction::Send {
             generation: 0,
             selection_revision: 0,
-            now: false,
+
             snapshot: None,
             draft_id: "first-draft".into(),
             revision: 0,
@@ -533,7 +533,7 @@ async fn clipboard_image_is_leased_then_sent_atomically_and_copy_uses_original_b
     send.send(UiAction::Send {
         generation: 0,
         selection_revision: 0,
-        now: false,
+
         snapshot: None,
         draft_id: "image-draft".into(),
         revision: 1,
@@ -1163,7 +1163,7 @@ async fn edit_adapter_loads_full_original_then_forks_before_first_request_and_di
     send.send(UiAction::SendEdited {
         generation: 0,
         selection_revision,
-        now: false,
+
         snapshot: None,
         draft_id: "edited".into(),
         revision: 4,
@@ -1222,7 +1222,7 @@ async fn edit_adapter_loads_full_original_then_forks_before_first_request_and_di
     send.send(UiAction::SendEdited {
         generation: 0,
         selection_revision,
-        now: false,
+
         snapshot: None,
         draft_id: "edited".into(),
         revision: 4,
@@ -2646,7 +2646,7 @@ async fn persisted_output_identity_is_delivered_before_each_history_window() {
     send.send(UiAction::Send {
         generation: 0,
         selection_revision: 0,
-        now: false,
+
         snapshot: None,
         draft_id: "identity".into(),
         revision: 0,
@@ -3045,7 +3045,7 @@ async fn send_and_edited_send_keep_cwd_and_attachment_validation_order() {
             UiAction::SendEdited {
                 generation: 0,
                 selection_revision: 0,
-                now: false,
+
                 snapshot: None,
                 draft_id: "edited".into(),
                 revision: 0,
@@ -3062,7 +3062,7 @@ async fn send_and_edited_send_keep_cwd_and_attachment_validation_order() {
             UiAction::Send {
                 generation: 0,
                 selection_revision: 0,
-                now: false,
+
                 snapshot: None,
                 draft_id: "send".into(),
                 revision: 0,
@@ -3164,7 +3164,7 @@ async fn quit_accepted_before_frontend_binding_still_drains_queued_send_and_late
     send.try_send(UiAction::Send {
         generation: 0,
         selection_revision: 0,
-        now: false,
+
         snapshot: None,
         draft_id: "queued-before-quit".into(),
         revision: 0,
@@ -3293,7 +3293,7 @@ async fn mismatched_submission_snapshot_never_creates_receipt_attempt_or_submitt
     send.send(UiAction::Send {
         generation: 0,
         selection_revision: 0,
-        now: false,
+
         snapshot: Some(Box::new(snapshot)),
         draft_id: "source-draft".into(),
         revision: 7,

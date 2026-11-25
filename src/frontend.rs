@@ -431,15 +431,8 @@ fn tool_group_notice(
         (UiLanguage::En, _) => format!("Cancelled {cancelled_calls} unexecuted tool calls"),
     };
     match release {
-        Some((execution, reason)) => {
-            let cause = match reason {
-                crate::control::ForegroundRelease::Background => {
-                    i18n::local!(language, "背景移行の要求", "Background request")
-                }
-                crate::control::ForegroundRelease::AdditionalInput => {
-                    i18n::local!(language, "追加指示", "Additional instruction")
-                }
-            };
+        Some((execution, crate::control::ForegroundRelease::Background)) => {
+            let cause = i18n::local!(language, "背景移行の要求", "Background request");
             match language {
                 UiLanguage::Ja => {
                     format!("{cause}でshell {execution}の待機を解除し背景へ移しました。{remaining}")
@@ -1713,7 +1706,7 @@ async fn run_client(
                         }) {status(&updates,rejected,i18n::local!(language, "下書き一覧の取得キューが満杯です", "The draft-list read queue is full")).await;}
                     }
                     UiAction::Send {
-                        generation, selection_revision, now, snapshot,
+                        generation, selection_revision, snapshot,
                         draft_id,
                         revision,
                         thread_id,
@@ -1768,7 +1761,7 @@ async fn run_client(
                                         thread_id,
                                         create: ThreadCreateArgs { agents: None, connection, cwd: Some(cwd), model, effort, parent_thread_id: None },
                                         draft: Box::new(snapshot),
-                                        deliver: if now { crate::protocol::Deliver::Now } else { crate::protocol::Deliver::Next },
+                                        deliver: crate::protocol::Deliver::Next,
                                     })), Some(trace.operation_id.clone()),
                                 ).await
                             }
@@ -2322,7 +2315,7 @@ async fn run_client(
                         });
                     }
                     UiAction::SendEdited {
-                        generation, selection_revision, now, snapshot,
+                        generation, selection_revision, snapshot,
                         draft_id,
                         revision,
                         source_thread_id,
@@ -2376,7 +2369,7 @@ async fn run_client(
                                     selection_revision: Some(selection_revision),
                                     create: ThreadCreateArgs { agents: None, cwd: Some(cwd), connection, model, effort, parent_thread_id: None },
                                     draft: Box::new(snapshot),
-                                    deliver: if now { crate::protocol::Deliver::Now } else { crate::protocol::Deliver::Next },
+                                    deliver: crate::protocol::Deliver::Next,
                                 })), Some(trace.operation_id.clone())).await
                             }
                             .await;
@@ -5041,11 +5034,11 @@ mod notice_tests {
         assert!(background.contains("後続の未実行呼出しはありません"));
         assert!(!background.contains("取り消"));
         let input = tool_group_notice(
-            Some(("other", ForegroundRelease::AdditionalInput)),
+            Some(("other", ForegroundRelease::Background)),
             2,
             UiLanguage::Ja,
         );
-        assert!(input.contains("追加指示でshell other"));
+        assert!(input.contains("背景移行の要求でshell other"));
         assert!(input.contains("2件取り消しました"));
         assert_eq!(
             tool_group_notice(None, 3, UiLanguage::Ja),

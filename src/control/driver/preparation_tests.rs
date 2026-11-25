@@ -140,12 +140,7 @@ async fn outstanding_now_receipt_applies_at_the_normal_driver_boundary() {
             text: "outstanding legacy input".into(),
         }),
     );
-    let original = control
-        .store
-        .execute(request.clone(), None)
-        .await
-        .unwrap()
-        .result;
+    let original = crate::control::db::legacy_now_fixture(&control.store, &request).await;
     let message = original["message_id"].as_str().unwrap();
     assert_eq!(original["deliver"], "now");
     let condition = WaitCondition::MessageDelivered {
@@ -1709,7 +1704,7 @@ async fn a_reported_running_shell_can_be_backgrounded_immediately() {
             Ok(())
             }).await.unwrap();
         let slot = control.live.register_or_nudge_driver(
-            &snapshot.thread, snapshot.run.clone(), &control.stop, false,
+            &snapshot.thread, snapshot.run.clone(), &control.stop,
         ).await.unwrap();
         let other_args = serde_json::from_value(json!({"command":"cat","stdin_open":true,"background":true})).unwrap();
         let (other, _) = run_shell(control.clone(), &snapshot, &slot, "publication-group", "other-call", other_args).await.unwrap();
@@ -1885,7 +1880,7 @@ async fn stop_accepted_after_driver_exit_choice_is_settled_at_retirement() {
         assert!(admit_attempt(&control, &snapshot, "held-no-http", prepared, 0, 0).await.unwrap());
         let run = accepted.run_id.as_ref().unwrap();
         let slot = control.live.register_or_nudge_driver(
-            &accepted.thread_id, run.clone(), &control.stop, false,
+            &accepted.thread_id, run.clone(), &control.stop,
         ).await.unwrap();
         // The driver's outcome is already chosen, but its owned slot still exists.
         let stopped = control.store.execute(Request::new(
@@ -2886,7 +2881,7 @@ async fn recovery_rewind_refuses_retained_driver_without_cancelling_or_mutating(
     let run = accepted.run_id.clone().unwrap();
     let slot = control
         .live
-        .register_or_nudge_driver(&thread, run.clone(), &control.stop, false)
+        .register_or_nudge_driver(&thread, run.clone(), &control.stop)
         .await
         .unwrap();
     let response = control
@@ -3125,7 +3120,7 @@ async fn recovery_rewind_terminal_reply_creates_run_after_path_rewrite() {
         .await
         .unwrap();
     assert_eq!(
-        effects.wake_threads.as_slice(),
+        effects.quiet_wake_threads.as_slice(),
         std::slice::from_ref(&accepted.thread_id)
     );
     let thread = accepted.thread_id.clone();

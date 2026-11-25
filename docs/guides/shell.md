@@ -69,9 +69,8 @@ to do next.
 
 The process stays with its original Run; later unexecuted calls are cancelled.
 The shell may finish before readback, so get/read/wait on the same ID. The
-existing immediate delivery option (`--deliver now` or the TUI immediate key)
-can still release a foreground wait with reason `additional_input`. Neither
-release means the process was stopped or should be relaunched.
+release does not mean the process stopped or should be relaunched. Historical
+records may show `additional_input`; ordinary sends no longer release a wait.
 
 Later calls that were not executed save `status: "cancelled"`, `executed: false`,
 a machine-readable `reason`, a human-readable `message`, and any known

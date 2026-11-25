@@ -51,7 +51,7 @@ async fn human_cli_attachment_is_anchored_to_its_own_immutable_event_once_withou
         .execute_with_plan(request(), None, plan(0))
         .await
         .unwrap();
-    assert!(result.wake_threads.is_empty());
+    assert!(result.quiet_wake_threads.is_empty());
     assert!(result.quiet_wake_threads.is_empty());
     // A repeated committed operation must not append another history event.
     store
@@ -118,7 +118,7 @@ async fn authenticated_cli_reference_uses_dedicated_pending_node_and_a_stale_pla
         .execute_with_plan(request(), Some(origin), plan(1))
         .await
         .unwrap();
-    assert!(result.wake_threads.is_empty());
+    assert!(result.quiet_wake_threads.is_empty());
     assert_eq!(result.quiet_wake_threads, vec!["thread"]);
     store
         .database

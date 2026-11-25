@@ -1160,9 +1160,8 @@ pub struct MessageSendOptions {
     /// Recipient Thread; omit to send to your current Thread. This does not ask a person or require a reply.
     #[arg(long = "thread")]
     pub thread_id: Option<String>,
-    /// Delivery timing. Omitted: the next safe boundary. now: also release a
-    /// foreground shell wait (never interrupts response generation). complete:
-    /// when the Thread's live Run would complete, or immediately if none is live.
+    /// Omitted: the next safe boundary. complete: when the Thread's live Run
+    /// would complete, or immediately if none is live.
     #[arg(long, value_enum)]
     pub deliver: Option<wire::Deliver>,
     #[command(flatten)]
@@ -1385,7 +1384,7 @@ impl ValueEnum for wire::ArchivedFilter {
 }
 impl ValueEnum for wire::Deliver {
     fn value_variants<'a>() -> &'a [Self] {
-        &[Self::Now, Self::Complete]
+        &[Self::Complete]
     }
     fn to_possible_value(&self) -> Option<clap::builder::PossibleValue> {
         Some(clap::builder::PossibleValue::new(self.as_str()))

@@ -536,11 +536,11 @@ async fn archive_publishes_changed_threads_once_and_replays_without_effects() {
     }));
     let first = store.execute(archive_both.clone(), None).await.unwrap();
     assert_eq!(first.changed_threads, [a.clone(), b.clone()]);
-    assert!(first.wake_threads.is_empty() && first.quiet_wake_threads.is_empty());
+    assert!(first.quiet_wake_threads.is_empty());
     // The same operation ID returns the saved result and repeats no effect.
     let replay = store.execute(archive_both, None).await.unwrap();
     assert_eq!(replay.result, first.result);
-    assert!(replay.changed_threads.is_empty() && replay.wake_threads.is_empty());
+    assert!(replay.changed_threads.is_empty() && replay.quiet_wake_threads.is_empty());
     // A no-op archive under a new operation changes nothing to publish.
     let again = full(
         &store,

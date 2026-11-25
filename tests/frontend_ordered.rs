@@ -374,7 +374,7 @@ async fn human_chips_keep_source_positions_through_followups_edit_restore_and_ow
         .send(UiAction::SendEdited {
             generation: 0,
             selection_revision: u64::try_from(selected_revision).unwrap(),
-            now: false,
+
             snapshot: None,
             draft_id: "edit".into(),
             revision: 1,

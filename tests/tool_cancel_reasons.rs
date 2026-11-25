@@ -151,7 +151,6 @@ async fn incoming(receiver: &mut mpsc::UnboundedReceiver<Incoming>) -> Incoming 
 #[derive(Clone, Copy)]
 enum Scenario {
     Failed,
-    NewInput,
     ExplicitBackground,
 }
 
@@ -162,10 +161,10 @@ async fn check(scenario: Scenario, expected: &str) {
     let first = incoming(&mut requests).await;
     let shell = match scenario {
         Scenario::Failed => "exit 7",
-        Scenario::NewInput | Scenario::ExplicitBackground => "cat",
+        Scenario::ExplicitBackground => "cat",
     };
     first.reply.send(Reply::json(json!({"id":"group","status":"completed","output":[
-        {"type":"function_call","id":"first","call_id":"first-call","name":"shell","arguments":json!({"command":shell,"background":false,"stdin_open":matches!(scenario,Scenario::NewInput|Scenario::ExplicitBackground)}).to_string()},
+        {"type":"function_call","id":"first","call_id":"first-call","name":"shell","arguments":json!({"command":shell,"background":false,"stdin_open":matches!(scenario,Scenario::ExplicitBackground)}).to_string()},
         {"type":"function_call","id":"second","call_id":"second-call","name":"shell","arguments":json!({"command":"printf must-not-run","background":false}).to_string()},
         {"type":"function_call","id":"third","call_id":"third-call","name":"shell","arguments":json!({"command":"printf also-must-not-run","background":false}).to_string()}
     ]}))).ok().unwrap();
@@ -181,27 +180,6 @@ async fn check(scenario: Scenario, expected: &str) {
             })
             .await
             .unwrap()
-        }
-        Scenario::NewInput => {
-            crate::test_watchdog::watchdog("tests/tool_cancel_reasons.rs: check",async {
-                loop {
-                    let running=control.store.database.call(|db| Ok(db.query_row("SELECT EXISTS(SELECT 1 FROM shell_execution WHERE state='running')",[],|r|r.get::<_,bool>(0))?)).await.unwrap();
-                    if running {break;} tokio::task::yield_now().await;
-                }
-            }).await.unwrap();
-            command(
-                &control,
-                Command::MessageSend(MessageSendArgs {
-                    max_model_requests: None,
-                    resume_recovery: false,
-                    human: false,
-                    sender_label: None,
-                    thread_id: Some(accepted.thread_id.clone()),
-                    text: "additional instruction".into(),
-                    deliver: Deliver::Now,
-                }),
-            )
-            .await;
         }
         _ => {}
     }
@@ -276,10 +254,6 @@ async fn check(scenario: Scenario, expected: &str) {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn failed_prerequisite_saves_exit_facts_without_starting_remaining_calls() {
     check(Scenario::Failed, "previous_call_failed").await;
-}
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn new_input_release_preserves_running_execution_without_duplicate_calls() {
-    check(Scenario::NewInput, "previous_wait_released_by_new_input").await;
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn explicit_background_release_has_its_own_saved_cancellation_reason() {

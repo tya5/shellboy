@@ -110,27 +110,16 @@ still counts the full serialized draft payload.
 
 ## Explicit foreground release
 
-Normal configured send key and CLI send queue at the next tool-group/request
-boundary without releasing a foreground shell. `message send --deliver now` explicitly
-releases that wait; its process continues and the next model input receives the
-saved messages. Persist the bounded delivery-mode fact with the receipt/result
-and operation fingerprint. MessageAccepted exposes typed `deliver`
-(`next`/`now`/`complete`, default `next` and omitted when `next`); `complete` is
-[Revisit](revisit.md).
-Receipt result metadata may additionally contain cancellation facts, so message
-get reads the typed saved assignment projection rather than parsing that internal
-record as a strict public acknowledgement. Public unknown-field rejection stays
-intact. Operation replay retains the original acknowledgement, while message get
-reports the current saved delivery state. Human and model CLI follow the same rule.
+The configured send key and default CLI delivery queue at the next tool-group
+or request boundary. They never release a foreground shell wait. The sender
+tracks the exact message, reads `held_by`, and may separately request Background
+for the precise `foreground_shell` execution. See [Foreground decision
+points](foreground-decision-points.md). `complete` remains [Revisit](revisit.md).
 
-TUI Ctrl+Enter sends now unless Ctrl+Enter is configured as the ordinary send
-key. Ctrl+X then Ctrl+S always offers immediate delivery while the composer owns
-input. Reset incomplete chords on focus/overlay changes; unknown second keys
-retain normal handling. No send mode interrupts response generation. Only an
-unadmitted, unselected immediate receipt can release a newly registered wait;
-an already admitted/unacknowledged receipt cannot. Models use ordinary delivery
-for routine reports and now only for urgent information. Automatic time-based
-backgrounding remains deferred.
+Historical `now` receipts keep their saved delivery mode and argument identity.
+Exact operation replay returns the original acknowledgement without applying or
+waking again; `message get` reads the current saved delivery state. Fresh `now`
+operations are rejected rather than mapped to `next`.
 
 ## Human-only Turn interruption
 

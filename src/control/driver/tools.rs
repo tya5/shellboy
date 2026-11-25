@@ -152,7 +152,6 @@ pub(super) async fn run_tool_group(
         }
         let release = match result.get("reason").and_then(Value::as_str) {
             Some("shell_backgrounded") => Some(ForegroundRelease::Background),
-            Some("additional_input") => Some(ForegroundRelease::AdditionalInput),
             _ => None,
         };
         if let Some(reason) = release
