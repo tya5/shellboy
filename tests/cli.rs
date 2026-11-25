@@ -990,11 +990,7 @@ async fn message_delivery_timing_replaces_now_and_revisit_commands() {
         convert(&["message", "send", "--resume-recovery", "--text", "x"]).await,
         Command::MessageSend(args) if args.resume_recovery
     ));
-    for (flag, deliver) in [
-        (None, Deliver::Next),
-        (Some("now"), Deliver::Now),
-        (Some("complete"), Deliver::Complete),
-    ] {
+    for (flag, deliver) in [(None, Deliver::Next), (Some("complete"), Deliver::Complete)] {
         let mut args = vec!["message", "send", "--text", "Check again"];
         if let Some(flag) = flag {
             args.extend(["--deliver", flag]);
@@ -1010,6 +1006,22 @@ async fn message_delivery_timing_replaces_now_and_revisit_commands() {
                 text: "Check again".into(),
                 deliver,
             })
+        );
+    }
+    for verb in ["send", "ask"] {
+        assert!(
+            Cli::try_parse_from([
+                "shellboy",
+                "message",
+                verb,
+                "--thread",
+                "t",
+                "--deliver",
+                "now",
+                "--text",
+                "x"
+            ])
+            .is_err()
         );
     }
     for args in [

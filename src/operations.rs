@@ -1002,7 +1002,7 @@ pub(crate) const FIELD_SPECS: &[FieldSpec] = &[
         id: FieldId::Deliver,
         default_origin: DefaultOrigin::None,
         label: "届けるとき",
-        help: "空は次の安全な区切り。nowは前景shell待ちも解除します（応答生成は割込みません）。completeは動いているRunが完了するときに届け、動いていなければすぐ届けます。",
+        help: "空は次の安全な区切り。completeは動いているRunが完了するときに届け、動いていなければすぐ届けます。",
         kind: FieldType::Choice,
         discovery: Discovery::None,
     },

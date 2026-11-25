@@ -1010,6 +1010,7 @@ impl Control {
         {
             return Ok(saved.result);
         }
+        options.deliver.validate_new()?;
         options.request_fingerprint = Some(fingerprint);
         self.start().await?;
         if let Some(submission) = &options.submission {
@@ -1461,10 +1462,6 @@ impl Control {
                 self.stop_run(&run_id).await;
             }
         }
-        for thread in effects.wake_threads {
-            self.changed(&thread);
-            self.kick(thread).await;
-        }
         for thread in effects.quiet_wake_threads {
             self.changed(&thread);
             self.kick_quiet(thread).await;
@@ -1558,24 +1555,9 @@ impl Control {
             requested: true
         }))
     }
-    fn kick(
-        self: &Arc<Self>,
-        thread_id: String,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'static>> {
-        self.kick_inner(thread_id, true)
-    }
-
     fn kick_quiet(
         self: &Arc<Self>,
         thread_id: String,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'static>> {
-        self.kick_inner(thread_id, false)
-    }
-
-    fn kick_inner(
-        self: &Arc<Self>,
-        thread_id: String,
-        interrupt: bool,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'static>> {
         let control = self.clone();
         Box::pin(async move {
@@ -1584,12 +1566,7 @@ impl Control {
             }
             let slot = match control
                 .live
-                .register_live_run_driver(
-                    &control.store.database,
-                    &thread_id,
-                    &control.stop,
-                    interrupt,
-                )
+                .register_live_run_driver(&control.store.database, &thread_id, &control.stop)
                 .await
             {
                 Ok(Some(slot)) => slot,

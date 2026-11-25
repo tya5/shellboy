@@ -1068,10 +1068,10 @@ args!(MessageAskArgs {
     #[serde(default, skip_serializing_if = "Option::is_none")] sender_label: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")] thread_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")] to: Option<String>,
-    #[serde(default, skip_serializing_if = "Deliver::is_next")] deliver: Deliver,
+    #[serde(default, skip_serializing_if = "Deliver::is_next")] #[schemars(with = "NewDelivery")] deliver: Deliver,
     text: String,
 });
-args!(MessageSendArgs { #[serde(default, skip_serializing_if = "Option::is_none")] max_model_requests: Option<std::num::NonZeroU32>, #[serde(default, skip_serializing_if = "is_false")] human: bool, #[serde(default, skip_serializing_if = "is_false")] resume_recovery: bool, #[serde(default, skip_serializing_if = "Option::is_none")] sender_label: Option<String>, #[serde(default)] thread_id: Option<String>, text: String, #[serde(default, skip_serializing_if = "Deliver::is_next")] deliver: Deliver });
+args!(MessageSendArgs { #[serde(default, skip_serializing_if = "Option::is_none")] max_model_requests: Option<std::num::NonZeroU32>, #[serde(default, skip_serializing_if = "is_false")] human: bool, #[serde(default, skip_serializing_if = "is_false")] resume_recovery: bool, #[serde(default, skip_serializing_if = "Option::is_none")] sender_label: Option<String>, #[serde(default)] thread_id: Option<String>, text: String, #[serde(default, skip_serializing_if = "Deliver::is_next")] #[schemars(with = "NewDelivery")] deliver: Deliver });
 /// Message delivery timing; `Complete` is Revisit.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -1081,7 +1081,27 @@ pub enum Deliver {
     Now,
     Complete,
 }
+// Decode legacy arguments unchanged for exact persisted replay. The public
+// schema advertises only values admitted for fresh operations.
+#[allow(dead_code)]
+#[derive(JsonSchema)]
+#[serde(rename_all = "snake_case")]
+enum NewDelivery {
+    Next,
+    Complete,
+}
+
 impl Deliver {
+    pub(crate) fn validate_new(self) -> Result<(), ApiError> {
+        if self == Self::Now {
+            return Err(ApiError::new(
+                ErrorCode::InvalidArgument,
+                "deliver now has been removed",
+            ));
+        }
+        Ok(())
+    }
+
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Next => "next",
@@ -1641,7 +1661,7 @@ args!(DraftSubmitArgs {
     selection_revision: Option<u64>,
     create: ThreadCreateArgs,
     draft: Box<crate::ui::DraftSnapshot>,
-    #[serde(default)] deliver: Deliver,
+    #[serde(default)] #[schemars(with = "NewDelivery")] deliver: Deliver,
 });
 pub const DRAFT_IMAGE_CHUNK_BYTES: usize = 1024 * 1024;
 

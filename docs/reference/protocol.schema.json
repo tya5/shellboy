@@ -2974,7 +2974,7 @@
           "$ref": "#/definitions/ThreadCreateArgs"
         },
         "deliver": {
-          "$ref": "#/definitions/Deliver",
+          "$ref": "#/definitions/NewDelivery",
           "default": "next"
         },
         "draft": {
@@ -5333,7 +5333,7 @@
       "additionalProperties": false,
       "properties": {
         "deliver": {
-          "$ref": "#/definitions/Deliver"
+          "$ref": "#/definitions/NewDelivery"
         },
         "human": {
           "type": "boolean"
@@ -5719,7 +5719,7 @@
       "additionalProperties": false,
       "properties": {
         "deliver": {
-          "$ref": "#/definitions/Deliver"
+          "$ref": "#/definitions/NewDelivery"
         },
         "human": {
           "type": "boolean"
@@ -5864,6 +5864,13 @@
       ],
       "title": "ModelListResult",
       "type": "object"
+    },
+    "NewDelivery": {
+      "enum": [
+        "next",
+        "complete"
+      ],
+      "type": "string"
     },
     "NoListFilters": {
       "type": "object"

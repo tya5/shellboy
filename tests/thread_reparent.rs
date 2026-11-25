@@ -147,7 +147,7 @@ async fn move_and_detach_change_only_the_parent_and_never_updated_at() {
         Value::Null
     );
     assert_eq!(attached.result["parent_change"]["live_run_id"], Value::Null);
-    assert!(attached.wake_threads.is_empty());
+    assert!(attached.quiet_wake_threads.is_empty());
     assert_eq!(parent_of(&store, &t).await.as_deref(), Some(a.as_str()));
     assert_eq!(revision(&store, &t).await, before + 1);
     assert_eq!(

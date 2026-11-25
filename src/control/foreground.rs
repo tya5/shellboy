@@ -4,7 +4,6 @@ use tokio::sync::watch;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ForegroundRelease {
     Background,
-    AdditionalInput,
 }
 
 /// One bounded delivery slot for the currently awaited call; no permit survives
@@ -19,29 +18,17 @@ impl ForegroundSlot {
         *self.current.lock().expect("foreground slot poisoned") = Some((execution.into(), sender));
         ForegroundReceiver(receiver)
     }
-    pub(super) fn release(&self, reason: ForegroundRelease) -> bool {
-        self.release_matching(None, reason).is_some()
-    }
-    pub(super) fn release_matching(
-        &self,
-        execution: Option<&str>,
-        reason: ForegroundRelease,
-    ) -> Option<String> {
+    pub(super) fn release_matching(&self, execution: Option<&str>) -> Option<String> {
         let current = self.current.lock().expect("foreground slot poisoned");
         let (id, sender) = current.as_ref().filter(|(id, sender)| {
             !sender.is_closed() && execution.is_none_or(|expected| expected == id)
         })?;
         sender.send_if_modified(|pending| {
-            if *pending == Some(ForegroundRelease::Background) {
-                // An explicit Background is sticky until this call ends. A stale input
-                // nudge must neither reject nor replace it.
-                false
-            } else {
-                *pending = Some(reason);
-                // Re-notify even for another input wake: the earlier one may
-                // already have been consumed before a new receipt committed.
-                true
+            if pending.is_some() {
+                return false;
             }
+            *pending = Some(ForegroundRelease::Background);
+            true
         });
         Some(id.clone())
     }
@@ -72,7 +59,7 @@ impl ForegroundSlot {
     }
 }
 
-/// One coalesced reason for this call, rather than a queue of stale input wakes.
+/// One coalesced release for this exact foreground call.
 pub(super) struct ForegroundReceiver(watch::Receiver<Option<ForegroundRelease>>);
 impl ForegroundReceiver {
     pub(super) async fn recv(&mut self) -> Option<ForegroundRelease> {
@@ -86,56 +73,26 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn background_is_not_rejected_by_queued_additional_input() {
-        let slot = ForegroundSlot::default();
-        let mut call = slot.register("current");
-        assert!(slot.release(ForegroundRelease::AdditionalInput));
-        assert!(
-            slot.release(ForegroundRelease::Background),
-            "explicit Background must not be rejected by an obsolete input wake"
-        );
-        assert!(slot.release(ForegroundRelease::AdditionalInput));
-        assert_eq!(call.recv().await, Some(ForegroundRelease::Background));
-        slot.clear();
-    }
-
-    #[tokio::test]
-    async fn consumed_input_wake_does_not_hide_a_later_input() {
-        let slot = ForegroundSlot::default();
-        let mut call = slot.register("current");
-        for _ in 0..2 {
-            assert!(slot.release(ForegroundRelease::AdditionalInput));
-            assert_eq!(call.recv().await, Some(ForegroundRelease::AdditionalInput));
-        }
-        slot.clear();
-    }
-
-    #[tokio::test]
     async fn completion_winning_a_queued_release_does_not_release_the_next_call() {
-        for reason in [
-            ForegroundRelease::Background,
-            ForegroundRelease::AdditionalInput,
-        ] {
-            let slot = ForegroundSlot::default();
-            let mut first = slot.register("fixture");
-            assert!(slot.release(reason));
-            let (completed, completion) = tokio::sync::oneshot::channel();
-            completed.send(()).unwrap();
-            // Both completion and the user action are ready. Exercise the exact
-            // ordering that used to leave a Run-wide Notify permit behind.
-            tokio::select! {
-                biased;
-                _ = completion => {},
-                _ = first.recv() => panic!("fixture must choose completion"),
-            }
-            slot.clear();
-            drop(first);
-            let mut second = slot.register("fixture");
-            assert!(!second.0.has_changed().unwrap());
-            assert!(slot.release(ForegroundRelease::Background));
-            assert_eq!(second.recv().await, Some(ForegroundRelease::Background));
-            slot.clear();
+        let slot = ForegroundSlot::default();
+        let mut first = slot.register("fixture");
+        assert!(slot.release_matching(Some("fixture")).is_some());
+        let (completed, completion) = tokio::sync::oneshot::channel();
+        completed.send(()).unwrap();
+        // Both completion and the user action are ready. Exercise the exact
+        // ordering that used to leave a Run-wide Notify permit behind.
+        tokio::select! {
+            biased;
+            _ = completion => {},
+            _ = first.recv() => panic!("fixture must choose completion"),
         }
+        slot.clear();
+        drop(first);
+        let mut second = slot.register("fixture");
+        assert!(!second.0.has_changed().unwrap());
+        assert!(slot.release_matching(Some("fixture")).is_some());
+        assert_eq!(second.recv().await, Some(ForegroundRelease::Background));
+        slot.clear();
     }
 
     #[tokio::test]
@@ -143,15 +100,12 @@ mod tests {
         let slot = ForegroundSlot::default();
         let first = slot.register("fixture");
         drop(first);
-        assert!(!slot.release(ForegroundRelease::Background));
+        assert!(slot.release_matching(Some("fixture")).is_none());
         slot.clear();
         let mut second = slot.register("fixture");
         assert!(!second.0.has_changed().unwrap());
-        assert!(slot.release(ForegroundRelease::AdditionalInput));
-        assert_eq!(
-            second.recv().await,
-            Some(ForegroundRelease::AdditionalInput)
-        );
+        assert!(slot.release_matching(Some("fixture")).is_some());
+        assert_eq!(second.recv().await, Some(ForegroundRelease::Background));
         slot.clear();
     }
 }

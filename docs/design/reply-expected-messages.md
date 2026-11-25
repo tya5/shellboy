@@ -28,7 +28,7 @@ what it returns with `--result reply|turn-end|run-end` (default `reply`).
 | # | User decision (2026-11-03) | Where |
 |---|---|---|
 | D1 | Wake once at Run end; on the second detection record "ignored" as a stored notice, release waits, notify the sender | [Run-end rule](#run-end-rule) |
-| D2 | `message ask --thread ID`, combinable with `--deliver now\|complete` (originally the `message send --expect-reply` flag, replaced by #317) | [CLI](#cli) |
+| D2 | `message ask --thread ID`, combinable with `--deliver complete` (originally the `message send --expect-reply` flag, replaced by #317) | [CLI](#cli) |
 | D3 | One reply per message; replying clears the pending state; progress uses ordinary messages | [Reply operation](#message-reply) |
 | D4 | The recipient Thread's model replies; a human may also reply from the TUI if that is simpler | [Who may reply](#authority), [Human reply](#human-reply) |
 | D5 | Recipient Thread deleted: release waits and notify the sender | [Outcomes](#outcomes) |
@@ -196,7 +196,7 @@ names change.
 ### `message ask`
 
 ```
-message ask (--thread THREAD [--deliver now|complete] | --to NAME)
+message ask (--thread THREAD [--deliver complete] | --to NAME)
             (--text TEXT | --text-stdin)
 ```
 
@@ -623,7 +623,7 @@ decided here without an explicit user answer (see [Decisions](#decisions)).
 | G4 | `held` with `stopping` | Design | reply state is independent of delivery; the message is replyable only once `applied`; sender may cancel meanwhile |
 | G5 | `held` with `recovery_wait` | Decided | stays pending; not a release reason (D6, Q2); exec adds `run_ended` of the assigned Run, guides add `thread_settled` |
 | G6 | `held` with `previous_instance_interrupted` | Design | stays pending across restart; admitted on explicit resume; the 128 resume bound is unchanged |
-| G7 | `--deliver now` | Decided | combinable (D2); no reply-specific effect |
+| G7 | `--deliver complete` | Decided | combinable (D2); no reply-specific effect |
 | G8 | `--deliver complete` and Run-end ordering | Design | waiting `complete` messages are delivered first; the reminder is checked only when none wait, so a `complete` message can still be answered before any reminder |
 | G9 | Forks (`thread fork`) | Decided | receipts stay with the original target Thread; the fork shares the node but cannot reply and has no reminder (Q13) |
 | G10 | Compaction replacing original or reply nodes | Design | node rows stay (receipt and Turn roots), so `message get` and `history read` still work; the model regains IDs from `message list --awaiting` and the reminder |

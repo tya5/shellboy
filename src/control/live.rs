@@ -1,6 +1,8 @@
 //! Live process/driver registrations, cancellation, and handle liveness.
 //! DB Run/Turn state remains authoritative; these maps contain owned handles.
-use super::{DriverSlot, ForegroundRelease, ForegroundSlot, LiveShell};
+#[cfg(test)]
+use super::ForegroundRelease;
+use super::{DriverSlot, ForegroundSlot, LiveShell};
 use crate::control::driver::proactive::ThreadJob;
 use crate::{protocol::ApiError, shell::ShellHandle};
 use std::{
@@ -73,10 +75,9 @@ impl LiveRegistry {
         thread: &str,
         run: String,
         owner_stop: &CancellationToken,
-        interrupt: bool,
     ) -> Option<DriverSlot> {
         let mut drivers = self.drivers.lock().await;
-        self.register_or_nudge_driver_locked(&mut drivers, thread, run, owner_stop, interrupt)
+        self.register_or_nudge_driver_locked(&mut drivers, thread, run, owner_stop)
     }
 
     /// Select the live Run and publish its slot under one registry admission.
@@ -87,7 +88,6 @@ impl LiveRegistry {
         database: &crate::storage::DbWorker,
         thread: &str,
         owner_stop: &CancellationToken,
-        interrupt: bool,
     ) -> Result<Option<DriverSlot>, crate::storage::StorageError> {
         if owner_stop.is_cancelled() {
             return Ok(None);
@@ -109,7 +109,7 @@ impl LiveRegistry {
         let Some(run) = run.filter(|_| !owner_stop.is_cancelled()) else {
             return Ok(None);
         };
-        Ok(self.register_or_nudge_driver_locked(&mut drivers, thread, run, owner_stop, interrupt))
+        Ok(self.register_or_nudge_driver_locked(&mut drivers, thread, run, owner_stop))
     }
 
     fn register_or_nudge_driver_locked(
@@ -118,16 +118,10 @@ impl LiveRegistry {
         thread: &str,
         run: String,
         owner_stop: &CancellationToken,
-        interrupt: bool,
     ) -> Option<DriverSlot> {
         if let Some(existing) = drivers.get(thread) {
             if existing.driver_active.load(Ordering::Acquire) {
                 existing.nudge.notify_one();
-                if interrupt {
-                    existing
-                        .foreground
-                        .release(ForegroundRelease::AdditionalInput);
-                }
                 return None;
             }
             // A natural Run exit may leave one writer-owned proactive job for
@@ -372,10 +366,8 @@ impl LiveRegistry {
                 !slot.stop.is_cancelled() && target.is_none_or(|(run, _)| slot.run_id == run)
             })
             .and_then(|slot| {
-                slot.foreground.release_matching(
-                    target.map(|(_, execution)| execution),
-                    ForegroundRelease::Background,
-                )
+                slot.foreground
+                    .release_matching(target.map(|(_, execution)| execution))
             })
             .ok_or_else(|| super::background_refusal("not_foreground"))
     }
@@ -518,26 +510,25 @@ impl LiveRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Duration;
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn concurrent_kicks_publish_one_slot_and_old_completion_cannot_remove_a_replacement() {
         let registry = Arc::new(LiveRegistry::default());
         let stop = CancellationToken::new();
         let barrier = Arc::new(tokio::sync::Barrier::new(3));
-        let spawn_kick = |interrupt| {
+        let spawn_kick = || {
             let registry = registry.clone();
             let stop = stop.clone();
             let barrier = barrier.clone();
             tokio::spawn(async move {
                 barrier.wait().await;
                 registry
-                    .register_or_nudge_driver("thread", "run".into(), &stop, interrupt)
+                    .register_or_nudge_driver("thread", "run".into(), &stop)
                     .await
             })
         };
-        let first = spawn_kick(false);
-        let second = spawn_kick(true);
+        let first = spawn_kick();
+        let second = spawn_kick();
         barrier.wait().await;
         let (first, second) = (first.await.unwrap(), second.await.unwrap());
         assert_eq!(
@@ -547,7 +538,7 @@ mod tests {
         let first = first.or(second).unwrap();
         assert!(registry.remove_driver_if_current("thread", &first.id).await);
         let replacement = registry
-            .register_or_nudge_driver("thread", "replacement".into(), &stop, false)
+            .register_or_nudge_driver("thread", "replacement".into(), &stop)
             .await
             .unwrap();
         assert!(!registry.remove_driver_if_current("thread", &first.id).await);
@@ -578,7 +569,7 @@ mod tests {
         let registry = Arc::new(LiveRegistry::default());
         let owner_stop = CancellationToken::new();
         let first = registry
-            .register_or_nudge_driver("thread", "run-a".into(), &owner_stop, false)
+            .register_or_nudge_driver("thread", "run-a".into(), &owner_stop)
             .await
             .unwrap();
         let old_run_stop = first.stop.clone();
@@ -632,7 +623,7 @@ mod tests {
         .unwrap();
 
         let second = registry
-            .register_or_nudge_driver("thread", "run-b".into(), &owner_stop, false)
+            .register_or_nudge_driver("thread", "run-b".into(), &owner_stop)
             .await
             .expect("a natural Run exit permits a new driver on the same Thread");
         assert!(Arc::ptr_eq(&first.proactive_job, &second.proactive_job));
@@ -688,7 +679,7 @@ mod tests {
         let registry = LiveRegistry::default();
         let owner_stop = CancellationToken::new();
         let slot = registry
-            .register_or_nudge_driver("thread", "run".into(), &owner_stop, false)
+            .register_or_nudge_driver("thread", "run".into(), &owner_stop)
             .await
             .unwrap();
         let job_cancel = CancellationToken::new();
@@ -719,7 +710,7 @@ mod tests {
         let registry = LiveRegistry::default();
         let owner_stop = CancellationToken::new();
         let slot = registry
-            .register_or_nudge_driver("thread", "run-a".into(), &owner_stop, false)
+            .register_or_nudge_driver("thread", "run-a".into(), &owner_stop)
             .await
             .unwrap();
         let job_cancel = CancellationToken::new();
@@ -750,7 +741,7 @@ mod tests {
             let registry = Arc::new(LiveRegistry::default());
             let owner_stop = CancellationToken::new();
             let slot = registry
-                .register_or_nudge_driver("thread", "run".into(), &owner_stop, false)
+                .register_or_nudge_driver("thread", "run".into(), &owner_stop)
                 .await
                 .unwrap();
             let job_cancel = CancellationToken::new();
@@ -814,7 +805,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn quiet_and_interrupt_kicks_preserve_the_slot_and_background_targets_its_live_call() {
+    async fn ordinary_kick_preserves_foreground_until_explicit_background() {
         let registry = LiveRegistry::default();
         let stop = CancellationToken::new();
         assert_eq!(
@@ -822,7 +813,7 @@ mod tests {
             crate::protocol::ErrorCode::InvalidState
         );
         let slot = registry
-            .register_or_nudge_driver("thread", "run".into(), &stop, false)
+            .register_or_nudge_driver("thread", "run".into(), &stop)
             .await
             .unwrap();
         assert_eq!(
@@ -832,34 +823,20 @@ mod tests {
         let mut call = slot.foreground.register("execution");
         assert!(
             registry
-                .register_or_nudge_driver("thread", "ignored-run".into(), &stop, false)
+                .register_or_nudge_driver("thread", "ignored-run".into(), &stop)
                 .await
                 .is_none()
         );
-        tokio::time::timeout(Duration::from_secs(1), slot.nudge.notified())
+        crate::test_watchdog::watchdog("normal driver nudge", slot.nudge.notified())
             .await
             .unwrap();
         assert!(
-            tokio::time::timeout(Duration::from_millis(10), call.recv())
-                .await
-                .is_err(),
+            slot.foreground.waiting_execution().as_deref() == Some("execution"),
             "quiet kick nudges without releasing foreground"
-        );
-        assert!(
-            registry
-                .register_or_nudge_driver("thread", "ignored-run".into(), &stop, true)
-                .await
-                .is_none()
-        );
-        assert_eq!(
-            tokio::time::timeout(Duration::from_secs(1), call.recv())
-                .await
-                .unwrap(),
-            Some(ForegroundRelease::AdditionalInput)
         );
         registry.background("thread", None).await.unwrap();
         assert_eq!(
-            tokio::time::timeout(Duration::from_secs(1), call.recv())
+            crate::test_watchdog::watchdog("explicit Background release", call.recv())
                 .await
                 .unwrap(),
             Some(ForegroundRelease::Background)

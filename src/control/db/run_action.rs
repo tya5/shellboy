@@ -61,7 +61,6 @@ mod tests {
     fn no_effects(result: &MutationResult) {
         assert!(
             result.stop_runs.is_empty()
-                && result.wake_threads.is_empty()
                 && result.quiet_wake_threads.is_empty()
                 && result.changed_threads.is_empty()
                 && result.compact_threads.is_empty()
@@ -146,7 +145,7 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(first.quiet_wake_threads, ["t"]);
-            assert!(first.wake_threads.is_empty() && first.stop_runs.is_empty());
+            assert!(first.stop_runs.is_empty());
             assert_ne!(state(&store).await.1, "recovery_wait");
             let replay = store
                 .execute_expected_run("fixture:retry".into(), expected(), RunAction::Retry)

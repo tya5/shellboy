@@ -14,7 +14,6 @@ admission differs.
 | Timing | Meaning |
 | --- | --- |
 | omitted | Queue for the next safe boundary (tool-group or request boundary). |
-| `now` | As omitted, and also release a foreground shell wait. Never interrupts a model response. |
 | `complete` | When the target Thread's live Run would complete normally. With no live Run, exactly the omitted timing. |
 
 `--deliver complete` against a live Run saves the message as a held receipt
@@ -24,7 +23,7 @@ is live, the result is that of an ordinary send (`new_run`, or `held` behind a
 stopping Run under the ordinary rules). The caller therefore sees whether the
 message was deferred or delivered, and receives the message ID either way.
 
-Ordering is per timing class, not one FIFO. Default and `now` messages sent
+Ordering is per timing class, not one FIFO. Default messages sent
 later are admitted at their own boundaries and overtake waiting `complete`
 messages; a waiting `complete` message never blocks or delays them. Waiting
 `complete` messages keep their send order among themselves.
@@ -104,7 +103,7 @@ the delete, and rewriting those triggers is not worth a schema change. Old
 
 Integration tests use temporary stores and a local HTTP mock: completion
 delivery in send order, immediate delivery without a live Run, a Run completing
-between the original send and the `complete` send, `now`/default overtaking
+between the original send and the `complete` send, default overtaking
 waiting messages (including interleaved sequences), cancelling one of several,
 release at stop, at Esc, at shutdown (admitted after restart) and at recovery wait,
 owned background shell ordering, and the model shell CLI path. A unit test

@@ -1365,29 +1365,17 @@ async fn run_shell(
             true,
         ))
     };
-    // Register before inspecting durable input. A send during the model request
-    // or spawn remains accepted even if no foreground channel existed then.
-    // Recheck after every interrupt signal: a late kick for already-applied
-    // input must not release a later call, and later real input must still wake.
     let result = async {
-        loop {
-            let turn = snapshot.turn.clone();
-            let pending = control.store.database.call(move |db| {
-                Ok(super::pending_messages::has_immediate_pending_tx(db, &turn)?)
-            }).await.map_err(storage_error)?;
             if turn_binding.cancel.is_cancelled() && !slot.stop.is_cancelled() { return released("human_turn_interrupted"); }
-            if pending { return released("additional_input"); }
             tokio::select! {
                 result=&mut done_receive=>{slot.foreground.clear();let completion=result.map_err(|_|invalid("Shell collector exited"))??;let stop_calls=completion.exit_code!=Some(0)||completion.state!=ShellState::Exited||!completion.output_complete;let result=shell_result(&control,&execution,completion).await?;let stop_calls=stop_calls||result.get("wait_release_outcome").is_some_and(|value|!value.is_null());return Ok((result,stop_calls));},
                 _=slot.stop.cancelled()=>{handle.stop();return Ok((json!({"status":"stopping","execution_id":execution,"reason":"run_stopped"}),true));},
                 _=turn_binding.cancel.cancelled()=>{if slot.stop.is_cancelled(){handle.stop();return Ok((json!({"status":"stopping","execution_id":execution,"reason":"run_stopped"}),true));}return released("human_turn_interrupted");},
                 reason=release.recv()=> match reason {
-                    Some(ForegroundRelease::Background) => return released("shell_backgrounded"),
-                    Some(ForegroundRelease::AdditionalInput) => {},
-                    None => return Err(invalid("Foreground release channel closed")),
+                    Some(ForegroundRelease::Background) => released("shell_backgrounded"),
+                    None => Err(invalid("Foreground release channel closed")),
                 },
             }
-        }
     }.await;
     slot.foreground.clear();
     let current = snapshot.clone();

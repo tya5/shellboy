@@ -566,7 +566,6 @@ mod tests {
                 .try_send(UiAction::Send {
                     generation: 0,
                     selection_revision: 0,
-                    now: false,
                     snapshot: None,
                     draft_id: format!("closing-{revision}"),
                     revision: u64::try_from(revision).unwrap(),

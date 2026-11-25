@@ -71,9 +71,9 @@ refresh/subscription.
 
 ## Activity display
 
-Immediately after sending, local `送信受付中` (accepting submission) shows the frozen input. Once committed, one DB snapshot supplies both selected history and saved `反映待ち` (pending) rows above the composer. Saved input appears in one of these projections, never both. Pending rows include CLI/other-conversation senders and distinguish held/uncertain input and immediate delivery. `/queue` opens the full bounded list (128 rows, overflow count); Enter inspects delivery facts, O opens the original, D cancels one selected ID and A cancels only the displayed IDs, both at once with no Y step (see [Cancelling queued input](#cancelling-queued-input)); new arrivals are never included. Unknown historical admission is not automatically replayed.
+Immediately after sending, local `送信受付中` (accepting submission) shows the frozen input. Once committed, one DB snapshot supplies both selected history and saved `反映待ち` (pending) rows above the composer. Saved input appears in one of these projections, never both. Pending rows include CLI/other-conversation senders and distinguish held/uncertain input and historical delivery metadata. `/queue` opens the full bounded list (128 rows, overflow count); Enter inspects delivery facts, O opens the original, D cancels one selected ID and A cancels only the displayed IDs, both at once with no Y step (see [Cancelling queued input](#cancelling-queued-input)); new arrivals are never included. Unknown historical admission is not automatically replayed.
 
-The configured send key queues normally at the next boundary. Ctrl+Enter sends immediately unless it is already configured as ordinary send; Ctrl+X then Ctrl+S is always the immediate-delivery chord while the composer owns input. Immediate delivery releases a foreground shell wait and preserves its process; it does not interrupt response generation. Esc first closes popups, completions and selection; in the bare conversation it interrupts the exact observed Turn. Background shells and owned children continue. Ctrl+C or `/stop` stops the whole Run and its owned work. No automatic background timeout is enabled.
+The configured send key queues normally at the next boundary. Sending does not release a foreground shell wait; use Background on that shell as a separate action. Esc first closes popups, completions and selection; in the bare conversation it interrupts the exact observed Turn. Background shells and owned children continue. Ctrl+C or `/stop` stops the whole Run and its owned work. No automatic background timeout is enabled.
 
 The footer status bar also reports slow or stalled DB-worker activity. After an
 active operation exceeds 1 second it shows `DB <operation> <elapsed>`; when the
@@ -177,7 +177,6 @@ These are defaults. Change send/newline combinations with `ui.send_key` and `ui.
 | Key | Action |
 | --- | --- |
 | Enter | Queue draft at the next boundary, or execute a manually typed slash action |
-| Ctrl+Enter / Ctrl+X then Ctrl+S | Immediate delivery; configured ordinary Ctrl+Enter keeps its normal role |
 | Esc | Close the current popup/completion/selection first; otherwise interrupt the active Turn |
 | Ctrl+J | Newline; available without keyboard enhancement |
 | Shift+Enter | Newline when terminal keyboard enhancement is supported |

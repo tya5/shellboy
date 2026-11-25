@@ -1739,8 +1739,8 @@ fn field_help_for(id: FieldId, language: crate::config::UiLanguage) -> &'static 
         ),
         FieldId::Deliver => local!(
             language,
-            "空は次の安全な区切り。nowは前景shell待ちも解除します（応答生成は割込みません）。completeは動いているRunが完了するときに届け、動いていなければすぐ届けます。",
-            "Empty: the next safe boundary. now: also release a foreground shell wait (never interrupts response generation). complete: deliver when the live Run would complete, or immediately if no Run is live."
+            "空は次の安全な区切り。completeは動いているRunが完了するときに届け、動いていなければすぐ届けます。",
+            "Empty: the next safe boundary. complete: deliver when the live Run would complete, or immediately if no Run is live."
         ),
         FieldId::Text => local!(
             language,

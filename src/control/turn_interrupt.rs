@@ -366,7 +366,7 @@ mod tests {
             let (_root, owner, control, thread, run, turn) = fixture().await;
             let slot = control
                 .live
-                .register_or_nudge_driver(&thread, run.clone(), &control.stop, false)
+                .register_or_nudge_driver(&thread, run.clone(), &control.stop)
                 .await
                 .unwrap();
             let ack = if wire {
@@ -403,7 +403,7 @@ mod tests {
         let (_directory, owner, control, thread, run, old_turn) = fixture().await;
         let slot = control
             .live
-            .register_or_nudge_driver(&thread, run.clone(), &control.stop, false)
+            .register_or_nudge_driver(&thread, run.clone(), &control.stop)
             .await
             .unwrap();
         let old = slot.bind_turn(&control, &old_turn).await.unwrap();
@@ -461,7 +461,7 @@ mod tests {
         let (_directory, owner, control, thread, run, turn) = fixture().await;
         let slot = control
             .live
-            .register_or_nudge_driver(&thread, run.clone(), &control.stop, false)
+            .register_or_nudge_driver(&thread, run.clone(), &control.stop)
             .await
             .unwrap();
         slot.bind_turn(&control, &turn).await.unwrap();
@@ -603,7 +603,7 @@ mod tests {
         let (_directory, owner, control, thread, old_run, old_turn) = fixture().await;
         let old_slot = control
             .live
-            .register_or_nudge_driver(&thread, old_run.clone(), &control.stop, false)
+            .register_or_nudge_driver(&thread, old_run.clone(), &control.stop)
             .await
             .unwrap();
         let saved_thread = thread.clone();
@@ -647,7 +647,7 @@ mod tests {
                 .await;
             let slot = control
                 .live
-                .register_or_nudge_driver(&thread, "replacement-run".into(), &control.stop, false)
+                .register_or_nudge_driver(&thread, "replacement-run".into(), &control.stop)
                 .await
                 .unwrap();
             let binding = slot.bind_turn(&control, &new_turn).await.unwrap();

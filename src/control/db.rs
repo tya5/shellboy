@@ -104,7 +104,6 @@ pub struct MutationResult {
     pub(super) committed_error: Option<ApiError>,
     pub owner_shutdown: bool,
     pub result: Value,
-    pub wake_threads: Vec<String>,
     /// Publish committed metadata without starting or resuming a driver.
     pub changed_threads: Vec<String>,
     /// Notify a driver without interrupting its foreground shell/tool group.
@@ -2173,6 +2172,7 @@ impl Store {
         now: &str,
         content: SendContent<'_>,
     ) -> Result<MutationResult> {
+        args.deliver.validate_new()?;
         let named = matches!(content.reply, ReplyIntent::Named(_));
         let expects_reply = !matches!(content.reply, ReplyIntent::None);
         let id = target(args.thread_id.as_deref(), caller)?;
@@ -2295,11 +2295,7 @@ impl Store {
                 .extend(Key::recovery(id.clone(), run, turn));
         }
         if wake {
-            if args.deliver == Deliver::Now {
-                result.wake_threads.push(id);
-            } else {
-                result.quiet_wake_threads.push(id);
-            }
+            result.quiet_wake_threads.push(id);
         } else {
             // Queued or held messages change saved delivery state without a wake (#243).
             result.changed_threads.push(id);
@@ -2803,7 +2799,7 @@ pub(crate) fn recovery_rewind_tx(
     {
         result.changed_threads.push(branch.to_owned());
     }
-    result.wake_threads =
+    result.quiet_wake_threads =
         super::reply::terminal_tx(tx, run, now, &mut result.wait_keys).map_err(sql_error)?;
     Ok(result)
 }
@@ -3065,7 +3061,6 @@ fn retry_run(
         committed_error: None,
         owner_shutdown: false,
         result: serde_json::to_value(run_details(tx, id)?).unwrap(),
-        wake_threads: vec![],
         changed_threads: vec![],
         quiet_wake_threads: vec![details.thread_id],
         stop_runs: vec![],
@@ -5078,7 +5073,6 @@ mod agents_reference_tests {
             .await
             .unwrap();
         assert_eq!(result.changed_threads, vec![thread.clone()]);
-        assert!(result.wake_threads.is_empty());
         assert!(result.quiet_wake_threads.is_empty());
         assert!(result.stop_runs.is_empty());
         assert!(result.compact_threads.is_empty());
@@ -5624,9 +5618,71 @@ mod draft_recovery_revision_tests {
     }
 }
 
+/// V39 fixture: import its exact saved delivery and operation envelopes while
+/// using the ordinary writer for the unrelated Thread/Run/Turn setup.
+#[cfg(test)]
+pub(super) async fn legacy_now_fixture(store: &Store, request: &Request) -> Value {
+    let mut next = request.clone();
+    let Command::MessageSend(args) = &mut next.command else {
+        unreachable!()
+    };
+    assert_eq!(args.deliver, Deliver::Now);
+    args.deliver = Deliver::Next;
+    let mut result = store.execute(next.clone(), None).await.unwrap().result;
+    result["deliver"] = json!("now");
+    let result_for_db = result.clone();
+    let operation = next.operation_id;
+    let mut saved_wire = json!({"command": next.command, "caller": null});
+    saved_wire["command"]["args"]["deliver"] = json!("now");
+    let fingerprint = hash(serde_json::to_vec(&saved_wire).unwrap());
+    store.database.call(move |db| {
+        let tx = db.transaction()?;
+        assert_eq!(tx.execute("UPDATE receipt SET result_json=?2 WHERE client_operation_id=?1", params![operation, result_for_db.to_string()])?, 1);
+        let saved = json!({"result":result_for_db});
+        assert_eq!(tx.execute("UPDATE operation_receipt SET request_hash=?2,result_ref_json=?3 WHERE operation_id=?1", params![operation, fingerprint, saved.to_string()])?, 1);
+        tx.commit()?;
+        Ok(())
+    }).await.unwrap();
+    result
+}
+
 #[cfg(test)]
 mod message_acknowledgement_state_tests {
     use super::*;
+    #[tokio::test]
+    async fn fresh_now_send_and_ask_are_refused_without_creating_a_message() {
+        let root = tempfile::tempdir().unwrap();
+        let db = DbWorker::open(root.path().join("retired-delivery.db"))
+            .await
+            .unwrap();
+        let store = Store::new(
+            db.clone(),
+            Arc::new(Config::default()),
+            root.path().into(),
+            "fixture".into(),
+        );
+        for command in ["message.send", "message.ask"] {
+            let request: Request = serde_json::from_value(json!({
+                "command":command, "args":{"thread_id":"t","text":"never admitted","deliver":"now"},
+                "operation_id":format!("fixture:{command}"), "protocol_version":crate::protocol::PROTOCOL_VERSION,
+            })).unwrap();
+            let refusal = store.execute(request, None).await.unwrap_err();
+            assert_eq!(refusal.code, ErrorCode::InvalidArgument);
+            assert_eq!(refusal.message, "deliver now has been removed");
+        }
+        db.call(|db| {
+            assert_eq!(
+                db.query_row("SELECT count(*) FROM receipt", [], |row| row
+                    .get::<_, u32>(0))?,
+                0
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+        db.shutdown().await.unwrap();
+    }
+
     #[tokio::test]
     async fn typed_immediate_ack_replays_original_while_get_preserves_assignment_after_cancellation_metadata()
      {
@@ -5651,8 +5707,8 @@ mod message_acknowledgement_state_tests {
                 deliver: Deliver::Now,
             }),
         );
-        let first = store.execute(request.clone(), None).await.unwrap();
-        let accepted: MessageAccepted = serde_json::from_value(first.result.clone()).unwrap();
+        let first = legacy_now_fixture(&store, &request).await;
+        let accepted: MessageAccepted = serde_json::from_value(first.clone()).unwrap();
         assert_eq!(accepted.deliver, Deliver::Now);
         assert_eq!(accepted.assignment, Assignment::NewRun);
         store
@@ -5685,8 +5741,8 @@ mod message_acknowledgement_state_tests {
         assert_eq!(current.turn_id, accepted.turn_id);
         assert_eq!(current.delivery_status, DeliveryStatus::Cancelled);
         let replay = store.execute(request, None).await.unwrap();
-        assert_eq!(replay.result, first.result);
-        assert!(replay.wake_threads.is_empty() && replay.quiet_wake_threads.is_empty());
+        assert_eq!(replay.result, first);
+        assert!(replay.quiet_wake_threads.is_empty());
         let replay: MessageAccepted = serde_json::from_value(replay.result).unwrap();
         assert_eq!(replay.deliver, Deliver::Now);
         assert_eq!(replay.delivery_status, DeliveryStatus::Accepted);
@@ -5861,8 +5917,7 @@ mod thread_deletion_notification_tests {
                 expected
             );
             assert!(
-                first.wake_threads.is_empty()
-                    && first.quiet_wake_threads.is_empty()
+                first.quiet_wake_threads.is_empty()
                     && first.stop_runs.is_empty()
                     && first.compact_threads.is_empty()
             );
@@ -5871,7 +5926,6 @@ mod thread_deletion_notification_tests {
             assert!(
                 replay.changed_threads.is_empty()
                     && replay.deleted_threads.is_empty()
-                    && replay.wake_threads.is_empty()
                     && replay.quiet_wake_threads.is_empty()
             );
             owner.shutdown().await.unwrap();
@@ -6396,15 +6450,11 @@ mod independent_run_notification_tests {
                 let first = result.unwrap();
                 assert!(first.changed_threads.is_empty());
                 assert_eq!(first.quiet_wake_threads, vec!["child".to_owned()]);
-                assert!(first.wake_threads.is_empty() && first.stop_runs.is_empty());
+                assert!(first.stop_runs.is_empty());
                 db.call(|db| {assert_eq!(db.query_row("SELECT count(*) FROM pragma_table_info('run') WHERE name='owner_run_id'",[],|r|r.get::<_,i64>(0))?,0);Ok(())}).await.unwrap();
                 let replay = store.execute(request, caller.clone()).await.unwrap();
                 assert_eq!(replay.result, first.result);
-                assert!(
-                    replay.changed_threads.is_empty()
-                        && replay.wake_threads.is_empty()
-                        && replay.quiet_wake_threads.is_empty()
-                );
+                assert!(replay.changed_threads.is_empty() && replay.quiet_wake_threads.is_empty());
                 if mode == "owned" {
                     let second = store
                         .execute(

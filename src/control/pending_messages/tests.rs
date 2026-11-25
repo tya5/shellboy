@@ -119,7 +119,7 @@ async fn human_question_reply_cancel_and_attachment_frontier_preserve_fifo() {
         )
         .await
         .unwrap();
-    assert!(first.wake_threads.is_empty() && first.quiet_wake_threads.is_empty());
+    assert!(first.quiet_wake_threads.is_empty());
     let first_accepted: MessageAccepted = serde_json::from_value(first.result.clone()).unwrap();
     assert_eq!(first_accepted.delivery_status, DeliveryStatus::Accepted);
     assert_eq!(first_accepted.assignment, Assignment::Pending);
@@ -694,7 +694,7 @@ async fn cancellation_is_partial_unrestricted_archived_idempotent_and_never_wake
         .execute(req.clone(), Some(origin("sender")))
         .await
         .unwrap();
-    assert!(outcome.wake_threads.is_empty() && outcome.quiet_wake_threads.is_empty());
+    assert!(outcome.quiet_wake_threads.is_empty());
     assert_eq!(outcome.changed_threads, ["t"]);
     let cancelled: MessageCancelResult = serde_json::from_value(outcome.result.clone()).unwrap();
     assert_eq!(
@@ -836,86 +836,6 @@ async fn cancellation_and_admission_commit_boundary_prevents_retraction_or_parti
     }).await.unwrap();
     store.database.shutdown().await.unwrap();
 }
-#[tokio::test]
-async fn only_explicit_unadmitted_now_input_releases_foreground_wait() {
-    let (_root, store) = store().await;
-    let queued = store
-        .execute(
-            Request::new(
-                "fixture:queued",
-                Command::MessageSend(MessageSendArgs {
-                    max_model_requests: None,
-                    resume_recovery: false,
-                    human: false,
-                    sender_label: None,
-                    thread_id: Some("t".into()),
-                    text: "ordinary".into(),
-                    deliver: Deliver::Next,
-                }),
-            ),
-            None,
-        )
-        .await
-        .unwrap();
-    assert_eq!(queued.quiet_wake_threads, ["t"]);
-    assert!(queued.wake_threads.is_empty());
-    store
-        .database
-        .call(|db| {
-            assert!(!has_immediate_pending_tx(db, "u")?);
-            Ok(())
-        })
-        .await
-        .unwrap();
-    let now = store
-        .execute(
-            Request::new(
-                "fixture:now",
-                Command::MessageSend(MessageSendArgs {
-                    max_model_requests: None,
-                    resume_recovery: false,
-                    human: false,
-                    sender_label: None,
-                    thread_id: Some("t".into()),
-                    text: "urgent".into(),
-                    deliver: Deliver::Now,
-                }),
-            ),
-            None,
-        )
-        .await
-        .unwrap();
-    assert_eq!(now.wake_threads, ["t"]);
-    assert!(now.quiet_wake_threads.is_empty());
-    assert_eq!(now.result["deliver"], "now");
-    let id = now.result["message_id"].as_str().unwrap().to_owned();
-    store
-        .database
-        .call(move |db| {
-            assert!(has_immediate_pending_tx(db, "u")?);
-            let tx = db.transaction()?;
-            crate::history::append_existing_nodes(&tx, "t", 0, std::slice::from_ref(&id), "admit")?;
-            crate::control::message_delivery::mark_admitted_tx(
-                &tx,
-                "t",
-                std::slice::from_ref(&id),
-            )?;
-            assert!(
-                !has_immediate_pending_tx(&tx, "u")?,
-                "accepted but admitted now input cannot release a later call"
-            );
-            tx.execute("DELETE FROM thread_path WHERE node_id=?1", [id])?;
-            assert!(
-                !has_immediate_pending_tx(&tx, "u")?,
-                "rewinding cannot re-arm an immediate send"
-            );
-            tx.commit()?;
-            Ok(())
-        })
-        .await
-        .unwrap();
-    store.database.shutdown().await.unwrap();
-}
 fn submission(op: &str, source: &str, revision: u64, text: &str) -> DraftSubmission {
     DraftSubmission {
         draft_id: DraftSubmission::id_for_operation(op),
@@ -959,7 +879,7 @@ async fn frozen_submission_survives_precommit_failure_and_accepts_atomically_wit
         parent_thread_id: None,
     };
     let options = DraftSendOptions {
-        deliver: Deliver::Now,
+        deliver: Deliver::Next,
         submission: Some(frozen.clone()),
         expected_selection_revision: Some(0),
         ..Default::default()
@@ -1004,7 +924,7 @@ async fn frozen_submission_survives_precommit_failure_and_accepts_atomically_wit
         .await
         .unwrap();
     let options = DraftSendOptions {
-        deliver: Deliver::Now,
+        deliver: Deliver::Next,
         submission: Some(frozen.clone()),
         expected_selection_revision: Some(0),
         ..Default::default()

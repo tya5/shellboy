@@ -91,9 +91,6 @@ impl UiState {
         if closes_management {
             self.management.epoch = self.management.epoch.wrapping_add(1);
         }
-        if !self.composer_active() {
-            self.immediate_chord = false;
-        }
         let input_owner = self.active.clone();
         let selection_before = self.selection_mode;
         let follow_before = self.view().navigation.follow();
@@ -116,12 +113,6 @@ impl UiState {
                 after_nodes: view.nodes().len() as u64,
                 ..Default::default()
             });
-        }
-        if self.active != input_owner {
-            self.immediate_chord = false;
-        }
-        if !self.composer_active() {
-            self.immediate_chord = false;
         }
         if self.active == input_owner && self.view().status != status_before {
             self.active_view_mut()
@@ -298,12 +289,6 @@ impl UiState {
             _ => vec![],
         }
     }
-    fn submit_immediately(&mut self) -> Vec<UiAction> {
-        self.send_now = true;
-        let actions = self.submit();
-        self.send_now = false;
-        actions
-    }
     pub(super) fn key(&mut self, key: KeyEvent) -> Vec<UiAction> {
         self.expire_rewind_undo();
         if let Some(actions) = self.global_key(key) {
@@ -445,19 +430,6 @@ impl UiState {
         }
         if let Some(actions) = self.history_focus_key(key) {
             return actions;
-        }
-        if self.immediate_chord {
-            self.immediate_chord = false;
-            if key_matches("Ctrl+S", key) {
-                return self.submit_immediately();
-            }
-        }
-        if key_matches("Ctrl+X", key) {
-            self.immediate_chord = true;
-            return vec![];
-        }
-        if key_matches("Ctrl+Enter", key) && !key_matches(&self.config.ui.send_key, key) {
-            return self.submit_immediately();
         }
         if let Some(actions) = self.composer_key(key) {
             return actions;

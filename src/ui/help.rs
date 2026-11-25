@@ -499,24 +499,6 @@ impl Page {
             "反映待ち・中断・復元",
             "Queued input, interruption, and recovery"
         ));
-        if !config.ui.send_key.eq_ignore_ascii_case("Ctrl+Enter") {
-            page.entry(
-                "Ctrl+Enter",
-                local!(
-                    config.ui.language,
-                    "すぐ渡す（応答生成は中断しない）",
-                    "Deliver now without interrupting generation"
-                ),
-            );
-        }
-        page.entry(
-            crate::ui::text_width::glyphs::select("Ctrl+X → Ctrl+S", "Ctrl+X > Ctrl+S"),
-            local!(
-                config.ui.language,
-                "すぐ渡す。前景shellの待機だけを解除する",
-                "Deliver now and release only the foreground shell wait"
-            ),
-        );
         page.entry("/replies",local!(config.ui.language,
             "返事待ちを確認。Enterで返信先を選び、Escで返信モード解除（本文は保持）",
             "Inspect awaiting replies; Enter selects a target, Esc leaves reply mode and keeps text"

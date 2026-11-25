@@ -144,30 +144,6 @@
     "reason": "Opt-in non-gating performance workload sampling/pacing window, not an upper/lower response-latency assertion; readiness/completion guards use shared WATCHDOG."
   },
   {
-    "file": "src/control/live.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "1a1964702f95cfb35a4adaf33623ea4e40406b93c3353d8e4cc142db0a03027b",
-    "function": "quiet_and_interrupt_kicks_preserve_the_slot_and_background_targets_its_live_call",
-    "count": 2,
-    "reason": "Deferred #41/shared-read: existing quiet_and_interrupt_kicks_preserve_the_slot_and_background_targets_its_live_call test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "src/control/live.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "57f0175ac2ac7cd2a444ed12670c19c256247c9332f1f22193ee412d5eaca5fc",
-    "function": "quiet_and_interrupt_kicks_preserve_the_slot_and_background_targets_its_live_call",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing quiet_and_interrupt_kicks_preserve_the_slot_and_background_targets_its_live_call test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "src/control/live.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "c2078b919902b2d57f5b6f6746fd7911f91e7766da1ebad19f5f67146acc0132",
-    "function": "quiet_and_interrupt_kicks_preserve_the_slot_and_background_targets_its_live_call",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing quiet_and_interrupt_kicks_preserve_the_slot_and_background_targets_its_live_call test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
     "file": "src/control/wait.rs",
     "rule": "raw-timeout",
     "fingerprint": "1d8fcbbce9e8f6716d41b0624cb74b4f7ee4a4589cf9a3785474c88c2f377fc5",

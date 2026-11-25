@@ -195,15 +195,9 @@ async fn same_operation_is_durable_idempotent_conflict_checked_and_old_instance_
     let first = store.execute(req.clone(), None).await.unwrap();
     let second = store.execute(req.clone(), None).await.unwrap();
     assert_eq!(first.result, second.result);
-    assert!(
-        first.wake_threads.is_empty(),
-        "ordinary queued send must not release foreground work"
-    );
     assert_eq!(first.quiet_wake_threads, vec![thread.thread_id]);
     assert!(
-        second.wake_threads.is_empty()
-            && second.quiet_wake_threads.is_empty()
-            && second.changed_threads.is_empty(),
+        second.quiet_wake_threads.is_empty() && second.changed_threads.is_empty(),
         "retransmission must not reschedule foreground, quiet or observation effects"
     );
     let mut conflicting = req.clone();
@@ -392,7 +386,7 @@ async fn acceptance_assignments_are_immutable_across_completion_stop_and_delete(
     assert_eq!(held.assignment, Assignment::Pending);
     assert_eq!(held.run_id, None);
     assert_eq!(held.turn_id, None);
-    assert!(effects.wake_threads.is_empty());
+    assert!(effects.quiet_wake_threads.is_empty());
     let delete = request(Command::ThreadDelete(ThreadDeleteArgs {
         preview_marker: None,
         thread_id: thread.thread_id.clone(),
@@ -532,7 +526,7 @@ async fn machine_message_does_not_resume_recovery_but_new_human_instruction_does
     let mechanical_message: MessageAccepted = serde_json::from_value(mechanical.result).unwrap();
     assert_eq!(mechanical_message.delivery_status, DeliveryStatus::Held);
     assert!(
-        mechanical.wake_threads.is_empty() && mechanical.quiet_wake_threads.is_empty(),
+        mechanical.quiet_wake_threads.is_empty(),
         "ordinary machine input cannot resume a recovery Turn"
     );
     let human_result = execute(
@@ -553,7 +547,7 @@ async fn machine_message_does_not_resume_recovery_but_new_human_instruction_does
     assert_eq!(human.turn_id, accepted.turn_id);
     assert_eq!(human.delivery_status, DeliveryStatus::Accepted);
     assert_eq!(effects.quiet_wake_threads, vec![child.thread_id.clone()]);
-    assert!(effects.wake_threads.is_empty());
+    assert!(effects.quiet_wake_threads.is_empty());
     let run = human.run_id.unwrap();
     store
         .database
@@ -1134,7 +1128,7 @@ async fn explicit_new_human_send_assigns_only_unassigned_stopping_messages_once(
     let replay = store.execute(restart_request, None).await.unwrap();
     assert_eq!(replay.result, restart_result.result);
     assert!(
-        replay.wake_threads.is_empty(),
+        replay.quiet_wake_threads.is_empty(),
         "saved acceptance cannot repeat recovery effects"
     );
     let expected = vec![old.message_id.clone(), pending.message_id.clone()];
@@ -1213,7 +1207,7 @@ async fn first_send_creates_thread_and_message_atomically_and_retransmits_once()
         .await
         .unwrap();
     assert_eq!(first.result, again.result);
-    assert!(again.wake_threads.is_empty());
+    assert!(again.quiet_wake_threads.is_empty());
     store
         .database
         .call(|db| {
@@ -1564,13 +1558,9 @@ async fn retry_schedules_exactly_one_quiet_driver_wake() {
         .unwrap();
     let effects = execute(&store, Command::RunRetry(RunTarget { run_id: run })).await;
     assert_eq!(
-        effects.wake_threads.len() + effects.quiet_wake_threads.len(),
+        effects.quiet_wake_threads.len(),
         1,
         "retry must not kick twice"
-    );
-    assert!(
-        effects.wake_threads.is_empty(),
-        "retry is not new human input"
     );
     assert_eq!(effects.quiet_wake_threads, vec![thread.thread_id]);
     store.database.shutdown().await.unwrap();
@@ -2253,17 +2243,11 @@ async fn explicit_recovery_releases_only_the_resumed_turn_and_zero_row_cas_relea
                 );
             } else {
                 let effects = result.unwrap();
-                assert!(
-                    effects.wake_threads.is_empty(),
-                    "RunRetry and ordinary queued human recovery both use a quiet driver wake"
-                );
                 assert_eq!(effects.quiet_wake_threads, vec![thread.thread_id.clone()]);
                 let replay = store.execute(recovery_request, None).await.unwrap();
                 assert_eq!(replay.result, effects.result);
                 assert!(
-                    replay.wake_threads.is_empty()
-                        && replay.quiet_wake_threads.is_empty()
-                        && replay.changed_threads.is_empty(),
+                    replay.quiet_wake_threads.is_empty() && replay.changed_threads.is_empty(),
                     "saved recovery result cannot repeat any wake or change effect"
                 );
             }

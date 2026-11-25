@@ -1063,36 +1063,27 @@ mod tests {
         assert!(!ui.queue_popup.visible);
     }
     #[test]
-    fn now_keys_respect_configured_normal_send_and_chord_focus() {
+    fn only_the_configured_composer_send_key_submits() {
         for normal in ["Enter", "Ctrl+Enter"] {
             let mut config = Config::default();
             config.ui.send_key = normal.into();
             let mut ui = UiState::new(&config, std::env::temp_dir());
-            ui.insert("normal", false);
-            let actions = ui.event(key(KeyCode::Enter, KeyModifiers::CONTROL));
-            assert!(matches!(&actions[0],UiAction::Send {now,..} if *now==(normal!="Ctrl+Enter")));
-            let mut ui = UiState::new(&config, std::env::temp_dir());
-            ui.insert("urgent", false);
+            ui.insert("ordinary", false);
+            let _ = ui.event(key(KeyCode::Char('x'), KeyModifiers::CONTROL));
+            let actions = ui.event(key(KeyCode::Char('s'), KeyModifiers::CONTROL));
             assert!(
-                ui.event(key(KeyCode::Char('x'), KeyModifiers::CONTROL))
-                    .is_empty()
+                !actions
+                    .iter()
+                    .any(|action| matches!(action, UiAction::Send { .. }))
             );
-            assert!(matches!(
-                &ui.event(key(KeyCode::Char('s'), KeyModifiers::CONTROL))[0],
-                UiAction::Send { now: true, .. }
-            ));
+            let actions = ui.event(key(KeyCode::Enter, KeyModifiers::CONTROL));
+            assert_eq!(
+                actions
+                    .iter()
+                    .any(|action| matches!(action, UiAction::Send { .. })),
+                normal == "Ctrl+Enter"
+            );
         }
-        let mut ui = ui();
-        ui.insert("keep", false);
-        ui.event(key(KeyCode::Char('x'), KeyModifiers::CONTROL));
-        ui.event(key(KeyCode::Char('a'), KeyModifiers::NONE));
-        assert_eq!(ui.view().draft.text, "keepa");
-        ui.event(key(KeyCode::Char('x'), KeyModifiers::CONTROL));
-        ui.event(key(KeyCode::Char('n'), KeyModifiers::CONTROL));
-        assert!(
-            ui.event(key(KeyCode::Char('s'), KeyModifiers::CONTROL))
-                .is_empty()
-        );
     }
     #[test]
     fn queue_cancel_uses_only_the_displayed_ids_without_confirmation() {

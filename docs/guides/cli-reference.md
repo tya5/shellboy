@@ -246,8 +246,8 @@ Root cwd defaults to owner startup cwd; child cwd to the parent's. Relative cwd 
 
 | Operation and all specific flags | Main result and conditions |
 |---|---|
-| `message send [--thread THREAD] [--deliver now\|complete] [--resume-recovery] [--max-model-requests N] [--sender-label TEXT] (--text TEXT \| --text-stdin)` | message_id/thread_id/delivery_status/assignment/run_id/turn_id, plus `deliver` when not the default and `hint` when held. `--sender-label` is self-asserted (not verified); non-human messages may include it in the derived preamble without changing saved text. Active work takes additions at safe boundaries; stopping can yield held/pending. Machine messages hold at `recovery_wait` unless `--resume-recovery` explicitly resumes; the event records `external_cli` or authenticated shell Origin. Human input explicitly resumes; replies without model Origin retain their recovery behavior independent of sender display |
-| `message ask [--to NAME or --thread THREAD] [--sender-label TEXT] [--deliver now\|complete] (--text TEXT or --text-stdin)` | Returns `MessageAccepted` and opens one reply duty. A named recipient defaults to `human` and requires model origin. Delivery timing applies only to Thread recipients. |
+| `message send [--thread THREAD] [--deliver complete] [--resume-recovery] [--max-model-requests N] [--sender-label TEXT] (--text TEXT \| --text-stdin)` | message_id/thread_id/delivery_status/assignment/run_id/turn_id, plus `deliver` when not the default and `hint` when held. `--sender-label` is self-asserted (not verified); non-human messages may include it in the derived preamble without changing saved text. Active work takes additions at safe boundaries; stopping can yield held/pending. Machine messages hold at `recovery_wait` unless `--resume-recovery` explicitly resumes; the event records `external_cli` or authenticated shell Origin. Human input explicitly resumes; replies without model Origin retain their recovery behavior independent of sender display |
+| `message ask [--to NAME or --thread THREAD] [--sender-label TEXT] [--deliver complete] (--text TEXT or --text-stdin)` | Returns `MessageAccepted` and opens one reply duty. A named recipient defaults to `human` and requires model origin. Delivery timing applies only to Thread recipients. |
 | `message list --awaiting [--owed-by-thread THREAD or --asked-by-thread THREAD or --to NAME] [--limit N] [--cursor C]` | Bounded read of pending replies by direction. Without a direction it lists all pending requests. Items include the credential-free saved `sender` (`MessageSender`); `asked_by` is the model Thread ID or null. `--asked-by-thread` matches only model Thread senders. `thread get` returns bounded directional counts, not the list. |
 | `message reply --message MESSAGE (--text TEXT \| --text-stdin)` | Reply once to an applied pending reply request; returns `reply_to`/reply message ID and optional delivery |
 | `message get --message MESSAGE` | Original immutable assignment, current delivery_status, `hint` when held, sender facts, and `expect_reply`, `reply` state/node, or `reply_to` when applicable; `end_message_node_id` remains available when present |
@@ -269,7 +269,7 @@ For an admitted Thread-to-Thread reply duty, the receipt-derived developer pream
 waiting messages are delivered together in send order as one new Turn. If that Run
 stops, is shut down, or enters recovery wait instead, each waiting message is
 released as ordinary held input and follows the usual resume/retry rules. Later
-default or `--deliver now` messages overtake waiting `complete` messages.
+default messages overtake waiting `complete` messages.
 
 `message get` returns `sender.kind`: `model` with verified credential-free
 instance/thread/run/turn/execution IDs, `external_cli` for a new external CLI
@@ -306,16 +306,13 @@ belongs to #41 and is not changed by this sender-inspection follow-up.
 every case:
 
 - omitted: queue for the next safe boundary.
-- `now`: also release a foreground shell wait for urgent delivery. That shell
-  continues under its execution ID; an in-progress model response is not
-  interrupted.
 - `complete`: deliver when the Thread's live Run would complete
   normally, after owned shells finish. The result is
   `delivery_status: held`, `assignment: pending`, `deliver: complete`. If no Run
   is live, it is delivered immediately exactly like an omitted timing, and the
   result shows that assignment (for example `new_run`).
 
-Later default or `now` messages overtake waiting `complete` messages; waiting
+Later default messages overtake waiting `complete` messages; waiting
 `complete` messages are delivered together, in send order, as one new Turn of
 the completing Run. Several may wait. A waiting message never outlives its
 Run: if the Run stops, is shut down or enters recovery wait instead, it becomes
@@ -604,7 +601,7 @@ successful measured usage, start/end time and next_request_pending after an edit
 
 Send with `shellboy message ask --thread THREAD --text 'Task'`;
 the receipt's `message_id` identifies the duty, independently of assignment or
-`--deliver now|complete`. The recipient replies after application with
+`--deliver complete`. The recipient replies after application with
 `shellboy message reply --message MESSAGE_ID --text 'Result'`. A model cannot
 ask its own Thread. To ask a person, omit `--thread`. Ordinary progress messages
 create no reply duty.

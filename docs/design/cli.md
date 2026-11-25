@@ -97,9 +97,9 @@ mainはstandalone JSON応答・owner RPC・TUI寿命を局所関数へ分ける�
 
 ## Delivery timing and Revisit (#187)
 
-`message send --deliver now|complete` selects the delivery timing of one
+`message send --deliver complete` selects the delivery timing of one
 ordinary message; omission is the next safe boundary. The wire field is
-`deliver` (`next`/`now`/`complete`, default `next`, omitted when `next`), and
+`deliver` (`next`/`complete` on fresh requests, default `next`, omitted when `next`), and
 `MessageAccepted` echoes it. `--now` and the `revisit set/get/cancel` commands
 are removed without aliases. See [Revisit](revisit.md).
 

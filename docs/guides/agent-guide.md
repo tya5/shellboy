@@ -448,7 +448,7 @@ Use the same current release for the owner and CLI. The local RPC handshake uses
 
 ## Queued messages and human Turn interruption
 
-`shellboy message send --thread THREAD_ID --text 'Report; no reply needed'` queues ordinary input at the next tool-group/request boundary. Use this for routine reports. Add `--deliver now` only when the information must urgently release the recipient's foreground shell wait. That shell continues with its execution ID; immediate delivery does not cancel an in-progress model response. Do not poll or send repeated nudges merely because an input remains queued.
+`shellboy message send --thread THREAD_ID --text 'Report; no reply needed'` queues ordinary input at the next tool-group/request boundary. Use this for routine reports. An ordinary send does not release a foreground shell wait. Do not poll or send repeated nudges merely because an input remains queued.
 
 ### Observe application and identify an exact blocker
 
@@ -520,7 +520,7 @@ Inside your shell, omitting `--thread` targets your own Thread. The result has
 `message cancel --message MESSAGE_ID`. Several such messages may wait; at
 completion they arrive together, in send order, as a new Turn of the same Run,
 and your Run continues. Messages you or others send later with the default
-timing or `--deliver now` are delivered at their own boundaries first; a waiting
+timing are delivered at their own boundaries first; a waiting
 complete-delivery message never delays them. To continue again, send another
 one during that Turn.
 

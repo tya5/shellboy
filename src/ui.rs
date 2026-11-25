@@ -688,7 +688,7 @@ pub enum UiAction {
     Send {
         generation: u64,
         selection_revision: u64,
-        now: bool,
+
         snapshot: Option<Box<DraftSnapshot>>,
         draft_id: String,
         revision: u64,
@@ -721,7 +721,7 @@ pub enum UiAction {
     SendEdited {
         generation: u64,
         selection_revision: u64,
-        now: bool,
+
         snapshot: Option<Box<DraftSnapshot>>,
         draft_id: String,
         revision: u64,
@@ -1895,8 +1895,7 @@ pub struct UiState {
     /// Selection revision at Y and the confirmed facts, until the result arrives.
     rewind_base: Option<(u64, rewind::RewindFacts)>,
     queue_popup: message_queue::QueuePopup,
-    send_now: bool,
-    immediate_chord: bool,
+
     queue_notifications: VecDeque<String>,
     next_model_request: u64,
     next_detail_request: u64,
@@ -2046,8 +2045,7 @@ impl UiState {
             rewind_undo: None,
             rewind_base: None,
             queue_popup: message_queue::QueuePopup::default(),
-            send_now: false,
-            immediate_chord: false,
+
             queue_notifications: VecDeque::new(),
             next_model_request: 0,
             autosave: Default::default(),
@@ -4899,7 +4897,7 @@ impl UiState {
 
         self.dirty = true;
         let text = self.view().draft.text.clone();
-        let now = std::mem::take(&mut self.send_now);
+
         let view = self.active_view_mut();
         if view
             .pending
@@ -4978,7 +4976,6 @@ impl UiState {
             return vec![UiAction::SendEdited {
                 generation: view.generation,
                 selection_revision: view.selection_revision,
-                now,
                 snapshot,
                 draft_id: draft.draft_id,
                 revision: draft.revision,
@@ -4995,7 +4992,6 @@ impl UiState {
         vec![UiAction::Send {
             generation: view.generation,
             selection_revision: view.selection_revision,
-            now,
             snapshot,
             draft_id: draft.draft_id,
             revision: draft.revision,

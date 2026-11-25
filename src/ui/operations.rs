@@ -1563,7 +1563,7 @@ impl Form {
                         "deliver",
                         "届けるとき（空=次の区切り）",
                         String::new(),
-                        Choice(&["", "now", "complete"]),
+                        Choice(&["", "complete"]),
                     ),
                 ],
                 |form, _cwd| {
