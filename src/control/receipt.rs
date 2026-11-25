@@ -500,7 +500,10 @@ mod tests {
         assert_eq!(db.total_changes(), before);
 
         db.execute_batch(
-            r#"INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,hold_reason,created_at)
+            r#"INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)
+               VALUES('fixture-thread','/fixture','/fixture/AGENTS.md','fixture-profile','fixture-model','now');
+               INSERT INTO node(id,kind,created_at,payload_json) VALUES('m','user','now','{}');
+               INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,hold_reason,created_at)
                VALUES('delivery','current:saved','{}','fixture-thread','m','held','fixture hold','now');
                INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,created_at,result_ref_json,reserved_bytes)
                VALUES('current:compact-queued','current','null','hash','completed','now','{"result":{"status":"queued","operation_id":"current:compact-queued","thread_id":"fixture-thread"}}',0),
