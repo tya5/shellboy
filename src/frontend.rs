@@ -3034,7 +3034,7 @@ async fn run_client(
                         if !spawn_read(&mut read_workers, &read_slots, &read_cancel, async move {
                             match request(
                                 &control,
-                                Command::HistoryRead(HistoryReadArgs { end_message_only: false, parts: false,
+                                Command::HistoryRead(HistoryReadArgs { display: None, end_message_only: false, parts: false,
                                     node_id,
                                     cursor,
                                     limit_bytes: MAX_BODY_BYTES,
@@ -4418,92 +4418,15 @@ pub async fn progress(
     Ok(projection.poll_running)
 }
 
-const MAX_ANCHORED_BODY_BYTES: usize = 8 * 1024;
-fn open_code_fence_before(text: &str, end: usize) -> Option<usize> {
-    let mut open: Option<(usize, u8, usize)> = None;
-    let mut line_start = 0;
-    for line in text[..end].split_inclusive('\n') {
-        let content = line.trim_end_matches(['\n', '\r']);
-        let indent = content.bytes().take_while(|byte| *byte == b' ').count();
-        if indent <= 3 {
-            let tail = &content[indent..];
-            let marker = tail.as_bytes().first().copied();
-            if matches!(marker, Some(b'`' | b'~')) {
-                let count = tail
-                    .bytes()
-                    .take_while(|byte| Some(*byte) == marker)
-                    .count();
-                if count >= 3 {
-                    if let Some((_, open_marker, open_count)) = open {
-                        if marker == Some(open_marker)
-                            && count >= open_count
-                            && tail[count..].trim().is_empty()
-                        {
-                            open = None;
-                        }
-                    } else {
-                        open = Some((line_start, marker.unwrap(), count));
-                    }
-                }
-            }
-        }
-        line_start += line.len();
-    }
-    open.map(|(start, _, _)| start)
-}
+#[cfg(test)]
+use crate::history::display_source::MAX_ANCHORED_BODY_BYTES;
 fn window(text: &str, offset: Option<usize>) -> (String, usize, usize) {
-    let total = text.chars().count();
-    let mut limit = offset.map_or(MAX_BODY_BYTES as usize, |_| MAX_ANCHORED_BODY_BYTES);
-    let mut start = if let Some(offset) = offset {
-        text.char_indices()
-            .nth(offset.min(total).saturating_sub(512))
-            .map_or(text.len(), |(index, _)| index)
-    } else {
-        text.ceil_char_boundary(text.len().saturating_sub(MAX_BODY_BYTES as usize))
-    };
-    if offset.is_some()
-        && let Some(fence_start) = open_code_fence_before(text, start)
-        && start - fence_start <= MAX_BODY_BYTES as usize
-    {
-        let requested_end = start + limit;
-        start = fence_start;
-        limit = (requested_end - start).min(MAX_BODY_BYTES as usize);
-    }
-    let end = text.floor_char_boundary((start + limit).min(text.len()));
+    let (extent, total) = crate::history::display_source::extent(text, offset);
     (
-        text[start..end].into(),
-        text[..start].chars().count(),
+        text[extent.clone()].into(),
+        text[..extent.start].chars().count(),
         total,
     )
-}
-/// Canonical history text plus visible reasoning ranges; opaque continuations
-/// are excluded by the same known-field rule as the history reader.
-pub fn display_payload(payload: &Value) -> (String, Vec<(usize, usize)>) {
-    let canonical = crate::history::text_of_payload(payload);
-    let mut rendered = String::new();
-    let mut seen = false;
-    let mut ranges: Vec<(usize, usize)> = Vec::new();
-    crate::history::payload::visit(payload, |leaf| {
-        if seen {
-            rendered.push('\n');
-        }
-        seen = true;
-        rendered.push_str(leaf.text);
-        if leaf.context.reasoning && leaf.end > leaf.start {
-            if let Some(last) = ranges.last_mut()
-                && last.1 + 1 == leaf.start
-            {
-                last.1 = leaf.end;
-            } else {
-                ranges.push((leaf.start, leaf.end));
-            }
-        }
-    });
-    // A future history extractor change must never corrupt canonical anchors.
-    if rendered != canonical {
-        ranges.clear();
-    }
-    (canonical, ranges)
 }
 /// Read payload bytes on the DB worker; decode/project only on the bounded pool.
 struct RawNode {
@@ -4516,34 +4439,11 @@ struct RawNode {
 }
 impl RawNode {
     fn decode(&self) -> (Value, String, Vec<(usize, usize)>) {
-        match self
-            .payload
-            .as_ref()
-            .and_then(|value| serde_json::from_str::<Value>(value).ok())
-        {
-            Some(payload) => {
-                let (text, ranges) = if matches!(
-                    self.kind.as_str(),
-                    "incomplete_response" | "model_stream_observation"
-                ) {
-                    received::body(&payload)
-                } else {
-                    display_payload(&payload)
-                };
-                (payload, text, ranges)
-            }
-            None => {
-                let reason = self
-                    .reason
-                    .as_deref()
-                    .unwrap_or("stored payload unavailable or malformed");
-                (
-                    serde_json::json!({"tombstone_reason": reason}),
-                    format!("[original unavailable: {reason}]"),
-                    vec![],
-                )
-            }
-        }
+        crate::history::display_source::decode(
+            &self.kind,
+            self.payload.as_deref(),
+            self.reason.as_deref(),
+        )
     }
 }
 fn expired_history_cursor() -> ApiError {

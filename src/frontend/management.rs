@@ -470,6 +470,7 @@ pub(super) fn follow_target_in(
             let source=row.get("source_node_id").and_then(Value::as_str).filter(|s|!s.is_empty()).ok_or_else(||ApiError::new(ErrorCode::TargetUnavailable,"Saved attachment source node is unavailable; select its metadata to inspect saved selection"))?;
             return Ok(FollowTarget::Command(Box::new(Command::HistoryRead(
                 HistoryReadArgs {
+                    display: None,
                     node_id: source.into(),
                     end_message_only: false,
                     parts: false,
@@ -601,6 +602,7 @@ fn follow_in(
         | "end_message_node_id"
         | "request_node_id"
         | "result_node_id" => Ok(Command::HistoryRead(HistoryReadArgs {
+            display: None,
             end_message_only: false,
             parts: false,
             node_id: id,

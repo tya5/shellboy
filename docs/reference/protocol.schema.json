@@ -3572,6 +3572,16 @@
         "context": {
           "$ref": "#/definitions/ExecutionContext"
         },
+        "display": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HistoryDisplayPage"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "kind": {
           "type": "string"
         },
@@ -3626,6 +3636,156 @@
         "next_node_ids"
       ],
       "title": "HistoryBody",
+      "type": "object"
+    },
+    "HistoryDisplayPage": {
+      "properties": {
+        "extent": {
+          "$ref": "#/definitions/HistoryDisplayRange"
+        },
+        "output_limited": {
+          "type": "boolean"
+        },
+        "page": {
+          "$ref": "#/definitions/HistoryDisplayRange"
+        },
+        "reasoning": {
+          "items": {
+            "$ref": "#/definitions/HistoryDisplayRange"
+          },
+          "type": "array"
+        },
+        "received_recovery_wait": {
+          "type": "boolean"
+        },
+        "total_chars": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "extent",
+        "page",
+        "total_chars",
+        "reasoning",
+        "output_limited",
+        "received_recovery_wait"
+      ],
+      "type": "object"
+    },
+    "HistoryDisplayPosition": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "tail",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "absolute",
+              "type": "string"
+            },
+            "offset": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "offset"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "from_end",
+              "type": "string"
+            },
+            "offset": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "offset"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "HistoryDisplayRange": {
+      "properties": {
+        "end": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "start": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "start",
+        "end"
+      ],
+      "type": "object"
+    },
+    "HistoryDisplayRead": {
+      "additionalProperties": false,
+      "properties": {
+        "position": {
+          "$ref": "#/definitions/HistoryDisplayPosition"
+        },
+        "selection": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HistoryDisplaySelection"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "position"
+      ],
+      "type": "object"
+    },
+    "HistoryDisplaySelection": {
+      "additionalProperties": false,
+      "properties": {
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "thread_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "thread_id",
+        "revision"
+      ],
       "type": "object"
     },
     "HistoryExecutionLink": {
@@ -4199,6 +4359,16 @@
           "type": [
             "string",
             "null"
+          ]
+        },
+        "display": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HistoryDisplayRead"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "encoding": {
@@ -14897,6 +15067,16 @@
       "properties": {
         "context": {
           "$ref": "#/definitions/ExecutionContext"
+        },
+        "display": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HistoryDisplayPage"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "kind": {
           "type": "string"

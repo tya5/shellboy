@@ -5267,6 +5267,7 @@ mod agents_reference_tests {
                     let body = history::read_node_body(
                         db,
                         &HistoryReadArgs {
+                            display: None,
                             end_message_only: false,
                             parts: false,
                             node_id: node.clone(),

@@ -1388,7 +1388,7 @@ async fn progress_distinguishes_answered_background_and_counts_only_actual_spawn
 #[test]
 fn reasoning_ranges_follow_original_unicode_text_and_never_include_opaque_items() {
     let payload = serde_json::json!({"output":[{"type":"reasoning","summary":[{"type":"summary_text","text":"考え中\n日本語"}],"encrypted_content":"opaque-secret"},{"type":"message","role":"assistant","content":[{"type":"output_text","text":"回答 日本語"}]},{"type":"function_call","call_id":"c","arguments":"{\"command\":\"printf\"}"},{"type":"vendor_extension","text":"unknown-secret"}]});
-    let (text, ranges) = frontend::display_payload(&payload);
+    let (text, ranges) = shellboy::history::display_source::display_payload(&payload);
     assert_eq!(text, shellboy::history::text_of_payload(&payload));
     assert_eq!(ranges.len(), 1);
     let chars = text.chars().collect::<Vec<_>>();
@@ -2062,6 +2062,7 @@ async fn structured_history_pages_details_url_copy_and_wait_cancel_keep_original
     .await;
     assert!(canonical.starts_with(&(first.text.clone() + &second.text)));
     send.send(UiAction::Manage(Command::HistoryRead(HistoryReadArgs {
+        display: None,
         end_message_only: false,
         parts: false,
         node_id: "long".into(),
@@ -3386,6 +3387,7 @@ async fn external_input_copy_keeps_only_canonical_body_and_code_not_sender_metad
     );
     let original = History::new(control.store.database.clone())
         .read(HistoryReadArgs {
+            display: None,
             node_id: "external-copy".into(),
             end_message_only: false,
             parts: false,

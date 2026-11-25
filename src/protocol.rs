@@ -1346,7 +1346,23 @@ fn is_true(value: &bool) -> bool {
 fn default_true() -> bool {
     true
 }
-args!(HistoryReadArgs { #[serde(default, skip_serializing_if = "is_false")] end_message_only: bool, #[serde(default, skip_serializing_if = "is_false")] parts: bool, node_id: String, #[serde(default = "body_limit")] limit_bytes: u32, #[serde(default)] cursor: Option<String>, #[serde(default = "utf8")] encoding: String });
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum HistoryDisplayPosition {
+    Tail,
+    Absolute { offset: u64 },
+    FromEnd { offset: u64 },
+}
+args!(HistoryDisplaySelection {
+    thread_id: String,
+    revision: u64
+});
+args!(HistoryDisplayRead {
+    position: HistoryDisplayPosition,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    selection: Option<HistoryDisplaySelection>
+});
+args!(HistoryReadArgs { #[serde(default, skip_serializing_if = "Option::is_none")] display: Option<HistoryDisplayRead>, #[serde(default, skip_serializing_if = "is_false")] end_message_only: bool, #[serde(default, skip_serializing_if = "is_false")] parts: bool, node_id: String, #[serde(default = "body_limit")] limit_bytes: u32, #[serde(default)] cursor: Option<String>, #[serde(default = "utf8")] encoding: String });
 args!(HistorySearchArgs {
     query: String,
     #[serde(default = "search_limit")]
@@ -2524,7 +2540,19 @@ record!(HistorySnippet {
     #[serde(default, skip_serializing_if = "Option::is_none")] execution_count_exact: Option<bool>,
     executions_truncated: bool
 });
-record!(HistoryBody { context: crate::context::ExecutionContext, provenance: NodeProvenance, node_id: String, kind: String, text: String, source_node_ids: Vec<String>, previous_node_ids: Vec<String>, next_node_ids: Vec<String>, #[serde(default, skip_serializing_if = "Option::is_none")] next_cursor: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] tombstone_reason: Option<String> });
+record!(HistoryDisplayRange {
+    start: u64,
+    end: u64
+});
+record!(HistoryDisplayPage {
+    extent: HistoryDisplayRange,
+    page: HistoryDisplayRange,
+    total_chars: u64,
+    reasoning: Vec<HistoryDisplayRange>,
+    output_limited: bool,
+    received_recovery_wait: bool
+});
+record!(HistoryBody { #[serde(default, skip_serializing_if = "Option::is_none")] display: Option<HistoryDisplayPage>, context: crate::context::ExecutionContext, provenance: NodeProvenance, node_id: String, kind: String, text: String, source_node_ids: Vec<String>, previous_node_ids: Vec<String>, next_node_ids: Vec<String>, #[serde(default, skip_serializing_if = "Option::is_none")] next_cursor: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] tombstone_reason: Option<String> });
 record!(SearchMatch {
     node_id: String,
     excerpt: String,
