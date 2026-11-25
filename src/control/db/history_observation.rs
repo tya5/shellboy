@@ -1,0 +1,196 @@
+//! Optional selected-window facts read on the existing owner inspection lane.
+use super::*;
+use crate::control::message_delivery::MessageHolds;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static READ_SEQUENCE: AtomicU64 = AtomicU64::new(1);
+const PENDING_LIMIT: usize = 128;
+
+impl Store {
+    pub(in crate::control) async fn observe_history_window(
+        &self,
+        args: HistoryWindowArgs,
+        holds: MessageHolds,
+        operation: &str,
+        shell: bool,
+    ) -> Result<MutationResult> {
+        if args.before.saturating_add(args.after).saturating_add(1) as usize
+            > crate::frontend::WINDOW_FACTS_LIMIT
+        {
+            return Err(error(
+                ErrorCode::InputLimit,
+                "Selected observation exceeds its 128-node window bound",
+            ));
+        }
+        let operation = operation.to_owned();
+        let observer = self.database.clone();
+        let queued_at = std::time::Instant::now();
+        inspection_work(move || {
+            let mut db = open_inspection(observer.path())?;
+            let window = observer.observe_inspection(
+                &mut db,
+                "HistoryWindow",
+                queued_at,
+                Some(if shell { "shell" } else { "external" }),
+                |db| {
+                    let tx = db.transaction().map_err(sql_error)?;
+                    let sequence = READ_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+                    let mut window = history::window(&tx, &args)?;
+                    window.observation = Some(observe(&tx, &window, &holds, sequence)?);
+                    tx.commit().map_err(sql_error)?;
+                    Ok::<_, ApiError>(window)
+                },
+            )?;
+            let value = serde_json::to_value(window).map_err(|_| {
+                error(
+                    ErrorCode::InvalidState,
+                    "History observation serialization failed",
+                )
+            })?;
+            let value = history::rpc::finish("history.window", &operation, value)?;
+            if !history::fits_response_frame(&operation, &value).map_err(|_| {
+                error(
+                    ErrorCode::InvalidState,
+                    "History observation serialization failed",
+                )
+            })? {
+                return Err(error(
+                    ErrorCode::InputLimit,
+                    "Selected observation exceeds the frame limit; request a smaller window",
+                ));
+            }
+            MutationResult::value(value)
+        })
+        .await?
+    }
+}
+
+fn observe(
+    db: &Connection,
+    window: &HistoryWindow,
+    holds: &MessageHolds,
+    read_sequence: u64,
+) -> Result<HistoryWindowObservation> {
+    let committed_attempts = history::committed_attempt_bindings(
+        db,
+        window
+            .items
+            .iter()
+            .filter(|item| item.kind == "assistant_response")
+            .map(|item| item.node_id.as_str()),
+    )
+    .map_err(sql_error)?
+    .into_iter()
+    .map(|(attempt_id, node_id)| HistoryWindowCommittedAttempt {
+        attempt_id,
+        node_id,
+    })
+    .collect();
+    let facts = crate::frontend::read_window_facts(db, &window.items)
+        .map_err(StorageError::into_api_error)?;
+    Ok(HistoryWindowObservation {
+        read_sequence,
+        pending: pending(db, &window.thread_id, holds).map_err(sql_error)?,
+        committed_attempts,
+        activity: activity(db, &window.thread_id)?,
+        tools: facts.tools,
+        recovery: facts.recovery,
+        usage: facts.usage,
+    })
+}
+
+fn pending(
+    db: &Connection,
+    thread: &str,
+    holds: &MessageHolds,
+) -> rusqlite::Result<HistoryWindowPending> {
+    // Seek each status separately using the receipt index. Filter after the
+    // bounded raw prefix so admitted receipts cannot turn this into a scan.
+    let mut rows = db.prepare_cached(
+        "WITH candidates AS MATERIALIZED (
+             SELECT rowid, message_node_id, client_operation_id, created_at, path_admission
+               FROM receipt INDEXED BY receipt_target
+              WHERE target_thread_id=?1 AND state=?2 ORDER BY created_at,rowid LIMIT ?3
+         )
+         SELECT rowid, message_node_id, client_operation_id, created_at,
+                path_admission<>'admitted' AND NOT EXISTS(
+                    SELECT 1 FROM thread_path p WHERE p.thread_id=?1 AND p.node_id=message_node_id
+                ) FROM candidates ORDER BY created_at,rowid",
+    )?;
+    let mut candidates = Vec::with_capacity(PENDING_LIMIT * 2);
+    let mut first_unproven: Option<(String, i64)> = None;
+    for (state, delivery_status) in [
+        ("accepted", DeliveryStatus::Accepted),
+        ("held", DeliveryStatus::Held),
+    ] {
+        let mut result = rows.query(params![thread, state, (PENDING_LIMIT + 1) as i64])?;
+        let mut examined = 0;
+        while let Some(row) = result.next()? {
+            examined += 1;
+            let key = (row.get::<_, String>(3)?, row.get::<_, i64>(0)?);
+            if examined > PENDING_LIMIT && first_unproven.as_ref().is_none_or(|bound| &key < bound)
+            {
+                first_unproven = Some(key.clone());
+            }
+            if row.get::<_, bool>(4)? {
+                candidates.push((
+                    key,
+                    HistoryWindowPendingMessage {
+                        message_id: row.get(1)?,
+                        operation_id: row.get(2)?,
+                        delivery_status,
+                        held_by: None,
+                    },
+                ));
+            }
+        }
+    }
+    candidates.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+    let total = candidates.len() as u64;
+    let mut items = candidates
+        .into_iter()
+        .take_while(|(key, _)| first_unproven.as_ref().is_none_or(|bound| key < bound))
+        .take(PENDING_LIMIT)
+        .map(|(_, item)| item)
+        .collect::<Vec<_>>();
+    let blockers = holds.read(db, items.iter().map(|item| item.message_id.as_str()))?;
+    for (item, held_by) in items.iter_mut().zip(blockers) {
+        item.held_by = held_by;
+    }
+    Ok(HistoryWindowPending {
+        items,
+        total,
+        total_exact: first_unproven.is_none(),
+    })
+}
+
+fn activity(db: &Connection, thread: &str) -> Result<HistoryWindowActivity> {
+    let run_id: Option<String> = db
+        .query_row(
+            "SELECT id FROM run WHERE thread_id=?1 ORDER BY created_at DESC,id DESC LIMIT 1",
+            [thread],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(sql_error)?;
+    let Some(run_id) = run_id else {
+        return Ok(HistoryWindowActivity::default());
+    };
+    let turn_id: Option<String> = db.query_row(
+        "SELECT id FROM turn INDEXED BY activity_turn_run WHERE run_id=?1 ORDER BY created_at DESC,id DESC LIMIT 1", [&run_id], |r| r.get(0),
+    ).optional().map_err(sql_error)?;
+    let attempt_id = if let Some(turn_id) = &turn_id {
+        db.query_row(
+            "SELECT id FROM model_attempt INDEXED BY activity_attempt_turn WHERE turn_id=?1 ORDER BY rowid DESC LIMIT 1", [turn_id], |r| r.get(0),
+        ).optional().map_err(sql_error)?
+    } else {
+        None
+    };
+    let waiting_reason = crate::readback::run_wait_reason(db, thread, &run_id)?;
+    Ok(HistoryWindowActivity {
+        run_id: Some(run_id),
+        turn_id,
+        attempt_id,
+        waiting_reason,
+    })
+}
