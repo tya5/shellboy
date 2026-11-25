@@ -1619,6 +1619,10 @@ record!(EventChange {
     thread_id: String,
     seq: u64
 });
+record!(EventRecoveryTransition {
+    thread_id: String,
+    seq: u64
+});
 // Unsaved answer text (#243 E3). `offset` counts Unicode scalar values in the attempt's
 // full model stream, including omitted reasoning deltas; it restarts with each attempt.
 record!(EventTextDelta {
@@ -1630,6 +1634,8 @@ record!(EventLiveText {
     thread_id: String,
     attempt_id: String,
     input_through_node_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    receive_age_ms: Option<u64>,
     gap: bool,
     deltas: Vec<EventTextDelta>
 });
@@ -1667,7 +1673,7 @@ record!(EventAttemptEnd {
     #[serde(default, skip_serializing_if = "Option::is_none")] output_limit: Option<AttemptOutputLimit>,
     seq: u64
 });
-record!(EventsWaitResult { status: EventsWaitStatus, cursor: String, changes: Vec<EventChange>, more: bool, config_changed: bool, #[serde(default, skip_serializing_if="Option::is_none")] live_text: Option<Vec<EventLiveText>>, #[serde(default, skip_serializing_if="Option::is_none")] attempt_ends: Option<Vec<EventAttemptEnd>>, #[serde(default)] reasoning_activity: Vec<EventReasoningActivity> });
+record!(EventsWaitResult { status: EventsWaitStatus, cursor: String, changes: Vec<EventChange>, more: bool, config_changed: bool, #[serde(default, skip_serializing_if="Vec::is_empty")] recovery_transitions: Vec<EventRecoveryTransition>, #[serde(default, skip_serializing_if="Option::is_none")] live_text: Option<Vec<EventLiveText>>, #[serde(default, skip_serializing_if="Option::is_none")] attempt_ends: Option<Vec<EventAttemptEnd>>, #[serde(default)] reasoning_activity: Vec<EventReasoningActivity> });
 pub const MAX_EVENT_THREAD_FILTER: usize = 64;
 pub const MAX_EVENT_CHANGES: usize = 64;
 /// Opaque cursor: the owner instance that issued it and a position of that instance's change clock.

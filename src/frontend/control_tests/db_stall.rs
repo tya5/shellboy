@@ -77,15 +77,12 @@ async fn foreground_db_stall_keeps_submission_input_and_status_delivery_responsi
             std::sync::Arc::new(tokio::sync::Semaphore::new(2)),
         ));
         sender.try_send(action).unwrap();
-        // Acknowledgement and the activity snapshot both bypass the occupied DB.
+        // Acknowledgement bypasses the occupied DB.
         crate::test_watchdog::watchdog("foreground DB stall updates", async {
             let mut operation = false;
-            let mut activity = false;
-            while !operation || !activity {
+            while !operation {
                 while let Ok(update) = incoming.try_recv() {
                     operation |= matches!(&update, UiUpdate::SendOperation { .. });
-                    activity |=
-                        matches!(&update, UiUpdate::DbWorkerActivity(a) if a.active.is_some());
                     assert!(!matches!(&update, UiUpdate::SavedMessage { .. }));
                     ui.apply(update);
                 }

@@ -122,3 +122,35 @@ async fn native_gap_retires_the_old_browser_page_and_reloads_one_bounded_page() 
     send.try_send(UiAction::Quit).unwrap();
     control_tests::finish_bridge(bridge, &incoming).await;
 }
+
+#[tokio::test]
+async fn native_preview_is_scoped_answer_only_and_instance_fenced() {
+    let (_root, owner, control, server) = control_tests::fixture().await;
+    let data_dir = &owner.loaded.data_dir;
+    let instance = &control.store.instance_id;
+    let selected = control.fixture_live_text("thread");
+    let hidden = control.fixture_live_text("independent");
+    assert!(hidden.record(0, "hidden answer", false));
+    assert!(selected.record(0, "synthetic reasoning", true));
+    assert!(selected.record(19, "visible answer", false));
+    selected.received(std::time::Instant::now(), true);
+    let page = super::wait_scoped(data_dir, instance, None, false, Some("thread".into()))
+        .await
+        .unwrap();
+    let attempts = page.live_text.unwrap();
+    assert_eq!(attempts.len(), 1);
+    assert_eq!(attempts[0].thread_id, "thread");
+    assert_eq!(attempts[0].attempt_id, "fixture-attempt");
+    assert!(attempts[0].receive_age_ms.is_some());
+    assert_eq!(attempts[0].deltas.len(), 1);
+    assert_eq!(attempts[0].deltas[0].text, "visible answer");
+    let error = super::wait_scoped(data_dir, "wrong-owner", None, false, Some("thread".into()))
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, crate::protocol::ErrorCode::ProtocolMismatch);
+    drop(selected);
+    drop(hidden);
+    server.shutdown().await.unwrap();
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+}

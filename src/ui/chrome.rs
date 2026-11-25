@@ -177,11 +177,6 @@ pub(super) struct ContextBar {
     pub auto_at: u64,
 }
 
-#[derive(Clone, Copy)]
-pub(super) struct FooterTrailing<'a> {
-    pub(super) context: Option<ContextBar>,
-    pub(super) db_status: Option<&'a str>,
-}
 /// 999 -> `999`, 10200 -> `10.2K`, 140000 -> `140K`, 1200000 -> `1.2M` (floored).
 pub(crate) fn compact_tokens(n: u64) -> String {
     fn scaled(n: u64, unit: u64, suffix: &str) -> String {
@@ -266,69 +261,21 @@ impl ContextBar {
     }
 }
 
-#[cfg(test)]
 /// Two quiet footer rows. Caller owns animation and transient-notice lifetime.
 pub(super) fn footer_lines(
     view: &ThreadView,
     width: u16,
     hints: &str,
     palette: super::theme::Palette,
-    activity_spans: Vec<ratatui::text::Span<'static>>,
-    notice: Option<(&str, bool)>,
-    context: Option<ContextBar>,
-) -> Vec<ratatui::text::Line<'static>> {
-    footer_lines_with_db(
-        view,
-        width,
-        hints,
-        palette,
-        activity_spans,
-        notice,
-        FooterTrailing {
-            context,
-            db_status: None,
-        },
-    )
-}
-
-pub(super) fn footer_lines_with_db(
-    view: &ThreadView,
-    width: u16,
-    hints: &str,
-    palette: super::theme::Palette,
     mut activity_spans: Vec<ratatui::text::Span<'static>>,
     notice: Option<(&str, bool)>,
-    trailing: FooterTrailing<'_>,
+    context: Option<ContextBar>,
 ) -> Vec<ratatui::text::Line<'static>> {
     use ratatui::{
         style::Style,
         text::{Line, Span},
     };
-    let FooterTrailing { context, db_status } = trailing;
     let phase = view.footer_phase();
-    // The debug DB item must not crowd out the current conversation state.
-    let activity_width: usize = activity_spans.iter().map(|s| s.content.width()).sum();
-    let db_room = usize::from(width).saturating_sub(
-        activity_width.min(usize::from(width))
-            + if activity_width > 0 {
-                glyphs::separator().width()
-            } else {
-                0
-            },
-    );
-    let db_status = db_status
-        .map(|status| fit(status, db_room, false))
-        .filter(|status| !status.is_empty());
-    let status_reserve = db_status
-        .as_ref()
-        .map(|status| status.width() + glyphs::separator().width())
-        .unwrap_or_default();
-    if status_reserve > 0 {
-        activity_spans = fit_spans(
-            activity_spans,
-            usize::from(width).saturating_sub(status_reserve),
-        );
-    }
     let mut facts = Vec::new();
     if let Some(reason) = view.activity.snapshot.as_ref().and_then(|s| s.index_pause) {
         use crate::{config::UiLanguage, index::PauseReason};
@@ -517,8 +464,7 @@ pub(super) fn footer_lines_with_db(
                 .iter()
                 .map(|s| s.content.width())
                 .sum::<usize>()
-                + 3
-                + status_reserve,
+                + 3,
         ),
         false,
     );
@@ -530,8 +476,7 @@ pub(super) fn footer_lines_with_db(
     }
     if let Some(bar) = context {
         let used: usize = activity_spans.iter().map(|s| s.content.width()).sum();
-        let room =
-            usize::from(width).saturating_sub(used + if used > 0 { 3 } else { 0 } + status_reserve);
+        let room = usize::from(width).saturating_sub(used + if used > 0 { 3 } else { 0 });
         if let Some(text) = bar.text_for(room, palette.plain(), view.language) {
             if used > 0 {
                 activity_spans.push(Span::raw(glyphs::separator()));
@@ -543,23 +488,6 @@ pub(super) fn footer_lines_with_db(
             };
             activity_spans.push(Span::styled(text, style));
         }
-    }
-    if let Some(status) = db_status {
-        let used: usize = activity_spans.iter().map(|span| span.content.width()).sum();
-        let separator = if used > 0 { glyphs::separator() } else { "" };
-        let gap = usize::from(width).saturating_sub(used + separator.width() + status.width());
-        if gap > 0 {
-            activity_spans.push(Span::raw(" ".repeat(gap)));
-        }
-        if used > 0 {
-            activity_spans.push(Span::raw(separator));
-        }
-        let style = if status.starts_with("DB!") && !palette.plain() {
-            Style::default().fg(super::theme::ATTENTION)
-        } else {
-            Style::default().fg(palette.muted())
-        };
-        activity_spans.push(Span::styled(status, style));
     }
     let (hint, error) = notice.unwrap_or((hints, false));
     let navigation_hint = (view.navigation.is_loading()
@@ -756,50 +684,6 @@ fn welcome_with_logo(
         .collect()
 }
 
-// Sanitize display values, preserve graphemes, and make every cut explicit.
-// Source titles/models/paths remain untouched for details and full-value copy.
-fn fit_spans(
-    spans: Vec<ratatui::text::Span<'static>>,
-    width: usize,
-) -> Vec<ratatui::text::Span<'static>> {
-    use ratatui::text::Span;
-    let mut remaining = width;
-    let mut fitted = Vec::new();
-    for span in spans {
-        if remaining == 0 {
-            break;
-        }
-        // Shimmer emits one span per character. In particular, a whitespace
-        // span is a real cell, not an empty label or a truncation boundary.
-        let safe = crate::presentation::sanitize_plain(span.content.as_ref(), 0).0;
-        let full_width = safe.width();
-        let text = if full_width <= remaining {
-            safe
-        } else {
-            let mut text = String::new();
-            let mut cells = 1;
-            for grapheme in safe.graphemes(true) {
-                if cells + grapheme.width() > remaining {
-                    break;
-                }
-                text.push_str(grapheme);
-                cells += grapheme.width();
-            }
-            text.push_str(glyphs::ellipsis());
-            text
-        };
-        let used = text.width();
-        if used > 0 {
-            fitted.push(Span::styled(text, span.style));
-            remaining = remaining.saturating_sub(used);
-        }
-        if used < full_width {
-            break;
-        }
-    }
-    fitted
-}
-
 fn fit(text: &str, width: usize, tail: bool) -> String {
     if width == 0 {
         return String::new();
@@ -836,45 +720,6 @@ fn fit(text: &str, width: usize, tail: bool) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn db_activity_is_right_aligned_without_adding_a_footer_row() {
-        use crate::{
-            config::{Config, PaletteMode},
-            ui::ThreadView,
-        };
-        let view = ThreadView::new(&Config::default(), std::path::PathBuf::from("/"));
-        let palette =
-            super::super::theme::Palette::from_capabilities(PaletteMode::Dark, false, true);
-        let rows = footer_lines_with_db(
-            &view,
-            80,
-            "",
-            palette,
-            vec![ratatui::text::Span::raw("Working")],
-            None,
-            FooterTrailing {
-                context: None,
-                db_status: Some("DB message send 1s"),
-            },
-        );
-        assert_eq!(rows.len(), 2);
-        let status: String = rows[0]
-            .spans
-            .iter()
-            .map(|span| span.content.as_ref())
-            .collect();
-        assert!(status.ends_with("DB message send 1s"), "{status:?}");
-        assert_eq!(status.len(), 80);
-
-        let normal = footer_lines(&view, 80, "", palette, vec![], None, None);
-        assert_eq!(normal.len(), 2);
-        let normal_text: String = normal[0]
-            .spans
-            .iter()
-            .map(|span| span.content.as_ref())
-            .collect();
-        assert!(!normal_text.contains("DB message send 1s"));
-    }
 
     #[test]
     fn draft_pause_update_displays_and_clears_saved_fact() {
@@ -1915,53 +1760,5 @@ mod context_wait_footer_tests {
             .map(|s| s.content.as_ref())
             .collect::<String>();
         assert!(!text.contains("会話要約の完了待ち"), "{text}");
-    }
-}
-
-#[cfg(test)]
-mod span_fitting_tests {
-    use super::*;
-    use ratatui::{
-        style::{Color, Style},
-        text::Span,
-    };
-
-    #[test]
-    fn animated_character_spans_preserve_spaces_labels_and_styles() {
-        for label in ["* Accepting input", "* 送信受付中", "* Waiting for model"] {
-            let style = Style::default().fg(Color::Green);
-            let spans: Vec<_> = label
-                .chars()
-                .map(|ch| Span::styled(ch.to_string(), style))
-                .collect();
-            let fitted = fit_spans(spans, label.width());
-            assert_eq!(
-                fitted
-                    .iter()
-                    .map(|s| s.content.as_ref())
-                    .collect::<String>(),
-                label
-            );
-            assert!(fitted.iter().all(|s| s.style == style));
-        }
-    }
-
-    #[test]
-    fn fitting_truncates_at_cell_boundaries_without_discarding_whitespace_spans() {
-        let style = Style::default().fg(Color::Green);
-        let spans = vec![
-            Span::raw("*"),
-            Span::raw(" "),
-            Span::styled("日本語", style),
-        ];
-        let fitted = fit_spans(spans, 5);
-        assert_eq!(
-            fitted
-                .iter()
-                .map(|s| s.content.as_ref())
-                .collect::<String>(),
-            format!("* 日{}", glyphs::ellipsis())
-        );
-        assert_eq!(fitted.last().unwrap().style, style);
     }
 }

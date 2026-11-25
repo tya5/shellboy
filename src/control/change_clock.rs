@@ -13,8 +13,8 @@
 //! `.await` or I/O, and a reader that stops reading holds nothing here.
 use super::wait::wakes::{Key, Wakes};
 use crate::protocol::{
-    EventAttemptEnd, EventAttemptOutcome, EventLiveText, EventReasoningActivity, EventTextDelta,
-    MAX_EVENT_CHANGES, MAX_FRAME_BYTES,
+    EventAttemptEnd, EventAttemptOutcome, EventLiveText, EventReasoningActivity,
+    EventRecoveryTransition, EventTextDelta, MAX_EVENT_CHANGES, MAX_FRAME_BYTES,
 };
 use std::{
     collections::{BTreeMap, HashMap, VecDeque},
@@ -66,6 +66,7 @@ struct Inner {
     config_changed_seq: Option<u64>,
     by_thread: HashMap<String, u64>,
     by_seq: BTreeMap<u64, String>,
+    recovery: VecDeque<EventRecoveryTransition>,
     /// Keyed by Thread: a Thread streams one attempt at a time, and a later attempt replaces it.
     text: HashMap<String, AttemptText>,
     reasoning_activity: HashMap<String, AttemptActivity>,
@@ -78,6 +79,7 @@ struct AttemptActivity {
     attempt: String,
     started: std::time::Instant,
     received_bytes: Option<u64>,
+    last_receive: Option<(u64, std::time::Instant)>,
     sequence: u64,
 }
 
@@ -103,6 +105,8 @@ pub(crate) enum Poll {
         text: Vec<EventLiveText>,
         reasoning_activity: Vec<EventReasoningActivity>,
         reasoning_changed: bool,
+        receive_changed: bool,
+        recovery_transitions: Vec<EventRecoveryTransition>,
         config_changed: bool,
         attempt_ends: Vec<EventAttemptEnd>,
     },
@@ -119,6 +123,27 @@ pub(crate) struct LiveTextGuard<'a> {
 impl LiveTextGuard<'_> {
     pub(crate) fn reservation(&self) -> (String, std::sync::Arc<Mutex<bool>>) {
         (self.token.clone(), self.alive.clone())
+    }
+    pub(crate) fn received(&self, at: std::time::Instant, notify: bool) {
+        let mut inner = self.clock.lock();
+        let seq = inner.seq + 1;
+        let Some(active) = inner
+            .reasoning_activity
+            .get_mut(self.thread)
+            .filter(|active| active.token == self.token)
+        else {
+            return;
+        };
+        if !notify && let Some((_, last)) = active.last_receive.as_mut() {
+            *last = (*last).max(at);
+            return;
+        }
+        active.last_receive = Some((seq, at));
+        inner.seq = seq;
+        drop(inner);
+        self.clock
+            .wakes
+            .publish([Key::Live(Some(self.thread.into())), Key::Live(None)]);
     }
     pub(crate) fn record(&self, offset: u64, text: &str, reasoning: bool) -> bool {
         self.clock.record_admitted_text(
@@ -168,6 +193,9 @@ impl ChangeClock {
         self.wakes.publish([Key::Config]);
     }
     pub(crate) fn record(&self, thread_id: &str) {
+        self.record_change(thread_id, false);
+    }
+    pub(super) fn record_change(&self, thread_id: &str, recovery: bool) {
         let mut inner = self.lock();
         inner.seq += 1;
         let seq = inner.seq;
@@ -176,12 +204,23 @@ impl ChangeClock {
         }
         inner.by_seq.insert(seq, thread_id.to_owned());
         let old_floor = inner.floor;
+        if recovery {
+            inner.recovery.push_back(EventRecoveryTransition {
+                thread_id: thread_id.into(),
+                seq,
+            });
+            if inner.recovery.len() > self.cap
+                && let Some(evicted) = inner.recovery.pop_front()
+            {
+                inner.floor = inner.floor.max(evicted.seq);
+            }
+        }
         while inner.by_thread.len() > self.cap {
             let Some((evicted, thread)) = inner.by_seq.pop_first() else {
                 break;
             };
             inner.by_thread.remove(&thread);
-            inner.floor = evicted;
+            inner.floor = inner.floor.max(evicted);
         }
         let floor = if inner.floor != old_floor {
             inner.floor
@@ -237,6 +276,7 @@ impl ChangeClock {
                 attempt: attempt.into(),
                 started: std::time::Instant::now(),
                 received_bytes: None,
+                last_receive: None,
                 sequence,
             },
         );
@@ -504,11 +544,40 @@ impl ChangeClock {
             }
             changes.push((thread.clone(), *seq));
         }
-        let cursor = if more {
+        let mut cursor = if more {
             changes.last().map_or(inner.seq, |(_, seq)| *seq)
         } else {
             inner.seq
         };
+        let mut recovery_transitions = Vec::new();
+        for recovery in inner
+            .recovery
+            .iter()
+            .filter(|event| {
+                event.seq > after
+                    && event.seq <= cursor
+                    && (filter.is_empty() || filter.contains(&event.thread_id))
+            })
+            .take(MAX_EVENT_CHANGES + 1)
+        {
+            recovery_transitions.push(recovery.clone());
+        }
+        if recovery_transitions.len() > MAX_EVENT_CHANGES {
+            recovery_transitions.pop();
+            cursor = recovery_transitions
+                .last()
+                .expect("nonempty recovery page")
+                .seq;
+            changes.retain(|(_, seq)| *seq <= cursor);
+            more = true;
+        }
+        let receive_changed = include_text
+            && inner.reasoning_activity.iter().any(|(thread, activity)| {
+                (filter.is_empty() || filter.contains(thread))
+                    && activity
+                        .last_receive
+                        .is_some_and(|(seq, _)| seq > after && seq <= cursor)
+            });
         let text = if include_text {
             inner.live_text(after, cursor, filter)
         } else {
@@ -540,6 +609,8 @@ impl ChangeClock {
             text,
             reasoning_activity,
             reasoning_changed,
+            receive_changed,
+            recovery_transitions,
             config_changed: inner
                 .config_changed_seq
                 .is_some_and(|seq| seq > after && seq <= cursor),
@@ -586,10 +657,21 @@ impl Inner {
     /// deltas of one kind merge; a listed attempt with no text is still live.
     fn live_text(&self, after: u64, upto: u64, filter: &[String]) -> Vec<EventLiveText> {
         let mut attempts = Vec::new();
+        let now = std::time::Instant::now();
         for (thread, entry) in &self.text {
+            let receive_age_ms = self
+                .reasoning_activity
+                .get(thread)
+                .and_then(|active| active.last_receive)
+                .filter(|(seq, _)| *seq <= upto)
+                .map(|(_, at)| {
+                    now.saturating_duration_since(at)
+                        .as_millis()
+                        .min(u64::MAX as u128) as u64
+                });
             // Admission reserves capacity, but is not itself a received text delta.
             // Retired deltas retain a floor, so their empty/gap entries stay visible.
-            if entry.deltas.is_empty() && entry.floor == 0 {
+            if entry.deltas.is_empty() && entry.floor == 0 && receive_age_ms.is_none() {
                 continue;
             }
 
@@ -620,6 +702,7 @@ impl Inner {
                 thread_id: thread.clone(),
                 attempt_id: entry.attempt.clone(),
                 input_through_node_id: entry.input_through_node_id.clone(),
+                receive_age_ms,
                 gap: after < entry.floor,
                 deltas,
             });
@@ -845,6 +928,92 @@ mod tests {
             [(9, false, "!")]
         );
         assert_eq!(cursor, 7);
+    }
+
+    #[test]
+    fn receive_age_tracks_keepalives_without_text_or_retired_attempts() {
+        let clock = ChangeClock::new(Wakes::default());
+        let first = clock.live_text_guard("selected", "first");
+        let baseline = clock.snapshot(&[], true, false).0;
+        let now = std::time::Instant::now();
+        first.received(now - std::time::Duration::from_secs(30), true);
+        first.received(now - std::time::Duration::from_secs(5), false);
+        let Some(Poll::Ready {
+            text,
+            cursor,
+            receive_changed,
+            ..
+        }) = clock.poll(baseline, &["selected".into()], true, false)
+        else {
+            panic!("expected a receive update")
+        };
+        assert!(receive_changed);
+        assert_eq!(text[0].attempt_id, "first");
+        assert!(text[0].deltas.is_empty());
+        assert!(text[0].receive_age_ms.unwrap() >= 5_000);
+        assert_eq!(
+            clock.lock().reasoning_activity["selected"]
+                .last_receive
+                .unwrap()
+                .1,
+            now - std::time::Duration::from_secs(5)
+        );
+        let (hidden, _) = text_poll(&clock, baseline, &["other".into()]);
+        assert!(hidden.is_empty());
+        let second = clock.live_text_guard("selected", "second");
+        first.received(now, true);
+        let (retired, _) = text_poll(&clock, cursor, &["selected".into()]);
+        assert!(retired.is_empty());
+        second.received(now, true);
+        let (current, _) = text_poll(&clock, cursor, &["selected".into()]);
+        assert_eq!(current[0].attempt_id, "second");
+    }
+
+    #[test]
+    fn recovery_transitions_page_without_coalescing_or_replay() {
+        let clock = ChangeClock::with_capacity(MAX_EVENT_CHANGES * 2);
+        for _ in 0..MAX_EVENT_CHANGES + 1 {
+            clock.record_change("recovering", true);
+        }
+        clock.record("recovering");
+        let Some(Poll::Ready {
+            changes,
+            more,
+            cursor,
+            recovery_transitions,
+            ..
+        }) = clock.poll(0, &[], false, false)
+        else {
+            panic!("expected first recovery page")
+        };
+        assert!(more);
+        assert!(changes.is_empty());
+        assert_eq!(recovery_transitions.len(), MAX_EVENT_CHANGES);
+        assert_eq!(recovery_transitions.last().unwrap().seq, cursor);
+        let Some(Poll::Ready {
+            changes,
+            more,
+            cursor,
+            recovery_transitions,
+            ..
+        }) = clock.poll(cursor, &[], false, false)
+        else {
+            panic!("expected final recovery page")
+        };
+        assert!(!more);
+        assert_eq!(changes.len(), 1);
+        assert_eq!(recovery_transitions.len(), 1);
+        assert!(recovery_transitions[0].seq < cursor);
+        assert!(
+            matches!(clock.poll(cursor, &[], false, false), Some(Poll::Ready { recovery_transitions, .. }) if recovery_transitions.is_empty())
+        );
+        let narrow = ChangeClock::with_capacity(1);
+        narrow.record_change("recovering", true);
+        narrow.record_change("recovering", true);
+        assert!(matches!(
+            narrow.poll(0, &[], false, false),
+            Some(Poll::Resync { .. })
+        ));
     }
 
     #[test]
@@ -1106,6 +1275,7 @@ mod tests {
             config_changed: false,
             live_text: Some(text),
             attempt_ends: None,
+            recovery_transitions: vec![],
             reasoning_activity: vec![],
         })
         .unwrap();

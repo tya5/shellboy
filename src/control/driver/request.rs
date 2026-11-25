@@ -337,9 +337,11 @@ pub(super) async fn stream_observer<'a>(
         };
         // Bound additional UI traffic, including byte-sized keepalives.
         // A receipt after a long silence is always forwarded immediately.
-        if last_receive_notice.is_none_or(|last| {
+        let notify = last_receive_notice.is_none_or(|last| {
             observed_at.saturating_duration_since(last) >= std::time::Duration::from_secs(1)
-        }) {
+        });
+        live_text.received(observed_at, notify);
+        if notify {
             last_receive_notice = Some(observed_at);
             control.publish_event(EngineEvent::ModelReceive {
                 thread_id: thread.into(),

@@ -156,6 +156,36 @@ explicit reconnect must validate the same instance before resuming the cursor.
 This slice does not remove the remaining private live preview, recovery bell,
 or diagnostics paths, or implement reattachment to a replacement owner.
 
+### Unit 4a live reader inventory
+
+| Private producer and client use | Native basis and parity constraint |
+| --- | --- |
+| `EngineEvent::Stream` and `streaming::Frame::deliver`: selected-Thread provisional preview, offsets, reasoning windows and suppression after attempt adoption | `events.wait` can already supply selected-Thread answer deltas and attempt ends. It omits reasoning text intentionally. A cursor gap must reset the transient window and schedule a bounded saved read; do not fill an omitted range with fabricated text or ship reasoning bodies through the existing feed. The current frame's SQL liveness check also needs a native fence. |
+| `EngineEvent::ModelReceive`: current-attempt last receive time, including transport keepalives | `events.wait` reasoning activity includes attempt ID, reasoning elapsed time and optional bytes. Those facts are not last receive time. Using local event arrival time would mislabel delayed calls and reconnect baselines. |
+| `EngineEvent::Changed { recovery }`: bell for a new saved recovery transition, including nonselected Threads | The owner-wide saved-change hint already wakes the client; `thread.get` and `turn.get` can explain current recovery. Their current state does not distinguish a new transition from a baseline or ordinary change while already recovering. |
+| `EngineEvent::Notice` and `Error`: release/cancellation and transient status text | Project release/cancellation from bounded saved tool results, deduplicated by saved identity. A generic raw error or notice event is not a native replacement; check each unsaved status call site for an existing typed result. |
+| DB activity, GC watches and UI-memory callback: slow/no-progress footer, Help diagnostics and `status --memory` UI cache contribution | The adopted design drops raw worker telemetry and callbacks. Existing native status does not reproduce those UI-only diagnostics. Keep slow-job reporting on the owner rather than depending on a terminal to sample it. |
+| `DisplayOutput` wake plus `committed_*_output_markers`: exact visible execution refresh, output-age indicator and retained live tail | `wait` already has `shell_output` for an exact read cursor and `shell.read` can return decoded segments. Establish cursor coverage for the visible set, same-timestamp commits, retained-tail baseline, truncation and terminal edges before replacing the hint. `shell.get.last_output_at` is not a lossless output cursor. |
+
+Approved user-visible changes: live preview shows answer text only; saved
+reasoning is unchanged. The private DB/GC footer, Help diagnostics and UI-memory
+callback are retired rather than exported. Carry these changes into the Core
+release notes when the cutover lands.
+
+Unit 4b owns saved attempt settlement and tool-notice projection, after which
+the remaining private notice/error subscription is removed. Neither needs a
+third event fact in 4a.
+
+Exact output is the separately reviewed Unit 4a-out, stacked on this unit.
+Extend the existing `shell.read` (including the CLI) with a bounded indexed
+tail and opaque continuation that does not replay the retained prefix. Keep
+`wait`'s `shell_output` condition unchanged. Do not change the lossless read
+mode or add an output timer, event fact, or private fallback.
+
+The existing owner-wide saved-change wait remains metadata-only. No broadening
+of the live text audience, periodic polling, or compatibility path follows
+from this inventory.
+
 ### Draft save and selected view
 
 `draft.save` checks the live Thread and editing draft revision, then commits
