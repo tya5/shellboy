@@ -376,14 +376,26 @@ impl ShellOutputReader {
             .map(canonical_encoding)
             .transpose()?
             .map(|encoding| encoding.name().to_owned());
+        if args.tail {
+            return self.db(move |db| {
+                let tx = db.transaction().map_err(sql_error)?;
+                let mut state = snapshot(&tx, &args.execution_id)?;
+                set_raw_start(&tx, &mut state, &args.execution_id)?;
+                if canonical.as_deref().is_some_and(|name| name != state.encoding) {
+                    return Err(error(ErrorCode::InvalidArgument, "tail must use the saved output encoding")
+                        .hint("change the encoding with shell read --encoding NAME without --tail or --cursor"));
+                }
+                let tail = preview::read_tail(&tx, &args, &state, streams)?;
+                tx.commit().map_err(sql_error)?;
+                Ok(tail)
+            }).await;
+        }
         let old = args
             .cursor
             .as_deref()
             .map(OutputCursor::decode)
             .transpose()?;
         let mut pin = ReadPin::new(self.database.clone(), self.instance.to_string());
-        pin.armed = !args.tail;
-        let tail_args = args.tail.then(|| args.clone());
         let execution = args.execution_id.clone();
         let pin_id = pin.id.clone();
         let instance = pin.instance.clone();
@@ -409,29 +421,19 @@ impl ShellOutputReader {
                 state.encoding=requested;
                 encoding_changed = true;
             }
-            let tail = if let Some(args) = tail_args {
-                Some(preview::read_tail(&tx, &args, &state, streams)?)
-            } else {
-                ReadPin::insert_tx(&tx, &pin_id, &instance, &execution, state.generation)?;
-                None
-            };
+            ReadPin::insert_tx(&tx, &pin_id, &instance, &execution, state.generation)?;
             tx.commit().map_err(sql_error)?;
             if encoding_changed { wakes.publish([super::wait::wakes::Key::ShellOutput(execution)]); }
-            Ok((state, tail))
+            Ok(state)
         }).await;
         let result = match prepared {
-            Ok((_, Some(tail))) => return Ok(tail),
-            Ok((state, None)) => {
+            Ok(state) => {
                 let encoding = canonical_encoding(&state.encoding)?;
                 self.read_pinned(&args, streams, old, state, encoding).await
             }
             Err(error) => Err(error),
         };
-        let released = if pin.armed {
-            pin.release().await
-        } else {
-            Ok(())
-        };
+        let released = pin.release().await;
         match result {
             Ok(value) => {
                 released?;

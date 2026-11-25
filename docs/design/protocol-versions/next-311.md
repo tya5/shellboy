@@ -9,6 +9,8 @@ running. The tail uses up to 128 indexed chunk entries and the smaller of the
 existing byte limit and 16 KiB; stream ranges remain opt-in. True-only
 `tail_skipped` and `decode_uncertain` distinguish a skipped prefix and possible
 missing decoder context from observed decoding errors and retention expiry.
+A tail uses the saved encoding and rejects a different explicit encoding;
+change the saved encoding with the ordinary non-tail read.
 
 Continue with `shell.read` and the returned cursor, without `tail`. This uses
 existing exact reconstruction from retained bytes; bounding that reconstruction

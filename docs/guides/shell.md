@@ -223,7 +223,9 @@ stderr. `tail_skipped: true` means earlier bytes were omitted;
 `decode_uncertain: true` means the bounded suffix may lack decoder context from
 an earlier byte sequence. These flags are omitted when false. Tail does not change retention.
 
-Do not combine `--tail` with `--cursor`. Continue at the returned `cursor` using
+A tail uses the saved output encoding. An explicit `--encoding` must match it;
+to change it, use ordinary `shell read --encoding NAME` without `--tail` or
+`--cursor`. Do not combine `--tail` with `--cursor`. Continue at the returned `cursor` using
 ordinary `shell read --cursor`, without `--tail`; the reader reconstructs the
 exact decoder context from retained bytes. The unchanged `shell_output` wait
 accepts that cursor, so a running execution does not need polling. `output_complete`
