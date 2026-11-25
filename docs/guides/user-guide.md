@@ -748,7 +748,7 @@ execution settles, even if it fails or is stopped. Find the result with
 `shellboy shell list --thread THREAD`, then inspect its status and saved output
 with `shell get` and `shell read`. Recurring schedules stay listed.
 
-Use `shellboy schedule add --thread THREAD --cron '0 * * * *' -- 'echo check'`
+Use `shellboy schedule add --thread THREAD --cron '0 * * * *' --command 'echo check'`
 for a recurring command, or replace `--cron` with `--at` (an RFC 3339 time)
 or `--in 10m` for a one-shot. The command uses the Thread's working directory
 unless you specify `--cwd`. `schedule list --thread THREAD` reports the next
@@ -773,7 +773,7 @@ does not resume the interrupted deletion on startup.
 To send a message to the owning Thread only when a flag file exists (POSIX shell):
 
 ```sh
-shellboy schedule add --thread THREAD --cron '0 * * * *' -- \
+shellboy schedule add --thread THREAD --cron '0 * * * *' --command \
   'if test -f needs-review; then shellboy message send --thread "$SHELLBOY_THREAD_ID" --text "Review is needed"; fi'
 ```
 
@@ -781,7 +781,7 @@ To limit model requests in a Run started by a scheduled shell, put the flag
 in the shell command (POSIX example):
 
 ```sh
-shellboy schedule add --thread THREAD --cron '30 8 * * 1-5' -- \
+shellboy schedule add --thread THREAD --cron '30 8 * * 1-5' --command \
   'shellboy message send --thread "$SHELLBOY_THREAD_ID" --max-model-requests 8 --text "Review the inbox and report."'
 ```
 

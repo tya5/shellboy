@@ -126,6 +126,19 @@ fn process_help_version_and_errors_use_expected_exit_and_output() {
     assert!(std::fs::read_dir(root.path()).unwrap().next().is_none());
 }
 
+#[test]
+fn noninteractive_cli_without_subcommand_reports_no_arguments() {
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_shellboy"))
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let response: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(response["error"]["code"], "invalid_state");
+    let message = response["error"]["message"].as_str().unwrap();
+    assert!(message.contains("No subcommand was given"), "{message}");
+    assert!(message.ends_with("Arguments received: none"), "{message}");
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn actual_cli_connects_to_owner_and_durable_retransmission_does_not_create_twice() {
     let root = tempfile::tempdir().unwrap();
@@ -1562,4 +1575,95 @@ async fn artifact_cli_round_trip_through_owner_changes_and_restart() {
     let _ = serving.await;
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
+}
+
+#[test]
+fn schedule_add_refuses_retired_positional_command_with_help() {
+    let output = Command::new(env!("CARGO_BIN_EXE_shellboy"))
+        .args([
+            "schedule",
+            "add",
+            "--in",
+            "10m",
+            "--",
+            "sh",
+            "-c",
+            "echo hello",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let response: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(response["error"]["code"], "invalid_argument");
+    let message = response["error"]["message"].as_str().unwrap();
+    assert!(
+        message.contains(r#"["sh", "-c", "echo hello"]"#),
+        "{response}"
+    );
+    assert!(message.contains("--command '...'"), "{response}");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn schedule_add_command_round_trips_and_runs_nested_shellboy_send() {
+    use std::{path::Path, process::Stdio, time::Duration};
+    use tokio::io::{AsyncBufReadExt, BufReader};
+
+    async fn cli(data: &Path, args: &[&str]) -> Value {
+        let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_shellboy"))
+            .arg("--data-dir")
+            .arg(data)
+            .args(args)
+            .output()
+            .await
+            .unwrap();
+        let response: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert!(
+            output.status.success() && response["ok"] == true,
+            "{response}"
+        );
+        response["result"].clone()
+    }
+
+    crate::test_watchdog::watchdog("schedule CLI nested shellboy send", async {
+        let root = tempfile::tempdir().unwrap();
+        let data = root.path().join("data");
+        let config = root.path().join("config.toml");
+        std::fs::write(&config, "default_connection=\"fixture\"\ndefault_model=\"fixture-model\"\n[connections.fixture]\nbase_url=\"http://127.0.0.1:1/v1\"\n[shell]\nkind=\"bash\"\n").unwrap();
+        let mut owner = tokio::process::Command::new(env!("CARGO_BIN_EXE_shellboy"))
+            .args(["serve", "--data-dir"]).arg(&data).arg("--config").arg(config)
+            .current_dir(root.path()).stdin(Stdio::null()).stdout(Stdio::piped())
+            .kill_on_drop(true).spawn().unwrap();
+        let mut stdout = BufReader::new(owner.stdout.take().unwrap());
+        let mut ready = String::new();
+        stdout.read_line(&mut ready).await.unwrap();
+        let ready: Value = serde_json::from_str(&ready).unwrap();
+        assert_eq!(ready["event"], "ready");
+        let thread = cli(&data, &["thread", "create"]).await;
+        let thread = thread["thread_id"].as_str().unwrap();
+        let command = r#"sh -c 'shellboy message send --thread "$SHELLBOY_THREAD_ID" --text "Review is needed"'"#;
+        let listed = cli(&data, &["schedule", "add", "--thread", thread, "--in", "10m", "--command", command]).await;
+        let list = cli(&data, &["schedule", "list", "--thread", thread]).await;
+        let items = list["items"].as_array().expect("schedule items");
+        let item = items.iter().find(|item| item["schedule_id"] == listed["schedule_id"]).unwrap();
+        assert_eq!(item["command"], command);
+        cli(&data, &["schedule", "add", "--thread", thread, "--in", "1s", "--command", command]).await;
+        let execution = loop {
+            let list = cli(&data, &["shell", "list", "--thread", thread]).await;
+            if let Some(item) = list["items"].as_array().unwrap().iter().find(|item| {
+                matches!(item["state"].as_str(), Some("exited" | "failed" | "stopped"))
+            }) {
+                break item["execution_id"].as_str().unwrap().to_owned();
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        };
+        let saved = cli(&data, &["shell", "get", "--execution", &execution]).await;
+        let read = cli(&data, &["shell", "read", "--execution", &execution]).await;
+        assert_eq!(saved["exit_code"], 0, "{saved}: {read}");
+        let sent: Value = serde_json::from_str(read["text"].as_str().unwrap()).unwrap();
+        assert_eq!(sent["ok"], true, "{sent}");
+        assert_eq!(sent["result"]["thread_id"], thread, "{sent}");
+        cli(&data, &["shutdown"]).await;
+        assert!(owner.wait().await.unwrap().success());
+    }).await.unwrap();
 }

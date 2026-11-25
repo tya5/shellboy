@@ -370,11 +370,28 @@ The scheduler (cron, 定期実行, スケジュール) belongs to the Thread. It
 Turn. `schedule add` and `schedule set --schedule ID --description TEXT` take an optional description. To wake the owning Thread only when there is work, use a command such as:
 
 ```sh
-shellboy schedule add --thread THREAD --cron '0 * * * *' -- \
+shellboy schedule add --thread THREAD --cron '0 * * * *' --command \
   'if test -f needs-review; then shellboy message send --thread "$SHELLBOY_THREAD_ID" --text "Review is needed"; fi'
 ```
 
-Scheduled commands receive `SHELLBOY_THREAD_ID`, but no model shell Origin.
+Pass the whole program as one `--command` string. For example, on Bash
+with an explicit `sh -c`:
+
+```sh
+shellboy schedule add --thread THREAD --cron '0 3 * * *' --command \
+  'sh -c '\''shellboy message send --thread "$SHELLBOY_THREAD_ID" --text "Review is needed"'\'''
+```
+
+For a PowerShell owner, keep the environment reference literal at registration:
+
+```powershell
+shellboy schedule add --thread THREAD --cron '0 3 * * *' --command 'shellboy message send --thread $env:SHELLBOY_THREAD_ID --text ''Review is needed'''
+```
+
+Scheduled commands and model shells receive the selected owner's
+`SHELLBOY_DATA_DIR`, `SHELLBOY_THREAD_ID`, and `SHELLBOY_SOCKET`. You do not need
+`--data-dir` to call `shellboy` from these shells. Scheduled commands do not
+receive a model shell Origin.
 
 ### Services for long-running commands
 
