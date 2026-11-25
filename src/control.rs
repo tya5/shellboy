@@ -61,8 +61,10 @@ use crate::{
     ipc::Invocation,
     protocol::*,
     shell::{ShellHandle, ShellSupervisor},
+    storage::StorageError,
 };
 use db::{MutationResult, Store};
+use rusqlite::OptionalExtension;
 use serde_json::{Value, json};
 use std::{
     collections::HashMap,
@@ -1482,26 +1484,48 @@ impl Control {
                 )
             })
             .await;
-        if let Ok(thread) = thread {
-            if let Some(token) = self.compact_tasks.lock().await.get(&thread) {
-                token.cancel();
+        let thread = match thread {
+            Ok(thread) => thread,
+            Err(error) => {
+                self.record_stop_settlement_failure(run_id, error).await;
+                return;
             }
-            let active = self.live.cancel_run(&thread, run_id).await;
-            if !active {
-                match driver::stop_without_driver(self, run_id).await {
-                    Ok(()) => {
-                        self.store.database.signals().run_ended(run_id);
-                    }
-                    Err(error) => {
-                        self.fail_storage().await;
-                        self.publish_event(EngineEvent::Error {
-                            thread_id: thread.clone(),
-                            error,
-                        });
-                    }
-                }
+        };
+        if let Some(token) = self.compact_tasks.lock().await.get(&thread) {
+            token.cancel();
+        }
+        let active = self.live.cancel_run(&thread, run_id).await;
+        if !active {
+            if !driver::stop_without_driver(self, run_id).await {
+                return;
             }
-            self.changed(&thread);
+            self.store.database.signals().run_ended(run_id);
+        }
+        self.changed(&thread);
+    }
+
+    async fn record_stop_settlement_failure(&self, run_id: &str, error: StorageError) {
+        let reason = match error {
+            StorageError::Operation(error) if !error.is_storage_failure() => {
+                RunStopSettlementFailure::Invariant
+            }
+            _ => RunStopSettlementFailure::Storage,
+        };
+        let run = run_id.to_owned();
+        // The failing transaction has rolled back. A narrow write may still
+        // succeed, but it must not annotate a Run that has already settled.
+        match self.store.database.call(move |db| {
+            let tx = db.transaction()?;
+            let thread = tx.query_row(
+                "UPDATE run SET stop_settlement_failure=?2 WHERE id=?1 AND state='stopping' RETURNING thread_id",
+                rusqlite::params![run, reason.as_str()], |row| row.get::<_, String>(0),
+            ).optional()?;
+            tx.commit()?;
+            Ok(thread)
+        }).await {
+            Ok(Some(thread)) => self.changed(&thread),
+            Ok(None) => {},
+            Err(_) => self.fail_storage().await,
         }
     }
 
@@ -1597,16 +1621,9 @@ impl Control {
             .await;
         // A stop may have found this slot after drive already chose its exit.
         // Retire first: later stop handlers then own the absent-driver path.
-        if let Err(error) = driver::stop_without_driver(self, &slot.run_id).await {
-            if error.is_storage_failure() {
-                self.fail_storage().await;
-            }
-            self.publish_event(EngineEvent::Error {
-                thread_id: thread_id.clone(),
-                error,
-            });
+        if driver::stop_without_driver(self, &slot.run_id).await {
+            self.changed(&thread_id);
         }
-        self.changed(&thread_id);
         // A finished Run can release receipts (submitted-draft copies) and
         // the raw output of its shells to retention.
         let signals = self.store.database.signals();

@@ -171,10 +171,11 @@ async fn drive_inner(
     let mut instructions = Instructions::default();
     loop {
         if slot.stop.is_cancelled() {
-            return drain_and_stop(&control, &slot.run_id, Some(&thread)).await;
+            drain_and_stop(&control, &slot.run_id, &thread).await;
+            return Ok(());
         }
         let _ = slot.nudge.notified().now_or_never();
-        let boundary_guard = tokio::select! {biased;_=slot.stop.cancelled()=>return drain_and_stop(&control,&slot.run_id,Some(&thread)).await,guard=boundary.lock()=>guard};
+        let boundary_guard = tokio::select! {biased;_=slot.stop.cancelled()=>{drain_and_stop(&control,&slot.run_id,&thread).await;return Ok(());},guard=boundary.lock()=>guard};
         let completed_job = {
             let join_notified = slot.proactive_join_done.clone().notified_owned();
             tokio::pin!(join_notified);
@@ -184,7 +185,7 @@ async fn drive_inner(
                 drop(job);
                 drop(boundary_guard);
                 tokio::select! {
-                    _ = slot.stop.cancelled() => return drain_and_stop(&control, &slot.run_id, Some(&thread)).await,
+                    _ = slot.stop.cancelled() => { drain_and_stop(&control, &slot.run_id, &thread).await; return Ok(()); },
                     _ = join_notified => {}
                 }
                 continue;
@@ -209,7 +210,8 @@ async fn drive_inner(
             }
         }
         if slot.stop.is_cancelled() {
-            return drain_and_stop(&control, &slot.run_id, Some(&thread)).await;
+            drain_and_stop(&control, &slot.run_id, &thread).await;
+            return Ok(());
         }
         super::turn_interrupt::acknowledge(&control, &thread, &slot.run_id).await?;
         let snapshot =
@@ -218,7 +220,8 @@ async fn drive_inner(
                 Next::Drain => {
                     drop(boundary_guard);
                     control.live.cancel_join_proactive_job(&thread, &slot).await;
-                    return drain_and_stop(&control, &slot.run_id, Some(&thread)).await;
+                    drain_and_stop(&control, &slot.run_id, &thread).await;
+                    return Ok(());
                 }
                 Next::Done => return Ok(()),
                 Next::Idle => {
@@ -253,7 +256,7 @@ async fn drive_inner(
             drop(jobs);
             drop(boundary_guard);
             tokio::select! {
-                _ = slot.stop.cancelled() => return drain_and_stop(&control, &slot.run_id, Some(&thread)).await,
+                _ = slot.stop.cancelled() => { drain_and_stop(&control, &slot.run_id, &thread).await; return Ok(()); },
                 _ = turn_binding.cancel.cancelled() => continue,
                 _ = join_notified => {}
             }
@@ -277,7 +280,7 @@ async fn drive_inner(
             }
             drop(jobs);
             boundary_guard = tokio::select! {biased;
-                _=slot.stop.cancelled()=>return drain_and_stop(&control,&slot.run_id,Some(&thread)).await,
+                _=slot.stop.cancelled()=>{drain_and_stop(&control,&slot.run_id,&thread).await;return Ok(());},
                 _=turn_binding.cancel.cancelled()=>continue,
                 guard=boundary.lock()=>guard,
             };
@@ -359,7 +362,7 @@ async fn drive_inner(
             Err(error) if error.code == ErrorCode::OperationConflict => continue,
             Err(error) => {
                 if slot.stop.is_cancelled() {
-                    drain_and_stop(&control, &slot.run_id, Some(&thread)).await?;
+                    drain_and_stop(&control, &slot.run_id, &thread).await;
                 }
                 return Err(error);
             }
@@ -396,7 +399,8 @@ async fn drive_inner(
                 (Err(_), None) => {}
             }
             if slot.stop.is_cancelled() {
-                return drain_and_stop(&control, &slot.run_id, Some(&thread)).await;
+                drain_and_stop(&control, &slot.run_id, &thread).await;
+                return Ok(());
             }
             control.changed(&thread);
             continue;
@@ -975,10 +979,17 @@ async fn recover_with_observation(
 
     Ok(())
 }
-pub(super) async fn stop_without_driver(
-    control: &Arc<Control>,
-    run_id: &str,
-) -> Result<(), ApiError> {
+pub(super) async fn stop_without_driver(control: &Arc<Control>, run_id: &str) -> bool {
+    match try_stop_without_driver(control, run_id).await {
+        Ok(()) => true,
+        Err(error) => {
+            control.record_stop_settlement_failure(run_id, error).await;
+            false
+        }
+    }
+}
+
+async fn try_stop_without_driver(control: &Arc<Control>, run_id: &str) -> Result<(), StorageError> {
     loop {
         let run = run_id.to_owned();
         let target: Option<(String, String)> = control
@@ -991,8 +1002,7 @@ pub(super) async fn stop_without_driver(
                     })
                     .optional()?)
             })
-            .await
-            .map_err(storage_error)?;
+            .await?;
         let Some((thread, state)) = target else {
             return Ok(());
         };
@@ -1019,8 +1029,7 @@ pub(super) async fn stop_without_driver(
                     |r| r.get::<_, bool>(0),
                 )?)
             })
-            .await
-            .map_err(storage_error)?;
+            .await?;
         if !still_stopping {
             drop(boundary_guard);
             return Ok(());
@@ -1047,20 +1056,26 @@ pub(super) async fn stop_without_driver(
             }
             super::live::StoppedRunBoundary::NoMatchingDriver
             | super::live::StoppedRunBoundary::InactiveRunClear => {
-                drain_and_stop(control, run_id, None).await?;
+                try_drain_and_stop(control, run_id, None).await?;
                 return Ok(());
             }
         }
     }
 }
 
+async fn drain_and_stop(control: &Arc<Control>, run_id: &str, thread: &str) {
+    if let Err(error) = try_drain_and_stop(control, run_id, Some(thread)).await {
+        control.record_stop_settlement_failure(run_id, error).await;
+    }
+}
+
 /// Freeze this Run, drain its shells, then record terminal state only after
 /// every owned shell has released its live handle.
-async fn drain_and_stop(
+async fn try_drain_and_stop(
     control: &Arc<Control>,
     run_id: &str,
     current_thread: Option<&str>,
-) -> Result<(), ApiError> {
+) -> Result<(), StorageError> {
     let run_id = run_id.to_owned();
     let preserve_usage_waits = control.store.config.recovery.auto_retry_usage_limit;
     let stop = control.stop.clone();
@@ -1089,8 +1104,7 @@ async fn drain_and_stop(
             tx.commit()?;
             Ok(owned)
         })
-        .await
-        .map_err(storage_error)?;
+        .await?;
     if owned.is_empty() {
         return Ok(());
     }
@@ -1123,8 +1137,7 @@ async fn drain_and_stop(
             wait_wakes.publish(keys);
             Ok(wakes)
         })
-        .await
-        .map_err(storage_error)?;
+        .await?;
     for thread in wakes {
         control.changed(&thread);
         control.kick_quiet(thread).await;

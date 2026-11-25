@@ -312,7 +312,9 @@ Successful stop acceptance does not prove all PIDs were reaped. Wait for Run ter
 
 After normal-shutdown grace expires, the TUI offers continued waiting or force quit. W/Enter waits for the same shutdown. F then Y explicitly forces exit; N/Esc cancels force confirmation. Force quit can leave unsaved data/unreaped descendants and differs from normal shutdown.
 
-Canonical DB persistence failure stops new acceptance and proceeds to stop owned work, rather than continuing as a display-only error. Do not delete DB/lock files to force startup. After shutdown, investigate storage, permissions, and free space.
+If `shellboy run get --run RUN_ID` reports `stop_settlement_failure`, stop was not confirmed. For `storage`, inspect free space and permissions on the data directory. For `invariant`, record the Run ID and inspect owner diagnostics before trying again. Once the cause is addressed, if the same Run is still `stopping`, explicitly request its stop again and check `run get` for settlement. Do not replay the Run's input or infer its external effects from the stop receipt. A successful settlement clears the field.
+
+If the owner cannot even save the stop failure, it stops new acceptance and drains owned work. The absence of a saved failure is not proof of settlement. Do not delete DB/lock files to force startup. Investigate storage and reconcile the Run after the owner is available. Other canonical DB persistence failures still stop new acceptance rather than continuing as display-only errors.
 
 ## Retention and collection
 

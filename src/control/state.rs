@@ -422,7 +422,7 @@ fn stop_drained_runs_inner(
         for id in statement.query_map(params![run, now()], |row| row.get(0))? {
             keys.extend(Key::shell_terminal(id?));
         }
-        if tx.execute("UPDATE run SET state='stopped',ended_at=?2,stop_reason=COALESCE(stop_reason,?3) WHERE id=?1 AND state IN ('live','stopping')",params![run,now(),if stopping_for_shutdown {Some("app_shutdown")} else {None}])? != 0 {
+        if tx.execute("UPDATE run SET state='stopped',stop_settlement_failure=NULL,ended_at=?2,stop_reason=COALESCE(stop_reason,?3) WHERE id=?1 AND state IN ('live','stopping')",params![run,now(),if stopping_for_shutdown {Some("app_shutdown")} else {None}])? != 0 {
             keys.extend([Key::Run(run.clone()), Key::ThreadSettled(thread.clone())]);
         }
         if tx.execute("UPDATE receipt SET state='held',hold_reason='stopped',updated_at=?2 WHERE run_id=?1 AND state='accepted'",params![run,now()])? != 0 {
@@ -472,7 +472,7 @@ pub(crate) fn interrupt_previous_work(
         [now],
     )?;
     let report = repair_interrupted_tool_groups(tx, now)?;
-    tx.execute("UPDATE run SET state='stopped',ended_at=?1,stop_reason=COALESCE(stop_reason,'previous_instance_interrupted') WHERE state IN ('live','stopping') AND id NOT IN (SELECT value FROM json_each(?2))",params![now,preserved])?;
+    tx.execute("UPDATE run SET state='stopped',stop_settlement_failure=NULL,ended_at=?1,stop_reason=COALESCE(stop_reason,'previous_instance_interrupted') WHERE state IN ('live','stopping') AND id NOT IN (SELECT value FROM json_each(?2))",params![now,preserved])?;
     interrupt_previous_attempts(tx, now)?;
     tx.execute("UPDATE attachment_delivery SET status='held' WHERE status='accepted' AND (target_run_id IS NOT NULL OR json_extract(origin_json,'$.kind')='shell')",[])?;
     tx.execute("UPDATE receipt SET state='held',hold_reason='previous_instance_interrupted',updated_at=?1 WHERE state='accepted'",[&now])?;
@@ -489,7 +489,7 @@ pub(super) fn finish_drained_shutdown(
 ) -> Result<(), StorageError> {
     let preserved = super::usage_limit_retry::preserved_runs(tx, preserve_usage_waits)?;
     tx.execute("UPDATE attachment_delivery SET status='held' WHERE status='accepted' AND (target_run_id IS NOT NULL OR json_extract(origin_json,'$.kind')='shell')",[])?;
-    tx.execute("UPDATE run SET state='stopped',ended_at=?1,stop_reason=COALESCE(stop_reason,'app_shutdown') WHERE state IN ('live','stopping') AND id NOT IN (SELECT value FROM json_each(?2))",params![now(),preserved])?;
+    tx.execute("UPDATE run SET state='stopped',stop_settlement_failure=NULL,ended_at=?1,stop_reason=COALESCE(stop_reason,'app_shutdown') WHERE state IN ('live','stopping') AND id NOT IN (SELECT value FROM json_each(?2))",params![now(),preserved])?;
     tx.execute("UPDATE turn SET state='stopped',ended_at=?1 WHERE state IN ('preparing','running','waiting','recovery_wait') AND run_id NOT IN (SELECT value FROM json_each(?2))",params![now(),preserved])?;
     super::message_delivery::repair_terminal_tx(tx, &now())?;
     Ok(())
