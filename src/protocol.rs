@@ -1343,6 +1343,7 @@ fn window_side() -> u32 {
 // `MAX_LIST_LIMIT`. `expect_node_id` pairs with `ordinal` to detect a path
 // that was rewound or compacted since the caller last saw it.
 args!(HistoryWindowArgs { thread_id: String,
+    #[serde(default, skip_serializing_if = "is_false")] include_observation: bool,
     #[serde(default, skip_serializing_if = "is_false")] items: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")] ordinal: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")] node_id: Option<String>,
@@ -1354,7 +1355,70 @@ args!(HistoryWindowArgs { thread_id: String,
 // Items carry their own `selection.ordinal`. `total` is one past the last
 // ordinal; `revision` is the Thread's selected-path revision (it also advances
 // on append, which keeps every earlier position valid).
-record!(HistoryWindow { thread_id: String, revision: u64, total: u64, items: Vec<HistorySnippet> });
+record!(HistoryWindow { thread_id: String, revision: u64, total: u64, items: Vec<HistorySnippet>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] observation: Option<HistoryWindowObservation>
+});
+record!(HistoryWindowObservation {
+    read_sequence: u64,
+    pending: HistoryWindowPending,
+    committed_attempts: Vec<HistoryWindowCommittedAttempt>,
+    activity: HistoryWindowActivity,
+    tools: HistoryWindowTools,
+    recovery: Vec<HistoryWindowRecovery>,
+    usage: Vec<HistoryWindowUsage>
+});
+record!(HistoryWindowTools {
+    calls: Vec<HistoryWindowToolCall>,
+    limited_node_ids: Vec<String>
+});
+record!(HistoryWindowToolCall {
+    node_id: String, group_id: String, call_id: String, ordinal: u32,
+    result_state: String, released: bool, background: bool,
+    #[serde(skip_serializing_if = "Option::is_none")] command: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")] description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")] shell_state: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")] shell_exit_code: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")] execution_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")] call_node_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")] result_node_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")] prior_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")] elapsed_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")] started_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")] output_revision: Option<(u64, bool)>
+});
+record!(HistoryWindowRecovery {
+    node_id: String, failure_count: u64, latest_attempt_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")] source_node_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")] reason: Option<HistoryWindowRecoveryReason>
+});
+record!(HistoryWindowRecoveryReason {
+    kind: String,
+    excerpt: String,
+    truncated: bool
+});
+record!(HistoryWindowUsage { node_id: String, sources: Vec<HistoryWindowUsageSource> });
+record!(HistoryWindowUsageSource {
+    attempt_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")] input_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")] cached_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")] input_bytes: Option<HistoryWindowInputBytes>
+});
+record!(HistoryWindowInputBytes { total: u64, categories: std::collections::BTreeMap<String, u64> });
+record!(HistoryWindowPending { items: Vec<HistoryWindowPendingMessage>, total: u64, total_exact: bool });
+record!(HistoryWindowPendingMessage {
+    message_id: String, operation_id: String, delivery_status: DeliveryStatus,
+    #[serde(skip_serializing_if = "Option::is_none")] held_by: Option<MessageHeldBy>
+});
+record!(HistoryWindowCommittedAttempt {
+    attempt_id: String,
+    node_id: String
+});
+record!(#[derive(Default)] HistoryWindowActivity {
+    #[serde(skip_serializing_if = "Option::is_none")] run_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")] turn_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")] attempt_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")] waiting_reason: Option<RunWaitReason>
+});
 args!(HistoryReceivedArgs { thread_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")] cursor: Option<String>
 });

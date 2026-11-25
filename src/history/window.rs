@@ -13,6 +13,34 @@ pub fn window(
     window_projected(connection, args)
 }
 
+/// Return only unambiguous saved attempt bindings for the caller's bounded
+/// selected assistant-response nodes. An imported split or ambiguous binding
+/// does not identify an attempt that the client can adopt.
+pub(crate) fn committed_attempt_bindings<'a>(
+    db: &Connection,
+    nodes: impl IntoIterator<Item = &'a str>,
+) -> rusqlite::Result<Vec<(String, String)>> {
+    let mut query = db.prepare_cached(
+        "SELECT DISTINCT o.attempt_id FROM output_item o
+         WHERE o.node_id=?1 AND NOT EXISTS (
+             SELECT 1 FROM output_item other
+             WHERE other.attempt_id=o.attempt_id AND other.node_id IS NOT NULL
+               AND other.node_id<>o.node_id
+         ) ORDER BY o.attempt_id LIMIT 2",
+    )?;
+    let mut bindings = Vec::new();
+    for node_id in nodes {
+        let mut rows = query.query([node_id])?;
+        if let Some(row) = rows.next()? {
+            let attempt = row.get(0)?;
+            if rows.next()?.is_none() {
+                bindings.push((attempt, node_id.to_owned()));
+            }
+        }
+    }
+    Ok(bindings)
+}
+
 struct ItemWindowRow {
     node_id: String,
     kind: String,
@@ -129,6 +157,7 @@ fn window_projected(
             revision,
             total,
             items: Vec::new(),
+            observation: None,
         });
     } else {
         total - 1
@@ -294,6 +323,7 @@ fn window_projected(
         revision,
         total,
         items: window_items,
+        observation: None,
     })
 }
 
@@ -391,6 +421,7 @@ mod items_source_guard_tests {
 
     fn args(items: bool) -> crate::protocol::HistoryWindowArgs {
         crate::protocol::HistoryWindowArgs {
+            include_observation: false,
             thread_id: "t".into(),
             items,
             ordinal: Some(0),
