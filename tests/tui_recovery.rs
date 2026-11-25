@@ -713,10 +713,15 @@ async fn multiple_calls_keep_source_order_numbers_commands_background_and_cancel
     assert!(!shown.contains("背景（利用者）"));
     assert!(!shown.contains("利用者が先行する呼出し"));
     assert!(running_row.find("tail -f /dev/null").unwrap() < running_row.find("背景 |").unwrap());
-    // The background-process panel (`\-[1] $ cmd`) may or may not be on screen
-    // when the frame is drawn; only conversation items count here.
+    // Count conversation items, not the status notice below the composer
+    // or the independent background-process panel.
     let conversation: String = shown
         .lines()
+        .take_while(|line| {
+            !line.starts_with('+')
+                || !line.ends_with('+')
+                || !line[1..line.len() - 1].bytes().all(|b| b == b'-')
+        })
         .filter(|line| !line.trim_start().starts_with("\\-["))
         .map(|line| format!("{line}\n"))
         .collect();
@@ -729,7 +734,11 @@ async fn multiple_calls_keep_source_order_numbers_commands_background_and_cancel
     }
     assert!(shown.find("printf one").unwrap() < shown.find("tail -f /dev/null").unwrap());
     assert!(shown.find("tail -f /dev/null").unwrap() < shown.find("printf MUST_NOT_RUN").unwrap());
-    assert!(!shown.contains("#1") && !shown.contains("#2") && !shown.contains("#3"));
+    assert!(
+        !conversation.contains("#1")
+            && !conversation.contains("#2")
+            && !conversation.contains("#3")
+    );
     assert_eq!(identities.len(), 3);
     assert!(identities.iter().all(|(group, _)| group.is_some()));
     let count = control
