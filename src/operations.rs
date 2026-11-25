@@ -67,6 +67,7 @@ pub(crate) enum OperationId {
     ShellStop,
     AttachmentAdd,
     AttachmentList,
+    AttachmentReload,
     AttachmentRemove,
     CompactList,
     Compact,
@@ -2208,6 +2209,17 @@ pub(crate) const SPECS: &[OperationSpec] = &[
         route: Route::Owner,
         fields: &[FieldId::Thread, FieldId::Limit, FieldId::Cursor],
     },
+    // Like shell.read's raw-output pins, reload may touch transient owner resources.
+    // It observes current files without committing a send or changing the selection.
+    OperationSpec {
+        id: OperationId::AttachmentReload,
+        label: "添付 · 明示再読込",
+        meaning: "対象Threadの添付を再読込して、送信せず現在のハッシュと状態を表示します。",
+        effect: Effect::Inspect,
+        confirmation: Confirmation::None,
+        route: Route::Owner,
+        fields: &[FieldId::Thread],
+    },
     OperationSpec {
         id: OperationId::AttachmentRemove,
         label: "添付 · 除外",
@@ -2610,6 +2622,7 @@ impl OperationId {
         Self::ShellStop,
         Self::AttachmentAdd,
         Self::AttachmentList,
+        Self::AttachmentReload,
         Self::AttachmentRemove,
         Self::CompactList,
         Self::Compact,
@@ -2726,6 +2739,7 @@ impl OperationId {
             Command::ShellStop(_) => Self::ShellStop,
             Command::AttachmentAdd(_) => Self::AttachmentAdd,
             Command::AttachmentList(_) => Self::AttachmentList,
+            Command::AttachmentReload(_) => Self::AttachmentReload,
             Command::AttachmentRemove(_) => Self::AttachmentRemove,
             Command::Compact(_) | Command::CompactPreview(_) => Self::Compact,
             Command::ContextEdit(_) => Self::Compact,
