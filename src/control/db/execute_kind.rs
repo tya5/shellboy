@@ -260,13 +260,15 @@ mod tests {
             assert!(!UNDECLARED_WRITER_BOUNDS.contains(&kind));
         }
         let bounded_history_kinds = [Kind::HistoryRecall, Kind::HistoryReceived];
+        assert_eq!(Kind::DraftList.classification(), PureRead);
+        assert!(!UNDECLARED_WRITER_BOUNDS.contains(&Kind::DraftList));
         for kind in bounded_history_kinds {
             assert_eq!(kind.classification(), PureRead, "{kind:?}");
             assert!(!UNDECLARED_WRITER_BOUNDS.contains(&kind));
         }
         assert_eq!(
             Kind::ALL.len(),
-            86 + service_kinds.len() + intervention_kinds.len() + bounded_history_kinds.len(),
+            86 + service_kinds.len() + intervention_kinds.len() + bounded_history_kinds.len() + 1,
             "classify new kinds and update this ratchet"
         );
     }
