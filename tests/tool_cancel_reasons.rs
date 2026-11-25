@@ -168,20 +168,17 @@ async fn check(scenario: Scenario, expected: &str) {
         {"type":"function_call","id":"second","call_id":"second-call","name":"shell","arguments":json!({"command":"printf must-not-run","background":false}).to_string()},
         {"type":"function_call","id":"third","call_id":"third-call","name":"shell","arguments":json!({"command":"printf also-must-not-run","background":false}).to_string()}
     ]}))).ok().unwrap();
-    match scenario {
-        Scenario::ExplicitBackground => {
-            crate::test_watchdog::watchdog("tests/tool_cancel_reasons.rs: check", async {
-                loop {
-                    if control.background(&accepted.thread_id, None).await.is_ok() {
-                        break;
-                    }
-                    tokio::task::yield_now().await;
+    if let Scenario::ExplicitBackground = scenario {
+        crate::test_watchdog::watchdog("tests/tool_cancel_reasons.rs: check", async {
+            loop {
+                if control.background(&accepted.thread_id, None).await.is_ok() {
+                    break;
                 }
-            })
-            .await
-            .unwrap()
-        }
-        _ => {}
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
     }
     let next = incoming(&mut requests).await;
     let results = next.body["input"]
