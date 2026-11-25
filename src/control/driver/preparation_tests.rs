@@ -668,6 +668,11 @@ async fn completed_attempt_cannot_adopt_its_tool_group_a_second_time() {
         .await
         .unwrap()
     );
+    let generating = control.request(Request::new(
+        format!("{}:generating-hold", owner.instance_id),
+        Command::MessageGet(crate::protocol::MessageTarget { message_id: accepted.message_id.clone() }),
+    )).await.result.unwrap();
+    assert_eq!(generating["held_by"], json!({"kind":"response_generation"}));
     let condition = crate::protocol::WaitCondition::MessageDelivered {
         message_id: accepted.message_id.clone(),
     };
@@ -738,6 +743,13 @@ async fn completed_attempt_cannot_adopt_its_tool_group_a_second_time() {
     let cancelled = crate::protocol::WaitCondition::MessageDelivered {
         message_id: cancelled,
     };
+    let cancelled_only = super::super::wait::observe(
+        control.clone(), "cancelled-delivery".into(), crate::protocol::WaitArgs {
+            conditions: vec![cancelled.clone()], timeout_ms: 0, after: None,
+        }, None, CancellationToken::new(),
+    ).await.unwrap();
+    assert_eq!(cancelled_only["status"], "unavailable");
+    assert_eq!(cancelled_only["matched"], json!([]));
     let mixed = super::super::wait::observe(
         control.clone(),
         "mixed-application".into(),
@@ -1485,11 +1497,15 @@ async fn a_reported_running_shell_can_be_backgrounded_immediately() {
             db.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id=?1),'publication-attempt',?1,0,0,'fixture','fixture',0,'completed','{}','now')", [&turn])?;
             db.execute("INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES('publication-group','publication-attempt',?1,'running','now')", [turn])?;
             db.execute("INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state)VALUES('publication-group','publication-call',0,'shell','{}','pending')", [])?;
+            db.execute("INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state)VALUES('publication-group','other-call',1,'shell','{}','pending')", [])?;
             Ok(())
             }).await.unwrap();
         let slot = control.live.register_or_nudge_driver(
             &snapshot.thread, snapshot.run.clone(), &control.stop, false,
         ).await.unwrap();
+        let other_args = serde_json::from_value(json!({"command":"cat","stdin_open":true,"background":true})).unwrap();
+        let (other, _) = run_shell(control.clone(), &snapshot, &slot, "publication-group", "other-call", other_args).await.unwrap();
+        assert_eq!(other["status"], "running");
         // Poll the real driver only at explicit steps. The DB can commit its
         // running row while the driver's response future has not resumed.
         let args = serde_json::from_value(json!({"command":"cat","stdin_open":true})).unwrap();
@@ -1500,17 +1516,29 @@ async fn a_reported_running_shell_can_be_backgrounded_immediately() {
             assert!(futures_util::poll!(shell.as_mut()).is_pending());
             let running = control.store.database.call(|db| {
                 use rusqlite::OptionalExtension;
-                Ok(db.query_row("SELECT id FROM shell_execution WHERE state='running'", [], |row| row.get::<_, String>(0)).optional()?)
+                Ok(db.query_row("SELECT s.id FROM shell_execution s JOIN tool_call c ON c.operation_id=s.id WHERE s.state='running' AND c.call_id='publication-call'", [], |row| row.get::<_, String>(0)).optional()?)
                 }).await.unwrap();
             if let Some(id) = running { break id; }
             tokio::task::yield_now().await;
         };
-        let message_get = Request::new(
-            format!("{}:hold", owner.instance_id),
-            Command::MessageGet(crate::protocol::MessageTarget { message_id: accepted.message_id.clone() }),
-        );
+        assert_ne!(other["execution_id"], execution);
+        let send = |suffix: &str, deliver| Request::new(format!("{}:{suffix}", owner.instance_id),
+            Command::MessageSend(MessageSendArgs { max_model_requests: None, resume_recovery: false,
+                human: false, sender_label: None, deliver, thread_id: Some(snapshot.thread.clone()), text: "fresh queued input".into() }));
+        let pending = control.request(send("pending", crate::protocol::Deliver::Next)).await.result.unwrap();
+        let revisit = control.request(send("revisit", crate::protocol::Deliver::Complete)).await.result.unwrap();
+        let get = |value: &Value| Request::new(format!("{}:hold", owner.instance_id),
+            Command::MessageGet(crate::protocol::MessageTarget { message_id: value["message_id"].as_str().unwrap().into() }));
+        let message_get = get(&pending);
         let detail = control.request(message_get.clone()).await.result.unwrap();
         assert_eq!(detail["held_by"], json!({"kind":"foreground_shell","execution_id":execution}));
+        let detail = control.request(get(&revisit)).await.result.unwrap();
+        assert_eq!(detail["held_by"], json!({"kind":"run_completion"}));
+        {
+            let _busy = control.live.test_drivers().lock().await;
+            let detail = control.request(message_get.clone()).await.result.unwrap();
+            assert_eq!(detail["held_by"], json!({"kind":"unknown"}));
+        }
         let accepted = if wire {
             let wrong = control.request(Request::new(format!("{}:stale", owner.instance_id), Command::ShellBackground(crate::protocol::ExecutionTarget { execution_id: "stale".into() }))).await;
             assert_eq!(wrong.error.unwrap().details.unwrap()["reason"], "execution_not_found");
@@ -2449,6 +2477,11 @@ async fn recovery_rewind_stops_exact_waiting_run_and_preserves_held_input_body_a
         .unwrap()
         .result;
     let held_id = held["message_id"].as_str().unwrap().to_owned();
+    let detail = control.request(Request::new(
+        format!("{}:recovery-hold", owner.instance_id),
+        Command::MessageGet(crate::protocol::MessageTarget { message_id: held_id.clone() }),
+    )).await.result.unwrap();
+    assert_eq!(detail["held_by"], json!({"kind":"recovery_wait"}));
     let before_held = {
         let id = held_id.clone();
         control.store.database.call(move |db| Ok((
