@@ -105,9 +105,22 @@ async fn live_tail_cursor_waits_and_continues_exactly_after_incomplete_character
 }
 
 #[tokio::test]
+async fn tail_refuses_encoding_changes_and_accepts_saved_encoding_aliases() {
+    let (_dir, db, reader) = fixture().await;
+    append(&db, "stdout", "あ".as_bytes()).await;
+    let error = reader.read(ShellReadArgs { tail: true, ..args(None, "CP932", 64) }).await.unwrap_err();
+    assert_eq!(error.code, ErrorCode::InvalidArgument);
+    assert!(error.hint.as_deref().unwrap().contains("without --tail"));
+    let tail = reader.read(ShellReadArgs { tail: true, ..args(None, "utf8", 64) }).await.unwrap();
+    assert_eq!(tail.encoding, "UTF-8");
+    assert_eq!(tail.text, "あ");
+}
+
+#[tokio::test]
 async fn stateful_tail_reports_uncertainty_but_cursor_continues_canonically() {
     let (_dir, db, reader) = fixture().await;
     append(&db, "stdout", b"\x1b$B$").await;
+    reader.read(args(None, "ISO-2022-JP", 1)).await.unwrap();
     let tail = reader
         .read(ShellReadArgs {
             tail: true,
