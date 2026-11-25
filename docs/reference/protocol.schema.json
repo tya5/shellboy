@@ -10435,6 +10435,12 @@
             "null"
           ]
         },
+        "foreground": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "group_cleanup_confirmed": {
           "type": [
             "boolean",
@@ -10654,6 +10660,12 @@
           "format": "int32",
           "type": [
             "integer",
+            "null"
+          ]
+        },
+        "foreground": {
+          "type": [
+            "boolean",
             "null"
           ]
         },
@@ -15857,6 +15869,12 @@
           ]
         },
         "forced": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "foreground": {
           "type": [
             "boolean",
             "null"
