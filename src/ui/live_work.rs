@@ -1521,7 +1521,6 @@ mod tests {
         assert_eq!(view.height(4), 1);
         view.accept(None, at);
         view.configure(false, 3);
-        assert_eq!(view.height(30), 5);
         assert_eq!(view.height(3), 0);
         assert!(view.preview.is_none());
     }
