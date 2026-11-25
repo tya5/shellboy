@@ -1,59 +1,34 @@
 # Shellboy
 
-Shellboy is a terminal AI assistant for working in a folder. Its conversations,
-called **Threads**, are saved locally so you can come back later, inspect what the
-assistant ran, and pick up where you left off. The assistant uses a shell to work
-with files and commands, and the same `shellboy` CLI you can use to inspect
-history and delegate work. Core is a single executable with local SQLite storage.
+**A local-first terminal agent for long-running, resumable, multi-agent work.**
 
-[Shellboy Studio](https://github.com/tya5/shellboy-studio) is an optional browser
-UI that connects to a compatible Core.
+For work you cannot afford to lose, Shellboy gives the model a real shell and
+saves conversations, accepted requests, command executions, failures, and
+provenance locally. Keep commands running in the background or delegate tasks
+to child Threads. Search saved history and pick up the work after an
+interruption or restart, without assuming a stopped command will restart.
 
-## Your first Thread in about five minutes
+<!-- Demo GIF placeholder: #426. Add the image here when it is ready. -->
 
-Five minutes is a target if you already have a compatible model endpoint, not a
-setup guarantee. You need its API root URL, a model ID, and a credential unless
-you are using a keyless local endpoint. Use the [download for your platform](#download)
-and open an interactive terminal with the downloaded `shellboy` on your PATH.
+## What makes it different
 
-1. Run `shellboy config init` and open the file named by `config_path` in the JSON
-   result. Set `default_model` to your model ID and the selected connection's
-   `base_url` to its API root, not the URL of an individual request. The template
-   uses `default_connection = "proxy"` and `api_key_env = "SHELLBOY_API_KEY"`.
-   Keep the variable **name** in TOML, not the key. For a compatible keyless
-   local endpoint, remove `api_key_env` and skip the credential step. See
-   [Configuration](docs/guides/configuration.md) for endpoint choices and output limits.
-2. If using a credential, set the named variable in this terminal. These examples
-   prompt without putting the key itself in the command. Model-started shells can
-   inherit this environment, so use a key and workspace you trust the assistant with.
+- **Long-running work:** Run [shells in the background](docs/guides/shell.md#foreground-and-background), [schedule commands](docs/guides/user-guide.md#schedule-a-command), and [manage services](docs/guides/user-guide.md#keep-a-command-running).
+- **Resumable conversations:** Reopen a [Thread with its history and working directory](docs/guides/user-guide.md#conversations-and-work-states).
+- **Explicit delegation:** Give a [child Thread a task and ask for a reply](docs/guides/delegation.md#creating-a-child-and-sending-a-request).
+- **Recoverable failures:** After a restart, distinguish [saved requests from completed work](docs/guides/recovery-and-storage.md#distinguish-acceptance-from-completion) and inspect [typed failures](docs/guides/recovery-and-storage.md#typed-failures-and-next-actions) before choosing what to do next.
+- **Inspectable history:** [Search an index](docs/guides/history-and-search.md#search-requires-a-separate-index), [read retained originals](docs/guides/history-and-search.md#finding-and-reading-original-content), [trace commands to saved output](docs/guides/history-and-search.md#linking-executions-and-history), [fork](docs/guides/history-and-search.md#forks-and-request-editing), or [compact](docs/guides/history-and-search.md#compaction-and-spill).
+- **One executable:** Use the [TUI and CLI](docs/guides/user-guide.md#talking-without-the-tui) with [local SQLite storage](docs/guides/user-guide.md#storage-and-resources). [Shellboy Studio](https://github.com/tya5/shellboy-studio) is an optional browser UI that connects to a compatible Core.
+- **Conversation API dialects:** Choose [Responses (default), Chat Completions, or Anthropic Messages](docs/guides/configuration.md#conversation-api-dialect) per connection. Dialect support does not guarantee compatibility with a particular provider.
 
-   Bash:
+> **Safety:** Shellboy has no command sandbox or per-command approval.\
+> Model commands run with the owner's OS privileges.\
+> Use a dedicated account, container, or VM for valuable work. See the [full safety model](docs/guides/user-guide.md#safety-model).
 
-   ```bash
-   read -r -s -p 'API key: ' SHELLBOY_API_KEY
-   printf '\n'
-   export SHELLBOY_API_KEY
-   ```
+## Quick start
 
-   PowerShell:
-
-   ```powershell
-   $key = Read-Host 'API key' -AsSecureString
-   $env:SHELLBOY_API_KEY = [System.Net.NetworkCredential]::new('', $key).Password
-   ```
-3. Run `shellboy config check`. It reads the configuration and makes a model
-   catalog GET, not a conversation request. Fix errors before continuing; a
-   successful check is not proof that the endpoint accepts conversation requests.
-4. In a sample directory with a `README.md` you are comfortable sending to the
-   endpoint, run `shellboy`. Type the prompt below and press Enter:
-
-   > Read this folder's README and summarize the project in three bullets. Do not change files.
-
-   This sends a model request and may incur provider charges. Once accepted, the
-   request appears in the saved conversation instead of the draft. That means it
-   was saved, not that the reply succeeded. Wait for the assistant's separate reply,
-   or inspect the reason shown if processing fails. On a later launch, press
-   Ctrl+T or type `/threads`, select the saved Thread, and press Enter to reopen it.
+1. [Download Shellboy](#download) and put it on your PATH. Run `shellboy config init` and edit the reported `config_path`: set the API root and model ID, and set the named credential variable in your terminal if required. See [first setup](docs/guides/configuration.md#first-setup-without-an-owner).
+2. Run `shellboy config check`. It checks the model catalog, not whether the endpoint accepts conversations.
+3. In a sample folder you're comfortable sharing with your endpoint, run `shellboy` and ask: "Read this folder's README and summarize it in three bullets. Do not change files." This sends a model request and may incur charges. To reopen the Thread later, press Ctrl+T or use `/threads`.
 
 ## Download
 
