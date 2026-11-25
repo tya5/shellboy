@@ -626,10 +626,10 @@ shows a count; missing saved timing or wait evidence is not reported as zero.
 Elapsed time comes from saved start facts. Last-output age uses saved or newly
 observed output; local clocks do not poll the database.
 
-The section heading is always shown (`◉ 抱えている作業` followed by `なし` when idle). Alt+W
-or a click on the heading folds and unfolds the body; it starts open and shows
-exactly `ui.live_work_rows` rows (blank-padded), so its height changes only when
-you toggle it or resize the terminal.
+When idle, the section uses one heading row if space permits (`◉ 抱えている作業`
+followed by `なし`). Alt+W or a click on the heading folds and unfolds the body.
+It starts open; when populated, the open body reserves `ui.live_work_rows` rows
+and pads unused slots when space permits.
 
 Shift+Tab visits displayed live-work rows, then held-input rows, then returns to
 the composer. Clicking a row focuses it directly. Focus uses reverse video and
@@ -650,10 +650,11 @@ The current Thread's `Pending replies` region lists both questions for you and r
 
 ### Held input
 
-A second `◉ Held input` region sits below live work and above the composer. It
-remains visible as `None` when empty and never blinks. Its fixed, blank-padded
-body has `ui.held_input_rows` rows (1 through 10, default 3), independently of
-live work. Small screens show fewer rows; a hidden count includes saved rows
+A second `◉ Held input` region sits below live work and above the composer. When
+empty, it shows only the `None` heading in one row if space permits and never
+blinks. When open and populated, its body reserves `ui.held_input_rows` rows
+(1 through 10, default 3) independently of live work, padding unused slots.
+Small screens show fewer rows; a hidden count includes saved rows
 beyond the bounded worker page. Rows show bounded excerpts and saved receipt
 state/reason; narrow rows omit time before shortening the reason.
 

@@ -565,16 +565,19 @@ Each name follows the `extra_headers` rules: valid header name (at most 256 byte
 
 `ui.live_work_rows` controls how many oldest owned-work rows can be read and
 shown above the composer. It defaults to 3 and accepts integers from 1 to 10;
-other values are configuration errors. Small terminals may show fewer rows and
+other values are configuration errors. When open and populated, the body reserves
+the configured rows and pads unused slots. When empty, only the `None` heading
+remains, using one row if space permits. Small terminals may show fewer rows and
 report the hidden count. Restart the owner after changing the setting.
 
 ## Held Input Rows
 
-`ui.held_input_rows` independently controls the fixed held-input body below live
-work and above the composer. It defaults to 3 and accepts integers from 1 to 10;
-zero, out-of-range values and other types are configuration errors. Empty bodies
-are blank-padded, with a persistent `None` heading. Small terminals can reduce
-the body and show a hidden count. Alt+W or heading clicks fold each region for
+`ui.held_input_rows` independently controls the held-input body below live work
+and above the composer. It defaults to 3 and accepts integers from 1 to 10;
+zero, out-of-range values and other types are configuration errors. When open and
+populated, the body reserves the configured rows and pads unused slots. When empty,
+only the `None` heading remains, using one row if space permits. Small terminals
+can reduce the body and show a hidden count. Alt+W or heading clicks fold each region for
 this UI process only; fold state is not saved to the configuration or database.
 
 ## Pending Reply Rows
