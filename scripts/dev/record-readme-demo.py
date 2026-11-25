@@ -13,43 +13,31 @@ from pty_capture import Terminal, WATCHDOG_SECONDS
 
 ROOT = Path(__file__).resolve().parents[2]
 QUESTION = 'Run the tests and investigate the failure.'
-CHILD_ASK = 'Check why the total is wrong. Read the source and reply with the cause.'
+CHILD_ASK = 'Why is the total wrong?'
 REASON = 'The total adds the shipping fee twice.'
 TEST = 'python3 -m unittest -v'
-ASK = 'python3 delegate.py'
-ANSWER = 'python3 delegate.py reply'
-COLS, ROWS = 78, 32
+CREATE = ('''./shellboy thread create --parent-thread "$SHELLBOY_THREAD_ID"'''
+          ''' | python3 -c 'import json,sys; print(json.load(sys.stdin)["result"]["thread_id"])' > c''')
+ASK = f'''./shellboy message ask --thread "$(cat c)" --text '{CHILD_ASK}' > a'''
+DUTY = './shellboy thread get --thread "$(cat c)" | python3 show-duty.py'
+ANSWER = ('''cat checkout.py && ./shellboy message reply --message "$(cat ask-id)"'''
+          f" --text '{REASON}' > reply")
+COLS, ROWS = 88, 24
 MAX_BYTES = 1_000_000
 
-# Only the fixture shell starts these CLI operations. The HTTP mock never
-# accesses the owner directly and never runs commands supplied by a request.
-DELEGATE = '''import json
-import os
+# Decode real CLI results for the recorded duty; no fake terminal output.
+SHOW_DUTY = '''import json
 from pathlib import Path
-import subprocess
 import sys
 
-
-def cli(*args):
-    answer = json.loads(subprocess.check_output(['./shellboy', *args]))
-    if not answer['ok']:
-        raise RuntimeError(answer['error'])
-    return answer['result']
-
-
-if sys.argv[1:] == ['reply']:
-    print(Path('checkout.py').read_text().strip())
-    cli('message', 'reply', '--message', Path('.ask-id').read_text(),
-        '--text', 'The total adds the shipping fee twice.')
-    print('The total adds the shipping fee twice.')
-else:
-    parent = os.environ['SHELLBOY_THREAD_ID']
-    child = cli('thread', 'create', '--parent-thread', parent)['thread_id']
-    ask = cli('message', 'ask', '--thread', child, '--text', ''' + repr(CHILD_ASK) + ''')
-    Path('.ask-id').write_text(ask['message_id'])
-    count = cli('thread', 'get', '--thread', child)['pending_replies']['owed_by']['count']
-    assert count == 1, count
-    print(f'Child Thread running: {count} reply owed')
+ask = json.loads(Path('a').read_text())
+assert ask['ok'], ask
+Path('ask-id').write_text(ask['result']['message_id'])
+result = json.load(sys.stdin)
+assert result['ok'], result
+count = result['result']['pending_replies']['owed_by']['count']
+assert count == 1, count
+print(f'Child Thread: {count} reply owed')
 '''
 
 
@@ -74,12 +62,14 @@ def model(release_test, release_child, child_answered):
             if outputs:
                 last = outputs[-1]['call_id']
                 if last == 'test' and release_test.wait(WATCHDOG_SECONDS):
+                    self.tool('create', CREATE)
+                elif last == 'create':
                     self.tool('ask', ASK)
-                elif last == 'ask' and child_answered.wait(WATCHDOG_SECONDS):
+                elif last == 'ask':
+                    self.tool('duty', DUTY)
+                elif last == 'duty' and child_answered.wait(WATCHDOG_SECONDS):
                     self.say('The tests fail: expected 15, got 20.\n\n' + REASON)
                 elif last == 'answer':
-                    if REASON in outputs[-1]['output']:
-                        child_answered.set()
                     self.say('I checked checkout.py and sent the cause back to the parent.')
                 else:
                     self.send_error(500)
@@ -131,7 +121,7 @@ def capture(binary, project):
         'class CheckoutTest(unittest.TestCase):\n'
         '    def test_shipping_is_charged_once(self):\n'
         '        self.assertEqual(total(10, 5), 15)\n')
-    (project / 'delegate.py').write_text(DELEGATE)
+    (project / 'show-duty.py').write_text(SHOW_DUTY)
     with model(test, child, answered) as server:
         worker = Thread(target=server.serve_forever)
         worker.start()
@@ -151,9 +141,10 @@ def capture(binary, project):
             terminal.expect(lambda text: terminal.frames.frame_count > before
                             and 'Ctrl+T Threads' in text, 'interactive redraw')
 
-        def still(terminal, caption, seconds, marker):
+        def still(terminal, caption, seconds, *markers):
             terminal.send('\x0c')
-            terminal.expect(lambda screen: marker in screen, caption)
+            terminal.expect(lambda screen: all(marker in screen for marker in markers)
+                            and 'Loading output' not in screen, caption)
             # Later PTY frames mutate the decoder's rows.
             frames.append({'caption': caption, 'seconds': seconds,
                            'cells': [row.copy() for row in terminal.screen.buffer]})
@@ -164,26 +155,34 @@ def capture(binary, project):
             terminal = launch()
             ready(terminal)
             terminal.paste(QUESTION)
-            still(terminal, '01   Ask Shellboy to investigate', 4, QUESTION)
+            still(terminal, '01   Ask Shellboy to investigate', 3, QUESTION)
             terminal.send('\r')
-            still(terminal, '02   Run the tests in the shell', 5, 'FAILED (failures=1)')
+            still(terminal, '02   Run the failing test in the shell', 5, 'FAILED (failures=1)')
             test.set()
-            text = terminal.expect(lambda screen: 'python3 delegate.py' in screen and 'exit 0' in screen, 'delegation shell')
-            row = next(i for i, line in enumerate(text.splitlines(), 1) if 'python3 delegate.py' in line)
+            text = terminal.expect(lambda screen: 'python3 show-duty.py' in screen
+                                   and 'Descendants | Active 1' in screen, 'active child and duty read')
+            row = next(i for i, line in enumerate(text.splitlines(), 1) if 'python3 show-duty.py' in line)
             terminal.send(f'\x1b[<0;5;{row}M\x1b[<0;5;{row}m')
-            still(terminal, '03   Delegate to a child Thread that owes a reply', 6, '1 reply owed')
+            still(terminal, '03   Ask a child Thread to investigate', 5,
+                  './shellboy message ask --thread', CHILD_ASK, '1 reply owed')
             terminal.send('\x1b\x1b')
             child.set()
             terminal.send('\x1b[1;5F')
-            still(terminal, '04   Read the diagnosis', 4, REASON)
+            still(terminal, '04   The child answers the Ask', 6, f'Reply: "{CHILD_ASK}"', REASON)
+            answered.set()
+            terminal.expect(lambda screen: 'The tests fail: expected 15, got 20.' in screen
+                            and 'Completed' in screen, 'completed investigation')
             terminal.close()
             terminal = launch()
-            still(terminal, '05   Quit and start Shellboy again', 3, 'Ctrl+')
             ready(terminal)
+            still(terminal, '05   Quit and start Shellboy again', 3, 'Ready for input')
             terminal.send('/threads\r')
             still(terminal, '06   Find the same conversation with /threads', 4, 'Run the tests and investig')
             terminal.send('\r')
-            still(terminal, '07   Reopen the saved history', 6, REASON)
+            terminal.expect(lambda screen: 'Conversations |' not in screen
+                            and 'Tab History' in screen, 'parent conversation opened')
+            still(terminal, '07   Reopen the saved diagnosis', 6, 'Completed', REASON,
+                  'The tests fail: expected 15, got 20.')
             terminal.close()
         finally:
             child.set()
