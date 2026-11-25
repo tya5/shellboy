@@ -29,6 +29,7 @@ pub(super) fn query(
             });
             let excerpt: String = row.get(8)?;
             Ok(PendingMessage {
+                held_by: None,
                 message_id: row.get(0)?,
                 operation_id: row.get(1)?,
                 sender_thread,
@@ -102,6 +103,20 @@ pub(super) fn query(
         submitted,
         awaiting_replies,
     })
+}
+pub(super) fn project_holds(
+    db: &Connection,
+    owner: &crate::control::message_delivery::MessageHolds,
+    pending: &mut PendingMessages,
+) -> rusqlite::Result<()> {
+    let blockers = owner.read(
+        db,
+        pending.items.iter().map(|item| item.message_id.as_str()),
+    )?;
+    for (item, held_by) in pending.items.iter_mut().zip(blockers) {
+        item.held_by = held_by;
+    }
+    Ok(())
 }
 pub(super) fn submission_snapshot(
     snapshot: Option<Box<DraftSnapshot>>,

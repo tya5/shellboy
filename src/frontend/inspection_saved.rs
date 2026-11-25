@@ -160,7 +160,11 @@ pub(super) fn read_live_tx(
 ) -> Result<RawSaved, StorageError> {
     let mut raw = read_tx(db, command, None)?;
     if let RawSaved::Message(message) = &mut raw {
-        message.held_by = owner.read_message_hold(db, &message.id)?;
+        message.held_by = owner
+            .message_holds()
+            .read(db, [message.id.as_str()])?
+            .pop()
+            .flatten();
     }
     Ok(raw)
 }

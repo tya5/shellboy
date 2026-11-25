@@ -119,6 +119,14 @@ pub(super) struct RawHistory {
     info: HistoryInfo,
 }
 impl RawHistory {
+    pub(super) fn project_message_holds(
+        &mut self,
+        db: &Connection,
+        owner: &crate::control::message_delivery::MessageHolds,
+    ) -> rusqlite::Result<()> {
+        message_queue::project_holds(db, owner, &mut self.info.pending)
+    }
+
     /// Borrow only the identities in this bounded page, without cloning payloads.
     pub(super) fn source_ids(&self) -> impl Iterator<Item = &str> {
         self.rows.iter().map(|row| row.node.id.as_str())
@@ -226,12 +234,14 @@ impl<'a> HistoryReader<'a> {
             .ok_or_else(|| ApiError::new(ErrorCode::InvalidState, "Accepted input has no Thread"))?
             .to_owned();
         let target = thread.clone();
+        let holds = control.message_holds();
         let (raw, before_cursor) = control
             .store
             .database
             .call(move |db| {
                 let tx = db.transaction()?;
-                let (raw, cursor) = query_page_tx(&tx, &target, None, None)?;
+                let (mut raw, cursor) = query_page_tx(&tx, &target, None, None)?;
+                raw.project_message_holds(&tx, &holds)?;
                 let cursor = cursor.map_err(StorageError::from)?;
                 tx.commit()?;
                 Ok((raw, cursor))
@@ -276,6 +286,7 @@ impl<'a> HistoryReader<'a> {
     ) -> Result<(), ApiError> {
         let thread = reply.target.thread.clone();
         let wanted_offset = anchor.char_offset;
+        let holds = self.control.message_holds();
         let result = self
             .control
             .store
@@ -284,6 +295,7 @@ impl<'a> HistoryReader<'a> {
                 let tx = db.transaction()?;
                 let (mut raw, ordinal) = query_rebase(&tx, &thread, &anchor)?;
                 raw.info.pending = message_queue::query(&tx, &thread)?;
+                raw.project_message_holds(&tx, &holds)?;
                 raw.info.read_revision = message_queue::read_revision();
                 tx.commit()?;
                 Ok((raw, ordinal))
@@ -336,6 +348,7 @@ impl<'a> HistoryReader<'a> {
             let thread = reply.target.thread.clone();
             let ordinal = request.ordinal;
             let position = request.position;
+            let holds = self.control.message_holds();
             let raw = self
                 .control
                 .store
@@ -344,6 +357,7 @@ impl<'a> HistoryReader<'a> {
                     let tx = db.transaction()?;
                     let mut raw = query_window(&tx, &thread, &request)?;
                     raw.info.pending = message_queue::query(&tx, &thread)?;
+                    raw.project_message_holds(&tx, &holds)?;
                     raw.info.read_revision = message_queue::read_revision();
                     tx.commit()?;
                     Ok(raw)
@@ -396,13 +410,15 @@ impl<'a> HistoryReader<'a> {
             let thread = reply.thread.clone();
             let append = before.is_some();
             let db_anchor = anchor.clone();
+            let holds = self.control.message_holds();
             let (raw, before_cursor) = self
                 .control
                 .store
                 .database
                 .call(move |db| {
                     let tx = db.transaction()?;
-                    let (raw, cursor) = query_page_tx(&tx, &thread, before, db_anchor)?;
+                    let (mut raw, cursor) = query_page_tx(&tx, &thread, before, db_anchor)?;
+                    raw.project_message_holds(&tx, &holds)?;
                     tx.commit()?;
                     Ok((raw, cursor))
                 })

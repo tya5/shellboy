@@ -69,6 +69,7 @@ fn saved(
             vec![]
         } else {
             vec![PendingMessage {
+                held_by: None,
                 sender_kind: crate::protocol::SenderKind::Human,
                 completion_scheduled: false,
                 expect_reply: false,

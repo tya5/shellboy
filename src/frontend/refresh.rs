@@ -297,12 +297,14 @@ pub(super) async fn run(
         let limit=control.store.config.ui.live_work_rows;
         let view_scopes=super::view_read::prepare_requests(&views).await;
         let index=control.index.clone();
+        let holds=control.message_holds();
         let details = super::native_header(&data_dir, &thread).await.map(Arc::new).map_err(StorageError::from);
         let read=snapshot::read_sequenced(
             control.store.database.path().to_path_buf(),stop.clone(),move |db,sequence| {
             // Keep typed per-surface failures; do not reinterpret WAL contention.
             let (receipts, visible, views) = read_current_and_views_tx_limited(db,&target,&ids,VisibleReadScope { tool_scope, waits: waits.as_deref(), limit },sequence,&view_scopes,details)?;
             let visible = visible.and_then(|mut raw| {
+                raw.history.project_message_holds(db, &holds)?;
                 raw.index_pause = index.read_display_pause(db)?;
                 Ok(raw)
             });

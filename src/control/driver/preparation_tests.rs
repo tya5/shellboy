@@ -629,20 +629,50 @@ async fn completed_attempt_cannot_adopt_its_tool_group_a_second_time() {
         .as_str()
         .unwrap()
         .to_owned();
+    let cancelled = crate::protocol::WaitCondition::MessageDelivered {
+        message_id: cancelled,
+    };
+    let cancellation_wait = tokio::spawn(super::super::wait::observe(
+        control.clone(),
+        "parked-before-cancellation".into(),
+        crate::protocol::WaitArgs {
+            conditions: vec![cancelled.clone()],
+            timeout_ms: 30_000,
+            after: None,
+        },
+        None,
+        CancellationToken::new(),
+    ));
+    crate::test_watchdog::watchdog(
+        "delivery wait parks before cancellation",
+        control.waits.parked.notified(),
+    )
+    .await
+    .unwrap();
+    let crate::protocol::WaitCondition::MessageDelivered { message_id } = &cancelled else {
+        unreachable!()
+    };
     let cancellation = control
-        .store
-        .execute(
-            Request::new(
-                format!("{}:cancel-input", owner.instance_id),
-                Command::MessageCancel(crate::protocol::MessageCancelArgs {
-                    message_ids: vec![cancelled.clone()],
-                }),
-            ),
-            None,
-        )
+        .request(Request::new(
+            format!("{}:cancel-input", owner.instance_id),
+            Command::MessageCancel(crate::protocol::MessageCancelArgs {
+                message_ids: vec![message_id.clone()],
+            }),
+        ))
         .await
+        .result
         .unwrap();
-    assert_eq!(cancellation.result["items"][0]["outcome"], "cancelled");
+    assert_eq!(cancellation["items"][0]["outcome"], "cancelled");
+    let cancelled_result = crate::test_watchdog::watchdog(
+        "cancellation commit wakes exact delivery wait",
+        cancellation_wait,
+    )
+    .await
+    .unwrap()
+    .unwrap()
+    .unwrap();
+    assert_eq!(cancelled_result["status"], "unavailable");
+    assert_eq!(cancelled_result["matched"], json!([]));
     let snapshot = ready(&control, &accepted).await;
     let prepared = Arc::new(
         control
@@ -714,6 +744,47 @@ async fn completed_attempt_cannot_adopt_its_tool_group_a_second_time() {
     )
     .await
     .unwrap();
+    let later = control
+        .store
+        .execute(
+            Request::new(
+                format!("{}:later-input", owner.instance_id),
+                Command::MessageSend(MessageSendArgs {
+                    max_model_requests: None,
+                    resume_recovery: false,
+                    human: false,
+                    sender_label: None,
+                    deliver: crate::protocol::Deliver::Next,
+                    thread_id: Some(accepted.thread_id.clone()),
+                    text: "not included in the admitted attempt".into(),
+                }),
+            ),
+            None,
+        )
+        .await
+        .unwrap()
+        .result;
+    let later_id = later["message_id"].as_str().unwrap().to_owned();
+    let disconnect = CancellationToken::new();
+    let unrelated = tokio::spawn(super::super::wait::observe(
+        control.clone(),
+        "parked-for-later-input".into(),
+        crate::protocol::WaitArgs {
+            conditions: vec![crate::protocol::WaitCondition::MessageDelivered {
+                message_id: later_id.clone(),
+            }],
+            timeout_ms: 30_000,
+            after: None,
+        },
+        None,
+        disconnect.clone(),
+    ));
+    crate::test_watchdog::watchdog(
+        "later message wait initially parked",
+        control.waits.parked.notified(),
+    )
+    .await
+    .unwrap();
     let response = model::ModelResponse::completed(json!({"id":"response","status":"completed","output":[{"type":"function_call","name":"shell","call_id":"call","arguments":"{\"command\":\"printf unused\"}"}]}),true).unwrap();
     model::request_path::persist_received_attempt(
         &control.store.database,
@@ -746,9 +817,22 @@ async fn completed_attempt_cannot_adopt_its_tool_group_a_second_time() {
     .unwrap()
     .unwrap();
     assert_eq!(observed["matched"], json!([condition]));
-    let cancelled = crate::protocol::WaitCondition::MessageDelivered {
-        message_id: cancelled,
-    };
+    crate::test_watchdog::watchdog(
+        "unrelated adoption wakes but does not satisfy later message wait",
+        control.waits.parked.notified(),
+    )
+    .await
+    .unwrap();
+    assert!(!unrelated.is_finished());
+    disconnect.cancel();
+    let unrelated =
+        crate::test_watchdog::watchdog("later message observer ends on disconnect", unrelated)
+            .await
+            .unwrap()
+            .unwrap();
+    if let Ok(result) = unrelated {
+        assert_eq!(result["matched"], json!([]));
+    }
     let cancelled_only = super::super::wait::observe(
         control.clone(),
         "cancelled-delivery".into(),
@@ -1539,6 +1623,20 @@ async fn a_reported_running_shell_can_be_backgrounded_immediately() {
         let send = |suffix: &str, deliver| Request::new(format!("{}:{suffix}", owner.instance_id),
             Command::MessageSend(MessageSendArgs { max_model_requests: None, resume_recovery: false,
                 human: false, sender_label: None, deliver, thread_id: Some(snapshot.thread.clone()), text: "fresh queued input".into() }));
+        let earlier = control.request(send("earlier", crate::protocol::Deliver::Next)).await.result.unwrap();
+        let named = control.store.execute(Request::new(
+            format!("{}:named-between-inputs", owner.instance_id),
+            Command::MessageAsk(crate::protocol::MessageAskArgs {
+                to: Some("human".into()), human: false, sender_label: None,
+                deliver: crate::protocol::Deliver::Next, thread_id: None,
+                text: "synthetic decision".into(),
+            }),
+        ), Some(crate::protocol::Origin {
+            instance_id: owner.instance_id.clone(), thread_id: snapshot.thread.clone(),
+            run_id: snapshot.run.clone(), turn_id: snapshot.turn.clone(), execution_id: execution.clone(),
+            token: String::new(),
+        })).await.unwrap().result;
+        assert_ne!(earlier["message_id"], named["message_id"]);
         let pending = control.request(send("pending", crate::protocol::Deliver::Next)).await.result.unwrap();
         let revisit = control.request(send("revisit", crate::protocol::Deliver::Complete)).await.result.unwrap();
         let get = |value: &Value| Request::new(format!("{}:hold", owner.instance_id),
