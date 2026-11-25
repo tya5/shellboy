@@ -7932,7 +7932,8 @@ mod layout_cache_tests {
             char_offset: 64_000,
         };
         // Preserve the original ten-row witness and independently characterize 18 rows.
-        let mut terminal = Terminal::new(TestBackend::new(80, if compact { 28 } else { 20 })).unwrap();
+        let mut terminal =
+            Terminal::new(TestBackend::new(80, if compact { 28 } else { 20 })).unwrap();
         if compact {
             // Exercise the same 18 conversation rows before and after compact headings land.
             terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
