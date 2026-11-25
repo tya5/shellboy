@@ -95,7 +95,7 @@ fn fresh_clap_executable_paths_and_every_option_match_the_catalogue_bindings() {
     executable_commands(&parser, &mut vec![], &mut leaves);
     assert_eq!(
         leaves.len(),
-        107,
+        108,
         "track new CLI lifecycle paths explicitly"
     );
     for name in ["serve", "shutdown", "storage check"] {
