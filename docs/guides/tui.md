@@ -308,6 +308,8 @@ Replace `ID` and connection names below with real values. `/attach` and `/cwd`, 
 
 Omitting the node in `/fork` suggests the anchor or tail; `/edit` and `/rewind` suggest the anchor or latest user node. Invalid node kinds/boundaries are errors. Specify IDs for reproducible actions. `/edit` never overwrites the old node: sending branches immediately before the original request. If a Run is active or stopping, sending is refused; stop it or wait for it to finish, then retry the retained draft.
 
+Schedule and Service lists read the connected owner. If that owner becomes unavailable, reconnect or inspect that owner's CLI status; the lists do not fall back to a different local source.
+
 ## Branches
 
 A branch is a child conversation (a Thread) made by `/fork`, `/edit` or `/rewind` that shares the start of its parent's history. Nothing is stored for the tree itself: it is read from the saved conversations (`shellboy thread branches` returns the same facts as JSON).

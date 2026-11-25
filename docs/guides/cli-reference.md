@@ -86,6 +86,15 @@ needed. A terminal-before-admission hold reason is not a terminal receipt or pro
 of body loss. See [held input inspection](recovery-and-storage.md#inspect-a-held-message-without-resending-it)
 for path/body distinctions and the duplicate-instruction risk of manual resend.
 
+Read `held_by.kind` from the exact message: `foreground_shell` (with the blocking `execution_id`), `response_generation`, `run_completion`, `recovery_wait`, `stopping`, or `unknown`. This live projection is not part of the accepted receipt. A missing hold is not evidence of application; check `delivery_status`.
+
+```sh
+shellboy wait --conditions-json '[{"type":"message_delivered","message_id":"MESSAGE_ID"}]' --timeout-ms 30000
+shellboy message get --message MESSAGE_ID
+```
+
+Check `matched` for the exact predicate, or `delivery_status: applied` on readback. A different condition can satisfy a mixed wait. Application is not a reply or completed work. If still held and intervention is needed, use `shell background` only with the `held_by.execution_id` from a `foreground_shell` hold, then observe the same message again. See the [worked intervention](agent-guide.md#observe-application-and-identify-an-exact-blocker).
+
 ### Saved execution context
 
 `run get`, `turn get`, `message get`, and `history read` require `context`. `thread get` can omit it for a fork. `history read` requires `provenance`; every `history list` item requires `provenance`, `context`, and `selection`. It includes meaningful state, saved created_at/updated_at/ended_at, thread_id/run_id/turn_id/node_id, Thread parent_thread_id versus Run owner_run_id, and structured recovery_reason. Unrecorded started_at and Thread created_at are omitted. Run/Turn `lifetime_ms` is wall-clock creation-to-end time including preparation/waits and is absent before termination. A node's Thread is its origin, not a fork's selected path.
@@ -250,9 +259,9 @@ Root cwd defaults to owner startup cwd; child cwd to the parent's. Relative cwd 
 | `message ask [--to NAME or --thread THREAD] [--sender-label TEXT] [--deliver complete] (--text TEXT or --text-stdin)` | Returns `MessageAccepted` and opens one reply duty. A named recipient defaults to `human` and requires model origin. Delivery timing applies only to Thread recipients. |
 | `message list --awaiting [--owed-by-thread THREAD or --asked-by-thread THREAD or --to NAME] [--limit N] [--cursor C]` | Bounded read of pending replies by direction. Without a direction it lists all pending requests. Items include the credential-free saved `sender` (`MessageSender`); `asked_by` is the model Thread ID or null. `--asked-by-thread` matches only model Thread senders. `thread get` returns bounded directional counts, not the list. |
 | `message reply --message MESSAGE (--text TEXT \| --text-stdin)` | Reply once to an applied pending reply request; returns `reply_to`/reply message ID and optional delivery |
-| `message get --message MESSAGE` | Original immutable assignment, current delivery_status, `hint` when held, sender facts, and `expect_reply`, `reply` state/node, or `reply_to` when applicable; `end_message_node_id` remains available when present |
+| `message get --message MESSAGE` | Original immutable assignment, current delivery_status, `hint` and optional live `held_by` when held, sender facts, and `expect_reply`, `reply` state/node, or `reply_to` when applicable; `end_message_node_id` remains available when present |
 | `message cancel --message MESSAGE [--message MESSAGE ...]` | Cancel 1..128 fixed message IDs. Queued input can be archived; an admitted pending reply duty returns `reply_cancelled` without removing history. Other outcomes are `cancelled`/`already_cancelled`/`already_admitted`/`not_found`/`forbidden`/`unavailable`. Does not wake the model |
-| `operation get --operation ID` | operation_id/state/outcome, instance_id/created_at/current_instance, result_uncertain/result_expired/replay_policy/targets, target-dependent downstream. Global `--operation-id` identifies this query; `--operation` identifies its target |
+| `operation get --operation ID` | `OperationReceiptDetails`: operation_id/state/outcome, instance_id/created_at/current_instance, result_uncertain/result_expired/replay_policy/targets, target-dependent downstream. Global `--operation-id` identifies this query; `--operation` identifies its target |
 
 `--max-model-requests N` accepts a positive count and requires a new Run; an
 active Run causes a refusal rather than receiving or queuing the message. The
@@ -503,6 +512,8 @@ Changed history path/revision or target can cause `cursor_expired`; encoding mis
 | Uncertain non-receipted write; no `next_operation` | Do not invent a lookup or replay the write. For draft images, use the explicit replacement flow if needed. |
 | Structured `exec` fails or loses output | Keep validated stdout separate from stderr diagnostics and exit status. Inspect typed diagnostics and reported IDs; no output is not proof the action never ran. |
 
+For a receipt-backed Ask whose response was lost, follow only the typed `error.details.next_operation` with `command: operation.get`, using its `args.operation_id` as `--operation ID` against the same owner data directory. `OperationReceiptDetails.outcome` is null or the saved outcome, `{"result": ...}` or `{"error": ...}` with no `ok` field, `targets` is a sparse string map, and `downstream` is optional `message` or `compact` evidence, not a replay result. Follow an exact target with `message get` or the corresponding saved read. Preserve the `do_not_reexecute`, `operation_expired`, and `return_saved_outcome` distinctions; `operation_not_found` does not prove nonexecution.
+
 ## Error codes
 
 | Code | Meaning / next action |
@@ -564,7 +575,9 @@ not assert such work. Exit markers and Revisit are independent of activity.
 
 ### Observing long-running shells (Issue #45)
 
-`shell background --execution ID` releases the current foreground tool wait without stopping the process or closing stdin. It acknowledges the release request, not completion. Inspect the execution with `shell get` and the Turn tool result with `history read`.
+`shell background --execution ID` releases the current foreground tool wait without stopping the process or closing stdin. It acknowledges the release request, not completion. The saved tool reason is `shell_backgrounded`, without attribution; later cancelled calls may have `previous_wait_released_by_shell_background`. Inspect the execution with `shell get` and the Turn tool result with `history read`.
+
+Use `shellboy shell read --execution ID --tail [--limit-bytes N]` for a bounded initial suffix (128 chunks, at most 16 KiB of raw bytes). It uses the saved encoding, cannot be combined with `--cursor`, and returns the ordinary cursor. Use `shell read --execution ID --cursor CURSOR` for continuation. `tail_skipped` and `decode_uncertain` are true-only signals, not `decode_errors` or `output_expired`. See the [build-log example](agent-guide.md#start-at-the-end-of-a-long-shell-log).
 
 `shell get --execution ID` and shell entries in `status` expose saved
 `started_at`, nullable `last_output_at` (latest retained output sequence),

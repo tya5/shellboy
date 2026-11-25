@@ -409,6 +409,14 @@ shellboy wait --conditions-json '[{"type":"reply_received","message_id":"MESSAGE
 待機後は保存された返信状態を確認してください。質問の受付は回答ではなく、返信なしで義務が終了しても待機は終わることがあります。
 [Agent Guide](agent-guide.md#reply-to-a-request) に返信の手順があります。
 
+### 再送せずに配信を確認する
+
+Send と Ask は共通の `MessageAccepted` を返します。受け付けた入力の `message_id` を控えます。Reply の `MessageReplied` では `message_id` が回答、`reply_to` が元の質問です。回答が質問元の Thread にルーティングされる場合のみ `delivery` が付きます。`held` でも返信失敗とは限らないので、回答 ID で `message get` を確認します。
+
+訂正を送った後は `shellboy wait --conditions-json '[{"type":"message_delivered","message_id":"MESSAGE_ID"}]' --timeout-ms 30000` で、その入力が適用されたか確認できます。一致しても回答が届いたとは限りません。時間切れなら `message get` の `held_by` を読みます。`foreground_shell` の場合だけ、必要に応じてそこにある正確な ID で `shellboy shell background --execution EXECUTION_ID` を実行し、元の入力を再確認します。別のシェルを推測したり訂正を再送したりしません。
+
+Send や Ask の応答を見失った場合、エラーの `details.next_operation.command` が `operation.get` のときだけ、指定された ID で同じ owner に `shellboy operation get --operation ID` を実行します。受付結果が見つからなくても、実行されなかった証拠にはなりません。[CLI の操作証拠](cli-reference.md#operation-evidence)を参照してください。
+
 ## 5. 子へ委譲する
 
 「サブエージェントを使って」と言うだけで、モデルがShellboyの子Thread操作を正確に理解する保証はありません。ガイドは実行ファイルに同梱されています。モデルには短い入口の案内が渡り、必要なときに自分でガイドを読みます。全文が毎回の指示に展開されるわけではなく、checkoutやリポジトリのパスも不要です。確実に手順を読ませたいときはガイドIDを書きます。
@@ -473,6 +481,10 @@ Ctrl+Cは現在会話のRunと所有する背景処理の停止です。Escは�
 モデル要求と経路変更は行いません。予測された失敗と取得上限を確認してください。
 要約文の長さは未確定で、会話が変わった後の編集を許可するものでもありません。
 詳しい上限は CLI reference を参照してください。
+
+### 長いコマンド出力の末尾を読む
+
+`shellboy shell read --execution EXECUTION_ID --tail` で、保存済み出力の末尾を上限付きで読みます。保存済みの文字コードを使用します。`tail_skipped` は前半の省略、`decode_uncertain` はデコードに必要な情報が足りない可能性を示します。続きは返されたカーソルを `shell read --execution EXECUTION_ID --cursor CURSOR` に渡し、`--tail` は付けません。成功かどうかは `shell get` の終了状態を確認します。
 
 ### コマンドを常駐させる
 

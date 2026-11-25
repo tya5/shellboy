@@ -54,6 +54,9 @@ The JSON's `result.text` contains the text; use `next_cursor` to continue. The f
 | Keep a watcher running independently of a Run | `shellboy service --help` | [Services](#services-for-long-running-commands) |
 | Command meaning and examples | `shellboy --help` / `shellboy docs search --query 'background'` | `docs get` using the returned guide ID |
 | Current work state | `shellboy status --thread THREAD_ID` | get the target returned by each item; this is saved state, not an inference of OS process liveness |
+| Confirm message application or identify a held message | `shellboy message get --message MESSAGE_ID` and exact `message_delivered` wait | Background only the execution named by a `foreground_shell` hold; see [the worked intervention](#observe-application-and-identify-an-exact-blocker) |
+| Reconcile a lost write response | `shellboy operation get --operation ID` when the error names `operation.get` | [Check the original receipt and its target](#distinguish-acceptance-from-completion); do not resend blindly |
+| Read the recent end of a large shell log | `shellboy shell read --execution WORK_EXECUTION_ID --tail` | [Continue from the returned cursor](#start-at-the-end-of-a-long-shell-log), without `--tail` |
 | Assignment of a sent request | `shellboy message get --message MESSAGE_ID` | inspect `reply.state`, then read `reply.node_id` when replied |
 | Output of a launched command | `shellboy shell get --execution WORK_EXECUTION_ID` | shell read with that same ID; continue using the read cursor |
 | Evidence for a conversation's decisions | `shellboy history search ...` / `history list ...` | history read by node ID; history relations for relationships |
@@ -204,6 +207,8 @@ If the target is unavailable, check `error.details.pending_duty_ids` for up to
 16 duties this Thread owes, not questions it sent. A missing ID prefix can
 return the same suggestions with `not_found`. Verify the intended duty before
 sending; suggestions never change the target.
+Send and Ask return a flat `MessageAccepted` result; keep `result.message_id` for the accepted input. Reply returns `MessageReplied`: `result.reply_to` is the original Ask ID and `result.message_id` is the answer ID. For a live routed reply, `result.delivery` is a `MessageAccepted` with that same answer ID, and may be `held`; a standalone answer omits `delivery`. For example, after replying to a child's question, use `shellboy message get --message ANSWER_ID` to check routing, not the original Ask ID. To read the answer to a question you asked, use that Ask ID and follow its `reply.node_id`.
+
 See [Delegation](delegation.md#waiting-for-replies) for reminders and wait states.
 
 ### Ask the human for a decision
@@ -290,6 +295,20 @@ shellboy shell read --execution WORK_EXECUTION_ID --encoding UTF-8 --limit-bytes
 
 The wait process exiting successfully is not the work process succeeding. Check its
 wait outcome, then the target execution's exit code or signal and output completeness.
+
+### Start at the end of a long shell log
+
+For a build that was already running before you began observing, use its exact
+execution ID, not the shell that runs these commands:
+
+```sh
+shellboy shell read --execution EXECUTION_ID --tail --limit-bytes 8192
+# Save result.cursor as CURSOR even if the execution is still running.
+shellboy wait --conditions-json '[{"type":"shell_output","execution_id":"EXECUTION_ID","cursor":"CURSOR"}]' --timeout-ms 30000
+shellboy shell read --execution EXECUTION_ID --cursor CURSOR
+```
+
+The initial tail uses the saved encoding and at most 128 chunks / 16 KiB of raw output (or your smaller limit). `tail_skipped` means you did not read the prefix; `decode_uncertain` means the suffix may lack decoder context. Neither means a build passed, bytes expired, or a decode error was observed. Inspect `shell get` for the saved exit state. See [Shell output](shell.md#raw-output-encoding-and-cursors) for encoding and continuation details.
 
 ### Noninteractive Git and stalled shells
 
@@ -655,7 +674,7 @@ condition or readback reports `applied`; neither means the model replied. On
 timeout, read `held_by`. If intervention is still needed and `kind` is
 `foreground_shell`, call `shellboy shell background --execution EXECUTION_ID`
 with only the ID in that fact. Never guess from a shell list or use a replacement
-ID. For generation, Revisit, recovery, unknown or absent holds, do not background.
+ID. For `response_generation`, `run_completion`, `recovery_wait`, `stopping`, `unknown`, or no hold fact, do not background.
 `requested: true` acknowledges the exact request; it does not prove the wait
 released or the message applied. Confirm application by exact-message wait or
 read, not by repeating Send or Background. The launched process keeps its Run
@@ -674,6 +693,7 @@ shellboy message get --message SKIP_MSG
 # held_by: {"kind":"foreground_shell","execution_id":"TEST_EXEC"}
 shellboy shell background --execution TEST_EXEC
 # requested: true acknowledges the request only.
+shellboy wait --conditions-json '[{"type":"message_delivered","message_id":"SKIP_MSG"}]' --timeout-ms 30000
 ```
 
 If the reviewer receives `shell_backgrounded`, they read the instruction and
@@ -778,6 +798,8 @@ CLI `ok:true` means the requested command reached its own success boundary, not 
 | Receipt is saved, pending (including an old-owner pending row), expired, or missing | Use the saved outcome and exact targets if present. Pending, expiry, and `operation_not_found` are not evidence of no effects; inspect target state. Do not start a new mutation just because the observation failed. |
 | Uncertain non-receipted write; no `next_operation` | Do not invent a lookup or replay the write. For draft images, use the explicit replacement flow if needed. |
 | Structured `exec` fails or loses output | Keep validated stdout separate from stderr diagnostics and exit status. Inspect typed diagnostics and reported IDs; no output is not proof the action never ran. |
+
+For example, if a reply to `message ask --thread` is lost, copy `error.details.next_operation.args.operation_id` only after confirming its `command` is `operation.get`. Run `shellboy operation get --operation ID` against the same owner data directory. `OperationReceiptDetails` has a saved `state`, a nullable `outcome` (the original result as `result` or a failure as `error`, with no `ok` field), sparse `targets`, and optional typed `downstream`. If it proves acceptance and names a message, inspect that message with `message get` before acting. `return_saved_outcome` is receipt evidence, `do_not_reexecute` prohibits replay, and `operation_expired` means the saved result is no longer available. A missing receipt is not permission to open a second duty.
 
 Retain original mutation and wait operation IDs for correlation. See [Recovery](recovery-and-storage.md) and [CLI reference](cli-reference.md).
 

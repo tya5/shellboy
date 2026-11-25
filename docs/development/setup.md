@@ -134,6 +134,27 @@ diagnostic. Otherwise, task-branch dispatch runs Linux only by default; set
 without an exact-SHA three-OS pass. Experimental failures are retained and never
 automatically retried into success.
 
+### Locate a native macOS failure (#396)
+
+A three-OS run has two macOS check jobs. `check (macos-latest)` runs the
+library and binary test targets. `check (macos-latest shard 2)` runs
+`integration`, `termination_signals`, and `tool_group_crash_recovery`, as well
+as the real CLI fallback-namespace check and optional macOS diagnostics. Each
+runner builds and runs the tests assigned to it; both macOS jobs must pass on
+the same SHA. Do not use a passing library shard to clear an integration failure.
+
+For example, when investigating a native CLI integration failure, open shard
+2's build/test timing artifacts first. To check or reproduce the shard's
+current target list from a checkout:
+
+```sh
+python3 scripts/check-macos-test-shards.py
+python3 scripts/check-macos-test-shards.py --shard 2
+```
+
+This validates Cargo target coverage and prints Cargo test arguments; it does
+not run tests. The workflow uploads build logs and per-shard harness logs.
+
 ## CI execution policy (#57)
 
 Before pushing any proposed tree, finish the full local standard check with
