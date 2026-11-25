@@ -5034,7 +5034,10 @@ mod notice_tests {
             0,
             UiLanguage::Ja,
         );
-        assert!(background.contains("人間の操作でshell execution"));
+        assert_eq!(
+            background,
+            "背景移行の要求でshell executionの待機を解除し背景へ移しました。後続の未実行呼出しはありません"
+        );
         assert!(background.contains("後続の未実行呼出しはありません"));
         assert!(!background.contains("取り消"));
         let input = tool_group_notice(
