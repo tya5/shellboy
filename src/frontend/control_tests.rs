@@ -324,6 +324,85 @@ async fn recurring_management_mutations_use_selected_listener_without_fallback()
     owner.shutdown().await.unwrap();
 }
 
+#[tokio::test]
+async fn recurring_management_reads_are_instance_fenced_without_fallback() {
+    use crate::protocol::{Command, ErrorCode, ScheduleAddArgs, ServiceAddArgs, ThreadTarget};
+    use tokio_util::sync::CancellationToken;
+    let (root, owner, control, server) = fixture().await;
+    let (_other_root, other, other_control, other_server) = fixture().await;
+    let target = || ThreadTarget {
+        thread_id: Some("thread".into()),
+    };
+    let dir = &owner.loaded.data_dir;
+    let pairs = [
+        (
+            Command::ScheduleAdd(ScheduleAddArgs {
+                thread_id: target().thread_id,
+                cron: None,
+                at: None,
+                in_seconds: Some(3600),
+                cwd: None,
+                description: None,
+                command: "echo schedule".into(),
+            }),
+            Command::ScheduleList(target()),
+            "schedule_id",
+        ),
+        (
+            Command::ServiceAdd(ServiceAddArgs {
+                thread_id: target().thread_id,
+                cwd: None,
+                description: None,
+                command: "echo service".into(),
+            }),
+            Command::ServiceList(target()),
+            "service_id",
+        ),
+    ];
+    for (add, list, key) in pairs {
+        let added = super::management_request(&control, dir, add, CancellationToken::new())
+            .await
+            .unwrap();
+        assert!(added[key].is_string(), "{added}");
+        let seen = super::management_request(&control, dir, list.clone(), CancellationToken::new())
+            .await
+            .unwrap();
+        assert_eq!(seen["thread_id"], "thread");
+        assert_eq!(seen["items"].as_array().unwrap().len(), 1);
+        assert_eq!(seen["items"][0][key], added[key]);
+        assert!(seen.get("request_operation_id").is_none());
+        for (directory, code) in [
+            (other.loaded.data_dir.clone(), ErrorCode::ProtocolMismatch),
+            (
+                root.path().join("without-listener"),
+                ErrorCode::AppNotRunning,
+            ),
+        ] {
+            let result = super::management_request(
+                &control,
+                &directory,
+                list.clone(),
+                CancellationToken::new(),
+            )
+            .await;
+            assert_eq!(super::management_outcome(&result).unwrap_err().code, code);
+        }
+        let stop = CancellationToken::new();
+        stop.cancel();
+        let result = super::management_request(&control, dir, list, stop).await;
+        assert_eq!(
+            super::management_outcome(&result).unwrap_err().code,
+            ErrorCode::InvalidState
+        );
+    }
+    other_server.shutdown().await.unwrap();
+    other_control.shutdown().await.unwrap();
+    other.shutdown().await.unwrap();
+    server.shutdown().await.unwrap();
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+}
+
 fn drain(updates: &std::sync::mpsc::Receiver<crate::ui::UiUpdate>) {
     while updates.try_recv().is_ok() {}
 }

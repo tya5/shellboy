@@ -40,6 +40,10 @@ The TUI now consumes saved Thread invalidation through instance-fenced native
 bounded readback in the existing scopes. Live preview and operational diagnostics
 still use the embedded paths; this is not the final client cutover.
 
+Schedule and Service list reads use the connected native owner without a
+direct fallback. The remaining native reader and subscription migrations
+precede the detached startup and typed disconnect cutover in Unit 5.
+
 ## Core #311 native Thread archive
 
 Thread List and management archive/unarchive use the selected native owner.

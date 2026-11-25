@@ -42,8 +42,9 @@ Each unit is independently reviewable and can land without a user-visible partia
 1. **Client close and a real browser slice.** Separate TUI close from owner teardown; until cutover only the existing outer launch composition retains its existing stop policy. Use the native protocol browser adapter for `thread.list`, including exact-ID refresh. Until Unit 5, the production embedded TUI uses that native adapter against its own existing listener, not its former direct browser reader. A synthetic independent `serve` test drives that production adapter, selects the requested data dir, renders the page and closes the adapter; a subsequent read can still reach the same owner. This validates the seam without shipping a second TUI. Check that explicit owner shutdown still works.
 2. **Saved reads and bounded inspection.** Migrate header, history/window, browser watch and inspectors onto typed native reads. Add the minimum missing domain facts from the table, one bounded surface per reviewable patch. Verify revision mismatch, continuation/omission, exact source copy and received/recall cases. Keep no direct TUI path for a migrated surface.
 3. **Durable compose over the wire.** Move draft save/restore/submit and attachment pin ownership behind native requests, migrate saved anchor/follow-tail, and remove direct mutations. Witness stale revisions, restoration after refused send, lost response after accepted send, and one receipt when the same operation is replayed. Keep local composer text on transport loss and mark unconfirmed saves/submits unknown with their operation/receipt IDs. A user-triggered reconnect reconciles those IDs without replaying writes. Existing draft and view state remain readable; no runtime legacy shim.
-4. **Live input/updates and intervention.** Use scoped event/readback with gap recovery and route mutations, including #402, through the native dispatcher. Move remaining snapshot queries to owner-side domain readers and remove private subscriptions. On owner loss enter the disconnected state described above, retain the typed reason and local compose state, cancel old-instance subscriptions, and offer only user-triggered reconnect or quit. Witness that a gap reloads bounded data, that disconnect preserves local input and unknown receipts, and that stale Turn/execution IDs cannot affect replacements. The frontend should no longer import owner DB or execution objects.
-5. **Default startup, attach, Core management and deletion.** Attach first, launch detached `serve` only on confirmed absence, delete the old fused composition and owner shutdown/force hooks. Test absent/existing/concurrent starts in disposable profiles, quit and reattach to the same instance with a still-running owned shell, terminal loss, explicit stop, mismatch/permission refusal without spawning, and two independent data dirs. Add the Core management view and test its owner observations, Stop confirmation with live work, exact-instance Stop, and explicit Restart through the same detached launch path. Verify that Stop stays disconnected, Restart does not target a replacement instance, and neither action enables supervision or retry. Verify platform detachment on each supported OS before adopting the default. Do not install an owner or migrate real user data as part of the witness.
+4. **Live input/updates and intervention.** Use instance-fenced native event/readback with gap recovery and route mutations, including #402, through the native dispatcher. Move remaining snapshot queries to owner-side domain readers and remove private subscriptions in independently landable slices. Witness that a gap reloads bounded data. Do not expose a new disconnected mode while startup is still fused; the frontend should no longer import owner DB or execution objects before cutover.
+5. **Default startup, attach, and typed disconnect cutover.** Attach first, launch detached `serve` only on confirmed absence, and delete the old fused composition and owner shutdown/force hooks. In the same cutover, keep the screen, typed reason, local input, and unknown receipts on owner loss, cancel old-instance subscriptions, and allow only user-triggered reconnect or quit. Witness that stale Turn and execution IDs cannot affect replacements. Test absent/existing/concurrent starts in disposable profiles, quit and reattach to the same instance with a still-running owned shell, terminal loss, explicit stop, mismatch/permission refusal without spawning, and two independent data dirs. Verify platform detachment on each supported OS before adopting the default. Do not install an owner or migrate real user data as part of the witness.
+6. **Core management view (separate slice).** Test owner observations, Stop confirmation with live work, exact-instance Stop, and explicit Restart through the same detached launch path. Stop stays disconnected, Restart does not target a replacement instance, and neither action enables supervision or retry.
 
 ## Deletion ledger
 
@@ -125,13 +126,18 @@ Neither a stale refusal nor a lost reply is retried against another identity.
 The typed acknowledgment is not completion; saved readback still determines
 what happened to the shell or Turn.
 
-### Recurring work mutations
+### Recurring work mutations and reads
 
 Schedule and Service mutations from the TUI management surface go through
 the selected native listener. Saved target IDs and receipts keep their
 existing meaning. A lost reply retains the operation ID for lookup and is
-not retried or presented as a refusal. Schedule and Service reads are
-unchanged by this slice.
+not retried or presented as a refusal.
+
+The management Schedule and Service lists use the existing native list
+commands, fenced to the connected owner instance. Their exact Thread scope,
+64-row cap per kind, and existing saved output tails are unchanged. A missing
+or replacement endpoint does not fall back to the embedded owner. Cancellation
+drops the outstanding read; there is no new subscription or polling path.
 
 ### Saved change delivery (Unit 4)
 
