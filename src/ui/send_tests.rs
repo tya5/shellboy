@@ -87,12 +87,6 @@ fn saved(
             }]
         },
         total: u64::from(!admitted),
-        submitted: vec![SubmittedMessage {
-            operation_id: "operation".into(),
-            source_draft_id: id.into(),
-            revision,
-            message_id: node.into(),
-        }],
     };
     let generation = ui.view().generation;
     let history = UiUpdate::History {

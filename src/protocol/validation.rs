@@ -909,9 +909,13 @@ impl Command {
             }
             Self::DraftRestore(a) => nonempty(&a.archive_id, "archive_id"),
             Self::DraftGet(a) => {
-                nonempty(&a.thread_id, "thread_id")?;
+                if let Some(thread) = &a.thread_id {
+                    nonempty(thread, "thread_id")?;
+                }
                 if let Some(id) = &a.operation_id {
                     nonempty(id, "operation_id")?;
+                } else if a.thread_id.is_none() {
+                    return Err(invalid("draft.get requires thread_id or operation_id"));
                 }
                 Ok(())
             }

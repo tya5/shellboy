@@ -70,6 +70,7 @@ impl UiUpdate {
             | Self::DraftAnchorExpired { .. }
             | Self::DraftSaveFailed { .. }
             | Self::ReceiptSource { .. }
+            | Self::ExactSubmission { .. }
             | Self::RestoredSnapshot { .. }
             | Self::LoadFailed { .. }
             | Self::HistoryInvalidated { .. }

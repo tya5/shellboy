@@ -280,5 +280,6 @@ Submission identity belongs to a submitted draft record in `draft.get` and
 Use the owner-verified submitted copy or its retained receipt marker when the
 copy is already collected. They describe the same record, not two submissions.
 A collected copy has no draft body; do not reconstruct it from message history
-or restore it as editable input. Keep the existing Thread and view generation
-fences for reconciliation. No new persisted fields, event facts, or fallback.
+or restore it as editable input. For lost acknowledgements, look up the local pending operation exactly and
+apply it only to its matching source revision and view generation. Ordinary
+history reads neither list nor look up submitted drafts. No new persisted fields, event facts, or fallback.

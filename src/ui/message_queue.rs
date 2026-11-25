@@ -5,7 +5,6 @@ use crate::config::UiLanguage;
 pub struct PendingMessages {
     pub items: Vec<PendingMessage>,
     pub total: u64,
-    pub submitted: Vec<SubmittedMessage>,
     pub awaiting_replies: Vec<ReplyTarget>,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -30,13 +29,6 @@ impl ReplyTarget {
             UiLanguage::En => format!("Replying to {text}"),
         }
     }
-}
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SubmittedMessage {
-    pub operation_id: String,
-    pub source_draft_id: String,
-    pub revision: u64,
-    pub message_id: String,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PendingMessage {
@@ -400,14 +392,7 @@ impl UiState {
             view.thread_id.is_none()
                 && view.generation == generation
                 && view.pending.values().any(|local| {
-                    pending.submitted.iter().any(|item| {
-                        item.source_draft_id == local.snapshot.draft_id
-                            && item.revision == local.snapshot.revision
-                            && local
-                                .operation_id
-                                .as_ref()
-                                .is_none_or(|operation| operation == &item.operation_id)
-                    }) || local.operation_id.as_ref().is_some_and(|operation| {
+                    local.operation_id.as_ref().is_some_and(|operation| {
                         pending
                             .items
                             .iter()
@@ -776,10 +761,12 @@ mod tests {
             ui.insert(" newer", false);
             let mut pending = PendingMessages::default();
             let nodes = if admitted {
-                pending.submitted.push(SubmittedMessage {
+                ui.apply(UiUpdate::ExactSubmission {
                     operation_id: "operation".into(),
-                    source_draft_id: draft_id.clone(),
+                    draft_id: draft_id.clone(),
                     revision: *revision,
+                    generation: *generation,
+                    thread_id: "thread".into(),
                     message_id: "saved".into(),
                 });
                 vec![selected("saved")]
@@ -813,7 +800,7 @@ mod tests {
         }
     }
     #[test]
-    fn db_pair_before_operation_update_uses_frozen_source_identity_without_duplicates() {
+    fn exact_submission_waits_for_local_operation_identity() {
         let mut ui = ui();
         ui.insert("original", false);
         let actions = ui.event(key(KeyCode::Enter, KeyModifiers::NONE));
@@ -832,12 +819,6 @@ mod tests {
             awaiting_replies: Vec::new(),
             items: vec![item],
             total: 1,
-            submitted: vec![SubmittedMessage {
-                operation_id: "operation".into(),
-                source_draft_id: draft_id.clone(),
-                revision: *revision,
-                message_id: "saved".into(),
-            }],
         };
         ui.apply(UiUpdate::History {
             thread_id: "thread".into(),
@@ -851,16 +832,26 @@ mod tests {
             selection_revision: 0,
             total_nodes: 0,
         });
-        assert!(ui.view().pending.is_empty());
-        assert_eq!(ui.view().pending_messages.total, 1);
-        assert!(ui.view().draft.text.is_empty());
+        let exact = || UiUpdate::ExactSubmission {
+            operation_id: "operation".into(),
+            draft_id: draft_id.clone(),
+            revision: *revision,
+            generation: *generation,
+            thread_id: "thread".into(),
+            message_id: "saved".into(),
+        };
+        ui.apply(exact());
+        assert!(!ui.view().pending.is_empty());
         ui.apply(UiUpdate::SendOperation {
             draft_id: draft_id.clone(),
             revision: *revision,
             operation_id: "operation".into(),
         });
+        ui.apply(exact());
+        ui.apply(exact());
         assert!(ui.view().pending.is_empty());
-        assert_eq!(ui.view().pending_messages.items.len(), 1);
+        assert_eq!(ui.view().thread_id.as_deref(), Some("thread"));
+        assert!(ui.view().draft.text.is_empty());
     }
     #[test]
     fn saved_ack_after_db_reconciliation_still_applies_newer_queue_without_clearing_edits() {
@@ -876,20 +867,24 @@ mod tests {
         else {
             panic!("send expected");
         };
-        let binding = SubmittedMessage {
-            operation_id: "operation".into(),
-            source_draft_id: draft_id.clone(),
+        ui.apply(UiUpdate::SendOperation {
+            draft_id: draft_id.clone(),
             revision: *revision,
+            operation_id: "operation".into(),
+        });
+        ui.apply(UiUpdate::ExactSubmission {
+            operation_id: "operation".into(),
+            draft_id: draft_id.clone(),
+            revision: *revision,
+            generation: *generation,
+            thread_id: "thread".into(),
             message_id: "saved".into(),
-        };
+        });
         ui.apply(UiUpdate::History {
             thread_id: "thread".into(),
             generation: *generation,
             nodes: vec![selected("saved")],
-            pending: PendingMessages {
-                submitted: vec![binding.clone()],
-                ..Default::default()
-            },
+            pending: PendingMessages::default(),
             read_revision: 1,
             before_cursor: None,
             append: false,
@@ -908,7 +903,6 @@ mod tests {
                 awaiting_replies: Vec::new(),
                 items: vec![queued("newly-arrived")],
                 total: 1,
-                submitted: vec![binding],
             },
             read_revision: 2,
             before_cursor: None,

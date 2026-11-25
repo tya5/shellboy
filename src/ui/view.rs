@@ -123,12 +123,6 @@ impl ThreadView {
                             .items
                             .iter()
                             .any(|m| &m.operation_id == operation)
-                    }) || self.pending_messages.submitted.iter().any(|m| {
-                        m.source_draft_id == p.snapshot.draft_id
-                            && m.revision == p.snapshot.revision
-                            && p.operation_id
-                                .as_ref()
-                                .is_none_or(|operation| operation == &m.operation_id)
                     }) || p.source_node_id.as_ref().is_some_and(|id| {
                         self.pending_messages
                             .items

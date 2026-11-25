@@ -316,8 +316,7 @@ pub(super) async fn run(
             Err(error)=>(Err(error.clone()),Err(error.clone()),Some(Err(error)),0),
         };
         let result=async {
-            let mut raw=checked_storage(&control,visible).await?;
-            raw.history.adopt_submitted(&control,&thread).await?;
+            let raw=checked_storage(&control,visible).await?;
             // Rendering, sender/model-error JSON, decoding and timestamp work
             // begin only after the readonly snapshot released its transaction.
             let mut frame=presentation_work(move || project(raw,render_width,language)).await??;

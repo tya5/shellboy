@@ -89,7 +89,6 @@ pub(super) fn query(
     Ok(PendingMessages {
         items,
         total: total as u64,
-        submitted: Vec::new(),
         awaiting_replies,
     })
 }
@@ -170,38 +169,53 @@ async fn draft_records(
     Ok(page.items)
 }
 
-pub(super) async fn submitted(
+pub(super) async fn exact_submission(
     control: &Control,
-    thread: &str,
-) -> Result<Vec<SubmittedMessage>, ApiError> {
-    draft_records(
+    operation: &str,
+    draft_id: &str,
+    revision: u64,
+    generation: u64,
+) -> Result<(String, UiUpdate), ApiError> {
+    use crate::protocol::{DraftGetArgs, DraftRecord, DraftState};
+    let saved: DraftState = compose_call(
         control,
-        Some(thread.into()),
-        crate::protocol::DraftListKind::Submitted,
+        Command::DraftGet(DraftGetArgs {
+            thread_id: None,
+            operation_id: Some(operation.into()),
+        }),
+        None,
     )
-    .await?
-    .into_iter()
-    .map(|record| match record {
-        crate::protocol::DraftRecord::Submitted {
+    .await?;
+    match saved.record {
+        Some(DraftRecord::Submitted {
             operation_id,
             source_draft_id,
             source_revision,
+            thread_id,
             message_id,
             ..
-        } => Ok(SubmittedMessage {
-            operation_id,
-            source_draft_id,
-            revision: source_revision,
-            message_id,
-        }),
+        }) if operation_id == operation
+            && source_draft_id == draft_id
+            && source_revision == revision =>
+        {
+            Ok((
+                thread_id.clone(),
+                UiUpdate::ExactSubmission {
+                    operation_id,
+                    draft_id: source_draft_id,
+                    revision,
+                    generation,
+                    thread_id,
+                    message_id,
+                },
+            ))
+        }
         _ => Err(ApiError::new(
-            ErrorCode::ProtocolMismatch,
-            "Invalid submitted draft record",
+            ErrorCode::InvalidState,
+            "Saved submission is not the pending draft revision",
         )),
-    })
-    .collect()
+    }
 }
-
 pub(super) async fn archives(
     control: &Control,
     thread: Option<String>,
@@ -1083,6 +1097,92 @@ mod retention_tests {
     use serde_json::json;
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn exact_owner_submission_outside_first_page_reconciles_matching_view() {
+        use crate::protocol::{DraftListArgs, DraftListKind, DraftListPage, DraftRecord};
+        use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+        let (root, owner, control, server) = crate::frontend::control_tests::fixture().await;
+        let mut ui = crate::ui::UiState::new(&crate::config::Config::default(), root.path().into());
+        ui.insert("original", false);
+        let actions = ui.event(Event::Key(KeyEvent::new(
+            KeyCode::Enter,
+            KeyModifiers::NONE,
+        )));
+        let UiAction::Send {
+            draft_id,
+            revision,
+            generation,
+            ..
+        } = &actions[0]
+        else {
+            panic!("expected send")
+        };
+        let operation_id = "old-operation";
+        ui.apply(UiUpdate::SendOperation {
+            draft_id: draft_id.clone(),
+            revision: *revision,
+            operation_id: operation_id.into(),
+        });
+        ui.apply(UiUpdate::Receipt {
+            draft_id: draft_id.clone(),
+            revision: *revision,
+            thread_id: None,
+            status: ReceiptStatus::Unknown,
+            message: None,
+        });
+        let source = draft_id.clone();
+        let rev = *revision;
+        owner.db.call(move |db| {
+            let tx = db.transaction()?;
+            tx.execute("INSERT INTO node(id,kind,created_at,payload_json) VALUES('old-message','user','0','{}')", [])?;
+            let retained = json!({"draft_submission":{"operation_id":operation_id,"source_draft_id":source,"source_revision":rev,"message_id":"old-message"}}).to_string();
+            tx.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,path_admission,created_at,result_json) VALUES('old-message',?1,'null','thread','old-message','applied','admitted','0',?2)", params![operation_id,retained])?;
+            for n in 0..128 {
+                let id = format!("new-{n}");
+                let body = json!({"_submission":{"operation_id":id,"source_draft_id":id,"source_revision":1,"message_id":id}}).to_string();
+                tx.execute("INSERT INTO draft VALUES(?1,'thread',1,?2,'submitted','1')", params![crate::control::db::DraftSubmission::id_for_operation(&id),body])?;
+            }
+            tx.commit()?;
+            Ok(())
+        }).await.unwrap();
+        let first: DraftListPage = compose_call(
+            &control,
+            Command::DraftList(DraftListArgs {
+                thread_id: Some("thread".into()),
+                kind: DraftListKind::Submitted,
+                limit: 128,
+                cursor: None,
+            }),
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(first.items.len(), 128);
+        assert!(first.next_cursor.is_some());
+        assert!(!first.items.iter().any(|item| matches!(item, DraftRecord::Submitted {operation_id: id,..} if id == operation_id)));
+        assert!(
+            exact_submission(&control, operation_id, draft_id, revision + 1, *generation)
+                .await
+                .is_err()
+        );
+        let (_, stale) =
+            exact_submission(&control, operation_id, draft_id, *revision, generation + 1)
+                .await
+                .unwrap();
+        ui.apply(stale);
+        assert!(ui.view().thread_id.is_none());
+        let (thread, exact) =
+            exact_submission(&control, operation_id, draft_id, *revision, *generation)
+                .await
+                .unwrap();
+        ui.apply(exact);
+        assert_eq!(ui.view().thread_id.as_deref(), Some(thread.as_str()));
+        assert!(ui.view().draft.text.is_empty());
+        drop(server);
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn draft_list_pages_preserve_archive_scope_and_order() {
         use crate::protocol::{DraftListArgs, DraftListKind, DraftListPage, DraftRecord};
         let (_root, owner, control, server) = crate::frontend::control_tests::fixture().await;
@@ -1226,26 +1326,13 @@ mod retention_tests {
             })
             .await
             .unwrap();
-        let records = submitted(&control, "thread").await.unwrap();
-        let [record] = records.as_slice() else {
-            panic!("expected one retained submission")
-        };
-        assert_eq!(record.operation_id, "retention-op");
-        assert_eq!(record.source_draft_id, "retention-composer");
-        assert_eq!(record.revision, 7);
-        let exact: crate::protocol::DraftState = compose_call(
-            &control,
-            Command::DraftGet(crate::protocol::DraftGetArgs {
-                thread_id: "thread".into(),
-                operation_id: Some(record.operation_id.clone()),
-            }),
-            None,
-        )
-        .await
-        .unwrap();
-        assert!(exact.draft.is_none());
+        let (thread, update) =
+            exact_submission(&control, "retention-op", "retention-composer", 7, 42)
+                .await
+                .unwrap();
+        assert_eq!(thread, "thread");
         assert!(
-            matches!(exact.record, Some(crate::protocol::DraftRecord::Submitted { operation_id, message_id, source_revision: 7, .. }) if operation_id == record.operation_id && message_id == record.message_id)
+            matches!(update, UiUpdate::ExactSubmission {message_id, generation: 42, ..} if message_id == "retention-message")
         );
         // Simulate a crash-before-ack editable copy and an older unfinished submission.
         owner.db.call(|db| {
