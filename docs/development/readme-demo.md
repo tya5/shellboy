@@ -11,9 +11,11 @@ The recorder uses the existing PTY cell decoder. It creates a disposable project
 configuration, home and owner database. Using `/tmp` keeps the macOS per-user
 temporary directory out of the recording. A scripted, unauthenticated Responses
 mock listens on literal loopback only. The parent runs the failing unit test and
-opens a real Ask; the child reads the sample source and replies with the cause.
-The recorder captures the owed-reply count before allowing the child to answer,
-then quits, starts a new TUI process, and reopens the parent with `/threads`.
+runs `shellboy message ask --thread` in the visible shell. The child reads the
+sample source and answers the original Ask. The recorder captures the actual
+owed-reply count before allowing the child to answer, and captures the routed
+reply before letting the parent finish. It then quits, starts a new TUI process,
+and reopens the saved diagnosis with `/threads`.
 
 Python 3, Swift/AppKit (macOS command-line tools), and FFmpeg with `palettegen`
 and `paletteuse` are recording-only tools. AppKit rasterizes the captured cells
