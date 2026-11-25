@@ -605,6 +605,7 @@ pub enum ServiceCommand {
         cwd: Option<String>,
         #[arg(long)]
         description: Option<String>,
+        /// A single shell command string, interpreted by the owner's configured shell.
         #[arg(long, allow_hyphen_values = true)]
         command: String,
     },
@@ -658,6 +659,7 @@ pub enum ScheduleCommand {
 
 #[derive(Debug, Clone, Args)]
 #[command(group(clap::ArgGroup::new("when").required(true).args(["cron", "at", "delay"])))]
+#[command(after_help = "Bash: shellboy schedule add --in 10m --command 'echo ready'\nPowerShell: shellboy schedule add --in 10m --command 'Write-Output ready'")]
 pub struct ScheduleAddOptions {
     #[arg(long = "thread")]
     thread_id: Option<String>,
@@ -671,8 +673,9 @@ pub struct ScheduleAddOptions {
     cwd: Option<String>,
     #[arg(long)]
     description: Option<String>,
-    #[arg(last = true, required = true, num_args = 1..)]
-    command: Vec<String>,
+    /// A single shell command string, interpreted by the owner's configured shell.
+    #[arg(long, allow_hyphen_values = true)]
+    command: String,
 }
 
 impl From<ServiceCommand> for wire::Command {
@@ -715,7 +718,7 @@ impl From<ScheduleCommand> for wire::Command {
                 in_seconds: a.delay,
                 cwd: a.cwd,
                 description: a.description,
-                command: a.command.join(" "),
+                command: a.command,
             }),
             ScheduleCommand::Set {
                 schedule_id,
@@ -765,11 +768,46 @@ pub(crate) fn scheduled_work_slash(text: &str) -> Result<wire::Command, String> 
     let parsed = ScheduledWorkSlash::try_parse_from(
         std::iter::once("/").chain(words.iter().map(String::as_str)),
     )
-    .map_err(|error| error.to_string())?;
+    .map_err(|error| {
+        scheduled_command_argument_error(&error, &words).unwrap_or_else(|| error.to_string())
+    })?;
     Ok(match parsed.command {
         ScheduledWorkCommand::Schedule { command } => command.into(),
         ScheduledWorkCommand::Service { command } => command.into(),
     })
+}
+
+/// Explain rejected positional input without echoing unrelated flag values.
+pub fn scheduled_command_argument_error(error: &clap::Error, words: &[String]) -> Option<String> {
+    use clap::error::{ContextKind, ContextValue, ErrorKind};
+    if error.kind() != ErrorKind::UnknownArgument {
+        return None;
+    }
+    let usage = error.get(ContextKind::Usage)?.to_string();
+    let command = usage.split_whitespace().collect::<Vec<_>>();
+    if !command
+        .windows(2)
+        .any(|pair| matches!(pair, ["schedule" | "service", "add"]))
+    {
+        return None;
+    }
+    let ContextValue::String(argument) = error.get(ContextKind::InvalidArg)? else {
+        return None;
+    };
+    let tail = words
+        .iter()
+        .position(|word| word == "--")
+        .map(|index| &words[index + 1..]);
+    let received = match tail {
+        Some(tail) if !tail.is_empty() && (argument == "--" || tail.first() == Some(argument)) => {
+            tail
+        }
+        _ if !argument.starts_with('-') => std::slice::from_ref(argument),
+        _ => return None,
+    };
+    Some(format!(
+        "Unexpected positional arguments: {received:?}. Pass the entire shell program as --command '...'"
+    ))
 }
 
 fn parse_schedule_delay(input: &str) -> Result<u64, String> {

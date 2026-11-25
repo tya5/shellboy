@@ -332,6 +332,11 @@ Ordinary messages wait for the next tool-group/request boundary and do not relea
 
 ## OS sandbox wrappers
 
+Shellboy sets the selected owner's environment in both model shells and
+scheduled shells: `SHELLBOY_DATA_DIR`, `SHELLBOY_THREAD_ID`, and the local
+`SHELLBOY_SOCKET` when applicable. Calls to `shellboy` inside these shells do
+not need `--data-dir`. Scheduled shells do not have a model shell Origin.
+
 These are optional OS boundaries, not built-in Shellboy security features. A cwd
 or separate worktree is not a permission fence. Wrap **only the model shell** by
 setting `[shell] executable`; start the owner normally, outside that wrapper.

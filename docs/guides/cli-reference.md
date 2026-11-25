@@ -1002,6 +1002,10 @@ tracked separately in #85; use run get/the existing recovery reason for now.
 
 ## Schedules and services
 
+`schedule add` and `service add` take `--command STRING`. Pass one quoted
+shell program; it is stored as written and run by the owner's configured shell.
+Positional command arguments are not supported.
+
 For command examples and execution IDs, see the Agent Guide's
 [scheduled checks](agent-guide.md#scheduled-checks) and
 [services](agent-guide.md#services-for-long-running-commands).

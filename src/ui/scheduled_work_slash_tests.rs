@@ -23,7 +23,7 @@ macro_rules! routes {
 
 routes! {
     schedule_list: "/schedule list --thread thread-a" => Command::ScheduleList(ThreadTarget { thread_id: Some("thread-a".into()) });
-    schedule_add: "/schedule add --thread thread-a --in 10m --cwd '/a path' --description 'later today' -- \"printf '%s' 'hello world'\"" => Command::ScheduleAdd(ScheduleAddArgs {
+    schedule_add: "/schedule add --thread thread-a --in 10m --cwd '/a path' --description 'later today' --command \"printf '%s' 'hello world'\"" => Command::ScheduleAdd(ScheduleAddArgs {
         thread_id: Some("thread-a".into()), cron: None, at: None, in_seconds: Some(600), cwd: Some("/a path".into()), description: Some("later today".into()), command: "printf '%s' 'hello world'".into(),
     });
     schedule_set: "/schedule set --schedule sched-a --description 'updated text'" => Command::ScheduleSet(ScheduleSetArgs { schedule_id: "sched-a".into(), description: "updated text".into() });
@@ -50,4 +50,12 @@ fn rejects_non_cli_verbs_flags_and_unclosed_quotes() {
         assert!(ui.slash(text).is_empty(), "{text}");
         assert!(ui.command_rejected, "{text}");
     }
+}
+
+#[test]
+fn schedule_add_refuses_the_retired_positional_form() {
+    let error = crate::cli::scheduled_work_slash("schedule add --in 10m -- sh -c 'echo hello'")
+        .unwrap_err();
+    assert!(error.contains(r#"["sh", "-c", "echo hello"]"#), "{error}");
+    assert!(error.contains("--command '...'"), "{error}");
 }

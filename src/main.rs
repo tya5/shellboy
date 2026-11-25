@@ -66,13 +66,20 @@ fn cli_parse_error(error: &clap::Error) -> ApiError {
         .map(ToString::to_string)
         .or_else(|| Some(Cli::command().render_usage().to_string()));
     let kind = format!("{:?}", error.kind());
+    let scheduled = shellboy::cli::scheduled_command_argument_error(
+        error,
+        &std::env::args_os()
+            .skip(1)
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect::<Vec<_>>(),
+    );
     let hint = match &usage {
         Some(usage) => format!("{usage}\nUse shellboy <command> --help for available arguments"),
         None => "Run shellboy --help or shellboy <command> --help for syntax".into(),
     };
     ApiError::new(
         ErrorCode::InvalidArgument,
-        format!("Invalid command line ({kind})"),
+        scheduled.unwrap_or_else(|| format!("Invalid command line ({kind})")),
     )
     .hint(hint)
     .details(serde_json::json!({"parser_kind":kind,"arguments":arguments,"usage":usage}))
@@ -558,10 +565,16 @@ async fn run_owner(cli: Cli, cwd: &Path) -> ExitCode {
 }
 fn run_tui(cli: Cli, runtime: tokio::runtime::Runtime) -> ExitCode {
     if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
+        let count = std::env::args_os().skip(1).count();
+        let received = if count == 0 {
+            "none".into()
+        } else {
+            count.to_string()
+        };
         return print_error(
             ApiError::new(
                 ErrorCode::InvalidState,
-                "The TUI needs an interactive terminal",
+                format!("No subcommand was given, and the TUI needs an interactive terminal. Arguments received: {received}"),
             )
             .hint("Use a subcommand to connect to an already running owner"),
             None,
