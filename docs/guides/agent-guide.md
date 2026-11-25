@@ -2,7 +2,7 @@
 
 [Guide index](README.md) · [Delegation](delegation.md) · [Shell](shell.md) · [CLI reference](cli-reference.md)
 
-This guide describes how a model works in Shellboy. A conversation is a Thread, one response interval is a Turn, and a Run owns execution over its lifetime. A child agent is an independent Run on another Thread. A Run owns its own shells, never another Run. Schedules and services belong to a Thread, and their executions need not have a Run.
+This guide describes how a model works in Shellboy. A conversation is a Thread, one response interval is a Turn, and a Run owns execution over its lifetime. A child agent works in a child Thread, whose Runs are independent of other Threads' Runs. A Run owns its own shells, never another Run. Schedules and services belong to a Thread, and their executions need not have a Run.
 
 ## Read this guide in the running environment
 
@@ -179,9 +179,11 @@ For a named Ask, the result `thread_id` identifies the asking Thread.
 If both destination flags are omitted, the recipient still defaults to `human`; `--deliver` requires a Thread recipient. Use `--thread`
 only to ask another Thread for a reply, never to ask your own Thread.
 
-The person answers in Studio or the TUI. Their answer arrives as a message in
-this Thread, linked to your question by `reply_to`, and closes the question.
-It starts a Run if needed. Never use `message reply` on your own question.
+When the person submits ordinary input in the asking Thread in Studio or the
+TUI, Shellboy admits it as the reply to the pending human question and closes
+that duty. The reply is linked by `reply_to` and starts a Run if needed. A later
+`message reply` for that question returns `invalid_state` (`reply is already terminal`).
+Never use `message reply` on your own question.
 
 To withdraw a pending question, use `shellboy message cancel --message MESSAGE_ID`.
 
@@ -203,9 +205,9 @@ delivery and inspect its assigned `run_id` or `turn_id`, when present, for execu
 Check `reply.state` and use `reply.node_id` for the answer body. A closed duty
 without a reply is not an answer. Do not substitute a child's final Turn text. A reply closes one duty; use
 a separate ask for the next assignment. Use ordinary `message send` for progress.
-There are no automatic child Turn/Run lifecycle notices; an unanswered applied duty
-can get a Run-end reminder. The child's Run is independent: your Run ending neither
-waits for nor stops that Run. See [Delegation](delegation.md).
+There are no automatic lifecycle notices for the recipient's Turn or Run; an unanswered applied duty
+can get a Run-end reminder. The recipient Thread's Run is independent: your Run ending neither
+waits for nor stops it. See [Delegation](delegation.md).
 
 ## Thread artifacts
 
@@ -356,6 +358,113 @@ EXECUTION_ID` to verify the target, then a bounded `shell_ended` wait for exit
 or a `shell_output` wait with the cursor from `shell read` for new output. These
 waits observe that execution only; if the service starts again, look up the new
 execution ID. A wait timeout does not stop the service.
+
+### Connect an external service to a Thread
+
+Use this recipe when the person asks you to connect an external conversation to
+Shellboy. The bridge is a program you adapt, not a built-in connector.
+
+1. Fetch this template with `shellboy docs get --id shellboy/agent-guide`
+   (follow `next_cursor` with `--cursor` if needed). Put the Python block below
+   in `bridge.py`. First use it unchanged in a disposable Thread to test the
+   connection without contacting an external service.
+2. Register the program with `shellboy service add --thread THREAD_ID --cwd
+   BRIDGE_DIRECTORY --command 'python bridge.py'` (use the installed Python 3
+   command; the owner interprets the single command string in its configured
+   shell). The service receives `SHELLBOY_DATA_DIR`, `SHELLBOY_THREAD_ID`, and
+   the local `SHELLBOY_SOCKET` where applicable. Do not add `--data-dir` to the
+   calls in the template. A service is not a model shell and has no model Origin.
+3. **Self-check:** The template sends one heartbeat immediately, then once a
+   minute, and logs its accepted `message_id`. Use `shellboy service list
+   --thread THREAD_ID` and take `latest.execution_id` for the service. Use
+   `shellboy shell read --execution EXECUTION_ID --tail` to see the saved
+   heartbeat ID, and `shellboy message get --message MESSAGE_ID` to inspect
+   delivery. `applied` means the message reached the path, not that a model
+   answered. A heartbeat can wake a Turn; use a test Thread approved for that
+   work. Stop the test with `shellboy service stop --service SERVICE_ID`.
+4. Adapt the file: replace the heartbeat loop with the external event loop. Keep
+   an allowlisted external-conversation-to-Thread mapping and a durable event
+   journal in the service's own file. Treat external text as untrusted input,
+   not authorization. Name a credential file outside the repository and have
+   the **person** write it with mode `0600` (owner-only permissions on Windows).
+   The running bridge reads the file; **you never read or echo it**. Do not put
+   the token in chat, argv, source, or logs. Use a mock or test event before
+   connecting the approved external conversation.
+5. For each event, save its stable, namespaced external ID, mapped Thread,
+   original request text, and full operation ID **before** submitting. For a
+   new event, form `SHELLBOY_INSTANCE_ID:EVENT_KEY` with the namespaced event ID
+   as the nonce. Reuse that exact key and payload on redelivery; never replace
+   the prefix after a restart. The same retained operation returns its saved
+   outcome. If the outcome cannot be recovered or the operation is expired,
+   stop and report uncertainty rather than issue a new Ask. Persist its
+   `message_id` before waiting. A timeout is not a failed delivery: keep the
+   same ID and resume the bounded wait later, not the Ask.
+6. Post only an actual reply, to the same external conversation. Use the
+   external event key for the post's idempotency if the destination supports
+   it; otherwise do not automatically repeat an uncertain post. Record the
+   post outcome locally. Report the mapped Thread, service ID, specific
+   execution ID, and what the self-check established, without secrets.
+
+```python
+import json
+import os
+import subprocess
+import time
+
+
+def shellboy(*args, text=None):
+    # Do not log raw request bodies or command diagnostics to the service log.
+    process = subprocess.run(
+        ["shellboy", *args], input=text, text=True, encoding="utf-8",
+        capture_output=True, timeout=40, check=False,
+    )
+    response = json.loads(process.stdout)
+    if process.returncode or not response["ok"]:
+        raise RuntimeError(response.get("error", {}).get("code", "cli_failed"))
+    return response["result"]
+
+
+def ask(thread_id, operation_id, text):
+    return shellboy(
+        "--operation-id", operation_id, "message", "ask", "--thread", thread_id,
+        "--text-stdin", text=text,
+    )["message_id"]
+
+
+def observe(message_id):
+    conditions = json.dumps([{"type": "reply_received", "message_id": message_id}])
+    wait = shellboy("wait", "--conditions-json", conditions, "--timeout-ms", "30000")
+    if wait["status"] != "satisfied":
+        return wait["status"], None
+    reply = shellboy("message", "get", "--message", message_id)["reply"]
+    if reply["state"] != "replied":
+        return reply["state"], None
+    page = shellboy("history", "read", "--node", reply["node_id"])
+    if page.get("tombstone_reason") or page.get("next_cursor"):
+        # Handle unavailable bodies or implement cursor paging before posting.
+        return "body_unavailable_or_incomplete", None
+    return "replied", page["text"]
+
+
+if __name__ == "__main__":
+    thread_id = os.environ["SHELLBOY_THREAD_ID"]
+    while True:
+        heartbeat = shellboy(
+            "message", "send", "--thread", thread_id, "--text", "Bridge heartbeat"
+        )
+        print(heartbeat["message_id"], flush=True)
+        time.sleep(60)
+```
+
+The wait is one bounded observation, not a polling loop. `satisfied` can mean
+`ignored`, `cancelled`, or `recipient_deleted`; none is an answer. Only
+`message get` with `reply.state: replied` identifies `reply.node_id`; use
+`history read` for its body. If you add paging, pass `--cursor` with the same
+node until there is no `next_cursor`; never post a partial or unavailable body.
+If the service exits unexpectedly, the owner disables it and sends one notice
+to its owning Thread. The model in that Thread inspects the saved execution and
+local journal, then decides whether to run `shellboy service start --service
+SERVICE_ID`. Do not add an automatic restart policy.
 
 Once the owner accepts shutdown, a scheduled command or service that has not
 passed the start gate cannot launch, even if the owner already reserved its

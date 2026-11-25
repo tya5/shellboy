@@ -461,6 +461,10 @@ invoking `message ask` from a regular terminal or the TUI cannot use those route
 Ordinary `message send`, including from scripts or scheduled commands, does not
 open a reply duty.
 
+To answer a model's Ask to `human`, type and submit ordinary input in the same
+Thread. Shellboy admits it as the reply and closes the pending duty. A later
+`message reply` on that question returns `invalid_state` (`reply is already terminal`).
+
 Keep the returned `message_id`. Read the reply state with
 `shellboy message get --message MESSAGE_ID`; when `reply.state` is `replied`,
 read the answer with `shellboy history read --node REPLY_NODE_ID` using
@@ -756,6 +760,17 @@ shellboy schedule add --thread THREAD --cron '30 8 * * 1-5' -- \
 
 The send refuses if the Thread already has an active Run. The limit belongs
 to the new Run, not the schedule, the scheduled shell, or child Threads.
+
+### Connect an external service to a Thread
+
+Ask your agent to follow the [bridge recipe](agent-guide.md#connect-an-external-service-to-a-thread).
+It starts with a disposable heartbeat service and checks the saved output before
+connecting a real external conversation. The bridge is Thread-owned and waits
+for explicit replies; it does not add a built-in connector. If a credential is
+needed, have the agent name a private file outside the repository. Write the
+credential there yourself with owner-only permissions (`0600` on Unix); never
+paste it into chat. The bridge reads it, not the agent. The owning Thread reviews
+an unexpected-exit notice before deciding whether to restart the service.
 
 ## Thread artifacts
 
