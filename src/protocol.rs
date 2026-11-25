@@ -2241,11 +2241,12 @@ args!(
 pub enum RunStopReason {
     ModelRequestCeilingReached { requests_used: u32 },
 }
+states!(RunStopSettlementFailure { Storage => "storage", Invariant => "invariant" });
 record!(RunModelRequests {
     ceiling: u32,
     used: u32
 });
-record!(RunDetails { #[serde(default, skip_serializing_if = "Option::is_none")] model_requests: Option<RunModelRequests>, #[serde(default, skip_serializing_if = "Option::is_none")] stop_reason: Option<RunStopReason>, #[serde(default, skip_serializing_if = "Option::is_none")] waiting_reason: Option<RunWaitReason>, #[serde(default, skip_serializing_if = "Option::is_none")] usage_totals: Option<Value>, context: crate::context::ExecutionContext, run_id: String, thread_id: String, state: RunState, #[serde(default, skip_serializing_if = "Option::is_none")] turn_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] end_message_node_id: Option<String>, owned_execution_ids: Vec<String>, #[serde(default, skip_serializing_if = "Option::is_none")] recovery_hint: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] revisit: Option<RevisitSummary> });
+record!(RunDetails { #[serde(default, skip_serializing_if = "Option::is_none")] stop_settlement_failure: Option<RunStopSettlementFailure>, #[serde(default, skip_serializing_if = "Option::is_none")] model_requests: Option<RunModelRequests>, #[serde(default, skip_serializing_if = "Option::is_none")] stop_reason: Option<RunStopReason>, #[serde(default, skip_serializing_if = "Option::is_none")] waiting_reason: Option<RunWaitReason>, #[serde(default, skip_serializing_if = "Option::is_none")] usage_totals: Option<Value>, context: crate::context::ExecutionContext, run_id: String, thread_id: String, state: RunState, #[serde(default, skip_serializing_if = "Option::is_none")] turn_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] end_message_node_id: Option<String>, owned_execution_ids: Vec<String>, #[serde(default, skip_serializing_if = "Option::is_none")] recovery_hint: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] revisit: Option<RevisitSummary> });
 record!(TurnDetails { #[serde(default, skip_serializing_if = "Option::is_none")] usage_totals: Option<Value>, context: crate::context::ExecutionContext, turn_id: String, run_id: String, thread_id: String, state: TurnState, #[serde(default, skip_serializing_if = "Option::is_none")] end_message_node_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] recovery_hint: Option<String> });
 // Optional shell fields describe unknown/live lifecycle facts and the internal
 // output-reader snapshot, which deliberately does not load command ownership.

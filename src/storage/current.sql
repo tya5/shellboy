@@ -907,3 +907,6 @@ ALTER TABLE run ADD COLUMN max_model_requests INTEGER CHECK(max_model_requests >
 ALTER TABLE run ADD COLUMN model_requests_used INTEGER NOT NULL DEFAULT 0 CHECK(model_requests_used >= 0 AND (max_model_requests IS NULL OR model_requests_used <= max_model_requests));
 INSERT INTO schema_migration(version,name) VALUES(65,'0065_run_request_ceiling');
 PRAGMA user_version=65;
+ALTER TABLE run ADD COLUMN stop_settlement_failure TEXT CHECK(stop_settlement_failure IS NULL OR (state = 'stopping' AND stop_settlement_failure IN ('storage', 'invariant')));
+INSERT INTO schema_migration(version,name) VALUES(66,'next_run_stop_settlement_failure');
+PRAGMA user_version=66;

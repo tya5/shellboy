@@ -2919,8 +2919,8 @@ pub(crate) fn saved_usage_for_detail(
 
 pub fn run_details(connection: &Connection, id: &str) -> Result<RunDetails> {
     let row = connection
-        .query_row("SELECT thread_id,state,max_model_requests,model_requests_used,stop_reason FROM run WHERE id=?1", [id], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, Option<u32>>(2)?, row.get::<_, u32>(3)?, row.get::<_, Option<String>>(4)?))
+        .query_row("SELECT thread_id,state,max_model_requests,model_requests_used,stop_reason,stop_settlement_failure FROM run WHERE id=?1", [id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, Option<u32>>(2)?, row.get::<_, u32>(3)?, row.get::<_, Option<String>>(4)?, row.get::<_, Option<String>>(5)?))
         })
         .optional()
         .map_err(sql_error)?
@@ -2936,7 +2936,19 @@ pub fn run_details(connection: &Connection, id: &str) -> Result<RunDetails> {
         Some(turn) => recovery_status(connection, &row.0, turn, recovery_hint)?,
         None => recovery_hint,
     };
+    let stop_settlement_failure = row
+        .5
+        .map(|reason| {
+            RunStopSettlementFailure::parse(&reason).ok_or_else(|| {
+                error(
+                    ErrorCode::InvalidState,
+                    "unknown saved stop settlement failure",
+                )
+            })
+        })
+        .transpose()?;
     Ok(RunDetails {
+        stop_settlement_failure,
         model_requests: row.2.map(|ceiling| crate::protocol::RunModelRequests {
             ceiling,
             used: row.3,
@@ -6568,7 +6580,6 @@ mod driverless_child_stop_notification_tests {
             );
             let mut parent_notifications = 0;
             let mut child_notifications = 0;
-            let mut errors = 0;
             while let Ok(event) = events.try_recv() {
                 match event {
                     EngineEvent::Changed {
@@ -6579,19 +6590,28 @@ mod driverless_child_stop_notification_tests {
                         thread_id,
                         recovery: false,
                     } if thread_id == "child-3" => child_notifications += 1,
-                    EngineEvent::Error { thread_id, error }
-                        if fail_drain && thread_id == "child-3" =>
-                    {
-                        assert_eq!(error.code, ErrorCode::SaveFailed);
-                        errors += 1;
-                    }
                     other => panic!("unexpected stop notification: {other:?}"),
                 }
             }
             assert_eq!(parent_notifications, 0);
             // One hint when the stopping state commits (#243) and one after the drain.
             assert_eq!(child_notifications, 2);
-            assert_eq!(errors, usize::from(fail_drain));
+            let get = || {
+                control.request(Request::new(
+                    format!("{}:get-child-stop", owner.instance_id),
+                    Command::RunGet(RunTarget {
+                        run_id: "run-3".into(),
+                    }),
+                ))
+            };
+            let after = get().await.result.unwrap();
+            if fail_drain {
+                assert_eq!(after["state"], "stopping");
+                assert_eq!(after["stop_settlement_failure"], "storage");
+            } else {
+                assert_eq!(after["state"], "stopped");
+                assert!(after.get("stop_settlement_failure").is_none());
+            }
             assert!(
                 nudge.notified().now_or_never().is_none(),
                 "display notification must never nudge the parent model"
@@ -6604,13 +6624,22 @@ mod driverless_child_stop_notification_tests {
                 if fail_drain {db.execute_batch("DROP TRIGGER reject_child_drain;")?;}
                 Ok(())
             }).await.unwrap();
-            control.live.test_drivers().lock().await.clear();
-            let shutdown = control.shutdown().await;
             if fail_drain {
-                assert_eq!(shutdown.unwrap_err().code, ErrorCode::SaveFailed);
-            } else {
-                shutdown.unwrap();
+                let retry = control
+                    .request(Request::new(
+                        format!("{}:settle-hidden-child", owner.instance_id),
+                        Command::RunStop(RunTarget {
+                            run_id: "run-3".into(),
+                        }),
+                    ))
+                    .await;
+                assert!(retry.ok);
+                let settled = get().await.result.unwrap();
+                assert_eq!(settled["state"], "stopped");
+                assert!(settled.get("stop_settlement_failure").is_none());
             }
+            control.live.test_drivers().lock().await.clear();
+            control.shutdown().await.unwrap();
             owner.shutdown().await.unwrap();
         }
     }

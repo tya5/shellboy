@@ -347,6 +347,11 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         sql: include_str!("../../migrations/0065_run_request_ceiling.sql"),
         foreign_keys: Some(Impact::IndexOnly),
     },
+    Migration {
+        version: 66,
+        sql: include_str!("../../migrations/next_run_stop_settlement_failure.sql"),
+        foreign_keys: Some(Impact::IndexOnly),
+    },
 ];
 
 pub(super) fn run(

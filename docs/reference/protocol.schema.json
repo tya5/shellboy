@@ -10090,6 +10090,16 @@
             }
           ]
         },
+        "stop_settlement_failure": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RunStopSettlementFailure"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "thread_id": {
           "type": "string"
         },
@@ -10171,6 +10181,13 @@
           "type": "object"
         }
       ]
+    },
+    "RunStopSettlementFailure": {
+      "enum": [
+        "storage",
+        "invariant"
+      ],
+      "type": "string"
     },
     "RunTarget": {
       "additionalProperties": false,
@@ -15707,6 +15724,16 @@
           "anyOf": [
             {
               "$ref": "#/definitions/RunStopReason"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "stop_settlement_failure": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RunStopSettlementFailure"
             },
             {
               "type": "null"

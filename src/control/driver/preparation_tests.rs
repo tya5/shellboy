@@ -1825,7 +1825,7 @@ async fn stopping_keeps_queued_input_held_with_the_recorded_reason() {
                 .await
                 .unwrap();
         } else {
-            drain_and_stop(&control, &run, None).await.unwrap();
+            try_drain_and_stop(&control, &run, None).await.unwrap();
         }
         control
             .store
@@ -1860,7 +1860,7 @@ async fn concurrent_stop_completion_does_not_start_model_work() {
         let run = accepted.run_id.as_ref().unwrap();
         control.store.execute(Request::new(format!("{}:stop",owner.instance_id),
             Command::RunStop(RunTarget {run_id:run.clone()})), None).await.unwrap();
-        let (one,two)=tokio::join!(stop_without_driver(&control,run),stop_without_driver(&control,run));
+        let (one,two)=tokio::join!(try_stop_without_driver(&control,run),try_stop_without_driver(&control,run));
         one.unwrap();two.unwrap();
         let target=run.clone();
         let observed:(String,String,i64)=control.store.database.call(move|db| Ok(db.query_row(
