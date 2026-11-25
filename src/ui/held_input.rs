@@ -99,8 +99,8 @@ fn total(view: &ThreadView) -> u64 {
     )
 }
 
-pub(super) fn height(available: u16, collapsed: bool, capacity: usize) -> u16 {
-    RegionLayout::new(capacity, collapsed).height(available, 0)
+pub(super) fn height(view: &ThreadView, available: u16, collapsed: bool, capacity: usize) -> u16 {
+    RegionLayout::new(capacity, collapsed).height(available, 0, total(view) > 0)
 }
 pub(super) fn configure(view: &mut ThreadView, collapsed: bool, capacity: usize, area: Rect) {
     let count = rows(view).count();
@@ -524,23 +524,26 @@ mod tests {
         }
     }
     #[test]
-    fn fixed_empty_heading_both_languages_and_fold_geometry() {
+    fn empty_heading_stays_readable_in_both_languages() {
         let mut ui = ui();
         ui.active_view_mut().pending_messages = Default::default();
         for (language, title) in [(UiLanguage::En, "None"), (UiLanguage::Ja, "なし")] {
-            configure(ui.active_view_mut(), false, 3, Rect::new(0, 0, 80, 5));
-            let buffer = screen(ui.view(), 80, language);
+            let area = Rect::new(0, 0, 80, 1);
+            configure(ui.active_view_mut(), false, 3, area);
+            let mut terminal = Terminal::new(TestBackend::new(80, 1)).unwrap();
+            terminal
+                .draw(|frame| draw(frame, area, ui.view(), language))
+                .unwrap();
+            let buffer = terminal.backend().buffer();
             let mut text = String::new();
             let mut x = 0;
             while x < buffer.area.width {
-                let symbol = buffer[(x, 1)].symbol();
+                let symbol = buffer[(x, 0)].symbol();
                 text.push_str(symbol);
                 x += symbol.width().max(1) as u16;
             }
             assert!(text.contains(title));
             assert_eq!(ui.view().held_input.visible_rows, 0);
-            assert_eq!(height(20, false, 3), 5);
-            assert_eq!(height(20, true, 3), 2);
         }
     }
     #[test]
@@ -686,22 +689,35 @@ mod tests {
         assert!(!ui.view().live_work.region.active);
     }
     #[test]
-    fn full_layout_orders_regions_and_keeps_headings_when_empty() {
+    fn empty_regions_leave_rows_to_conversation_and_restore_held_rows_on_arrival() {
         let mut ui = ui();
         ui.active_view_mut().pending_messages = Default::default();
-        let mut terminal = Terminal::new(TestBackend::new(80, 30)).unwrap();
+        let mut terminal = Terminal::new(TestBackend::new(80, 26)).unwrap();
         terminal
             .draw(|frame| super::super::draw(frame, &mut ui))
             .unwrap();
         let live = ui.view().live_work.region.area.unwrap();
         let held = ui.view().held_input.area.unwrap();
         assert_eq!(held.y, live.bottom());
-        assert!(held.bottom() < 30);
+        assert!(held.bottom() < 26);
         let view = ui.view();
         assert_eq!(view.live_work.region.visible_rows, 0);
         assert_eq!(view.held_input.visible_rows, 0);
-        assert_eq!(live.height, 5);
-        assert_eq!(held.height, 5);
+        assert_eq!(live.height, 1);
+        assert_eq!(held.height, 1);
+        let empty_body = view.navigation.scroll.area.unwrap();
+        ui.insert("synthetic send", false);
+        ui.key(key(KeyCode::Enter));
+        terminal
+            .draw(|frame| super::super::draw(frame, &mut ui))
+            .unwrap();
+        let view = ui.view();
+        assert_eq!(view.held_input.visible_rows, 1);
+        assert_eq!(view.held_input.area.unwrap().height, 5);
+        assert_eq!(
+            view.navigation.scroll.area.unwrap().height + 4,
+            empty_body.height
+        );
     }
     #[test]
     fn accepting_rows_never_clone_or_render_full_drafts_or_invent_saved_ids() {

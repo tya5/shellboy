@@ -405,8 +405,7 @@ impl LiveWorkView {
             .as_ref()
             .is_some_and(|s| !s.rows.is_empty() || s.overflow > 0)
     }
-    /// Heading always; a body of exactly `capacity` rows when open. The height
-    /// never depends on how much work exists (#131).
+    /// Empty work uses only its heading; work keeps the configured open height.
     pub fn height(&self, available: u16) -> u16 {
         let preview = if self
             .open
@@ -417,7 +416,9 @@ impl LiveWorkView {
         } else {
             0
         };
-        self.region.layout().height(available, preview)
+        self.region
+            .layout()
+            .height(available, preview, self.has_work())
     }
     pub fn set_area(&mut self, area: Rect) {
         let total = self.rows().len();
@@ -2029,20 +2030,20 @@ mod tests {
     }
 
     #[test]
-    fn height_is_constant_across_zero_two_zero_works_and_empty_heading_does_not_blink() {
+    fn empty_work_uses_one_row_without_blinking_and_work_keeps_its_configured_height() {
         let at = Instant::now();
         let mut ui = UiState::new(&japanese_config(), PathBuf::from("/"));
         ui.select_thread("thread".into());
         let (text, empty) = screen(&mut ui);
         assert!(text.contains("◉ 抱えている作業 | なし"), "{text}");
-        assert_eq!(empty, 5);
+        assert_eq!(empty, 1);
         assert!(ui.view().live_work.blink_origin().is_none());
         let mut two = snapshot(at);
         two.rows.truncate(2);
         set_work(&mut ui, Some(two), 1, at);
         let (text, busy) = screen(&mut ui);
         assert!(text.contains("printf synthetic-output"), "{text}");
-        assert_eq!(busy, empty);
+        assert_eq!(busy, 5);
         set_work(&mut ui, None, 2, at);
         let (_, after) = screen(&mut ui);
         assert_eq!(after, empty);

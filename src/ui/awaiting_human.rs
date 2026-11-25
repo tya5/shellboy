@@ -12,7 +12,7 @@ pub(super) fn height(available: u16, collapsed: bool, capacity: usize, count: us
     if count == 0 {
         return 0;
     }
-    RegionLayout::new(capacity, collapsed).height(available, 0)
+    RegionLayout::new(capacity, collapsed).height(available, 0, true)
 }
 pub(super) fn configure(view: &mut ThreadView, collapsed: bool, capacity: usize, area: Rect) {
     let count = rows(view).len();
