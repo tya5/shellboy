@@ -7860,28 +7860,34 @@ mod layout_cache_tests {
                 ui.view().navigation.anchor
             );
             previous = first;
-            let mut requests = std::collections::VecDeque::from(ui.take_deferred_actions());
-            requests.extend(ui.scroll(1));
-            while let Some(action) = requests.pop_front() {
-                if let UiAction::LoadNodeWindow {
-                    thread_id,
-                    generation,
-                    view_revision,
-                    char_offset,
-                    ..
-                } = action
-                {
-                    read_count += 1;
-                    assert!(read_count < 30, "bounded navigation must converge");
-                    ui.apply(UiUpdate::NodeWindow {
+            let mut deliver = |ui: &mut UiState, actions| {
+                let mut requests = std::collections::VecDeque::from(actions);
+                while let Some(action) = requests.pop_front() {
+                    if let UiAction::LoadNodeWindow {
                         thread_id,
                         generation,
                         view_revision,
-                        node: window(char_offset),
-                    });
-                    requests.extend(ui.take_deferred_actions());
+                        char_offset,
+                        ..
+                    } = action
+                    {
+                        read_count += 1;
+                        assert!(read_count < 30, "bounded navigation must converge");
+                        ui.apply(UiUpdate::NodeWindow {
+                            thread_id,
+                            generation,
+                            view_revision,
+                            node: window(char_offset),
+                        });
+                        requests.extend(ui.take_deferred_actions());
+                    }
                 }
-            }
+            };
+            // Settle the render's requests before advancing the navigation revision.
+            let requests = ui.take_deferred_actions();
+            deliver(&mut ui, requests);
+            let requests = ui.scroll(1);
+            deliver(&mut ui, requests);
         }
         assert!(read_count > 0);
     }
