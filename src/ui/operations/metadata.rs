@@ -675,6 +675,9 @@ fn operation_label_for(id: OperationId, language: crate::config::UiLanguage) -> 
         OperationId::ShellStop => local!(language, "shell · 停止", "Shell · Stop"),
         OperationId::AttachmentAdd => local!(language, "添付 · 追加", "Attachment · Add"),
         OperationId::AttachmentList => local!(language, "添付 · 一覧", "Attachment · List"),
+        OperationId::AttachmentReload => {
+            local!(language, "添付 · 明示再読込", "Attachment · Reload")
+        }
         OperationId::AttachmentRemove => local!(language, "添付 · 除外", "Attachment · Remove"),
         OperationId::Compact => local!(language, "履歴 · 圧縮と編集", "History · Compact and edit"),
         OperationId::IndexStatus => local!(language, "索引 · 状態", "Index · Status"),
@@ -1046,6 +1049,11 @@ fn operation_meaning_for(id: OperationId, language: crate::config::UiLanguage) -
             language,
             "対象Threadで選択されている添付参照とその状態を表示します。",
             "Show attachment references selected for the target Thread and their states."
+        ),
+        OperationId::AttachmentReload => local!(
+            language,
+            "対象Threadの添付を再読込して、送信せず現在のハッシュと状態を表示します。",
+            "Re-read the selected attachments for the Thread and report current hashes and status without sending."
         ),
         OperationId::AttachmentRemove => local!(
             language,
