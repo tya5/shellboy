@@ -2770,12 +2770,12 @@
           ]
         },
         "thread_id": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
-      "required": [
-        "thread_id"
-      ],
       "type": "object"
     },
     "DraftImageAction": {
@@ -3017,11 +3017,15 @@
               "format": "uint64",
               "minimum": 0,
               "type": "integer"
+            },
+            "thread_id": {
+              "type": "string"
             }
           },
           "required": [
             "kind",
             "draft_id",
+            "thread_id",
             "operation_id",
             "source_draft_id",
             "source_revision",
