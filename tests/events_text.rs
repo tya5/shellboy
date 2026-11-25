@@ -569,30 +569,38 @@ async fn a_filter_excludes_other_threads_and_the_cursor_moves_past_them() {
             let provider_a = fixture.next_request().await;
             send(&control, &b, "go").await;
             let provider_b = fixture.next_request().await;
-            let mut at = cursor(&poll(&control, None, &[&a], 0).await);
-            provider_b.delta("not for you");
-            // Everything is listed unfiltered; wait for the hidden delta to land.
-            loop {
-                let unfiltered = poll(&control, None, &[], 0).await;
-                if entry(&unfiltered, &b).is_some_and(|item| joined(item) == "not for you") {
-                    break;
+            // Both response headers precede the baseline, so the hidden delta
+            // is the only later receive before the filtered poll.
+            let mut at = loop {
+                let base = poll(&control, None, &[], 0).await;
+                if [&a, &b].into_iter().all(|thread| {
+                    entry(&base, thread).is_some_and(|item| item["receive_age_ms"].is_number())
+                }) {
+                    break cursor(&base);
                 }
                 tokio::time::sleep(Duration::from_millis(5)).await;
-            }
+            };
+            provider_b.delta("not for you");
+            let hidden_cursor = loop {
+                let unfiltered = poll(&control, None, &[], 0).await;
+                if entry(&unfiltered, &b).is_some_and(|item| joined(item) == "not for you") {
+                    break cursor(&unfiltered);
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            };
+            assert_ne!(hidden_cursor, at);
             let filtered = poll(&control, Some(&at), &[&a], 0).await;
-            assert!(matches!(
-                filtered["status"].as_str(),
-                Some("timeout" | "text")
-            ));
-            if filtered["status"] == "text" {
-                assert!(entry(&filtered, &a).unwrap()["receive_age_ms"].is_number());
-            }
+            assert_eq!(filtered["status"], "timeout");
             for item in filtered["live_text"].as_array().unwrap() {
                 assert_eq!(item["thread_id"], a);
                 assert_eq!(item["deltas"], json!([]));
                 assert!(item["receive_age_ms"].is_number());
             }
-            assert_ne!(cursor(&filtered), at, "the cursor moves past hidden text");
+            assert_eq!(
+                cursor(&filtered),
+                hidden_cursor,
+                "cursor passes the hidden delta"
+            );
             at = cursor(&filtered);
             provider_a.delta("for you");
             read_text(&control, &mut at, &a, 0, "for you").await;
