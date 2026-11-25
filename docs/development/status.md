@@ -33,6 +33,13 @@ retention. A request beyond the bound enters existing Turn recovery with a
 typed `input_limit`; no shortened history is sent. See the
 [replay design](../design/replay-cache.md#resend-assembly-limit-385).
 
+## Core #311 saved change delivery
+
+The TUI now consumes saved Thread invalidation through instance-fenced native
+`events.wait`, without a private saved-change fallback. A cursor gap schedules
+bounded readback in the existing scopes. Live preview and operational diagnostics
+still use the embedded paths; this is not the final client cutover.
+
 ## Core #311 native Thread archive
 
 Thread List and management archive/unarchive use the selected native owner.

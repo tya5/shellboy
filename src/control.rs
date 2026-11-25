@@ -564,7 +564,16 @@ impl Control {
     }
     #[cfg(test)]
     pub(crate) fn emit_test_event(&self, event: EngineEvent) {
+        if let EngineEvent::Changed { thread_id, .. } = &event {
+            self.change_clock.record(thread_id);
+        }
         self.publish_event(event);
+    }
+    #[cfg(test)]
+    pub(crate) fn expire_saved_event_cursor_for_test(&self) {
+        for i in 0..=change_clock::MAX_CHANGE_THREADS {
+            self.change_clock.record(&format!("fixture-gap-{i}"));
+        }
     }
     pub fn subscribe(&self) -> broadcast::Receiver<EngineEvent> {
         self.events.subscribe()

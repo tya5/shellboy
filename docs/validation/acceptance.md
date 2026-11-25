@@ -1,5 +1,12 @@
 # Validation record
 
+## Core #311 saved change delivery
+
+Two focused macOS tests passed: a native cursor gap retired a stale browser
+page ticket and the production first-page reader kept its continuation; a
+saved usage update refreshed the scoped management observation. Neither is a
+terminal attachment or replacement-owner acceptance test.
+
 ## Core #311 native Thread archive
 
 On macOS, the independent-owner browser witness archived and unarchived the
