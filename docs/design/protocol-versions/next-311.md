@@ -11,3 +11,28 @@ cursor, identified by Thread and event sequence. Baselines and gaps do not ring
 historical bells; a gap requests fresh saved state instead. A page returns at
 most 64 recovery transitions and may have more even when changes to the same
 Thread coalesced.
+
+## Selected history observation
+
+`history.window` accepts `include_observation: true`. The result adds
+`observation` even if its selected path is empty. The default response does
+not include this field. The owner observes the window, its pending-message
+prefix and typed holds, the selected Thread's activity IDs, and exact saved
+attempt-to-node bindings in one read transaction. Ambiguous bindings are not
+returned. `revision` still describes the selected path; `read_sequence`
+orders observation admissions within the selected owner instance, not across
+owners or independent header and sidebar calls.
+
+A pending observation returns up to 128 items ordered by saved receipt
+creation and row identity. The owner examines at most 129 rows per pending
+receipt state before applying the selected-path exclusion. If that prefix
+cannot prove completeness, `total_exact` is false and `total` is a lower
+bound; unavailable items are not evidence of rejection or delivery.
+
+Opt-in reads accept at most 128 window positions. `tools` reports exact
+node/group/call correlations with saved result and current execution facts;
+`limited_node_ids` reports per-node call coverage limits. `recovery` describes
+saved resume evidence without raw diagnostic records, and `usage` reports
+bounded candidate attempt identities and measured usage. These facts cover
+only items in the returned window. A response that cannot fit the frame
+budget fails with `InputLimit`; it is not returned as a complete observation.

@@ -2,6 +2,7 @@
 pub(super) mod archive;
 mod compose;
 mod execute_kind;
+mod history_observation;
 mod id_resolution;
 mod reparent;
 mod run_action;

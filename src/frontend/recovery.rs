@@ -88,6 +88,36 @@ pub(super) struct Evidence {
     source: Option<String>,
 }
 
+impl Evidence {
+    fn model_error(&self) -> Option<crate::model::ModelError> {
+        let body: serde_json::Value = serde_json::from_str(self.error_json.as_deref()?).ok()?;
+        serde_json::from_value(body.get("error")?.clone()).ok()
+    }
+
+    pub(super) fn into_window(
+        self,
+        items: &[crate::protocol::HistorySnippet],
+    ) -> crate::protocol::HistoryWindowRecovery {
+        use crate::protocol::{HistoryWindowRecovery, HistoryWindowRecoveryReason};
+        let reason = self.model_error().map(|error| HistoryWindowRecoveryReason {
+            kind: error.kind.chars().take(64).collect(),
+            excerpt: crate::presentation::sanitize_plain(
+                &error.message.chars().take(256).collect::<String>(),
+                0,
+            )
+            .0,
+            truncated: error.message.chars().nth(256).is_some(),
+        });
+        HistoryWindowRecovery {
+            node_id: items[self.index].node_id.clone(),
+            failure_count: self.count as u64,
+            latest_attempt_id: self.attempt,
+            source_node_id: self.source,
+            reason,
+        }
+    }
+}
+
 pub(super) fn requests(nodes: &[UiNode]) -> Vec<(usize, String)> {
     nodes
         .iter()
@@ -192,12 +222,7 @@ pub(super) fn apply(
     language: crate::config::UiLanguage,
 ) {
     for saved in evidence {
-        let error = saved
-            .error_json
-            .and_then(|body| serde_json::from_str::<serde_json::Value>(&body).ok())
-            .and_then(|body| {
-                serde_json::from_value::<crate::model::ModelError>(body["error"].clone()).ok()
-            });
+        let error = saved.model_error();
         let presentation = &mut nodes[saved.index].presentation;
         let note = match language {
             crate::config::UiLanguage::Ja => {

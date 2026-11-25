@@ -19,7 +19,7 @@ pub(crate) fn is_legacy_admission_node(id: &str, kind: &str) -> bool {
 }
 
 mod window;
-pub(crate) use window::NODE_SQL as SELECTED_NODE_ORDINAL_SQL;
+pub(crate) use window::{NODE_SQL as SELECTED_NODE_ORDINAL_SQL, committed_attempt_bindings};
 pub use window::{STATEMENTS_FOR_TESTS as WINDOW_STATEMENTS_FOR_TESTS, window};
 mod body_page;
 mod node_row;
@@ -39,6 +39,7 @@ pub fn reachability_for_tests(db: &Connection, id: &str) -> rusqlite::Result<boo
     reachability::searchable(db, id)
 }
 mod message_budget;
+pub(crate) use message_budget::fits_complete as fits_response_frame;
 mod message_provenance;
 pub(crate) mod notification;
 pub(crate) mod recall;

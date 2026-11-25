@@ -2079,6 +2079,7 @@ impl Form {
                 ],
                 |form, _cwd| {
                     Ok(Command::HistoryWindow(HistoryWindowArgs {
+                        include_observation: false,
                         items: false,
                         thread_id: form.owned("thread")?,
                         ordinal: form.optional_number("ordinal")?,

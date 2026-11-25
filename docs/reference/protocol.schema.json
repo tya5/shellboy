@@ -4698,6 +4698,16 @@
           },
           "type": "array"
         },
+        "observation": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HistoryWindowObservation"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "revision": {
           "format": "uint64",
           "minimum": 0,
@@ -4719,6 +4729,39 @@
         "items"
       ],
       "title": "HistoryWindow",
+      "type": "object"
+    },
+    "HistoryWindowActivity": {
+      "properties": {
+        "attempt_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "run_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "turn_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "waiting_reason": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RunWaitReason"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
       "type": "object"
     },
     "HistoryWindowArgs": {
@@ -4748,6 +4791,9 @@
             "null"
           ]
         },
+        "include_observation": {
+          "type": "boolean"
+        },
         "items": {
           "type": "boolean"
         },
@@ -4771,6 +4817,392 @@
       },
       "required": [
         "thread_id"
+      ],
+      "type": "object"
+    },
+    "HistoryWindowCommittedAttempt": {
+      "properties": {
+        "attempt_id": {
+          "type": "string"
+        },
+        "node_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "attempt_id",
+        "node_id"
+      ],
+      "type": "object"
+    },
+    "HistoryWindowInputBytes": {
+      "properties": {
+        "categories": {
+          "additionalProperties": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "object"
+        },
+        "total": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "total",
+        "categories"
+      ],
+      "type": "object"
+    },
+    "HistoryWindowObservation": {
+      "properties": {
+        "activity": {
+          "$ref": "#/definitions/HistoryWindowActivity"
+        },
+        "committed_attempts": {
+          "items": {
+            "$ref": "#/definitions/HistoryWindowCommittedAttempt"
+          },
+          "type": "array"
+        },
+        "pending": {
+          "$ref": "#/definitions/HistoryWindowPending"
+        },
+        "read_sequence": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "recovery": {
+          "items": {
+            "$ref": "#/definitions/HistoryWindowRecovery"
+          },
+          "type": "array"
+        },
+        "tools": {
+          "$ref": "#/definitions/HistoryWindowTools"
+        },
+        "usage": {
+          "items": {
+            "$ref": "#/definitions/HistoryWindowUsage"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "read_sequence",
+        "pending",
+        "committed_attempts",
+        "activity",
+        "tools",
+        "recovery",
+        "usage"
+      ],
+      "type": "object"
+    },
+    "HistoryWindowPending": {
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/definitions/HistoryWindowPendingMessage"
+          },
+          "type": "array"
+        },
+        "total": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "total_exact": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "items",
+        "total",
+        "total_exact"
+      ],
+      "type": "object"
+    },
+    "HistoryWindowPendingMessage": {
+      "properties": {
+        "delivery_status": {
+          "$ref": "#/definitions/DeliveryStatus"
+        },
+        "held_by": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MessageHeldBy"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "message_id": {
+          "type": "string"
+        },
+        "operation_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "message_id",
+        "operation_id",
+        "delivery_status"
+      ],
+      "type": "object"
+    },
+    "HistoryWindowRecovery": {
+      "properties": {
+        "failure_count": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "latest_attempt_id": {
+          "type": "string"
+        },
+        "node_id": {
+          "type": "string"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HistoryWindowRecoveryReason"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_node_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "node_id",
+        "failure_count",
+        "latest_attempt_id"
+      ],
+      "type": "object"
+    },
+    "HistoryWindowRecoveryReason": {
+      "properties": {
+        "excerpt": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "kind",
+        "excerpt",
+        "truncated"
+      ],
+      "type": "object"
+    },
+    "HistoryWindowToolCall": {
+      "properties": {
+        "background": {
+          "type": "boolean"
+        },
+        "call_id": {
+          "type": "string"
+        },
+        "call_node_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "command": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "elapsed_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "execution_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "group_id": {
+          "type": "string"
+        },
+        "node_id": {
+          "type": "string"
+        },
+        "ordinal": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "output_revision": {
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "boolean"
+            }
+          ],
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "prior_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "released": {
+          "type": "boolean"
+        },
+        "result_node_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "result_state": {
+          "type": "string"
+        },
+        "shell_exit_code": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "shell_state": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "started_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "node_id",
+        "group_id",
+        "call_id",
+        "ordinal",
+        "result_state",
+        "released",
+        "background"
+      ],
+      "type": "object"
+    },
+    "HistoryWindowTools": {
+      "properties": {
+        "calls": {
+          "items": {
+            "$ref": "#/definitions/HistoryWindowToolCall"
+          },
+          "type": "array"
+        },
+        "limited_node_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "calls",
+        "limited_node_ids"
+      ],
+      "type": "object"
+    },
+    "HistoryWindowUsage": {
+      "properties": {
+        "node_id": {
+          "type": "string"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/definitions/HistoryWindowUsageSource"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "node_id",
+        "sources"
+      ],
+      "type": "object"
+    },
+    "HistoryWindowUsageSource": {
+      "properties": {
+        "attempt_id": {
+          "type": "string"
+        },
+        "cached_tokens": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "input_bytes": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HistoryWindowInputBytes"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "input_tokens": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "attempt_id"
       ],
       "type": "object"
     },
@@ -15024,6 +15456,16 @@
             "$ref": "#/definitions/HistorySnippet"
           },
           "type": "array"
+        },
+        "observation": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HistoryWindowObservation"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "revision": {
           "format": "uint64",
