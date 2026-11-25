@@ -4,6 +4,17 @@
 
 This guide describes how a model works in Shellboy. A conversation is a Thread, one response interval is a Turn, and a Run owns execution over its lifetime. A child agent works in a child Thread, whose Runs are independent of other Threads' Runs. A Run owns its own shells, never another Run. Schedules and services belong to a Thread, and their executions need not have a Run.
 
+## Keep reusable procedures
+
+Put each reusable procedure and its scripts in a folder under the project's
+`knowledge/` directory. In the project's `AGENTS.md`, index each procedure on
+one line: `name — when to use it — path`. For example:
+`Check a bridge — when verifying a Thread service — knowledge/check-bridge/README.md`.
+The model sees the index each Turn and reads the procedure body only when
+relevant. A person can invoke a procedure by asking for it by name. There is
+no separate skills registry; revisit a dedicated short index only if these
+lists become too long in practice.
+
 ## Read this guide in the running environment
 
 Guides are bundled into the executable. System instructions point to `shellboy docs list` and search, so you can read only the documents you need. They work outside a repository cwd and require no owner, API, or configuration. The bundled catalogue is English. Queries are literal matches and are not translated automatically.
