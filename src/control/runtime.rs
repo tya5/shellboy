@@ -697,7 +697,6 @@ impl Control {
                     text,
                     reasoning_activity,
                     reasoning_changed,
-                    receive_changed,
                     recovery_transitions,
                     config_changed,
                     attempt_ends,
@@ -715,7 +714,7 @@ impl Control {
                             recovery_transitions,
                         );
                     }
-                    if reasoning_changed || receive_changed || !attempt_ends.is_empty() {
+                    if reasoning_changed || !attempt_ends.is_empty() {
                         return result(
                             EventsWaitStatus::Text,
                             cursor,

@@ -79,7 +79,7 @@ struct AttemptActivity {
     attempt: String,
     started: std::time::Instant,
     received_bytes: Option<u64>,
-    last_receive: Option<(u64, std::time::Instant)>,
+    last_receive: Option<std::time::Instant>,
     sequence: u64,
 }
 
@@ -105,7 +105,6 @@ pub(crate) enum Poll {
         text: Vec<EventLiveText>,
         reasoning_activity: Vec<EventReasoningActivity>,
         reasoning_changed: bool,
-        receive_changed: bool,
         recovery_transitions: Vec<EventRecoveryTransition>,
         config_changed: bool,
         attempt_ends: Vec<EventAttemptEnd>,
@@ -124,26 +123,16 @@ impl LiveTextGuard<'_> {
     pub(crate) fn reservation(&self) -> (String, std::sync::Arc<Mutex<bool>>) {
         (self.token.clone(), self.alive.clone())
     }
-    pub(crate) fn received(&self, at: std::time::Instant, notify: bool) {
+    pub(crate) fn received(&self, at: std::time::Instant) {
         let mut inner = self.clock.lock();
-        let seq = inner.seq + 1;
-        let Some(active) = inner
+        if let Some(active) = inner
             .reasoning_activity
             .get_mut(self.thread)
             .filter(|active| active.token == self.token)
-        else {
-            return;
-        };
-        if !notify && let Some((_, last)) = active.last_receive.as_mut() {
-            *last = (*last).max(at);
-            return;
+        {
+            // Time since the last bytes is sampled on readback, not cursor progress.
+            active.last_receive = Some(active.last_receive.map_or(at, |last| last.max(at)));
         }
-        active.last_receive = Some((seq, at));
-        inner.seq = seq;
-        drop(inner);
-        self.clock
-            .wakes
-            .publish([Key::Live(Some(self.thread.into())), Key::Live(None)]);
     }
     pub(crate) fn record(&self, offset: u64, text: &str, reasoning: bool) -> bool {
         self.clock.record_admitted_text(
@@ -571,13 +560,6 @@ impl ChangeClock {
             changes.retain(|(_, seq)| *seq <= cursor);
             more = true;
         }
-        let receive_changed = include_text
-            && inner.reasoning_activity.iter().any(|(thread, activity)| {
-                (filter.is_empty() || filter.contains(thread))
-                    && activity
-                        .last_receive
-                        .is_some_and(|(seq, _)| seq > after && seq <= cursor)
-            });
         let text = if include_text {
             inner.live_text(after, cursor, filter)
         } else {
@@ -609,7 +591,6 @@ impl ChangeClock {
             text,
             reasoning_activity,
             reasoning_changed,
-            receive_changed,
             recovery_transitions,
             config_changed: inner
                 .config_changed_seq
@@ -663,8 +644,7 @@ impl Inner {
                 .reasoning_activity
                 .get(thread)
                 .and_then(|active| active.last_receive)
-                .filter(|(seq, _)| *seq <= upto)
-                .map(|(_, at)| {
+                .map(|at| {
                     now.saturating_duration_since(at)
                         .as_millis()
                         .min(u64::MAX as u128) as u64
@@ -936,35 +916,30 @@ mod tests {
         let first = clock.live_text_guard("selected", "first");
         let baseline = clock.snapshot(&[], true, false).0;
         let now = std::time::Instant::now();
-        first.received(now - std::time::Duration::from_secs(30), true);
-        first.received(now - std::time::Duration::from_secs(5), false);
-        let Some(Poll::Ready {
-            text,
-            cursor,
-            receive_changed,
-            ..
-        }) = clock.poll(baseline, &["selected".into()], true, false)
+        first.received(now - std::time::Duration::from_secs(30));
+        first.received(now - std::time::Duration::from_secs(5));
+        let Some(Poll::Ready { text, cursor, .. }) =
+            clock.poll(baseline, &["selected".into()], true, false)
         else {
             panic!("expected a receive update")
         };
-        assert!(receive_changed);
+        assert_eq!(cursor, baseline);
         assert_eq!(text[0].attempt_id, "first");
         assert!(text[0].deltas.is_empty());
         assert!(text[0].receive_age_ms.unwrap() >= 5_000);
         assert_eq!(
             clock.lock().reasoning_activity["selected"]
                 .last_receive
-                .unwrap()
-                .1,
+                .unwrap(),
             now - std::time::Duration::from_secs(5)
         );
         let (hidden, _) = text_poll(&clock, baseline, &["other".into()]);
         assert!(hidden.is_empty());
         let second = clock.live_text_guard("selected", "second");
-        first.received(now, true);
+        first.received(now);
         let (retired, _) = text_poll(&clock, cursor, &["selected".into()]);
         assert!(retired.is_empty());
-        second.received(now, true);
+        second.received(now);
         let (current, _) = text_poll(&clock, cursor, &["selected".into()]);
         assert_eq!(current[0].attempt_id, "second");
     }
@@ -1397,6 +1372,47 @@ mod tests {
         drain.as_mut().enable();
         drop(closing);
         assert!(drain.as_mut().now_or_never().is_some());
+        server.shutdown().await.unwrap();
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn events_wait_samples_receive_age_without_completing_for_bytes_alone() {
+        use crate::protocol::{Command, EventsWaitArgs, Request};
+        let (_root, owner, control, server) = crate::frontend::control_tests::fixture().await;
+        let guard = control.fixture_live_text("t");
+        let request = |after| {
+            Request::new(
+                uuid::Uuid::new_v4().to_string(),
+                Command::EventsWait(EventsWaitArgs {
+                    after,
+                    thread_ids: vec!["t".into()],
+                    timeout_ms: 0,
+                    include_text: true,
+                    include_reasoning_activity: false,
+                }),
+            )
+        };
+        let baseline = control.request(request(None)).await.result.unwrap();
+        let cursor = baseline["cursor"].as_str().unwrap().to_owned();
+        guard.received(std::time::Instant::now());
+        let idle = control
+            .request(request(Some(cursor.clone())))
+            .await
+            .result
+            .unwrap();
+        assert_eq!(idle["status"], "timeout");
+        assert_eq!(idle["cursor"], cursor);
+        assert_eq!(idle["live_text"][0]["attempt_id"], "fixture-attempt");
+        assert!(idle["live_text"][0]["receive_age_ms"].is_number());
+        assert_eq!(idle["live_text"][0]["deltas"], serde_json::json!([]));
+        assert!(guard.record(0, "answer", false));
+        let text = control.request(request(Some(cursor))).await.result.unwrap();
+        assert_eq!(text["status"], "text");
+        assert_eq!(text["live_text"][0]["deltas"][0]["text"], "answer");
+        assert!(text["live_text"][0]["receive_age_ms"].is_number());
+        drop(guard);
         server.shutdown().await.unwrap();
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
