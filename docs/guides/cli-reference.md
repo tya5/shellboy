@@ -1200,7 +1200,7 @@ storage status for logical index bytes. Reclamation resumes after restart.
 
 Use `shellboy message ask --thread CHILD_THREAD_ID --text 'Report what you verified'` for a Thread, or `shellboy message ask --to human --text 'Choose A or B'` for a person. If both destination flags are omitted, the recipient still defaults to `human`; named recipients require model origin.
 
-`message ask` returns the same `MessageAccepted` shape as `message send` and `message reply`. Save its `message_id`. Acceptance opens the duty but does not prove delivery or execution. Inspect that message's `delivery_status` and follow its assigned `run_id` or `turn_id` when present. Inspect `reply.state` and `reply.node_id` for the answer; a closed duty without a reply is not an answer.
+`message ask` returns the same `MessageAccepted` shape as `message send`. Save its `message_id`. Acceptance opens the duty but does not prove delivery or execution. Inspect that message's `delivery_status` and follow its assigned `run_id` or `turn_id` when present. Inspect `reply.state` and `reply.node_id` for the answer; a closed duty without a reply is not an answer.
 
 A person answers in Studio or the TUI; the answer
 arrives in this Thread with `reply_to` and starts a Run if needed. Your questions

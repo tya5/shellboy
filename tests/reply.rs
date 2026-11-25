@@ -100,7 +100,8 @@ async fn named_ask_leaves_only_its_recipient_list_after_reply() {
         sender_label: Some("not the addressee".into()),
     }));
     let answer = store.execute(reply.clone(), None).await.unwrap().result;
-    crate::operation_result_schema::assert_result("message.reply", &answer);
+    crate::operation_result_schema::assert_result("message.send", &answer["delivery"]);
+    assert_eq!(answer["message_id"], answer["delivery"]["message_id"]);
     assert_eq!(answer["reply_to"], named.result["message_id"]);
     assert_eq!(store.execute(reply, None).await.unwrap().result, answer);
     let history = |id: &str| {
