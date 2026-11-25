@@ -20,6 +20,8 @@ pub(crate) mod inspection_external;
 mod inspection_history;
 mod inspection_index;
 mod inspection_lifecycle;
+#[cfg(test)]
+pub(crate) use inspection_lifecycle::inspect_run_fields_for_test;
 mod inspection_lists;
 mod inspection_operation;
 mod inspection_physical;

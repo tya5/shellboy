@@ -31,7 +31,8 @@ const RUN_SQL: &str = "SELECT CASE WHEN octet_length(r.thread_id)>512 THEN '' EL
     OR COALESCE(octet_length(r.ended_at)>512,0)
     OR COALESCE(octet_length(r.stop_reason)>512,0)
     OR COALESCE(octet_length(u.id)>512,0)
-    OR COALESCE(octet_length(u.answer_node_id)>512,0))
+    OR COALESCE(octet_length(u.answer_node_id)>512,0)),
+    CASE WHEN octet_length(r.stop_settlement_failure)>512 THEN '' ELSE r.stop_settlement_failure END
 FROM run r LEFT JOIN turn u ON u.id=(SELECT id FROM turn WHERE run_id=r.id ORDER BY created_at DESC,id DESC LIMIT 1)
                 WHERE r.id=?1";
 
@@ -61,6 +62,7 @@ struct RawRun {
     created: String,
     ended: Option<String>,
     stop_reason: Option<String>,
+    stop_settlement_failure: Option<String>,
     turn: Option<String>,
     answer: Option<String>,
     reason: Option<String>,
@@ -129,6 +131,7 @@ pub(super) fn read_tx(db: &Connection, command: &Command) -> Result<Raw, Storage
                         created: row.get(2)?,
                         ended: row.get(3)?,
                         stop_reason: row.get(4)?,
+                        stop_settlement_failure: row.get(10)?,
                         turn: row.get(5)?,
                         answer: row.get(6)?,
                         reason: row.get(7)?,
@@ -283,7 +286,9 @@ pub(super) fn prepare_in(
             (
                 thread,
                 encoded(RunDetails {
-                    stop_settlement_failure: None,
+                    stop_settlement_failure: crate::readback::decode_stop_settlement_failure(
+                        raw.stop_settlement_failure.as_deref(),
+                    )?,
                     model_requests: None,
                     stop_reason: None,
                     waiting_reason: raw.waiting_reason,
@@ -348,6 +353,17 @@ pub(super) fn prepare_in(
         limited_fields,
         observed_at: raw.observed_at,
     })
+}
+
+#[cfg(test)]
+pub(crate) fn inspect_run_fields_for_test(
+    db: &Connection,
+    id: &str,
+) -> Result<Vec<crate::presentation::PresentationField>, StorageError> {
+    let command = Command::RunGet(crate::protocol::RunTarget { run_id: id.into() });
+    let language = crate::config::UiLanguage::En;
+    let prepared = prepare_in(read_tx(db, &command)?, language)?;
+    Ok(super::management::report_in(language, prepared.value, 64 * 1024).fields)
 }
 
 pub(super) async fn request(

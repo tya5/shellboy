@@ -1,5 +1,7 @@
 //! Saved readback projections; no new receipts, provider calls or source writes.
-use crate::protocol::{ApiError, CompactListArgs, ErrorCode, ShellListArgs};
+use crate::protocol::{
+    ApiError, CompactListArgs, ErrorCode, RunStopSettlementFailure, ShellListArgs,
+};
 use rusqlite::{Connection, params};
 use serde_json::{Value, json};
 mod compact;
@@ -16,6 +18,21 @@ pub(crate) use compact_display::{last_compaction, read as read_last_compaction_d
 pub(crate) use run_wait::read as run_wait_reason;
 pub(crate) use shell::list as shells;
 pub(crate) use time::Window;
+pub(crate) fn decode_stop_settlement_failure(
+    reason: Option<&str>,
+) -> Result<Option<RunStopSettlementFailure>, ApiError> {
+    reason
+        .map(|reason| {
+            RunStopSettlementFailure::parse(reason).ok_or_else(|| {
+                ApiError::new(
+                    ErrorCode::InvalidState,
+                    "unknown saved stop settlement failure",
+                )
+            })
+        })
+        .transpose()
+}
+
 fn invalid(message: &str) -> ApiError {
     ApiError::new(ErrorCode::InvalidArgument, message)
 }

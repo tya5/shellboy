@@ -138,6 +138,7 @@ pub(super) fn report_in(language: UiLanguage, value: Value, budget: usize) -> Re
             "turn_id",
             "operation_id",
             "state",
+            "stop_settlement_failure",
             "scope",
             "count",
             "complete",
@@ -218,7 +219,10 @@ pub(super) fn report_in(language: UiLanguage, value: Value, budget: usize) -> Re
     fn summary_rank(pointer: &str) -> u8 {
         match pointer {
             "/state" | "/paused" | "/management/status/paused" => 0,
-            "/deletable_now" | "/snapshot_only" | "/result_uncertain" => 1,
+            "/deletable_now"
+            | "/snapshot_only"
+            | "/result_uncertain"
+            | "/stop_settlement_failure" => 1,
             _ => 2,
         }
     }
