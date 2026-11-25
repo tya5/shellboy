@@ -387,6 +387,31 @@ mod tests {
                     && call.call_id == "call"
                     && call.result_state == "failed")
         );
+        let block = |group: &str| crate::presentation::PresentationBlock {
+            kind: crate::presentation::BlockKind::ToolCall,
+            tool: Some(crate::presentation::ToolPresentation {
+                call_id: "call".into(),
+                group_id: Some(group.into()),
+                status: "requested".into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let node = UiNode {
+            node_id: "call-source".into(),
+            presentation: crate::presentation::NodePresentation {
+                blocks: vec![block("g"), block("different-group")],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        for (facts, state) in [(&old.tools, "completed"), (&fresh.tools, "failed")] {
+            let mut nodes = [node.clone()];
+            tools::apply_window(&mut nodes, facts);
+            let blocks = &nodes[0].presentation.blocks;
+            assert_eq!(blocks[0].tool.as_ref().unwrap().status, state);
+            assert_eq!(blocks[1].tool.as_ref().unwrap().status, "requested");
+        }
         drop(read);
         owner.shutdown().await.unwrap();
     }
