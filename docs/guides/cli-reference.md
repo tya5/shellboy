@@ -1202,7 +1202,7 @@ Use `shellboy message ask --thread CHILD_THREAD_ID --text 'Report what you verif
 
 `message ask` returns the same `MessageAccepted` shape as `message send`. Save its `message_id`. Acceptance opens the duty but does not prove delivery or execution. Inspect that message's `delivery_status` and follow its assigned `run_id` or `turn_id` when present. Inspect `reply.state` and `reply.node_id` for the answer; a closed duty without a reply is not an answer.
 
-`message reply` returns `MessageReplied`: `message_id` is the saved answer node and `reply_to` is the original Ask message ID. When the owner delivers the answer to an asking Thread, `delivery` is its `MessageAccepted` result. A standalone answer omits `delivery`.
+`message reply` returns `MessageReplied`: `message_id` is the saved answer node and `reply_to` is the original Ask message ID. When the owner routes the answer to a live asking Thread, `delivery` records acceptance for routing, not completed delivery. Check `delivery.delivery_status` for the initial status, which may be `held`. For current status, run `shellboy message get --message MESSAGE_ID` with the answer's `message_id`, not `reply_to`. A standalone answer omits `delivery`.
 
 A person answers in Studio or the TUI; the answer
 arrives in this Thread with `reply_to` and starts a Run if needed. Your questions
