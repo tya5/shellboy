@@ -454,6 +454,20 @@ relevant. A person can invoke a procedure by asking for it by name. There is
 no separate skills registry; revisit a dedicated short index only if these
 lists become too long in practice.
 
+## Bring skills and MCP servers you already have
+
+- **Skills:** Copy the `SKILL.md` folder and its scripts under `knowledge/`.
+  Use its frontmatter description as the “when to use it” part of the
+  `AGENTS.md` index line. Run its scripts through the shell. Adapt steps that
+  name another product's tools: replace `Read` and `Edit` with shell commands,
+  and `Agent` with Shellboy Thread delegation where appropriate.
+- **MCP servers:** The model calls a command-line MCP client through the shell.
+  If a server must stay running to maintain a login or connection, run it as a
+  Thread-owned service. Give the model a small CLI that can list tools, call a
+  tool, and show usage with `--help`. Use the server's supported transport and
+  keep credentials in a user-written private file. This is a setup pattern,
+  not a built-in adapter or an endorsement of a particular client.
+
 ## Ask and reply
 
 An **Ask** opens a reply duty: Shellboy saves the question, its delivery state,
