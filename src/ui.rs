@@ -7843,7 +7843,8 @@ mod layout_cache_tests {
         for step in 0..100 {
             terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
             let buffer = terminal.backend().buffer();
-            let text = (2..22)
+            let viewport = ui.view().navigation.scroll.area.unwrap();
+            let text = (viewport.y + 1..viewport.bottom() - 1)
                 .map(|y| (1..79).map(|x| buffer[(x, y)].symbol()).collect::<String>())
                 .collect::<Vec<_>>()
                 .join("\n");
