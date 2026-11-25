@@ -174,14 +174,14 @@ release notes when the cutover lands.
 
 Unit 4b owns saved attempt settlement and tool-notice projection, after which
 the remaining private notice/error subscription is removed. Neither needs a
-third event fact in 4a. The scoped native loop owns answer preview adoption.
-Saved-history updates and speculative frames use the same bounded ordered
-outbox; the loop reconciles them before forwarding either to the UI. A single
-answer chunk can display before the first saved read. Reconciliation retains a
-matching preview and retires an incompatible one in the same ordered delivery
-as saved state. Exact attempt ends retire their own staged preview after any
-in-flight frame is acknowledged. The view renders the outcome without keeping
-an attempt-end ledger. No additional delta, read, or delivery retry is needed.
+third event fact in 4a. The frontend delivers saved pages, preview frames and
+exact native attempt ends through the existing ordered outbox. A single answer
+chunk can display before the first saved read. The UI checks the window's
+navigation revision, installs the eligible window, and reconciles the preview
+against it in the same step. A superseded window cannot change the preview.
+When a replacement retires the preview anchor, the installed saved window
+supplies the anchor without a second read. Exact attempt ends follow any
+in-flight frame and do not require a second attempt-end ledger.
 
 
 Exact output is the separately reviewed Unit 4a-out, stacked on this unit.

@@ -47,7 +47,7 @@ pub struct ThreadView {
     // Last applied saved-history window, distinct from newer input requests.
     pub(super) received_window_revision: Option<u64>,
     pub total_nodes: u64,
-    notice_tail: Option<(u64, u64, Option<String>)>,
+    saved_tail: Option<(u64, u64, Option<String>)>,
     notice_anchor: Option<(u64, u64, String)>,
     pub status: String,
     pub pending: BTreeMap<u64, PendingSend>,
@@ -373,7 +373,7 @@ impl ThreadView {
             received_revision: 0,
             received_window_revision: None,
             total_nodes: 0,
-            notice_tail: None,
+            saved_tail: None,
             notice_anchor: None,
             status: crate::ui::i18n::local!(config.ui.language, "入力できます", "Ready for input")
                 .into(),
@@ -567,21 +567,84 @@ impl ThreadView {
 }
 
 impl ThreadView {
-    fn observe_notice_tail(&mut self, nodes: &[UiNode], first: u64, revision: u64, total: u64) {
-        // Notice baseline identity comes from the accepted saved page, never from the
+    pub(super) fn accepts_preview(&self, source: &crate::presentation::PreviewSource) -> bool {
+        self.saved_tail
+            .as_ref()
+            .is_none_or(|(_, _, tail)| tail == &source.input_through_node_id)
+    }
+
+    pub(super) fn reconcile_saved_preview(
+        &mut self,
+        settled: bool,
+        installed_anchor: Option<ViewAnchor>,
+    ) -> Vec<UiAction> {
+        let retired = self
+            .nodes
+            .iter()
+            .filter(|node| {
+                self.provisional_nodes.contains(&node.node_id)
+                    && node.role != "received_response"
+                    && (settled
+                        || node
+                            .presentation
+                            .preview_source
+                            .as_ref()
+                            .is_some_and(|source| !self.accepts_preview(source)))
+            })
+            .map(|node| node.node_id.clone())
+            .collect::<Vec<_>>();
+        if settled || !retired.is_empty() {
+            self.activity.clear_receive_observation();
+        }
+        if let Some(anchor) = installed_anchor
+            && self
+                .navigation
+                .anchor
+                .node_id
+                .as_ref()
+                .is_some_and(|id| retired.contains(id))
+        {
+            // The replacement already supplies a saved viewport; retiring the
+            // transient anchor must not start another rebase.
+            self.navigation.anchor = if anchor.node_id.as_ref().is_some_and(|id| {
+                !self.provisional_nodes.contains(id)
+                    && self.nodes.iter().any(|node| &node.node_id == id)
+            }) {
+                anchor
+            } else {
+                ViewAnchor {
+                    node_id: self
+                        .nodes
+                        .iter()
+                        .rev()
+                        .find(|node| !self.provisional_nodes.contains(&node.node_id))
+                        .map(|node| node.node_id.clone()),
+                    char_offset: 0,
+                }
+            };
+            self.navigation.scroll.within = 0;
+        }
+        retired
+            .iter()
+            .filter_map(|id| self.settle_stream(id))
+            .collect()
+    }
+
+    fn observe_saved_tail(&mut self, nodes: &[UiNode], first: u64, revision: u64, total: u64) {
+        // Tail identity comes from the accepted saved page, never from the
         // rendered list (which may contain pinned audit and live rows).
         if (total == 0 || !nodes.is_empty()) && first.saturating_add(nodes.len() as u64) == total {
-            self.notice_tail = Some((
+            self.saved_tail = Some((
                 revision,
                 total,
                 nodes.last().map(|node| node.node_id.clone()),
             ));
         } else if self
-            .notice_tail
+            .saved_tail
             .as_ref()
             .is_some_and(|(r, n, _)| (*r, *n) != (revision, total))
         {
-            self.notice_tail = None;
+            self.saved_tail = None;
         }
     }
 
@@ -593,9 +656,9 @@ impl ThreadView {
         total: u64,
     ) {
         use crate::presentation::{BlockKind, ToolReasonKind};
-        self.observe_notice_tail(nodes, first, revision, total);
+        self.observe_saved_tail(nodes, first, revision, total);
         let Some((previous_revision, ordinal, id)) = self.notice_anchor.as_ref() else {
-            if let Some((_, _, Some(id))) = &self.notice_tail {
+            if let Some((_, _, Some(id))) = &self.saved_tail {
                 self.notice_anchor = Some((revision, total - 1, id.clone()));
             }
             return;
@@ -610,7 +673,7 @@ impl ThreadView {
             // A path rewrite (or a newer page without proof of the prefix)
             // supplies a baseline, not a reason to replay its saved results.
             if revision > *previous_revision {
-                self.notice_anchor = self.notice_tail.as_ref().and_then(|(_, total, id)| {
+                self.notice_anchor = self.saved_tail.as_ref().and_then(|(_, total, id)| {
                     id.as_ref().map(|id| (revision, total - 1, id.clone()))
                 });
             }
