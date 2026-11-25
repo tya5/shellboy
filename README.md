@@ -12,13 +12,30 @@ interruption or restart, without assuming a stopped command will restart.
 
 ## What makes it different
 
+- **Ask and reply as saved work:** When a model [asks you or another Thread for an answer](docs/guides/user-guide.md#ask-and-reply), Shellboy records who owes it. An unanswered request stays visible and can be followed up or handed on, even after a restart.
 - **Long-running work:** Run [shells in the background](docs/guides/shell.md#foreground-and-background), [schedule commands](docs/guides/user-guide.md#schedule-a-command), and [manage services](docs/guides/user-guide.md#keep-a-command-running).
 - **Resumable conversations:** Reopen a [Thread with its history and working directory](docs/guides/user-guide.md#conversations-and-work-states).
-- **Explicit delegation:** Give a [child Thread a task and ask for a reply](docs/guides/delegation.md#creating-a-child-and-sending-a-request).
 - **Recoverable failures:** After a restart, distinguish [saved requests from completed work](docs/guides/recovery-and-storage.md#distinguish-acceptance-from-completion) and inspect [typed failures](docs/guides/recovery-and-storage.md#typed-failures-and-next-actions) before choosing what to do next.
 - **Inspectable history:** [Search an index](docs/guides/history-and-search.md#search-requires-a-separate-index), [read retained originals](docs/guides/history-and-search.md#finding-and-reading-original-content), [trace commands to saved output](docs/guides/history-and-search.md#linking-executions-and-history), [fork](docs/guides/history-and-search.md#forks-and-request-editing), or [compact](docs/guides/history-and-search.md#compaction-and-spill).
 - **One executable:** Use the [TUI and CLI](docs/guides/user-guide.md#talking-without-the-tui) with [local SQLite storage](docs/guides/user-guide.md#storage-and-resources). [Shellboy Studio](https://github.com/tya5/shellboy-studio) is an optional browser UI that connects to a compatible Core.
 - **Conversation API dialects:** Choose [Responses (default), Chat Completions, or Anthropic Messages](docs/guides/configuration.md#conversation-api-dialect) per connection. Dialect support does not guarantee compatibility with a particular provider.
+
+## Ask and reply
+
+If a model needs you to choose between two approaches, it can run
+`shellboy message ask --text 'Should I fix this now or defer it?'`. Answer in the
+TUI; Shellboy sends your answer back to that conversation and links it to the
+original question. The same reply tracking works when one Thread asks another
+Thread, whether or not it is a child.
+
+The idea comes from work tracking: a question has an assignee and a status.
+`message list --awaiting` shows replies still owed, even after a Turn ends. If
+a duty closes without a reply, its saved status shows that outcome. You can
+follow up or send a new Ask to someone else.
+
+Agent Guide: [Reply to a request](docs/guides/agent-guide.md#reply-to-a-request),
+[Ask the human for a decision](docs/guides/agent-guide.md#ask-the-human-for-a-decision),
+and [Ask another Thread for work](docs/guides/agent-guide.md#ask-another-thread-for-work).
 
 > **Safety:** Shellboy has no command sandbox or per-command approval.\
 > Model commands run with the owner's OS privileges.\

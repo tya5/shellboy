@@ -24,6 +24,38 @@ Operation guides for people using Shellboy and models working inside it. Start w
 
 For people: User Guide → TUI operations → task-specific guides. For models: Agent Guide → delegation/shell → CLI reference. Both audiences share the feature guides.
 
+## Ask and reply
+
+An **Ask** opens a reply duty: Shellboy saves the question, its delivery state,
+and who owes the reply. When the recipient replies to that question, the reply
+is linked to it. This does not require a parent-child relationship.
+
+| Who asks | Who receives the question | How |
+| --- | --- | --- |
+| Model in a Thread | You (the default `human` recipient) | `shellboy message ask --text TEXT` |
+| Model in a Thread | A named recipient | `shellboy message ask --to NAME --text TEXT`; the name is not a Thread ID. |
+| Model in a Thread | Another Thread on the same owner | `shellboy message ask --thread THREAD_ID --text TEXT`, including a Thread that is not a child. |
+| Person using the TUI or CLI | A Thread on the same owner | `/ask --thread THREAD_ID --text "Question"` in the TUI, or `shellboy message ask --thread THREAD_ID --text TEXT` in the CLI. |
+
+Asks to `human` or another named recipient require a model inside a Thread;
+invoking `message ask` from a regular terminal or the TUI cannot use those routes.
+Ordinary `message send`, including from scripts or scheduled commands, does not
+open a reply duty.
+
+Keep the returned `message_id`. Read the reply state with
+`shellboy message get --message MESSAGE_ID`; when `reply.state` is `replied`,
+read the answer with `shellboy history read --node REPLY_NODE_ID` using
+`reply.node_id`. A person can also observe the question with a bounded wait:
+
+```sh
+shellboy wait --conditions-json '[{"type":"reply_received","message_id":"MESSAGE_ID"}]' --timeout-ms 30000
+```
+
+Inspect the saved reply state afterward: an accepted ask is not an answer, and
+a wait can also settle when the duty ends without a reply.
+
+See the [User Guide](user-guide.md#ask-and-reply) and the [Agent Guide](agent-guide.md#reply-to-a-request).
+
 ## Common terms
 
 | Term | Meaning |
