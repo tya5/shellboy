@@ -135,24 +135,44 @@ fn pending(
             if row.get::<_, bool>(4)? {
                 candidates.push((
                     key,
-                    HistoryWindowPendingMessage {
-                        message_id: row.get(1)?,
-                        operation_id: row.get(2)?,
-                        delivery_status,
-                        held_by: None,
-                    },
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    delivery_status,
                 ));
             }
         }
     }
     candidates.sort_unstable_by(|a, b| a.0.cmp(&b.0));
     let total = candidates.len() as u64;
-    let mut items = candidates
+    // Only hydrate the proved prefix, not either raw state scan or its lookahead.
+    let mut display = db.prepare_cached(
+        "SELECT
+        COALESCE((SELECT substr(group_concat(fragment,''),1,513) FROM
+            (SELECT substr(json_extract(j.value,'$.text'),1,513) AS fragment
+               FROM json_each(n.payload_json,'$.content') j
+              WHERE json_extract(j.value,'$.type') IN ('input_text','output_text') LIMIT 128)),''),
+        (SELECT count(*) FROM attachment_ref a WHERE a.source_node_id=n.id)
+        FROM node n WHERE n.id=?1",
+    )?;
+    let mut items = Vec::with_capacity(PENDING_LIMIT.min(candidates.len()));
+    for ((created_at, _), message_id, operation_id, delivery_status) in candidates
         .into_iter()
-        .take_while(|(key, _)| first_unproven.as_ref().is_none_or(|bound| key < bound))
+        .take_while(|(key, ..)| first_unproven.as_ref().is_none_or(|bound| key < bound))
         .take(PENDING_LIMIT)
-        .map(|(_, item)| item)
-        .collect::<Vec<_>>();
+    {
+        let (excerpt, attachment_count): (String, i64) =
+            display.query_row([&message_id], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        items.push(HistoryWindowPendingMessage {
+            message_id,
+            operation_id,
+            delivery_status,
+            created_at,
+            excerpt_truncated: excerpt.chars().count() > 512,
+            excerpt: excerpt.chars().take(512).collect(),
+            attachment_count: attachment_count as u64,
+            held_by: None,
+        });
+    }
     let blockers = holds.read(db, items.iter().map(|item| item.message_id.as_str()))?;
     for (item, held_by) in items.iter_mut().zip(blockers) {
         item.held_by = held_by;

@@ -4342,13 +4342,15 @@ mod tests {
             let (instance, mut events, serve) = start(&data, "wire-thread", "Independent owner thread").await;
             let (other_instance, mut other_events, other_serve) = start(&other, "other-thread", "Other owner thread").await;
             assert_ne!(instance, other_instance);
+            let wrong_owner = NativeBrowser::new(&data, &other_instance);
+            assert_eq!(wrong_owner.list(Default::default(), &CancellationToken::new()).await.unwrap_err().code, crate::protocol::ErrorCode::ProtocolMismatch);
             let stop = CancellationToken::new();
             let other_stop = CancellationToken::new();
-            let other_browser = NativeBrowser::new(&other);
+            let other_browser = NativeBrowser::new(&other, &other_instance);
             let page = other_browser.list(Default::default(), &other_stop).await.unwrap();
             assert_eq!(page.items.iter().map(|row| row.thread_id.as_str()).collect::<Vec<_>>(), ["other-thread"]);
             {
-                let client = NativeBrowser::new(&data);
+                let client = NativeBrowser::new(&data, &instance);
                 let page = client.list(ThreadListArgs::default(), &stop).await.unwrap();
                 assert_eq!(page.items.iter().map(|row| row.thread_id.as_str()).collect::<Vec<_>>(), ["wire-thread"]);
                 let exact = client.exact(vec!["other-thread".into(), "wire-thread".into()], &stop).await.unwrap();
@@ -4371,7 +4373,7 @@ mod tests {
                 assert_eq!(client.set_archived("wire-thread".into(), false).await.unwrap(), 1);
                 stop.cancel();
             }
-            let again = NativeBrowser::new(&data).list(Default::default(), &CancellationToken::new()).await.unwrap();
+            let again = NativeBrowser::new(&data, &instance).list(Default::default(), &CancellationToken::new()).await.unwrap();
             assert_eq!(again.items[0].thread_id, "wire-thread");
             assert!(!serve.is_finished());
             assert!(crate::ipc::shutdown_owner(&data, None).await.unwrap().ok);
