@@ -909,6 +909,8 @@ pub struct NodePresentation {
     #[serde(skip)]
     pub provisional_stream: bool,
     #[serde(skip)]
+    pub preview_observation: u64,
+    #[serde(skip)]
     pub output_limited: bool,
     /// Skipped, failed or spill-only automatic attempt triggered after this
     /// response (#230); drawn as one note row, never part of the saved body.

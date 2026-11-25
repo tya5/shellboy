@@ -2566,11 +2566,9 @@ impl UiState {
         }
         let settled = view.turn_id.is_some()
             && (view.turn_id != details.turn_id || details.recovery_reason.is_some());
-        if settled {
-            self.apply_inner(UiUpdate::PreviewGap {
-                thread_id: thread.clone(),
-                generation,
-            });
+        if settled && let Some(view) = self.view_for(&thread, generation) {
+            let retired = view.retire_saved_preview(*read_revision);
+            self.deferred_actions.extend(retired);
         }
         let read_revision = *read_revision;
         // Children have all been checked before any mutation. Retain paid stream
@@ -3350,15 +3348,6 @@ impl UiState {
                     && view.delivery_read_revision != 0
                     && (selection_revision > view.selection_revision
                         || total_nodes > view.total_nodes);
-                let notice = (!append
-                    && view.delivery_read_revision != 0
-                    && selection_revision == view.selection_revision
-                    && total_nodes > view.total_nodes)
-                    .then(|| {
-                        let first_new = view.total_nodes.saturating_sub(first_ordinal);
-                        view::saved_tool_notice(&nodes, first_new, language)
-                    })
-                    .flatten();
                 if !view.on_history(
                     nodes,
                     before_cursor,
@@ -3372,16 +3361,7 @@ impl UiState {
                 view.delivery_read_revision = read_revision;
                 view.pending_messages = pending;
                 view.reconcile_saved_inputs();
-                let retired = if advanced {
-                    view.activity.clear_receive_observation();
-                    view.settle_other_streams("")
-                } else {
-                    Vec::new()
-                };
-                if let Some(notice) = notice {
-                    view.status = notice;
-                    view.promote_status_notice(history_interaction::NoticeKind::Info);
-                }
+                let retired = if advanced { view.retire_saved_preview(read_revision) } else { Vec::new() };
                 self.deferred_actions.extend(retired);
             }
             UiUpdate::StreamCommitted {
@@ -3422,6 +3402,11 @@ impl UiState {
                 let Some(view) = self.view_for(&thread_id, generation) else {
                     return;
                 };
+                if verified && view.preview_retired_at > 0
+                    && presentation.preview_observation <= view.preview_retired_at
+                {
+                    return;
+                }
                 let retired = if verified {
                     view.settle_other_streams(&node_id)
                 } else {
@@ -3692,6 +3677,7 @@ impl UiState {
                         view.reconcile_saved_inputs();
                     }
                     view.received_window_revision = Some(view_revision);
+                    let old = (view.selection_revision, view.total_nodes);
                     let refresh_tail = view.on_history_window(
                         nodes,
                         first_ordinal,
@@ -3700,6 +3686,10 @@ impl UiState {
                         anchor,
                         window_reply.is_some(),
                     );
+                    if (view.selection_revision, view.total_nodes) > old {
+                        let retired = view.retire_saved_preview(read_revision);
+                        self.deferred_actions.extend(retired);
+                    }
                     if refresh_tail {
                         self.deferred_actions.push(UiAction::LoadHistory {
                             thread_id,
@@ -8998,6 +8988,15 @@ mod tool_refresh_tests {
     }
     #[test]
     fn saved_tail_notices_skip_baseline_and_repeated_reads_and_retire_preview() {
+        saved_notices_and_preview(false);
+    }
+
+    #[test]
+    fn saved_window_first_notifies_once_and_fences_late_preview() {
+        saved_notices_and_preview(true);
+    }
+
+    fn saved_notices_and_preview(window_first: bool) {
         use crate::presentation::{BlockKind, PresentationBlock, ToolPresentation, ToolReasonKind};
         let mut ui = UiState::new(&Config::default(), PathBuf::from("/"));
         ui.select_thread("t".into());
@@ -9027,10 +9026,12 @@ mod tool_refresh_tests {
                     nodes,
                     total_nodes,
                     first_ordinal,
+                    selection_revision,
                     ..
                 } = history.as_mut()
             {
                 *first_ordinal = 0;
+                *selection_revision = total;
                 *total_nodes = total;
                 nodes.push(cancelled("old"));
                 if total > 1 {
@@ -9044,25 +9045,37 @@ mod tool_refresh_tests {
             ui.view().operation_notice.is_none(),
             "baseline is history, not a notice"
         );
-        ui.apply(UiUpdate::Stream {
+        let stream = |generation| UiUpdate::Stream {
             thread_id: "t".into(),
-            generation: ui.view().generation,
+            generation,
             node_id: "attempt".into(),
             role: "assistant".into(),
             text: "transient".into(),
             base_char_offset: 0,
             total_chars: 9,
             reasoning_ranges: Vec::new(),
-            presentation: Default::default(),
+            presentation: NodePresentation { preview_observation: 1, ..Default::default() },
             ack: Some(Arc::new(tokio::sync::Notify::new())),
-        });
+        };
+        ui.apply(stream(ui.view().generation));
         assert!(
             ui.view()
                 .nodes()
                 .iter()
                 .any(|node| node.node_id == "attempt")
         );
-        ui.apply(tail(&ui, 2, 2));
+        if window_first {
+            let view = ui.view();
+            ui.apply(UiUpdate::HistoryWindow {
+                thread_id: "t".into(), generation: view.generation,
+                view_revision: view.navigation.view_revision,
+                nodes: vec![cancelled("old"), cancelled("new")], pending: Default::default(),
+                read_revision: 2, first_ordinal: 0, selection_revision: 2, total_nodes: 2,
+                anchor: view.navigation.anchor.clone(),
+            });
+        } else {
+            ui.apply(tail(&ui, 2, 2));
+        }
         assert!(
             ui.view().operation_notice.is_some(),
             "new saved cancellation should notify"
@@ -9073,6 +9086,8 @@ mod tool_refresh_tests {
                 .iter()
                 .any(|node| node.node_id == "attempt")
         );
+        ui.apply(stream(ui.view().generation));
+        assert!(!ui.view().nodes().iter().any(|node| node.node_id == "attempt"), "late frame cannot restore retired preview");
         assert!(ui.view().nodes().iter().any(|node| node.node_id == "new"));
         ui.view_mut().clear_operation_notice();
         ui.apply(tail(&ui, 3, 2));

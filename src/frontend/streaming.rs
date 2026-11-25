@@ -10,9 +10,11 @@ pub(super) struct StreamBody {
     dirty: bool,
     revision: u64,
     gap: bool,
+    observation: u64,
 }
 impl StreamBody {
     pub(super) fn append(&mut self, text: &str, reasoning: bool) {
+        self.observation = super::message_queue::read_revision();
         let start = self.total;
         self.text.push_str(text);
         self.total += text.chars().count();
@@ -82,6 +84,7 @@ pub(super) struct Prepared {
     gap: bool,
     node: Option<UiNode>,
     prepared: bool,
+    observation: u64,
 }
 pub(super) enum Outcome {
     Queued,
@@ -115,6 +118,7 @@ impl Display {
                 gap,
                 dirty: true,
                 revision: 0,
+                observation: source.presentation.preview_observation,
             };
             if body.text.is_empty() {
                 body.base = body.total;
@@ -252,6 +256,7 @@ impl Display {
                 presentation: Default::default(),
             }),
             prepared: false,
+            observation: window.body.observation,
         })
     }
 }
@@ -267,6 +272,7 @@ impl Prepared {
                         self.ticket.width,
                     );
                     node.presentation.body_extent_unknown |= self.gap;
+                    node.presentation.preview_observation = self.observation;
                     seal_stream_node(node, &self.ticket, self.gap);
                 }
                 self.prepared = true;
