@@ -9,6 +9,7 @@ mod live;
 mod live_admission;
 mod memory;
 pub(crate) mod message_delivery;
+mod message_hold;
 mod notification;
 mod owner_shutdown;
 pub(crate) mod pending_messages;
@@ -1312,6 +1313,7 @@ impl Control {
                         })?;
                         self.recovery_rewind(request, origin, thread).await
                     }
+                    Command::MessageGet(args) => self.message_with_hold(&args.message_id).await,
                     Command::HistoryExport(args) => {
                         let thread = args.thread_id.clone();
                         let mut result = self.store.execute(request, origin).await?;

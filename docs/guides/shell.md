@@ -418,3 +418,9 @@ for `[shell] executable`. These Windows options are **unverified here**:
 - Use a container/VM for stronger isolation, or evaluate a Linux wrapper in WSL2
   after qualifying its namespace, IPC and proxy behavior there. No WSL2 or Windows
   Sandbox networking/ACL recipe has been tested as part of this guide.
+
+### Intervening in a foreground wait
+
+See the [agent guide's message delivery recipe](agent-guide.md#observe-application-and-identify-an-exact-blocker) for tracking an
+exact message and using its typed blocker to request Background. A `wait`
+observation timeout never stops the process or releases a foreground wait.

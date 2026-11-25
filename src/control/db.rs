@@ -2880,6 +2880,7 @@ pub fn message_details(connection: &Connection, id: &str) -> Result<MessageDetai
     let hint = (status == DeliveryStatus::Held)
         .then(|| super::message_delivery::held_hint(context.hold_reason.as_deref()).to_owned());
     Ok(MessageDetails {
+        held_by: None,
         to_human: metadata["to_human"] == true,
         sender: MessageSender::from_saved(Some(&row.6)),
         context,

@@ -606,6 +606,43 @@ async fn adoption_selection_conflict_rolls_back_without_entering_recovery() {
 #[tokio::test]
 async fn completed_attempt_cannot_adopt_its_tool_group_a_second_time() {
     let (_root, owner, control, accepted) = fixture("http://127.0.0.1:1/v1").await;
+    let cancelled = control
+        .store
+        .execute(
+            Request::new(
+                format!("{}:cancelled-input", owner.instance_id),
+                Command::MessageSend(MessageSendArgs {
+                    max_model_requests: None,
+                    resume_recovery: false,
+                    human: false,
+                    sender_label: None,
+                    deliver: crate::protocol::Deliver::Next,
+                    thread_id: Some(accepted.thread_id.clone()),
+                    text: "cancel this before admission".into(),
+                }),
+            ),
+            None,
+        )
+        .await
+        .unwrap()
+        .result["message_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let cancellation = control
+        .store
+        .execute(
+            Request::new(
+                format!("{}:cancel-input", owner.instance_id),
+                Command::MessageCancel(crate::protocol::MessageCancelArgs {
+                    message_ids: vec![cancelled.clone()],
+                }),
+            ),
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(cancellation.result["items"][0]["outcome"], "cancelled");
     let snapshot = ready(&control, &accepted).await;
     let prepared = Arc::new(
         control
@@ -631,6 +668,41 @@ async fn completed_attempt_cannot_adopt_its_tool_group_a_second_time() {
         .await
         .unwrap()
     );
+    let condition = crate::protocol::WaitCondition::MessageDelivered {
+        message_id: accepted.message_id.clone(),
+    };
+    let pending = super::super::wait::observe(
+        control.clone(),
+        "before-application".into(),
+        crate::protocol::WaitArgs {
+            conditions: vec![condition.clone()],
+            timeout_ms: 0,
+            after: None,
+        },
+        None,
+        CancellationToken::new(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(pending["status"], "timeout");
+    assert_eq!(pending["matched"], json!([]));
+    let observer = tokio::spawn(super::super::wait::observe(
+        control.clone(),
+        "parked-before-application".into(),
+        crate::protocol::WaitArgs {
+            conditions: vec![condition.clone()],
+            timeout_ms: 30_000,
+            after: None,
+        },
+        None,
+        CancellationToken::new(),
+    ));
+    crate::test_watchdog::watchdog(
+        "message application wait registered",
+        control.waits.parked.notified(),
+    )
+    .await
+    .unwrap();
     let response = model::ModelResponse::completed(json!({"id":"response","status":"completed","output":[{"type":"function_call","name":"shell","call_id":"call","arguments":"{\"command\":\"printf unused\"}"}]}),true).unwrap();
     model::request_path::persist_received_attempt(
         &control.store.database,
@@ -654,6 +726,48 @@ async fn completed_attempt_cannot_adopt_its_tool_group_a_second_time() {
         .await
         .unwrap()
     );
+    let observed = crate::test_watchdog::watchdog(
+        "message application commit wakes the registered wait",
+        observer,
+    )
+    .await
+    .unwrap()
+    .unwrap()
+    .unwrap();
+    assert_eq!(observed["matched"], json!([condition]));
+    let cancelled = crate::protocol::WaitCondition::MessageDelivered {
+        message_id: cancelled,
+    };
+    let mixed = super::super::wait::observe(
+        control.clone(),
+        "mixed-application".into(),
+        crate::protocol::WaitArgs {
+            conditions: vec![cancelled, condition.clone()],
+            timeout_ms: 0,
+            after: None,
+        },
+        None,
+        CancellationToken::new(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(mixed["status"], "satisfied");
+    assert_eq!(mixed["matched"], json!([condition]));
+    let applied = super::super::wait::observe(
+        control.clone(),
+        "after-application".into(),
+        crate::protocol::WaitArgs {
+            conditions: vec![condition.clone()],
+            timeout_ms: 0,
+            after: None,
+        },
+        None,
+        CancellationToken::new(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(applied["status"], "satisfied");
+    assert_eq!(applied["matched"], json!([condition]));
     assert!(
         !adopt_response(
             &control,
@@ -1391,6 +1505,12 @@ async fn a_reported_running_shell_can_be_backgrounded_immediately() {
             if let Some(id) = running { break id; }
             tokio::task::yield_now().await;
         };
+        let message_get = Request::new(
+            format!("{}:hold", owner.instance_id),
+            Command::MessageGet(crate::protocol::MessageTarget { message_id: accepted.message_id.clone() }),
+        );
+        let detail = control.request(message_get.clone()).await.result.unwrap();
+        assert_eq!(detail["held_by"], json!({"kind":"foreground_shell","execution_id":execution}));
         let accepted = if wire {
             let wrong = control.request(Request::new(format!("{}:stale", owner.instance_id), Command::ShellBackground(crate::protocol::ExecutionTarget { execution_id: "stale".into() }))).await;
             assert_eq!(wrong.error.unwrap().details.unwrap()["reason"], "execution_not_found");
@@ -1410,6 +1530,8 @@ async fn a_reported_running_shell_can_be_backgrounded_immediately() {
             control.background(&snapshot.thread, None).await.unwrap();
         }
         let (result, halt) = shell.await.unwrap();
+        let detail = control.request(message_get).await.result.unwrap();
+        assert!(detail.get("held_by").is_none());
         assert!(halt);
         assert_eq!(result, json!({"status":"running","execution_id":execution,"reason":"human_backgrounded","cancel_remaining_calls":true}));
         save_tool_result(&control, &snapshot, "publication-group", "publication-call", result).await.unwrap();
