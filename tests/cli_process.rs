@@ -1579,8 +1579,8 @@ async fn artifact_cli_round_trip_through_owner_changes_and_restart() {
 
 #[test]
 fn schedule_add_refuses_retired_positional_command_with_help() {
-    let output = Command::new(env!("CARGO_BIN_EXE_shellboy"))
-        .args([
+    for words in [
+        vec![
             "schedule",
             "add",
             "--in",
@@ -1589,24 +1589,42 @@ fn schedule_add_refuses_retired_positional_command_with_help() {
             "sh",
             "-c",
             "echo hello",
-        ])
-        .output()
-        .unwrap();
-    assert_eq!(output.status.code(), Some(1));
-    let response: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(response["error"]["code"], "invalid_argument");
-    let message = response["error"]["message"].as_str().unwrap();
-    assert!(
-        message.contains(r#"["sh", "-c", "echo hello"]"#),
-        "{response}"
-    );
-    assert!(message.contains("--command '...'"), "{response}");
+        ],
+        vec![
+            "--data-dir",
+            "PRIVATE_DIRECTORY",
+            "schedule",
+            "add",
+            "--in",
+            "10m",
+            "sh",
+            "--description",
+            "PRIVATE_DESCRIPTION",
+            "-c",
+            "echo hello",
+        ],
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_shellboy"))
+            .args(words)
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(1));
+        let response: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(response["error"]["code"], "invalid_argument");
+        let message = response["error"]["message"].as_str().unwrap();
+        assert!(
+            message.contains(r#"["sh", "-c", "echo hello"]"#),
+            "{response}"
+        );
+        assert!(message.contains("--command '...'"), "{response}");
+        assert!(!message.contains("PRIVATE_"), "{response}");
+    }
 }
 
 #[cfg(unix)]
 #[tokio::test]
 async fn schedule_add_command_round_trips_and_runs_nested_shellboy_send() {
-    use std::{path::Path, process::Stdio, time::Duration};
+    use std::{path::Path, process::Stdio};
     use tokio::io::{AsyncBufReadExt, BufReader};
 
     async fn cli(data: &Path, args: &[&str]) -> Value {
@@ -1647,16 +1665,21 @@ async fn schedule_add_command_round_trips_and_runs_nested_shellboy_send() {
         let items = list["items"].as_array().expect("schedule items");
         let item = items.iter().find(|item| item["schedule_id"] == listed["schedule_id"]).unwrap();
         assert_eq!(item["command"], command);
+        let baseline = cli(&data, &["events", "wait", "--thread", thread]).await;
+        let mut cursor = baseline["cursor"].as_str().unwrap().to_owned();
         cli(&data, &["schedule", "add", "--thread", thread, "--in", "1s", "--command", command]).await;
         let execution = loop {
             let list = cli(&data, &["shell", "list", "--thread", thread]).await;
-            if let Some(item) = list["items"].as_array().unwrap().iter().find(|item| {
-                matches!(item["state"].as_str(), Some("exited" | "failed" | "stopped"))
-            }) {
+            if let Some(item) = list["items"].as_array().unwrap().first() {
                 break item["execution_id"].as_str().unwrap().to_owned();
             }
-            tokio::time::sleep(Duration::from_millis(50)).await;
+            let changed = cli(&data, &["events", "wait", "--thread", thread, "--after", &cursor, "--timeout-ms", "10000"]).await;
+            assert_eq!(changed["status"], "changed", "{changed}");
+            cursor = changed["cursor"].as_str().unwrap().to_owned();
         };
+        let condition = serde_json::json!([{"type":"shell_ended", "execution_id":execution}]).to_string();
+        let settled = cli(&data, &["wait", "--conditions-json", &condition, "--timeout-ms", "10000"]).await;
+        assert_eq!(settled["status"], "satisfied", "{settled}");
         let saved = cli(&data, &["shell", "get", "--execution", &execution]).await;
         let read = cli(&data, &["shell", "read", "--execution", &execution]).await;
         assert_eq!(saved["exit_code"], 0, "{saved}: {read}");
