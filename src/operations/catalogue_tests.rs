@@ -161,6 +161,31 @@ fn fresh_clap_executable_paths_and_every_option_match_the_catalogue_bindings() {
             "{name} must not be offered as a TUI form"
         );
     }
+    // Snapshot discovery is an explicit CLI read, not a generated TUI form.
+    let draft_list = leaves
+        .remove("draft list")
+        .expect("tracked draft read path");
+    let actual = draft_list
+        .get_arguments()
+        .filter(|arg| !matches!(arg.get_id().as_str(), "help" | "version"))
+        .map(|arg| {
+            format!(
+                "--{}",
+                arg.get_long().expect("draft list uses named options")
+            )
+        })
+        .collect::<BTreeSet<_>>();
+    let mut expected = ["--thread", "--kind", "--limit", "--cursor"]
+        .map(str::to_owned)
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+    expected.extend(GLOBAL_ARGUMENTS.iter().map(|arg| arg.spelling.to_owned()));
+    assert_eq!(actual, expected);
+    assert!(
+        !CLI_BINDINGS
+            .iter()
+            .any(|binding| binding.path.join(" ") == "draft list")
+    );
     // Human decision requests (#262) are model-origin CLI operations, not TUI forms.
     assert!(leaves.remove("message ask").is_some());
     assert!(
