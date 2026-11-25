@@ -382,6 +382,33 @@ rewindは作成時の生の値をコピーするため、後から親を変更�
 offはコンパクション全体を止めません。意図された動作ではautomatic summaryを
 続け、automatic spill段階だけをskipします。実効値がautomaticの経路を決めます。
 
+## 質問と返信
+
+`Ask` は返信義務を作ります。質問、配信状態、誰が返信するかを保存し、
+返信が届くと元の質問に関連付けます。親子関係は不要です。
+
+| 質問する側 | 宛先 | 操作 |
+| --- | --- | --- |
+| Thread内のモデル | 利用者（既定の `human`） | `shellboy message ask --text TEXT` |
+| Thread内のモデル | 名前で指定した宛先 | `shellboy message ask --to NAME --text TEXT`。名前はThread IDではありません。 |
+| Thread内のモデル | 同じownerの別Thread | `shellboy message ask --thread THREAD_ID --text TEXT`。子Threadでなくても指定できます。 |
+| TUIまたはCLIを使う人 | 同じownerのThread | TUIでは `/ask --thread THREAD_ID --text "Question"`、CLIでは `shellboy message ask --thread THREAD_ID --text TEXT`。 |
+
+`human` や名前で指定した宛先への質問には、Thread内のモデルが必要です。
+通常の端末やTUIからはこれらの宛先に質問できません。スクリプトやスケジュールからの
+通常の `message send` は返信義務を作りません。
+
+返された `message_id` を保存し、`shellboy message get --message MESSAGE_ID` で返信状態を確認します。
+`reply.state` が `replied` の場合は、`reply.node_id` を使って
+`shellboy history read --node REPLY_NODE_ID` で回答を読みます。利用者は次のように時間を区切って待つこともできます。
+
+```sh
+shellboy wait --conditions-json '[{"type":"reply_received","message_id":"MESSAGE_ID"}]' --timeout-ms 30000
+```
+
+待機後は保存された返信状態を確認してください。質問の受付は回答ではなく、返信なしで義務が終了しても待機は終わることがあります。
+[Agent Guide](agent-guide.md#reply-to-a-request) に返信の手順があります。
+
 ## 5. 子へ委譲する
 
 「サブエージェントを使って」と言うだけで、モデルがShellboyの子Thread操作を正確に理解する保証はありません。ガイドは実行ファイルに同梱されています。モデルには短い入口の案内が渡り、必要なときに自分でガイドを読みます。全文が毎回の指示に展開されるわけではなく、checkoutやリポジトリのパスも不要です。確実に手順を読ませたいときはガイドIDを書きます。
