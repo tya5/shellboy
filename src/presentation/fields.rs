@@ -39,7 +39,7 @@ fn field_name(key: &str) -> &str {
         "operation_id" => "操作ID",
         "request_operation_id" => "この操作の受付ID",
         "owner_run_id" => "所有する親作業",
-        "parent_id" => "親会話",
+        "parent_id" | "parent_thread_id" => "親会話",
         "title" => "件名",
         "cwd" => "作業フォルダー",
         "agents_path" => "指示ファイル参照",
@@ -1050,13 +1050,15 @@ mod tests {
 
     #[test]
     fn human_terms_leave_canonical_identifiers_and_states_unchanged() {
-        let raw = serde_json::json!({"thread_id":"thread-full-id", "run_id":"run-full-id", "turn_id":"turn-full-id", "state":"running"});
+        let raw = serde_json::json!({"thread_id":"thread-full-id", "run_id":"run-full-id", "turn_id":"turn-full-id", "parent_thread_id":"current-parent-id", "parent_id":"saved-parent-id", "state":"running"});
         let mut fields = fields_of_value(&raw);
         decorate(&mut fields, &raw);
         for (key, label, value) in [
             ("/thread_id", "会話ID", "thread-full-id"),
             ("/run_id", "作業ID", "run-full-id"),
             ("/turn_id", "応答処理ID", "turn-full-id"),
+            ("/parent_thread_id", "親会話", "current-parent-id"),
+            ("/parent_id", "親会話", "saved-parent-id"),
         ] {
             let field = fields.iter().find(|field| field.key == key).unwrap();
             assert_eq!(field.label, label);

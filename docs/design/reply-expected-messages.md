@@ -248,7 +248,7 @@ duplicated.
 ### How a model lists pending reply-expected messages
 
 `message list --awaiting` pages pending duties with at most one direction
-filter (none lists every pending duty, oldest first): `--owed-by THREAD` (Thread-directed asks it must answer), `--asked-by
+filter (none lists every pending duty, oldest first): `--owed-by-thread THREAD` (Thread-directed asks it must answer), `--asked-by-thread
 THREAD` (asks it sent, named or Thread-directed) or `--to NAME` (asks to that
 name). Items are `{message_id, created_at, asked_by, sender, recipient, excerpt}`,
 oldest first, with `--limit` / `--cursor`. `thread get` returns
@@ -578,7 +578,7 @@ Every flow in `docs/guides/delegation.md` and the Agent Guide.
 
 | Current flow | Today | New | Lost? |
 |---|---|---|---|
-| Create child | `thread create --parent` | unchanged | no |
+| Create child | `thread create --parent-thread` | unchanged | no |
 | Assign work | `message send --thread CHILD --text …` | `message ask --thread CHILD --text …` | no |
 | Check assignment / pending | `message get` (`assignment`, `held` reason) | unchanged; also shows `reply.state` | no |
 | Wait for one child | `wait turn_completed CHILD_TURN` | `wait reply_received CHILD_MESSAGE` (+ `thread_settled` for recovery/stop if wanted) | no; waits on the specific request rather than whichever Turn answered |

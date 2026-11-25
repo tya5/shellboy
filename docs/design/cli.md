@@ -11,7 +11,7 @@ shellboy thread list [--limit 50] [--cursor TOKEN] [--query TEXT] [--state STATE
 shellboy thread get [--thread ID]
 shellboy thread export --thread ID --out PATH
 shellboy thread import --in PATH
-shellboy thread create [--cwd PATH] [--connection PROFILE] [--model ID] [--effort TEXT] [--parent ID]
+shellboy thread create [--cwd PATH] [--connection PROFILE] [--model ID] [--effort TEXT] [--parent-thread ID]
 shellboy thread fork --thread ID --node ID [--cwd PATH]
 shellboy thread delete-preview --thread ID [--descendants]
 shellboy thread delete --thread ID [--descendants]
@@ -23,7 +23,7 @@ shellboy thread unarchive [--thread ID]... [--descendants]
 shellboy thread tag [--thread ID]... [--add TAG]... [--remove TAG]...
 shellboy thread tags [--limit 50] [--cursor TOKEN]
 shellboy thread cwds [--limit 50] [--cursor TOKEN]
-shellboy thread set [--thread ID] [--cwd PATH] [--connection PROFILE] [--model ID] [--effort TEXT] [--auto-compact-at N|0|''] [--spill on|off|''] [--segment-chars N|''] [--reduce-rounds N|''] [--parent ID|'']
+shellboy thread set [--thread ID] [--cwd PATH] [--connection PROFILE] [--model ID] [--effort TEXT] [--auto-compact-at N|0|''] [--spill on|off|''] [--segment-chars N|''] [--reduce-rounds N|''] [--parent-thread ID|'']
 shellboy thread request --thread ID [--attempt ID] [--compare-attempt ID] [--body]
 shellboy message send [--thread ID] [--deliver now|complete] [--resume-recovery] (--text TEXT | --text-stdin)
 shellboy message get --message ID
@@ -66,7 +66,7 @@ Shell readの `--encoding` は任意で、未指定時はexecutionの保存済�
 
 ## CLI ID prefix resolution (#325)
 
-Before dispatch, one shared CLI resolver walks typed command target IDs for Thread, message, Run and shell execution. Full 36-character IDs pass through unchanged; nonempty values shorter than 8 characters are rejected; empty strings pass through as command values (for example, `--parent ''` detaches, while commands requiring an ID reject empty themselves). 8–35-character prefixes require the `id.resolve` Welcome capability and resolve only when unique. The owner reads at most nine ordered rows from one bounded indexed range on the key the existing command reads: primary keys for Thread, Run and shell execution, and the existing `receipt_message_node` index for messages. Count raw rows before visibility filtering, including tombstones: fewer than nine is a complete range and can answer exactly; nine means `prefix_too_short`, never uniqueness, with up to eight visible candidates. Complete ranges return the exact ID, `not_found`, or typed ambiguity with at most eight candidates. Only the resulting full IDs enter ordinary wire commands. If the capability is absent, short IDs fail locally with `required_capability=id.resolve`; full IDs remain usable. A `message.reply` prefix-resolution `not_found` includes the caller Thread's first 16 pending duty IDs from the existing bounded reply-inbox read, matching target-unavailable details; other commands retain plain `not_found`. Offline `thread request` inspection does not use owner resolution and keeps full IDs only. This adds no database schema, index, persisted state or dependency.
+Before dispatch, one shared CLI resolver walks typed command target IDs for Thread, message, Run and shell execution. Full 36-character IDs pass through unchanged; nonempty values shorter than 8 characters are rejected; empty strings pass through as command values (for example, `--parent-thread ''` detaches, while commands requiring an ID reject empty themselves). 8–35-character prefixes require the `id.resolve` Welcome capability and resolve only when unique. The owner reads at most nine ordered rows from one bounded indexed range on the key the existing command reads: primary keys for Thread, Run and shell execution, and the existing `receipt_message_node` index for messages. Count raw rows before visibility filtering, including tombstones: fewer than nine is a complete range and can answer exactly; nine means `prefix_too_short`, never uniqueness, with up to eight visible candidates. Complete ranges return the exact ID, `not_found`, or typed ambiguity with at most eight candidates. Only the resulting full IDs enter ordinary wire commands. If the capability is absent, short IDs fail locally with `required_capability=id.resolve`; full IDs remain usable. A `message.reply` prefix-resolution `not_found` includes the caller Thread's first 16 pending duty IDs from the existing bounded reply-inbox read, matching target-unavailable details; other commands retain plain `not_found`. Offline `thread request` inspection does not use owner resolution and keeps full IDs only. This adds no database schema, index, persisted state or dependency.
 
 ## Startup timing inspection (#212)
 
@@ -405,7 +405,7 @@ human by default) to request a deliberate reply and retain its message ID. The r
 --text TEXT` (or `--text-stdin`). `message get --message M` exposes reply state;
 `wait --conditions-json '[{"type":"reply_received","message_id":"M"}]'` waits
 for a terminal reply state, not a Turn's end message. `message list --awaiting`
-with at most one of `--owed-by T`, `--asked-by T` or `--to NAME` pages pending duties,
+with at most one of `--owed-by-thread T`, `--asked-by-thread T` or `--to NAME` pages pending duties,
 and `thread get` returns `pending_replies.owed_by` / `.asked_by` counts. See the adopted reply design for Run-end and exec
 behavior implemented by subsequent steps.
 

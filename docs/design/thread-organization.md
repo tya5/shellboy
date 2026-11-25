@@ -94,9 +94,9 @@ ancestry only; explicit replies use the sender on the original receipt.
 | ~~Retry only by the live direct owner or a human~~ | was: avoid two Runs deciding recovery for one child | **removed (#256)**: retry is a generation CAS (`resume_recovery_turn_tx` returns false when the Turn changed), so a race is safe. The user then also removed the stop check: any caller may stop or retry any Run (personal use; the check was not a security boundary) |
 | Model message to a child in `recovery_wait` is held | an ordinary message must not silently act as a retry | keep |
 | Delete refused while any selected Thread has a live/stopping Run | no deletion under running work | keep |
-| Parent must be a live Thread | no dangling new edges | keep for `set --parent` too |
+| Parent must be a live Thread | no dangling new edges | keep for `set --parent-thread` too |
 | Readers' bounds (depth 8, 256 members, 32 ancestors, 200 descendants) | bounded reads | keep; they are bounds that report incompleteness, not prohibitions |
-| Who may call `thread set` / `thread delete` / `thread create --parent` | — | no caller check exists today (`set_thread`, `delete_thread` take no authority check beyond Origin for target defaulting); a model may already delete any stopped Thread. Re-parenting under the same rule adds no stronger capability, so **no caller restriction** is proposed |
+| Who may call `thread set` / `thread delete` / `thread create --parent-thread` | — | no caller check exists today (`set_thread`, `delete_thread` take no authority check beyond Origin for target defaulting); a model may already delete any stopped Thread. Re-parenting under the same rule adds no stronger capability, so **no caller restriction** is proposed |
 
 Possible concern: a model could re-parent an independent Thread under itself and
 then own that Thread's next Run. The consequence is that its own Run stays live
@@ -108,8 +108,8 @@ the Thread independently except obligations. Not a safety issue.
 **Operation.** Reuse `thread.set` with one optional field:
 
 ```
-shellboy thread set --thread T --parent P     # attach / move under P
-shellboy thread set --thread T --parent ''    # detach: independent Thread
+shellboy thread set --thread T --parent-thread P     # attach / move under P
+shellboy thread set --thread T --parent-thread ''    # detach: independent Thread
 ```
 
 `""` clears, as `--effort ''` already does (`set_thread`, `src/control/db.rs:1761`).
@@ -154,7 +154,7 @@ fix up:
 - A fork child moved under another Thread leaves its old family. Under the new
   parent it is shown with a divergence if the paths share a prefix, otherwise
   `divergence_unknown = no_shared_prefix` (the existing state for plain
-  `create --parent` children). Inline `↳` markers in the old parent's history
+  `create --parent-thread` children). Inline `↳` markers in the old parent's history
   disappear; that is the meaning of moving it.
 - Detaching a fork makes it its own family root.
 - The paging cursor fingerprint includes (Thread, parent) pairs, so a move during
@@ -339,7 +339,7 @@ TUI (Thread browser, [thread browser](thread-browser.md)):
    new Run start; TUI archive key and view toggle; docs. Tests: EXPLAIN for each
    list mode, cursor per mode, bounds (200 IDs, 256 descendants), skipped live
    Threads, auto-unarchive only on Run start, GC unaffected.
-2. **Re-parent**: `thread set --parent P|''`; live-parent and cycle checks with the
+2. **Re-parent**: `thread set --parent-thread P|''`; live-parent and cycle checks with the
    1024-step bound; context record; changed old/new parent; F8 form field;
    guide wording. Tests: cycle (self, descendant, deep chain at the bound),
    re-parent with a live owned Run (old owner keeps notices and stop cascade; new parent
@@ -394,9 +394,9 @@ adopted design for stage 1; the sections above remain the study.
 
 Follows §3 with these concrete choices (decision D-222-2).
 
-- Wire: `thread.set` gains `parent_id` (`ThreadSetArgs`, skipped on the wire when absent). A
+- Wire: `thread.set` takes `parent_thread_id` (`ThreadSetArgs`, skipped on the wire when absent). A
   Thread ID moves the Thread under that Thread; the empty string detaches it. CLI
-  `thread set --parent ID|''`; F8 `会話 | 設定` field `親会話` (empty = unchanged, `none` = no
+  `thread set --parent-thread ID|''`; F8 `会話 | 設定` field `親会話` (empty = unchanged, `none` = no
   parent). The field combines with the other `thread set` fields in one transaction (the
   move runs first; any later failure rolls it back). No new command, table, worker or queue.
 - Checks run in the write transaction on the single DB worker (`src/control/db/reparent.rs`):

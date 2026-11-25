@@ -24,7 +24,7 @@ TUIでも同じstatus結果を構造化して表示し、対象IDから既存get
 
 ### 境界の具体化
 
-`status --state`は複数指定、`history list --status`は関連shellの単一native状態を指定する。履歴node自体にRunやshellと共通のライフサイクルは作らない。各nodeの実行リンクは8件までで総数と省略を明記し、残りは`status --run RUN --all`のページから取得する。TUIの`/status`は人間向けの全Thread一覧、`/status thread`は保存済み現在Thread、`/status all`は全Threadの終端も含める。未保存Threadの限定要求を全体へ読み替えない。
+`status --state`は複数指定、`history list --shell-state`は関連shellの単一native状態を指定する。履歴node自体にRunやshellと共通のライフサイクルは作らない。各nodeの実行リンクは8件までで総数と省略を明記し、残りは`status --run RUN --all`のページから取得する。TUIの`/status`は人間向けの全Thread一覧、`/status thread`は保存済み現在Thread、`/status all`は全Threadの終端も含める。未保存Threadの限定要求を全体へ読み替えない。
 
 管理結果の参照・再取得は発行世代を持ち、新しい要求の後で古い応答が画面を置き換えない。statusには対応receiptがないので、観測要求のoperation IDを受付参照先として表示しない。shell内部operation IDもexecution UUIDであり、owner receiptへのリンクに流用しない。
 

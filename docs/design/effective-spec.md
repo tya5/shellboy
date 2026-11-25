@@ -68,7 +68,7 @@ notes below describe their own releases, not the current schema number.
 Conversation schema32 (#222 stage 1) adds the nullable `thread.archived_at`
 column and two partial list indexes; archive is organization metadata only. See
 [thread organization](thread-organization.md) and [thread browser](thread-browser.md).
-Re-parenting (#222 stage 2, no schema change) lets `thread set --parent` move a Thread under another live
+Re-parenting (#222 stage 2, no schema change) lets `thread set --parent-thread` move a Thread under another live
 Thread or detach it; live Run ownership is never transferred. See the same documents.
 
 Human decision requests (#262) reuse reply receipts. Schema36 adds a partial
