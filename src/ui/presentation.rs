@@ -1897,7 +1897,8 @@ fn tool_metadata(
         || status == "background_current"
         || matches!(
             tool.reason_kind,
-            crate::presentation::ToolReasonKind::HumanBackgrounded
+            crate::presentation::ToolReasonKind::ShellBackgrounded
+                | crate::presentation::ToolReasonKind::HumanBackgrounded
                 | crate::presentation::ToolReasonKind::AdditionalInput
         );
     let mut parts = Vec::new();
@@ -5601,6 +5602,7 @@ mod conversation_item_tests {
             for (explicit_background, reason, expected) in [
                 (false, ToolReasonKind::Unknown, ""),
                 (true, ToolReasonKind::Unknown, "背景"),
+                (false, ToolReasonKind::ShellBackgrounded, "背景"),
                 (false, ToolReasonKind::HumanBackgrounded, "背景（利用者）"),
                 (false, ToolReasonKind::AdditionalInput, "背景（追加入力）"),
             ] {
@@ -5624,6 +5626,11 @@ mod conversation_item_tests {
                     if !expected.is_empty() {
                         assert!(text.contains(expected), "{text}");
                     }
+                    assert_eq!(
+                        text.contains("背景（利用者）"),
+                        reason == ToolReasonKind::HumanBackgrounded,
+                        "{status}: {text}"
+                    );
                     assert!(text.contains("printf synthetic"), "{text}");
                 }
                 assert_eq!(

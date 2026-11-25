@@ -429,8 +429,10 @@ entry from generation tool definitions and keeps command-based rows.
 
 For a cancelled shell call, check `executed: false`, its stable `reason`, and
 `prerequisite` facts. `previous_wait_released_by_new_input` and
-`previous_wait_released_by_human_background` mean inspect the existing
+`previous_wait_released_by_shell_background` mean inspect the existing
 prerequisite execution with get/read/wait, rather than repeat its command.
+The historical `previous_wait_released_by_human_background` reason calls for
+the same readback.
 `previous_call_failed` requires reading the retained failure output;
 `previous_output_incomplete` does not itself imply a failed process.
 `previous_wait_released` preserves a CLI wait outcome separately from process

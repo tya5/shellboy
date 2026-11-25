@@ -400,7 +400,9 @@ fn ordered_tool_group_visible(nodes: &[ui::UiNode]) -> bool {
             && tool.status == "cancelled"
             && tool.command == "printf MUST_NOT_RUN"
     }) && tools.clone().any(|tool| {
-        tool.call_id == "two" && tool.status == "running" && tool.reason.contains("背景へ移行")
+        tool.call_id == "two"
+            && tool.status == "running"
+            && tool.reason_kind == shellboy::presentation::ToolReasonKind::ShellBackgrounded
     }) && nodes
         .iter()
         .filter(|node| node.role == "tool")
@@ -497,7 +499,7 @@ async fn multiple_calls_keep_source_order_numbers_commands_background_and_cancel
     assert_eq!(cancelled["executed"], false);
     assert_eq!(
         cancelled["reason"],
-        "previous_wait_released_by_human_background"
+        "previous_wait_released_by_shell_background"
     );
     assert_eq!(cancelled["prerequisite"]["call_id"], "two");
     assert_eq!(
@@ -608,7 +610,7 @@ async fn multiple_calls_keep_source_order_numbers_commands_background_and_cancel
         && tool.command == "printf MUST_NOT_RUN"));
     assert!(early_facts.iter().any(|tool| tool.call_id == "two"
         && tool.status == "running"
-        && tool.reason.contains("背景へ移行")));
+        && tool.reason_kind == shellboy::presentation::ToolReasonKind::ShellBackgrounded));
     assert_eq!(
         early_enriched
             .iter()
@@ -685,9 +687,9 @@ async fn multiple_calls_keep_source_order_numbers_commands_background_and_cancel
     for wanted in [
         "printf one",
         "⏵ tail -f /dev/null",
-        "背景（利用者）",
+        "背景 |",
         "⊘ printf MUST_NOT_RUN",
-        "利用者が先行する呼出しを背景へ移したため未実行",
+        "先行する呼出しを背景へ移したため未実行",
     ] {
         assert!(shown.contains(wanted), "missing {wanted}: {shown}");
     }
@@ -695,10 +697,11 @@ async fn multiple_calls_keep_source_order_numbers_commands_background_and_cancel
         .lines()
         .find(|line| line.contains("⏵ tail -f /dev/null"))
         .unwrap();
-    assert!(running_row.contains("背景（利用者）"), "{running_row}");
+    assert!(!shown.contains("背景（利用者）"));
+    assert!(!shown.contains("利用者が先行する呼出し"));
     assert!(
         running_row.find("tail -f /dev/null").unwrap()
-            < running_row.find("背景（利用者）").unwrap()
+            < running_row.find("背景 |").unwrap()
     );
     // The background-process panel (`\-[1] $ cmd`) may or may not be on screen
     // when the frame is drawn; only conversation items count here.
