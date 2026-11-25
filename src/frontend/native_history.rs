@@ -120,6 +120,7 @@ impl Owner<'_> {
                 Some(_) => return Err(invalid_response()),
                 None => {
                     let outline = page.outline.take().ok_or_else(invalid_response)?;
+                    validate_outline(&page.extent, &outline)?;
                     extent.insert(DisplayExtent::new(
                         body.kind.clone(),
                         body.provenance.source_revision,
@@ -231,6 +232,26 @@ impl DisplayExtent {
         self.end = page.page.end;
         Ok(())
     }
+}
+
+fn validate_outline(
+    extent: &HistoryDisplayRange,
+    outline: &HistoryDisplayOutline,
+) -> Result<(), ApiError> {
+    let in_extent = |range: &HistoryDisplayRange| {
+        range.start >= extent.start && range.start < range.end && range.end <= extent.end
+    };
+    let mut previous = extent.start;
+    for block in &outline.blocks {
+        if !in_extent(&block.range) || block.range.start < previous {
+            return Err(invalid_response());
+        }
+        previous = block.range.end;
+    }
+    if outline.links.iter().any(|link| !in_extent(&link.range)) {
+        return Err(invalid_response());
+    }
+    Ok(())
 }
 
 fn source_changed() -> ApiError {
@@ -382,6 +403,34 @@ mod tests {
         assert_eq!(
             extent.reasoning,
             [HistoryDisplayRange { start: 40, end: 44 }]
+        );
+    }
+
+    #[test]
+    fn native_display_rejects_outline_outside_its_extent() {
+        use crate::protocol::{HistoryDisplayBlock, HistoryDisplayRole};
+        let mut outline = outline();
+        let extent = HistoryDisplayRange { start: 14, end: 20 };
+        for (start, end) in [(14, 16), (16, 20)] {
+            outline.blocks.push(HistoryDisplayBlock {
+                range: HistoryDisplayRange { start, end },
+                role: HistoryDisplayRole::Prose,
+                tool: None,
+                event_kind: None,
+                fields: Vec::new(),
+            });
+        }
+        validate_outline(&extent, &outline).unwrap();
+        outline.blocks[1].range.start = 15;
+        assert_eq!(
+            validate_outline(&extent, &outline).unwrap_err().code,
+            ErrorCode::ProtocolMismatch
+        );
+        outline.blocks[1].range.start = 16;
+        outline.blocks[1].range.end = 21;
+        assert_eq!(
+            validate_outline(&extent, &outline).unwrap_err().code,
+            ErrorCode::ProtocolMismatch
         );
     }
 
