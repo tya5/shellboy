@@ -2465,6 +2465,8 @@ async fn run_client(
                             Ok(Some(stop))=>stop,Ok(None)=>continue,
                             Err(error)=>{update(&updates,UiUpdate::ThreadListFailed {generation,error:error.to_string()}).await;continue;}
                         };
+                        #[cfg(test)]
+                        saved_events::tests::observe(saved_events::tests::Observed::Page { generation, stop: page_stop.clone() });
                         let control=control.clone();let results=background_tx.clone();let progress_slots=progress_slots.clone();let diagnostics=control.diagnostics().clone();
                         if !spawn_read(&mut read_workers,&read_slots,&read_cancel,async move {
                             let requested_cursor=cursor.clone();
@@ -3783,6 +3785,10 @@ async fn run_client(
             event = async { saved_events.as_mut().expect("guarded native wait").await }, if saved_events.is_some() => {
                 match event {
                     Ok(page) => {
+                        #[cfg(test)]
+                        if page.status == crate::protocol::EventsWaitStatus::Baseline {
+                            saved_events::tests::observe(saved_events::tests::Observed::Baseline);
+                        }
                         if saved_events::schedule_reload(&page, &mut browser) {
                             status_dirty |= status_enabled;
                             management.inspection.resync();

@@ -144,8 +144,8 @@ normal bounded first-page and selected reads, not a walk through old pages.
 The first baseline also refreshes any view already shown before it arrived.
 
 No worker or queued event buffer is added; dropping the pending wait drops its
-connection. Definite wait-class admission refusal can wait and retry the same
-cursor. Other errors stop the wait and use the existing reconnect/quit gate;
+connection. All wait errors, including typed wait-class admission refusal, stop
+the wait and use the existing reconnect/quit gate without a client retry;
 explicit reconnect must validate the same instance before resuming the cursor.
 This slice does not remove the remaining private live preview, recovery bell,
 or diagnostics paths, or implement reattachment to a replacement owner.
