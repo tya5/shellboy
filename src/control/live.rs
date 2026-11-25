@@ -335,8 +335,13 @@ impl LiveRegistry {
     ) -> Result<Option<String>, ()> {
         let drivers = self.drivers.try_lock().map_err(|_| ())?;
         match drivers.get(thread) {
-            Some(slot) if slot.run_id == run && !slot.stop.is_cancelled()
-                && slot.driver_active.load(Ordering::Acquire) => Ok(slot.foreground.waiting_execution()),
+            Some(slot)
+                if slot.run_id == run
+                    && !slot.stop.is_cancelled()
+                    && slot.driver_active.load(Ordering::Acquire) =>
+            {
+                Ok(slot.foreground.waiting_execution())
+            }
             Some(_) => Err(()),
             None => Ok(None),
         }

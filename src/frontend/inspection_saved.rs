@@ -2,8 +2,8 @@
 use crate::{
     context::ExecutionContext,
     protocol::{
-        ApiError, Assignment, Command, DeliveryStatus, ErrorCode, MessageDetails, MessageHeldBy, MessageSender,
-        ShellDetails, ShellState,
+        ApiError, Assignment, Command, DeliveryStatus, ErrorCode, MessageDetails, MessageHeldBy,
+        MessageSender, ShellDetails, ShellState,
     },
     storage::StorageError,
 };

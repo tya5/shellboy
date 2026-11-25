@@ -23,10 +23,15 @@ pub(super) fn exact_input_candidate(
         &format!("SELECT EXISTS(SELECT 1 FROM {TURN_INPUT_CANDIDATES} AND message_node_id=?2 AND target_thread_id=?3)"),
         params![turn, message, thread], |row| row.get::<_, bool>(0),
     )?;
-    if !candidate { return Ok(false); }
+    if !candidate {
+        return Ok(false);
+    }
     // Prove this node can cross the existing admission frontier. An earlier
     // caller absent from this single-target proof may make attribution unknown.
-    Ok(plan_admission_tx(db, thread, &[message.to_owned()], "")?.admitted_callers.iter().any(|id| id == message))
+    Ok(plan_admission_tx(db, thread, &[message.to_owned()], "")?
+        .admitted_callers
+        .iter()
+        .any(|id| id == message))
 }
 
 pub(crate) fn held_hint(reason: Option<&str>) -> &'static str {

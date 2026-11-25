@@ -668,10 +668,16 @@ async fn completed_attempt_cannot_adopt_its_tool_group_a_second_time() {
         .await
         .unwrap()
     );
-    let generating = control.request(Request::new(
-        format!("{}:generating-hold", owner.instance_id),
-        Command::MessageGet(crate::protocol::MessageTarget { message_id: accepted.message_id.clone() }),
-    )).await.result.unwrap();
+    let generating = control
+        .request(Request::new(
+            format!("{}:generating-hold", owner.instance_id),
+            Command::MessageGet(crate::protocol::MessageTarget {
+                message_id: accepted.message_id.clone(),
+            }),
+        ))
+        .await
+        .result
+        .unwrap();
     assert_eq!(generating["held_by"], json!({"kind":"response_generation"}));
     let condition = crate::protocol::WaitCondition::MessageDelivered {
         message_id: accepted.message_id.clone(),
@@ -744,10 +750,18 @@ async fn completed_attempt_cannot_adopt_its_tool_group_a_second_time() {
         message_id: cancelled,
     };
     let cancelled_only = super::super::wait::observe(
-        control.clone(), "cancelled-delivery".into(), crate::protocol::WaitArgs {
-            conditions: vec![cancelled.clone()], timeout_ms: 0, after: None,
-        }, None, CancellationToken::new(),
-    ).await.unwrap();
+        control.clone(),
+        "cancelled-delivery".into(),
+        crate::protocol::WaitArgs {
+            conditions: vec![cancelled.clone()],
+            timeout_ms: 0,
+            after: None,
+        },
+        None,
+        CancellationToken::new(),
+    )
+    .await
+    .unwrap();
     assert_eq!(cancelled_only["status"], "unavailable");
     assert_eq!(cancelled_only["matched"], json!([]));
     let mixed = super::super::wait::observe(
@@ -2477,10 +2491,16 @@ async fn recovery_rewind_stops_exact_waiting_run_and_preserves_held_input_body_a
         .unwrap()
         .result;
     let held_id = held["message_id"].as_str().unwrap().to_owned();
-    let detail = control.request(Request::new(
-        format!("{}:recovery-hold", owner.instance_id),
-        Command::MessageGet(crate::protocol::MessageTarget { message_id: held_id.clone() }),
-    )).await.result.unwrap();
+    let detail = control
+        .request(Request::new(
+            format!("{}:recovery-hold", owner.instance_id),
+            Command::MessageGet(crate::protocol::MessageTarget {
+                message_id: held_id.clone(),
+            }),
+        ))
+        .await
+        .result
+        .unwrap();
     assert_eq!(detail["held_by"], json!({"kind":"recovery_wait"}));
     let before_held = {
         let id = held_id.clone();
