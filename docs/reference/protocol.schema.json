@@ -5451,6 +5451,16 @@
         "expect_reply": {
           "type": "boolean"
         },
+        "held_by": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MessageHeldBy"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "hint": {
           "type": [
             "string",
@@ -5499,6 +5509,86 @@
       ],
       "title": "MessageDetails",
       "type": "object"
+    },
+    "MessageHeldBy": {
+      "oneOf": [
+        {
+          "properties": {
+            "execution_id": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "foreground_shell",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "execution_id"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "response_generation",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "run_completion",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "recovery_wait",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "stopping",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "unknown",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "MessageListArgs": {
       "additionalProperties": false,
@@ -13469,6 +13559,23 @@
               "type": "string"
             },
             "type": {
+              "const": "message_delivered",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "message_id"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "message_id": {
+              "type": "string"
+            },
+            "type": {
               "const": "reply_received",
               "type": "string"
             }
@@ -15206,6 +15313,16 @@
         },
         "expect_reply": {
           "type": "boolean"
+        },
+        "held_by": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MessageHeldBy"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "hint": {
           "type": [
