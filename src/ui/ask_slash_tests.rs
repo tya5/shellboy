@@ -71,14 +71,22 @@ async fn thread_ask_slash_opens_one_duty_and_send_opens_none() {
         "fixture".into(),
     );
     let request = |id: &str, command| Request::new(format!("fixture:{id}"), command);
-    let count = || {
-        store.database.call(|db| {
-            Ok(
-                db.query_row("SELECT count(*) FROM pending_replies", [], |row| {
-                    row.get::<_, i64>(0)
-                })?,
+    let owed = || async {
+        store
+            .execute(
+                request(
+                    "details",
+                    Command::ThreadGet(ThreadGetArgs {
+                        thread_id: Some("recipient".into()),
+                        display: false,
+                    }),
+                ),
+                None,
             )
-        })
+            .await
+            .unwrap()
+            .result["pending_replies"]["owed_by"]
+            .clone()
     };
     let mut ui = UiState::new(&Config::default(), root.path().into());
     let send = Command::MessageSend(MessageSendArgs {
@@ -91,7 +99,7 @@ async fn thread_ask_slash_opens_one_duty_and_send_opens_none() {
         resume_recovery: false,
     });
     store.execute(request("send", send), None).await.unwrap();
-    assert_eq!(count().await.unwrap(), 0);
+    assert_eq!(owed().await, serde_json::json!({"count": 0, "exact": true}));
     let actions = ui.slash("/ask --to claude --text 'Named question'");
     let [UiAction::Manage(named)] = actions.as_slice() else {
         panic!("expected named Ask")
@@ -106,7 +114,7 @@ async fn thread_ask_slash_opens_one_duty_and_send_opens_none() {
         error.message,
         "named questions require the current model Thread"
     );
-    assert_eq!(count().await.unwrap(), 0);
+    assert_eq!(owed().await, serde_json::json!({"count": 0, "exact": true}));
     let actions = ui.slash("/ask --thread recipient --text 'Thread question'");
     let [UiAction::Manage(ask)] = actions.as_slice() else {
         panic!("expected Thread Ask")
@@ -115,5 +123,5 @@ async fn thread_ask_slash_opens_one_duty_and_send_opens_none() {
         .execute(request("ask", ask.clone()), None)
         .await
         .unwrap();
-    assert_eq!(count().await.unwrap(), 1);
+    assert_eq!(owed().await, serde_json::json!({"count": 1, "exact": true}));
 }
