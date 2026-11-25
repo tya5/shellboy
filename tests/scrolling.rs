@@ -39,8 +39,8 @@ fn rows(ui: &mut UiState, terminal: &mut Terminal<TestBackend>) -> Vec<String> {
     terminal.draw(|frame| draw(frame, ui)).unwrap();
     let buffer = terminal.backend().buffer();
     // Empty composer: one header, body with one-cell padding, three composer
-    // rows, two footer rows, plus both fixed five-row regions (#131/#218).
-    (2..buffer.area.height - 16)
+    // rows, two footer rows, and one heading per empty region.
+    (2..buffer.area.height - 8)
         .map(|y| {
             let mut row = String::new();
             let mut x = 1;
@@ -142,7 +142,7 @@ fn overlays_and_composer_wheel_do_not_move_hidden_history() {
         ui.event(Event::Mouse(MouseEvent {
             kind: MouseEventKind::ScrollUp,
             column: 10,
-            row: 25,
+            row: terminal.backend().buffer().area.height - 4,
             modifiers: KeyModifiers::NONE,
         }));
         assert_eq!(rows(&mut ui, &mut terminal), before);

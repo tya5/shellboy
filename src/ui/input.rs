@@ -422,8 +422,8 @@ mod tests {
             .unwrap();
         assert_eq!(
             ui.view().navigation.scroll.area.unwrap().height,
-            8,
-            "three-row folded input leaves room for both fixed regions"
+            16,
+            "three-row folded input leaves room for both empty region headings"
         );
         let chip = terminal
             .backend()

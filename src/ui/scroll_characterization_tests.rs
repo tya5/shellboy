@@ -71,7 +71,7 @@ fn rows(ui: &mut UiState, terminal: &mut Terminal<TestBackend>) -> Vec<String> {
     use crate::ui::text_width::UnicodeWidthStr;
     terminal.draw(|frame| draw(frame, ui)).unwrap();
     let buffer = terminal.backend().buffer();
-    (2..buffer.area.height - 16)
+    (2..buffer.area.height - 8)
         .map(|y| {
             let mut row = String::new();
             let mut x = 1;
@@ -184,7 +184,7 @@ fn following_tail_is_the_initial_state_and_render_does_not_change_it() {
     // The first render is the one that initializes the visual scroll cache.
     assert!(before.contains("initialized=false"), "{before}");
     assert!(after_first.contains("initialized=true"), "{after_first}");
-    assert!(ui.view().navigation.scroll.row() > 0 && ui.view().navigation.scroll.height == 33 - 13);
+    assert!(ui.view().navigation.scroll.row() > 0 && ui.view().navigation.scroll.height == first.len() as u16);
 }
 
 #[test]
@@ -702,7 +702,7 @@ fn render_publishes_only_derived_viewport_cache_and_then_settles() {
     let first = state(&ui);
     let authoritative = (ui.view().navigation.anchor.clone(), snap(&ui));
     assert_eq!(first.3, 58, "text width excludes the border and scrollbar");
-    assert_eq!(first.4, 20);
+    assert_eq!(first.4, 28);
     assert_eq!(first.5, ui.view().history_revision());
     assert_eq!(first.6, ui.view().navigation.anchor);
     assert!(first.7);
@@ -711,7 +711,7 @@ fn render_publishes_only_derived_viewport_cache_and_then_settles() {
     t.backend_mut().resize(40, 44);
     rows(&mut ui, &mut t);
     assert_eq!(ui.view().navigation.scroll.width, 38);
-    assert_eq!(ui.view().navigation.scroll.height, 26);
+    assert_eq!(ui.view().navigation.scroll.height, 34);
     assert_eq!(
         (ui.view().navigation.anchor.clone(), snap(&ui)),
         authoritative
