@@ -731,9 +731,19 @@ async fn models_can_request_and_reply_across_threads() {
             Some("human"),
             vec![human_ask["message_id"].as_str().unwrap()],
         ),
-        (None, Some("sender"), Some("human"), vec![human_ask["message_id"].as_str().unwrap()]),
+        (
+            None,
+            Some("sender"),
+            Some("human"),
+            vec![human_ask["message_id"].as_str().unwrap()],
+        ),
         (None, Some("recipient"), Some("human"), vec![]),
-        (Some("recipient"), Some("sender"), None, vec![message_id.as_str()]),
+        (
+            Some("recipient"),
+            Some("sender"),
+            None,
+            vec![message_id.as_str()],
+        ),
     ] {
         let page = store
             .execute(
@@ -787,10 +797,26 @@ async fn models_can_request_and_reply_across_threads() {
         limit: 1,
         cursor: None,
     };
-    let first = store.execute(request(Command::MessageList(asked.clone())), None).await.unwrap().result;
-    asked.cursor = Some(first["next_cursor"].as_str().expect("two duties from sender").into());
+    let first = store
+        .execute(request(Command::MessageList(asked.clone())), None)
+        .await
+        .unwrap()
+        .result;
+    asked.cursor = Some(
+        first["next_cursor"]
+            .as_str()
+            .expect("two duties from sender")
+            .into(),
+    );
     asked.to = Some("human".into());
-    assert_eq!(store.execute(request(Command::MessageList(asked)), None).await.unwrap_err().code, ErrorCode::CursorExpired);
+    assert_eq!(
+        store
+            .execute(request(Command::MessageList(asked)), None)
+            .await
+            .unwrap_err()
+            .code,
+        ErrorCode::CursorExpired
+    );
 
     let not_applied = store
         .execute(
