@@ -4,7 +4,10 @@ use crate::ui::{DraftSnapshot, UiAttachment};
 use crate::{
     control::submission_retention,
     history::{self, ThreadScope},
-    protocol::{DraftSaveArgs, ErrorCode},
+    protocol::{
+        DraftGetArgs, DraftListArgs, DraftListFilters, DraftListKind, DraftListPage, DraftRecord,
+        DraftSaveArgs, ErrorCode, PageCursor, RecordPage,
+    },
 };
 use rusqlite::{OptionalExtension, Transaction, params};
 use serde_json::Value;
@@ -109,8 +112,9 @@ pub(super) fn save(
 
 pub(super) fn get(
     tx: &Transaction<'_>,
-    thread: &str,
+    args: &DraftGetArgs,
 ) -> super::Result<crate::protocol::DraftState> {
+    let thread = &args.thread_id;
     let selection_revision = history::selection_revision(tx, thread, ThreadScope::Live)
         .optional()
         .map_err(sql_error)?
@@ -120,6 +124,19 @@ pub(super) fn get(
                 "Draft Thread is not available",
             )
         })?;
+    if let Some(operation) = &args.operation_id {
+        let row = tx.query_row(&format!("{SUBMITTED} AND operation_id=?2 {SUBMISSION_GROUP} ORDER BY accepted_at DESC LIMIT 1"),
+            params![thread,operation], submitted_row).optional().map_err(sql_error)?;
+        let record = row
+            .map(|(_, _, record)| record)
+            .ok_or_else(|| error(ErrorCode::TargetUnavailable, "Submitted draft not found"))?;
+        return Ok(crate::protocol::DraftState {
+            selection_revision: selection_revision as u64,
+            draft: None,
+            view: None,
+            record: Some(record),
+        });
+    }
     let fence = submission_retention::fence("current.id", "current.revision", "?1");
     let body: Option<String> = tx.query_row(
         &format!("SELECT body_json FROM draft current WHERE state='editing' AND thread_id=?1 AND NOT {fence} ORDER BY updated_at DESC,id DESC LIMIT 1"),
@@ -152,7 +169,111 @@ pub(super) fn get(
         selection_revision: selection_revision as u64,
         draft,
         view,
+        record: None,
     })
+}
+
+const SUBMITTED: &str = "SELECT max(accepted_at) AS accepted_at, operation_id,source_draft_id,source_revision,message_id FROM (    SELECT json_extract(body_json,'$._submission.operation_id') AS operation_id,json_extract(body_json,'$._submission.source_draft_id') AS source_draft_id,json_extract(body_json,'$._submission.source_revision') AS source_revision,json_extract(body_json,'$._submission.message_id') AS message_id,updated_at AS accepted_at FROM draft WHERE thread_id=?1 AND state='submitted'    UNION ALL SELECT client_operation_id,json_extract(result_json,'$.draft_submission.source_draft_id'),json_extract(result_json,'$.draft_submission.source_revision'),message_node_id,created_at FROM receipt WHERE target_thread_id=?1 AND json_extract(result_json,'$.draft_submission.operation_id')=client_operation_id AND json_extract(result_json,'$.draft_submission.message_id')=message_node_id    ) WHERE typeof(operation_id)='text' AND typeof(source_draft_id)='text' AND typeof(source_revision)='integer' AND source_revision>=0 AND typeof(message_id)='text'";
+const SUBMISSION_GROUP: &str = " GROUP BY operation_id,source_draft_id,source_revision,message_id";
+
+type DraftRow = (String, String, DraftRecord);
+fn submitted_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<DraftRow> {
+    let operation_id: String = row.get(1)?;
+    let source_draft_id: String = row.get(2)?;
+    let source_revision = row.get::<_, i64>(3)? as u64;
+    let message_id: String = row.get(4)?;
+    Ok((
+        row.get(0)?,
+        operation_id.clone(),
+        DraftRecord::Submitted {
+            draft_id: super::DraftSubmission::id_for_operation(&operation_id),
+            operation_id,
+            source_draft_id,
+            source_revision,
+            message_id,
+        },
+    ))
+}
+
+pub(super) fn list(tx: &Transaction<'_>, args: &DraftListArgs) -> super::Result<DraftListPage> {
+    let filters = DraftListFilters {
+        thread_id: args.thread_id.clone(),
+        kind: args.kind,
+    };
+    if let Some(thread) = &args.thread_id {
+        history::selection_revision(tx, thread, ThreadScope::Live)
+            .optional()
+            .map_err(sql_error)?
+            .ok_or_else(|| {
+                error(
+                    ErrorCode::TargetUnavailable,
+                    "Draft Thread is not available",
+                )
+            })?;
+    }
+    let scope = "draft.list";
+    let filter = serde_json::to_string(&filters).expect("draft list filter is serializable");
+    let boundary: Option<(String, String)> = args
+        .cursor
+        .as_deref()
+        .map(|token| {
+            let cursor = PageCursor::decode_live(token, scope, &filter, 0, None)?;
+            serde_json::from_str(&cursor.last_sort_key)
+                .map_err(|_| error(ErrorCode::CursorExpired, "Invalid draft list cursor"))
+        })
+        .transpose()?;
+    let (time, key) = boundary.unzip();
+    let count = i64::from(args.limit) + 1;
+    let mut rows = (|| -> rusqlite::Result<Vec<DraftRow>> {
+        match args.kind {
+            DraftListKind::Restorable => {
+                let fence = submission_retention::fence(
+                    "json_extract(current.body_json,'$._submission.source_draft_id')",
+                    "json_extract(current.body_json,'$._submission.source_revision')",
+                    "COALESCE(current.thread_id,?1)",
+                );
+                tx.prepare(&format!("SELECT updated_at,id,json_extract(body_json,'$.kind'),json_extract(body_json,'$.source_message_id'),substr(json_extract(body_json,'$.text'),1,80) FROM draft current WHERE state IN ('archived','submitting') AND (thread_id=?1 OR thread_id IS NULL) AND (state<>'submitting' OR NOT {fence}) AND (?2 IS NULL OR (updated_at,id)<(?2,?3)) ORDER BY updated_at DESC,id DESC LIMIT ?4"))?
+                    .query_map(params![args.thread_id,time,key,count], |row| {
+                        let id: String = row.get(1)?;
+                        let record = if row.get::<_, Option<String>>(2)?.as_deref() == Some("cancelled_message") {
+                            DraftRecord::Cancelled { draft_id: id.clone(), source_message_id: row.get(3)? }
+                        } else {
+                            DraftRecord::Unconfirmed { draft_id: id.clone(), excerpt: row.get::<_, Option<String>>(4)?.unwrap_or_default() }
+                        };
+                        Ok((row.get(0)?,id,record))
+                    })?.collect()
+            }
+            DraftListKind::Submitted => {
+                tx.prepare(&format!("{SUBMITTED}{SUBMISSION_GROUP} HAVING ?2 IS NULL OR (max(accepted_at),operation_id)<(?2,?3) ORDER BY accepted_at DESC,operation_id DESC LIMIT ?4"))?
+                    .query_map(params![args.thread_id,time,key,count], submitted_row)?.collect()
+            }
+        }
+    })().map_err(sql_error)?;
+    let next_cursor = if rows.len() > args.limit as usize {
+        rows.pop();
+        let (time, id, _) = rows.last().expect("validated positive page limit");
+        Some(
+            PageCursor {
+                version: 2,
+                scope: scope.into(),
+                filter,
+                last_sort_key: serde_json::to_string(&(time, id))
+                    .expect("draft list key is serializable"),
+                watermark: 0,
+                revision: 0,
+                encoding: None,
+            }
+            .encode()?,
+        )
+    } else {
+        None
+    };
+    Ok(RecordPage::new(
+        args.limit,
+        filters,
+        rows.into_iter().map(|(_, _, record)| record).collect(),
+        next_cursor,
+    ))
 }
 
 pub(super) fn restore_archive(

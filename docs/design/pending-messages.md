@@ -252,3 +252,22 @@ Cancellation is available to any model or human caller. A queued input is
 archived and its duty is cancelled together. An admitted input stays in history;
 its duty becomes cancelled, returns `reply_cancelled`, and adds a durable
 recipient notice without waking it. See [the adopted design](reply-expected-messages.md).
+
+### Owner reads for submission snapshots (#311 slice 4c)
+
+The owner exposes the restorable archive list through `draft.list` (`draft list`
+in the CLI), with the #416 `items`, `next_cursor`, `limit`, and normalized
+`filters` fields. Follow the cursor with the same Thread scope and projection.
+For Restore, retain the selected Thread plus unbound entries, the owner
+submission fence, newest-first ordering, and the existing display cap of 128.
+List items expose only metadata and bounded archive excerpts; restoring by ID
+still uses `draft.restore` for the full input. The client does not consult SQL
+or turn a partial/refused read into an empty successful page.
+
+Submission identity belongs to a submitted draft record in `draft.get` and
+`draft.list`: source draft ID, source revision, operation ID and message ID.
+Use the owner-verified submitted copy or its retained receipt marker when the
+copy is already collected. They describe the same record, not two submissions.
+A collected copy has no draft body; do not reconstruct it from message history
+or restore it as editable input. Keep the existing Thread and view generation
+fences for reconciliation. No new persisted fields, event facts, or fallback.

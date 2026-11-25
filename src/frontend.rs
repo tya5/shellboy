@@ -4266,6 +4266,7 @@ async fn select_thread(
             control,
             Command::DraftGet(crate::protocol::DraftGetArgs {
                 thread_id: thread.into(),
+                operation_id: None,
             }),
             None,
         )

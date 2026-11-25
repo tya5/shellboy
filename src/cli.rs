@@ -86,6 +86,11 @@ pub enum CliCommand {
         #[command(subcommand)]
         command: ThreadCommand,
     },
+    /// Inspect saved submission snapshots without restoring them.
+    Draft {
+        #[command(subcommand)]
+        command: DraftCommand,
+    },
     /// Submit text or inspect its immutable assignment.
     Message {
         #[command(subcommand)]
@@ -477,6 +482,20 @@ pub enum ThreadCommand {
         after_help = "Inspect what a Thread sends, for example to find where two requests diverge:\n  shellboy thread request --thread THREAD_ID\n  shellboy thread request --thread THREAD_ID --attempt ATTEMPT_ID --compare-attempt NEXT_ATTEMPT_ID\n\nOpens the data directory's database read-only and never calls a model. Items list type, role, characters and a short hash; --body adds the body JSON. Headers and credentials are never shown; configured extra_body values appear as hashes. Parts saved state cannot determine are reported as unknown."
     )]
     Request(crate::request_inspect::RequestOptions),
+}
+#[derive(Debug, Clone, Subcommand)]
+pub enum DraftCommand {
+    /// List restorable or submitted draft records without loading their bodies.
+    List {
+        #[arg(long)]
+        thread: Option<String>,
+        #[arg(long, value_enum, default_value = "restorable")]
+        kind: wire::DraftListKind,
+        #[arg(long, default_value_t = 50, value_parser = clap::value_parser!(u32).range(1..=200))]
+        limit: u32,
+        #[arg(long)]
+        cursor: Option<String>,
+    },
 }
 #[derive(Debug, Clone, Subcommand)]
 pub enum MessageCommand {
@@ -2204,6 +2223,20 @@ impl Cli {
                     parent_thread_id: a.parent_thread_id,
                 })),
             },
+            CliCommand::Draft {
+                command:
+                    DraftCommand::List {
+                        thread,
+                        kind,
+                        limit,
+                        cursor,
+                    },
+            } => C::DraftList(wire::DraftListArgs {
+                thread_id: thread,
+                kind,
+                limit,
+                cursor,
+            }),
             CliCommand::Message { command } => match command {
                 MessageCommand::Send(a) => C::MessageSend(wire::MessageSendArgs {
                     max_model_requests: a.max_model_requests,
