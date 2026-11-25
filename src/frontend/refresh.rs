@@ -6,6 +6,7 @@ use rusqlite::Connection;
 
 pub(super) struct Query {
     pub data_dir: std::path::PathBuf,
+    pub instance_id: String,
     pub thread: String,
     pub ids: Vec<String>,
     pub generation: Option<u64>,
@@ -14,7 +15,6 @@ pub(super) struct Query {
     pub render_width: u16,
     pub language: crate::config::UiLanguage,
     pub tool_scope: Option<ToolObservation>,
-    pub views: view_read::Tickets,
 }
 
 struct RawVisible {
@@ -185,73 +185,6 @@ fn project(
     })
 }
 
-type RawCurrentAndViews = (
-    Vec<(String, ReceiptStatus)>,
-    Result<RawVisible, StorageError>,
-    Option<Result<view_read::RawBatch, StorageError>>,
-);
-
-struct VisibleReadScope<'a> {
-    tool_scope: Option<ToolObservation>,
-    waits: Option<&'a [(String, String)]>,
-    limit: usize,
-}
-
-// Production coupled collector: all consumers use this caller's connection and
-// read sequence; the same-Thread inspector borrows the already-read header Arc.
-#[cfg(test)]
-fn read_current_and_views_tx(
-    db: &Connection,
-    thread: &str,
-    ids: &[String],
-    tool_scope: Option<ToolObservation>,
-    waits: Option<&[(String, String)]>,
-    sequence: u64,
-    views: &view_read::Tickets,
-) -> Result<RawCurrentAndViews, StorageError> {
-    read_current_and_views_tx_limited(
-        db,
-        thread,
-        ids,
-        VisibleReadScope {
-            tool_scope,
-            waits,
-            limit: 3,
-        },
-        sequence,
-        views,
-        header::read_tx(db, thread).map(Arc::new),
-    )
-}
-
-fn read_current_and_views_tx_limited(
-    db: &Connection,
-    thread: &str,
-    ids: &[String],
-    scope: VisibleReadScope<'_>,
-    sequence: u64,
-    views: &view_read::Tickets,
-    details: Result<Arc<header::RawHeader>, StorageError>,
-) -> Result<RawCurrentAndViews, StorageError> {
-    let VisibleReadScope {
-        tool_scope,
-        waits,
-        limit,
-    } = scope;
-    let receipts = receipt_states_tx(db, ids)?;
-    let visible = read_visible_tx_limited(db, thread, tool_scope, waits, sequence, limit, details);
-    let facts = if views.is_empty() {
-        None
-    } else {
-        Some(view_read::read_shared_tx(
-            db,
-            views,
-            visible.as_ref().ok().map(|raw| &raw.details),
-        ))
-    };
-    Ok((receipts, visible, facts))
-}
-
 pub(super) async fn run(
     query: Query,
     control: Arc<Control>,
@@ -263,6 +196,7 @@ pub(super) async fn run(
 ) {
     let Query {
         data_dir,
+        instance_id,
         thread,
         ids,
         generation,
@@ -271,7 +205,6 @@ pub(super) async fn run(
         render_width,
         language,
         tool_scope,
-        views,
     } = query;
     let _permit = permit;
     tokio::select! {biased;_=stop.cancelled()=>{},_=async {
@@ -288,32 +221,29 @@ pub(super) async fn run(
             if let Some(revision)=tool_revision {
                 update(&updates,UiUpdate::ToolFacts {thread_id:thread.clone(),generation,revision,result:Err(error.to_string())}).await;
             }
-            if !views.is_empty() {let _=sender.send(BackgroundResult::ViewFacts {tickets:views.clone(),result:Err(error.clone())}).await;}
             let _=sender.send(BackgroundResult::Refreshed {thread_id:thread,receipts,progress:Some(Err(error)),epoch,generation:Some(generation)}).await;
             return;
         };
         let target=thread.clone();
         let waits=control.pending_wait_sources();
         let limit=control.store.config.ui.live_work_rows;
-        let view_scopes=super::view_read::prepare_requests(&views).await;
         let index=control.index.clone();
         let holds=control.message_holds();
-        let details = super::native_header(&data_dir, &thread).await.map(Arc::new).map_err(StorageError::from);
+        let details = super::native_header(&data_dir, &instance_id, &thread).await.map(Arc::new).map_err(StorageError::from);
         let read=snapshot::read_sequenced(
             control.store.database.path().to_path_buf(),stop.clone(),move |db,sequence| {
-            // Keep typed per-surface failures; do not reinterpret WAL contention.
-            let (receipts, visible, views) = read_current_and_views_tx_limited(db,&target,&ids,VisibleReadScope { tool_scope, waits: waits.as_deref(), limit },sequence,&view_scopes,details)?;
-            let visible = visible.and_then(|mut raw| {
+            let receipts = receipt_states_tx(db, &ids)?;
+            let visible = read_visible_tx_limited(db, &target, tool_scope, waits.as_deref(), sequence, limit, details).and_then(|mut raw| {
                 raw.history.project_message_holds(db, &holds)?;
                 raw.index_pause = index.read_display_pause(db)?;
                 Ok(raw)
             });
-            Ok((receipts, visible, views))
+            Ok((receipts, visible))
         }).await;
         drop(_progress_permit);
-        let (receipts,visible,browser_result,sequence)=match checked_storage(&control,read).await {
-            Ok(((receipts,visible,browser),sequence))=>(Ok(receipts),visible.map_err(snapshot::storage_error),browser.map(|result|result.map_err(snapshot::storage_error)),sequence),
-            Err(error)=>(Err(error.clone()),Err(error.clone()),Some(Err(error)),0),
+        let (receipts, visible) = match checked_storage(&control, read).await {
+            Ok(((receipts, visible), _)) => (Ok(receipts), visible.map_err(snapshot::storage_error)),
+            Err(error) => (Err(error.clone()), Err(error)),
         };
         let result=async {
             let raw=checked_storage(&control,visible).await?;
@@ -349,20 +279,6 @@ pub(super) async fn run(
             load_failed(&updates,thread.clone(),generation,error.clone()).await;
         }
         let _=sender.send(BackgroundResult::Refreshed {thread_id:thread,receipts,progress:Some(result),epoch,generation:Some(generation)}).await;
-        // Sidebar wire reads have their own tickets. They cannot gate delivery
-        // of the selected conversation or release of its refresh slot.
-        if !views.is_empty() {
-            let result=match browser_result {
-                Some(Ok(raw))=>{
-                    let language=control.store.config.ui.language;
-                    super::view_read::prepare_native(&control,raw,sequence,&views,language).await.map(|prepared|(prepared,sequence))
-                },
-                Some(Err(error))=>Err(error),
-                None=>Err(ApiError::new(ErrorCode::InvalidState,"Visible observations unavailable")),
-            };
-            let result=checked_storage(&control,result).await;
-            let _=sender.send(BackgroundResult::ViewFacts {tickets:views,result:result.map(Box::new)}).await;
-        }
     }=>{}}
 }
 
@@ -735,6 +651,7 @@ mod tests {
                 run(
                     Query {
                         data_dir: owner.loaded.data_dir.clone(),
+                        instance_id: control.store.instance_id.clone(),
                         thread: "t".into(),
                         ids: vec![],
                         generation: Some(1),
@@ -743,7 +660,6 @@ mod tests {
                         render_width: 80,
                         language: crate::config::UiLanguage::Ja,
                         tool_scope: None,
-                        views: view_read::Tickets::default(),
                     },
                     control.clone(),
                     updates,
@@ -783,7 +699,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn actual_combined_view_and_browser_keep_one_sequence_without_writer_admission() {
+    async fn current_view_read_does_not_require_writer_admission() {
         let root = tempfile::tempdir().unwrap();
         let owner = DataOwner::start(None, Some(root.path().join("data")), root.path().into())
             .await
@@ -817,14 +733,6 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        let mut browser = browser::Browser::default();
-        browser
-            .observe(7, "".into(), Some("t".into()), true)
-            .unwrap();
-        let ticket = browser.take(tokio::time::Instant::now()).unwrap();
-        let mut descendants = lineage_observer::Observer::default();
-        descendants.observe(9, vec!["t".into()]).unwrap();
-        let descendant_ticket = descendants.take(tokio::time::Instant::now()).unwrap();
         let (updates, received) = std::sync::mpsc::sync_channel(16);
         let (sender, mut results) = mpsc::channel(8);
         let slots = Arc::new(Semaphore::new(1));
@@ -834,6 +742,7 @@ mod tests {
             run(
                 Query {
                     data_dir: owner.loaded.data_dir.clone(),
+                    instance_id: control.store.instance_id.clone(),
                     thread: "t".into(),
                     ids: vec!["held-paired".into()],
                     generation: Some(3),
@@ -842,11 +751,6 @@ mod tests {
                     render_width: 80,
                     language: crate::config::UiLanguage::Ja,
                     tool_scope: None,
-                    views: view_read::Tickets {
-                        browser: Some(ticket),
-                        descendants: Some(descendant_ticket),
-                        ..Default::default()
-                    },
                 },
                 control.clone(),
                 updates,
@@ -860,29 +764,9 @@ mod tests {
         drop(release);
         pending.receive().await.unwrap();
         observed.unwrap();
-        let mut browser_sequence = None;
         let mut receipts_seen = false;
         while let Ok(result) = results.try_recv() {
             match result {
-                BackgroundResult::ViewFacts { result, .. } => {
-                    assert!(
-                        receipts_seen,
-                        "selected refresh must finish before sidebar readback"
-                    );
-                    let (prepared, sequence) = *result.unwrap();
-                    let patch = prepared.browser.unwrap().unwrap().patch.unwrap();
-                    assert_eq!(patch.read_sequence, sequence);
-                    let observed = prepared.descendants.unwrap().unwrap();
-                    assert_eq!(observed.queried_roots, 1);
-                    assert_eq!(observed.snapshots.len(), 1);
-                    assert_eq!(observed.snapshots[0].root, "t");
-                    assert_eq!(observed.snapshots[0].threads, ["t-child"]);
-                    assert_eq!(
-                        (observed.snapshots[0].active, observed.snapshots[0].recovery),
-                        (1, 0)
-                    );
-                    browser_sequence = Some(sequence);
-                }
                 BackgroundResult::Refreshed {
                     receipts, progress, ..
                 } => {
@@ -907,15 +791,9 @@ mod tests {
             })
             .unwrap();
         assert_eq!(view.0.title, "paired saved name");
-        let UiUpdate::History {
-            pending,
-            read_revision,
-            ..
-        } = *view.1
-        else {
+        let UiUpdate::History { pending, .. } = *view.1 else {
             panic!("paired history")
         };
-        assert_eq!(Some(read_revision), browser_sequence);
         assert_eq!(pending.items[0].message_id, "held-paired");
         assert_eq!(slots.available_permits(), 1);
         server.shutdown().await.unwrap();
@@ -1047,158 +925,6 @@ mod tests {
         );
         assert_eq!(after.info.pending.total, 0);
         assert!(after_sequence > before_sequence);
-        owner.shutdown().await.unwrap();
-    }
-    #[tokio::test]
-    async fn p3_coupled_snapshot_reuses_header_sequence_and_cancelled_consumers_add_no_sql() {
-        let root = tempfile::tempdir().unwrap();
-        let owner = DataOwner::start(None, Some(root.path().join("data")), root.path().into())
-            .await
-            .unwrap();
-        owner.db.call(|db| {
-            db.execute_batch("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','coupled title','/','','p','m','now');
-                INSERT INTO thread(id,parent_thread_id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES('child','t','child title','/','','p','m','now');
-                INSERT INTO run(id,thread_id,state,created_at)VALUES('child-run','child','live','now');")?;
-            Ok(())
-        }).await.unwrap();
-        let control = Control::new(&owner, root.path().into());
-        let mut browser = browser::Browser::default();
-        browser
-            .observe(7, String::new(), Some("t".into()), true)
-            .unwrap();
-        let mut descendants = lineage_observer::Observer::default();
-        descendants.observe(9, vec!["t".into()]).unwrap();
-        let mut inspection = inspection_state::Observation::default();
-        let target = crate::ui::InspectionTarget::Thread("t".into());
-        let context = crate::ui::ManagementContext {
-            epoch: 11,
-            owner_draft: "synthetic".into(),
-            owner_thread: Some("t".into()),
-        };
-        inspection.install(11, context.clone(), target.clone(), None);
-        inspection.observe(&context, &target, true);
-        let at = tokio::time::Instant::now();
-        let tickets = view_read::Tickets {
-            browser: Some(browser.take(at).unwrap()),
-            descendants: Some(descendants.take(at).unwrap()),
-            inspection: Some(inspection.take_metadata(at).unwrap()),
-            inspection_services: Some(inspection_read::Services::new(&control)),
-            ..Default::default()
-        };
-        let collect = tickets.clone();
-        let ((visible, facts, current_only_count), sequence) = snapshot::read_sequenced(
-            owner.db.path().to_path_buf(),
-            CancellationToken::new(),
-            move |db, sequence| {
-                assert!(!db.is_autocommit());
-                assert_eq!(
-                    db.pragma_query_value(None, "query_only", |row| row.get::<_, i64>(0))?,
-                    1
-                );
-                let trace = super::super::sql_trace::Statements::new(db);
-                let _ = read_current_and_views_tx(
-                    db,
-                    "t",
-                    &[],
-                    None,
-                    Some(&[]),
-                    sequence,
-                    &view_read::Tickets::default(),
-                )?;
-                let current_only_count = trace.count();
-                let mut without_inspector = collect.clone();
-                without_inspector.inspection = None;
-                let _ = read_current_and_views_tx(
-                    db,
-                    "t",
-                    &[],
-                    None,
-                    Some(&[]),
-                    sequence,
-                    &without_inspector,
-                )?;
-                let before_full = trace.count();
-                let browser_count = before_full - current_only_count;
-                let (_, visible, facts) =
-                    read_current_and_views_tx(db, "t", &[], None, Some(&[]), sequence, &collect)?;
-                let full_count = trace.count() - before_full;
-                let before_standalone = trace.count();
-                let _ = inspection_read::read_scoped_tx(
-                    db,
-                    &target,
-                    None,
-                    collect.inspection_services.as_ref(),
-                    None,
-                )?;
-                let standalone_inspector_count = trace.count() - before_standalone;
-                assert_eq!(
-                    standalone_inspector_count, 9,
-                    "one header + six bounded compaction queries (including two source preflights) + two latest-message queries"
-                );
-                assert_eq!(
-                    full_count,
-                    browser_count + standalone_inspector_count - 1,
-                    "the coupled inspector must not query the explicit-title header again"
-                );
-                assert!(
-                    full_count <= 64,
-                    "fixed four-consumer fixture statement bound: {full_count}"
-                );
-                Ok((
-                    visible?,
-                    facts.expect("visible tickets").expect("shared collection"),
-                    current_only_count,
-                ))
-            },
-        )
-        .await
-        .unwrap();
-        let frame = project(visible, 80, crate::config::UiLanguage::Ja).unwrap();
-        assert_eq!(frame.details.title, "coupled title");
-        assert_eq!(frame.info.read_revision, sequence);
-        let prepared = view_read::prepare(facts, sequence, &tickets, crate::config::UiLanguage::Ja);
-        let (updates, received) = std::sync::mpsc::sync_channel(16);
-        view_read::complete(
-            control.diagnostics(),
-            &mut browser,
-            &mut descendants,
-            &mut inspection,
-            &updates,
-            tickets.clone(),
-            Ok((prepared, sequence)),
-        )
-        .await;
-        let presentation = inspection.take_presentation().unwrap();
-        assert_eq!(presentation.metadata.sequence, sequence);
-        assert_eq!(presentation.metadata.value["title"], "coupled title");
-        assert!(received.try_iter().any(|update|matches!(update,UiUpdate::BrowserPatch{patch,..} if patch.read_sequence==sequence)));
-        let descendant = descendants.snapshots().next().unwrap();
-        assert_eq!(descendant.root, "t");
-        assert_eq!(descendant.threads, ["child"]);
-        assert_eq!(descendant.active, 1);
-        tickets.browser.as_ref().unwrap().stop.cancel();
-        tickets.descendants.as_ref().unwrap().stop.cancel();
-        tickets.inspection.as_ref().unwrap().stop.cancel();
-        let (_, later_sequence) = snapshot::read_sequenced(
-            owner.db.path().to_path_buf(),
-            CancellationToken::new(),
-            move |db, sequence| {
-                let trace = super::super::sql_trace::Statements::new(db);
-                let (_, visible, facts) =
-                    read_current_and_views_tx(db, "t", &[], None, Some(&[]), sequence, &tickets)?;
-                assert!(visible.is_ok() && facts.is_some());
-                assert_eq!(
-                    trace.count(),
-                    current_only_count,
-                    "cancelled browser/count/inspector consumers add zero SQL"
-                );
-                Ok(())
-            },
-        )
-        .await
-        .unwrap();
-        assert!(later_sequence > sequence);
-        drop(control);
         owner.shutdown().await.unwrap();
     }
 }
