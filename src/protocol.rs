@@ -2976,7 +2976,7 @@ mod message_acknowledgement_tests {
         let mut generator = settings.into_generator();
         let schema = operation_result_schemas(&mut generator);
         let results = schema.as_object().unwrap();
-        for name in [
+        let expected = [
             "artifact.add",
             "artifact.update",
             "artifact.list",
@@ -3000,6 +3000,8 @@ mod message_acknowledgement_tests {
             "thread.fork",
             "thread.delete",
             "thread.delete_preview",
+            "thread.delete_set",
+            "thread.delete_set_preview",
             "thread.prune",
             "thread.rewind",
             "thread.archive",
@@ -3008,6 +3010,7 @@ mod message_acknowledgement_tests {
             "thread.tags",
             "thread.cwds",
             "thread.set",
+            "message.ask",
             "message.reply",
             "message.send",
             "message.get",
@@ -3020,6 +3023,7 @@ mod message_acknowledgement_tests {
             "turn.get",
             "turn.interrupt",
             "wait",
+            "events.wait",
             "history.list",
             "history.window",
             "history.recall",
@@ -3063,13 +3067,9 @@ mod message_acknowledgement_tests {
             "schedule.enable",
             "schedule.disable",
             "schedule.remove",
-        ] {
-            assert!(
-                results.contains_key(name),
-                "missing result schema for {name}"
-            );
-        }
-        assert_eq!(results.len(), 89);
+        ];
+        let actual: std::collections::BTreeSet<_> = results.keys().map(String::as_str).collect();
+        assert_eq!(actual, expected.into_iter().collect());
         for name in ["thread.create", "connection.test"] {
             assert_eq!(
                 results[name],
