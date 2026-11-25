@@ -21,7 +21,7 @@ The JSON's `result.text` contains the text; use `next_cursor` to continue. The f
 
 | What you need | Entry point | Follow-up |
 |---|---|---|
-| Ask a person or another Thread | `shellboy message ask --text 'Question'` or add `--thread CHILD_THREAD_ID` | [Ask and reply](#reply-to-a-request) |
+| Ask a person or another Thread | `shellboy message ask --to human --text 'Question'` or `shellboy message ask --thread CHILD_THREAD_ID --text 'Task'` | [Ask and reply](#reply-to-a-request) |
 | Reply to an applied request | `shellboy message reply --message MESSAGE_ID --text 'Result'` | Inspect `message get` if delivery is uncertain |
 | Wait for a shell or read its output | [Waiting for a shell](#waiting-for-a-shell-and-leaving-shells-behind) | Use the work execution ID, not the ID of the wait command |
 | Run a command once or periodically | `shellboy schedule --help` | [Scheduled checks](#scheduled-checks) |
@@ -172,8 +172,8 @@ See [Delegation](delegation.md#waiting-for-replies) for reminders and wait state
 
 ### Ask the human for a decision
 
-Run `shellboy message ask --text 'Question and options'` without `--thread`.
-The default recipient is `human`; `--deliver` requires a Thread recipient. Use `--thread`
+Run `shellboy message ask --to human --text 'Question and options'`.
+If both destination flags are omitted, the recipient still defaults to `human`; `--deliver` requires a Thread recipient. Use `--thread`
 only to ask another Thread for a reply, never to ask your own Thread.
 
 The person answers in Studio or the TUI. Their answer arrives as a message in
@@ -195,8 +195,10 @@ shellboy message get --message MESSAGE_ID
 shellboy history read --node REPLY_NODE_ID
 ```
 
-Check `reply.state` and use its `reply.node_id` for the body. Do not substitute a
-child's final Turn text or treat acceptance as a reply. A reply closes one duty; use
+Acceptance opens one reply duty. Check `delivery_status` on the same message for
+delivery and inspect its assigned `run_id` or `turn_id`, when present, for execution.
+Check `reply.state` and use `reply.node_id` for the answer body. A closed duty
+without a reply is not an answer. Do not substitute a child's final Turn text. A reply closes one duty; use
 a separate ask for the next assignment. Use ordinary `message send` for progress.
 There are no automatic child Turn/Run lifecycle notices; an unanswered applied duty
 can get a Run-end reminder. The child's Run is independent: your Run ending neither

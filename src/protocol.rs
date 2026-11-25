@@ -93,6 +93,7 @@ fn operation_result_schemas(
     result!("thread.cwds", RecordPage<String, NoListFilters>);
     result!("thread.set", ThreadDetails);
     result!("id.resolve", IdResolveResult);
+    result!("message.ask", MessageAccepted);
     result!("message.reply", MessageAccepted);
     result!("message.send", MessageAccepted);
     result!("message.get", MessageDetails);
