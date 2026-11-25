@@ -3,7 +3,7 @@ use super::*;
 use rusqlite::Connection;
 use std::sync::atomic::{AtomicU64, Ordering};
 static READ_REVISION: AtomicU64 = AtomicU64::new(1);
-pub(super) fn read_revision() -> u64 {
+pub(crate) fn read_revision() -> u64 {
     READ_REVISION.fetch_add(1, Ordering::Relaxed)
 }
 pub(super) fn query(
