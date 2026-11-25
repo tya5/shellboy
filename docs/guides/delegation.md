@@ -2,7 +2,7 @@
 
 [Guide index](README.md) · [Agent Guide](agent-guide.md) · [CLI reference](cli-reference.md)
 
-A child agent is an independent Run on a child Thread. The Thread hierarchy organizes history and settings, not
+A child agent works in a child Thread, which runs independently of the parent Thread. The Thread hierarchy organizes history and settings, not
 execution ownership. A Run owns shells only. Child work does not keep a parent Run alive, and stopping/retrying a
 parent never stops/replays another Thread's Run. Application shutdown still stops every live Run independently.
 
@@ -110,7 +110,7 @@ The sender's Run can complete while the recipient Thread continues independently
 stops only its own shells and does not stop the recipient's Run. Application exit stops every live Run independently. Never rely on a Thread's tree
 position as a cleanup policy; select the exact Run or shell when a stop is needed.
 
-After reading the results and waiting for the child's Runs to end, the parent or user decides whether to retain the child.
+After reading the results and waiting for the recipient Thread's Runs to end, the parent or user decides whether to retain the child.
 Preview with `shellboy thread delete-preview --thread CHILD_THREAD_ID` (optionally `--descendants`), then use `shellboy thread delete --thread CHILD_THREAD_ID` with the same descendant selection only if deletable; deletion rechecks live/stopping Runs.
 Deletion removes access to that child's conversation and excludes deleted Threads from usage totals (required shared sources may remain); retain children needed for audits or later cost checks.
 
@@ -123,12 +123,12 @@ answer through `message reply` remain explicit resume actions.
 
 
 ```bash
-shellboy run get --run CHILD_RUN_ID
+shellboy run get --run RECIPIENT_RUN_ID
 shellboy turn get --turn CHILD_TURN_ID
 # After inspecting and fixing the cause, the parent, any other caller, or a human explicitly retries
-shellboy run retry --run CHILD_RUN_ID
+shellboy run retry --run RECIPIENT_RUN_ID
 # Alternatively, to discontinue
-shellboy run stop --run CHILD_RUN_ID
+shellboy run stop --run RECIPIENT_RUN_ID
 ```
 
 Retry and stop are alternatives; the example does not instruct running both consecutively. An ordinary model message to a child in `recovery_wait` is held, not substituted for automatic recovery. After restart, earlier Runs are not automatically executed again. Decide on new execution using interruption information, stored end messages, reply states, and unprocessed messages. Retain IDs of unexecuted instruction messages when stopping.
