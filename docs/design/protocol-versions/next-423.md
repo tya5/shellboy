@@ -1,0 +1,9 @@
+# Protocol next (#423)
+
+## Exact shell Background result
+
+Explicit Background records `shell_backgrounded` and gives later cancelled
+calls the reason `previous_wait_released_by_shell_background`. This does not
+claim who requested Background. Saved person-specific results remain as
+written. Request arguments, acknowledgement, exact target checks and immediate
+delivery are unchanged.
