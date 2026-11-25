@@ -22,6 +22,7 @@ async fn finish(db: &DbWorker) {
 }
 fn args(cursor: Option<String>, encoding: &str, limit: u32) -> ShellReadArgs {
     ShellReadArgs {
+        tail: false,
         segments: true,
         execution_id: "x".into(),
         cursor,
@@ -39,6 +40,89 @@ async fn pin_count(db: &DbWorker) -> i64 {
     })
     .await
     .unwrap()
+}
+
+#[tokio::test]
+async fn tail_of_long_output_is_bounded_and_preserves_stream_order() {
+    let (_dir, db, reader) = fixture().await;
+    append(&db, "stdout", &vec![b'x'; 256 * 1024]).await;
+    append(&db, "stderr", b"err").await;
+    append(&db, "stdout", b"end").await;
+    finish(&db).await;
+    let tail = reader
+        .read(ShellReadArgs {
+            tail: true,
+            ..args(None, "UTF-8", 65536)
+        })
+        .await
+        .unwrap();
+    assert_eq!(tail.raw_bytes, 16 * 1024);
+    assert!(tail.text.ends_with("errend"));
+    assert_eq!(tail.segments.len(), 3);
+    assert!(tail.tail_skipped && tail.output_complete);
+    assert!(!tail.decode_uncertain && !tail.decode_errors);
+    let next = reader
+        .read(args(Some(tail.cursor), "UTF-8", 64))
+        .await
+        .unwrap();
+    assert!(next.output_complete && next.text.is_empty());
+}
+
+#[tokio::test]
+async fn live_tail_cursor_waits_and_continues_exactly_after_incomplete_character() {
+    let (_dir, db, reader) = fixture().await;
+    append(&db, "stdout", b"old text\xe3\x81").await;
+    let tail = reader
+        .read(ShellReadArgs {
+            tail: true,
+            ..args(None, "UTF-8", 6)
+        })
+        .await
+        .unwrap();
+    assert_eq!(tail.text, "text");
+    assert_eq!(tail.raw_bytes, 6);
+    assert!(tail.tail_skipped && !tail.output_complete && !tail.decode_errors);
+    let cursor = tail.cursor.clone();
+    assert!(
+        !db.call(move |db| Ok(wait_position(db, "x", &cursor).unwrap()))
+            .await
+            .unwrap()
+    );
+    append(&db, "stdout", b"\x82!\n").await;
+    let cursor = tail.cursor.clone();
+    assert!(
+        db.call(move |db| Ok(wait_position(db, "x", &cursor).unwrap()))
+            .await
+            .unwrap()
+    );
+    let next = reader
+        .read(args(Some(tail.cursor), "UTF-8", 64))
+        .await
+        .unwrap();
+    assert_eq!(next.text, "あ!\n");
+    assert_eq!(next.raw_bytes, 3);
+    assert!(!next.output_complete && !next.decode_errors);
+}
+
+#[tokio::test]
+async fn stateful_tail_reports_uncertainty_but_cursor_continues_canonically() {
+    let (_dir, db, reader) = fixture().await;
+    append(&db, "stdout", b"\x1b$B$").await;
+    let tail = reader
+        .read(ShellReadArgs {
+            tail: true,
+            ..args(None, "ISO-2022-JP", 1)
+        })
+        .await
+        .unwrap();
+    assert!(tail.tail_skipped && tail.decode_uncertain);
+    append(&db, "stdout", b"\x22\x1b(B").await;
+    let next = reader
+        .read(args(Some(tail.cursor), "ISO-2022-JP", 64))
+        .await
+        .unwrap();
+    assert_eq!(next.text, "あ");
+    assert!(!next.decode_errors);
 }
 
 #[tokio::test]
@@ -183,6 +267,7 @@ async fn cp932_redecode_keeps_raw_unchanged_and_decoders_are_independent_per_str
     assert!(!first.decode_errors);
     let inherited = reader
         .read(ShellReadArgs {
+            tail: false,
             segments: false,
             execution_id: "x".into(),
             cursor: None,
@@ -383,6 +468,7 @@ async fn streaming_reader_uses_fixed_watermark_and_missing_middle_raw_is_explici
     assert!(stream.next_page(64).await.unwrap().is_none());
     let all = reader
         .read(ShellReadArgs {
+            tail: false,
             segments: false,
             execution_id: "x".into(),
             cursor: None,

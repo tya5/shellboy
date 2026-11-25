@@ -1429,6 +1429,9 @@ pub struct SearchOptions {
 }
 #[derive(Debug, Clone, Args)]
 pub struct ShellReadOptions {
+    /// Start at the latest bounded output instead of the retained beginning.
+    #[arg(long, conflicts_with = "cursor")]
+    pub tail: bool,
     /// Target work ID from shell start, separate from this observation shell ID.
     #[arg(long = "execution")]
     pub execution_id: String,
@@ -2238,6 +2241,7 @@ impl Cli {
                     execution_id: a.execution_id,
                 }),
                 ShellCommand::Read(a) => C::ShellRead(wire::ShellReadArgs {
+                    tail: a.tail,
                     segments: a.segments,
                     execution_id: a.execution_id,
                     cursor: a.cursor,

@@ -1797,6 +1797,7 @@ mod tests {
                 );
                 let read = control
                     .request(request(Command::ShellRead(ShellReadArgs {
+                        tail: false,
                         segments: false,
                         execution_id: execution.clone(),
                         cursor: None,

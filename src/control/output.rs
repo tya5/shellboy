@@ -367,6 +367,9 @@ impl ShellOutputReader {
                 "raw read limit must be in 1..=65536",
             ));
         }
+        if args.tail {
+            args.validate()?;
+        }
         let canonical = args
             .encoding
             .as_deref()
@@ -379,6 +382,8 @@ impl ShellOutputReader {
             .map(OutputCursor::decode)
             .transpose()?;
         let mut pin = ReadPin::new(self.database.clone(), self.instance.to_string());
+        pin.armed = !args.tail;
+        let tail_args = args.tail.then(|| args.clone());
         let execution = args.execution_id.clone();
         let pin_id = pin.id.clone();
         let instance = pin.instance.clone();
@@ -404,19 +409,29 @@ impl ShellOutputReader {
                 state.encoding=requested;
                 encoding_changed = true;
             }
-            ReadPin::insert_tx(&tx, &pin_id, &instance, &execution, state.generation)?;
+            let tail = if let Some(args) = tail_args {
+                Some(preview::read_tail(&tx, &args, &state, streams)?)
+            } else {
+                ReadPin::insert_tx(&tx, &pin_id, &instance, &execution, state.generation)?;
+                None
+            };
             tx.commit().map_err(sql_error)?;
             if encoding_changed { wakes.publish([super::wait::wakes::Key::ShellOutput(execution)]); }
-            Ok(state)
+            Ok((state, tail))
         }).await;
         let result = match prepared {
-            Ok(state) => {
+            Ok((_, Some(tail))) => return Ok(tail),
+            Ok((state, None)) => {
                 let encoding = canonical_encoding(&state.encoding)?;
                 self.read_pinned(&args, streams, old, state, encoding).await
             }
             Err(error) => Err(error),
         };
-        let released = pin.release().await;
+        let released = if pin.armed {
+            pin.release().await
+        } else {
+            Ok(())
+        };
         match result {
             Ok(value) => {
                 released?;
@@ -523,6 +538,8 @@ impl ShellOutputReader {
             stderr_start_offset: state.stderr_start_offset,
             output_complete: state.details.output_complete && position.sequence == state.saved,
             decode_errors,
+            tail_skipped: false,
+            decode_uncertain: false,
         })
     }
     async fn page(

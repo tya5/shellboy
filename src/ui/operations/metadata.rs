@@ -1289,6 +1289,7 @@ fn field_label_for(id: FieldId, language: crate::config::UiLanguage) -> &'static
             "Observation or execution limit (ms)"
         ),
         FieldId::ExcerptChars => local!(language, "抜粋文字数", "Excerpt characters"),
+        FieldId::ShellTail => local!(language, "出力末尾", "Output tail"),
         FieldId::ShellSegments => local!(language, "出力ストリームの範囲", "Output stream ranges"),
         FieldId::LimitBytes => local!(language, "取得byte数", "Read size in bytes"),
         FieldId::EndMessageOnly => local!(language, "終了メッセージのみ", "End message only"),
@@ -1760,6 +1761,11 @@ fn field_help_for(id: FieldId, language: crate::config::UiLanguage) -> &'static 
             language,
             "0..4096Unicode scalarです。0は抜粋本文を省略し、CLI既定は512です。",
             "0..4096 Unicode scalars. Zero omits excerpt text; CLI default is 512."
+        ),
+        FieldId::ShellTail => local!(
+            language,
+            "保存出力の末尾を取得します。カーソルとは同時に指定できません。",
+            "Read a bounded tail of saved output. Do not combine with a cursor."
         ),
         FieldId::ShellSegments => local!(
             language,

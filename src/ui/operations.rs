@@ -1800,7 +1800,8 @@ impl Form {
                 ],
                 |form, _cwd| {
                     Ok(Command::ShellRead(ShellReadArgs {
-                        // Stream ranges are a CLI/wire opt-in; this form reads text only.
+                        // Tail and stream ranges are CLI/wire opt-ins.
+                        tail: false,
                         segments: false,
                         execution_id: form.owned("execution")?,
                         cursor: form.optional("cursor")?,

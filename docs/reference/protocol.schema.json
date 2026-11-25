@@ -10757,6 +10757,9 @@
         "decode_errors": {
           "type": "boolean"
         },
+        "decode_uncertain": {
+          "type": "boolean"
+        },
         "encoding": {
           "type": "string"
         },
@@ -10800,6 +10803,9 @@
             "integer",
             "null"
           ]
+        },
+        "tail_skipped": {
+          "type": "boolean"
         },
         "text": {
           "type": "string"
@@ -10866,6 +10872,9 @@
           "type": "integer"
         },
         "segments": {
+          "type": "boolean"
+        },
+        "tail": {
           "type": "boolean"
         }
       },
@@ -15968,6 +15977,9 @@
         "decode_errors": {
           "type": "boolean"
         },
+        "decode_uncertain": {
+          "type": "boolean"
+        },
         "encoding": {
           "type": "string"
         },
@@ -16011,6 +16023,9 @@
             "integer",
             "null"
           ]
+        },
+        "tail_skipped": {
+          "type": "boolean"
         },
         "text": {
           "type": "string"

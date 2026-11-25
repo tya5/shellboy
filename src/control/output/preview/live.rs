@@ -39,8 +39,7 @@ pub(crate) fn read(
     let state = snapshot(&tx, execution)?;
     let encoding = canonical_encoding(&state.encoding)?;
     let budget = limits.bytes.clamp(1, 4096);
-    let err_rows = tail_rows(&tx, execution, "stderr", 64)?;
-    let out_rows = tail_rows(&tx, execution, "stdout", 128 - err_rows.len())?;
+    let [out_rows, err_rows] = indexed_tail(&tx, execution, StreamSelection::Both)?;
     let rows = [&out_rows, &err_rows];
     let ends = [end(&out_rows), end(&err_rows)];
     let retained = |index: usize, offset: usize| {
@@ -91,9 +90,7 @@ pub(crate) fn read(
     let budgets = if continuous {
         [ends[0] - cursor.offsets[0], ends[1] - cursor.offsets[1]]
     } else {
-        let reserved = ends[1].min(budget.min(1024));
-        let out = ends[0].min(budget - reserved);
-        [out, ends[1].min(budget - out)]
+        tail_budgets(ends, budget)
     };
     let mut raw_bytes = 0;
     let terminal = state.terminal();
