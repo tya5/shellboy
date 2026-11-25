@@ -2321,6 +2321,7 @@ impl Cli {
                     shell_state: a.shell_state,
                 }),
                 HistoryCommand::Window(a) => C::HistoryWindow(wire::HistoryWindowArgs {
+                    include_observation: false,
                     items: false,
                     thread_id: a.thread_id,
                     ordinal: a.ordinal,

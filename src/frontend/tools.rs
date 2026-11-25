@@ -13,26 +13,7 @@ use rusqlite::OptionalExtension;
 const MAX_NODES: usize = 128;
 const MAX_GROUP_CALLS: usize = 128;
 
-pub(super) struct CallSource {
-    pub(super) node_id: String,
-    pub(super) call_id: String,
-    ordinal: u32,
-    command: Option<String>,
-    description: Option<String>,
-    result_state: String,
-    pub(super) shell_state: Option<String>,
-    shell_exit_code: Option<i64>,
-    released: bool,
-    pub(super) group_id: String,
-    prior_reason: Option<String>,
-    pub(super) execution_id: Option<String>,
-    call_node_id: Option<String>,
-    result_node_id: Option<String>,
-    elapsed_ms: Option<u64>,
-    started_at: Option<String>,
-    background: bool,
-    output_revision: Option<(u64, bool)>,
-}
+pub(super) use crate::protocol::HistoryWindowToolCall as CallSource;
 
 // The node's saved group uses the existing (group_id, call_id) primary key.
 // Only old nodes without a group field need the unambiguous result-relation fallback.
@@ -88,6 +69,12 @@ pub(super) struct ToolFacts {
     notices: Vec<super::notices::Fact>,
 }
 impl ToolFacts {
+    pub(super) fn into_window(self) -> crate::protocol::HistoryWindowTools {
+        crate::protocol::HistoryWindowTools {
+            calls: self.sources,
+            limited_node_ids: self.truncated_nodes,
+        }
+    }
     #[cfg(test)]
     pub(super) fn sources(&self) -> &[CallSource] {
         &self.sources

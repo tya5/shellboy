@@ -1329,6 +1329,16 @@ impl Control {
                         }
                         Ok(result)
                     }
+                    Command::HistoryWindow(args) if args.include_observation => {
+                        self.store
+                            .observe_history_window(
+                                args.clone(),
+                                self.message_holds(),
+                                &request.operation_id,
+                                origin.is_some(),
+                            )
+                            .await
+                    }
                     Command::HistoryExport(args) => {
                         let thread = args.thread_id.clone();
                         let mut result = self.store.execute(request, origin).await?;

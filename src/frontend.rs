@@ -80,6 +80,8 @@ mod streams;
 use streaming::StreamBody;
 mod notices;
 mod tools;
+mod window_facts;
+pub(crate) use window_facts::{WINDOW_FACTS_LIMIT, read_window_facts};
 mod usage;
 mod watch_page;
 mod watch_read;

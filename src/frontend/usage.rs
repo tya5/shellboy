@@ -47,6 +47,37 @@ pub(super) struct Observation {
     sources: Vec<Source>,
 }
 
+impl Observation {
+    pub(super) fn into_window(
+        self,
+        items: &[crate::protocol::HistorySnippet],
+    ) -> crate::protocol::HistoryWindowUsage {
+        use crate::model::wire_bytes::Category;
+        use crate::protocol::{
+            HistoryWindowInputBytes, HistoryWindowUsage, HistoryWindowUsageSource,
+        };
+        HistoryWindowUsage {
+            node_id: items[self.index].node_id.clone(),
+            sources: self
+                .sources
+                .into_iter()
+                .map(|source| HistoryWindowUsageSource {
+                    attempt_id: source.attempt,
+                    input_tokens: source.input_tokens,
+                    cached_tokens: source.cached_tokens,
+                    input_bytes: source.input_bytes.map(|bytes| HistoryWindowInputBytes {
+                        total: bytes.total,
+                        categories: Category::ALL
+                            .into_iter()
+                            .map(|kind| (kind.name().to_owned(), bytes.get(kind)))
+                            .collect(),
+                    }),
+                })
+                .collect(),
+        }
+    }
+}
+
 pub(super) fn requests(nodes: &[UiNode]) -> Vec<(usize, String)> {
     nodes
         .iter()

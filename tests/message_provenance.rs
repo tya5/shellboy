@@ -142,6 +142,7 @@ async fn shared_node_has_no_client_operation_id_in_nonorigin_thread() {
     let result = store
         .execute(
             request(Command::HistoryWindow(HistoryWindowArgs {
+                include_observation: false,
                 thread_id: "sender".into(),
                 before: 0,
                 after: 0,

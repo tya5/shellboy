@@ -402,6 +402,80 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn native_window_facts_keep_the_selected_transaction_snapshot() {
+        let root = tempfile::tempdir().unwrap();
+        let owner = DataOwner::start(None, Some(root.path().join("data")), root.path().into())
+            .await
+            .unwrap();
+        owner.db.call(|db| {
+            let tx=db.transaction()?;
+            tx.execute_batch("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','before','/','','p','m','now');
+                INSERT INTO run(id,thread_id,state,created_at,ended_at)VALUES('r','t','completed','now','now');
+                INSERT INTO turn(id,thread_id,run_id,state,created_at,ended_at)VALUES('u','t','r','completed','now','now');
+                INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='u'),'a','u',0,0,'p','m',0,'completed',json_object('adoption',json_object('outcome','adopted')),'{\"input_tokens\":140,\"output_tokens\":20,\"input_tokens_details\":{\"cached_tokens\":120}}','now');
+                INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES('g','a','u','completed','now');
+                INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state)VALUES('g','call',0,'shell','{\"command\":\"printf saved\"}','completed');")?;
+            shellboy_fixture_input(&tx,"input",true)?;
+            let call=json!({"group_id":"g","item":{"type":"function_call","call_id":"call","name":"shell","arguments":"{\"command\":\"printf saved\"}"}});
+            crate::history::append_node(&tx,"t","call-source",Some("u"),"assistant_response",&call,"now")?;
+            let result=json!({"group_id":"g","item":{"type":"function_call_output","call_id":"call","output":json!({"status":"exited","exit_code":0,"output":"saved successful output"}).to_string()}});
+            crate::history::append_node(&tx,"t","result-source",Some("u"),"tool_result",&result,"now")?;
+            tx.execute("INSERT INTO tool_result(group_id,call_id,node_id,status)VALUES('g','call','result-source','exited')",[])?;
+            shellboy_fixture_input(&tx,"queued",false)?;
+            tx.commit()?;Ok(())
+        }).await.unwrap();
+        let observed_window = |db: &Connection| {
+            crate::history::window(
+                db,
+                &serde_json::from_value(json!({"thread_id":"t", "include_observation":true}))
+                    .unwrap(),
+            )
+        };
+        // Pin the selected path before a separate writer changes a tool result.
+        // The display facts must still come from that WAL view.
+        let mut read = Connection::open(owner.db.path()).unwrap();
+        let tx = read.transaction().unwrap();
+        let window = observed_window(&tx).unwrap();
+        owner
+            .db
+            .call(|db| {
+                db.execute(
+                    "UPDATE tool_result SET status='failed' WHERE node_id='result-source'",
+                    [],
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let old = crate::frontend::read_window_facts(&tx, &window.items).unwrap();
+        assert!(
+            old.tools
+                .calls
+                .iter()
+                .any(|call| call.node_id == "result-source"
+                    && call.group_id == "g"
+                    && call.call_id == "call"
+                    && call.result_state == "exited")
+        );
+        tx.commit().unwrap();
+        let later = observed_window(&read).unwrap();
+        assert_eq!(later.revision, window.revision);
+        let fresh = crate::frontend::read_window_facts(&read, &later.items).unwrap();
+        assert!(
+            fresh
+                .tools
+                .calls
+                .iter()
+                .any(|call| call.node_id == "result-source"
+                    && call.group_id == "g"
+                    && call.call_id == "call"
+                    && call.result_state == "failed")
+        );
+        drop(read);
+        owner.shutdown().await.unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn current_page_queue_paused_facts_and_activity_are_owned_one_snapshot() {
         let root = tempfile::tempdir().unwrap();
         let owner = DataOwner::start(None, Some(root.path().join("data")), root.path().into())
@@ -844,6 +918,80 @@ mod tests {
         assert_eq!(Some(read_revision), browser_sequence);
         assert_eq!(pending.items[0].message_id, "held-paired");
         assert_eq!(slots.available_permits(), 1);
+        server.shutdown().await.unwrap();
+        dispatcher.await.unwrap();
+        drop(control);
+        owner.shutdown().await.unwrap();
+    }
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn native_window_observation_does_not_require_writer_admission() {
+        let root = tempfile::tempdir().unwrap();
+        let owner = DataOwner::start(None, Some(root.path().join("data")), root.path().into())
+            .await
+            .unwrap();
+        owner.db.call(|db| {
+            let tx=db.transaction()?;
+            tx.execute("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','paired saved name','/','','p','m','2026-01-01T00:00:00Z')",[])?;
+            tx.execute_batch("INSERT INTO run(id,thread_id,state,created_at,ended_at)VALUES('r','t','completed','2026-01-01T00:00:00Z','2026-01-01T00:00:01Z'); INSERT INTO turn(id,thread_id,run_id,state,created_at,ended_at)VALUES('u','t','r','completed','2026-01-01T00:00:00Z','2026-01-01T00:00:01Z');")?;
+            tx.execute_batch("INSERT INTO thread(id,parent_thread_id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t-child','t','unowned descendant','/','','p','m','2026-01-01T00:00:00Z'); INSERT INTO run(id,thread_id,state,created_at)VALUES('r-child','t-child','live','2026-01-01T00:00:00Z');")?;
+            shellboy_fixture_input(&tx,"held-paired",false)?;
+            tx.commit()?;Ok(())
+        }).await.unwrap();
+        let control = Control::new(&owner, root.path().into());
+        let (rpc, dispatcher) = tokio::sync::mpsc::channel(16);
+        let server = crate::ipc::LocalServer::bind(&owner, rpc).await.unwrap();
+        let dispatcher = tokio::spawn(control.clone().serve(dispatcher));
+        // The first native request initializes Control via the writer. Hold
+        // the writer only after readiness, as the embedded launcher does.
+        control.start().await.unwrap();
+        let (entered, ready) = tokio::sync::oneshot::channel();
+        let (release, blocked) = std::sync::mpsc::channel::<()>();
+        let pending = owner
+            .db
+            .try_call(move |_| {
+                let _ = entered.send(());
+                let _ = blocked.recv();
+                Ok(())
+            })
+            .unwrap();
+        crate::test_watchdog::watchdog("E readonly observation", ready)
+            .await
+            .unwrap()
+            .unwrap();
+        let native_window = crate::test_watchdog::watchdog(
+            "native selected observation bypasses the writer",
+            crate::ipc::call_selected_operation(
+                &owner.loaded.data_dir,
+                &control.store.instance_id,
+                Command::HistoryWindow(
+                    serde_json::from_value(json!({
+                        "thread_id": "t", "include_observation": true,
+                    }))
+                    .unwrap(),
+                ),
+                None,
+            ),
+        )
+        .await;
+        drop(release);
+        pending.receive().await.unwrap();
+        let response = native_window.unwrap().unwrap();
+        assert!(response.ok, "{:?}", response.error);
+        let window: crate::protocol::HistoryWindow =
+            serde_json::from_value(response.result.unwrap()).unwrap();
+        assert_eq!(window.thread_id, "t");
+        let observation = window.observation.expect("opted-in observation");
+        assert_eq!(observation.pending.total, 1);
+        assert!(observation.pending.total_exact);
+        assert_eq!(observation.pending.items[0].message_id, "held-paired");
+        assert_eq!(
+            observation.pending.items[0].held_by,
+            Some(crate::protocol::MessageHeldBy::Unknown)
+        );
+        assert_eq!(observation.activity.run_id.as_deref(), Some("r"));
+        assert_eq!(observation.activity.turn_id.as_deref(), Some("u"));
+        assert!(observation.committed_attempts.is_empty());
+
         server.shutdown().await.unwrap();
         dispatcher.await.unwrap();
         drop(control);
