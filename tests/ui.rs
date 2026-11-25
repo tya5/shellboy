@@ -1945,7 +1945,7 @@ fn scroll_wheel(ui: &mut UiState, up: bool) -> Vec<UiAction> {
 fn scroll_cells(ui: &mut UiState, terminal: &mut Terminal<TestBackend>) -> Vec<String> {
     terminal.draw(|frame| draw(frame, ui)).unwrap();
     let buffer = terminal.backend().buffer();
-    (2..buffer.area.height - 16)
+    (2..buffer.area.height - 8)
         .map(|y| {
             let mut out = String::new();
             let mut x = 1;

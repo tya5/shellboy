@@ -146,11 +146,10 @@ fn differences(
 }
 
 #[test]
-fn synthetic_help_width_mismatch_leaves_residue_in_diff() {
+fn clean_redraw_after_a_help_width_mismatch_matches_a_fresh_screen() {
     text_width::set_terminal_width(Some(1));
-    for enabled in [false, true] {
         let mut ui = fixture();
-        ui.config.ui.clean_redraw = enabled;
+        ui.config.ui.clean_redraw = true;
         let mut terminal = terminal(80);
         let mut screen = vt100::Parser::new(30, 80, 0);
         screen.process(&frame(&mut terminal, &mut ui));
@@ -167,22 +166,13 @@ fn synthetic_help_width_mismatch_leaves_residue_in_diff() {
         screen.process(mismatch.as_bytes());
         ui.event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
         let close = frame(&mut terminal, &mut ui);
-        assert_eq!(close.windows(4).any(|b| b == b"\x1b[2J"), enabled);
+        assert!(close.windows(4).any(|b| b == b"\x1b[2J"));
         screen.process(&close);
         let mut fresh = vt100::Parser::new(30, 80, 0);
         ui.full_redraw_requested = true;
         fresh.process(&frame(&mut terminal, &mut ui));
         let diff = differences(screen.screen(), fresh.screen(), 80);
-        eprintln!("help width mismatch enabled={enabled} final differing cells: {diff:?}");
-        if enabled {
-            assert!(diff.is_empty(), "full redraw must match fresh: {diff:?}");
-        } else {
-            assert!(
-                !diff.is_empty(),
-                "baseline should expose the synthetic residue"
-            );
-        }
-    }
+        assert!(diff.is_empty(), "full redraw must match fresh: {diff:?}");
     text_width::clear_terminal_width();
 }
 

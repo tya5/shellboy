@@ -1135,7 +1135,7 @@ mod tests {
                 let mut config = Config::parse("default_connection='fixture'\ndefault_model='fixture'\n[connections.fixture]\nbase_url='http://127.0.0.1:1/v1'").unwrap();
                 config.ui.language = language;
                 let mut ui = UiState::new(&config, PathBuf::from("/synthetic"));
-                let shown = frame_text(&mut ui, 120, 24);
+                let shown = frame_text(&mut ui, 120, 14);
                 assert!(
                     !shown.contains("/attach パス"),
                     "{language:?} {policy:?}: {shown}"
@@ -1390,7 +1390,7 @@ mod tests {
             text_width::set_terminal_width(policy);
             for width in [80, 120] {
                 let mut ui = UiState::new(&config, PathBuf::from("/synthetic"));
-                let shown = frame_text(&mut ui, width, 24);
+                let shown = frame_text(&mut ui, width, 14);
                 assert!(
                     shown.contains(&format!("送信: Ctrl+Enter{separator}改行: Enter")),
                     "{policy:?}: {shown}"
@@ -1414,7 +1414,7 @@ mod tests {
         let cwd = PathBuf::from("/synthetic/missing-workspace");
         let expected_agents = format!("AGENTS: {}", cwd.join("AGENTS.md").display());
         let mut ui = UiState::new(&config, cwd);
-        let shown = frame_text(&mut ui, 100, 24);
+        let shown = frame_text(&mut ui, 100, 14);
         for expected in [
             "依頼を入力",
             "送信: Ctrl+Enter",
