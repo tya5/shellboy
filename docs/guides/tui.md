@@ -104,12 +104,11 @@ smaller terminals show a hidden count. Matching row numbers connect a wait to
 its visible target. Shift+Tab focuses a row, Space opens a shell preview, F6
 inspects it, and `o` opens the relevant Thread when a row provides one. Unknown evidence remains unknown.
 
-The heading is always shown, as `◉ 抱えている作業` plus `なし` (none) when there is no work
-(no blink then). Alt+W or a click on the heading folds and unfolds the body; the
-state is kept while the UI runs and starts open. An open body is always exactly
-`ui.live_work_rows` rows, padded with blank rows, so the section height changes
-only when you toggle it or resize the terminal. Alt+W is skipped if it is bound
-as the send or newline key.
+When there is no work, the section uses one heading row if space permits: `◉ 抱えている作業`
+plus `なし` (none), without blinking. Alt+W or a click on the heading folds and
+unfolds the body; the state is kept while the UI runs and starts open. When open
+and populated, the body reserves `ui.live_work_rows` rows, padding unused slots
+when space permits. Alt+W is skipped if it is bound as the send or newline key.
 
 Each work row is drawn as a tree entry, with state and elapsed time at the
 right edge. When the startup measurement confirms that ambiguous characters
@@ -721,10 +720,11 @@ row enters reply mode; submitting answers that message, and Esc keeps the draft.
 
 ## Held Input Region
 
-The fixed `◉ Held input` region follows live work and precedes the composer.
-Its heading persists as `None` when empty and never blinks. The body reserves
-`ui.held_input_rows` rows (1..10, default 3), independently of live work; small
-screens can show fewer rows with an explicit hidden count. Shift+Tab traverses
+The `◉ Held input` region follows live work and precedes the composer. When empty,
+it shows only the `None` heading in one row if space permits and never blinks.
+When open and populated, the body reserves `ui.held_input_rows` rows (1..10,
+default 3) independently of live work, padding unused slots. Small screens can
+show fewer rows with an explicit hidden count. Shift+Tab traverses
 the displayed live-work rows, then held rows, then returns to the composer.
 Alt+W folds the last focused region; clicking either heading folds that region.
 A focused row uses reverse video and bold without a caret, even without colors.
