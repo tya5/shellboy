@@ -37,6 +37,7 @@ mod live_output;
 mod live_work;
 mod message_metadata;
 mod message_queue;
+mod native_history;
 mod preview_reads;
 mod receipt_delivery;
 mod received;
@@ -61,19 +62,6 @@ mod refresh;
 mod selection;
 #[cfg(test)]
 pub(crate) mod sql_trace;
-// Pending selected changes reserve browser facts for their next joint snapshot.
-fn standalone_browser_deadline(
-    browser: &browser::Browser,
-    selected: Option<&str>,
-    dirty: &std::collections::HashSet<String>,
-    next_view: Option<tokio::time::Instant>,
-) -> Option<tokio::time::Instant> {
-    browser
-        .deadline()
-        .filter(|_| selected.is_none_or(|thread| !dirty.contains(thread)))
-        .map(|due| next_view.map_or(due, |global| due.max(global)))
-}
-
 #[cfg(test)]
 pub(crate) mod stream_metrics;
 mod streaming;
@@ -1179,9 +1167,6 @@ async fn run_client(
                 .iter()
                 .find(|thread| {
                     !refreshing.contains(*thread)
-                        && !browser.blocks_selected_refresh(thread)
-                        && (selection.active_thread.as_deref() != Some(thread.as_str())
-                            || view_read_next.is_none_or(|due| tokio::time::Instant::now() >= due))
                         && selection.refresh_ready(thread, tokio::time::Instant::now())
                 })
                 .cloned()
@@ -1201,27 +1186,12 @@ async fn run_client(
             refreshing.insert(thread.clone());
             selection.refresh_started(&thread, tokio::time::Instant::now());
             let tool_scope = visible.then(|| selection.tool_scope.clone()).flatten();
-            let view_tickets = if visible {
-                let at = tokio::time::Instant::now();
-                view_read_next = Some(at + Duration::from_millis(500));
-                view_read::Tickets {
-                    coverage_request: None,
-                    inspection_services: Some(inspection_read::Services::new(&control)),
-                    browser: browser.take(at),
-                    descendants: descendants.take(at),
-                    inspection: management.inspection.take_metadata(at),
-                    inspection_usage: management
-                        .inspection
-                        .take_usage(at, control.diagnostics().clone()),
-                }
-            } else {
-                view_read::Tickets::default()
-            };
             #[cfg(test)]
             stream_metrics::FRONTEND_RELOADS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             read_workers.spawn(refresh::run(
                 refresh::Query {
                     data_dir: client_context.data_dir.clone(),
+                    instance_id: control.store.instance_id.clone(),
                     thread,
                     ids,
                     generation,
@@ -1230,7 +1200,6 @@ async fn run_client(
                     render_width,
                     language: control.store.config.ui.language,
                     tool_scope,
-                    views: view_tickets,
                 },
                 control.clone(),
                 updates.worker(),
@@ -1308,57 +1277,20 @@ async fn run_client(
             });
         }
         actions.enable_cancel(control_tasks.is_empty());
-        let refresh_deadline = selection
-            .refresh_deadline(&dirty_threads, &refreshing)
-            .or_else(|| {
-                selection
-                    .active_thread
-                    .as_ref()
-                    .filter(|thread| {
-                        dirty_threads.contains(*thread) && !refreshing.contains(*thread)
-                    })
-                    .and(view_read_next)
-            })
-            .filter(|_| {
-                selection
-                    .active_thread
-                    .as_deref()
-                    .is_none_or(|thread| !browser.blocks_selected_refresh(thread))
-            })
-            .map(|due| view_read_next.map_or(due, |global| due.max(global)));
+        let refresh_deadline = selection.refresh_deadline(&dirty_threads, &refreshing);
         let live_deadline = live_output.deadline();
         let physical_deadline = management.inspection.physical_deadline();
         let watch_output_deadline = browser.output_deadline();
-        let browser_deadline = standalone_browser_deadline(
-            &browser,
-            selection.active_thread.as_deref(),
-            &dirty_threads,
-            view_read_next,
-        )
-        .into_iter()
-        .chain(descendants.deadline().filter(|_| {
-            selection
-                .active_thread
-                .as_ref()
-                .is_none_or(|thread| !dirty_threads.contains(thread))
-        }))
-        .chain(management.inspection.deadline().filter(|_| {
-            selection
-                .active_thread
-                .as_ref()
-                .is_none_or(|thread| !dirty_threads.contains(thread))
-        }))
-        .min()
-        .map(|due| view_read_next.map_or(due, |global| due.max(global)));
+        let browser_deadline = browser
+            .deadline()
+            .into_iter()
+            .chain(descendants.deadline())
+            .chain(management.inspection.deadline())
+            .min()
+            .map(|due| view_read_next.map_or(due, |global| due.max(global)));
         tokio::select! {
             _=tokio::time::sleep_until(browser_deadline.unwrap_or_else(||tokio::time::Instant::now()+Duration::from_secs(86400))),
                 if browser_deadline.is_some() && !updates.backpressured() && read_slots.available_permits()>0=>{
-                // Both timers can wake in the same select. Let the outer loop
-                // admit the selected view first so it can take this browser
-                // ticket into its one snapshot instead of delaying it 500ms.
-                if refresh_deadline.is_some_and(|due|tokio::time::Instant::now()>=due) {
-                    continue;
-                }
                 if let Ok(permit)=read_slots.clone().try_acquire_owned() {
                     let at=tokio::time::Instant::now();
                     let tickets=view_read::Tickets {coverage_request:None,inspection_services:Some(inspection_read::Services::new(&control)),browser:browser.take(at),descendants:descendants.take(at),inspection:management.inspection.take_metadata(at),inspection_usage:management.inspection.take_usage(at,control.diagnostics().clone())};
@@ -4285,15 +4217,27 @@ async fn save_draft(
     .map(|_| ())
 }
 
-async fn native_header(data_dir: &Path, thread: &str) -> Result<header::RawHeader, ApiError> {
-    let details: ThreadDetails = inspection_history::native_read(
-        data_dir,
-        Command::ThreadGet(ThreadGetArgs {
-            thread_id: Some(thread.to_owned()),
-            display: true,
-        }),
-    )
-    .await?;
+async fn native_header(
+    data_dir: &Path,
+    instance_id: &str,
+    thread: &str,
+) -> Result<header::RawHeader, ApiError> {
+    let request = Command::ThreadGet(ThreadGetArgs {
+        thread_id: Some(thread.to_owned()),
+        display: true,
+    });
+    let reply = crate::ipc::call_selected_operation(data_dir, instance_id, request, None).await?;
+    let invalid = || {
+        ApiError::new(
+            ErrorCode::ProtocolMismatch,
+            "Invalid Thread display response",
+        )
+    };
+    if !reply.ok {
+        return Err(reply.error.unwrap_or_else(invalid));
+    }
+    let details: ThreadDetails =
+        serde_json::from_value(reply.result.ok_or_else(invalid)?).map_err(|_| invalid())?;
     if details.thread_id != thread || details.display_coverage.is_none() {
         return Err(ApiError::new(
             ErrorCode::InvalidState,
@@ -4312,7 +4256,12 @@ async fn select_thread(
     render_width: u16,
 ) -> Result<(), ApiError> {
     let result = async {
-        let header = native_header(compose_data_dir(control), thread).await?;
+        let header = native_header(
+            compose_data_dir(control),
+            &control.store.instance_id,
+            thread,
+        )
+        .await?;
         let state: crate::protocol::DraftState = compose_call(
             control,
             Command::DraftGet(crate::protocol::DraftGetArgs {

@@ -2043,7 +2043,9 @@ async fn native_display_header_keeps_typed_title_omission_and_default_contract()
         Ok(())
     }).await.unwrap();
     let path = &owner.loaded.data_dir;
-    let bounded = super::native_header(path, "thread").await.unwrap();
+    let bounded = super::native_header(path, &control.store.instance_id, "thread")
+        .await
+        .unwrap();
     assert_eq!(
         bounded.prepare_for_ui(crate::config::UiLanguage::En).title,
         "Untitled (original text is outside the captured range)"
@@ -2053,6 +2055,10 @@ async fn native_display_header_keeps_typed_title_omission_and_default_contract()
             .prepare_inspection_in(crate::config::UiLanguage::Ja)
             .1,
         ["title"]
+    );
+    let mismatch = super::native_header(path, "different-instance", "thread").await;
+    assert!(
+        matches!(mismatch, Err(error) if error.code == crate::protocol::ErrorCode::ProtocolMismatch)
     );
     let ordinary: ThreadDetails = super::inspection_history::native_read(
         path,
