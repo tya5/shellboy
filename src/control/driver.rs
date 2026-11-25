@@ -1369,7 +1369,7 @@ async fn run_shell(
                 _=slot.stop.cancelled()=>{handle.stop();return Ok((json!({"status":"stopping","execution_id":execution,"reason":"run_stopped"}),true));},
                 _=turn_binding.cancel.cancelled()=>{if slot.stop.is_cancelled(){handle.stop();return Ok((json!({"status":"stopping","execution_id":execution,"reason":"run_stopped"}),true));}return released("human_turn_interrupted");},
                 reason=release.recv()=> match reason {
-                    Some(ForegroundRelease::Background) => return released("human_backgrounded"),
+                    Some(ForegroundRelease::Background) => return released("shell_backgrounded"),
                     Some(ForegroundRelease::AdditionalInput) => {},
                     None => return Err(invalid("Foreground release channel closed")),
                 },

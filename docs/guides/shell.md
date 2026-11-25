@@ -58,9 +58,20 @@ Choose the next observation from the stored state and result:
 | cursor_expired / cursor_encoding_mismatch | Check the target and encoding, then resume reading without a cursor. Previously read bytes may return again |
 | output_expired | For an evicted cursor, read without it to recover the retained window. Repeated reads cannot restore reclaimed bytes |
 
-When a human moves foreground work to the background, the shell stays alive and subsequent tool calls that have not executed are cancelled. If explicitly immediate instructions (`message send --deliver now` or the TUI immediate key) release a foreground wait, also inspect the existing execution. Do not treat release of the tool wait as process termination and execute the same command again.
+An explicit `shell background --execution ID` or TUI Background action releases
+only the named foreground wait. The tool result records `status: "running"`,
+the continuing `execution_id`, and `reason: "shell_backgrounded"`; it does not
+identify who asked. `requested: true` acknowledges the request, not release or
+message application. Use the [exact-message intervention recipe](agent-guide.md#observe-application-and-identify-an-exact-blocker): send, wait for application,
+read `held_by` on timeout, then Background only the exact shell it names, if
+still useful. Read the message and inspect the execution before deciding what
+to do next.
 
-In that case, the tool result includes `status: "running"`, the continuing `execution_id`, and an intervention `reason` of `"human_backgrounded"` or `"additional_input"`. Each subsequent call, if any, receives a `cancelled` result. The UI reports the target and subsequent cancellations from the same stored results; it does not invent cancellations when no subsequent calls exist. The shell may finish after that notification, so get/read/wait on the same ID for its latest state.
+The process stays with its original Run; later unexecuted calls are cancelled.
+The shell may finish before readback, so get/read/wait on the same ID. The
+existing immediate delivery option (`--deliver now` or the TUI immediate key)
+can still release a foreground wait with reason `additional_input`. Neither
+release means the process was stopped or should be relaunched.
 
 Later calls that were not executed save `status: "cancelled"`, `executed: false`,
 a machine-readable `reason`, a human-readable `message`, and any known
@@ -68,7 +79,7 @@ a machine-readable `reason`, a human-readable `message`, and any known
 and CLI wait-release outcome. These facts describe the prerequisite when its
 result was returned; they do not assert its current liveness.
 
-- `previous_wait_released_by_new_input` / `previous_wait_released_by_human_background`:
+- `previous_wait_released_by_new_input` / `previous_wait_released_by_shell_background`:
   inspect the prerequisite's existing execution with `shell get`, `shell read`,
   and `wait`. Do not restart the same command just because its wait was released.
 - `previous_call_failed`: inspect retained output and the actual state/exit code
@@ -98,6 +109,21 @@ on success can be one shell command (`test-command && next-command`) rather than
 separate tool calls; releasing the foreground wait still leaves that shell alive.
 
 Unlike backgrounding, interrupting a Run with Ctrl+C requests stopping it and its owned shells. Acceptance of a stop request does not mean every PID has been reclaimed; query the terminal Run/shell state. An interrupted model is not automatically resumed merely to deliver a notification.
+
+### Worked background-and-wait examples
+
+Use `background: true` for the launch, then wait with the `shell_ended` condition
+above for the returned execution ID. The limit is when to reconsider, not a
+process deadline. On timeout, inspect the same ID with `shell get` and bounded
+`shell read`; after an end event, verify the saved exit code and output completeness.
+
+| Work | Observation and decision |
+|---|---|
+| Tests | Launch `cargo test --locked --lib` → `TEST_EXEC`. A 30-second wait times out. Read the test progress; if the next step needs the result, wait again on `TEST_EXEC` and verify the saved exit status. |
+| Build | Launch `cargo build --locked` → `BUILD_EXEC`. A 60-second wait times out; readback shows linking. Review docs meanwhile, then observe the same `BUILD_EXEC` and verify its result. |
+| Install | Launch an approved noninteractive install in a disposable environment → `INSTALL_EXEC`. The bounded wait times out but output shows download progress. Continue observing `INSTALL_EXEC`; verify its exit and the expected installed state without launching a second install. |
+| Migration | Launch an approved migration against a backed-up disposable copy → `MIGRATE_EXEC`. On timeout, read progress and check the recovery procedure before considering Stop. If progressing, wait again on `MIGRATE_EXEC` and verify the resulting data and schema. |
+| Server | Launch `./dev-server` → `SERVER_EXEC`. A short wait times out, which only rules out an observed early exit. Inspect output and check readiness separately using the documented health check. Stop `SERVER_EXEC` when finished. |
 
 ### Finding and stopping a stalled shell
 

@@ -2071,16 +2071,205 @@ async fn real_shell_cli_starts_independent_child_without_parent_retention_or_lif
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn human_background_keeps_the_first_shell_alive_and_cancels_remaining_calls_with_notice() {
-    assert_human_background_notice(true).await;
+async fn real_shell_cli_backgrounds_only_the_execution_named_by_the_message_hold() {
+    let (url, mut requests, server) = proxy().await;
+    let (_directory, owner, control) = runtime(&url).await;
+    let (send, receive) = mpsc::channel(32);
+    let local = shellboy::ipc::LocalServer::bind(&owner, send)
+        .await
+        .unwrap();
+    let serving = tokio::spawn(control.clone().serve(receive));
+    let recipient = start(&control).await;
+    let call = |id: &str, script: &str| {
+        json!({
+            "type":"function_call","id":id,"call_id":id,"name":"shell",
+            "arguments":json!({"command":script,"stdin_open":true}).to_string()
+        })
+    };
+    incoming(&mut requests).await.reply.send(Reply::json(json!({
+        "id":"target-group","status":"completed","output":[call("target", "cat"),call("later", "printf must-not-run")]
+    }))).ok().unwrap();
+    let sender = start(&control).await;
+    let executable = env!("CARGO_BIN_EXE_shellboy").replace('\'', "'\\''");
+    let script = format!(
+        "IFS= read -r target && '{executable}' shell background --execution \"$target\"; cat"
+    );
+    incoming(&mut requests)
+        .await
+        .reply
+        .send(Reply::json(json!({
+            "id":"sender-group","status":"completed","output":[call("intervention", &script)]
+        })))
+        .ok()
+        .unwrap();
+
+    async fn queue(control: &Arc<Control>, thread: &str, text: &str) -> String {
+        command(
+            control,
+            Command::MessageSend(MessageSendArgs {
+                max_model_requests: None,
+                resume_recovery: false,
+                human: false,
+                sender_label: None,
+                deliver: Deliver::Next,
+                thread_id: Some(thread.to_owned()),
+                text: text.to_owned(),
+            }),
+        )
+        .await["message_id"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    }
+    async fn message(control: &Arc<Control>, id: &str) -> Value {
+        command(
+            control,
+            Command::MessageGet(shellboy::protocol::MessageTarget {
+                message_id: id.to_owned(),
+            }),
+        )
+        .await
+    }
+    async fn blocker(control: &Arc<Control>, id: &str) -> String {
+        watchdog("message is held by a live foreground execution", async {
+            loop {
+                let detail = message(control, id).await;
+                if detail["held_by"]["kind"] == "foreground_shell" {
+                    break detail["held_by"]["execution_id"]
+                        .as_str()
+                        .unwrap()
+                        .to_owned();
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap()
+    }
+    let pending = queue(
+        &control,
+        &recipient.thread_id,
+        "exact background fixture instruction",
+    )
+    .await;
+    let other_pending = queue(
+        &control,
+        &sender.thread_id,
+        "unrelated foreground instruction",
+    )
+    .await;
+    let target = blocker(&control, &pending).await;
+    let other = blocker(&control, &other_pending).await;
+    assert_ne!(target, other);
+    // The real CLI receives the sender's shell-issued Origin through IPC.
+    command(
+        &control,
+        Command::ShellWrite(ShellWriteArgs {
+            execution_id: other.clone(),
+            text: format!("{target}\n"),
+            encoding: "UTF-8".into(),
+        }),
+    )
+    .await;
+    let next = incoming(&mut requests).await;
+    let input = next.body["input"].as_array().unwrap();
+    let result = |id: &str| -> Value {
+        let item = input
+            .iter()
+            .find(|item| item["type"] == "function_call_output" && item["call_id"] == id)
+            .unwrap();
+        serde_json::from_str(item["output"].as_str().unwrap()).unwrap()
+    };
+    let released = result("target");
+    assert_eq!(released["execution_id"], target);
+    assert_eq!(released["thread_id"], recipient.thread_id);
+    assert_eq!(released["run_id"], recipient.run_id.as_deref().unwrap());
+    assert_eq!(released["turn_id"], recipient.turn_id.as_deref().unwrap());
+    assert_eq!(released["status"], "running");
+    assert_eq!(released["reason"], "shell_backgrounded");
+    assert_eq!(released["cancel_remaining_calls"], true);
+    let later = result("later");
+    assert_eq!(later["status"], "cancelled");
+    assert_eq!(later["executed"], false);
+    assert_eq!(
+        later["reason"],
+        "previous_wait_released_by_shell_background"
+    );
+    assert_eq!(later["prerequisite"]["execution_id"], target);
+    assert!(
+        next.body["input"]
+            .to_string()
+            .contains("exact background fixture instruction")
+    );
+    assert_eq!(
+        message(&control, &other_pending).await["held_by"],
+        json!({"kind":"foreground_shell","execution_id":other})
+    );
+    assert_eq!(
+        command(
+            &control,
+            Command::ShellGet(ExecutionTarget {
+                execution_id: target.clone()
+            })
+        )
+        .await["state"],
+        "running"
+    );
+    let stale = control
+        .request(Request::new(
+            format!("{}:old-foreground", control.store.instance_id),
+            Command::ShellBackground(ExecutionTarget {
+                execution_id: target,
+            }),
+        ))
+        .await
+        .error
+        .unwrap();
+    assert_eq!(stale.code, ErrorCode::InvalidState);
+    assert_eq!(
+        message(&control, &other_pending).await["held_by"]["execution_id"],
+        other
+    );
+    next.reply
+        .send(final_answer("target resumed"))
+        .ok()
+        .unwrap();
+    // Durable application follows adoption of the model response, not request dispatch.
+    let delivered = command(
+        &control,
+        Command::Wait(WaitArgs {
+            conditions: vec![WaitCondition::MessageDelivered {
+                message_id: pending.clone(),
+            }],
+            timeout_ms: 30_000,
+            after: None,
+        }),
+    )
+    .await;
+    assert_eq!(
+        delivered["matched"],
+        json!([{"type":"message_delivered","message_id":pending}])
+    );
+    assert_eq!(
+        message(&control, &pending).await["delivery_status"],
+        "applied"
+    );
+    local.shutdown().await.unwrap();
+    serving.await.unwrap();
+    close(control, owner, server).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn human_background_of_a_single_shell_notifies_ui_and_model_without_cancelled_calls() {
-    assert_human_background_notice(false).await;
+async fn background_keeps_the_first_shell_alive_and_cancels_remaining_calls_with_notice() {
+    assert_background_notice(true).await;
 }
 
-async fn assert_human_background_notice(has_remaining_call: bool) {
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn background_of_a_single_shell_notifies_ui_and_model_without_cancelled_calls() {
+    assert_background_notice(false).await;
+}
+
+async fn assert_background_notice(has_remaining_call: bool) {
     let (url, mut requests, proxy_server) = proxy().await;
     let (_directory, owner, control) = runtime(&url).await;
     let mut events = control.subscribe();
@@ -2119,7 +2308,7 @@ async fn assert_human_background_notice(has_remaining_call: bool) {
         ))
         .ok()
         .unwrap();
-    crate::test_watchdog::watchdog("tests/runtime.rs: assert_human_background_notice", async {
+    crate::test_watchdog::watchdog("tests/runtime.rs: assert_background_notice", async {
         loop {
             if control.background(&accepted.thread_id, None).await.is_ok() {
                 break;
@@ -2149,7 +2338,7 @@ async fn assert_human_background_notice(has_remaining_call: bool) {
     );
     let cancelled_count = usize::from(has_remaining_call);
     assert_eq!(results.len(), 1 + cancelled_count);
-    assert_eq!(results[0]["reason"], "human_backgrounded");
+    assert_eq!(results[0]["reason"], "shell_backgrounded");
     if has_remaining_call {
         assert_eq!(results[1]["status"], "cancelled");
     }
@@ -2196,7 +2385,7 @@ async fn assert_human_background_notice(has_remaining_call: bool) {
                 format!("未実行のツール呼出しを{cancelled_calls}件取り消しました")
             };
             notices.push(format!(
-                "人間の操作でshell {}の待機を解除し背景へ移しました。{remaining}",
+                "背景移行の要求でshell {}の待機を解除し背景へ移しました。{remaining}",
                 results[0]["execution_id"].as_str().unwrap()
             ));
         }
@@ -2224,11 +2413,11 @@ async fn assert_human_background_notice(has_remaining_call: bool) {
         "No remaining unexecuted calls"
     };
     let expected_ui_notice = format!(
-        "Human action ended the wait for shell {} and moved it to the background. {ui_remaining}",
+        "Background request ended the wait for shell {} and moved it to the background. {ui_remaining}",
         results[0]["execution_id"].as_str().unwrap()
     );
     let ui_notice =
-        crate::test_watchdog::watchdog("tests/runtime.rs: assert_human_background_notice", async {
+        crate::test_watchdog::watchdog("tests/runtime.rs: assert_background_notice", async {
             loop {
                 match updates_receive.try_recv() {
                     Ok(update @ shellboy::ui::UiUpdate::Status { .. }) => {
@@ -2312,7 +2501,7 @@ async fn assert_human_background_notice(has_remaining_call: bool) {
     )
     .await;
     let stopped =
-        crate::test_watchdog::watchdog("tests/runtime.rs: assert_human_background_notice", async {
+        crate::test_watchdog::watchdog("tests/runtime.rs: assert_background_notice", async {
             loop {
                 match updates_receive.try_recv() {
                     Ok(update @ shellboy::ui::UiUpdate::Progress { .. }) => {
@@ -2338,12 +2527,12 @@ async fn assert_human_background_notice(has_remaining_call: bool) {
     ui.apply(stopped);
     assert_eq!(ui.view().state, "中断済み");
     actions.send(shellboy::ui::UiAction::Quit).await.unwrap();
-    crate::test_watchdog::watchdog("tests/runtime.rs: assert_human_background_notice", bridge)
+    crate::test_watchdog::watchdog("tests/runtime.rs: assert_background_notice", bridge)
         .await
         .unwrap()
         .unwrap()
         .unwrap();
-    crate::test_watchdog::watchdog("tests/runtime.rs: assert_human_background_notice", serving)
+    crate::test_watchdog::watchdog("tests/runtime.rs: assert_background_notice", serving)
         .await
         .unwrap()
         .unwrap();

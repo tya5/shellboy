@@ -1673,12 +1673,12 @@ async fn a_reported_running_shell_can_be_backgrounded_immediately() {
         let detail = control.request(message_get).await.result.unwrap();
         assert!(detail.get("held_by").is_none());
         assert!(halt);
-        assert_eq!(result, json!({"status":"running","execution_id":execution,"reason":"human_backgrounded","cancel_remaining_calls":true}));
+        assert_eq!(result, json!({"status":"running","execution_id":execution,"reason":"shell_backgrounded","cancel_remaining_calls":true}));
         save_tool_result(&control, &snapshot, "publication-group", "publication-call", result).await.unwrap();
         control.store.database.call(move |db| {
             let (body, shell): (String, String) = db.query_row("SELECT json_extract(n.payload_json,'$.item.output'),s.state FROM tool_result r JOIN node n ON n.id=r.node_id JOIN shell_execution s ON s.id=?1 WHERE r.group_id='publication-group' AND r.call_id='publication-call'", [&execution], |row| Ok((row.get(0)?,row.get(1)?)))?;
             let saved: Value = serde_json::from_str(&body).unwrap();
-            assert_eq!(saved["reason"], "human_backgrounded");
+            assert_eq!(saved["reason"], "shell_backgrounded");
             assert_eq!(saved["status"], "running");
             assert_eq!(saved["cancel_remaining_calls"], true);
             assert_eq!(shell, "running");

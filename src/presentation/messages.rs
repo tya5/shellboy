@@ -1366,6 +1366,9 @@ pub fn tool_reason(tool: &super::ToolPresentation, language: UiLanguage) -> Stri
         R::PriorOutputIncomplete => "Not executed because earlier output was incomplete",
         R::PriorWaitNewInput => "Not executed after additional input released the earlier wait",
         R::PriorWaitHumanBackground => "Not executed after the user backgrounded the earlier call",
+        R::PriorWaitShellBackground => {
+            "Not executed after the earlier call moved to the background"
+        }
         R::PriorWaitReleased => "Not executed due to the earlier wait outcome",
         R::HumanTurnInterrupted => "User interrupted the turn",
         R::PriorTurnInterrupted => "Not executed because the user interrupted the turn",
@@ -1373,6 +1376,7 @@ pub fn tool_reason(tool: &super::ToolPresentation, language: UiLanguage) -> Stri
         R::GroupValidation => "Not executed because tool group validation failed",
         R::AdditionalInput => "Backgrounded after additional input",
         R::HumanBackgrounded => "Backgrounded by the user",
+        R::ShellBackgrounded => "Moved to the background by request",
         R::ForegroundTimeout => "Backgrounded at the foreground wait time limit",
         R::OutputLimit => "Output limit reached",
         R::Unknown => return tool.reason.clone(),

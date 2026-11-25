@@ -151,7 +151,7 @@ pub(super) async fn run_tool_group(
             ));
         }
         let release = match result.get("reason").and_then(Value::as_str) {
-            Some("human_backgrounded") => Some(ForegroundRelease::Background),
+            Some("shell_backgrounded") => Some(ForegroundRelease::Background),
             Some("additional_input") => Some(ForegroundRelease::AdditionalInput),
             _ => None,
         };
@@ -234,9 +234,9 @@ fn cancelled_after(call_id: &str, result: &Value) -> Value {
             "previous_wait_released_by_new_input",
             "New input released the previous shell's foreground wait; inspect its execution before repeating work",
         ),
-        Some("human_backgrounded") => (
-            "previous_wait_released_by_human_background",
-            "A human released the previous shell's foreground wait; inspect its execution before repeating work",
+        Some("shell_backgrounded") => (
+            "previous_wait_released_by_shell_background",
+            "The previous shell was moved to the background; inspect its execution before repeating work",
         ),
         _ if result.get("output_complete").and_then(Value::as_bool) == Some(false) => (
             "previous_output_incomplete",

@@ -1162,7 +1162,8 @@ Partial writes, timeouts and in-flight failures retain their typed write result;
 `shell.background {execution_id}` requests release of the exact running foreground
 execution awaited by a live Turn. It returns `{execution_id, requested: true}`
 when the live foreground slot accepts the request. The shell remains running;
-the existing driver may record `human_backgrounded` and cancel remaining calls.
+the driver may record `shell_backgrounded` and cancel remaining calls. The same
+owner accepts this exact action across Threads, without a caller-Thread gate.
 The acknowledgment is not a saved tool outcome; shell completion or another
 release can win the race. Unknown executions return `target_unavailable`
 (`details.reason=execution_not_found`); known but ineligible executions return

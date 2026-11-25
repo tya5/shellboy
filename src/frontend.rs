@@ -434,7 +434,7 @@ fn tool_group_notice(
         Some((execution, reason)) => {
             let cause = match reason {
                 crate::control::ForegroundRelease::Background => {
-                    i18n::local!(language, "人間の操作", "Human action")
+                    i18n::local!(language, "背景移行の要求", "Background request")
                 }
                 crate::control::ForegroundRelease::AdditionalInput => {
                     i18n::local!(language, "追加指示", "Additional instruction")

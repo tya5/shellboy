@@ -33,7 +33,7 @@ impl ForegroundSlot {
         })?;
         sender.send_if_modified(|pending| {
             if *pending == Some(ForegroundRelease::Background) {
-                // A human action is sticky until this call ends. A stale input
+                // An explicit Background is sticky until this call ends. A stale input
                 // nudge must neither reject nor replace it.
                 false
             } else {
@@ -86,13 +86,13 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn human_background_is_not_rejected_by_queued_additional_input() {
+    async fn background_is_not_rejected_by_queued_additional_input() {
         let slot = ForegroundSlot::default();
         let mut call = slot.register("current");
         assert!(slot.release(ForegroundRelease::AdditionalInput));
         assert!(
             slot.release(ForegroundRelease::Background),
-            "human control must not be rejected by an obsolete input wake"
+            "explicit Background must not be rejected by an obsolete input wake"
         );
         assert!(slot.release(ForegroundRelease::AdditionalInput));
         assert_eq!(call.recv().await, Some(ForegroundRelease::Background));
