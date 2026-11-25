@@ -8,7 +8,7 @@ provenance locally. Keep commands running in the background or delegate tasks
 to child Threads. Search saved history and pick up the work after an
 interruption or restart, without assuming a stopped command will restart.
 
-<!-- Demo GIF placeholder: #426. Add the image here when it is ready. -->
+![Shellboy runs a failing test, delegates the investigation to a child Thread that owes a reply, then reopens the saved diagnosis after restart.](docs/assets/shellboy-demo.gif)
 
 ## What makes it different
 

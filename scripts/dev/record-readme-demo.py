@@ -210,6 +210,8 @@ def main():
         # The concat demuxer needs a final timestamp to apply the final hold.
         (scratch / 'frames.txt').write_text(manifest + f"file '{len(frames) - 1}.png'\n")
         seconds = sum(frame['seconds'] for frame in frames)
+        if not 20 <= seconds <= 40:
+            raise ValueError(f'GIF must run 20-40 seconds, got {seconds}')
         output = scratch / 'demo.gif'
         subprocess.run(['ffmpeg', '-nostdin', '-v', 'error', '-f', 'concat', '-safe', '1',
                         '-i', 'frames.txt', '-filter_complex',

@@ -4,11 +4,12 @@ On macOS, build a trusted `shellboy` binary from the checkout you want to record
 Then run from the repository root:
 
 ```sh
-python3 scripts/dev/record-readme-demo.py --binary /path/to/shellboy
+TMPDIR=/tmp python3 scripts/dev/record-readme-demo.py --binary /path/to/shellboy
 ```
 
 The recorder uses the existing PTY cell decoder. It creates a disposable project,
-configuration, home and owner database. A scripted, unauthenticated Responses
+configuration, home and owner database. Using `/tmp` keeps the macOS per-user
+temporary directory out of the recording. A scripted, unauthenticated Responses
 mock listens on literal loopback only. The parent runs the failing unit test and
 opens a real Ask; the child reads the sample source and replies with the cause.
 The recorder captures the owed-reply count before allowing the child to answer,
