@@ -176,7 +176,10 @@ Unit 4b owns saved attempt settlement and tool-notice projection, after which
 the remaining private notice/error subscription is removed. Neither needs a
 third event fact in 4a. The frontend delivers saved pages, preview frames and
 exact native attempt ends through the existing ordered outbox. A single answer
-chunk can display before the first saved read. The UI checks the window's
+chunk can display before the first saved read. If a frame is ahead of the
+installed saved tail, the UI retains the latest frame for that attempt without
+displaying it until a matching saved install; an exact end can retire it first.
+No additional read or delta is required. The UI checks the window's
 navigation revision, installs the eligible window, and reconciles the preview
 against it in the same step. A superseded window cannot change the preview.
 When a replacement retires the preview anchor, the installed saved window

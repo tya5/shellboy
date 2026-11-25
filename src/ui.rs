@@ -2593,11 +2593,7 @@ impl UiState {
                 node_id,
             });
         }
-        self.apply_inner(history);
-        if settled && let Some(view) = self.view_for(&thread, generation) {
-            let retired = view.reconcile_saved_preview(true, None);
-            self.deferred_actions.extend(retired);
-        }
+        self.apply_inner_with_settlement(history, settled);
         if let Some(received) = received {
             self.apply_inner(*received);
         }
@@ -2614,6 +2610,10 @@ impl UiState {
         self.dirty = true;
     }
     fn apply_inner(&mut self, update: UiUpdate) {
+        self.apply_inner_with_settlement(update, false);
+    }
+
+    fn apply_inner_with_settlement(&mut self, update: UiUpdate, settled: bool) {
         let language = self.config.ui.language;
         if let UiUpdate::ProgramStatus(snapshot) = update {
             if self.config.ui.program_status == crate::config::ProgramStatus::Off {
@@ -3365,7 +3365,7 @@ impl UiState {
                 view.pending_messages = pending;
                 view.reconcile_saved_inputs();
                 if !append {
-                    let retired = view.reconcile_saved_preview(false, None);
+                    let retired = view.reconcile_saved_preview(settled, None);
                     self.deferred_actions.extend(retired);
                 }
             }
@@ -3407,20 +3407,7 @@ impl UiState {
                 let Some(view) = self.view_for(&thread_id, generation) else {
                     return;
                 };
-                if verified
-                    && presentation
-                        .preview_source
-                        .as_ref()
-                        .is_some_and(|source| !view.accepts_preview(source))
-                {
-                    return;
-                }
-                let retired = if verified {
-                    view.settle_other_streams(&node_id)
-                } else {
-                    Vec::new()
-                };
-                view.on_stream(UiNode {
+                let frame = UiNode {
                     node_id,
                     role,
                     text,
@@ -3428,8 +3415,13 @@ impl UiState {
                     total_chars,
                     reasoning_ranges,
                     presentation,
-                });
-                self.deferred_actions.extend(retired);
+                };
+                if verified {
+                    let retired = view.observe_preview(frame);
+                    self.deferred_actions.extend(retired);
+                } else {
+                    view.on_stream(frame);
+                }
             }
             UiUpdate::HistoryRebaseNotice {
                 thread_id,
@@ -3477,6 +3469,7 @@ impl UiState {
                 let view = self.active_view_mut();
                 if view.matches(&thread_id, generation) {
                     view.activity.clear_receive_observation();
+                    view.clear_unconfirmed_preview();
                     let retired = view.settle_other_streams("");
                     self.deferred_actions.extend(retired);
                 }
@@ -4584,6 +4577,7 @@ impl UiState {
             key
         };
         self.active_view_mut().items.cancel_pending();
+        self.active_view_mut().clear_unconfirmed_preview();
         self.active = key;
         self.active_view_mut().items.cancel_pending();
         self.thread_browser.close();
@@ -9094,6 +9088,78 @@ mod tool_refresh_tests {
             1,
             "late frame cannot restore the retired preview"
         );
+    }
+
+    #[test]
+    fn new_preview_before_matching_saved_tail_adopts_without_a_second_frame() {
+        for ended in [false, true] {
+            let (send, receive) = crate::frontend::test_outbox();
+            let mut ui = UiState::new(&Config::default(), PathBuf::from("/"));
+            ui.select_thread("t".into());
+            let generation = ui.view().generation;
+            let ui_revision = ui.view().navigation.view_revision;
+            let window = |revision, id: &str| UiUpdate::HistoryWindow {
+                thread_id: "t".into(),
+                generation,
+                view_revision: ui_revision,
+                nodes: vec![UiNode {
+                    node_id: id.into(),
+                    role: "user".into(),
+                    text: "saved input".into(),
+                    total_chars: 11,
+                    ..Default::default()
+                }],
+                read_revision: revision,
+                selection_revision: revision,
+                total_nodes: 1,
+                first_ordinal: 0,
+                pending: Default::default(),
+                anchor: ViewAnchor::default(),
+            };
+            send(window(1, "old"));
+            ui.apply(receive());
+            send(UiUpdate::Stream {
+                thread_id: "t".into(),
+                generation,
+                node_id: "attempt".into(),
+                role: "assistant".into(),
+                text: "only chunk".into(),
+                base_char_offset: 0,
+                total_chars: 10,
+                reasoning_ranges: vec![],
+                presentation: NodePresentation {
+                    preview_source: Some(crate::presentation::PreviewSource {
+                        input_through_node_id: Some("new".into()),
+                    }),
+                    ..Default::default()
+                },
+                ack: Some(Arc::new(tokio::sync::Notify::new())),
+            });
+            ui.apply(receive());
+            assert_eq!(ui.view().nodes().len(), 1);
+            if ended {
+                send(UiUpdate::PreviewEnded {
+                    thread_id: "t".into(),
+                    generation,
+                    attempts: vec!["attempt".into()],
+                });
+                ui.apply(receive());
+            }
+            send(window(2, "new"));
+            ui.apply(receive());
+            let texts = ui
+                .view()
+                .nodes()
+                .iter()
+                .map(|node| node.text.as_str())
+                .collect::<Vec<_>>();
+            if ended {
+                assert_eq!(texts, ["saved input"]);
+            } else {
+                assert_eq!(texts, ["saved input", "only chunk"]);
+            }
+            assert!(ui.take_deferred_actions().is_empty());
+        }
     }
 
     #[test]

@@ -48,6 +48,7 @@ pub struct ThreadView {
     pub(super) received_window_revision: Option<u64>,
     pub total_nodes: u64,
     saved_tail: Option<(u64, u64, Option<String>)>,
+    unconfirmed_preview: Option<UiNode>,
     notice_anchor: Option<(u64, u64, String)>,
     pub status: String,
     pub pending: BTreeMap<u64, PendingSend>,
@@ -374,6 +375,7 @@ impl ThreadView {
             received_window_revision: None,
             total_nodes: 0,
             saved_tail: None,
+            unconfirmed_preview: None,
             notice_anchor: None,
             status: crate::ui::i18n::local!(config.ui.language, "入力できます", "Ready for input")
                 .into(),
@@ -567,10 +569,42 @@ impl ThreadView {
 }
 
 impl ThreadView {
-    pub(super) fn accepts_preview(&self, source: &crate::presentation::PreviewSource) -> bool {
+    fn accepts_preview(&self, source: &crate::presentation::PreviewSource) -> bool {
         self.saved_tail
             .as_ref()
             .is_none_or(|(_, _, tail)| tail == &source.input_through_node_id)
+    }
+
+    pub(super) fn observe_preview(&mut self, frame: UiNode) -> Vec<UiAction> {
+        if frame
+            .presentation
+            .preview_source
+            .as_ref()
+            .is_some_and(|source| !self.accepts_preview(source))
+        {
+            // Keep the latest bounded frame after acknowledging delivery; a
+            // matching saved install must not depend on a second delta.
+            self.unconfirmed_preview = Some(frame);
+            return Vec::new();
+        }
+        self.clear_unconfirmed_preview();
+        let retired = self.settle_other_streams(&frame.node_id);
+        self.on_stream(frame);
+        retired
+    }
+
+    pub(super) fn clear_unconfirmed_preview(&mut self) {
+        self.unconfirmed_preview = None;
+    }
+
+    fn clear_unconfirmed_attempt(&mut self, attempt: &str) {
+        if self
+            .unconfirmed_preview
+            .as_ref()
+            .is_some_and(|frame| frame.node_id == attempt)
+        {
+            self.clear_unconfirmed_preview();
+        }
     }
 
     pub(super) fn reconcile_saved_preview(
@@ -624,10 +658,23 @@ impl ThreadView {
             };
             self.navigation.scroll.within = 0;
         }
-        retired
+        let mut actions = retired
             .iter()
             .filter_map(|id| self.settle_stream(id))
-            .collect()
+            .collect::<Vec<_>>();
+        if let Some((_, _, tail)) = &self.saved_tail
+            && self.unconfirmed_preview.as_ref().is_some_and(|frame| {
+                frame
+                    .presentation
+                    .preview_source
+                    .as_ref()
+                    .is_some_and(|source| &source.input_through_node_id == tail)
+            })
+            && let Some(frame) = self.unconfirmed_preview.take()
+        {
+            actions.extend(self.observe_preview(frame));
+        }
+        actions
     }
 
     fn observe_saved_tail(&mut self, nodes: &[UiNode], first: u64, revision: u64, total: u64) {
@@ -997,6 +1044,7 @@ impl ThreadView {
         thread_id: String,
         generation: u64,
     ) -> Option<UiAction> {
+        self.clear_unconfirmed_attempt(&attempt_id);
         if !self.provisional_nodes.contains(&attempt_id) {
             return None;
         }
@@ -2056,6 +2104,7 @@ mod owner_tests {
 
 impl ThreadView {
     pub(super) fn settle_stream(&mut self, attempt: &str) -> Option<UiAction> {
+        self.clear_unconfirmed_attempt(attempt);
         // A stale terminal read must not discard a source already committed.
         if self.committed_nodes.contains_key(attempt) {
             return None;
