@@ -184,7 +184,10 @@ fn following_tail_is_the_initial_state_and_render_does_not_change_it() {
     // The first render is the one that initializes the visual scroll cache.
     assert!(before.contains("initialized=false"), "{before}");
     assert!(after_first.contains("initialized=true"), "{after_first}");
-    assert!(ui.view().navigation.scroll.row() > 0 && ui.view().navigation.scroll.height == first.len() as u16);
+    assert!(
+        ui.view().navigation.scroll.row() > 0
+            && ui.view().navigation.scroll.height == first.len() as u16
+    );
 }
 
 #[test]
