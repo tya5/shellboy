@@ -750,7 +750,7 @@ async fn next_with_clients(
         if config.connections.get(&snapshot.profile).is_some_and(|c| c.prompt_cache_diagnostics) {
             snapshot.cache_comparison_response_id = model::cache_diagnostics::last_response_id(&tx, &thread)?;
         }
-        let pending:Vec<(String,String)>=tx.prepare("SELECT id,message_node_id FROM receipt WHERE turn_id=?1 AND state='accepted' ORDER BY created_at,rowid")?.query_map([&turn],|r|Ok((r.get(0)?,r.get(1)?)))?.collect::<Result<_,_>>()?;
+        let pending:Vec<(String,String)>=tx.prepare(&format!("SELECT id,message_node_id FROM {} ORDER BY created_at,rowid",super::message_delivery::TURN_INPUT_CANDIDATES))?.query_map([&turn],|r|Ok((r.get(0)?,r.get(1)?)))?.collect::<Result<_,_>>()?;
         let nodes:Vec<String>=pending.iter().map(|(_,node)|node.clone()).collect();
         let plan=super::message_delivery::plan_admission_tx(&tx,&thread,&nodes,&now())?;
         snapshot.receipts=pending.iter()

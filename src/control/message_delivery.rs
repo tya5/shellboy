@@ -10,6 +10,25 @@ use crate::{
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde_json::{Value, json};
 
+// Shared starting set for next-request admission and exact hold observation.
+pub(super) const TURN_INPUT_CANDIDATES: &str = "receipt WHERE turn_id=?1 AND state='accepted'";
+
+pub(super) fn exact_input_candidate(
+    db: &Connection,
+    thread: &str,
+    turn: &str,
+    message: &str,
+) -> rusqlite::Result<bool> {
+    let candidate = db.query_row(
+        &format!("SELECT EXISTS(SELECT 1 FROM {TURN_INPUT_CANDIDATES} AND message_node_id=?2 AND target_thread_id=?3)"),
+        params![turn, message, thread], |row| row.get::<_, bool>(0),
+    )?;
+    if !candidate { return Ok(false); }
+    // Prove this node can cross the existing admission frontier. An earlier
+    // caller absent from this single-target proof may make attribution unknown.
+    Ok(plan_admission_tx(db, thread, &[message.to_owned()], "")?.admitted_callers.iter().any(|id| id == message))
+}
+
 pub(crate) fn held_hint(reason: Option<&str>) -> &'static str {
     match reason {
         Some("run_completion") => {

@@ -2,7 +2,7 @@
 use crate::{
     context::ExecutionContext,
     protocol::{
-        ApiError, Assignment, Command, DeliveryStatus, ErrorCode, MessageDetails, MessageSender,
+        ApiError, Assignment, Command, DeliveryStatus, ErrorCode, MessageDetails, MessageHeldBy, MessageSender,
         ShellDetails, ShellState,
     },
     storage::StorageError,
@@ -46,6 +46,7 @@ pub(super) struct RawShell {
 }
 #[derive(Debug)]
 pub(super) struct RawMessage {
+    held_by: Option<MessageHeldBy>,
     id: String,
     thread: String,
     state: String,
@@ -74,10 +75,11 @@ pub(super) async fn request(
         ));
     }
     command.validate()?;
+    let owner = control.clone();
     let raw = super::snapshot::read(
         control.store.database.path().to_path_buf(),
         stop,
-        move |db| read_tx(db, &command, None),
+        move |db| read_live_tx(db, &owner, &command),
     )
     .await?;
     let prepared = super::presentation_work(move || prepare(raw)).await??;
@@ -151,6 +153,18 @@ const MESSAGE_SQL:&str="SELECT
 
 /// Closed allowlist checked before touching SQLite. `default_thread` is issuing
 /// context, never authority to retarget an explicit execution/message/Run.
+pub(super) fn read_live_tx(
+    db: &Connection,
+    owner: &crate::control::Control,
+    command: &Command,
+) -> Result<RawSaved, StorageError> {
+    let mut raw = read_tx(db, command, None)?;
+    if let RawSaved::Message(message) = &mut raw {
+        message.held_by = owner.read_message_hold(db, &message.id)?;
+    }
+    Ok(raw)
+}
+
 pub(super) fn read_tx(
     db: &Connection,
     command: &Command,
@@ -245,6 +259,7 @@ pub(super) fn read_tx(
                 ],
             );
             Ok(RawSaved::Message(RawMessage {
+                held_by: None,
                 id: args.message_id.clone(),
                 thread: required(row.0, "message Thread identity")?,
                 state: required(row.1, "message delivery state")?,
@@ -418,7 +433,7 @@ pub(super) fn prepare(raw: RawSaved) -> Result<PreparedSaved, ApiError> {
             let assignment_limited =
                 raw.run.is_some() && raw.limited.iter().any(|p| p == "/assignment");
             let details = MessageDetails {
-                held_by: None,
+                held_by: raw.held_by,
                 hint: None,
                 to_human: false,
                 sender: MessageSender::from_saved(raw.sender.as_deref()),

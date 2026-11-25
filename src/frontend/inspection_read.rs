@@ -51,13 +51,15 @@ enum Body {
 }
 #[derive(Clone)]
 pub(super) struct Services {
+    owner: Arc<crate::control::Control>,
     pub instance_id: String,
     pub config: Arc<crate::config::Config>,
     pub index: Arc<crate::index::IndexService>,
 }
 impl Services {
-    pub fn new(control: &crate::control::Control) -> Self {
+    pub fn new(control: &Arc<crate::control::Control>) -> Self {
         Self {
+            owner: control.clone(),
             instance_id: control.store.instance_id.clone(),
             config: control.store.config.clone(),
             index: control.index.clone(),
@@ -165,12 +167,12 @@ pub(super) fn read_scoped_tx(
                 }),
                 None,
             )?),
-            InspectionTarget::Message(id) => Body::Saved(super::inspection_saved::read_tx(
+            InspectionTarget::Message(id) => Body::Saved(super::inspection_saved::read_live_tx(
                 db,
+                &services.owner,
                 &Command::MessageGet(MessageTarget {
                     message_id: id.clone(),
                 }),
-                None,
             )?),
             InspectionTarget::Attachments {
                 thread_id,

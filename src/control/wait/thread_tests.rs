@@ -184,6 +184,12 @@ async fn runtime_thread_delete_wakes_parked_thread_and_reply_waits() {
             after: None,
         }, None, CancellationToken::new()));
         control.waits.parked.notified().await;
+        let delivery_wait = tokio::spawn(observe(control.clone(), "delivery-wait".into(), WaitArgs {
+            conditions: vec![WaitCondition::MessageDelivered { message_id: "message".into() }],
+            timeout_ms,
+            after: None,
+        }, None, CancellationToken::new()));
+        control.waits.parked.notified().await;
         let response = control.request(Request {
             protocol_version: PROTOCOL_VERSION,
             operation_id: format!("{}:delete-recipient", owner.instance_id),
@@ -191,7 +197,10 @@ async fn runtime_thread_delete_wakes_parked_thread_and_reply_waits() {
             origin: None,
         }).await;
         assert!(response.ok, "{:?}", response.error);
-        let (thread_result, reply_result) = tokio::join!(thread_wait, reply_wait);
+        let (thread_result, reply_result, delivery_result) = tokio::join!(thread_wait, reply_wait, delivery_wait);
+        let delivery = delivery_result.unwrap().unwrap();
+        assert_eq!(delivery["status"], "unavailable");
+        assert_eq!(delivery["matched"], json!([]));
         assert_eq!(thread_result.unwrap().unwrap()["status"], "unavailable");
         let reply = reply_result.unwrap().unwrap();
         assert_eq!(reply["status"], "satisfied");

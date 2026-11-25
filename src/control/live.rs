@@ -326,6 +326,22 @@ impl LiveRegistry {
         drivers.remove(thread);
     }
 
+    /// Called on the DB worker. Never wait for a driver lock there: some
+    /// lifecycle transitions hold it across their database commit.
+    pub(super) fn foreground_observation(
+        &self,
+        thread: &str,
+        run: &str,
+    ) -> Result<Option<String>, ()> {
+        let drivers = self.drivers.try_lock().map_err(|_| ())?;
+        match drivers.get(thread) {
+            Some(slot) if slot.run_id == run && !slot.stop.is_cancelled()
+                && slot.driver_active.load(Ordering::Acquire) => Ok(slot.foreground.waiting_execution()),
+            Some(_) => Err(()),
+            None => Ok(None),
+        }
+    }
+
     pub(super) async fn foreground_for_run(
         &self,
         thread: &str,
