@@ -1325,3 +1325,13 @@ Read `error.hint` for the next action and `error.message` for diagnostic evidenc
 An unavailable or excluded attachment was not sent in that request. Inspect `shellboy attachment list --thread THREAD_ID` for current state; an earlier replay notice or accepted attachment command is not a delivery receipt.
 
 Standalone `rag` reports hints on failures and on failed scopes or inputs in a partial result. Use `shellboy rag init` for the intended, uninitialized store, `shellboy rag status` for a failed standalone embedding or store, and `shellboy index status` for the owner history index. For missing semantic coverage, repeat the search with `--mode keyword` to avoid another embedding call. Preserve the original query and requested scope.
+
+### List submission snapshots
+
+`shellboy draft list --thread ID` lists restorable inputs for that Thread and
+unbound inputs. Omit `--thread` to list unbound inputs only. Use
+`--kind submitted --thread ID` for the saved operation, message and source
+revision links, even if the owner collected the submitted body. This does not
+restore, send, or retry input. Lists default to 50 items (`--limit` accepts
+1 through 200); pass `next_cursor` as `--cursor` with the same Thread and kind
+on the same owner. The list is live, not a frozen snapshot.

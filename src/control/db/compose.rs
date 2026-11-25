@@ -125,7 +125,7 @@ pub(super) fn get(
             )
         })?;
     if let Some(operation) = &args.operation_id {
-        let row = tx.query_row(&format!("{SUBMITTED} AND operation_id=?2 {SUBMISSION_GROUP} ORDER BY accepted_at DESC LIMIT 1"),
+        let row = tx.query_row(&format!("{SUBMITTED} WHERE operation_id=?2 {SUBMISSION_GROUP} ORDER BY accepted_at DESC LIMIT 1"),
             params![thread,operation], submitted_row).optional().map_err(sql_error)?;
         let record = row
             .map(|(_, _, record)| record)
@@ -173,15 +173,43 @@ pub(super) fn get(
     })
 }
 
-const SUBMITTED: &str = "SELECT max(accepted_at) AS accepted_at, operation_id,source_draft_id,source_revision,message_id FROM (    SELECT json_extract(body_json,'$._submission.operation_id') AS operation_id,json_extract(body_json,'$._submission.source_draft_id') AS source_draft_id,json_extract(body_json,'$._submission.source_revision') AS source_revision,json_extract(body_json,'$._submission.message_id') AS message_id,updated_at AS accepted_at FROM draft WHERE thread_id=?1 AND state='submitted'    UNION ALL SELECT client_operation_id,json_extract(result_json,'$.draft_submission.source_draft_id'),json_extract(result_json,'$.draft_submission.source_revision'),message_node_id,created_at FROM receipt WHERE target_thread_id=?1 AND json_extract(result_json,'$.draft_submission.operation_id')=client_operation_id AND json_extract(result_json,'$.draft_submission.message_id')=message_node_id    ) WHERE typeof(operation_id)='text' AND typeof(source_draft_id)='text' AND typeof(source_revision)='integer' AND source_revision>=0 AND typeof(message_id)='text'";
-const SUBMISSION_GROUP: &str = " GROUP BY operation_id,source_draft_id,source_revision,message_id";
+// Group identical evidence from the frozen copy and its receipt marker. A
+// second distinct binding for one operation must never win by timestamp.
+const SUBMITTED: &str = "WITH evidence AS (
+    SELECT json_extract(body_json,'$._submission.operation_id') AS operation_id,
+           json_extract(body_json,'$._submission.source_draft_id') AS source_draft_id,
+           json_extract(body_json,'$._submission.source_revision') AS source_revision,
+           json_extract(body_json,'$._submission.message_id') AS message_id,
+           updated_at AS accepted_at
+      FROM draft WHERE thread_id=?1 AND state='submitted'
+    UNION ALL
+    SELECT client_operation_id,json_extract(result_json,'$.draft_submission.source_draft_id'),
+           json_extract(result_json,'$.draft_submission.source_revision'),message_node_id,created_at
+      FROM receipt WHERE target_thread_id=?1
+       AND json_extract(result_json,'$.draft_submission.operation_id')=client_operation_id
+       AND json_extract(result_json,'$.draft_submission.message_id')=message_node_id
+), bindings AS (
+    SELECT max(accepted_at) AS accepted_at,operation_id,source_draft_id,source_revision,message_id
+      FROM evidence GROUP BY operation_id,source_draft_id,source_revision,message_id
+)
+SELECT max(accepted_at) AS accepted_at,operation_id,source_draft_id,source_revision,message_id,
+       count(*) AS bindings FROM bindings";
+const SUBMISSION_GROUP: &str = " GROUP BY operation_id";
 
 type DraftRow = (String, String, DraftRecord);
 fn submitted_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<DraftRow> {
+    if row.get::<_, i64>(5)? != 1 {
+        return Err(rusqlite::Error::InvalidQuery);
+    }
     let operation_id: String = row.get(1)?;
     let source_draft_id: String = row.get(2)?;
-    let source_revision = row.get::<_, i64>(3)? as u64;
+    let revision: i64 = row.get(3)?;
+    let source_revision = u64::try_from(revision)
+        .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(3, revision))?;
     let message_id: String = row.get(4)?;
+    if operation_id.is_empty() || source_draft_id.is_empty() || message_id.is_empty() {
+        return Err(rusqlite::Error::InvalidQuery);
+    }
     Ok((
         row.get(0)?,
         operation_id.clone(),
@@ -200,7 +228,7 @@ pub(super) fn list(tx: &Transaction<'_>, args: &DraftListArgs) -> super::Result<
         thread_id: args.thread_id.clone(),
         kind: args.kind,
     };
-    if let Some(thread) = &args.thread_id {
+    if let (DraftListKind::Submitted, Some(thread)) = (args.kind, &args.thread_id) {
         history::selection_revision(tx, thread, ThreadScope::Live)
             .optional()
             .map_err(sql_error)?
@@ -232,7 +260,7 @@ pub(super) fn list(tx: &Transaction<'_>, args: &DraftListArgs) -> super::Result<
                     "json_extract(current.body_json,'$._submission.source_revision')",
                     "COALESCE(current.thread_id,?1)",
                 );
-                tx.prepare(&format!("SELECT updated_at,id,json_extract(body_json,'$.kind'),json_extract(body_json,'$.source_message_id'),substr(json_extract(body_json,'$.text'),1,80) FROM draft current WHERE state IN ('archived','submitting') AND (thread_id=?1 OR thread_id IS NULL) AND (state<>'submitting' OR NOT {fence}) AND (?2 IS NULL OR (updated_at,id)<(?2,?3)) ORDER BY updated_at DESC,id DESC LIMIT ?4"))?
+                tx.prepare(&format!("SELECT updated_at,id,json_extract(body_json,'$.kind'),json_extract(body_json,'$.source_message_id'),substr(json_extract(body_json,'$.text'),1,80) FROM draft current WHERE state IN ('archived','submitting') AND (thread_id IS NULL OR (thread_id=?1 AND EXISTS(SELECT 1 FROM thread t WHERE t.id=current.thread_id AND t.deleted_at IS NULL))) AND (state<>'submitting' OR NOT {fence}) AND (?2 IS NULL OR (updated_at,id)<(?2,?3)) ORDER BY updated_at DESC,id DESC LIMIT ?4"))?
                     .query_map(params![args.thread_id,time,key,count], |row| {
                         let id: String = row.get(1)?;
                         let record = if row.get::<_, Option<String>>(2)?.as_deref() == Some("cancelled_message") {
