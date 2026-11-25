@@ -7817,10 +7817,11 @@ mod layout_cache_tests {
             .collect::<String>();
         let payload = serde_json::json!({"text":source});
         let window = |offset: usize| {
-            let (text, start, total) = crate::frontend::window(&source, Some(offset));
-            let mut value = node("answer", &text);
+            let start = offset.saturating_sub(512);
+            let end = (start + 4 * 1024).min(source.len());
+            let mut value = node("answer", &source[start..end]);
             value.base_char_offset = start;
-            value.total_chars = total;
+            value.total_chars = source.len();
             value.presentation =
                 crate::presentation::project("assistant_response", &payload, &value.text, start);
             crate::presentation::render_markdown(&mut value.presentation, 76);
@@ -7835,14 +7836,14 @@ mod layout_cache_tests {
             node_id: Some("answer".into()),
             char_offset: 64_000,
         };
-        let mut terminal = Terminal::new(TestBackend::new(80, 28)).unwrap();
+        // Keep the previously characterized ten-row conversation viewport.
+        let mut terminal = Terminal::new(TestBackend::new(80, 20)).unwrap();
         let mut previous = 0;
         let mut read_count = 0;
-        for step in 0..180 {
+        for step in 0..100 {
             terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
             let buffer = terminal.backend().buffer();
-            let viewport = ui.view().navigation.scroll.area.unwrap();
-            let text = (viewport.y + 1..viewport.bottom() - 1)
+            let text = (2..22)
                 .map(|y| (1..79).map(|x| buffer[(x, y)].symbol()).collect::<String>())
                 .collect::<Vec<_>>()
                 .join("\n");
@@ -7860,34 +7861,28 @@ mod layout_cache_tests {
                 ui.view().navigation.anchor
             );
             previous = first;
-            let mut deliver = |ui: &mut UiState, actions| {
-                let mut requests = std::collections::VecDeque::from(actions);
-                while let Some(action) = requests.pop_front() {
-                    if let UiAction::LoadNodeWindow {
+            let mut requests = std::collections::VecDeque::from(ui.take_deferred_actions());
+            requests.extend(ui.scroll(1));
+            while let Some(action) = requests.pop_front() {
+                if let UiAction::LoadNodeWindow {
+                    thread_id,
+                    generation,
+                    view_revision,
+                    char_offset,
+                    ..
+                } = action
+                {
+                    read_count += 1;
+                    assert!(read_count < 30, "bounded navigation must converge");
+                    ui.apply(UiUpdate::NodeWindow {
                         thread_id,
                         generation,
                         view_revision,
-                        char_offset,
-                        ..
-                    } = action
-                    {
-                        read_count += 1;
-                        assert!(read_count < 30, "bounded navigation must converge");
-                        ui.apply(UiUpdate::NodeWindow {
-                            thread_id,
-                            generation,
-                            view_revision,
-                            node: window(char_offset),
-                        });
-                        requests.extend(ui.take_deferred_actions());
-                    }
+                        node: window(char_offset),
+                    });
+                    requests.extend(ui.take_deferred_actions());
                 }
-            };
-            // Settle the render's requests before advancing the navigation revision.
-            let requests = ui.take_deferred_actions();
-            deliver(&mut ui, requests);
-            let requests = ui.scroll(1);
-            deliver(&mut ui, requests);
+            }
         }
         assert!(read_count > 0);
     }

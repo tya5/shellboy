@@ -4456,7 +4456,7 @@ fn open_code_fence_before(text: &str, end: usize) -> Option<usize> {
     }
     open.map(|(start, _, _)| start)
 }
-pub(crate) fn window(text: &str, offset: Option<usize>) -> (String, usize, usize) {
+fn window(text: &str, offset: Option<usize>) -> (String, usize, usize) {
     let total = text.chars().count();
     let mut limit = offset.map_or(MAX_BODY_BYTES as usize, |_| MAX_ANCHORED_BODY_BYTES);
     let mut start = if let Some(offset) = offset {
