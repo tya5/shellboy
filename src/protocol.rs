@@ -1567,6 +1567,9 @@ args!(WaitArgs { conditions: Vec<WaitCondition>, #[serde(default = "timeout_ms")
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum WaitCondition {
+    MessageDelivered {
+        message_id: String,
+    },
     ReplyReceived {
         message_id: String,
     },
@@ -2165,7 +2168,18 @@ record!(ThreadDetails { #[serde(default, skip_serializing_if = "Option::is_none"
 
 // Present only in the result of a `thread set --parent-thread` that moved the Thread: where it was and which live Run still answers to its previous owner (#222).
 record!(ParentChange { #[serde(default)] previous_parent_id: Option<String>, #[serde(default)] live_run_id: Option<String> });
-record!(MessageDetails { #[serde(default, skip_serializing_if = "is_false")] to_human: bool, sender: MessageSender, context: crate::context::ExecutionContext, message_id: String, thread_id: String, delivery_status: DeliveryStatus, #[serde(default, skip_serializing_if = "Option::is_none")] hint: Option<String>, assignment: Assignment, #[serde(default, skip_serializing_if = "Option::is_none")] run_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] turn_id: Option<String>, #[serde(default, skip_serializing_if = "is_false")] expect_reply: bool, #[serde(default, skip_serializing_if = "Option::is_none")] reply: Option<Value>, #[serde(default, skip_serializing_if = "Option::is_none")] reply_to: Option<String> });
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum MessageHeldBy {
+    ForegroundShell { execution_id: String },
+    ResponseGeneration,
+    RunCompletion,
+    RecoveryWait,
+    Stopping,
+    Unknown,
+}
+
+record!(MessageDetails { #[serde(default, skip_serializing_if = "Option::is_none")] held_by: Option<MessageHeldBy>, #[serde(default, skip_serializing_if = "is_false")] to_human: bool, sender: MessageSender, context: crate::context::ExecutionContext, message_id: String, thread_id: String, delivery_status: DeliveryStatus, #[serde(default, skip_serializing_if = "Option::is_none")] hint: Option<String>, assignment: Assignment, #[serde(default, skip_serializing_if = "Option::is_none")] run_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] turn_id: Option<String>, #[serde(default, skip_serializing_if = "is_false")] expect_reply: bool, #[serde(default, skip_serializing_if = "Option::is_none")] reply: Option<Value>, #[serde(default, skip_serializing_if = "Option::is_none")] reply_to: Option<String> });
 args!(
     #[derive(Eq)]
     RunWaitReason {

@@ -448,6 +448,29 @@ Use the same current release for the owner and CLI. The local RPC handshake uses
 
 `shellboy message send --thread THREAD_ID --text 'Report; no reply needed'` queues ordinary input at the next tool-group/request boundary. Use this for routine reports. Add `--deliver now` only when the information must urgently release the recipient's foreground shell wait. That shell continues with its execution ID; immediate delivery does not cancel an in-progress model response. Do not poll or send repeated nudges merely because an input remains queued.
 
+### Observe application and identify an exact blocker
+
+To check whether an ordinary message reaches the model, retain the returned
+`message_id`. This is not the operation ID. Observe application with a limit:
+
+```sh
+shellboy wait --conditions-json '[{"type":"message_delivered","message_id":"MESSAGE_ID"}]' --timeout-ms 30000
+shellboy message get --message MESSAGE_ID
+```
+
+Application is confirmed only when `matched` contains the exact message
+condition or readback reports `applied`; neither means the model replied. On
+timeout, read `held_by`. If intervention is still needed and `kind` is
+`foreground_shell`, call `shellboy shell background --execution EXECUTION_ID`
+with only the ID in that fact. Never guess from a shell list or use a replacement
+ID. For generation, Revisit, recovery, unknown or absent holds, do not background.
+`requested: true` acknowledges the exact request; it does not prove the wait
+released or the message applied. Confirm application by exact-message wait or
+read, not by repeating Send or Background. The launched process keeps its Run
+ownership. A model woken by Background should read the message, then use
+`shell get` and bounded `shell read` before deciding whether to keep observing,
+continue other work, or stop that exact command.
+
 If the target is in `recovery_wait`, a normal machine send (including this one) is held and does not resume it. Inspect the saved reason with `run get`; use `run retry` when recovery should reprepare the same Turn. Use `message send --resume-recovery` only when this new message is itself the reviewed instruction to resume; the `recovery_resumed` event records `external_cli` for an explicit external CLI resume and preserves an authenticated shell Origin when present. The TUI message-send form exposes the same explicit choice. A human TUI/chat instruction or caller-less human `message reply` resumes explicitly; a model-origin reply does not impersonate a human and remains held at recovery wait.
 
 Retain the accepted `message_id`. `shellboy message get --message MESSAGE_ID` exposes its saved delivery/context; applied means path admission, not a successful answer. To cancel unread input explicitly, use `shellboy message cancel --message MESSAGE_ID` (repeat `--message` for up to 128 fixed IDs). Humans may cancel any sender's input; models may cancel ordinary queued input in the target Thread. For a reply request, only its sender Thread or the owner can withdraw it. Withdrawal after delivery leaves history intact; a late reply is rejected with `invalid_state`, `reply_state: cancelled`, and `reason: withdrawn`. Check each returned outcome: another input may already have been admitted. Same-operation replay returns the saved outcomes. Cancellation does not wake the recipient. A model asker receives `reply_outcome: cancelled`, which can start a Run if its Thread is idle and not stopping. `archive_draft_id` identifies a durable source available to a human through TUI `/restore list` or `/restore draft ID`; restoration does not execute or send anything automatically.

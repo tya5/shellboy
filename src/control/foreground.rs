@@ -54,6 +54,16 @@ impl ForegroundSlot {
             .filter(|(id, sender)| id == execution && !sender.is_closed())
             .map(|_| apply())
     }
+    pub(super) fn waiting_execution(&self) -> Option<String> {
+        self.current
+            .lock()
+            .expect("foreground slot poisoned")
+            .as_ref()
+            .filter(|(_, sender)| {
+                !sender.is_closed() && *sender.borrow() != Some(ForegroundRelease::Background)
+            })
+            .map(|(id, _)| id.clone())
+    }
     pub(super) fn clear(&self) {
         self.current
             .lock()

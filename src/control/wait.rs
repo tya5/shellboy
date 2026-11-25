@@ -47,7 +47,7 @@ pub(super) struct WaitRegistry {
     #[cfg(test)]
     pub(super) output_save_micros: StdMutex<Vec<u128>>,
     #[cfg(test)]
-    parked: tokio::sync::Notify,
+    pub(in crate::control) parked: tokio::sync::Notify,
     entries: Arc<StdMutex<HashMap<String, Registration>>>,
 }
 impl WaitRegistry {
@@ -188,6 +188,7 @@ async fn observe_inner(
     let mut keys = Vec::new();
     for condition in &args.conditions {
         match condition {
+            WaitCondition::MessageDelivered { .. } => {}
             WaitCondition::ReplyReceived { message_id } => {
                 keys.push(Key::Reply(message_id.clone()))
             }
@@ -253,6 +254,18 @@ async fn observe_inner(
                 if initial {
                     // Install the parent dependency before taking the predicate snapshot.
                     for condition in &query.conditions {
+                        // Delivery commits already invalidate their recipient's saved state.
+                        // Install that scoped key on the DB worker before the first snapshot.
+                        if let WaitCondition::MessageDelivered { message_id } = condition {
+                            let thread: Option<String> = db.query_row(
+                                "SELECT target_thread_id FROM receipt WHERE message_node_id=?1",
+                                [message_id], |row| row.get(0),
+                            ).optional()?;
+                            if let Some(thread) = thread {
+                                registration.add([Key::Changed(Some(thread.clone())), Key::ThreadUnavailable(thread)]);
+                            }
+                            continue;
+                        }
                         let (sql, id) = match condition {
                             WaitCondition::TurnCompleted { turn_id } => ("SELECT thread_id FROM turn WHERE id=?1", turn_id),
                             WaitCondition::RunEnded { run_id } => ("SELECT thread_id FROM run WHERE id=?1", run_id),
@@ -392,7 +405,7 @@ fn outcome(
         WaitStatus::Timeout => Some(crate::protocol::wait_timeout_reason(args.timeout_ms)),
         WaitStatus::Interrupted => Some("observation interrupted; targets continue".into()),
         WaitStatus::RecoveryWait => Some("target requires an explicit recovery decision".into()),
-        WaitStatus::Unavailable => Some("target Thread was deleted or became unavailable".into()),
+        WaitStatus::Unavailable => Some("a wait target became unavailable".into()),
         _ => None,
     };
     serde_json::to_value(WaitResult {
@@ -428,6 +441,25 @@ fn inspect(
     let mut snapshots = Vec::new();
     for condition in &args.conditions {
         match condition {
+            WaitCondition::MessageDelivered { message_id } => {
+                let target = db.query_row(
+                    "SELECT r.state, COALESCE(json_extract(r.result_json,'$.to_human')=1,0), t.deleted_at IS NULL AND t.id IS NOT NULL FROM receipt r LEFT JOIN thread t ON t.id=r.target_thread_id WHERE r.message_node_id=?1",
+                    [message_id],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, bool>(1)?, row.get::<_, bool>(2)?)),
+                ).optional().map_err(sql_error)?;
+                match target {
+                    Some((_, true, _)) => return Err(invalid("message is not model input")),
+                    Some((state, false, true)) => {
+                        if state == "applied" {
+                            observation.matched.push(condition.clone());
+                        } else if state == "cancelled" {
+                            observation.unavailable = true;
+                        }
+                        snapshots.push(json!({"type":"message_delivered","message_id":message_id,"state":state}));
+                    }
+                    _ => missing(&mut observation, initial, "Message", message_id)?,
+                }
+            }
             WaitCondition::ReplyReceived { message_id } => {
                 let row = db
                     .query_row(
