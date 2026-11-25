@@ -1202,6 +1202,9 @@ async fn positioned_display_pages_preserve_fences_and_reject_displaced_selection
     });
     let first = history.read(read.clone()).await.unwrap();
     let first_page = first.display.as_ref().unwrap();
+    let outline = first_page.outline.as_ref().unwrap();
+    assert_eq!(outline.blocks[0].range, first_page.extent);
+    assert!(outline.blocks[0].range.end > first_page.page.end);
     assert_eq!(first_page.page.start, prefix.len() as u64);
     assert_eq!(first.text.len(), 8 * 1024);
     assert!(first.text.starts_with("```rust\n"));
@@ -1210,6 +1213,7 @@ async fn positioned_display_pages_preserve_fences_and_reject_displaced_selection
     assert!(read.cursor.is_some());
     let second = history.read(read.clone()).await.unwrap();
     let second_page = second.display.unwrap();
+    assert!(second_page.outline.is_none());
     assert_eq!(second_page.page.start, first_page.page.end);
     assert_eq!(second_page.extent, first_page.extent);
     assert_eq!(second_page.page.end, first_page.extent.end);
@@ -1257,4 +1261,49 @@ async fn positioned_display_offsets_and_ranges_use_unicode_characters() {
     assert_eq!(display.reasoning, vec![display.page]);
     assert_eq!(result.text, "\u{754c}".repeat(612));
     assert!(result.next_cursor.is_none());
+}
+
+#[tokio::test]
+async fn positioned_display_outline_identifies_trim_and_clipped_tool_envelope() {
+    use shellboy::protocol::{
+        HistoryDisplayNode, HistoryDisplayPosition, HistoryDisplayRead, HistoryDisplayRole,
+    };
+    let (_root, db, history) = repository().await;
+    append(&db, "trim", "spill", json!({"text":"same visible notice", "context_trim":{"omitted_nodes":3, "first_node_id":"boundary", "api_key":"synthetic-hidden"}})).await;
+    let mut read = body("trim", 8192, None);
+    read.display = Some(HistoryDisplayRead {
+        position: HistoryDisplayPosition::Tail,
+        selection: None,
+    });
+    let trim = history
+        .read(read.clone())
+        .await
+        .unwrap()
+        .display
+        .unwrap()
+        .outline
+        .unwrap();
+    assert!(
+        matches!(&trim.node, HistoryDisplayNode::Trim { omitted_nodes: Some(3), first_node_id: Some(id), .. } if id == "boundary")
+    );
+    assert!(
+        !serde_json::to_string(&trim)
+            .unwrap()
+            .contains("synthetic-hidden")
+    );
+
+    let arguments = json!({"command":"echo synthetic", "padding":"x".repeat(24000)}).to_string();
+    append(&db,"call","assistant_response",json!({"group_id":"group", "output":[{"type":"function_call", "call_id":"exact-call", "arguments":arguments}]})).await;
+    read.node_id = "call".into();
+    read.display.as_mut().unwrap().position = HistoryDisplayPosition::Absolute { offset: 14000 };
+    let first = history.read(read).await.unwrap();
+    assert!(!first.text.contains("echo synthetic"));
+    let display = first.display.unwrap();
+    let block = &display.outline.unwrap().blocks[0];
+    assert_eq!(block.role, HistoryDisplayRole::ToolCall);
+    assert_eq!(block.range, display.extent);
+    let tool = block.tool.as_ref().unwrap();
+    assert_eq!(tool.call_id.as_deref(), Some("exact-call"));
+    assert_eq!(tool.group_id.as_deref(), Some("group"));
+    assert_eq!(tool.command.as_deref(), Some("echo synthetic"));
 }
