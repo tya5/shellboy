@@ -691,11 +691,13 @@ fn observation_closed() -> ApiError {
 
 /// The same native adapter serves the embedded UI and an independent owner.
 pub(crate) struct NativeBrowser<'a> {
-    data_dir: &'a std::path::Path,
+    owner: super::native_history::Owner<'a>,
 }
 impl<'a> NativeBrowser<'a> {
-    pub(crate) fn new(data_dir: &'a std::path::Path) -> Self {
-        Self { data_dir }
+    pub(crate) fn new(data_dir: &'a std::path::Path, instance: &'a str) -> Self {
+        Self {
+            owner: super::native_history::Owner { data_dir, instance },
+        }
     }
     pub(super) fn embedded(control: &'a Control) -> Self {
         Self::new(
@@ -705,6 +707,7 @@ impl<'a> NativeBrowser<'a> {
                 .path()
                 .parent()
                 .expect("owner database has a directory"),
+            &control.store.instance_id,
         )
     }
     pub(crate) async fn list(
@@ -712,17 +715,12 @@ impl<'a> NativeBrowser<'a> {
         args: ThreadListArgs,
         stop: &CancellationToken,
     ) -> Result<crate::protocol::ThreadListPage, ApiError> {
-        let reply = tokio::select! { biased;
-            _ = stop.cancelled() => return Err(observation_closed()),
-            reply = crate::ipc::call_selected(self.data_dir, Command::ThreadList(args)) => reply?,
-        };
-        let malformed =
-            || ApiError::new(ErrorCode::ProtocolMismatch, "Invalid thread.list response");
-        if !reply.ok {
-            return Err(reply.error.unwrap_or_else(malformed));
+        tokio::select! { biased;
+            _ = stop.cancelled() => Err(observation_closed()),
+            reply = self.owner.call(Command::ThreadList(args)) => reply,
         }
-        serde_json::from_value(reply.result.ok_or_else(malformed)?).map_err(|_| malformed())
     }
+
     pub(crate) async fn set_archived(
         &self,
         thread_id: String,
@@ -734,11 +732,11 @@ impl<'a> NativeBrowser<'a> {
         };
         if archived {
             let result: crate::protocol::ThreadArchiveResult =
-                native_request(self.data_dir, Command::ThreadArchive(args)).await?;
+                self.owner.call(Command::ThreadArchive(args)).await?;
             Ok(result.archived.len())
         } else {
             let result: crate::protocol::ThreadUnarchiveResult =
-                native_request(self.data_dir, Command::ThreadUnarchive(args)).await?;
+                self.owner.call(Command::ThreadUnarchive(args)).await?;
             Ok(result.unarchived.len())
         }
     }

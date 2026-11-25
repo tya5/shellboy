@@ -40,7 +40,9 @@ orders observation admissions within the selected owner instance, not across
 owners or independent header and sidebar calls.
 
 A pending observation returns up to 128 items ordered by saved receipt
-creation and row identity. The owner examines at most 129 rows per pending
+creation and row identity. Each returned row includes its creation time, a
+512-character message preview with a truncation indicator, and attachment count.
+Sender identity stays on `message.get`. The owner examines at most 129 rows per pending
 receipt state before applying the selected-path exclusion. If that prefix
 cannot prove completeness, `total_exact` is false and `total` is a lower
 bound; unavailable items are not evidence of rejection or delivery.
@@ -52,3 +54,10 @@ saved resume evidence without raw diagnostic records, and `usage` reports
 bounded candidate attempt identities and measured usage. These facts cover
 only items in the returned window. A response that cannot fit the frame
 budget fails with `InputLimit`; it is not returned as a complete observation.
+
+## Combined reply-duty filters
+
+`message.list` combines `asked_by_thread_id` with either `to` or
+`owed_by_thread_id` using AND. `owed_by_thread_id` selects unnamed duties and
+still conflicts with a named `to`. Continuations bind to the whole filter;
+the typed response filter echo still omits the named recipient itself.

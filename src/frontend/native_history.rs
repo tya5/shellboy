@@ -1,8 +1,8 @@
 //! Fenced transport and finite assembly for selected-history display sources.
 use crate::protocol::{
-    ApiError, Command, ErrorCode, HistoryBody, HistoryDisplayPage, HistoryDisplayPosition,
-    HistoryDisplayRange, HistoryDisplayRead, HistoryDisplaySelection, HistoryReadArgs,
-    HistoryWindow, HistoryWindowArgs, MAX_BODY_BYTES,
+    ApiError, Command, ErrorCode, HistoryBody, HistoryDisplayOutline, HistoryDisplayPage,
+    HistoryDisplayPosition, HistoryDisplayRange, HistoryDisplayRead, HistoryDisplaySelection,
+    HistoryReadArgs, HistoryWindow, HistoryWindowArgs, MAX_BODY_BYTES,
 };
 use std::path::Path;
 
@@ -10,13 +10,13 @@ const PAGE_BYTES: usize = 8 * 1024;
 // A page can end up to three bytes early at a UTF-8 boundary.
 const MAX_PAGES: usize = (MAX_BODY_BYTES as usize).div_ceil(PAGE_BYTES - 3);
 
-pub(super) struct Owner<'a> {
+pub(crate) struct Owner<'a> {
     pub data_dir: &'a Path,
     pub instance: &'a str,
 }
 
 impl Owner<'_> {
-    pub(super) async fn read<T: serde::de::DeserializeOwned>(
+    pub(crate) async fn call<T: serde::de::DeserializeOwned>(
         &self,
         command: Command,
     ) -> Result<T, ApiError> {
@@ -36,7 +36,7 @@ impl Owner<'_> {
     ) -> Result<HistoryWindow, ApiError> {
         args.include_observation = true;
         let thread = args.thread_id.clone();
-        let window: HistoryWindow = self.read(Command::HistoryWindow(args)).await?;
+        let window: HistoryWindow = self.call(Command::HistoryWindow(args)).await?;
         if window.thread_id != thread || window.observation.is_none() {
             return Err(invalid_response());
         }
@@ -63,13 +63,19 @@ impl Owner<'_> {
         };
         let mut extent = None;
         for _ in 0..MAX_PAGES {
-            let body: HistoryBody = self.read(Command::HistoryRead(args.clone())).await?;
+            let body: HistoryBody = self.call(Command::HistoryRead(args.clone())).await?;
             if body.node_id != node_id {
                 return Err(invalid_response());
             }
-            let page = body.display.ok_or_else(invalid_response)?;
-            let display =
-                extent.get_or_insert_with(|| DisplayExtent::new(body.kind.clone(), &page));
+            let mut page = body.display.ok_or_else(invalid_response)?;
+            let display = match &mut extent {
+                Some(display) if page.outline.is_none() => display,
+                Some(_) => return Err(invalid_response()),
+                None => {
+                    let outline = page.outline.take().ok_or_else(invalid_response)?;
+                    extent.insert(DisplayExtent::new(body.kind.clone(), &page, outline))
+                }
+            };
             let more = body.next_cursor.is_some();
             display.push(&body.kind, &page, &body.text, more)?;
             if !more {
@@ -86,6 +92,7 @@ impl Owner<'_> {
 
 pub(super) struct DisplayExtent {
     pub kind: String,
+    pub outline: HistoryDisplayOutline,
     pub text: String,
     pub range: HistoryDisplayRange,
     pub total_chars: u64,
@@ -96,9 +103,10 @@ pub(super) struct DisplayExtent {
 }
 
 impl DisplayExtent {
-    fn new(kind: String, page: &HistoryDisplayPage) -> Self {
+    fn new(kind: String, page: &HistoryDisplayPage, outline: HistoryDisplayOutline) -> Self {
         Self {
             kind,
+            outline,
             text: String::new(),
             range: page.extent.clone(),
             total_chars: page.total_chars,
@@ -208,6 +216,18 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(extent.text, text);
+        assert_eq!(extent.outline.blocks.len(), 1);
+        assert_eq!(
+            extent.outline.blocks[0].role,
+            crate::protocol::HistoryDisplayRole::Reasoning
+        );
+        assert_eq!(
+            extent.outline.blocks[0].range,
+            HistoryDisplayRange {
+                start: 0,
+                end: 4500
+            }
+        );
         assert_eq!(
             extent.reasoning,
             [HistoryDisplayRange {
@@ -251,8 +271,19 @@ mod tests {
         data.shutdown().await.unwrap();
     }
 
+    fn outline() -> HistoryDisplayOutline {
+        HistoryDisplayOutline {
+            node: crate::protocol::HistoryDisplayNode::Ordinary,
+            blocks: Vec::new(),
+            fields: Vec::new(),
+            links: Vec::new(),
+            limited: false,
+        }
+    }
+
     fn page(start: u64, end: u64) -> HistoryDisplayPage {
         HistoryDisplayPage {
+            outline: None,
             extent: HistoryDisplayRange { start: 40, end: 44 },
             page: HistoryDisplayRange { start, end },
             total_chars: 50,
@@ -265,7 +296,7 @@ mod tests {
     #[test]
     fn native_display_assembles_contiguous_unicode_and_reasoning_coordinates() {
         let first = page(40, 42);
-        let mut extent = DisplayExtent::new("assistant_response".into(), &first);
+        let mut extent = DisplayExtent::new("assistant_response".into(), &first, outline());
         extent
             .push("assistant_response", &first, "a\u{1f980}", true)
             .unwrap();
@@ -282,7 +313,7 @@ mod tests {
     #[test]
     fn native_display_refuses_partial_or_discontinuous_extent() {
         let first = page(40, 42);
-        let mut extent = DisplayExtent::new("assistant_response".into(), &first);
+        let mut extent = DisplayExtent::new("assistant_response".into(), &first, outline());
         assert_eq!(
             extent
                 .push("assistant_response", &first, "ab", false)
