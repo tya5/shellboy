@@ -2,6 +2,8 @@
 use super::*;
 mod envelopes;
 mod limits;
+mod outline;
+pub(crate) use outline::display_outline;
 
 /// Project only the supplied canonical text window; payload is inspected without mutation.
 pub fn project(

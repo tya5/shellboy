@@ -2544,7 +2544,76 @@ record!(HistoryDisplayRange {
     start: u64,
     end: u64
 });
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum HistoryDisplayRole {
+    Plain,
+    Prose,
+    Reasoning,
+    ToolCall,
+    ToolResult,
+    Event,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum HistoryDisplayNode {
+    Ordinary,
+    Reclaimed {
+        reason: String,
+    },
+    HiddenAdmission,
+    Received,
+    Spill {
+        source_node_ids: Vec<String>,
+    },
+    Trim {
+        omitted_nodes: Option<u64>,
+        reason: Option<String>,
+        first_node_id: Option<String>,
+        last_node_id: Option<String>,
+    },
+    Summary {
+        source_node_ids: Vec<String>,
+        structured: bool,
+    },
+    Interruption,
+}
+record!(HistoryDisplayTool {
+    call_id: Option<String>,
+    ordinal: Option<u32>,
+    group_id: Option<String>,
+    execution_id: Option<String>,
+    command: Option<String>,
+    description: Option<String>,
+    status: Option<String>,
+    exit_code: Option<i64>
+});
+record!(HistoryDisplayField {
+    path: String,
+    value: String,
+    omitted: bool
+});
+record!(HistoryDisplayLink {
+    range: HistoryDisplayRange,
+    url: String,
+    label: String
+});
+record!(HistoryDisplayBlock {
+    range: HistoryDisplayRange,
+    role: HistoryDisplayRole,
+    #[serde(default, skip_serializing_if = "Option::is_none")] tool: Option<HistoryDisplayTool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] event_kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")] fields: Vec<HistoryDisplayField>
+});
+record!(HistoryDisplayOutline {
+    node: HistoryDisplayNode,
+    blocks: Vec<HistoryDisplayBlock>,
+    fields: Vec<HistoryDisplayField>,
+    links: Vec<HistoryDisplayLink>,
+    limited: bool
+});
 record!(HistoryDisplayPage {
+    #[serde(default, skip_serializing_if = "Option::is_none")] outline: Option<HistoryDisplayOutline>,
     extent: HistoryDisplayRange,
     page: HistoryDisplayRange,
     total_chars: u64,

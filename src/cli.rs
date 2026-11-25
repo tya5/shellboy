@@ -1441,7 +1441,7 @@ pub struct HistoryReadOptions {
     /// For a summary node: list its saved summary parts (map then reduce) with per-part range, stage, usage and paged bodies.
     #[arg(long, conflicts_with = "end_message_only")]
     pub parts: bool,
-    /// Read the bounded display-source tail, rather than original text.
+    /// Read the bounded display-source tail, rather than original text. The first display page includes a typed outline: block spans and roles, saved tool and event facts, spill/trim/summary facts, safe fields and links.
     #[arg(long, conflicts_with_all = ["offset", "from_end", "parts", "end_message_only"])]
     pub display: bool,
     /// Read the display source around this absolute character offset.

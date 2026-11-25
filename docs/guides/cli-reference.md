@@ -99,6 +99,11 @@ most 8 KiB (or your smaller `--limit-bytes`); the full extent is at most 64 KiB.
 If `next_cursor` is present, repeat the same node and display option with
 `--cursor`. If the cursor expires, restart without it. Omit the display option
 for original text.
+The first page also includes `display.outline`: the saved node classification,
+ordered block spans and roles, typed tool and event facts, spill/trim/summary
+facts, redacted detail fields, and source links. `limited` marks omitted
+metadata. Continuations omit the outline. See the
+[positioned history protocol reference](../reference/history-display.md).
 
 `history read --node SUMMARY_NODE --parts` (not with `--end-message-only`) reads the saved historical per-part cache records of a `summary` node. New summaries do not generate those records. The response keeps the usual `history read` fields (`text` is the paged body, `next_cursor` continues it with `--cursor`, `--limit-bytes` caps one page) and adds `parts.items` plus `parts.reduce_keys_recorded`. Each item has `key`, `listed_as` (the historical part list that named the key), `state` (`retained`, `not_retained` when the record was collected or overwritten, or `unreadable`) and, for a retained part, `stage` and `round` when saved by the historical writer, `sources` (`first`, `last`, `count`), `characters`, `usage`. `usage` is only what the provider reported in the saved response (input, output, total tokens and cached/reasoning details); it is `null` when the provider reported none. Records saved before these fields existed report `stage`, `round` and `sources` as `null`, and summaries without `summary_reduce_keys` report `reduce_keys_recorded:false`; nothing is reconstructed. `text` is the retained bodies in that order, each after a `--- part KEY ---` line. A retry with the same key overwrites the part, so this shows the current record, not past history; a part also disappears when its conversation is deleted. One call reads at most 1024 parts (`input_limit` beyond that). If parts change between pages the continuation fails with `cursor_expired`; restart without `--cursor`.
 
