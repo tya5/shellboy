@@ -4206,18 +4206,12 @@ async fn native_header(
         thread_id: Some(thread.to_owned()),
         display: true,
     });
-    let reply = crate::ipc::call_selected_operation(data_dir, instance_id, request, None).await?;
-    let invalid = || {
-        ApiError::new(
-            ErrorCode::ProtocolMismatch,
-            "Invalid Thread display response",
-        )
-    };
-    if !reply.ok {
-        return Err(reply.error.unwrap_or_else(invalid));
+    let details: ThreadDetails = native_history::Owner {
+        data_dir,
+        instance: instance_id,
     }
-    let details: ThreadDetails =
-        serde_json::from_value(reply.result.ok_or_else(invalid)?).map_err(|_| invalid())?;
+    .read(request)
+    .await?;
     if details.thread_id != thread || details.display_coverage.is_none() {
         return Err(ApiError::new(
             ErrorCode::InvalidState,
