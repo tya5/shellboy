@@ -332,6 +332,7 @@ mod committed_source_tests {
             thread_id: "thread".into(),
             generation,
             attempt_id: "attempt".into(),
+            owner_end_seq: None,
             received_source: None,
             ack: None,
         });
