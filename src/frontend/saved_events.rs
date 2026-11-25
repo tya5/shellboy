@@ -10,6 +10,17 @@ pub(super) async fn wait(
     after: Option<String>,
     more: bool,
 ) -> Result<EventsWaitResult, ApiError> {
+    wait_scoped(data_dir, instance, after, more, None).await
+}
+
+pub(super) async fn wait_scoped(
+    data_dir: &Path,
+    instance: &str,
+    after: Option<String>,
+    more: bool,
+    thread: Option<String>,
+) -> Result<EventsWaitResult, ApiError> {
+    let include_text = thread.is_some();
     let timeout_ms = if after.is_none() || more {
         0
     } else {
@@ -20,9 +31,9 @@ pub(super) async fn wait(
         instance,
         Command::EventsWait(EventsWaitArgs {
             after,
-            thread_ids: vec![],
+            thread_ids: thread.into_iter().collect(),
             timeout_ms,
-            include_text: false,
+            include_text,
             include_reasoning_activity: false,
         }),
         None,

@@ -573,7 +573,6 @@ mod tests {
                 generation: 0,
                 view_revision: 0,
                 known_view: None,
-                preview_sources: vec![],
             })
             .unwrap();
         crate::test_watchdog::watchdog("src/frontend/thread_deletion.rs: frontend_delete_worker_returns_typed_outcome_and_cleans_up_without_popup_ownership", async {

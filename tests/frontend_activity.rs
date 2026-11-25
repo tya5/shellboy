@@ -285,7 +285,6 @@ async fn activity_delivery_observes_the_new_selection() {
         server,
     ));
     send.send(UiAction::SelectThread {
-        preview_sources: vec![],
         thread_id: "a".into(),
         generation: 1,
         view_revision: 0,
@@ -314,7 +313,6 @@ async fn activity_delivery_observes_the_new_selection() {
     .await
     .unwrap();
     send.send(UiAction::SelectThread {
-        preview_sources: vec![],
         thread_id: "b".into(),
         generation: 2,
         view_revision: 0,
@@ -517,7 +515,6 @@ async fn failed_activity_read_stops_the_real_frontend_with_storage_error() {
         server,
     ));
     send.send(UiAction::SelectThread {
-        preview_sources: vec![],
         thread_id: "a".into(),
         generation: 1,
         view_revision: 0,

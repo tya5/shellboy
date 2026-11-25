@@ -1772,7 +1772,6 @@ async fn structured_history_pages_details_url_copy_and_wait_cancel_keep_original
         .await
         .unwrap();
     send.send(UiAction::SelectThread {
-        preview_sources: vec![],
         thread_id: "source".into(),
         generation: 3,
         view_revision: 0,
@@ -2409,7 +2408,6 @@ async fn stale_history_navigation_recovers_after_path_change(remove_anchor: bool
         char_offset: 5,
     };
     send.send(UiAction::SelectThread {
-        preview_sources: vec![],
         thread_id: "navigation".into(),
         generation: 19,
         view_revision: 7,
@@ -2996,7 +2994,6 @@ async fn persisted_output_identity_is_delivered_before_each_history_window() {
     }).await.unwrap();
     while incoming.try_recv().is_ok() {}
     send.send(UiAction::SelectThread {
-        preview_sources: vec![],
         thread_id: thread.clone(),
         generation: 17,
         view_revision: 0,

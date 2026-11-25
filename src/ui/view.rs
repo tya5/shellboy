@@ -1941,6 +1941,7 @@ impl ThreadView {
 }
 
 impl ThreadView {
+    #[cfg(test)]
     pub(super) fn provisional_sources(&self) -> Vec<UiNode> {
         self.nodes
             .iter()

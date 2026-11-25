@@ -81,10 +81,6 @@ use tokio_util::sync::CancellationToken;
 
 #[derive(Debug, Clone)]
 pub enum EngineEvent {
-    MemoryProbe {
-        owner: u64,
-        reply: crate::memory::UiMemoryReply,
-    },
     Changed {
         thread_id: String,
         /// Committed transition fact for frontend attention; never a saved state.
@@ -547,6 +543,7 @@ impl Control {
                 let stop = self.stop.clone();
                 let control = Arc::downgrade(self);
                 let signals = self.store.database.signals().clone();
+                let database = self.store.database.clone();
                 // Re-discover durable history jobs left by a prior owner before
                 // maintenance starts; in-memory marks do not survive restart.
                 signals.mark_all(&crate::maintenance::Work::DELETION);
@@ -559,7 +556,10 @@ impl Control {
                         }
                         return;
                     }
-                    maintenance_loop(control, gc, signals, stop).await;
+                    tokio::select! {
+                        _ = maintenance_loop(control, gc, signals, stop) => {},
+                        _ = database.observe_slow_jobs() => {},
+                    }
                 })))
             })
             .await;
@@ -575,6 +575,14 @@ impl Control {
             self.change_clock.record(thread_id);
         }
         self.publish_event(event);
+    }
+    #[cfg(test)]
+    pub(crate) fn fixture_live_text<'a>(
+        &'a self,
+        thread: &'a str,
+    ) -> change_clock::LiveTextGuard<'a> {
+        // Reserve the synthetic attempt with the normal bounded live clock.
+        self.change_clock.live_text_guard(thread, "fixture-attempt")
     }
     #[cfg(test)]
     pub(crate) fn expire_saved_event_cursor_for_test(&self) {
@@ -596,7 +604,7 @@ impl Control {
                 .mark(crate::maintenance::Work::UsageLimitRetry);
         }
         // Record before waking so a woken long-poll always finds the entry.
-        self.change_clock.record(thread_id);
+        self.change_clock.record_change(thread_id, recovery);
         self.publish_event(EngineEvent::Changed {
             thread_id: thread_id.into(),
             recovery,
