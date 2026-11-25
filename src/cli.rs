@@ -487,7 +487,7 @@ pub enum MessageCommand {
     Send(MessageSendOptions),
     /// Request a reply from a named recipient or another Thread.
     #[command(
-        after_help = "  shellboy message ask --thread CHILD_THREAD_ID --text 'Report what you verified'\n  shellboy message ask --to human --text 'Choose A or B'\n  shellboy message get --message MESSAGE_ID\n\nAcceptance opens one reply duty. It does not prove delivery, execution, or an answer. Check delivery_status on the same message, inspect assigned Run and Turn IDs when present, and use reply.state and reply.node_id to identify the actual reply. A cancelled or otherwise closed duty without a reply is not an answer. Named recipients require model origin. Guide: shellboy docs get --id shellboy/delegation"
+        after_help = "  shellboy message ask --thread CHILD_THREAD_ID --text 'Report what you verified'\n  shellboy message ask --to human --text 'Choose A or B'\n  shellboy message ask --to claude --text 'Review the proposed change'\n  shellboy message get --message MESSAGE_ID\n\nAcceptance opens one reply duty. It does not prove delivery, execution, or an answer. Check delivery_status on the same message, inspect assigned Run and Turn IDs when present, and use reply.state and reply.node_id to identify the actual reply. A cancelled or otherwise closed duty without a reply is not an answer. Named recipients require model origin; thread_id identifies the asking Thread. Guide: shellboy docs get --id shellboy/delegation"
     )]
     Ask(MessageAskOptions),
     /// List pending replies without marking them read.

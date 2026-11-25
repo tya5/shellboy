@@ -172,7 +172,9 @@ See [Delegation](delegation.md#waiting-for-replies) for reminders and wait state
 
 ### Ask the human for a decision
 
-Run `shellboy message ask --to human --text 'Question and options'`.
+Run `shellboy message ask --to human --text 'Question and options'`, or use an
+explicit name such as `shellboy message ask --to claude --text 'Review the change'`.
+For a named Ask, the result `thread_id` identifies the asking Thread.
 If both destination flags are omitted, the recipient still defaults to `human`; `--deliver` requires a Thread recipient. Use `--thread`
 only to ask another Thread for a reply, never to ask your own Thread.
 
