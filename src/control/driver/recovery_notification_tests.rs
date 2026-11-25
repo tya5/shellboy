@@ -212,26 +212,27 @@ async fn frontend_delivers_background_and_child_recovery_without_selecting_them(
     let serving = tokio::spawn(control.clone().serve(requests));
     let (sender, receiver) = actions::channel(16);
     let (updates, incoming) = std::sync::mpsc::sync_channel(128);
-    let bridge = tokio::spawn(crate::frontend::run(
-        control.clone(),
-        receiver,
-        updates,
-        root.path().into(),
-        owner,
-        server,
+    let (observation, mut observed) = tokio::sync::mpsc::channel(4);
+    let bridge = tokio::spawn(crate::frontend::observe_saved_event_run(
+        observation,
+        crate::frontend::run(
+            control.clone(),
+            receiver,
+            updates,
+            root.path().into(),
+            owner,
+            server,
+        ),
     ));
-    // Initialize confirms subscription. Leave the UI on its empty draft: the
-    // recovering Thread has no frontend selection/generation or pending send.
-    crate::test_watchdog::watchdog("src/control/driver/recovery_notification_tests.rs: frontend_delivers_background_and_child_recovery_without_selecting_them", async {
-        loop {
-            if matches!(incoming.try_recv(), Ok(UiUpdate::Initialize { .. })) {
-                break;
-            }
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .unwrap();
+    // Wait for the native cursor, not Initialize (which can arrive first).
+    // Leave the UI on its empty draft: the recovering Thread is not selected.
+    let baseline = crate::test_watchdog::watchdog("recovery bell native baseline", observed.recv())
+        .await
+        .unwrap();
+    assert!(matches!(
+        baseline,
+        Some(crate::frontend::SavedEventObservation::Baseline)
+    ));
     let error = ApiError::new(ErrorCode::InvalidState, "synthetic background failure");
     recover(&control, &snapshot, error.clone(), None)
         .await

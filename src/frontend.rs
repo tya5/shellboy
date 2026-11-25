@@ -39,9 +39,15 @@ mod preview_reads;
 mod receipt_delivery;
 mod received;
 mod saved_events;
+#[cfg(test)]
+pub(crate) use saved_events::tests::{
+    Observed as SavedEventObservation, observe_run as observe_saved_event_run,
+};
 mod snapshot;
 mod thread_deletion;
 mod update_delivery;
+#[cfg(test)]
+pub(crate) use update_delivery::test_outbox;
 mod view_read;
 mod watch_action;
 use history_reader::{HistoryReader, Reply, WindowReply, WindowRequest};
@@ -74,6 +80,8 @@ mod streams;
 use streaming::StreamBody;
 mod notices;
 mod tools;
+mod window_facts;
+pub(crate) use window_facts::{WINDOW_FACTS_LIMIT, read_window_facts};
 mod usage;
 mod watch_page;
 mod watch_read;
@@ -85,7 +93,7 @@ use crate::{
     app::DataOwner,
     attachments::clipboard::{ClipboardAdapter, ClipboardPixels, CopyOutcome},
     config::CopyBackend,
-    control::{Control, EngineEvent},
+    control::Control,
     diagnostics::{DiagnosticIds, Diagnostics, MessageSendStage, MessageSendTrace},
     ipc::LocalServer,
     protocol::*,
@@ -418,41 +426,6 @@ async fn status(
     )
     .await;
 }
-fn tool_group_notice(
-    release: Option<(&str, crate::control::ForegroundRelease)>,
-    cancelled_calls: usize,
-    language: UiLanguage,
-) -> String {
-    let remaining = match (language, cancelled_calls) {
-        (UiLanguage::Ja, 0) => "後続の未実行呼出しはありません".to_owned(),
-        (UiLanguage::En, 0) => "No remaining unexecuted calls".to_owned(),
-        (UiLanguage::Ja, _) => format!("未実行のツール呼出しを{cancelled_calls}件取り消しました"),
-        (UiLanguage::En, 1) => "Cancelled 1 unexecuted tool call".to_owned(),
-        (UiLanguage::En, _) => format!("Cancelled {cancelled_calls} unexecuted tool calls"),
-    };
-    match release {
-        Some((execution, reason)) => {
-            let cause = match reason {
-                crate::control::ForegroundRelease::Background => {
-                    i18n::local!(language, "背景移行の要求", "Background request")
-                }
-                crate::control::ForegroundRelease::AdditionalInput => {
-                    i18n::local!(language, "追加指示", "Additional instruction")
-                }
-            };
-            match language {
-                UiLanguage::Ja => {
-                    format!("{cause}でshell {execution}の待機を解除し背景へ移しました。{remaining}")
-                }
-                UiLanguage::En => format!(
-                    "{cause} ended the wait for shell {execution} and moved it to the background. {remaining}"
-                ),
-            }
-        }
-        None => remaining,
-    }
-}
-
 fn trace_send(
     diagnostics: &Diagnostics,
     trace: &MessageSendTrace,
@@ -1100,7 +1073,6 @@ async fn run_client(
     let mut pending_index: Option<u64> = None;
     let mut pending_deletion: Option<u64> = None;
     let cancel = CancellationToken::new();
-    let mut ui_subscription = control.subscribe_ui();
     let event_instance = &control.store.instance_id;
     let event_directory = &client_context.data_dir;
     let mut saved_events = Some(Box::pin(saved_events::wait(
@@ -1109,22 +1081,10 @@ async fn run_client(
         None,
         false,
     )));
+    let mut preview_scope = None;
+    let mut preview_events = None;
     let mut tick = tokio::time::interval(Duration::from_millis(500));
     tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
-    let mut gc_diagnostics_rx = control.gc.subscribe_history_diagnostics();
-    let mut gc_diagnostics_open = true;
-    let initial_gc_diagnostics = gc_diagnostics_rx.borrow_and_update().clone();
-    update(&updates, UiUpdate::GcDiagnostics(initial_gc_diagnostics)).await;
-    let mut db_activity_rx = control.store.database.subscribe_activity();
-    let mut db_activity = db_activity_rx.borrow_and_update().clone();
-    let mut db_activity_open = true;
-    update(&updates, UiUpdate::DbWorkerActivity(db_activity.clone())).await;
-    if let Some(active) = db_activity.active.as_ref() {
-        control
-            .store
-            .database
-            .report_active_job_slow(active.id, std::time::Instant::now());
-    }
     let mut status_session = program_status::Session::new();
     let status_enabled = control.store.config.ui.program_status == crate::config::ProgramStatus::On;
     let mut status_dirty = status_enabled;
@@ -1327,7 +1287,24 @@ async fn run_client(
                 status_inflight = true;
             }
         }
-        ui_subscription.select(selection.active_thread.as_deref());
+        let selected_preview = selection.active_thread.as_ref().and_then(|thread| {
+            selection
+                .generations
+                .get(thread)
+                .map(|generation| (thread.clone(), *generation))
+        });
+        if preview_scope != selected_preview {
+            preview_scope = selected_preview;
+            preview_events = preview_scope.as_ref().map(|(thread, _)| {
+                Box::pin(saved_events::wait_scoped(
+                    event_directory,
+                    event_instance,
+                    None,
+                    false,
+                    Some(thread.clone()),
+                ))
+            });
+        }
         actions.enable_cancel(control_tasks.is_empty());
         let refresh_deadline = selection
             .refresh_deadline(&dirty_threads, &refreshing)
@@ -1372,28 +1349,6 @@ async fn run_client(
         .min()
         .map(|due| view_read_next.map_or(due, |global| due.max(global)));
         tokio::select! {
-            changed = gc_diagnostics_rx.changed(), if gc_diagnostics_open => {
-                if changed.is_err() {
-                    gc_diagnostics_open = false;
-                } else {
-                    let snapshot = gc_diagnostics_rx.borrow_and_update().clone();
-                    update(&updates, UiUpdate::GcDiagnostics(snapshot)).await;
-                }
-            },
-            changed = db_activity_rx.changed(), if db_activity_open => {
-                if changed.is_err() {
-                    db_activity_open = false;
-                } else {
-                    db_activity = db_activity_rx.borrow_and_update().clone();
-                    update(&updates, UiUpdate::DbWorkerActivity(db_activity.clone())).await;
-                    if let Some(active) = db_activity.active.as_ref() {
-                        control
-                            .store
-                            .database
-                            .report_active_job_slow(active.id, std::time::Instant::now());
-                    }
-                }
-            },
             _=tokio::time::sleep_until(browser_deadline.unwrap_or_else(||tokio::time::Instant::now()+Duration::from_secs(86400))),
                 if browser_deadline.is_some() && !updates.backpressured() && read_slots.available_permits()>0=>{
                 // Both timers can wake in the same select. Let the outer loop
@@ -1522,10 +1477,12 @@ async fn run_client(
                 }
             },
             _=updates.notified()=> {
-                updates.flush();delivery_next=tokio::time::Instant::now()+Duration::from_millis(5);
+                updates.flush();
+                delivery_next=tokio::time::Instant::now()+Duration::from_millis(5);
             },
             _=tokio::time::sleep_until(delivery_next),if updates.pending()=> {
-                updates.flush();delivery_next=tokio::time::Instant::now()+Duration::from_millis(5);
+                updates.flush();
+                delivery_next=tokio::time::Instant::now()+Duration::from_millis(5);
             },
             action=actions.recv_with_admission(!updates.backpressured())=> {
                 let Some(action) = action else {
@@ -1592,6 +1549,8 @@ async fn run_client(
                             Ok(()) => {
                                 if saved_events.is_none() {
                                     saved_events = Some(Box::pin(saved_events::wait(event_directory, event_instance, None, false)));
+                                    preview_scope = None;
+                                    preview_events = None;
                                 }
                                 compose_disconnected.store(false, Ordering::Release);
                                 status(&updates, None, i18n::local!(language, "再接続しました。未確認の操作は再送していません", "Reconnected. Unconfirmed writes were not replayed")).await;
@@ -2523,12 +2482,10 @@ async fn run_client(
                         generation,
                         view_revision,
                         known_view,
-                        preview_sources,
+
                     } => {
                         selection.select_thread(thread_id.clone(), generation);
-                        ui_subscription.select(Some(&thread_id));
                         streams.clear();
-                        streams.resume(thread_id.clone(), preview_sources);
                         stream_retry = None;
                         let control = control.clone();
                         let sender = updates.worker();
@@ -3395,8 +3352,9 @@ async fn run_client(
                             refreshing.retain(|thread| !ids.contains(thread));
                             pending.retain(|_, value| !ids.contains(&value.thread));
                             if selection.active_thread.as_ref().is_some_and(|thread| ids.contains(thread)) {
-                                ui_subscription.select(None);
                                 selection.activate_draft(uuid::Uuid::new_v4().to_string());
+                                preview_events = None;
+                                preview_scope = None;
                                 draft_pause_dirty = true;
                                 streams.clear();
                                 stream_retry = None;
@@ -3413,19 +3371,11 @@ async fn run_client(
                 Some(BackgroundResult::StreamFrame { ticket, result }) => {
                     stream_inflight = false;
                     match result {
-                        Ok(streaming::Outcome::Queued { ended: true }) => {
-                            streams.remove(&ticket);
-                            dirty_threads.insert(ticket.thread);
-                        }
-                        Ok(
-                            streaming::Outcome::Queued { ended: false }
-                            | streaming::Outcome::Cancelled
-                            | streaming::Outcome::Unchanged,
-                        ) => {}
+                        Ok(streaming::Outcome::Queued | streaming::Outcome::Cancelled | streaming::Outcome::Unchanged) => {}
                         Ok(streaming::Outcome::Full(frame)) => {
                             if selection.active_thread.as_deref() == Some(&ticket.thread)
                                 && selection.generations.get(&ticket.thread) == Some(&ticket.generation)
-                                && (frame.ended() || streams.current(&ticket, render_width))
+                                && (streams.current(&ticket, render_width))
                             {
                                 stream_retry = Some(frame);
                             }
@@ -3805,8 +3755,12 @@ async fn run_client(
                             for receipt in pending.values_mut() { receipt.repeat = true; }
                             dirty_threads.extend(pending.values().map(|value| value.thread.clone()));
                             if let Some(thread) = &selection.active_thread {
-                                streams.invalidate(thread);
                                 dirty_threads.insert(thread.clone());
+                            }
+                        }
+                        if control.store.config.ui.bell {
+                            for _ in &page.recovery_transitions {
+                                update(&updates, UiUpdate::RecoveryBell).await;
                             }
                         }
                         for change in page.changes {
@@ -3815,7 +3769,6 @@ async fn run_client(
                             browser.changed(&thread_id);
                             descendants.changed(&thread_id);
                             management.inspection.changed(&thread_id);
-                            streams.invalidate(&thread_id);
                             selection.changed(&thread_id);
                             receipt_delivery::changed(&mut pending, &thread_id);
                             if selection.active_thread.as_deref() == Some(&thread_id)
@@ -3832,62 +3785,70 @@ async fn run_client(
                     }
                 }
             },
-            event=ui_subscription.receiver.recv()=> match event {
-                Ok(EngineEvent::MemoryProbe {owner,reply}) => {
-                    if ui_subscription.belongs_to(owner) && !reply.is_closed() { update(&updates, UiUpdate::MemoryProbe(reply)).await; }
-                },
-                Ok(EngineEvent::Changed { recovery, .. }) => {
-                    if recovery && control.store.config.ui.bell {
-                        update(&updates, UiUpdate::RecoveryBell).await;
+            event = async { preview_events.as_mut().expect("guarded live wait").await }, if preview_events.is_some() && !stream_inflight && updates.main_ready() => {
+                let (thread, generation) = preview_scope.as_ref().expect("guarded selected Thread");
+                match event {
+                    Ok(page) => {
+                        let live_text = page.live_text.unwrap_or_default();
+                        let resync = page.status == crate::protocol::EventsWaitStatus::ResyncRequired;
+                        if resync || live_text.iter().any(|live| &live.thread_id == thread && live.gap) {
+                            // With no frame in flight, this ordered update retires any
+                            // already displayed preview before a retained suffix can arrive.
+                            streams.clear();
+                            stream_retry = None;
+                            dirty_threads.insert(thread.clone());
+                            update(&updates, UiUpdate::PreviewGap {
+                                thread_id: thread.clone(), generation: *generation,
+                            }).await;
+                        }
+                        let ended = page.attempt_ends.unwrap_or_default().into_iter()
+                            .filter(|end| &end.thread_id == thread).map(|end| end.attempt_id)
+                            .collect::<Vec<_>>();
+                        for attempt in &ended {
+                            streams.retire(thread, attempt);
+                        }
+                        if !ended.is_empty() {
+                            dirty_threads.insert(thread.clone());
+                            update(&updates, UiUpdate::PreviewEnded {
+                                thread_id: thread.clone(), generation: *generation,
+                                attempts: ended.clone(),
+                            }).await;
+                        }
+                        for live in live_text.into_iter().filter(|live| &live.thread_id == thread) {
+                            if ended.contains(&live.attempt_id) {
+                                continue;
+                            }
+                            let source = crate::presentation::PreviewSource {
+                                input_through_node_id: live.input_through_node_id,
+                            };
+                            if let Some(age) = live.receive_age_ms
+                                && let Some(observed_at) = std::time::Instant::now().checked_sub(Duration::from_millis(age)) {
+                                update(&updates, UiUpdate::ModelReceive {
+                                    thread_id: thread.clone(), generation: *generation,
+                                    attempt_id: live.attempt_id.clone(), observed_at,
+                                }).await;
+                            }
+                            if live.gap {
+                                // A gap can contain only omitted reasoning; retain its
+                                // provenance even when there is no answer to render yet.
+                                streams.observe_answer(thread, &live.attempt_id, "", true, &source);
+                            }
+                            for delta in live.deltas.into_iter().filter(|delta| !delta.reasoning) {
+                                streams.observe_answer(thread, &live.attempt_id, &delta.text, false, &source);
+                            }
+                        }
+                        preview_events = Some(Box::pin(saved_events::wait_scoped(event_directory, event_instance, Some(page.cursor), page.more, Some(thread.clone()))));
+                    }
+                    Err(error) => {
+                        preview_events = None;
+                        status(&updates, Some(thread.clone()), error).await;
                     }
                 }
-                Ok(EngineEvent::Stream {
-                    thread_id,
-                    node_id,
-                    text,
-                    reasoning,
-                    stream_char_offset,
-                }) => {
-                    if selection.active_thread.as_deref() == Some(&thread_id)
-                        && selection.generations.contains_key(&thread_id)
-                    {
-                        streams.observe(thread_id, node_id, stream_char_offset, &text, reasoning);
-                    }
-                }
-                Ok(EngineEvent::ModelReceive { thread_id, attempt_id, observed_at }) => {
-                    if selection.active_thread.as_deref() == Some(&thread_id)
-                        && let Some(generation) = selection.generations.get(&thread_id).copied()
-                    {
-                        update(&updates, UiUpdate::ModelReceive {
-                            thread_id, generation, attempt_id, observed_at,
-                        }).await;
-                    }
-                }
-                Ok(EngineEvent::Error { thread_id, error }) => {
-                    if activity::saved_execution_recovery(&error) {
-                        // Saved execution recovery owns its reactive footer, not an operation notice.
-                        dirty_threads.insert(thread_id);
-                    } else {
-                        status(&updates, Some(thread_id), error).await;
-                    }
-                }
-                Ok(EngineEvent::Notice { thread_id, foreground_release, cancelled_calls }) => {
-                    let release = foreground_release.as_ref().map(|(execution, reason)| (execution.as_str(), *reason));
-                    status(&updates, Some(thread_id), tool_group_notice(release, cancelled_calls, language)).await
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                    #[cfg(test)] stream_metrics::FRONTEND_LAGGED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    if let Some(thread) = &selection.active_thread {
-                        streams.invalidate(thread);
-                        dirty_threads.insert(thread.clone());
-                    }
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
             },
             _=tokio::time::sleep_until(stream_next),if !stream_inflight && (stream_retry.is_some() || streams.pending())=> {
                 let retry = stream_retry
                     .take()
-                    .filter(|frame| frame.ended() || streams.current(&frame.ticket, render_width));
+                    .filter(|frame| streams.current(&frame.ticket, render_width));
                 let frame = retry.map(|frame| *frame).or_else(|| {
                     selection
                         .active_thread
@@ -3898,26 +3859,19 @@ async fn run_client(
                 if let Some(frame) = frame {
                     stream_inflight = true;
                     stream_next = tokio::time::Instant::now() + stream_period;
-                    let control = control.clone();
                     let sender = updates.worker();
                     let results = background_tx.clone();
                     let stop = selection.cancel.child_token();
                     let ticket = frame.ticket.clone();
                     read_workers.spawn(async move {
-                        let result = frame.deliver(&control, sender, stop).await;
+                        let result = frame.deliver(sender, stop).await;
                         let _ = results
                             .send(BackgroundResult::StreamFrame { ticket, result })
                             .await;
                     });
                 }
             },
-            _=tick.tick(),if selection.progress_running || (status_enabled && status_dirty) || db_activity.active.is_some()=> {
-                if let Some(active) = db_activity.active.as_ref() {
-                    control
-                        .store
-                        .database
-                        .report_active_job_slow(active.id, std::time::Instant::now());
-                }
+            _=tick.tick(),if selection.progress_running || (status_enabled && status_dirty)=> {
                 status_ready = true;
                 if let Some(thread)=selection.periodic_refresh_thread(&refreshing) {
                     dirty_threads.insert(thread);
@@ -3929,7 +3883,7 @@ async fn run_client(
         }
     }
     drop(saved_events);
-    drop(ui_subscription);
+    drop(preview_events);
     read_cancel.cancel();
     drop(live_output);
     drop(browser);
@@ -4921,38 +4875,6 @@ mod stream_tests {
 pub(crate) mod control_tests;
 #[cfg(test)]
 mod inspection_tests;
-
-#[cfg(test)]
-mod notice_tests {
-    use super::{UiLanguage, tool_group_notice};
-    use crate::control::ForegroundRelease;
-
-    #[test]
-    fn tool_group_facts_are_formatted_at_the_frontend_boundary() {
-        let background = tool_group_notice(
-            Some(("execution", ForegroundRelease::Background)),
-            0,
-            UiLanguage::Ja,
-        );
-        assert_eq!(
-            background,
-            "背景移行の要求でshell executionの待機を解除し背景へ移しました。後続の未実行呼出しはありません"
-        );
-        assert!(background.contains("後続の未実行呼出しはありません"));
-        assert!(!background.contains("取り消"));
-        let input = tool_group_notice(
-            Some(("other", ForegroundRelease::AdditionalInput)),
-            2,
-            UiLanguage::Ja,
-        );
-        assert!(input.contains("追加指示でshell other"));
-        assert!(input.contains("2件取り消しました"));
-        assert_eq!(
-            tool_group_notice(None, 3, UiLanguage::Ja),
-            "未実行のツール呼出しを3件取り消しました"
-        );
-    }
-}
 
 #[cfg(test)]
 mod delivery_performance;

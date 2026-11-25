@@ -278,8 +278,6 @@ impl UpdateTarget for BufferedUpdates {
 fn latest_key(value: &UiUpdate) -> Option<String> {
     Some(match value {
         UiUpdate::ProgramStatus(_) => "program_status".into(),
-        UiUpdate::DbWorkerActivity(_) => "db-worker-activity".into(),
-        UiUpdate::GcDiagnostics(_) => "gc-diagnostics".into(),
         UiUpdate::Status { thread_id, .. } => format!("status:{thread_id:?}"),
         UiUpdate::DraftStatus { draft_id, .. } => format!("draft:{draft_id}"),
         UiUpdate::Progress { thread_id, .. } => format!("progress:{thread_id}"),
@@ -312,6 +310,20 @@ fn latest_key(value: &UiUpdate) -> Option<String> {
         UiUpdate::ShutdownProgress { .. } => "shutdown-progress".into(),
         _ => return None,
     })
+}
+
+#[cfg(test)]
+pub(crate) fn test_outbox() -> (impl Fn(UiUpdate), impl Fn() -> UiUpdate) {
+    let (tx, rx) = std::sync::mpsc::sync_channel(1);
+    let outbox = BufferedUpdates::new(tx);
+    let worker = outbox.worker();
+    (
+        move |update| worker.try_send(update).unwrap(),
+        move || {
+            outbox.flush();
+            rx.try_recv().unwrap()
+        },
+    )
 }
 
 #[cfg(test)]

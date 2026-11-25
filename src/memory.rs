@@ -1,28 +1,5 @@
 //! On-demand owner facts, not a heap estimator or periodic sampler.
 use serde_json::{Value, json};
-use std::sync::{Arc, Mutex};
-
-/// One response carried through the existing UI notification channels.
-#[derive(Clone, Debug)]
-pub struct UiMemoryReply(Arc<Mutex<Option<tokio::sync::oneshot::Sender<Value>>>>);
-impl UiMemoryReply {
-    pub(crate) fn new() -> (Self, tokio::sync::oneshot::Receiver<Value>) {
-        let (send, receive) = tokio::sync::oneshot::channel();
-        (Self(Arc::new(Mutex::new(Some(send)))), receive)
-    }
-    pub(crate) fn is_closed(&self) -> bool {
-        self.0
-            .lock()
-            .expect("memory reply lock")
-            .as_ref()
-            .is_none_or(|s| s.is_closed())
-    }
-    pub(crate) fn finish(&self, value: Value) {
-        if let Some(send) = self.0.lock().expect("memory reply lock").take() {
-            let _ = send.send(value);
-        }
-    }
-}
 pub(crate) fn cache(bytes: usize, limit: u64, entries: usize, unit: &str) -> Value {
     json!({"retained_bytes":bytes,"limit_bytes":limit,"entries":entries,"entry_unit":unit,"unavailable_reason":null})
 }

@@ -17,7 +17,6 @@ mod runtime;
 mod schedule;
 pub(crate) mod submission_retention;
 mod turn_interrupt;
-mod ui_events;
 mod usage_limit_retry;
 pub use foreground::ForegroundRelease;
 
@@ -77,27 +76,10 @@ use tokio_util::sync::CancellationToken;
 
 #[derive(Debug, Clone)]
 pub enum EngineEvent {
-    MemoryProbe {
-        owner: u64,
-        reply: crate::memory::UiMemoryReply,
-    },
     Changed {
         thread_id: String,
         /// Committed transition fact for frontend attention; never a saved state.
         recovery: bool,
-    },
-    Stream {
-        thread_id: String,
-        node_id: String,
-        text: String,
-        reasoning: bool,
-        stream_char_offset: usize,
-    },
-    /// Ephemeral transport observation; never persisted or included in model input.
-    ModelReceive {
-        thread_id: String,
-        attempt_id: String,
-        observed_at: std::time::Instant,
     },
     Notice {
         thread_id: String,
@@ -178,7 +160,6 @@ pub struct Control {
     ipc_refusals: Arc<crate::ipc::AdmissionRefusals>,
     origins: Mutex<HashMap<String, Origin>>,
     events: broadcast::Sender<EngineEvent>,
-    ui_events: ui_events::UiEvents,
     changed: Arc<Notify>,
     change_clock: Arc<change_clock::ChangeClock>,
     /// Wakes only `events.wait` calls that asked for text; everything else sleeps through deltas.
@@ -495,7 +476,6 @@ impl Control {
             ipc_refusals: owner.ipc_refusals.clone(),
             origins: Mutex::new(HashMap::new()),
             events,
-            ui_events: ui_events::UiEvents::new(),
             changed: changed.clone(),
             change_clock: Arc::new(change_clock::ChangeClock::new(waits.keyed.clone())),
             stop: owner_lifetime,
@@ -540,6 +520,7 @@ impl Control {
                 let stop = self.stop.clone();
                 let control = Arc::downgrade(self);
                 let signals = self.store.database.signals().clone();
+                let database = self.store.database.clone();
                 // Re-discover durable history jobs left by a prior owner before
                 // maintenance starts; in-memory marks do not survive restart.
                 signals.mark_all(&crate::maintenance::Work::DELETION);
@@ -552,7 +533,10 @@ impl Control {
                         }
                         return;
                     }
-                    maintenance_loop(control, gc, signals, stop).await;
+                    tokio::select! {
+                        _ = maintenance_loop(control, gc, signals, stop) => {},
+                        _ = database.observe_slow_jobs() => {},
+                    }
                 })))
             })
             .await;
@@ -570,10 +554,30 @@ impl Control {
         self.publish_event(event);
     }
     #[cfg(test)]
+    pub(crate) fn fixture_live_text<'a>(
+        &'a self,
+        thread: &'a str,
+    ) -> change_clock::LiveTextGuard<'a> {
+        // Reserve the synthetic attempt with the normal bounded live clock.
+        self.change_clock.live_text_guard(thread, "fixture-attempt")
+    }
+    #[cfg(test)]
+    pub(crate) fn fixture_end_live_text(&self, thread: &str) {
+        self.change_clock.record_attempt_end(
+            thread,
+            "fixture-attempt",
+            crate::protocol::EventAttemptOutcome::NotAdopted,
+            None,
+        );
+    }
+    #[cfg(test)]
     pub(crate) fn expire_saved_event_cursor_for_test(&self) {
         for i in 0..=change_clock::MAX_CHANGE_THREADS {
             self.change_clock.record(&format!("fixture-gap-{i}"));
         }
+    }
+    fn publish_event(&self, event: EngineEvent) {
+        let _ = self.events.send(event);
     }
     pub fn subscribe(&self) -> broadcast::Receiver<EngineEvent> {
         self.events.subscribe()
@@ -589,7 +593,7 @@ impl Control {
                 .mark(crate::maintenance::Work::UsageLimitRetry);
         }
         // Record before waking so a woken long-poll always finds the entry.
-        self.change_clock.record(thread_id);
+        self.change_clock.record_change(thread_id, recovery);
         self.publish_event(EngineEvent::Changed {
             thread_id: thread_id.into(),
             recovery,
@@ -608,13 +612,6 @@ impl Control {
     ) {
         self.change_clock
             .record_text(thread, attempt, stream_char_offset as u64, text, reasoning);
-        self.publish_event(EngineEvent::Stream {
-            thread_id: thread.into(),
-            node_id: attempt.into(),
-            text: text.into(),
-            reasoning,
-            stream_char_offset,
-        });
     }
 
     /// This task never waits for a model or owned shell to finish. Individual
@@ -1313,6 +1310,16 @@ impl Control {
                         self.recovery_rewind(request, origin, thread).await
                     }
                     Command::MessageGet(args) => self.message_with_hold(&args.message_id).await,
+                    Command::HistoryWindow(args) if args.include_observation => {
+                        self.store
+                            .observe_history_window(
+                                args.clone(),
+                                self.message_holds(),
+                                &request.operation_id,
+                                origin.is_some(),
+                            )
+                            .await
+                    }
                     Command::HistoryExport(args) => {
                         let thread = args.thread_id.clone();
                         let mut result = self.store.execute(request, origin).await?;

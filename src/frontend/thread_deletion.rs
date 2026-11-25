@@ -573,7 +573,6 @@ mod tests {
                 generation: 0,
                 view_revision: 0,
                 known_view: None,
-                preview_sources: vec![],
             })
             .unwrap();
         crate::test_watchdog::watchdog("src/frontend/thread_deletion.rs: frontend_delete_worker_returns_typed_outcome_and_cleans_up_without_popup_ownership", async {
@@ -586,13 +585,18 @@ mod tests {
                 tokio::time::sleep(Duration::from_millis(5)).await;
             }
         }).await.unwrap();
-        control.emit_test_event(EngineEvent::Stream {
-            thread_id: "thread".into(),
-            node_id: "deleted-attempt".into(),
-            text: "pending output".into(),
-            reasoning: false,
-            stream_char_offset: 0,
-        });
+        let live = control.fixture_live_text("thread");
+        assert!(live.record(0, "pending output", false));
+        live.received(std::time::Instant::now(), true);
+        crate::test_watchdog::watchdog("native preview owned before deletion", async {
+            loop {
+                if matches!(incoming.try_recv(), Ok(UiUpdate::ModelReceive { thread_id, attempt_id, .. })
+                    if thread_id == "thread" && attempt_id == "fixture-attempt") {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        }).await.unwrap();
         let draft = DraftSnapshot {
             draft_id: "worker-draft".into(),
             text: "queued autosave".into(),
@@ -640,37 +644,48 @@ mod tests {
         assert!(matches!(deleted, ThreadDeletionReply::Deleted(ids) if ids == ["thread"]));
         // After the deletion result is delivered, stale stream/receive events
         // cannot keep the deleted selection alive or repopulate its display.
-        control.emit_test_event(EngineEvent::ModelReceive {
-            thread_id: "thread".into(),
-            attempt_id: "after-deletion".into(),
-            observed_at: std::time::Instant::now(),
-        });
-        control.emit_test_event(EngineEvent::Stream {
-            thread_id: "thread".into(),
-            node_id: "deleted-attempt".into(),
-            text: "late output".into(),
-            reasoning: false,
-            stream_char_offset: 14,
-        });
-        control.emit_test_event(EngineEvent::Error {
-            thread_id: "independent".into(),
-            error: ApiError::new(ErrorCode::IoFailed, "post-deletion-event-fence"),
-        });
+        let stale = control.fixture_live_text("thread");
+        assert!(stale.record(0, "late output", false));
+        stale.received(std::time::Instant::now(), true);
+        let late = super::super::saved_events::wait_scoped(
+            &root.path().join("data"),
+            &control.store.instance_id,
+            None,
+            false,
+            Some("thread".into()),
+        )
+        .await
+        .unwrap();
+        assert!(
+            late.live_text
+                .unwrap()
+                .iter()
+                .any(|attempt| attempt.receive_age_ms.is_some())
+        );
+        // A native timing update for the new selection fences the old wait.
+        let independent = control.fixture_live_text("independent");
+        independent.received(std::time::Instant::now(), true);
+        sender
+            .try_send(UiAction::SelectThread {
+                thread_id: "independent".into(),
+                generation: 1,
+                view_revision: 0,
+                known_view: None,
+            })
+            .unwrap();
         crate::test_watchdog::watchdog("src/frontend/thread_deletion.rs: frontend_delete_worker_returns_typed_outcome_and_cleans_up_without_popup_ownership", async {
             loop {
                 while let Ok(update) = incoming.try_recv() {
                     match update {
+                        UiUpdate::ModelReceive { thread_id, generation: 1, .. }
+                            if thread_id == "independent" => return,
                         UiUpdate::Stream { thread_id, .. }
-                        | UiUpdate::ModelReceive { thread_id, .. } => {
+                        | UiUpdate::ModelReceive { thread_id, .. }
+                        | UiUpdate::PreviewGap { thread_id, .. } => {
                             assert_ne!(
                                 thread_id, "thread",
                                 "deleted selection must release stream ownership"
                             );
-                        }
-                        UiUpdate::Status { text, .. }
-                            if text.contains("post-deletion-event-fence") =>
-                        {
-                            return;
                         }
                         _ => {}
                     }

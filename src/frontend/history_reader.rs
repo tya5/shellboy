@@ -679,7 +679,12 @@ fn query_rebase(
         |position| position.saturating_sub(10).max(0),
     );
     let rows = history_rows(db, thread, PathRange::From(first))?;
-    let committed = committed_streams(db, &rows)?;
+    let committed = crate::history::committed_attempt_bindings(
+        db,
+        rows.iter()
+            .filter(|row| row.node.kind == "assistant_response")
+            .map(|row| row.node.id.as_str()),
+    )?;
     let first = rows.first().map_or(0, |row| row.ordinal as u64);
     Ok((
         RawHistory {
@@ -708,7 +713,12 @@ fn query_window(
     let total = history_total(db, thread)? as u64;
     let first = request.ordinal.saturating_sub(10);
     let rows = history_rows(db, thread, PathRange::From(first as i64))?;
-    let committed = committed_streams(db, &rows)?;
+    let committed = crate::history::committed_attempt_bindings(
+        db,
+        rows.iter()
+            .filter(|row| row.node.kind == "assistant_response")
+            .map(|row| row.node.id.as_str()),
+    )?;
     Ok(RawHistory {
         rows,
         info: HistoryInfo {
@@ -785,7 +795,12 @@ fn query_page_unstamped_tx(
         })
         .transpose();
     let first = rows.first().map_or(0, |row| row.ordinal as u64);
-    let committed = committed_streams(db, &rows)?;
+    let committed = crate::history::committed_attempt_bindings(
+        db,
+        rows.iter()
+            .filter(|row| row.node.kind == "assistant_response")
+            .map(|row| row.node.id.as_str()),
+    )?;
     Ok((
         RawHistory {
             rows,
@@ -804,36 +819,6 @@ fn query_page_unstamped_tx(
 // Stream events carry model-attempt IDs; only the persisted output ledger can
 // reconcile them with selected conversation nodes. Query only this bounded page
 // and decline ambiguous attempt mappings rather than guessing from body text.
-fn committed_streams(
-    db: &rusqlite::Connection,
-    rows: &[PathNode],
-) -> rusqlite::Result<Vec<(String, String)>> {
-    let mut query = db.prepare(
-        "SELECT DISTINCT o.attempt_id FROM output_item o
-         WHERE o.node_id=?1 AND NOT EXISTS (
-             SELECT 1 FROM output_item other
-             WHERE other.attempt_id=o.attempt_id AND other.node_id IS NOT NULL
-               AND other.node_id<>o.node_id
-         ) ORDER BY o.attempt_id LIMIT 2",
-    )?;
-    let mut result = Vec::new();
-    for node in rows
-        .iter()
-        .map(|row| &row.node)
-        .filter(|node| node.kind == "assistant_response")
-    {
-        let attempts = query
-            .query_map([&node.id], |row| row.get::<_, String>(0))?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        // Production commits one response node per attempt and one attempt per
-        // response. An inconsistent imported ledger must not create unbounded
-        // events or choose an arbitrary identity.
-        if attempts.len() == 1 {
-            result.push((attempts.into_iter().next().unwrap(), node.id.clone()));
-        }
-    }
-    Ok(result)
-}
 struct PathNode {
     ordinal: i64,
     node: RawNode,

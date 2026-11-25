@@ -197,6 +197,7 @@ async fn branch_revision_distinguishes_rewind_and_append_to_equal_length() {
     let f = Fixture::new([conversation(3), n_path(3)].concat()).await;
     let window = |thread: &str| {
         Command::HistoryWindow(HistoryWindowArgs {
+            include_observation: false,
             thread_id: thread.into(),
             items: true,
             ordinal: None,

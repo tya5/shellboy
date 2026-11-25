@@ -2295,6 +2295,19 @@ async fn assert_background_notice(has_remaining_call: bool) {
     for action in ui.select_thread(accepted.thread_id.clone()) {
         actions.send(action).await.unwrap();
     }
+    // Establish a saved baseline before releasing the model response. Opening
+    // a Thread after the results land must not replay a historical notice.
+    crate::test_watchdog::watchdog("Background notice saved baseline", async {
+        while ui.view().total_nodes == 0 {
+            match updates_receive.try_recv() {
+                Ok(update) => ui.apply(update),
+                Err(std::sync::mpsc::TryRecvError::Empty) => tokio::task::yield_now().await,
+                Err(error) => panic!("UI bridge stopped before saved baseline: {error}"),
+            }
+        }
+    })
+    .await
+    .unwrap();
     let mut calls = vec![
         json!({"type":"function_call","id":"first","call_id":"first-call","name":"shell","arguments":json!({"command":"cat","background":false,"stdin_open":true}).to_string()}),
         json!({"type":"function_call","id":"second","call_id":"second-call","name":"shell","arguments":json!({"command":"printf must-not-run","background":false}).to_string()}),
@@ -2409,40 +2422,42 @@ async fn assert_background_notice(has_remaining_call: bool) {
         control.store.config.ui.language,
         shellboy::config::UiLanguage::En
     );
-    let ui_remaining = if has_remaining_call {
-        "Cancelled 1 unexecuted tool call"
+    let notice_call = if has_remaining_call {
+        "second-call"
     } else {
-        "No remaining unexecuted calls"
+        "first-call"
     };
-    let expected_ui_notice = format!(
-        "Background request ended the wait for shell {} and moved it to the background. {ui_remaining}",
-        results[0]["execution_id"].as_str().unwrap()
-    );
-    let ui_notice =
-        crate::test_watchdog::watchdog("tests/runtime.rs: assert_background_notice", async {
-            loop {
-                match updates_receive.try_recv() {
-                    Ok(update @ shellboy::ui::UiUpdate::Status { .. }) => {
-                        if let shellboy::ui::UiUpdate::Status {
-                            thread_id: Some(ref target),
-                            ref text,
-                        } = update
-                            && target == &accepted.thread_id
-                            && text == &expected_ui_notice
-                        {
-                            break update;
-                        }
-                    }
-                    Ok(_) => {}
-                    Err(std::sync::mpsc::TryRecvError::Empty) => tokio::task::yield_now().await,
-                    Err(error) => panic!("UI bridge stopped before background notice: {error}"),
-                }
+    crate::test_watchdog::watchdog("saved Background result notice", async {
+        loop {
+            match updates_receive.try_recv() {
+                Ok(update) => ui.apply(update),
+                Err(std::sync::mpsc::TryRecvError::Empty) => tokio::task::yield_now().await,
+                Err(error) => panic!("UI bridge stopped before saved result notice: {error}"),
             }
-        })
-        .await
-        .unwrap();
-    ui.apply(ui_notice);
-    assert_eq!(ui.view().status, expected_ui_notice);
+            if ui
+                .view()
+                .nodes()
+                .iter()
+                .flat_map(|node| &node.presentation.blocks)
+                .any(|block| {
+                    block.kind == shellboy::presentation::BlockKind::ToolResult
+                        && block.tool.as_ref().is_some_and(|tool| {
+                            tool.call_id == notice_call
+                                && ui.view().status
+                                    == shellboy::presentation::messages::tool_heading(
+                                        tool,
+                                        false,
+                                        shellboy::config::UiLanguage::En,
+                                    )
+                        })
+                })
+            {
+                break;
+            }
+        }
+    })
+    .await
+    .unwrap();
     next.reply
         .send(final_answer("background running"))
         .ok()

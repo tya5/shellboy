@@ -391,6 +391,7 @@ mod tests {
         let report = request(
             &owner.loaded.data_dir,
             Command::HistoryWindow(crate::protocol::HistoryWindowArgs {
+                include_observation: false,
                 thread_id: "thread".into(),
                 ordinal: None,
                 node_id: Some("omitted-source".into()),

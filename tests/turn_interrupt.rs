@@ -128,6 +128,36 @@ async fn command(control: &Arc<Control>, command: Command) -> Value {
     assert!(response.ok, "{:?}", response.error);
     response.result.unwrap()
 }
+async fn wait_for_live_text(control: &Arc<Control>, thread: &str, expected: &str) {
+    let mut after = None;
+    loop {
+        let page: EventsWaitResult = serde_json::from_value(
+            command(
+                control,
+                Command::EventsWait(EventsWaitArgs {
+                    after,
+                    thread_ids: vec![thread.into()],
+                    timeout_ms: 1_000,
+                    include_text: true,
+                    include_reasoning_activity: false,
+                }),
+            )
+            .await,
+        )
+        .unwrap();
+        if page
+            .live_text
+            .into_iter()
+            .flatten()
+            .flat_map(|attempt| attempt.deltas)
+            .any(|delta| delta.text.contains(expected))
+        {
+            return;
+        }
+        after = Some(page.cursor);
+    }
+}
+
 async fn start(control: &Arc<Control>) -> MessageAccepted {
     let thread = command(
         control,
@@ -221,7 +251,6 @@ async fn close(control: Arc<Control>, owner: DataOwner, server: JoinHandle<()>) 
 async fn interrupted_stream_is_saved_without_retry_and_empty_run_completes() {
     let (url, mut requests, server) = proxy().await;
     let (_directory, owner, control) = runtime_with_io(&url, "").await;
-    let mut events = control.subscribe();
     let accepted = start(&control).await;
     incoming(&mut requests)
         .await
@@ -239,14 +268,7 @@ async fn interrupted_stream_is_saved_without_retry_and_empty_run_completes() {
         .ok()
         .unwrap();
     crate::test_watchdog::watchdog("tests/turn_interrupt.rs: interrupted_stream_is_saved_without_retry_and_empty_run_completes", async {
-        loop {
-            if let shellboy::control::EngineEvent::Stream { text, .. } =
-                events.recv().await.unwrap()
-                && text.contains("saved partial")
-            {
-                break;
-            }
-        }
+        wait_for_live_text(&control, &accepted.thread_id, "saved partial").await;
     })
     .await
     .unwrap();
@@ -479,7 +501,6 @@ async fn recovery_turn_interrupt_is_idempotent_and_stale_target_cannot_stop_repl
 async fn later_stream_interruption_is_not_misclassified_by_an_earlier_completed_tool_group() {
     let (url, mut requests, server) = proxy().await;
     let (_directory, owner, control) = runtime_with_io(&url, "").await;
-    let mut events = control.subscribe();
     let accepted = start(&control).await;
     incoming(&mut requests).await.reply.send(Reply::json(json!({
         "id":"earlier-group", "status":"completed", "output":[{
@@ -511,14 +532,7 @@ async fn later_stream_interruption_is_not_misclassified_by_an_earlier_completed_
         .ok()
         .unwrap();
     crate::test_watchdog::watchdog("tests/turn_interrupt.rs: later_stream_interruption_is_not_misclassified_by_an_earlier_completed_tool_group", async {
-        loop {
-            if let shellboy::control::EngineEvent::Stream { text, .. } =
-                events.recv().await.unwrap()
-                && text.contains("later response partial")
-            {
-                break;
-            }
-        }
+        wait_for_live_text(&control, &accepted.thread_id, "later response partial").await;
     })
     .await
     .unwrap();
@@ -568,7 +582,6 @@ fn completed_answer() -> Reply {
 async fn background_completion_after_interruption_starts_new_turn_and_completes_same_run() {
     let (url, mut requests, server) = proxy().await;
     let (_directory, owner, control) = runtime_with_io(&url, "").await;
-    let mut events = control.subscribe();
     let accepted = start(&control).await;
     incoming(&mut requests).await.reply.send(Reply::json(json!({
         "id":"background-group","status":"completed","output":[{
@@ -590,14 +603,7 @@ async fn background_completion_after_interruption_starts_new_turn_and_completes_
         body:format!("data: {}\n\n",json!({"type":"response.output_text.delta","delta":"interrupted while background work continues"})).into_bytes(),
     }).ok().unwrap();
     crate::test_watchdog::watchdog("tests/turn_interrupt.rs: background_completion_after_interruption_starts_new_turn_and_completes_same_run", async {
-        loop {
-            if let shellboy::control::EngineEvent::Stream { text, .. } =
-                events.recv().await.unwrap()
-                && text.contains("background work continues")
-            {
-                break;
-            }
-        }
+        wait_for_live_text(&control, &accepted.thread_id, "background work continues").await;
     })
     .await
     .unwrap();

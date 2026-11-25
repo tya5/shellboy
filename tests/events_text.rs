@@ -289,10 +289,14 @@ async fn deltas_arrive_in_order_with_offsets_then_the_attempt_ends_and_saved_out
             let t = thread(&control).await;
             send(&control, &t, "go").await;
             let provider = fixture.next_request().await;
-            // An attempt with no text yet is not listed, and the baseline is immediate.
+            // The baseline is immediate; an attempt may already have a receive timestamp.
             let base = poll(&control, None, &[&t], 0).await;
             assert_eq!(base["status"], "baseline");
-            assert_eq!(base["live_text"], json!([]));
+            for item in base["live_text"].as_array().unwrap() {
+                assert_eq!(item["thread_id"], t);
+                assert_eq!(item["deltas"], json!([]));
+                assert!(item["receive_age_ms"].is_number());
+            }
             let mut at = cursor(&base);
 
             provider.delta("hello");
@@ -326,7 +330,10 @@ async fn deltas_arrive_in_order_with_offsets_then_the_attempt_ends_and_saved_out
             assert_eq!(progress["reasoning_activity"][0]["attempt_id"], attempt);
             assert_eq!(progress["reasoning_activity"][0]["received_bytes"], 3);
             let idle = poll(&control, Some(&at), &[&t], 0).await;
-            assert_eq!(idle["status"], "timeout");
+            assert!(matches!(idle["status"].as_str(), Some("timeout" | "text")));
+            if idle["status"] == "text" {
+                assert!(entry(&idle, &t).unwrap()["receive_age_ms"].is_number());
+            }
             assert_eq!(entry(&idle, &t).unwrap()["deltas"], json!([]));
             assert_eq!(entry(&idle, &t).unwrap()["attempt_id"], attempt);
             assert_eq!(attempts(&control, &t).await, std::slice::from_ref(&attempt));
@@ -562,20 +569,38 @@ async fn a_filter_excludes_other_threads_and_the_cursor_moves_past_them() {
             let provider_a = fixture.next_request().await;
             send(&control, &b, "go").await;
             let provider_b = fixture.next_request().await;
-            let mut at = cursor(&poll(&control, None, &[&a], 0).await);
-            provider_b.delta("not for you");
-            // Everything is listed unfiltered; wait for the hidden delta to land.
-            loop {
-                let unfiltered = poll(&control, None, &[], 0).await;
-                if entry(&unfiltered, &b).is_some() {
-                    break;
+            // Both response headers precede the baseline, so the hidden delta
+            // is the only later receive before the filtered poll.
+            let mut at = loop {
+                let base = poll(&control, None, &[], 0).await;
+                if [&a, &b].into_iter().all(|thread| {
+                    entry(&base, thread).is_some_and(|item| item["receive_age_ms"].is_number())
+                }) {
+                    break cursor(&base);
                 }
                 tokio::time::sleep(Duration::from_millis(5)).await;
-            }
+            };
+            provider_b.delta("not for you");
+            let hidden_cursor = loop {
+                let unfiltered = poll(&control, None, &[], 0).await;
+                if entry(&unfiltered, &b).is_some_and(|item| joined(item) == "not for you") {
+                    break cursor(&unfiltered);
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            };
+            assert_ne!(hidden_cursor, at);
             let filtered = poll(&control, Some(&at), &[&a], 0).await;
             assert_eq!(filtered["status"], "timeout");
-            assert_eq!(filtered["live_text"], json!([]));
-            assert_ne!(cursor(&filtered), at, "the cursor moves past hidden text");
+            for item in filtered["live_text"].as_array().unwrap() {
+                assert_eq!(item["thread_id"], a);
+                assert_eq!(item["deltas"], json!([]));
+                assert!(item["receive_age_ms"].is_number());
+            }
+            assert_eq!(
+                cursor(&filtered),
+                hidden_cursor,
+                "cursor passes the hidden delta"
+            );
             at = cursor(&filtered);
             provider_a.delta("for you");
             read_text(&control, &mut at, &a, 0, "for you").await;

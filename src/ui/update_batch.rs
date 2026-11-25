@@ -13,6 +13,8 @@ impl UiUpdate {
             | Self::History { .. }
             | Self::StreamCommitted { .. }
             | Self::Stream { .. }
+            | Self::PreviewEnded { .. }
+            | Self::PreviewGap { .. }
             | Self::StreamSettled { .. }
             | Self::IncompleteResponses { .. }
             | Self::ViewState { .. }
@@ -30,12 +32,9 @@ impl UiUpdate {
             | Self::WatchDetails { .. }
             | Self::Descendants { .. }
             | Self::ProgramStatus(_)
-            | Self::DbWorkerActivity(_)
-            | Self::GcDiagnostics(_)
             | Self::BrowserPatch { .. }
             | Self::BrowserPatchFailed { .. }
             | Self::BrowserResync { .. }
-            | Self::MemoryProbe(_)
             | Self::LiveWorkObserved { .. }
             | Self::LiveWorkPreview { .. }
             | Self::DetailSourcesChanged { .. }

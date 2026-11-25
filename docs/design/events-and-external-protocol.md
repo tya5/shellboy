@@ -13,10 +13,13 @@ RPC as a documented external contract (#244).
 
 ## 1. Findings from the current code
 
-### 1.1 How the owner notifies observers today
+### 1.1 Notification paths before the native TUI cutover
 
-All notification is in-process and carries no saved data. Observers always
-re-read saved facts.
+The table records the implementation at the time of the event-wait proposal.
+For the current TUI, instance-fenced `events.wait` supplies change hints, live
+answer preview and receive timing. The client reads back saved facts. Tool
+notices use newly observed saved results, not `EngineEvent::Notice` or `Error`;
+typed operation refusals and saved recovery still display. See [TUI client](tui-client.md).
 
 | Mechanism | Where | Shape | Consumers |
 |---|---|---|---|

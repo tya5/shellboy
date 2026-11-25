@@ -45,7 +45,7 @@ impl ForegroundGate {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn foreground_db_stall_keeps_submission_input_and_status_delivery_responsive() {
+async fn foreground_db_stall_keeps_submission_and_input_responsive() {
     for language in ["en", "ja"] {
         let (root, owner, control, server) = fixture_with_language(language).await;
         let gate = ForegroundGate::start(owner.db.clone()).await;
@@ -77,15 +77,12 @@ async fn foreground_db_stall_keeps_submission_input_and_status_delivery_responsi
             std::sync::Arc::new(tokio::sync::Semaphore::new(2)),
         ));
         sender.try_send(action).unwrap();
-        // Acknowledgement and the activity snapshot both bypass the occupied DB.
+        // Acknowledgement bypasses the occupied DB.
         crate::test_watchdog::watchdog("foreground DB stall updates", async {
             let mut operation = false;
-            let mut activity = false;
-            while !operation || !activity {
+            while !operation {
                 while let Ok(update) = incoming.try_recv() {
                     operation |= matches!(&update, UiUpdate::SendOperation { .. });
-                    activity |=
-                        matches!(&update, UiUpdate::DbWorkerActivity(a) if a.active.is_some());
                     assert!(!matches!(&update, UiUpdate::SavedMessage { .. }));
                     ui.apply(update);
                 }
@@ -97,23 +94,6 @@ async fn foreground_db_stall_keeps_submission_input_and_status_delivery_responsi
         assert!(!gate.job.as_ref().unwrap().is_finished());
         ui.insert("next draft", false);
         let next = ui.view().draft.clone();
-        control.emit_test_event(crate::control::EngineEvent::Error {
-            thread_id: "thread".into(),
-            error: crate::protocol::ApiError::new(
-                crate::protocol::ErrorCode::InvalidState,
-                "status during stalled DB",
-            ),
-        });
-        crate::test_watchdog::watchdog("foreground DB stall updates", async {
-            loop {
-                while let Ok(update) = incoming.try_recv() {
-                    let observed = matches!(&update, UiUpdate::Status { text, .. } if text.contains("status during stalled DB"));
-                    ui.apply(update);
-                    if observed { return; }
-                }
-                tokio::task::yield_now().await;
-            }
-        }).await.unwrap();
         let display_now = Instant::now();
         ui.animation_tick(display_now + Duration::from_secs(227));
         assert_eq!(ui.view().draft, next);
@@ -137,7 +117,6 @@ async fn foreground_db_stall_keeps_submission_input_and_status_delivery_responsi
             }),
             "{screen}"
         );
-        assert!(screen.contains("status during stalled DB"), "{screen}");
         assert!(!gate.job.as_ref().unwrap().is_finished());
         gate.finish().await;
         crate::test_watchdog::watchdog("foreground DB stall updates", async {

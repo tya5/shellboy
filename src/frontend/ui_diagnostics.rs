@@ -347,19 +347,6 @@ mod tests {
                 }
             }
         }
-        for count in [0, 1, 2, 1_000_000] {
-            let value = super::super::tool_group_notice(None, count, UiLanguage::En);
-            if count == 0 {
-                assert_eq!(value, "No remaining unexecuted calls");
-            } else {
-                assert!(value.contains(&count.to_string()));
-                assert!(value.ends_with(if count == 1 {
-                    "tool call"
-                } else {
-                    "tool calls"
-                }));
-            }
-        }
     }
 }
 

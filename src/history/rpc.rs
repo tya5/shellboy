@@ -45,7 +45,7 @@ fn serialize(result: impl serde::Serialize) -> Result<Value, ApiError> {
     })
 }
 
-fn finish(command: &str, operation: &str, result: Value) -> Result<Value, ApiError> {
+pub(crate) fn finish(command: &str, operation: &str, result: Value) -> Result<Value, ApiError> {
     let mut response = Response::success(operation, result);
     fit_response(command, &mut response)
         .map_err(|_| ApiError::new(ErrorCode::InvalidState, "History provenance budget failed"))?;

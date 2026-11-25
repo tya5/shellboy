@@ -44,6 +44,7 @@ fn fill(db: &mut Connection, count: usize) {
 
 fn args() -> HistoryWindowArgs {
     HistoryWindowArgs {
+        include_observation: false,
         items: false,
         thread_id: "t".into(),
         ordinal: None,

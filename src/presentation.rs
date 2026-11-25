@@ -875,6 +875,11 @@ impl ReplyState {
         }
     }
 }
+/// Owner observation that supplied a disposable selected-Thread answer.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PreviewSource {
+    pub input_through_node_id: Option<String>,
+}
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NodePresentation {
     /// Display-only sentence provenance; canonical projections remain unchanged.
@@ -901,6 +906,8 @@ pub struct NodePresentation {
     pub read_revision: u64,
     #[serde(skip)]
     pub provisional_stream: bool,
+    #[serde(skip)]
+    pub preview_source: Option<PreviewSource>,
     #[serde(skip)]
     pub output_limited: bool,
     /// Skipped, failed or spill-only automatic attempt triggered after this

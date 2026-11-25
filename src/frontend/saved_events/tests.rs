@@ -7,7 +7,7 @@ use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-pub(in crate::frontend) enum Observed {
+pub(crate) enum Observed {
     Baseline,
     Page {
         generation: u64,
@@ -17,6 +17,13 @@ pub(in crate::frontend) enum Observed {
 
 tokio::task_local! {
     static OBSERVE: mpsc::Sender<Observed>;
+}
+
+pub(crate) async fn observe_run<T>(
+    sender: mpsc::Sender<Observed>,
+    run: impl Future<Output = T>,
+) -> T {
+    OBSERVE.scope(sender, run).await
 }
 
 pub(in crate::frontend) fn observe(event: Observed) {
@@ -119,6 +126,185 @@ async fn native_gap_retires_the_old_browser_page_and_reloads_one_bounded_page() 
         assert_eq!(next, ui.list_generation());
         assert!(observed.try_recv().is_err());
     }).await.unwrap();
+    send.try_send(UiAction::Quit).unwrap();
+    control_tests::finish_bridge(bridge, &incoming).await;
+}
+
+#[tokio::test]
+async fn native_preview_is_scoped_answer_only_and_instance_fenced() {
+    let (_root, owner, control, server) = control_tests::fixture().await;
+    let data_dir = &owner.loaded.data_dir;
+    let instance = &control.store.instance_id;
+    let selected = control.fixture_live_text("thread");
+    let hidden = control.fixture_live_text("independent");
+    assert!(hidden.record(0, "hidden answer", false));
+    assert!(selected.record(0, "synthetic reasoning", true));
+    assert!(selected.record(19, "visible answer", false));
+    selected.received(std::time::Instant::now(), true);
+    let page = super::wait_scoped(data_dir, instance, None, false, Some("thread".into()))
+        .await
+        .unwrap();
+    let attempts = page.live_text.unwrap();
+    assert_eq!(attempts.len(), 1);
+    assert_eq!(attempts[0].thread_id, "thread");
+    assert_eq!(attempts[0].attempt_id, "fixture-attempt");
+    assert!(attempts[0].receive_age_ms.is_some());
+    assert_eq!(attempts[0].deltas.len(), 1);
+    assert_eq!(attempts[0].deltas[0].text, "visible answer");
+    let error = super::wait_scoped(data_dir, "wrong-owner", None, false, Some("thread".into()))
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, crate::protocol::ErrorCode::ProtocolMismatch);
+    drop(selected);
+    drop(hidden);
+    server.shutdown().await.unwrap();
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+}
+
+// Prepared fixture rows satisfy the same indexed admission read as a real frame.
+pub(in crate::frontend) async fn install_preview_attempt(control: &crate::control::Control) {
+    control.store.database.call(|db| {
+        db.execute("UPDATE turn SET state='running' WHERE id='target-run'", [])?;
+        db.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at) VALUES('conversation','thread','fixture-attempt','target-run',0,0,'fixture','fixture-model',0,'inflight','{}','now')", [])?;
+        Ok(())
+    }).await.unwrap();
+}
+
+#[tokio::test]
+async fn native_preview_resync_without_replacement_retires_displayed_suffix() {
+    preview_gap(false).await;
+}
+
+#[tokio::test]
+async fn native_empty_answer_gap_keeps_the_next_live_suffix_marked_incomplete() {
+    preview_gap(true).await;
+}
+
+async fn preview_gap(still_live: bool) {
+    let (root, owner, control, server) = control_tests::fixture().await;
+    install_preview_attempt(&control).await;
+    let live = control.fixture_live_text("thread");
+    let mut ui = UiState::new(&control.store.config, root.path().into());
+    let (send, receive) = actions::channel(32);
+    let (updates, incoming) = std::sync::mpsc::sync_channel(128);
+    let bridge = tokio::spawn(run(
+        control.clone(),
+        receive,
+        updates,
+        root.path().into(),
+        owner,
+        server,
+    ));
+    for action in ui.select_thread("thread".into()) {
+        send.try_send(action).unwrap();
+    }
+    crate::test_watchdog::watchdog("native preview resync without replacement", async {
+        // This attempt has an empty selected input. Adopt that saved tail
+        // before emitting the single provisional frame.
+        loop {
+            if let Ok(update) = incoming.try_recv() {
+                let tail = matches!(&update, UiUpdate::History {
+                    thread_id, generation, append: false, total_nodes: 0, ..
+                } if thread_id == "thread" && *generation == ui.view().generation);
+                ui.apply(update);
+                if tail && ui.view().turn_id.as_deref() == Some("target-run") {
+                    break;
+                }
+            } else {
+                tokio::task::yield_now().await;
+            }
+        }
+        assert!(live.record(0, "provisional suffix", false));
+        while !ui
+            .view()
+            .nodes()
+            .iter()
+            .any(|node| node.text == "provisional suffix")
+        {
+            while let Ok(update) = incoming.try_recv() {
+                ui.apply(update);
+            }
+            tokio::task::yield_now().await;
+        }
+        let live = if still_live {
+            // A single oversized reasoning delta evicts the earlier answer.
+            // The owner omits all retained reasoning from the native page.
+            let reasoning = "r".repeat(128 * 1024);
+            assert!(live.record("provisional suffix".len() as u64, &reasoning, true));
+            Some(live)
+        } else {
+            drop(live);
+            control.expire_saved_event_cursor_for_test();
+            None
+        };
+        loop {
+            if let Ok(update) = incoming.try_recv() {
+                let gap = matches!(&update, UiUpdate::PreviewGap { thread_id, generation }
+                    if thread_id == "thread" && *generation == ui.view().generation);
+                ui.apply(update);
+                if gap {
+                    assert!(
+                        !ui.view()
+                            .nodes()
+                            .iter()
+                            .any(|node| node.node_id == "fixture-attempt")
+                    );
+                    break;
+                }
+            } else {
+                tokio::task::yield_now().await;
+            }
+        }
+        if let Some(live) = live {
+            assert!(live.record(
+                ("provisional suffix".len() + 128 * 1024) as u64,
+                "later answer",
+                false
+            ));
+            loop {
+                if let Ok(update) = incoming.try_recv() {
+                    ui.apply(update);
+                    if let Some(node) = ui
+                        .view()
+                        .nodes()
+                        .iter()
+                        .find(|node| node.text == "later answer")
+                    {
+                        assert_eq!(node.node_id, "fixture-attempt");
+                        assert!(
+                            node.presentation.body_extent_unknown,
+                            "missing answer prefix must stay unknown"
+                        );
+                        break;
+                    }
+                } else {
+                    tokio::task::yield_now().await;
+                }
+            }
+            control.fixture_end_live_text("thread");
+            loop {
+                if let Ok(update) = incoming.try_recv() {
+                    let ended = matches!(&update, UiUpdate::PreviewEnded { attempts, .. }
+                        if attempts.iter().any(|attempt| attempt == "fixture-attempt"));
+                    ui.apply(update);
+                    if ended {
+                        assert!(
+                            !ui.view()
+                                .nodes()
+                                .iter()
+                                .any(|node| node.node_id == "fixture-attempt")
+                        );
+                        break;
+                    }
+                } else {
+                    tokio::task::yield_now().await;
+                }
+            }
+        }
+    })
+    .await
+    .unwrap();
     send.try_send(UiAction::Quit).unwrap();
     control_tests::finish_bridge(bridge, &incoming).await;
 }

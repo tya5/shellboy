@@ -47,6 +47,9 @@ pub struct ThreadView {
     // Last applied saved-history window, distinct from newer input requests.
     pub(super) received_window_revision: Option<u64>,
     pub total_nodes: u64,
+    saved_tail: Option<(u64, u64, Option<String>)>,
+    unconfirmed_preview: Option<UiNode>,
+    notice_anchor: Option<(u64, u64, String)>,
     pub status: String,
     pub pending: BTreeMap<u64, PendingSend>,
     pub pending_messages: PendingMessages,
@@ -371,6 +374,9 @@ impl ThreadView {
             received_revision: 0,
             received_window_revision: None,
             total_nodes: 0,
+            saved_tail: None,
+            unconfirmed_preview: None,
+            notice_anchor: None,
             status: crate::ui::i18n::local!(config.ui.language, "入力できます", "Ready for input")
                 .into(),
             pending: BTreeMap::new(),
@@ -563,6 +569,195 @@ impl ThreadView {
 }
 
 impl ThreadView {
+    fn accepts_preview(&self, source: &crate::presentation::PreviewSource) -> bool {
+        self.saved_tail
+            .as_ref()
+            .is_none_or(|(_, _, tail)| tail == &source.input_through_node_id)
+    }
+
+    pub(super) fn observe_preview(&mut self, frame: UiNode) -> Vec<UiAction> {
+        if frame
+            .presentation
+            .preview_source
+            .as_ref()
+            .is_some_and(|source| !self.accepts_preview(source))
+        {
+            // Keep the latest bounded frame after acknowledging delivery; a
+            // matching saved install must not depend on a second delta.
+            self.unconfirmed_preview = Some(frame);
+            return Vec::new();
+        }
+        self.clear_unconfirmed_preview();
+        let retired = self.settle_other_streams(&frame.node_id);
+        self.on_stream(frame);
+        retired
+    }
+
+    pub(super) fn clear_unconfirmed_preview(&mut self) {
+        self.unconfirmed_preview = None;
+    }
+
+    fn clear_unconfirmed_attempt(&mut self, attempt: &str) {
+        if self
+            .unconfirmed_preview
+            .as_ref()
+            .is_some_and(|frame| frame.node_id == attempt)
+        {
+            self.clear_unconfirmed_preview();
+        }
+    }
+
+    pub(super) fn reconcile_saved_preview(
+        &mut self,
+        settled: bool,
+        installed_anchor: Option<ViewAnchor>,
+    ) -> Vec<UiAction> {
+        let retired = self
+            .nodes
+            .iter()
+            .filter(|node| {
+                self.provisional_nodes.contains(&node.node_id)
+                    && node.role != "received_response"
+                    && (settled
+                        || node
+                            .presentation
+                            .preview_source
+                            .as_ref()
+                            .is_some_and(|source| !self.accepts_preview(source)))
+            })
+            .map(|node| node.node_id.clone())
+            .collect::<Vec<_>>();
+        if settled || !retired.is_empty() {
+            self.activity.clear_receive_observation();
+        }
+        if let Some(anchor) = installed_anchor
+            && self
+                .navigation
+                .anchor
+                .node_id
+                .as_ref()
+                .is_some_and(|id| retired.contains(id))
+        {
+            // The replacement already supplies a saved viewport; retiring the
+            // transient anchor must not start another rebase.
+            self.navigation.anchor = if anchor.node_id.as_ref().is_some_and(|id| {
+                !self.provisional_nodes.contains(id)
+                    && self.nodes.iter().any(|node| &node.node_id == id)
+            }) {
+                anchor
+            } else {
+                ViewAnchor {
+                    node_id: self
+                        .nodes
+                        .iter()
+                        .rev()
+                        .find(|node| !self.provisional_nodes.contains(&node.node_id))
+                        .map(|node| node.node_id.clone()),
+                    char_offset: 0,
+                }
+            };
+            self.navigation.scroll.within = 0;
+        }
+        let mut actions = retired
+            .iter()
+            .filter_map(|id| self.settle_stream(id))
+            .collect::<Vec<_>>();
+        if let Some((_, _, tail)) = &self.saved_tail
+            && self.unconfirmed_preview.as_ref().is_some_and(|frame| {
+                frame
+                    .presentation
+                    .preview_source
+                    .as_ref()
+                    .is_some_and(|source| &source.input_through_node_id == tail)
+            })
+            && let Some(frame) = self.unconfirmed_preview.take()
+        {
+            actions.extend(self.observe_preview(frame));
+        }
+        actions
+    }
+
+    fn observe_saved_tail(&mut self, nodes: &[UiNode], first: u64, revision: u64, total: u64) {
+        // Tail identity comes from the accepted saved page, never from the
+        // rendered list (which may contain pinned audit and live rows).
+        if (total == 0 || !nodes.is_empty()) && first.saturating_add(nodes.len() as u64) == total {
+            self.saved_tail = Some((
+                revision,
+                total,
+                nodes.last().map(|node| node.node_id.clone()),
+            ));
+        } else if self
+            .saved_tail
+            .as_ref()
+            .is_some_and(|(r, n, _)| (*r, *n) != (revision, total))
+        {
+            self.saved_tail = None;
+        }
+    }
+
+    fn observe_saved_tool_results(
+        &mut self,
+        nodes: &[UiNode],
+        first: u64,
+        revision: u64,
+        total: u64,
+    ) {
+        use crate::presentation::{BlockKind, ToolReasonKind};
+        self.observe_saved_tail(nodes, first, revision, total);
+        let Some((previous_revision, ordinal, id)) = self.notice_anchor.as_ref() else {
+            if let Some((_, _, Some(id))) = &self.saved_tail {
+                self.notice_anchor = Some((revision, total - 1, id.clone()));
+            }
+            return;
+        };
+        let offset = ordinal
+            .checked_sub(first)
+            .and_then(|index| usize::try_from(index).ok());
+        let extends = offset
+            .and_then(|index| nodes.get(index))
+            .is_some_and(|node| &node.node_id == id);
+        if !extends {
+            // A path rewrite (or a newer page without proof of the prefix)
+            // supplies a baseline, not a reason to replay its saved results.
+            if revision > *previous_revision {
+                self.notice_anchor = self.saved_tail.as_ref().and_then(|(_, total, id)| {
+                    id.as_ref().map(|id| (revision, total - 1, id.clone()))
+                });
+            }
+            return;
+        }
+        let first_new = offset.expect("saved anchor is in the page") + 1;
+        let found = nodes[first_new..].iter().rev().find_map(|node| {
+            if node.presentation.provisional_stream {
+                return None;
+            }
+            node.presentation.blocks.iter().rev().find_map(|block| {
+                let tool = block
+                    .tool
+                    .as_ref()
+                    .filter(|_| block.kind == BlockKind::ToolResult)?;
+                let released = matches!(
+                    tool.reason_kind,
+                    ToolReasonKind::ShellBackgrounded
+                        | ToolReasonKind::HumanBackgrounded
+                        | ToolReasonKind::AdditionalInput
+                );
+                (released || tool.status == "cancelled").then_some(tool)
+            })
+        });
+        if let Some(tool) = found {
+            self.status = crate::presentation::messages::tool_heading(tool, false, self.language);
+            self.promote_status_notice(super::history_interaction::NoticeKind::Info);
+        }
+        if let Some(node) = nodes.last() {
+            self.notice_anchor = Some((
+                revision,
+                first + nodes.len() as u64 - 1,
+                node.node_id.clone(),
+            ));
+        }
+    }
+
     pub(super) fn on_thread(&mut self, details: ThreadDetails, draft: Option<DraftSnapshot>) {
         self.draft_restore_pending = false;
         self.agents_path = details.agents_path;
@@ -638,6 +833,9 @@ impl ThreadView {
                         .max(incoming.presentation.read_revision);
                 }
             }
+        }
+        if !append {
+            self.observe_saved_tool_results(&nodes, first_ordinal, selection_revision, total_nodes);
         }
         let mut source_changed = false;
         if self.navigation.follow() && !self.navigation.is_rebasing() {
@@ -846,6 +1044,7 @@ impl ThreadView {
         thread_id: String,
         generation: u64,
     ) -> Option<UiAction> {
+        self.clear_unconfirmed_attempt(&attempt_id);
         if !self.provisional_nodes.contains(&attempt_id) {
             return None;
         }
@@ -1120,6 +1319,7 @@ impl ThreadView {
             self.on_incomplete_responses(received);
             return false;
         }
+        self.observe_saved_tool_results(&nodes, first_ordinal, selection_revision, total_nodes);
         let received = self.take_received_previews(&received_bindings);
         // Rebase is an ordinal update, not proof that a committed stream's
         // canonical body was fetched. Retire only verified loaded sources.
@@ -1903,6 +2103,7 @@ mod owner_tests {
 
 impl ThreadView {
     pub(super) fn settle_stream(&mut self, attempt: &str) -> Option<UiAction> {
+        self.clear_unconfirmed_attempt(attempt);
         // A stale terminal read must not discard a source already committed.
         if self.committed_nodes.contains_key(attempt) {
             return None;
@@ -1940,6 +2141,7 @@ impl ThreadView {
 }
 
 impl ThreadView {
+    #[cfg(test)]
     pub(super) fn provisional_sources(&self) -> Vec<UiNode> {
         self.nodes
             .iter()
