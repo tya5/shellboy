@@ -37,6 +37,7 @@ mod live_output;
 mod live_work;
 mod message_metadata;
 mod message_queue;
+pub(crate) use message_queue::read_revision as saved_view_sequence;
 mod preview_reads;
 mod receipt_delivery;
 mod received;

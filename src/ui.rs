@@ -2567,7 +2567,7 @@ impl UiState {
         let settled = view.turn_id.is_some()
             && (view.turn_id != details.turn_id || details.recovery_reason.is_some());
         if settled && let Some(view) = self.view_for(&thread, generation) {
-            let retired = view.retire_saved_preview(*read_revision);
+            let retired = view.retire_saved_preview();
             self.deferred_actions.extend(retired);
         }
         let read_revision = *read_revision;
@@ -3361,7 +3361,11 @@ impl UiState {
                 view.delivery_read_revision = read_revision;
                 view.pending_messages = pending;
                 view.reconcile_saved_inputs();
-                let retired = if advanced { view.retire_saved_preview(read_revision) } else { Vec::new() };
+                let retired = if advanced {
+                    view.retire_saved_preview()
+                } else {
+                    Vec::new()
+                };
                 self.deferred_actions.extend(retired);
             }
             UiUpdate::StreamCommitted {
@@ -3402,7 +3406,8 @@ impl UiState {
                 let Some(view) = self.view_for(&thread_id, generation) else {
                     return;
                 };
-                if verified && view.preview_retired_at > 0
+                if verified
+                    && view.preview_retired_at > 0
                     && presentation.preview_observation <= view.preview_retired_at
                 {
                     return;
@@ -3687,7 +3692,7 @@ impl UiState {
                         window_reply.is_some(),
                     );
                     if (view.selection_revision, view.total_nodes) > old {
-                        let retired = view.retire_saved_preview(read_revision);
+                        let retired = view.retire_saved_preview();
                         self.deferred_actions.extend(retired);
                     }
                     if refresh_tail {
@@ -9045,6 +9050,7 @@ mod tool_refresh_tests {
             ui.view().operation_notice.is_none(),
             "baseline is history, not a notice"
         );
+        let observation = crate::frontend::saved_view_sequence();
         let stream = |generation| UiUpdate::Stream {
             thread_id: "t".into(),
             generation,
@@ -9054,7 +9060,10 @@ mod tool_refresh_tests {
             base_char_offset: 0,
             total_chars: 9,
             reasoning_ranges: Vec::new(),
-            presentation: NodePresentation { preview_observation: 1, ..Default::default() },
+            presentation: NodePresentation {
+                preview_observation: observation,
+                ..Default::default()
+            },
             ack: Some(Arc::new(tokio::sync::Notify::new())),
         };
         ui.apply(stream(ui.view().generation));
@@ -9067,10 +9076,15 @@ mod tool_refresh_tests {
         if window_first {
             let view = ui.view();
             ui.apply(UiUpdate::HistoryWindow {
-                thread_id: "t".into(), generation: view.generation,
+                thread_id: "t".into(),
+                generation: view.generation,
                 view_revision: view.navigation.view_revision,
-                nodes: vec![cancelled("old"), cancelled("new")], pending: Default::default(),
-                read_revision: 2, first_ordinal: 0, selection_revision: 2, total_nodes: 2,
+                nodes: vec![cancelled("old"), cancelled("new")],
+                pending: Default::default(),
+                read_revision: 2,
+                first_ordinal: 0,
+                selection_revision: 2,
+                total_nodes: 2,
                 anchor: view.navigation.anchor.clone(),
             });
         } else {
@@ -9087,7 +9101,13 @@ mod tool_refresh_tests {
                 .any(|node| node.node_id == "attempt")
         );
         ui.apply(stream(ui.view().generation));
-        assert!(!ui.view().nodes().iter().any(|node| node.node_id == "attempt"), "late frame cannot restore retired preview");
+        assert!(
+            !ui.view()
+                .nodes()
+                .iter()
+                .any(|node| node.node_id == "attempt"),
+            "late frame cannot restore retired preview"
+        );
         assert!(ui.view().nodes().iter().any(|node| node.node_id == "new"));
         ui.view_mut().clear_operation_notice();
         ui.apply(tail(&ui, 3, 2));
