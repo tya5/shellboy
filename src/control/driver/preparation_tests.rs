@@ -125,6 +125,116 @@ pub(super) async fn close(control: Arc<Control>, owner: DataOwner) {
 }
 
 #[tokio::test]
+async fn outstanding_now_receipt_applies_at_the_normal_driver_boundary() {
+    use crate::protocol::{Deliver, WaitArgs, WaitCondition};
+    let (_root, owner, control, accepted) = fixture("http://127.0.0.1:1/v1").await;
+    let request = Request::new(
+        format!("{}:legacy-now", owner.instance_id),
+        Command::MessageSend(MessageSendArgs {
+            max_model_requests: None,
+            resume_recovery: false,
+            human: false,
+            sender_label: None,
+            deliver: Deliver::Now,
+            thread_id: Some(accepted.thread_id.clone()),
+            text: "outstanding legacy input".into(),
+        }),
+    );
+    let original = control
+        .store
+        .execute(request.clone(), None)
+        .await
+        .unwrap()
+        .result;
+    let message = original["message_id"].as_str().unwrap();
+    assert_eq!(original["deliver"], "now");
+    let condition = WaitCondition::MessageDelivered {
+        message_id: message.into(),
+    };
+    let inspect = || {
+        super::super::wait::observe(
+            control.clone(),
+            "legacy-now-observation".into(),
+            WaitArgs {
+                conditions: vec![condition.clone()],
+                timeout_ms: 0,
+                after: None,
+            },
+            None,
+            CancellationToken::new(),
+        )
+    };
+    assert_eq!(inspect().await.unwrap()["status"], "timeout");
+    let snapshot = ready(&control, &accepted).await;
+    let prepared = Arc::new(
+        control
+            .attachments
+            .prepare_at_revision(
+                &accepted.thread_id,
+                CancellationToken::new(),
+                false,
+                snapshot.selection,
+            )
+            .await
+            .unwrap(),
+    );
+    assert!(
+        admit_attempt(
+            &control,
+            &snapshot,
+            "legacy-boundary",
+            prepared.clone(),
+            0,
+            0
+        )
+        .await
+        .unwrap()
+    );
+    assert_eq!(inspect().await.unwrap()["status"], "timeout");
+    let response = model::ModelResponse::completed(json!({
+        "id":"legacy-response", "status":"completed", "output":[
+            {"type":"message", "role":"assistant", "content":[{"type":"output_text", "text":"applied"}]}
+        ]
+    }), true).unwrap();
+    model::request_path::persist_received_attempt(
+        &control.store.database,
+        "legacy-boundary",
+        model::request_path::AttemptKind::Conversation,
+        false,
+        &Ok(response.clone()),
+    )
+    .await
+    .unwrap();
+    assert!(
+        adopt_response(
+            &control,
+            &snapshot,
+            "legacy-boundary",
+            &response,
+            prepared,
+            None,
+            Vec::new()
+        )
+        .await
+        .unwrap()
+    );
+    assert_eq!(inspect().await.unwrap()["matched"], json!([condition]));
+    let replay = control.store.execute(request.clone(), None).await.unwrap();
+    assert_eq!(replay.result, original);
+    assert!(replay.quiet_wake_threads.is_empty());
+    let mut changed = request;
+    let Command::MessageSend(args) = &mut changed.command else {
+        unreachable!()
+    };
+    args.deliver = Deliver::Next;
+    assert_eq!(
+        control.store.execute(changed, None).await.unwrap_err().code,
+        ErrorCode::OperationConflict
+    );
+    close(control, owner).await;
+}
+
+#[tokio::test]
 async fn human_acceptance_between_next_and_prepare_refreshes_source_before_http() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let (root, owner, control, accepted) =
