@@ -659,7 +659,9 @@ pub enum ScheduleCommand {
 
 #[derive(Debug, Clone, Args)]
 #[command(group(clap::ArgGroup::new("when").required(true).args(["cron", "at", "delay"])))]
-#[command(after_help = "Bash: shellboy schedule add --in 10m --command 'echo ready'\nPowerShell: shellboy schedule add --in 10m --command 'Write-Output ready'")]
+#[command(
+    after_help = "Bash: shellboy schedule add --in 10m --command 'echo ready'\nPowerShell: shellboy schedule add --in 10m --command 'Write-Output ready'"
+)]
 pub struct ScheduleAddOptions {
     #[arg(long = "thread")]
     thread_id: Option<String>,
