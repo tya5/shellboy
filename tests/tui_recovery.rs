@@ -699,10 +699,7 @@ async fn multiple_calls_keep_source_order_numbers_commands_background_and_cancel
         .unwrap();
     assert!(!shown.contains("背景（利用者）"));
     assert!(!shown.contains("利用者が先行する呼出し"));
-    assert!(
-        running_row.find("tail -f /dev/null").unwrap()
-            < running_row.find("背景 |").unwrap()
-    );
+    assert!(running_row.find("tail -f /dev/null").unwrap() < running_row.find("背景 |").unwrap());
     // The background-process panel (`\-[1] $ cmd`) may or may not be on screen
     // when the frame is drawn; only conversation items count here.
     let conversation: String = shown
