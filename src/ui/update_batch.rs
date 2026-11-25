@@ -13,6 +13,7 @@ impl UiUpdate {
             | Self::History { .. }
             | Self::StreamCommitted { .. }
             | Self::Stream { .. }
+            | Self::PreviewGap { .. }
             | Self::StreamSettled { .. }
             | Self::IncompleteResponses { .. }
             | Self::ViewState { .. }

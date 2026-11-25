@@ -39,26 +39,6 @@ impl Control {
         self.change_clock
             .record_attempt_end(thread, attempt, outcome, output_limit);
     }
-    pub(super) fn stream_admitted_delta(
-        &self,
-        guard: &change_clock::LiveTextGuard<'_>,
-        thread: &str,
-        attempt: &str,
-        text: &str,
-        reasoning: bool,
-        offset: usize,
-    ) {
-        if !guard.record(offset as u64, text, reasoning) {
-            return;
-        }
-        self.publish_event(EngineEvent::Stream {
-            thread_id: thread.into(),
-            node_id: attempt.into(),
-            text: text.into(),
-            reasoning,
-            stream_char_offset: offset,
-        });
-    }
     pub(super) async fn fence_terminal_status(&self, result: &Value) -> Result<(), ApiError> {
         let attempts = result
             .get("items")

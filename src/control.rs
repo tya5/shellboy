@@ -18,7 +18,6 @@ mod schedule;
 pub(crate) mod service_endpoint;
 pub(crate) mod submission_retention;
 mod turn_interrupt;
-mod ui_events;
 mod usage_limit_retry;
 pub use foreground::ForegroundRelease;
 
@@ -85,19 +84,6 @@ pub enum EngineEvent {
         thread_id: String,
         /// Committed transition fact for frontend attention; never a saved state.
         recovery: bool,
-    },
-    Stream {
-        thread_id: String,
-        node_id: String,
-        text: String,
-        reasoning: bool,
-        stream_char_offset: usize,
-    },
-    /// Ephemeral transport observation; never persisted or included in model input.
-    ModelReceive {
-        thread_id: String,
-        attempt_id: String,
-        observed_at: std::time::Instant,
     },
     Notice {
         thread_id: String,
@@ -179,7 +165,6 @@ pub struct Control {
     ipc_refusals: Arc<crate::ipc::AdmissionRefusals>,
     origins: Mutex<HashMap<String, Origin>>,
     events: broadcast::Sender<EngineEvent>,
-    ui_events: ui_events::UiEvents,
     changed: Arc<Notify>,
     change_clock: Arc<change_clock::ChangeClock>,
     /// Wakes only `events.wait` calls that asked for text; everything else sleeps through deltas.
@@ -498,7 +483,6 @@ impl Control {
             ipc_refusals: owner.ipc_refusals.clone(),
             origins: Mutex::new(HashMap::new()),
             events,
-            ui_events: ui_events::UiEvents::new(),
             changed: changed.clone(),
             change_clock: Arc::new(change_clock::ChangeClock::new(waits.keyed.clone())),
             stop: owner_lifetime,
@@ -590,6 +574,9 @@ impl Control {
             self.change_clock.record(&format!("fixture-gap-{i}"));
         }
     }
+    fn publish_event(&self, event: EngineEvent) {
+        let _ = self.events.send(event);
+    }
     pub fn subscribe(&self) -> broadcast::Receiver<EngineEvent> {
         self.events.subscribe()
     }
@@ -623,13 +610,6 @@ impl Control {
     ) {
         self.change_clock
             .record_text(thread, attempt, stream_char_offset as u64, text, reasoning);
-        self.publish_event(EngineEvent::Stream {
-            thread_id: thread.into(),
-            node_id: attempt.into(),
-            text: text.into(),
-            reasoning,
-            stream_char_offset,
-        });
     }
 
     /// This task never waits for a model or owned shell to finish. Individual
