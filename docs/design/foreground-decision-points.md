@@ -2,33 +2,54 @@
 
 ## Non-goals
 
-- No automatic wake on input, sender urgency, Core timer, expectation argument, or paused/resumable foreground state. Background is an actual release of the foreground wait, not a pause.
-- No change to response-generation interruption, Run ownership, Stop permissions, or owner/endpoint admission. No new caller-Thread authorization rule for Background.
-- No bundled input, output, or diagnostics in a new wake envelope. Read existing facts. No message-level `waiting_for` projection in this reset.
-- No new queue, persisted wait mirror, or DB migration presumed. This revision is design only, with no client pin or behavior change.
+- No automatic wake on send, wait timeout, or hold detection. No priority flag, shell timeout or expectation argument, or paused/resumable foreground state.
+- No Background by Thread, latest-execution lookup, or execution-wide foreground discovery API in this slice. The sender follows its own message and targets only its proven blocker.
+- No change to response-generation interruption, process ownership, Stop permissions, or owner admission. No caller-Thread authorization rule for Background.
+- No new wake envelope, queue, persisted blocker mirror, or DB migration assumed. This revision is design only.
 
-## What wakes a model
+## Track the exact message
 
-The intervening party decides whether to release a foreground wait. The launching model decides what to do after release. Background leaves the exact execution running under its original owner; it does not detach it from the Run, stop it, or start it again.
+Send or ask with default delivery and keep the **message ID** returned by acceptance, not the operation ID or a reply ID. Acceptance is not application. Core exposes two independent read paths: a typed explanation of a current hold and a bounded wait for this message to be applied.
 
-| Event | Exact foreground wait exists | No exact foreground wait exists |
-|---|---|---|
-| Ordinary send or ask | Queues input for the next eligible boundary. Does not itself wake the model. | Normal delivery. No interruption of response generation. |
-| Revisit (`complete`) | Keeps its current eligibility rules; Background does not promote it to ordinary input. | Existing hold and delivery rules. |
-| Person chooses Background in TUI or Studio, or another Thread calls `shell background --execution ID` | Releases the wait with a typed reason and that execution ID. The process keeps running; existing cancellation of later unexecuted calls in the tool group stays. | Refuse the exact target as no longer foreground; never match a different execution. A receipt replay can report its original outcome. |
-| Foreground execution ends | Existing terminal result with completion evidence. | Existing saved state and completion notices; there is no foreground tool to wake. |
-| Model's `shellboy wait --timeout-ms` expires while observing a background execution | Not a foreground release or intervention. | The observation returns; the background shell keeps running. Read state before making another decision. |
-| Turn interruption, Run stop, owner shutdown | Existing interruption and cleanup rules. Background does not override a committed stop or terminal state. | Existing behavior. |
+### Typed hold fact
 
-### Message plus explicit Background
+Add optional `held_by` to `message get` and existing read projections that expose the same message's current delivery (including Studio's pending rows). Keep existing status, saved context, and hints; `held_by` is structured current evidence, not a renamed historical reason or a parse of hint text. Do not expand list scope or attach this live field to historical send/ask receipts and exports.
 
-Send first using default delivery, confirm acceptance, then find the recipient's current foreground execution and call Background with that exact ID. Do not background on a failed send or while its acceptance is unknown. These are separate operations, not a transaction: the recipient can receive the input naturally before Background; the observed execution can end or be replaced before the call. If Background refuses the target or its reply is lost, inspect the original execution and any known operation receipt. Do not automatically re-send the message, retry the wake, or background a replacement. Message acceptance is not delivery, and Background acknowledgement is not process completion.
+```json
+{"held_by":{"kind":"foreground_shell","execution_id":"EXACT_EXECUTION_ID"}}
+```
 
-Any Thread may request Background on another Thread's foreground shell **on the connected owner**. There is no same-Thread, sender-role, or ownership check for this action. The current `ShellBackground` dispatch in `src/control/runtime.rs` resolves the execution's owning Thread and Run from the exact ID, rather than the caller's Thread, and `src/control/live.rs` matches that execution against the live driver slot. Keep those target-validity checks, not caller-based authorization. Verify the complete admitted path with a real Thread origin; if any upstream caller-Thread refusal exists, remove it for Background only. This does not grant access to a different owner or change other shell mutations.
+Other variants include `response_generation` and existing verified hold kinds such as `run_completion` and `recovery_wait`; none of those carry an execution ID. Omit the field when not held. For a held message with incomplete or conflicting live evidence, report `{"kind":"unknown"}` rather than making an actionable claim. Do not issue a foreground-shell reason for a hold that Background cannot release, such as Revisit waiting on Run completion. Check what blocks **this message**, not whether its recipient happens to have a running shell. A message held only dynamically at its next eligible boundary can have a live blocker even if the saved receipt is still `accepted`; preserve the saved status and prove the current hold by eligibility and active phase, not by receipt status alone.
+
+Obtain delivery eligibility and the blocker for the exact recipient, Run and Turn using the owner-side delivery and foreground state. Require a live current slot for that exact execution, not a launch flag, a generic `waiting` Turn, or merely an execution on the same Thread. Prefer omission for a message that has already applied, and an unknown reason for an unresolved hold, if facts race. Bound the work to rows already selected by each read. The read is observational: subsequent application or shell completion may invalidate it immediately.
+
+### Bounded wait for application
+
+Add a `message_delivered` condition to existing `wait`:
+
+```json
+{"type":"message_delivered","message_id":"MESSAGE_ID"}
+```
+
+Satisfy only on durable application of this exact model-target message (`applied`), using Core's existing application boundary. This does not promise provider processing, a response, or a reply. Acceptance, staging, path/attachment evidence alone, or applying another message are not success. Already-applied model input satisfies immediately; cancelled, unavailable and non-model targets are not success and use typed terminal/unavailable or invalid-target handling. Define those cases in the existing wait result model; do not keep waiting for a known impossible target or return a hold hint in the wait. Reply observation remains `reply_received`.
+
+Use the existing owner wait admission, deadlines, cancellation, and keyed read/subscribe/recheck discipline. Read the exact delivery identity using the existing ID lookup; register before the initial snapshot, publish after committed transitions relevant to this predicate (including cancellation and target loss), and recheck durable state rather than trusting a notification. No polling, full scan, new timer service, or sample-based delivery guess. Preserve the current wait envelope and distinguish a satisfied predicate from observation timeout and refusal; CLI exit success alone does not mean the message applied. Timeout has no effect on the input or the recipient.
+
+## Exact intervention and release
+
+| What the sender observes | Action |
+|---|---|
+| Accepted send, then `message_delivered` satisfied | Do not intervene. No reply is implied. |
+| Wait timed out and `message get` proves `held_by.kind = foreground_shell` | Explicitly call `shell background --execution` for **only** the reported ID, if intervention is still wanted. |
+| Response generation, Revisit, recovery, unknown, cancelled or no longer held | Do not background anything. Normal delivery, existing hold rules, or a terminal result apply. |
+| Exact Background succeeds | That foreground wait is released; the original process remains owned by its Run. Other work is untouched. Recheck this message if delivery confirmation is still needed. |
+| Exact Background refuses or outcome is unknown | Inspect the original target and known receipt. Do not resend, automatically retry, or resolve to another execution. |
+
+Send, wait, read and Background are separate operations. A message may apply naturally before the read, the named shell may finish, or the recipient may move on before Background. The operation revalidates the exact live target independently; it does not rebind a stale ID or guarantee message application. Any Thread on the connected owner may request Background for another Thread's shell, with no same-Thread, role, or ownership gate. Keep endpoint admission and exact execution, Run and live foreground checks. The current runtime dispatch resolves the target Thread and Run from the execution ID rather than the caller Thread; verify the full path with genuine Thread origin and remove any upstream Thread-based refusal for Background only. Person Background is unchanged. Foreground completion, interruption and shutdown keep their existing paths.
 
 ### Model-facing release result
 
-Reuse the existing release envelope. Preserve `human_backgrounded` for known person actions. Use the neutral `shell_backgrounded` for explicit commands not known to be person actions, including Thread-origin calls; do not infer human authority from an unlabelled caller. The reason says *why the wait returned*, not why the intervening party acted. Normal input delivery carries their message, if any.
+Reuse the existing release envelope. Preserve `human_backgrounded` for known person actions. Use the neutral `shell_backgrounded` for explicit commands not known to be person actions, including Thread-origin calls; do not infer human authority from an unlabelled caller. The reason says *why the wait returned*, not why the intervening party acted. Do not add the intervening Thread ID to the result: this is an execution action, not proof of who sent any particular message. Normal input delivery carries the message and its own sender provenance.
 
 ```json
 {"status":"running","execution_id":"EXACT_EXECUTION_ID","reason":"shell_backgrounded","cancel_remaining_calls":true}
@@ -36,44 +57,35 @@ Reuse the existing release envelope. Preserve `human_backgrounded` for known per
 
 `running` describes the release, not a promise the execution will still be live on readback. Treat both Background reasons as the same release for remaining-tool prerequisite reporting, without attributing a Thread-origin action to a person. Keep `human_turn_interrupted` distinct. Retain `additional_input` in historical records; it remains the legacy outcome while `now` is accepted, and is not emitted for the new explicit send-plus-Background flow.
 
-## Find the target by a typed execution fact
-
-Add `wait_disposition` to execution entries in existing `shell get`, `shell list`, and scoped `status` shell observations. Proposed values: `foreground` means the execution is the current model foreground wait for its exact live Turn; `background` means the execution is live and known to be running without a foreground wait, whether launched that way or explicitly released. Omit for terminal executions and when live attribution cannot be established. Absence is not `background`. Do not infer it from launch flags, timestamps, generic Turn `waiting`, the last listed shell, or a client-side join.
-
-Derive this from the owner-side live foreground identity and execution facts already used to validate release. A stale or closed slot is not foreground; once a release is authoritative, do not publish that slot as still waiting. Scope the projection to the exact owner, execution, Run and Turn, and only the bounded executions already selected for the read. If a transition races readback, omit when evidence is inconsistent. Keep existing page shape and continuation; no full scan or new filter is needed. Clients can look for a `foreground` entry under the exact Thread and check its Turn; on a partial walk or ambiguous result, do not guess. The mutation rechecks identity independently of the observational fact.
-
 ## Retire immediate delivery
 
-Remove `now` from new send/ask wire input, CLI options/help, and the TUI immediate-send gesture. No alias to `next`, hidden fallback, or implicit wake from ordinary input. Studio should replace any combined control with ordinary Send and separately explicit Background against the selected exact execution. Preserve default `next` and Revisit `complete` unchanged.
+Remove `now` from new send/ask wire input, CLI options/help, and the TUI immediate-send gesture. No alias to `next`, hidden fallback, or implicit wake from ordinary input. Studio should use the message's typed fact for its pending row (#159), and offer ordinary Send and a separate explicit Background against the named execution; never auto-release on a timeout. Preserve default `next` and Revisit `complete` unchanged.
 
 Historical `now` inputs, delivery metadata, receipts and `additional_input` results stay readable and exportable. Before removing the runtime path, prove that already accepted outstanding input reaches its existing legitimate boundary and that persisted operation replay and argument identity remain lossless. Historical decode/replay is not permission to admit a fresh `now`. Do not rewrite receipts or silently convert accepted requests. Hold removal if these checks cannot be met.
 
 ## Agent guide deliverable
 
-Ship matching text in `docs/guides/agent-guide.md` and a cross-link in `docs/guides/shell.md` with each implementation unit. Update quick lookup, intervention and delivery guidance; remove the old `--deliver now` advice only when removal lands. The following is proposed guide text and examples. The typed read field and new release reason are not yet shipped.
+Ship matching `docs/guides/agent-guide.md` text and a `docs/guides/shell.md` cross-link with each implementation unit. Update the CLI reference and quick lookup as features land; remove `--deliver now` advice when removal lands. The new field, predicate, and neutral release reason below are proposed syntax.
 
-**Intervene only when you need to release the wait.** Routine reports need only Send. For an instruction that cannot wait, send first; after acceptance, read the recipient's current foreground execution from their exact Thread. Background it explicitly. Do not interrupt a model response or stop a shell merely to deliver input.
+**Routine reports need only Send.** If timely application matters, track the message. Check the wait verdict, not its exit status. On timeout, read `held_by`; intervene only if it names the exact foreground execution and intervention is still useful.
 
 ```text
-Intervening model -> shellboy message send --thread RECIPIENT --text 'Skip the optional test and continue with the review.'
-Observed: input accepted.
-Intervening model -> shellboy shell list --thread RECIPIENT --state running
-Observed: TEST_EXEC is foreground for RECIPIENT's active Turn.
-Intervening model -> shellboy shell background --execution TEST_EXEC
-Woken model: the shell tool returned shell_backgrounded for TEST_EXEC; the new instruction arrives at its ordinary boundary.
+Sender -> shellboy message send --thread RECIPIENT --text 'Skip the optional test and continue the review.'
+Observed: accepted with message_id SKIP_MSG.
+Sender -> shellboy wait --conditions-json '[{"type":"message_delivered","message_id":"SKIP_MSG"}]' --timeout-ms 30000
+Observed: the wait timed out; application is not confirmed.
+Sender -> shellboy message get --message SKIP_MSG
+Observed: held_by is {"kind":"foreground_shell","execution_id":"TEST_EXEC"}.
+Sender -> shellboy shell background --execution TEST_EXEC
+Woken model: shell_backgrounded for TEST_EXEC; the skip instruction arrives at the normal boundary.
 Woken model -> shellboy shell get --execution TEST_EXEC
-Woken model: this is the optional test, still running; the instruction authorizes skipping it.
+Woken model -> shellboy message get --message SKIP_MSG
+Woken model: this is the running optional test; the instruction authorizes skipping it.
 Woken model -> shellboy shell stop --execution TEST_EXEC
-Woken model: confirm terminal state with wait and shell get before reporting the check as skipped.
+Woken model: confirm terminal state with wait and shell get, then report skipped, not passed.
 ```
 
-**Read, then decide.** Start with `shellboy shell get --execution ID` for current identity, phase, and terminal evidence. If a new instruction arrived, read it before acting and use `shellboy message get --message ID` when its ID is known. Then use `shellboy shell read --execution ID --limit-bytes 65536` for output if progress matters; retain its continuation. Do not treat lack of recent output as proof of a hang. Continue to use the work's execution ID, not the ID of a short shell running a read or wait command.
-
-| Evidence and dependency | Choice |
-|---|---|
-| A routine report or wake changed nothing, and the next step needs the test result | Observe the same already-backgrounded execution with a bounded `shellboy wait`. Do not relaunch or try to make it foreground again. |
-| A build is still progressing and you have independent work | Leave it running, do the independent work, and return to the same ID later. |
-| The instruction authorizes skipping this exact command and stopping is appropriate | Stop the exact ID and confirm actual terminal outcome. |
+**Read, then choose.** Use `shell get` for current identity and terminal facts, `message get` for a known message ID, and bounded `shell read` for progress. If the next step needs the result, observe the already-backgrounded execution with a bounded wait. If it does not, continue useful work and return to the same ID later. Stop only when appropriate for that exact work; neither input arrival nor a silent shell proves a hang. Keep the work ID, not the ID of a short observation shell. Do not poll tightly or relaunch to resume waiting.
 
 **For unknown durations, start in the background and bound the observation.** Use `background: true` on the shell tool. For the returned ID, use:
 
@@ -83,7 +95,7 @@ shellboy shell get --execution WORK_EXEC
 shellboy shell read --execution WORK_EXEC --limit-bytes 65536
 ```
 
-Choose the wait interval for when it is useful to reconsider, not to impose a process deadline. On observation timeout, inspect, wait again if dependent, or do independent work. After an end event confirm the saved exit code and output completeness. No tight polling or blind restart. Cast the guide examples as observation transcripts, with the same commands and the selected work ID throughout:
+Choose the wait interval for when it is useful to reconsider, not to impose a process deadline. On observation timeout, inspect, wait again if dependent, or do independent work. After an end event confirm the saved exit code and output completeness. No tight polling or blind restart. The guide should turn each scenario below into an observation transcript, using the same work ID throughout:
 
 | Worked case | Launch, observation, and decision |
 |---|---|
@@ -95,6 +107,7 @@ Choose the wait interval for when it is useful to reconsider, not to impose a pr
 
 ## Independently landable units
 
-1. **Typed execution readback.** Publish the owner-derived execution fact in get/list/status without changing send or release behavior. Test foreground, launch-background, post-release, ended, stale identity and omission under ambiguity, with bounded list/status reads. Guide: discover exact foreground targets without guessing and add the existing background-and-wait examples. Studio #159 may adopt the execution fact independently; do not claim message-level attribution.
-2. **Explicit cross-Thread release.** Verify the existing operation with a genuine Thread origin and remove a caller-based restriction only if found. Preserve owner admission and exact-target validation; report neutral explicit-command release without mislabeling person actions. Test recipient-only wake, original process still running, later calls skipped, next-boundary input, stale Turn/execution refusal, and unchanged interruption and human behavior. Guide: send, find, Background, inspect, decide. Keep `now` working until removal. TUI and Studio preserve their explicit, exact-target person control; a client must not fabricate a human reason if provenance is unknown.
-3. **Remove `now`.** Once the replacement is available, remove new `now` sends/asks across CLI, wire and TUI, and remove its special wake path when historical compatibility permits. Test accepted older receipts, readback/export and replay, new-input rejection, ordinary input not waking, and unchanged Revisit and interruption. Guide: replace the old advice, explicitly describe non-atomic send and Background. Studio coordinates removal at protocol adoption, not a new urgency control. Number public wire changes at landing; this design does not authorize a pin.
+1. **Typed message readback.** Add `held_by` to the relevant live message reads without changing delivery or wake behavior. Witness exact foreground attribution, another running shell on the same Thread, generation, Revisit/recovery, application and cancellation, and stale or ambiguous live state. Studio #159 can adopt the typed pending-row line independently. Guide: interpret each variant and do not guess a target.
+2. **Delivery observation.** Add `message_delivered` through existing wait admission. Witness already-applied and pending input, application across registration/commit races, unrelated input, timeout, cancellation and target loss, and no delivery side effects. Guide: retain the message ID and use bounded wait without confusing application with replies.
+3. **Explicit exact-ID intervention.** Verify cross-Thread Background, remove a caller-based refusal only if found, and use the neutral reason for commands without known person provenance. Witness only the named wait released, its process still running, later calls cancelled, stale IDs refused and normal input application. Keep `now` available in this unit. Guide: send, wait, read the held reason, Background only its ID, and inspect before deciding. Include the worked background-and-wait examples.
+4. **Remove `now`.** Once the replacement is available, remove new `now` sends/asks from CLI/wire/TUI and remove the legacy wake path once outstanding delivery and replay witnesses pass. Preserve history and `complete`; no alias. Observe ordinary send not waking. Guide: remove old advice and retain the separate explicit steps. TUI and Studio retain exact-ID person Background; Studio adopts removal with the landed contract. Number public wire changes at landing; this design does not authorize a pin.
