@@ -72,6 +72,11 @@ async fn named_ask_leaves_only_its_recipient_list_after_reply() {
         .execute(request(ask(Some("claude"))), Some(origin.clone()))
         .await
         .unwrap();
+    crate::operation_result_schema::assert_result("message.ask", &named.result);
+    let named_acceptance: MessageAccepted = serde_json::from_value(named.result.clone()).unwrap();
+    assert!(named_acceptance.expect_reply && named_acceptance.to_human);
+    assert_eq!(named_acceptance.thread_id, "sender");
+    assert_eq!(named_acceptance.assignment, Assignment::Pending);
     assert!(
         named
             .changed_threads
@@ -95,6 +100,7 @@ async fn named_ask_leaves_only_its_recipient_list_after_reply() {
         sender_label: Some("not the addressee".into()),
     }));
     let answer = store.execute(reply.clone(), None).await.unwrap().result;
+    crate::operation_result_schema::assert_result("message.reply", &answer);
     assert_eq!(answer["reply_to"], named.result["message_id"]);
     assert_eq!(store.execute(reply, None).await.unwrap().result, answer);
     let history = |id: &str| {
@@ -501,7 +507,11 @@ async fn cancellation_releases_duty_and_lists_no_longer_awaiting() {
             .await
             .unwrap()
             .result;
-        let id = accepted["message_id"].as_str().unwrap().to_owned();
+        crate::operation_result_schema::assert_result("message.ask", &accepted);
+        let thread_acceptance: MessageAccepted = serde_json::from_value(accepted.clone()).unwrap();
+        assert!(thread_acceptance.expect_reply && !thread_acceptance.to_human);
+        assert_eq!(thread_acceptance.thread_id, "recipient");
+        let id = thread_acceptance.message_id;
         let details = store
             .execute(
                 request(Command::ThreadGet(shellboy::protocol::ThreadGetArgs {
