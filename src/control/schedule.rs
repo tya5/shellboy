@@ -1605,6 +1605,29 @@ mod tests {
         let restarted = row(&control, &thread).await;
         assert_eq!(restarted["enabled"], true);
         assert_eq!(restarted["latest"]["state"], "running");
+        let execution = restarted["latest"]["execution_id"].as_str().unwrap();
+        let details = call(
+            &control,
+            Command::ShellGet(crate::protocol::ExecutionTarget {
+                execution_id: execution.into(),
+            }),
+        )
+        .await;
+        assert_eq!(details["foreground"], false);
+        let list = call(
+            &control,
+            Command::ShellList(
+                serde_json::from_value(json!({"thread_id":thread,"state":"running"})).unwrap(),
+            ),
+        )
+        .await;
+        let service_row = list["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["execution_id"] == execution)
+            .unwrap();
+        assert_eq!(service_row["foreground"], false);
         assert_ne!(restarted["latest"]["execution_id"], first_id);
         assert!(control.live.clone_shell_handle(&first_id).await.is_none());
         call(
@@ -1737,6 +1760,11 @@ mod tests {
                     .find(|item| item["execution_id"] == execution)
                     .unwrap();
                 assert_eq!(active["state"], "running");
+                assert_eq!(active["foreground"], false);
+                assert_eq!(
+                    control.request(request(get())).await.result.unwrap()["foreground"],
+                    false
+                );
                 assert_eq!(active["schedule_id"], schedule);
                 let id = execution.clone();
                 let deadline = owner
@@ -1790,6 +1818,15 @@ mod tests {
             assert_eq!(saved["execution_id"], execution);
             assert_eq!(saved["thread_id"], thread);
             assert_eq!(saved["state"], expected);
+            assert!(saved.get("foreground").is_none());
+            let history = control.request(request(list())).await.result.unwrap();
+            let ended = history["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|row| row["execution_id"] == execution)
+                .unwrap();
+            assert!(ended.get("foreground").is_none());
             if expected == "exited" {
                 assert_eq!(
                     saved["exit_code"],

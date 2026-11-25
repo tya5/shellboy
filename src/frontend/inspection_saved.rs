@@ -389,6 +389,7 @@ pub(super) fn prepare(raw: RawSaved) -> Result<PreparedSaved, ApiError> {
                 .and_then(Value::as_str)
                 .map(str::to_owned);
             let details = ShellDetails {
+                foreground: None,
                 stdin_open,
                 stdin_last_write_at,
                 execution_id: raw.id,
