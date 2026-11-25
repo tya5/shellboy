@@ -44,10 +44,6 @@ async fn performance_slow_ui_bridge_action_and_event_progress() {
             })
             .is_ok()
         {}
-        control.emit_test_event(EngineEvent::Error {
-            thread_id: "thread".into(),
-            error: ApiError::new(ErrorCode::IoFailed, "synthetic pressure notice"),
-        });
         tokio::time::sleep(Duration::from_millis(10)).await;
         let before = stream_metrics::FRONTEND_ACTIONS.load(Ordering::Relaxed);
         let start = std::time::Instant::now();
@@ -138,7 +134,7 @@ async fn performance_slow_ui_bridge_action_and_event_progress() {
     println!(
         "PERF {}",
         serde_json::json!({"name":"slow_ui_bridge","samples":actions.len(),"threads":10,"deltas_per_trial":1000,"ui_stopped_ms":250,
-        "action_p50_ms":actions[3],"action_p95_ms":actions[6],"lagged":stream_metrics::FRONTEND_LAGGED.load(Ordering::Relaxed),"reloads":stream_metrics::FRONTEND_RELOADS.load(Ordering::Relaxed)})
+        "action_p50_ms":actions[3],"action_p95_ms":actions[6],"reloads":stream_metrics::FRONTEND_RELOADS.load(Ordering::Relaxed)})
     );
     sender.try_send(UiAction::Quit).unwrap();
     control_tests::finish_bridge(bridge, &incoming).await;

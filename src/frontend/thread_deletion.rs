@@ -662,14 +662,23 @@ mod tests {
                 .iter()
                 .any(|attempt| attempt.receive_age_ms.is_some())
         );
-        control.emit_test_event(EngineEvent::Error {
-            thread_id: "independent".into(),
-            error: ApiError::new(ErrorCode::IoFailed, "post-deletion-event-fence"),
-        });
+        // A native timing update for the new selection fences the old wait.
+        let independent = control.fixture_live_text("independent");
+        independent.received(std::time::Instant::now(), true);
+        sender
+            .try_send(UiAction::SelectThread {
+                thread_id: "independent".into(),
+                generation: 1,
+                view_revision: 0,
+                known_view: None,
+            })
+            .unwrap();
         crate::test_watchdog::watchdog("src/frontend/thread_deletion.rs: frontend_delete_worker_returns_typed_outcome_and_cleans_up_without_popup_ownership", async {
             loop {
                 while let Ok(update) = incoming.try_recv() {
                     match update {
+                        UiUpdate::ModelReceive { thread_id, generation: 1, .. }
+                            if thread_id == "independent" => return,
                         UiUpdate::Stream { thread_id, .. }
                         | UiUpdate::ModelReceive { thread_id, .. }
                         | UiUpdate::PreviewGap { thread_id, .. } => {
@@ -677,11 +686,6 @@ mod tests {
                                 thread_id, "thread",
                                 "deleted selection must release stream ownership"
                             );
-                        }
-                        UiUpdate::Status { text, .. }
-                            if text.contains("post-deletion-event-fence") =>
-                        {
-                            return;
                         }
                         _ => {}
                     }
