@@ -261,6 +261,8 @@ mod tests {
             assert!(!UNDECLARED_WRITER_BOUNDS.contains(&kind));
         }
         let bounded_history_kinds = [Kind::HistoryRecall, Kind::HistoryReceived];
+        assert_eq!(Kind::DraftList.classification(), PureRead);
+        assert!(!UNDECLARED_WRITER_BOUNDS.contains(&Kind::DraftList));
         for kind in bounded_history_kinds {
             assert_eq!(kind.classification(), PureRead, "{kind:?}");
             assert!(!UNDECLARED_WRITER_BOUNDS.contains(&kind));
