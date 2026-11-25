@@ -587,7 +587,7 @@ mod tests {
         }).await.unwrap();
         let live = control.fixture_live_text("thread");
         assert!(live.record(0, "pending output", false));
-        live.received(std::time::Instant::now(), true);
+        live.received(std::time::Instant::now());
         crate::test_watchdog::watchdog("native preview owned before deletion", async {
             loop {
                 if matches!(incoming.try_recv(), Ok(UiUpdate::ModelReceive { thread_id, attempt_id, .. })
@@ -646,7 +646,7 @@ mod tests {
         // cannot keep the deleted selection alive or repopulate its display.
         let stale = control.fixture_live_text("thread");
         assert!(stale.record(0, "late output", false));
-        stale.received(std::time::Instant::now(), true);
+        stale.received(std::time::Instant::now());
         let late = super::super::saved_events::wait_scoped(
             &root.path().join("data"),
             &control.store.instance_id,

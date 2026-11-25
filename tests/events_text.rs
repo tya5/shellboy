@@ -330,10 +330,8 @@ async fn deltas_arrive_in_order_with_offsets_then_the_attempt_ends_and_saved_out
             assert_eq!(progress["reasoning_activity"][0]["attempt_id"], attempt);
             assert_eq!(progress["reasoning_activity"][0]["received_bytes"], 3);
             let idle = poll(&control, Some(&at), &[&t], 0).await;
-            assert!(matches!(idle["status"].as_str(), Some("timeout" | "text")));
-            if idle["status"] == "text" {
-                assert!(entry(&idle, &t).unwrap()["receive_age_ms"].is_number());
-            }
+            assert_eq!(idle["status"], "timeout");
+            assert!(entry(&idle, &t).unwrap()["receive_age_ms"].is_number());
             assert_eq!(entry(&idle, &t).unwrap()["deltas"], json!([]));
             assert_eq!(entry(&idle, &t).unwrap()["attempt_id"], attempt);
             assert_eq!(attempts(&control, &t).await, std::slice::from_ref(&attempt));

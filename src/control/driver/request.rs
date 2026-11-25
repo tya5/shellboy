@@ -329,21 +329,12 @@ pub(super) async fn stream_observer<'a>(
         .admit_live_stream(thread, attempt, input_through_node_id)
         .await;
     let mut stream_chars = 0usize;
-    let mut last_receive_notice: Option<std::time::Instant> = None;
     Box::new(move |event| {
         let (event, observed_at) = match event {
             model::http::ObservedEvent::Received(at) => (None, at),
             model::http::ObservedEvent::Model { value, received_at } => (Some(value), received_at),
         };
-        // Bound additional UI traffic, including byte-sized keepalives.
-        // A receipt after a long silence is always forwarded immediately.
-        let notify = last_receive_notice.is_none_or(|last| {
-            observed_at.saturating_duration_since(last) >= std::time::Duration::from_secs(1)
-        });
-        live_text.received(observed_at, notify);
-        if notify {
-            last_receive_notice = Some(observed_at);
-        }
+        live_text.received(observed_at);
         let Some(event) = event else {
             return;
         };
