@@ -6,22 +6,9 @@ use crate::{
     config::UiLanguage,
     presentation::{EventClass, PresentationKind},
 };
-use rusqlite::OptionalExtension;
 
 pub(super) const ROLE: &str = "received_response";
 const SAVED_BYTES: usize = 1024 * 1024;
-
-pub(super) fn source(
-    db: &rusqlite::Connection,
-    attempt: &str,
-) -> rusqlite::Result<Option<(String, String)>> {
-    db.query_row(r#"SELECT n.id,n.kind FROM model_attempt a JOIN node n ON n.turn_id=a.turn_id
-      WHERE a.id=?1 AND n.kind IN ('incomplete_response','model_stream_observation') AND n.deleted_reason IS NULL
-      AND (json_extract(n.payload_json,'$.attempt_id')=a.id OR
-           (json_type(n.payload_json,'$.attempt_id') IS NULL AND n.payload_json=a.error_json))
-      ORDER BY CASE WHEN json_extract(n.payload_json,'$.attempt_id')=a.id THEN 0 ELSE 1 END,n.rowid DESC LIMIT 1"#,
-      [attempt],|row|Ok((row.get(0)?,row.get(1)?))).optional()
-}
 
 fn received_title(language: UiLanguage, observation: bool) -> String {
     match language {
@@ -557,36 +544,6 @@ mod tests {
             &payload,
             &body(&payload).0
         ));
-    }
-    #[test]
-    fn audit_source_binds_attempt_and_turn_with_legacy_fallback() {
-        let db = rusqlite::Connection::open_in_memory().unwrap();
-        db.execute_batch("CREATE TABLE model_attempt(id TEXT,turn_id TEXT,error_json TEXT); CREATE TABLE node(id TEXT,turn_id TEXT,kind TEXT,payload_json TEXT,deleted_reason TEXT); INSERT INTO model_attempt VALUES('a','u','{}');INSERT INTO node VALUES('legacy','u','incomplete_response','{}',NULL);").unwrap();
-        assert_eq!(source(&db, "a").unwrap().unwrap().0, "legacy");
-        db.execute(
-            "UPDATE model_attempt SET error_json=?1",
-            [r#"{"attempt_id":"other"}"#],
-        )
-        .unwrap();
-        db.execute(
-            "INSERT INTO node VALUES('wrong','u','incomplete_response',?1,NULL)",
-            [r#"{"attempt_id":"other"}"#],
-        )
-        .unwrap();
-        assert!(source(&db, "a").unwrap().is_none());
-        db.execute("UPDATE model_attempt SET error_json=NULL", [])
-            .unwrap();
-        db.execute(
-            "INSERT INTO node VALUES('exact','u','incomplete_response',?1,NULL)",
-            [r#"{"attempt_id":"a"}"#],
-        )
-        .unwrap();
-        db.execute(
-            "INSERT INTO node VALUES('wrong-turn','elsewhere','incomplete_response',?1,NULL)",
-            [r#"{"attempt_id":"a"}"#],
-        )
-        .unwrap();
-        assert_eq!(source(&db, "a").unwrap().unwrap().0, "exact");
     }
     #[tokio::test]
     async fn saved_previews_survive_reopen_and_all_old_sources_are_paged_without_replay() {

@@ -89,7 +89,7 @@ use crate::{
     app::DataOwner,
     attachments::clipboard::{ClipboardAdapter, ClipboardPixels, CopyOutcome},
     config::CopyBackend,
-    control::{Control, EngineEvent},
+    control::Control,
     diagnostics::{DiagnosticIds, Diagnostics, MessageSendStage, MessageSendTrace},
     ipc::LocalServer,
     protocol::*,
@@ -419,34 +419,6 @@ async fn status(
     )
     .await;
 }
-fn tool_group_notice(
-    release: Option<(&str, crate::control::ForegroundRelease)>,
-    cancelled_calls: usize,
-    language: UiLanguage,
-) -> String {
-    let remaining = match (language, cancelled_calls) {
-        (UiLanguage::Ja, 0) => "後続の未実行呼出しはありません".to_owned(),
-        (UiLanguage::En, 0) => "No remaining unexecuted calls".to_owned(),
-        (UiLanguage::Ja, _) => format!("未実行のツール呼出しを{cancelled_calls}件取り消しました"),
-        (UiLanguage::En, 1) => "Cancelled 1 unexecuted tool call".to_owned(),
-        (UiLanguage::En, _) => format!("Cancelled {cancelled_calls} unexecuted tool calls"),
-    };
-    match release {
-        Some((execution, crate::control::ForegroundRelease::Background)) => {
-            let cause = i18n::local!(language, "背景移行の要求", "Background request");
-            match language {
-                UiLanguage::Ja => {
-                    format!("{cause}でshell {execution}の待機を解除し背景へ移しました。{remaining}")
-                }
-                UiLanguage::En => format!(
-                    "{cause} ended the wait for shell {execution} and moved it to the background. {remaining}"
-                ),
-            }
-        }
-        None => remaining,
-    }
-}
-
 fn trace_send(
     diagnostics: &Diagnostics,
     trace: &MessageSendTrace,
@@ -1094,7 +1066,6 @@ async fn run_client(
     let mut pending_index: Option<u64> = None;
     let mut pending_deletion: Option<u64> = None;
     let cancel = CancellationToken::new();
-    let mut ui_subscription = control.subscribe();
     let event_instance = &control.store.instance_id;
     let event_directory = &client_context.data_dir;
     let mut saved_events = Some(Box::pin(saved_events::wait(
@@ -3380,19 +3351,11 @@ async fn run_client(
                 Some(BackgroundResult::StreamFrame { ticket, result }) => {
                     stream_inflight = false;
                     match result {
-                        Ok(streaming::Outcome::Queued { ended: true }) => {
-                            streams.remove(&ticket);
-                            dirty_threads.insert(ticket.thread);
-                        }
-                        Ok(
-                            streaming::Outcome::Queued { ended: false }
-                            | streaming::Outcome::Cancelled
-                            | streaming::Outcome::Unchanged,
-                        ) => {}
+                        Ok(streaming::Outcome::Queued | streaming::Outcome::Cancelled | streaming::Outcome::Unchanged) => {}
                         Ok(streaming::Outcome::Full(frame)) => {
                             if selection.active_thread.as_deref() == Some(&ticket.thread)
                                 && selection.generations.get(&ticket.thread) == Some(&ticket.generation)
-                                && (frame.ended() || streams.current(&ticket, render_width))
+                                && (streams.current(&ticket, render_width))
                             {
                                 stream_retry = Some(frame);
                             }
@@ -3766,7 +3729,6 @@ async fn run_client(
                             for receipt in pending.values_mut() { receipt.repeat = true; }
                             dirty_threads.extend(pending.values().map(|value| value.thread.clone()));
                             if let Some(thread) = &selection.active_thread {
-                                streams.invalidate(thread);
                                 dirty_threads.insert(thread.clone());
                             }
                         }
@@ -3781,7 +3743,6 @@ async fn run_client(
                             browser.changed(&thread_id);
                             descendants.changed(&thread_id);
                             management.inspection.changed(&thread_id);
-                            streams.invalidate(&thread_id);
                             selection.changed(&thread_id);
                             receipt_delivery::changed(&mut pending, &thread_id);
                             if selection.active_thread.as_deref() == Some(&thread_id)
@@ -3832,8 +3793,13 @@ async fn run_client(
                             }
                         }
                         for ended in page.attempt_ends.unwrap_or_default().into_iter().filter(|ended| &ended.thread_id == thread) {
-                            streams.invalidate(thread);
                             dirty_threads.insert(ended.thread_id);
+                            if streams.retire(thread, &ended.attempt_id) {
+                                update(&updates, UiUpdate::StreamSettled {
+                                    thread_id: thread.clone(), generation: *generation,
+                                    attempt_id: ended.attempt_id, received_source: None, ack: None,
+                                }).await;
+                            }
                         }
                         preview_events = Some(Box::pin(saved_events::wait_scoped(event_directory, event_instance, Some(page.cursor), page.more, Some(thread.clone()))));
                     }
@@ -3843,28 +3809,10 @@ async fn run_client(
                     }
                 }
             },
-            event=ui_subscription.recv()=> match event {
-                Ok(EngineEvent::Changed { .. }) => {}
-                Ok(EngineEvent::Error { thread_id, error }) => {
-                    if activity::saved_execution_recovery(&error) {
-                        // Saved execution recovery owns its reactive footer, not an operation notice.
-                        dirty_threads.insert(thread_id);
-                    } else {
-                        status(&updates, Some(thread_id), error).await;
-                    }
-                }
-                Ok(EngineEvent::Notice { thread_id, foreground_release, cancelled_calls }) => {
-                    let release = foreground_release.as_ref().map(|(execution, reason)| (execution.as_str(), *reason));
-                    status(&updates, Some(thread_id), tool_group_notice(release, cancelled_calls, language)).await
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-            },
             _=tokio::time::sleep_until(stream_next),if !stream_inflight && (stream_retry.is_some() || streams.pending())=> {
                 let retry = stream_retry
                     .take()
-                    .filter(|frame| frame.ended() || streams.current(&frame.ticket, render_width));
+                    .filter(|frame| streams.current(&frame.ticket, render_width));
                 let frame = retry.map(|frame| *frame).or_else(|| {
                     selection
                         .active_thread
@@ -3875,13 +3823,12 @@ async fn run_client(
                 if let Some(frame) = frame {
                     stream_inflight = true;
                     stream_next = tokio::time::Instant::now() + stream_period;
-                    let control = control.clone();
                     let sender = updates.worker();
                     let results = background_tx.clone();
                     let stop = selection.cancel.child_token();
                     let ticket = frame.ticket.clone();
                     read_workers.spawn(async move {
-                        let result = frame.deliver(&control, sender, stop).await;
+                        let result = frame.deliver(sender, stop).await;
                         let _ = results
                             .send(BackgroundResult::StreamFrame { ticket, result })
                             .await;
@@ -3901,7 +3848,6 @@ async fn run_client(
     }
     drop(saved_events);
     drop(preview_events);
-    drop(ui_subscription);
     read_cancel.cancel();
     drop(live_output);
     drop(browser);

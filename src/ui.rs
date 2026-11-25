@@ -2564,6 +2564,14 @@ impl UiState {
         {
             return;
         }
+        let settled = view.turn_id.is_some()
+            && (view.turn_id != details.turn_id || details.recovery_reason.is_some());
+        if settled {
+            self.apply_inner(UiUpdate::PreviewGap {
+                thread_id: thread.clone(),
+                generation,
+            });
+        }
         let read_revision = *read_revision;
         // Children have all been checked before any mutation. Retain paid stream
         // bindings before the canonical page and trim once after the whole frame.
@@ -3338,6 +3346,19 @@ impl UiState {
                 if read_revision < view.delivery_read_revision {
                     return;
                 }
+                let advanced = !append
+                    && view.delivery_read_revision != 0
+                    && (selection_revision > view.selection_revision
+                        || total_nodes > view.total_nodes);
+                let notice = (!append
+                    && view.delivery_read_revision != 0
+                    && selection_revision == view.selection_revision
+                    && total_nodes > view.total_nodes)
+                    .then(|| {
+                        let first_new = view.total_nodes.saturating_sub(first_ordinal);
+                        view::saved_tool_notice(&nodes, first_new, language)
+                    })
+                    .flatten();
                 if !view.on_history(
                     nodes,
                     before_cursor,
@@ -3351,6 +3372,17 @@ impl UiState {
                 view.delivery_read_revision = read_revision;
                 view.pending_messages = pending;
                 view.reconcile_saved_inputs();
+                let retired = if advanced {
+                    view.activity.clear_receive_observation();
+                    view.settle_other_streams("")
+                } else {
+                    Vec::new()
+                };
+                if let Some(notice) = notice {
+                    view.status = notice;
+                    view.promote_status_notice(history_interaction::NoticeKind::Info);
+                }
+                self.deferred_actions.extend(retired);
             }
             UiUpdate::StreamCommitted {
                 thread_id,
@@ -8964,6 +8996,92 @@ mod tool_refresh_tests {
             nodes: nodes.clone(),
         }
     }
+    #[test]
+    fn saved_tail_notices_skip_baseline_and_repeated_reads_and_retire_preview() {
+        use crate::presentation::{BlockKind, PresentationBlock, ToolPresentation, ToolReasonKind};
+        let mut ui = UiState::new(&Config::default(), PathBuf::from("/"));
+        ui.select_thread("t".into());
+        let cancelled = |id: &str| UiNode {
+            node_id: id.into(),
+            role: "tool".into(),
+            presentation: NodePresentation {
+                blocks: vec![PresentationBlock {
+                    kind: BlockKind::ToolResult,
+                    tool: Some(ToolPresentation {
+                        call_id: id.into(),
+                        status: "cancelled".into(),
+                        reason: "Saved cancellation".into(),
+                        reason_kind: ToolReasonKind::RunStopped,
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let tail = |ui: &UiState, revision, total| {
+            let mut update = frame(ui, revision, None);
+            if let UiUpdate::CurrentView { history, .. } = &mut update
+                && let UiUpdate::History {
+                    nodes,
+                    total_nodes,
+                    first_ordinal,
+                    ..
+                } = history.as_mut()
+            {
+                *first_ordinal = 0;
+                *total_nodes = total;
+                nodes.push(cancelled("old"));
+                if total > 1 {
+                    nodes.push(cancelled("new"));
+                }
+            }
+            update
+        };
+        ui.apply(tail(&ui, 1, 1));
+        assert!(
+            ui.view().operation_notice.is_none(),
+            "baseline is history, not a notice"
+        );
+        ui.apply(UiUpdate::Stream {
+            thread_id: "t".into(),
+            generation: ui.view().generation,
+            node_id: "attempt".into(),
+            role: "assistant".into(),
+            text: "transient".into(),
+            base_char_offset: 0,
+            total_chars: 9,
+            reasoning_ranges: Vec::new(),
+            presentation: Default::default(),
+            ack: Some(Arc::new(tokio::sync::Notify::new())),
+        });
+        assert!(
+            ui.view()
+                .nodes()
+                .iter()
+                .any(|node| node.node_id == "attempt")
+        );
+        ui.apply(tail(&ui, 2, 2));
+        assert!(
+            ui.view().operation_notice.is_some(),
+            "new saved cancellation should notify"
+        );
+        assert!(
+            !ui.view()
+                .nodes()
+                .iter()
+                .any(|node| node.node_id == "attempt")
+        );
+        assert!(ui.view().nodes().iter().any(|node| node.node_id == "new"));
+        ui.view_mut().clear_operation_notice();
+        ui.apply(tail(&ui, 3, 2));
+        assert!(
+            ui.view().operation_notice.is_none(),
+            "reread must not replay the notice"
+        );
+    }
+
     #[test]
     fn paired_paused_facts_converge_without_secondary_read_and_keep_source_window() {
         let mut ui = paused();
