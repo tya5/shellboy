@@ -984,6 +984,7 @@ impl ThreadView {
         self.promote_status_notice(history_interaction::NoticeKind::Failure);
     }
     pub(super) fn on_node_window(&mut self, view_revision: u64, mut node: UiNode) {
+        node.presentation.anchor_window = true;
         let node_id_for_reply = node.node_id.clone();
         let body_ready =
             !node.presentation.body_evicted && (node.total_chars == 0 || !node.text.is_empty());
@@ -1008,6 +1009,7 @@ impl ThreadView {
                 self.mark_source_changed();
             } else {
                 existing.presentation.read_revision = accepted_read;
+                existing.presentation.anchor_window = true;
             }
         }
         // A source-window response does not install an off-page node. Its slot
