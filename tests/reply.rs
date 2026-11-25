@@ -185,10 +185,31 @@ async fn named_ask_leaves_only_its_recipient_list_after_reply() {
         "sender"
     );
     let duty = store
-        .execute(request(ask(Some("human"))), Some(origin.clone()))
+        .execute(
+            request(Command::MessageAsk(MessageAskArgs {
+                human: false,
+                sender_label: Some("Release assistant".into()),
+                thread_id: None,
+                to: Some("human".into()),
+                deliver: Deliver::Next,
+                text: "Should the release preview open on Overview or Timeline?".into(),
+            })),
+            Some(origin.clone()),
+        )
         .await
         .unwrap()
         .result;
+    let ask_id = duty["message_id"].as_str().unwrap();
+    let ask_node = store.execute(history(ask_id), None).await.unwrap().result;
+    assert_eq!(ask_node["provenance"]["kind"], "assistant");
+    assert_eq!(
+        ask_node["provenance"]["sender"],
+        serde_json::json!({
+            "kind":"model", "label":"Release assistant", "thread_id":"sender",
+            "instance_id":"fixture", "run_id":"run", "turn_id":"turn", "execution_id":"shell"
+        })
+    );
+    assert!(ask_node["provenance"].get("client_operation_id").is_none());
     let answer = store
         .execute(
             request(Command::MessageReply(MessageReplyArgs {

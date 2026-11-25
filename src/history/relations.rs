@@ -102,6 +102,26 @@ fn provenance_with_sender_evidence(
         drop(statement);
         let raw = sender_raw;
         result.sender = Some(crate::protocol::MessageSender::from_saved(raw.as_deref()));
+    } else if result.kind == "assistant" {
+        // Named Asks use assistant nodes, but their identity belongs to the direct receipt.
+        let mut statement = connection
+            .prepare(
+                "SELECT CASE WHEN length(CAST(sender_json AS BLOB)) <= 8192 AND
+                 CASE WHEN json_valid(result_json) THEN json_type(result_json,'$.to_human')='true'
+                     AND json_type(result_json,'$.ask_name')='text' END
+                 THEN sender_json END
+             FROM receipt INDEXED BY receipt_message_node WHERE message_node_id=?1 LIMIT 2",
+            )
+            .map_err(sql_error)?;
+        let mut rows = statement.query([node_id]).map_err(sql_error)?;
+        if let Some(row) = rows.next().map_err(sql_error)? {
+            let raw: Option<String> = row.get(0).map_err(sql_error)?;
+            if rows.next().map_err(sql_error)?.is_none() {
+                result.sender = raw
+                    .as_deref()
+                    .map(|raw| crate::protocol::MessageSender::from_saved(Some(raw)));
+            }
+        }
     }
     Ok((result, operation_id))
 }
