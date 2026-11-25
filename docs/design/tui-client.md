@@ -174,10 +174,15 @@ release notes when the cutover lands.
 
 Unit 4b owns saved attempt settlement and tool-notice projection, after which
 the remaining private notice/error subscription is removed. Neither needs a
-third event fact in 4a. Cutover note: an answer preview is shown only when
-the accepted saved tail matches the attempt's input boundary. A provisional
-answer can stay hidden until the next accepted tail read and live frame; a
-late frame from the previous saved state cannot replace the saved answer.
+third event fact in 4a. The scoped native loop owns answer preview adoption.
+Saved-history updates and speculative frames use the same bounded ordered
+outbox; the loop reconciles them before forwarding either to the UI. A single
+answer chunk can display before the first saved read. Reconciliation retains a
+matching preview and retires an incompatible one in the same ordered delivery
+as saved state. Exact attempt ends retire their own staged preview after any
+in-flight frame is acknowledged. The view renders the outcome without keeping
+an attempt-end ledger. No additional delta, read, or delivery retry is needed.
+
 
 Exact output is the separately reviewed Unit 4a-out, stacked on this unit.
 Extend the existing `shell.read` (including the CLI) with a bounded indexed
