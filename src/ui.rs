@@ -1219,6 +1219,11 @@ pub enum UiUpdate {
         // of an unrelated history page. This is not a canonical ordinal.
         nodes: Vec<(String, UiNode)>,
     },
+    PreviewReconciled {
+        thread_id: String,
+        generation: u64,
+        saved: Box<UiUpdate>,
+    },
     PreviewGap {
         thread_id: String,
         generation: u64,
@@ -1227,7 +1232,6 @@ pub enum UiUpdate {
         thread_id: String,
         generation: u64,
         attempt_id: String,
-        owner_end_seq: Option<u64>,
         received_source: Option<(String, String)>,
         ack: Option<Arc<tokio::sync::Notify>>,
     },
@@ -2355,6 +2359,19 @@ impl UiState {
         std::mem::take(&mut self.terminal_requests)
     }
     pub fn apply(&mut self, update: UiUpdate) {
+        if let UiUpdate::PreviewReconciled {
+            thread_id,
+            generation,
+            saved,
+        } = update
+        {
+            self.apply_inner(UiUpdate::PreviewGap {
+                thread_id,
+                generation,
+            });
+            self.apply(*saved);
+            return;
+        }
         if let UiUpdate::CurrentView {
             generation,
             details,
@@ -2560,12 +2577,6 @@ impl UiState {
             .is_some_and(|facts| facts.nodes.len() > 128)
         {
             return;
-        }
-        let settled = view.turn_id.is_some()
-            && (view.turn_id != details.turn_id || details.recovery_reason.is_some());
-        if settled && let Some(view) = self.view_for(&thread, generation) {
-            let retired = view.retire_saved_preview();
-            self.deferred_actions.extend(retired);
         }
         let read_revision = *read_revision;
         // Children have all been checked before any mutation. Retain paid stream
@@ -2905,7 +2916,9 @@ impl UiState {
                 execute,
                 result,
             } => self.apply_thread_deletion(request_id, args, execute, result),
-            UiUpdate::SavedMessage { .. } => unreachable!("handled as atomic saved projection"),
+            UiUpdate::PreviewReconciled { .. } | UiUpdate::SavedMessage { .. } => {
+                unreachable!("handled as atomic saved projection")
+            }
             UiUpdate::ProgramStatus(_) => {
                 unreachable!("handled before view updates")
             }
@@ -3341,10 +3354,6 @@ impl UiState {
                 if read_revision < view.delivery_read_revision {
                     return;
                 }
-                let advanced = !append
-                    && view.delivery_read_revision != 0
-                    && (selection_revision > view.selection_revision
-                        || total_nodes > view.total_nodes);
                 if !view.on_history(
                     nodes,
                     before_cursor,
@@ -3358,12 +3367,6 @@ impl UiState {
                 view.delivery_read_revision = read_revision;
                 view.pending_messages = pending;
                 view.reconcile_saved_inputs();
-                let retired = if advanced {
-                    view.retire_saved_preview()
-                } else {
-                    Vec::new()
-                };
-                self.deferred_actions.extend(retired);
             }
             UiUpdate::StreamCommitted {
                 thread_id,
@@ -3403,14 +3406,6 @@ impl UiState {
                 let Some(view) = self.view_for(&thread_id, generation) else {
                     return;
                 };
-                if verified
-                    && presentation
-                        .preview_source
-                        .as_ref()
-                        .is_some_and(|source| !view.accepts_preview(&node_id, source))
-                {
-                    return;
-                }
                 let retired = if verified {
                     view.settle_other_streams(&node_id)
                 } else {
@@ -3481,7 +3476,6 @@ impl UiState {
                 thread_id,
                 generation,
                 attempt_id,
-                owner_end_seq,
                 received_source,
                 ack,
             } => {
@@ -3489,9 +3483,6 @@ impl UiState {
                     ack.notify_one();
                 }
                 if let Some(view) = self.view_for(&thread_id, generation) {
-                    if let Some(seq) = owner_end_seq {
-                        view.observe_attempt_end(&attempt_id, seq);
-                    }
                     if let Some((source, kind)) = received_source {
                         view.retain_incomplete_stream(&attempt_id, source, &kind);
                     } else if let Some(action) = view.settle_stream(&attempt_id) {
@@ -3685,7 +3676,6 @@ impl UiState {
                         view.reconcile_saved_inputs();
                     }
                     view.received_window_revision = Some(view_revision);
-                    let old = (view.selection_revision, view.total_nodes);
                     let refresh_tail = view.on_history_window(
                         nodes,
                         first_ordinal,
@@ -3694,10 +3684,6 @@ impl UiState {
                         anchor,
                         window_reply.is_some(),
                     );
-                    if (view.selection_revision, view.total_nodes) > old {
-                        let retired = view.retire_saved_preview();
-                        self.deferred_actions.extend(retired);
-                    }
                     if refresh_tail {
                         self.deferred_actions.push(UiAction::LoadHistory {
                             thread_id,
@@ -8892,16 +8878,16 @@ mod tool_refresh_tests {
         }
     }
     #[test]
-    fn saved_tail_notices_skip_baseline_and_repeated_reads_and_retire_preview() {
-        saved_notices_and_preview(false);
+    fn saved_tail_notices_skip_baseline_and_repeated_reads() {
+        saved_notices(false);
     }
 
     #[test]
-    fn saved_window_first_notifies_once_and_fences_late_preview() {
-        saved_notices_and_preview(true);
+    fn saved_window_first_notifies_once() {
+        saved_notices(true);
     }
 
-    fn saved_notices_and_preview(window_first: bool) {
+    fn saved_notices(window_first: bool) {
         use crate::presentation::{BlockKind, PresentationBlock, ToolPresentation, ToolReasonKind};
         let mut ui = UiState::new(&Config::default(), PathBuf::from("/"));
         ui.select_thread("t".into());
@@ -8953,31 +8939,6 @@ mod tool_refresh_tests {
             ui.view().operation_notice.is_none(),
             "baseline is history, not a notice"
         );
-        let stream = |generation, attempt: &str, input: &str, page_seq| UiUpdate::Stream {
-            thread_id: "t".into(),
-            generation,
-            node_id: attempt.into(),
-            role: "assistant".into(),
-            text: "transient".into(),
-            base_char_offset: 0,
-            total_chars: 9,
-            reasoning_ranges: Vec::new(),
-            presentation: NodePresentation {
-                preview_source: Some(crate::presentation::PreviewSource {
-                    input_through_node_id: Some(input.into()),
-                    page_seq,
-                }),
-                ..Default::default()
-            },
-            ack: Some(Arc::new(tokio::sync::Notify::new())),
-        };
-        ui.apply(stream(ui.view().generation, "attempt", "old", 7));
-        assert!(
-            ui.view()
-                .nodes()
-                .iter()
-                .any(|node| node.node_id == "attempt")
-        );
         if window_first {
             let view = ui.view();
             ui.apply(UiUpdate::HistoryWindow {
@@ -8999,34 +8960,6 @@ mod tool_refresh_tests {
             ui.view().operation_notice.is_some(),
             "new saved cancellation should notify"
         );
-        assert!(
-            !ui.view()
-                .nodes()
-                .iter()
-                .any(|node| node.node_id == "attempt")
-        );
-        // The old native page is only processed now, after saved adoption.
-        ui.apply(stream(ui.view().generation, "attempt", "old", 8));
-        assert!(
-            !ui.view()
-                .nodes()
-                .iter()
-                .any(|node| node.node_id == "attempt"),
-            "late frame cannot restore retired preview"
-        );
-        let generation = ui.view().generation;
-        ui.apply(UiUpdate::StreamSettled {
-            thread_id: "t".into(),
-            generation,
-            attempt_id: "ended".into(),
-            owner_end_seq: Some(10),
-            received_source: None,
-            ack: None,
-        });
-        ui.apply(stream(generation, "ended", "new", 9));
-        assert!(!ui.view().nodes().iter().any(|node| node.node_id == "ended"));
-        ui.apply(stream(generation, "next", "new", 10));
-        assert!(ui.view().nodes().iter().any(|node| node.node_id == "next"));
         assert!(ui.view().nodes().iter().any(|node| node.node_id == "new"));
         ui.view_mut().clear_operation_notice();
         ui.apply(tail(&ui, 3, 2));

@@ -45,6 +45,7 @@ struct Delivery {
     pending: Mutex<Pending>,
     closed: AtomicBool,
     ready: tokio::sync::Notify,
+    preview_ordered: AtomicBool,
     #[cfg(test)]
     observed_attempt: tokio::sync::Notify,
 }
@@ -67,6 +68,7 @@ impl BufferedUpdates {
                 pending: Mutex::new(Pending::default()),
                 closed: AtomicBool::new(false),
                 ready: tokio::sync::Notify::new(),
+                preview_ordered: AtomicBool::new(false),
                 #[cfg(test)]
                 observed_attempt: tokio::sync::Notify::new(),
             }),
@@ -157,7 +159,18 @@ impl BufferedUpdates {
         }
         false
     }
+    pub(super) fn order_previews(&self, enabled: bool) {
+        self.delivery
+            .preview_ordered
+            .store(enabled, Ordering::Relaxed);
+    }
     pub(super) fn flush(&self) {
+        self.flush_inner(None);
+    }
+    pub(super) fn flush_preview(&self, reconcile: &mut impl FnMut(UiUpdate) -> Option<UiUpdate>) {
+        self.flush_inner(Some(reconcile));
+    }
+    fn flush_inner(&self, mut reconcile: Option<&mut dyn FnMut(UiUpdate) -> Option<UiUpdate>>) {
         let mut q = self.delivery.pending.lock().expect("UI delivery lock");
         for _ in 0..32 {
             let oldest = q
@@ -180,6 +193,16 @@ impl BufferedUpdates {
             let Some(mut item) = item else {
                 break;
             };
+            if self.preview_ordered(&item.value) {
+                let Some(reconcile) = reconcile.as_deref_mut() else {
+                    q.critical.push_front(item);
+                    break;
+                };
+                let Some(value) = reconcile(item.value) else {
+                    continue;
+                };
+                item.value = value;
+            }
             match self.delivery.raw.try_send(item.value) {
                 Ok(()) => {}
                 Err(std::sync::mpsc::TrySendError::Full(value)) => {
@@ -199,6 +222,18 @@ impl BufferedUpdates {
                 }
             }
         }
+    }
+    fn preview_ordered(&self, value: &UiUpdate) -> bool {
+        self.delivery.preview_ordered.load(Ordering::Relaxed)
+            && matches!(
+                value,
+                UiUpdate::CurrentView { .. }
+                    | UiUpdate::SavedMessage { .. }
+                    | UiUpdate::History { append: false, .. }
+                    | UiUpdate::HistoryWindow { .. }
+                    | UiUpdate::Stream { .. }
+                    | UiUpdate::PreviewReconciled { .. }
+            )
     }
 }
 impl UpdateTarget for BufferedUpdates {
@@ -223,7 +258,7 @@ impl UpdateTarget for BufferedUpdates {
         }
         let mut q = self.delivery.pending.lock().expect("UI delivery lock");
         let was_empty = q.critical.is_empty() && q.latest.is_empty();
-        let value = if was_empty {
+        let value = if was_empty && !self.preview_ordered(&value) {
             match self.delivery.raw.try_send(value) {
                 Ok(()) => return Ok(()),
                 Err(std::sync::mpsc::TrySendError::Disconnected(value)) => {
@@ -314,6 +349,105 @@ fn latest_key(value: &UiUpdate) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn one_chunk_before_saved_read_is_displayed_then_retired_in_outbox_order() {
+        let (tx, rx) = std::sync::mpsc::sync_channel(8);
+        let out = BufferedUpdates::new(tx);
+        out.order_previews(true);
+        let worker = out.worker();
+        let mut ui = crate::ui::UiState::new(
+            &crate::config::Config::default(),
+            std::path::PathBuf::from("/"),
+        );
+        ui.select_thread("thread".into());
+        let generation = ui.view().generation;
+        let scope = ("thread".to_owned(), generation);
+        let mut adoption = streaming::Adoption::default();
+        let mut streams = streaming::Display::default();
+        let source = crate::presentation::PreviewSource {
+            input_through_node_id: None,
+        };
+        streams.observe_answer("thread", "attempt", "one chunk", false, &source);
+        let frame = streams.take_eligible(generation, 80, &adoption).unwrap();
+        let render = tokio::spawn(frame.deliver(worker.clone(), CancellationToken::new()));
+        out.notified().await;
+        worker.flush();
+        assert!(
+            rx.try_recv().is_err(),
+            "workers cannot bypass reconciliation"
+        );
+        out.flush_preview(&mut |value| adoption.reconcile(Some(&scope), &mut streams, value));
+        ui.apply(rx.try_recv().unwrap());
+        assert!(
+            ui.view()
+                .nodes()
+                .iter()
+                .any(|node| node.text == "one chunk")
+        );
+        assert!(matches!(
+            render.await.unwrap().unwrap(),
+            streaming::Outcome::Queued
+        ));
+        let saved = |id: &str, revision| UiUpdate::History {
+            thread_id: "thread".into(),
+            generation,
+            nodes: vec![UiNode {
+                node_id: id.into(),
+                text: "saved answer".into(),
+                ..Default::default()
+            }],
+            read_revision: revision,
+            selection_revision: revision,
+            total_nodes: 1,
+            first_ordinal: 0,
+            append: false,
+            before_cursor: None,
+            pending: Default::default(),
+        };
+        worker.try_send(saved("saved", 1)).unwrap();
+        let ack = Arc::new(tokio::sync::Notify::new());
+        worker
+            .try_send(UiUpdate::Stream {
+                thread_id: "thread".into(),
+                generation,
+                node_id: "attempt".into(),
+                role: "assistant".into(),
+                text: "one chunk".into(),
+                base_char_offset: 0,
+                total_chars: 9,
+                reasoning_ranges: vec![],
+                presentation: crate::presentation::NodePresentation {
+                    preview_source: Some(source),
+                    ..Default::default()
+                },
+                ack: Some(ack.clone()),
+            })
+            .unwrap();
+        worker.flush();
+        assert!(rx.try_recv().is_err());
+        out.flush_preview(&mut |value| adoption.reconcile(Some(&scope), &mut streams, value));
+        ui.apply(rx.try_recv().unwrap());
+        assert_eq!(
+            ui.view()
+                .nodes()
+                .iter()
+                .map(|node| node.node_id.as_str())
+                .collect::<Vec<_>>(),
+            ["saved"]
+        );
+        assert!(
+            rx.try_recv().is_err(),
+            "saved adoption fences the late rendered frame"
+        );
+        assert!(
+            std::future::poll_fn(|cx| std::task::Poll::Ready(
+                std::pin::pin!(ack.notified()).poll(cx).is_ready()
+            ))
+            .await
+        );
+        assert!(!streams.pending(&adoption));
+    }
+
     use super::*;
     fn critical(request_id: u64) -> UiUpdate {
         UiUpdate::ThreadDeletion {

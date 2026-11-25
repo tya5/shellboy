@@ -13,6 +13,7 @@ impl UiUpdate {
             | Self::History { .. }
             | Self::StreamCommitted { .. }
             | Self::Stream { .. }
+            | Self::PreviewReconciled { .. }
             | Self::PreviewGap { .. }
             | Self::StreamSettled { .. }
             | Self::IncompleteResponses { .. }
@@ -332,7 +333,6 @@ mod committed_source_tests {
             thread_id: "thread".into(),
             generation,
             attempt_id: "attempt".into(),
-            owner_end_seq: None,
             received_source: None,
             ack: None,
         });
