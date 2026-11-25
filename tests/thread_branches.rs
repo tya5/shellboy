@@ -4,9 +4,10 @@ use serde_json::Value;
 use shellboy::{
     config::Config,
     control::db::Store,
+    history::append_node,
     protocol::{
-        ApiError, Command, ErrorCode, Origin, Request, ThreadBranchesArgs, ThreadForkArgs,
-        ThreadRewindArgs,
+        ApiError, Command, ErrorCode, HistoryWindowArgs, Origin, Request, ThreadBranchesArgs,
+        ThreadForkArgs, ThreadRewindArgs,
     },
     storage::DbWorker,
 };
@@ -189,6 +190,69 @@ async fn fork_and_rewind_children_appear_as_branches_with_their_divergence_point
     assert_eq!(from_cut["root_thread_id"], "T");
     assert_eq!(item(&from_cut, &cut)["state"], "current");
     assert_eq!(item(&from_cut, "T")["state"], "ancestor");
+}
+
+#[tokio::test]
+async fn branch_revision_distinguishes_rewind_and_append_to_equal_length() {
+    let f = Fixture::new([conversation(3), n_path(3)].concat()).await;
+    let window = |thread: &str| {
+        Command::HistoryWindow(HistoryWindowArgs {
+            thread_id: thread.into(),
+            items: true,
+            ordinal: None,
+            node_id: None,
+            expect_node_id: None,
+            before: 0,
+            after: 0,
+            excerpt_chars: 0,
+        })
+    };
+    let before = f.branches("T", 50, None).await.unwrap();
+    let before_row = item(&before, "T");
+    let before_window = f.run(window("T")).await.unwrap();
+    assert_eq!(before_row["selection_revision"], before_window["revision"]);
+    assert_eq!(before_row["tip"]["node_id"], "n3");
+    let cut = f.rewind_to("T", "n2").await;
+    f.store
+        .database
+        .call(|db| {
+            let tx = db.transaction()?;
+            append_node(
+                &tx,
+                "T",
+                "new-tip",
+                None,
+                "user",
+                &serde_json::json!({"text":"alternate"}),
+                "2026-01-01T00:01:00",
+            )?;
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let after = f.branches("T", 50, None).await.unwrap();
+    let after_row = item(&after, "T");
+    let after_window = f.run(window("T")).await.unwrap();
+    assert_eq!(
+        before_row["size"]["path_nodes"],
+        after_row["size"]["path_nodes"]
+    );
+    assert_eq!(after_row["size"]["path_nodes"], after_window["total"]);
+    assert_eq!(after_row["tip"]["node_id"], "new-tip");
+    assert_eq!(after_row["selection_revision"], after_window["revision"]);
+    assert!(
+        after_row["selection_revision"].as_u64().unwrap()
+            > before_row["selection_revision"].as_u64().unwrap()
+    );
+    let child = item(&after, &cut);
+    let child_window = f.run(window(&cut)).await.unwrap();
+    assert_eq!(child["selection_revision"], child_window["revision"]);
+    assert_eq!(child["divergence"]["node_id"], "n2");
+    assert_eq!(
+        child["divergence"]["parent_selection_revision"],
+        after_window["revision"]
+    );
 }
 
 #[tokio::test]

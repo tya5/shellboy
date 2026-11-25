@@ -557,6 +557,11 @@
         "running": {
           "type": "boolean"
         },
+        "selection_revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
         "size": {
           "$ref": "#/definitions/Size"
         },
@@ -585,6 +590,7 @@
         }
       },
       "required": [
+        "selection_revision",
         "thread_id",
         "branch_kind",
         "depth",
@@ -2714,6 +2720,11 @@
           "description": "The parent has nodes after the divergence point.",
           "type": "boolean"
         },
+        "parent_selection_revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
         "request": {
           "anyOf": [
             {
@@ -2726,6 +2737,7 @@
         }
       },
       "required": [
+        "parent_selection_revision",
         "node_id",
         "ordinal",
         "parent_continues"

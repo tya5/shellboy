@@ -2,6 +2,11 @@ use super::*;
 use rusqlite::params;
 use serde_json::json;
 
+fn read_branches(db: &Connection, id: &str, args: &ThreadBranchesArgs) -> Result<Value, ApiError> {
+    let tx = db.unchecked_transaction().unwrap();
+    branches(&tx, id, args)
+}
+
 fn db() -> Connection {
     let db = Connection::open_in_memory().unwrap();
     db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
@@ -67,7 +72,7 @@ fn args(limit: u32, cursor: Option<String>) -> ThreadBranchesArgs {
     }
 }
 fn read(db: &Connection, id: &str) -> Value {
-    branches(db, id, &args(50, None)).unwrap()
+    read_branches(db, id, &args(50, None)).unwrap()
 }
 fn find<'a>(value: &'a Value, id: &str) -> &'a Value {
     value["items"]
@@ -207,7 +212,9 @@ fn deleted_parent_roots_its_own_family_and_deleted_children_are_skipped() {
             .all(|i| i["thread_id"] != "dead")
     );
     assert_eq!(
-        branches(&db, "gone", &args(50, None)).unwrap_err().code,
+        read_branches(&db, "gone", &args(50, None))
+            .unwrap_err()
+            .code,
         ErrorCode::ThreadNotFound
     );
 }
@@ -302,12 +309,12 @@ fn pages_are_bounded_stable_and_expire_when_the_tree_changes() {
         thread(&db, &id, Some("r"), &id);
         path(&db, &id, &["u:1", "a:1", &format!("u:{id}")]);
     }
-    let first = branches(&db, "r", &args(2, None)).unwrap();
+    let first = read_branches(&db, "r", &args(2, None)).unwrap();
     assert_eq!(first["items"].as_array().unwrap().len(), 2);
     assert_eq!(first["family_threads"], 6);
     let cursor = first["next_cursor"].as_str().unwrap().to_owned();
-    let second = branches(&db, "r", &args(2, Some(cursor.clone()))).unwrap();
-    let third = branches(
+    let second = read_branches(&db, "r", &args(2, Some(cursor.clone()))).unwrap();
+    let third = read_branches(
         &db,
         "r",
         &args(2, second["next_cursor"].as_str().map(str::to_owned)),
@@ -322,7 +329,7 @@ fn pages_are_bounded_stable_and_expire_when_the_tree_changes() {
     assert_eq!(all, ["r", "c0", "c1", "c2", "c3", "c4"]);
     // A different Thread cannot reuse the cursor, and a changed tree expires it.
     assert_eq!(
-        branches(&db, "c0", &args(2, Some(cursor.clone())))
+        read_branches(&db, "c0", &args(2, Some(cursor.clone())))
             .unwrap_err()
             .code,
         ErrorCode::CursorExpired
@@ -334,19 +341,21 @@ fn pages_are_bounded_stable_and_expire_when_the_tree_changes() {
     )
     .unwrap();
     path_extend(&db, "c4", "u:later");
-    assert!(branches(&db, "r", &args(2, Some(cursor.clone()))).is_ok());
+    assert!(read_branches(&db, "r", &args(2, Some(cursor.clone()))).is_ok());
     // A created Thread changes the tree and expires the cursor.
     thread(&db, "c5", Some("r"), "c5");
     assert_eq!(
-        branches(&db, "r", &args(2, Some(cursor))).unwrap_err().code,
+        read_branches(&db, "r", &args(2, Some(cursor)))
+            .unwrap_err()
+            .code,
         ErrorCode::CursorExpired
     );
     assert_eq!(
-        branches(&db, "r", &args(0, None)).unwrap_err().code,
+        read_branches(&db, "r", &args(0, None)).unwrap_err().code,
         ErrorCode::InvalidArgument
     );
     assert_eq!(
-        branches(&db, "r", &args(MAX_LIST_LIMIT + 1, None))
+        read_branches(&db, "r", &args(MAX_LIST_LIMIT + 1, None))
             .unwrap_err()
             .code,
         ErrorCode::InvalidArgument

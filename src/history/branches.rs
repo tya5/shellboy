@@ -21,7 +21,7 @@
 //! they stay different.
 use std::collections::HashSet;
 
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use schemars::JsonSchema;
 use serde::Serialize;
 use serde_json::Value;
@@ -53,6 +53,7 @@ pub struct Excerpt {
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct Divergence {
+    pub parent_selection_revision: u64,
     pub node_id: String,
     /// Position of the last shared node in both selected paths.
     pub ordinal: i64,
@@ -76,6 +77,7 @@ pub struct Size {
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct BranchItem {
+    pub selection_revision: u64,
     pub thread_id: String,
     pub title: Option<String>,
     pub parent_thread_id: Option<String>,
@@ -110,7 +112,8 @@ pub(crate) struct BranchListResult {
 struct Member {
     id: String,
     title: String,
-    parent: Option<String>,
+    parent: Option<(String, u64)>,
+    selection_revision: u64,
     branch_kind: Option<String>,
     depth: u32,
 }
@@ -134,34 +137,33 @@ pub enum Scope {
 fn not_found() -> ApiError {
     ApiError::new(ErrorCode::ThreadNotFound, "Thread not found")
 }
-type LiveThread = (String, Option<String>, Option<String>);
+type LiveThread = (String, Option<String>, Option<String>, u64);
 
 fn live_thread(db: &Connection, id: &str) -> Result<Option<LiveThread>, ApiError> {
     db.prepare_cached(
-        "SELECT title,parent_thread_id,branch_kind FROM thread WHERE id=?1 AND deleted_at IS NULL",
+        "SELECT title,parent_thread_id,branch_kind,selection_revision FROM thread WHERE id=?1 AND deleted_at IS NULL",
     )
     .map_err(sql_error)?
-    .query_row([id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+    .query_row([id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get::<_, i64>(3)? as u64)))
     .optional()
     .map_err(sql_error)
 }
-fn children(
-    db: &Connection,
-    parent: &str,
-    limit: usize,
-) -> Result<Vec<(String, String, Option<String>)>, ApiError> {
-    db.prepare_cached("SELECT id,title,branch_kind FROM thread WHERE parent_thread_id=?1 AND deleted_at IS NULL ORDER BY id LIMIT ?2")
+type ChildThread = (String, String, Option<String>, u64);
+
+fn children(db: &Connection, parent: &str, limit: usize) -> Result<Vec<ChildThread>, ApiError> {
+    db.prepare_cached("SELECT id,title,branch_kind,selection_revision FROM thread WHERE parent_thread_id=?1 AND deleted_at IS NULL ORDER BY id LIMIT ?2")
         .map_err(sql_error)?
-        .query_map(params![parent, limit as i64], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        .query_map(params![parent, limit as i64], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get::<_, i64>(3)? as u64)))
         .map_err(sql_error)?
         .collect::<rusqlite::Result<Vec<_>>>()
         .map_err(sql_error)
 }
 
 fn family(db: &Connection, thread: &str, scope: Scope) -> Result<Family, ApiError> {
-    let (title, mut parent, branch_kind) = live_thread(db, thread)?.ok_or_else(not_found)?;
+    let (title, mut parent, branch_kind, revision) =
+        live_thread(db, thread)?.ok_or_else(not_found)?;
     // Upward: stop at a missing or deleted parent (the Thread then roots its own family).
-    let mut upward = vec![(thread.to_owned(), title, branch_kind)];
+    let mut upward = vec![(thread.to_owned(), title, branch_kind, revision)];
     let mut seen: HashSet<String> = HashSet::from([thread.to_owned()]);
     let mut ancestors_truncated = false;
     let mut root_parent_unavailable = false;
@@ -171,23 +173,26 @@ fn family(db: &Connection, thread: &str, scope: Scope) -> Result<Family, ApiErro
             break;
         }
         match live_thread(db, &parent_id)? {
-            Some((title, next, kind)) if seen.insert(parent_id.clone()) => {
-                upward.push((parent_id, title, kind));
+            Some((title, next, kind, revision)) if seen.insert(parent_id.clone()) => {
+                upward.push((parent_id, title, kind, revision));
                 parent = next;
             }
             _ => root_parent_unavailable = true,
         }
     }
     upward.reverse();
-    let chain: Vec<String> = upward.iter().map(|(id, _, _)| id.clone()).collect();
+    let chain: Vec<String> = upward.iter().map(|(id, ..)| id.clone()).collect();
     let mut members: Vec<Member> = upward
-        .into_iter()
+        .iter()
         .enumerate()
-        .map(|(depth, (id, title, branch_kind))| Member {
-            parent: depth.checked_sub(1).map(|i| chain[i].clone()),
-            id,
-            title,
-            branch_kind,
+        .map(|(depth, (id, title, branch_kind, revision))| Member {
+            parent: depth
+                .checked_sub(1)
+                .map(|i| (chain[i].clone(), upward[i].3)),
+            id: id.clone(),
+            title: title.clone(),
+            branch_kind: branch_kind.clone(),
+            selection_revision: *revision,
             depth: depth as u32,
         })
         .collect();
@@ -196,14 +201,16 @@ fn family(db: &Connection, thread: &str, scope: Scope) -> Result<Family, ApiErro
     let mut cursor = 0;
     // Breadth first from the chain; a child of a chain member keeps its parent's depth + 1.
     while cursor < members.len() {
-        let (id, depth) = (members[cursor].id.clone(), members[cursor].depth);
+        let member = &members[cursor];
+        let (id, depth, parent_revision) =
+            (member.id.clone(), member.depth, member.selection_revision);
         cursor += 1;
         if scope == Scope::Local && cursor > chain.len() {
             break;
         }
         let room = FAMILY_LIMIT.saturating_sub(members.len());
         let found = children(db, &id, room + 1)?;
-        for (index, (child, title, branch_kind)) in found.into_iter().enumerate() {
+        for (index, (child, title, branch_kind, revision)) in found.into_iter().enumerate() {
             if included.contains(&child) {
                 continue;
             }
@@ -215,7 +222,8 @@ fn family(db: &Connection, thread: &str, scope: Scope) -> Result<Family, ApiErro
             members.push(Member {
                 id: child,
                 title,
-                parent: Some(id.clone()),
+                parent: Some((id.clone(), parent_revision)),
+                selection_revision: revision,
                 branch_kind,
                 depth: depth + 1,
             });
@@ -311,13 +319,14 @@ fn exists(db: &Connection, sql: &str, thread: &str) -> Result<bool, ApiError> {
 
 /// Where a child leaves its parent: lookups only, no payload is read.
 struct Point {
+    parent_selection_revision: u64,
     node_id: String,
     ordinal: i64,
     parent_continues: bool,
 }
 type Located = (Option<Point>, Option<&'static str>);
 fn locate(db: &Connection, member: &Member, length: i64) -> Result<Located, ApiError> {
-    let Some(parent) = &member.parent else {
+    let Some((parent, parent_selection_revision)) = &member.parent else {
         return Ok((None, None));
     };
     let parent_len = path_len(db, parent)?;
@@ -329,6 +338,7 @@ fn locate(db: &Connection, member: &Member, length: i64) -> Result<Located, ApiE
     })?;
     Ok((
         Some(Point {
+            parent_selection_revision: *parent_selection_revision,
             node_id,
             ordinal: end,
             parent_continues: parent_len > end + 1,
@@ -367,6 +377,7 @@ fn item(
     let (point, unknown) = locate(db, member, length)?;
     let divergence = match point {
         Some(point) => Some(Divergence {
+            parent_selection_revision: point.parent_selection_revision,
             request: last_request(db, &member.id, point.ordinal)?,
             node_id: point.node_id,
             ordinal: point.ordinal,
@@ -375,9 +386,10 @@ fn item(
         None => None,
     };
     Ok(BranchItem {
+        selection_revision: member.selection_revision,
         thread_id: member.id.clone(),
         title: (!member.title.trim().is_empty()).then(|| member.title.clone()),
-        parent_thread_id: member.parent.clone(),
+        parent_thread_id: member.parent.as_ref().map(|(id, _)| id.clone()),
         branch_kind: match member.branch_kind.as_deref() {
             Some("fork") => "fork",
             Some("rewind") => "rewind",
@@ -421,7 +433,13 @@ fn fingerprint(family: &Family) -> u64 {
     for member in &family.members {
         hasher.update(member.id.as_bytes());
         hasher.update([0]);
-        hasher.update(member.parent.as_deref().unwrap_or("").as_bytes());
+        hasher.update(
+            member
+                .parent
+                .as_ref()
+                .map_or("", |(id, _)| id.as_str())
+                .as_bytes(),
+        );
         hasher.update([1]);
     }
     hasher.update([
@@ -434,7 +452,7 @@ fn fingerprint(family: &Family) -> u64 {
 
 /// `thread branches`: one page of the family tree plus its bounds.
 pub fn branches(
-    db: &Connection,
+    db: &Transaction<'_>,
     requested: &str,
     args: &ThreadBranchesArgs,
 ) -> Result<Value, ApiError> {
@@ -552,7 +570,7 @@ pub fn markers(db: &Connection, thread: &str, nodes: &[String]) -> Result<Vec<Ma
     type PagePoint = (String, String, Vec<(usize, i64)>);
     let mut points: Vec<PagePoint> = Vec::new();
     for (index, member) in family.members.iter().enumerate() {
-        let Some(parent) = &member.parent else {
+        let Some((parent, _)) = &member.parent else {
             continue;
         };
         if !family.chain.contains(parent) {

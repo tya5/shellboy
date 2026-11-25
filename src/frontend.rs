@@ -725,8 +725,9 @@ async fn load_branches(
             .store
             .database
             .call(move |db| {
+                let snapshot = db.transaction()?;
                 Ok(crate::history::branches::branches(
-                    db,
+                    &snapshot,
                     &thread,
                     &crate::protocol::ThreadBranchesArgs {
                         thread_id: Some(thread.clone()),
