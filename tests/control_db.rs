@@ -547,7 +547,6 @@ async fn machine_message_does_not_resume_recovery_but_new_human_instruction_does
     assert_eq!(human.turn_id, accepted.turn_id);
     assert_eq!(human.delivery_status, DeliveryStatus::Accepted);
     assert_eq!(effects.quiet_wake_threads, vec![child.thread_id.clone()]);
-    assert!(effects.quiet_wake_threads.is_empty());
     let run = human.run_id.unwrap();
     store
         .database

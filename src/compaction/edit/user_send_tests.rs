@@ -90,7 +90,6 @@ async fn accepted_user_message_fences_new_owner_scope_without_revising_selection
             )
             .await
             .unwrap();
-        assert!(sent.quiet_wake_threads.is_empty());
         assert_eq!(
             sent.quiet_wake_threads.as_slice(),
             std::slice::from_ref(&thread)

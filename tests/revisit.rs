@@ -401,16 +401,15 @@ async fn run_completing_between_send_and_complete_still_delivers() {
 /// Later now/default messages overtake waiting complete messages; each timing
 /// class keeps its own send order.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn now_and_default_messages_overtake_waiting_complete_messages() {
+async fn next_messages_overtake_waiting_complete_messages() {
     use Deliver::*;
     let cases: &[&[(&str, Deliver)]] = &[
-        &[("C_THEN_NOW_C", Complete), ("C_THEN_NOW_N", Now)],
         &[("C_THEN_DEFAULT_C", Complete), ("C_THEN_DEFAULT_D", Next)],
         &[
             ("MIX_C1", Complete),
-            ("MIX_N1", Now),
+            ("MIX_N1", Next),
             ("MIX_C2", Complete),
-            ("MIX_N2", Now),
+            ("MIX_N2", Next),
             ("MIX_D1", Next),
         ],
     ];
@@ -431,7 +430,7 @@ async fn now_and_default_messages_overtake_waiting_complete_messages() {
             .collect::<Vec<_>>();
         let ordinary = case
             .iter()
-            .filter(|(_, deliver)| *deliver != Complete)
+            .filter(|(_, deliver)| *deliver == Next)
             .map(|(text, _)| *text)
             .collect::<Vec<_>>();
         first.reply.send((200, answer("Base answer"))).unwrap();

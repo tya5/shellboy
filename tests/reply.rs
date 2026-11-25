@@ -454,7 +454,6 @@ async fn delivered_cross_thread_ask_can_be_withdrawn_only_by_its_sender_or_owner
             .await
             .unwrap();
         assert_eq!(cancelled.result["items"][0]["outcome"], "reply_cancelled");
-        assert!(cancelled.quiet_wake_threads.is_empty());
         // The recipient gets a saved notice; only the sender gets the existing outcome wake.
         assert_eq!(cancelled.quiet_wake_threads, ["sender"]);
         for thread in ["sender", "recipient"] {
