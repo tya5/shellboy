@@ -943,6 +943,14 @@ pub enum UiUpdate {
         revision: u64,
         operation_id: String,
     },
+    ExactSubmission {
+        operation_id: String,
+        draft_id: String,
+        revision: u64,
+        generation: u64,
+        thread_id: String,
+        message_id: String,
+    },
     SavedMessagePending {
         draft_id: String,
         revision: u64,
@@ -2835,6 +2843,31 @@ impl UiState {
                         .expect("matching submission")
                         .operation_id = Some(operation_id);
                     view.reconcile_saved_inputs();
+                }
+            }
+            UiUpdate::ExactSubmission {
+                operation_id,
+                draft_id,
+                revision,
+                generation,
+                thread_id,
+                message_id,
+            } => {
+                if let Some(view) = self.views.values_mut().find(|view| {
+                    view.generation == generation
+                        && view.pending.get(&revision).is_some_and(|pending| {
+                            pending.send.is_some()
+                                && pending.snapshot.draft_id == draft_id
+                                && pending.snapshot.revision == revision
+                                && pending.operation_id.as_deref() == Some(&operation_id)
+                                && pending
+                                    .source_node_id
+                                    .as_deref()
+                                    .is_none_or(|id| id == message_id)
+                        })
+                }) {
+                    view.finish_saved_input(draft_id, revision, thread_id, ReceiptStatus::Accepted);
+                    self.dirty = true;
                 }
             }
             UiUpdate::SavedMessagePending {
