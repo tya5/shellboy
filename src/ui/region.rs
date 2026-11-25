@@ -20,11 +20,13 @@ impl RegionLayout {
         }
     }
 
-    pub fn height(self, available: u16, preview: u16) -> u16 {
+    pub fn height(self, available: u16, preview: u16, has_content: bool) -> u16 {
         if available <= 3 {
             return 0;
         }
-        let requested = if self.collapsed {
+        let requested = if !has_content {
+            1
+        } else if self.collapsed {
             2
         } else {
             2 + self.capacity as u16 + preview
@@ -146,7 +148,11 @@ mod tests {
                             })
                             .min(available - 3)
                         };
-                        assert_eq!(layout.height(available, preview), expected);
+                        assert_eq!(layout.height(available, preview, true), expected);
+                        assert_eq!(
+                            layout.height(available, preview, false),
+                            u16::from(available > 3)
+                        );
                     }
                     let area = Rect::new(3, 4, 18, available);
                     for overflow in [false, true] {

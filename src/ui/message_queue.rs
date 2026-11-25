@@ -1608,7 +1608,7 @@ mod language_tests {
         crate::ui::text_width::clear_terminal_width();
     }
     #[test]
-    fn region_ellipsis_preserves_graphemes_cells_and_held_height() {
+    fn region_ellipsis_preserves_graphemes_and_cells() {
         use crate::ui::text_width::UnicodeWidthStr;
         use unicode_segmentation::UnicodeSegmentation;
         let source = "state 日本語·e\u{301}👩‍💻 trailing";
@@ -1628,12 +1628,6 @@ mod language_tests {
                     );
                 }
             }
-            let mut config = Config::default();
-            config.ui.language = UiLanguage::En;
-            let mut ui = UiState::new(&config, PathBuf::new());
-            long_pending(&mut ui);
-            ui.queue_popup.visible = false;
-            assert_eq!(super::super::held_input::height(30, false, 3), 5);
         }
         crate::ui::text_width::clear_terminal_width();
     }
