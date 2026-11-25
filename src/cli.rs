@@ -255,6 +255,45 @@ pub enum ConfigCliCommand {
     )]
     Set(ConfigSetOptions),
 }
+#[derive(Debug, Parser)]
+#[command(name = "/config", disable_help_subcommand = true)]
+struct ConfigSlash {
+    #[command(subcommand)]
+    verb: ConfigSlashVerb,
+}
+
+#[derive(Debug, Subcommand)]
+enum ConfigSlashVerb {
+    /// Read the running owner's loaded and current settings.
+    Get,
+    /// Update the running owner's settings with the current content hash.
+    Set(ConfigSetOptions),
+    /// Check configuration using the active session's paths.
+    Check,
+}
+
+pub(crate) enum ConfigSlashAction {
+    Owner(Box<wire::Command>),
+    Check,
+}
+
+pub(crate) fn config_slash(text: &str) -> Result<ConfigSlashAction, String> {
+    let words = shlex::split(text).ok_or_else(|| "Unclosed quote or escape".to_owned())?;
+    let parsed = ConfigSlash::try_parse_from(
+        std::iter::once("/config").chain(words.iter().map(String::as_str)),
+    )
+    .map_err(|error| error.to_string())?;
+    let command = match parsed.verb {
+        ConfigSlashVerb::Get => wire::Command::ConfigGet(wire::ConfigGetArgs {}),
+        ConfigSlashVerb::Set(options) => {
+            wire::Command::ConfigSet(options.into_args().map_err(|error| error.message)?)
+        }
+        ConfigSlashVerb::Check => return Ok(ConfigSlashAction::Check),
+    };
+    command.validate().map_err(|error| error.message)?;
+    Ok(ConfigSlashAction::Owner(Box::new(command)))
+}
+
 #[derive(Debug, Clone, Args)]
 pub struct ConfigSetOptions {
     /// file.content_hash from config get; refused if the file has changed since.
