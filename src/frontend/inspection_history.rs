@@ -1,7 +1,7 @@
 //! Capture only immutable page identities; body retention stays with management.
 use crate::{
     protocol::{
-        ApiError, Command, ErrorCode, HistoryBody, HistoryGetArgs, HistoryListPage, HistoryWindow,
+        ApiError, Command, ErrorCode, HistoryBody, HistoryListPage, HistoryReadArgs, HistoryWindow,
     },
     ui::{HistorySourceScope, InspectionTarget},
 };
@@ -11,7 +11,7 @@ pub(super) enum CapturedCommand {
     Limited(super::inspection_retained::RetainedRoute),
 }
 pub(super) fn capture_command(command: &Command) -> Option<CapturedCommand> {
-    if !(matches!(command, Command::HistoryGet(_) | Command::HistoryList(_))
+    if !(matches!(command, Command::HistoryRead(_) | Command::HistoryList(_))
         || super::inspection_retained::supports(command))
     {
         return None;
@@ -34,9 +34,9 @@ pub(super) fn capture_saved(command: &CapturedCommand, value: &Value) -> Option<
 }
 pub(super) async fn native_body(
     data_dir: &std::path::Path,
-    args: HistoryGetArgs,
+    args: HistoryReadArgs,
 ) -> Result<HistoryBody, ApiError> {
-    native_read(data_dir, Command::HistoryGet(args)).await
+    native_read(data_dir, Command::HistoryRead(args)).await
 }
 
 pub(super) async fn native_read<T: serde::de::DeserializeOwned>(
@@ -109,7 +109,7 @@ pub(super) async fn request(
         _ = stop.cancelled() => Err(ApiError::new(ErrorCode::InvalidState, "Display snapshot observation closed")),
         result = async {
             match command {
-                command @ Command::HistoryGet(_) => {
+                command @ Command::HistoryRead(_) => {
                     let report: HistoryReport = native_read(data_dir, command).await?;
                     super::presentation_work(move || serialize(report)).await?
                 }
@@ -140,7 +140,7 @@ pub(super) fn capture(command: &Command, value: &Value) -> Option<InspectionTarg
         return Some(target);
     }
     let (rows, thread) = match command {
-        Command::HistoryGet(_) => (vec![value], None),
+        Command::HistoryRead(_) => (vec![value], None),
         Command::HistoryList(args) => (
             value.get("items")?.as_array()?.iter().take(201).collect(),
             Some(args.thread_id.as_str()),
@@ -260,7 +260,7 @@ mod tests {
             tx.commit()?;
             Ok(())
         }).await.unwrap();
-        let args = HistoryGetArgs {
+        let args = HistoryReadArgs {
             node_id: "summary".into(),
             cursor: None,
             limit_bytes: 32,
@@ -271,7 +271,7 @@ mod tests {
         let read = |args| {
             request(
                 &owner.loaded.data_dir,
-                Command::HistoryGet(args),
+                Command::HistoryRead(args),
                 tokio_util::sync::CancellationToken::new(),
             )
         };
@@ -286,7 +286,7 @@ mod tests {
             ]})
         );
         let cursor = report["next_cursor"].as_str().unwrap().to_owned();
-        let next = read(HistoryGetArgs {
+        let next = read(HistoryReadArgs {
             cursor: Some(cursor),
             ..args.clone()
         })
@@ -295,7 +295,7 @@ mod tests {
         assert_eq!(next["parts"], report["parts"]);
         assert_ne!(next["text"], report["text"]);
         assert!(
-            read(HistoryGetArgs {
+            read(HistoryReadArgs {
                 parts: false,
                 ..args
             })
@@ -333,7 +333,7 @@ mod tests {
         let read = |cursor| {
             request(
                 &owner.loaded.data_dir,
-                Command::HistoryGet(HistoryGetArgs {
+                Command::HistoryRead(HistoryReadArgs {
                     node_id: "inspection-source".into(),
                     cursor,
                     limit_bytes: 4,
@@ -413,7 +413,7 @@ mod tests {
     #[test]
     fn body_identity_never_infers_selection_from_creation_or_viewer_and_limits_do_not_copy_bad_ids()
     {
-        let command = Command::HistoryGet(HistoryGetArgs {
+        let command = Command::HistoryRead(HistoryReadArgs {
             node_id: "n".into(),
             cursor: None,
             limit_bytes: 65536,

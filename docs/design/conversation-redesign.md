@@ -318,7 +318,7 @@ metadata updates; rebind their unchanged original source to the new display
 request identity instead of labeling them stale or refetching them. Pending
 original-detail reads still receive a fresh request fence when needed.
 
-HistoryGet has no Thread selection argument: do not infer selection from the
+HistoryRead has no Thread selection argument: do not infer selection from the
 viewer, node creation Thread or delivery owner. Show selection scope unknown
 while observing exact node revision/body availability. HistoryList uses its
 literal captured Thread, never a later viewer selection; a captured selection
@@ -637,7 +637,7 @@ Exact indexed owned-work counts stay factual rather than being capped to zero.
 Delivery ownership update2026-11-01: the user moves unfinished saved lists/status
 to #107, remaining retained references/pages/waits to #108, and confirmation plus
 external/native snapshot labels to #109, outside #41. Their product requirements
-below remain adopted. G retains existing inspectors and HistoryGet/List plus its
+below remain adopted. G retains existing inspectors and HistoryRead/List plus its
 own reader/SQL qualification. Worker-owned files/functions and count gates are
 listed in those issues. Before G lands, workers do not modify active G files.
 After G main, reviewer update2026-11-01 in #108 assigns permanent module/target/

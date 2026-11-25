@@ -2571,7 +2571,7 @@ mod slow_job_tests {
         let queued = Instant::now() - SLOW_JOB_THRESHOLD;
         let value: String = db.observe_inspection(
             &mut connection,
-            "HistoryGet",
+            "HistoryRead",
             queued,
             Some("external"),
             |conn| {
@@ -2585,7 +2585,7 @@ mod slow_job_tests {
         let log = std::fs::read_to_string(root.path().join("logs/shellboy.log")).unwrap();
         assert!(!log.contains("private inspection marker"));
         let event: serde_json::Value = serde_json::from_str(log.lines().next().unwrap()).unwrap();
-        assert_eq!(event["db_job_slow"]["kind"], "HistoryGet");
+        assert_eq!(event["db_job_slow"]["kind"], "HistoryRead");
         assert_eq!(event["db_job_slow"]["lane"], "inspection");
         assert_eq!(event["db_job_slow"]["requester"], "external");
         assert_eq!(event["db_job_slow"]["statement_counters"]["rows"], 1);
@@ -2620,7 +2620,7 @@ mod slow_job_tests {
         let sql = format!("SELECT test_delay() || '{message}'");
         let value = db.observe_inspection(
             &mut connection,
-            "HistoryGet",
+            "HistoryRead",
             Instant::now() - SLOW_JOB_THRESHOLD,
             Some("shell"),
             |conn| {

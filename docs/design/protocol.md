@@ -111,7 +111,7 @@ P3照合修正: ShellReadArgs.encodingをOptionへ変更し、省略時にexecut
 `NodeProvenance` はkind/created_at/source_revisionと任意turn_id/run_id/origin_thread_idを持つ。履歴のassistant_response nodeに限り、既存output_itemのnode associationが一意な場合は任意attempt_idを投影する。association無し／曖昧なら省略し、唯一のowner IDが不正ならinvalid_stateとする。未確定のIDを生成せず省略し、originを共有nodeの全所属と同一視しない。`HistoryBody.provenance` is required and is derived from the saved node. 詳細は[検索・関係設計](search-and-relations.md#provenanceと区間)に従う。
 
 For a user node created by `message.send`, the selected-path history readers
-(`history.list`, `history.window`, and `history.get`) may include
+(`history.list`, `history.window`, and `history.read`) may include
 `provenance.client_operation_id`. It is read from the unique direct `receipt`
 for that node and its original Thread, using `receipt_message_node` with a
 maximum-two lookup; only a unique, nonempty ID of at most 256 UTF-8 bytes is
@@ -556,11 +556,11 @@ source classification, bands or #41 rendering.
 
 ## End-message read projection (#65)
 
-history.get accepts optional end_message_only (false by default; omitted from
+history.read accepts optional end_message_only (false by default; omitted from
 ordinary serialized requests). It applies only to assistant_response originals,
 selects the last assistant message with phase final_answer or the last unphased
-assistant message, and excludes reasoning/commentary. Its history.get.end_message
-cursor scope is distinct from the unchanged ordinary history.get scope; node,
+assistant message, and excludes reasoning/commentary. Its history.read.end_message
+cursor scope is distinct from the unchanged ordinary history.read scope; node,
 revision and UTF-8 cursor binding still apply. Missing final messages are explicit
 unavailability, not fabricated answers. No provider/API execution format or
 stored payload changes. The exec client uses this projection for local Schema
@@ -1097,7 +1097,7 @@ and adds no list field, event or polling path.
 
 `history.window` returns at most eight validated direct execution links per node. `execution_count_exact: true` means all candidates were examined and the count is exact; `false` means `execution_count` is a lower bound (capped at nine), even when it is zero or fewer than eight links are shown. `executions_truncated` is true whenever completeness was not proved. Only an indexed candidate sample is sorted and hydrated. A request link's `request_node_id` may be omitted when the scan cannot prove its uniqueness. The count semantics for `history.list` are unchanged.
 
-`history.get` reads `incomplete_response` and `model_stream_observation` as a byte range of the saved JSON via SQLite incremental I/O. The byte cursor remains bound to node, revision, encoding, and projection, and pages end at UTF-8 character boundaries. Ordinary decoded text (including the end-message projection) and summary parts still rebuild text before slicing: their decoded offsets do not correspond to byte offsets in the canonical JSON, and parts are mutable cache records. There is no new stored projection.
+`history.read` reads `incomplete_response` and `model_stream_observation` as a byte range of the saved JSON via SQLite incremental I/O. The byte cursor remains bound to node, revision, encoding, and projection, and pages end at UTF-8 character boundaries. Ordinary decoded text (including the end-message projection) and summary parts still rebuild text before slicing: their decoded offsets do not correspond to byte offsets in the canonical JSON, and parts are mutable cache records. There is no new stored projection.
 
 
 ## #274 spill-to-tool provenance
@@ -1116,7 +1116,7 @@ truncation flag keep their original direct-node meaning and are not silently bro
 
 Legacy spills without this captured metadata return `{"status":"unknown","items":[],"truncated":false}`;
 unknown is not proof of no tool execution. No history backfill, source-payload traversal or reverse lookup is run.
-Use `history relations --relation sources`/`history get` for explicit forensic exploration. Source IDs can outlive
+Use `history relations --relation sources`/`history read` for explicit forensic exploration. Source IDs can outlive
 source payload retention; tombstones do not invalidate captured IDs. `excerpt_chars:0` still includes provenance.
 
 Creation reuses the already assembled spill projection and writes a separate bounded `node.spill_tools_json` column

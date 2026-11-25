@@ -7,7 +7,7 @@ Original conversation content is stored as nodes; each Thread has an adopted pat
 CLI examples below use Bash/zsh. Replace `THREAD_ID`, `NODE_ID`, `CURSOR`, and `SPACE_ID` with actual returned values. Human external terminals must connect to the same data directory as the TUI. For another location, add `--data-dir /path/to/shellboy-data` to each command.
 
 
-Current `history list` items always include `provenance`, `context`, and `selection`; `history get` always includes `provenance` and `context`. Individual unknown associations inside these records remain omitted rather than inventing IDs or times. These required records are not optional older-owner fields.
+Current `history list` items always include `provenance`, `context`, and `selection`; `history read` always includes `provenance` and `context`. Individual unknown associations inside these records remain omitted rather than inventing IDs or times. These required records are not optional older-owner fields.
 
 ## Finding and reading original content
 
@@ -17,7 +17,7 @@ In the TUI, use F6 to select a history item, O for an original-content page, N f
 shellboy thread list --limit 20
 shellboy thread get --thread THREAD_ID
 shellboy history list --thread THREAD_ID --limit 20
-shellboy history get --node NODE_ID --limit-bytes 65536
+shellboy history read --node NODE_ID --limit-bytes 65536
 ```
 
 Omit body excerpts when inspecting path structure or locating large nodes:
@@ -48,9 +48,9 @@ With neither `--ordinal` nor `--node` the window ends at the last node. `--befor
 
 Appending advances `revision` but never moves an earlier position, so a position you already read stays valid. Rewind and compaction also advance `revision` and move or remove positions. `revision` alone cannot tell the two apart, so when you reuse a position pass the node you saw there: `--ordinal N --expect-node NODE_ID`. A position past the end, a `--node` that is no longer on the path, or an `--expect-node` mismatch fails with `cursor_expired`, and `error.details` carries the current `revision` and `total`; read again from the end or from a position below `total`.
 
-The `text` returned by `history get` is a body page respecting UTF-8 character boundaries. `source_node_ids` identifies sources of summaries and similar content; `previous_node_ids` and `next_node_ids` reference original neighboring nodes. Call `history get` again for an ID you want to follow. Reading originals does not alter the Thread's adopted path. `provenance` returns node kind, creation time, current original-content revision, and originating Thread/Run/Turn only where corresponding stored records exist. Do not confuse membership in a forked Thread with the origin.
+The `text` returned by `history read` is a body page respecting UTF-8 character boundaries. `source_node_ids` identifies sources of summaries and similar content; `previous_node_ids` and `next_node_ids` reference original neighboring nodes. Call `history read` again for an ID you want to follow. Reading originals does not alter the Thread's adopted path. `provenance` returns node kind, creation time, current original-content revision, and originating Thread/Run/Turn only where corresponding stored records exist. Do not confuse membership in a forked Thread with the origin.
 
-The `context` from `history get` contains stored creation time, originating Turn/Run/Thread, and present/tombstone state. Even after body reclamation, inspect tombstone_reason and origin. These values do not infer adoption into a fork or execution start time.
+The `context` from `history read` contains stored creation time, originating Turn/Run/Thread, and present/tombstone state. Even after body reclamation, inspect tombstone_reason and origin. These values do not infer adoption into a fork or execution start time.
 
 Page through direct relationships separately by type:
 
@@ -64,12 +64,12 @@ shellboy history relations --node SOURCE_NODE_ID --relation replacements --limit
 previous/next represent conversation neighbors; sources represent sources of summary/spill output; replacements represent replacement outputs using a source. Only completed replacements are returned; unfinished or failed replacements are not treated as history. Get `node_id` from `items` to read the body; when `next_cursor` exists, continue with `--cursor` for the same node/relation. Default is 50 items, maximum 200. This does not expand unlimited ancestors/descendants. Distinguish relation items' source_revision/source_hash, recorded by the replacement, from provenance.source_revision, the returned node's current revision.
 
 ```sh
-shellboy history get --node NODE_ID --encoding UTF-8 --limit-bytes 65536 --cursor 'CURSOR'
+shellboy history read --node NODE_ID --encoding UTF-8 --limit-bytes 65536 --cursor 'CURSOR'
 ```
 
 Continue using the `next_cursor` returned by that body. Cursors are opaque: do not edit or reuse them for another node/encoding. Current body pages are capped at 64KiB. Check `tombstone_reason` for a reclaimed body; a `target_unavailable` prune refusal is not an empty body either.
 
-A `history get` tool_result is the result/excerpt saved into the conversation. Retrieve stored shell raw output separately with paginated `shellboy shell read --execution EXECUTION_ID`. See [Shell](shell.md) for encoding changes and output retention. External attachments are path references; history cannot restore past external file contents.
+A `history read` tool_result is the result/excerpt saved into the conversation. Retrieve stored shell raw output separately with paginated `shellboy shell read --execution EXECUTION_ID`. See [Shell](shell.md) for encoding changes and output retention. External attachments are path references; history cannot restore past external file contents.
 
 In the TUI, the wheel moves by three display rows; PgUp/PgDn move by the history viewport height minus one row. The saved reading position uses the original node and source position. Ctrl+End returns to the bottom. If display cache is reclaimed, original pages are fetched again. `/copy NODE_ID` retrieves original content rather than screen truncation or a reasoning placeholder.
 
@@ -87,14 +87,14 @@ shellboy history list --thread THREAD_ID --shell-state running
 
 List `provenance` and `context` describe node origin and storage state. `selection.thread_id` / `ordinal` describe the path being listed; `selection.current_cwd` is that Thread's current configuration. For the actual shell launch directory, inspect `executions[].cwd`. Do not infer historical execution cwd from current settings.
 
-`executions` comes from stored relationships between tool groups/calls and shell executions, not guessed from ID-like body text or acceptance JSON. Follow `execution_id` with `shell get/read`, and `request_node_id` / `result_node_id` with `history get`. Records without a unique request node omit its ID. Distinguish `call_state` from shell `state`.
+`executions` comes from stored relationships between tool groups/calls and shell executions, not guessed from ID-like body text or acceptance JSON. Follow `execution_id` with `shell get/read`, and `request_node_id` / `result_node_id` with `history read`. Records without a unique request node omit its ID. Distinguish `call_state` from shell `state`.
 
 Each node lists at most eight executions. For `history list`, `execution_count` gives the total. In `history window`, `execution_count_exact: false` makes it a lower bound capped at nine, even when no links are shown; `executions_truncated` then also means completeness is unproved. Calls cancelled or rejected without creating an execution are excluded from this count. `command_excerpt` is a saved command excerpt of at most 80 characters; inspect `shell get` or the original request for the full command.
 
 ```bash
 shellboy shell get --execution EXECUTION_ID
 shellboy shell read --execution EXECUTION_ID --encoding UTF-8
-shellboy history get --node REQUEST_NODE_ID
+shellboy history read --node REQUEST_NODE_ID
 shellboy status --run ORIGIN_RUN_ID --all --limit 200
 ```
 
@@ -128,7 +128,7 @@ unchanged, so the selected path is `[earlier Turns][request][summary]`. User
 messages in the summarized work are given to the summarizer in their original
 order; their substance goes in a "User instructions to keep" section, not as
 verbatim copies. Every summary asks for that section. The originals stay
-readable with `shellboy history get` and `shellboy history relations`. One
+readable with `shellboy history read` and `shellboy history relations`. One
 summary runs per attempt.
 
 Reasoning follows one rule for every replacement: reasoning before the first
@@ -158,7 +158,7 @@ Manual compaction during recovery wait does not automatically resume the normal 
 
 Returned reasoning text/summaries are collapsed by default in the TUI. Toggle them with `/reasoning NODE_ID`. Shellboy does not invent reasoning that was not returned or decrypt/display encrypted reasoning. Source character positions and node IDs do not change when toggling.
 
-Changing connection or model advances the outgoing reasoning epoch and excludes prior-epoch reasoning/opaque continuation data from subsequent requests. Switching A→B→A does not automatically restore old A opaque data. Original nodes remain in the DB; history can retrieve displayable original text. `history get` does not display opaque bodies. Changing effort alone is distinct from switching models.
+Changing connection or model advances the outgoing reasoning epoch and excludes prior-epoch reasoning/opaque continuation data from subsequent requests. Switching A→B→A does not automatically restore old A opaque data. Original nodes remain in the DB; history can retrieve displayable original text. `history read` does not display opaque bodies. Changing effort alone is distinct from switching models.
 
 ## Search requires a separate index
 
@@ -174,7 +174,7 @@ CLI equivalent:
 shellboy history search --query 'error handling for the current task' --limit 10
 ```
 
-Search creates a query embedding in the active IndexSpace and returns excerpts grouped by original node, distances, node IDs, and related fields. Verify results through `history get` on the original node. Embedding API use may cost money. No matches do not necessarily mean the original is absent: check missing indexing, another space, individual failures, and similar causes. Local folders are not automatically ingested.
+Search creates a query embedding in the active IndexSpace and returns excerpts grouped by original node, distances, node IDs, and related fields. Verify results through `history read` on the original node. Embedding API use may cost money. No matches do not necessarily mean the original is absent: check missing indexing, another space, individual failures, and similar causes. Local folders are not automatically ingested.
 
 Filter the scope first through the CLI or F8's “履歴 | 検索” (History · Search):
 
@@ -346,7 +346,7 @@ All use the same queued acceptance as existing compact. Query downstream with th
 
 Originals remain after omission. `restore` restores the original range at the latest marker on the selected path (or the marker specified by `--from`), preserving subsequent conversation. In the TUI, use argument-free `/restore`. Attachments do not automatically return to send selection; add them with new attachment IDs if needed. Restoring beyond the guideline produces a warning.
 
-To restore omitted context in shorter form, use `--summary --from ... --to ...` with the notice's first/last original node IDs. This targets all omitted sources of one marker. Selecting only part of a hidden range is rejected with guidance to the full boundaries. Reading large amounts of originals through `history get` itself adds those read results to conversation input.
+To restore omitted context in shorter form, use `--summary --from ... --to ...` with the notice's first/last original node IDs. This targets all omitted sources of one marker. Selecting only part of a hidden range is rejected with guidance to the full boundaries. Reading large amounts of originals through `history read` itself adds those read results to conversation input.
 
 Edit infrequently and in coherent ranges. Prompt caching after the edited position may be invalidated. Result `before_characters` / `after_characters` / `changed_suffix_characters` count replay characters, not tokens or cache hits. Omission/restoration does not undo executed commands or file changes.
 

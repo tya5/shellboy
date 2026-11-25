@@ -235,9 +235,9 @@ struct CachedPart {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     round: Option<u32>,
 }
-/// Most parts one `history get --parts` reads (a summary has far fewer).
+/// Most parts one `history read --parts` reads (a summary has far fewer).
 const PART_READ_LIMIT: usize = 1024;
-/// Reader for `history get --node SUMMARY --parts`: per-part facts as JSON and
+/// Reader for `history read --node SUMMARY --parts`: per-part facts as JSON and
 /// the concatenated bodies as text. Absent fields (records saved before the
 /// stage/sources were recorded) are reported as null, never reconstructed; a
 /// key without a record (collected or overwritten) is `not_retained`.

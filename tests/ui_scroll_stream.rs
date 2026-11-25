@@ -148,7 +148,7 @@ fn completed_prose_stream_cannot_remain_in_the_selected_path_ordinal_cache() {
         "canonical ordinal replacement must preserve the top saved prose row; completed Markdown may be rendered"
     );
     // One downward step after completion must not treat the provisional attempt
-    // as canonical ordinal100 or manufacture a history.get attempt-node target.
+    // as canonical ordinal100 or manufacture a history.read attempt-node target.
     ui.event(Event::Mouse(MouseEvent {
         kind: MouseEventKind::ScrollDown,
         column: 10,

@@ -1,7 +1,7 @@
 use rusqlite::{Connection, params};
 use shellboy::{
     history::{History, provenance, relations},
-    protocol::{ErrorCode, HistoryGetArgs, HistoryRelation, HistoryRelationsArgs},
+    protocol::{ErrorCode, HistoryReadArgs, HistoryRelation, HistoryRelationsArgs},
     storage::DbWorker,
 };
 
@@ -78,7 +78,7 @@ async fn provenance_records_actual_origin_without_inventing_turns_or_thread_memb
         Ok(())
     }).await.unwrap();
     let body = History::new(db.clone())
-        .get(HistoryGetArgs {
+        .read(HistoryReadArgs {
             end_message_only: false,
             parts: false,
             node_id: "owned".into(),
@@ -123,7 +123,7 @@ async fn summary_and_spill_source_pages_preserve_ordinals_and_recorded_witness_a
         Ok(())
     }).await.unwrap();
     let tombstone = History::new(db.clone())
-        .get(HistoryGetArgs {
+        .read(HistoryReadArgs {
             end_message_only: false,
             parts: false,
             node_id: "source-000".into(),

@@ -761,7 +761,7 @@ mod tests {
         assert!(sources.contains("n0"));
         assert!(list_page(Some("invalid".into())).await.is_err());
         let raw = crate::history::History::new(owner.db.clone())
-            .get(crate::protocol::HistoryGetArgs {
+            .read(crate::protocol::HistoryReadArgs {
                 end_message_only: false,
                 parts: false,
                 node_id: "n0".into(),

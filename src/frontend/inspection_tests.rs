@@ -1692,7 +1692,7 @@ async fn f8_history_body_retains_original_detail_while_current_source_facts_chan
     let writer = rusqlite::Connection::open(path).unwrap();
     writer.execute_batch("BEGIN IMMEDIATE").unwrap();
     key(&mut ui, &sender, KeyCode::F(8), KeyModifiers::NONE);
-    dispatch(&sender, ui.event(Event::Paste("history get".into())));
+    dispatch(&sender, ui.event(Event::Paste("history read".into())));
     key(&mut ui, &sender, KeyCode::Enter, KeyModifiers::NONE);
     dispatch(&sender, ui.event(Event::Paste("retained-history".into())));
     key(&mut ui, &sender, KeyCode::Enter, KeyModifiers::NONE);
@@ -1897,7 +1897,7 @@ async fn f8_history_repeat_hint_uses_service_language_and_renders_at_80_columns(
     let ja = "aから同じ履歴照会と引数を指定して再取得。現在状態の更新は元の結果を取り直しません";
     let en = "Use a to enter the same query/args; refresh does not rerun.";
     for language in ["en", "ja"] {
-        for command in ["history get", "history list"] {
+        for command in ["history read", "history list"] {
             let (root, owner, control, server) =
                 super::control_tests::fixture_with_language(language).await;
             owner.db.call(|db| {

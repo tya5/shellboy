@@ -391,7 +391,7 @@ remain protected; autosave/restore fences survive admitted/cancelled copy dispos
 Adopt [exec](cli.md#noninteractive-saved-work-exec-65) as a composition of existing
 owner operations and local bounded subset validation. No Core execution engine,
 owner auto-start, provider structured-output dependency, table/worker/queue or new
-crate. Ordinary history.get stays unchanged; its optional end-message-only read projection (`--end-message-only`)
+crate. Ordinary history.read stays unchanged; its optional end-message-only read projection (`--end-message-only`)
 has an independent cursor scope and supports exact saved end-message validation.
 
 Issue #303 supersedes the historical Issue #73/D-015 bounded map/reduce
@@ -404,7 +404,7 @@ values. Existing history, receipts and usage JSON are not rewritten. Values
 already removed by that migration are not recoverable from the current schema
 alone; any preservation or recovery change requires a separate authorized
 forward migration. Migrations 40–43 remain immutable. The global auto-compaction
-target setting is independent and retained. Historical `history get --parts` remains read-only for existing saved
+target setting is independent and retained. Historical `history read --parts` remains read-only for existing saved
 cache records; current summaries neither create nor consume map/reduce parts.
 
 

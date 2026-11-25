@@ -26,7 +26,7 @@ shellboy message get --message MESSAGE_ID
 ```
 
 Use `shellboy message get --message MESSAGE_ID` to inspect the saved sender;
-`history get --node MESSAGE_ID` / `history list` expose the same `provenance.sender`.
+`history read --node MESSAGE_ID` / `history list` expose the same `provenance.sender`.
 A verified model sender has originating instance/Thread/Run/Turn/execution IDs,
 not merely the receiving Run's starter. A `label` is self-asserted and grants no
 authority; `external_cli` does not prove human input, and legacy missing evidence
@@ -41,7 +41,7 @@ Creation, sending, and retrieving the reply are separate steps. Distinguish crea
 
 Use `shellboy status --thread CHILD_THREAD_ID` to list current stored state, then get individual objects using the returned Run/Turn/shell/message IDs. Thread hierarchy is organizational; independent Run stop/retry acts on that Run and its shells only.
 
-Creating with a parent inherits cwd, AGENTS reference, connection, model, and effort. Corresponding create arguments can explicitly override cwd, connection, model, effort and the instruction reference (`--agents PATH`). Without `--agents`, changing cwd when creating a child still preserves its parent's AGENTS reference. The parent's entire history is not copied. Include needed text or node IDs to read through `history get` in the request. See [History and search](history-and-search.md) for independent Threads and history forks.
+Creating with a parent inherits cwd, AGENTS reference, connection, model, and effort. Corresponding create arguments can explicitly override cwd, connection, model, effort and the instruction reference (`--agents PATH`). Without `--agents`, changing cwd when creating a child still preserves its parent's AGENTS reference. The parent's entire history is not copied. Include needed text or node IDs to read through `history read` in the request. See [History and search](history-and-search.md) for independent Threads and history forks.
 
 `assignment` is `new_run`, `new_turn`, `existing_turn`, or `pending`. With `pending`, no Run/Turn has been determined yet; do not wait on a nonexistent Turn. Track the same message with `message get`, inspect the `held` reason and the target's `thread get` / `run get`. Once assigned to a definite Run/Turn, a message is not later reassigned to different IDs. Do not bypass pending by sending a duplicate request.
 

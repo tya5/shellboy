@@ -946,7 +946,7 @@ pub(super) fn capture_response(
             }
             RetainedRoute::SearchReferences
         }
-        Command::HistoryGet(a) => {
+        Command::HistoryRead(a) => {
             let sources = value.get("source_node_ids")?.as_array()?;
             if sources.is_empty() {
                 return None;
@@ -1068,7 +1068,7 @@ pub(super) fn capture_response(
     let total = match command {
         Command::HistoryRelations(_) => 1 + value["items"].as_array().map_or(0, Vec::len),
         Command::HistorySearch(_) => value["items"].as_array().map_or(0, Vec::len),
-        Command::HistoryGet(_) => 1 + value["source_node_ids"].as_array().map_or(0, Vec::len),
+        Command::HistoryRead(_) => 1 + value["source_node_ids"].as_array().map_or(0, Vec::len),
         Command::Wait(a) => a
             .conditions
             .iter()

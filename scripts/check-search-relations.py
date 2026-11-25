@@ -134,7 +134,7 @@ def main():
         assert search('different_thread', '--thread', 'visual-markdown') == []
         assert search('excluded_kind', '--kind', 'user', '--exclude-kind', 'user') == []
         assert search('exclusive_to', '--to', '2026-10-24T12:00:00+09:00') == []
-        original = cli('original', 'history', 'get', '--node', user)
+        original = cli('original', 'history', 'read', '--node', user)
         assert 'H01 はじめの依頼' in original['text'] and original['provenance'] == hit['provenance'], original
         next_page = cli('next', 'history', 'relations', '--node', user, '--relation', 'next', '--limit', '1')
         assert [entry['node_id'] for entry in next_page['items']] == [answer], next_page

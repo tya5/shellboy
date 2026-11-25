@@ -495,8 +495,8 @@ fn read_only_run_meaning_send_verb_and_mode_effects_are_factual() {
 fn runtime_cli_flags_and_mutual_exclusions_are_not_lost_in_form_metadata() {
     for (args, id, field) in [
         (
-            vec!["history", "get", "--node", "node", "--end-message-only"],
-            OperationId::HistoryGet,
+            vec!["history", "read", "--node", "node", "--end-message-only"],
+            OperationId::HistoryRead,
             FieldId::EndMessageOnly,
         ),
         (
@@ -624,7 +624,7 @@ fn origins_describe_real_context_and_keep_cli_and_tui_defaults_distinct() {
         Confirmation::IndexCostPreview
     );
     assert_eq!(
-        OperationId::HistoryGet.spec().confirmation,
+        OperationId::HistoryRead.spec().confirmation,
         Confirmation::None
     );
 }

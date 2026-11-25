@@ -171,7 +171,7 @@ fn window_projected(
             let source_omitted = row.payload_bytes as u64 > items::NODE_SOURCE_BYTES as u64
                 && row.deleted_reason.is_none();
             let excerpt_reason = if source_omitted {
-                Some("excerpt exceeds source budget; use history get".into())
+                Some("excerpt exceeds source budget; use history read".into())
             } else {
                 row.deleted_reason
             };

@@ -52,7 +52,7 @@ async fn help_examples_parse_and_name_the_next_observation() {
         ],
         vec!["message", "get", "--message", "MESSAGE_ID"],
         vec!["turn", "get", "--turn", "TURN_ID"],
-        vec!["history", "get", "--node", "END_MESSAGE_NODE_ID"],
+        vec!["history", "read", "--node", "END_MESSAGE_NODE_ID"],
         vec!["shell", "get", "--execution", "WORK_EXECUTION_ID"],
         vec![
             "shell",

@@ -3931,7 +3931,7 @@ async fn history_search_hit_omits_the_creating_send_operation_id() {
         .execute(
             Request::new(
                 "fixture:get-search-provenance",
-                Command::HistoryGet(serde_json::from_value(json!({"node_id":node})).unwrap()),
+                Command::HistoryRead(serde_json::from_value(json!({"node_id":node})).unwrap()),
             ),
             None,
         )

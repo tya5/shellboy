@@ -22,7 +22,7 @@ GCは別の実装段階。会話・推論・要約の期限削除は導入しな
 
 ## 本文readerの行decode（R2-6）
 
-history get・index source・standalone RAG nodeは、既にpayloadを読むreaderとしてcrate内NodeRowを共有する。named fieldはkind/payload/revision/body_hash/deleted_reasonで、共通decoderの列対応を一箇所に固定する。history getのprojectionは未使用body_hashをNULLにし、従来読まなかったhashの不正型で失敗しない。各readerのNULL/tombstone判定、revision cast、本文size limit、JSON parse、エラー公開は各境界に残す。witnessのpayload存在判定や2〜3列の参照queryに本文取得を持ち込まない。DDL・保存bytesは変更しない。
+history read・index source・standalone RAG nodeは、既にpayloadを読むreaderとしてcrate内NodeRowを共有する。named fieldはkind/payload/revision/body_hash/deleted_reasonで、共通decoderの列対応を一箇所に固定する。history readのprojectionは未使用body_hashをNULLにし、従来読まなかったhashの不正型で失敗しない。各readerのNULL/tombstone判定、revision cast、本文size limit、JSON parse、エラー公開は各境界に残す。witnessのpayload存在判定や2〜3列の参照queryに本文取得を持ち込まない。DDL・保存bytesは変更しない。
 
 ## 局所helperの整理（R2-8）
 
@@ -139,11 +139,11 @@ as branches-are-Threads) and [decisions](../development/decisions.md) D-237-1.
 `thread prune` releases a Thread's hold on originals of adopted summaries and
 spills (see [GC](gc.md)). Readers treat such an original as not retained as soon
 as the prune commits, if no other root (path, another Thread's Turn, receipt,
-pin, unpruned consumer) holds it: `history get` returns `target_unavailable`
+pin, unpruned consumer) holds it: `history read` returns `target_unavailable`
 with a "pruned ... not retained" message, and a tombstoned body records
 `deleted_reason=pruned_unreachable`; the check does not wait for the GC.
 `searchable` excludes the node. Summary and spill nodes, edges and
-`replacement_source` rows remain, so `history get` of a summary still lists
+`replacement_source` rows remain, so `history read` of a summary still lists
 source IDs.
 
 ## Raw Thread override inheritance
@@ -162,7 +162,7 @@ identity and transaction rollback rules remain unchanged.
 ### TUI canonical copy (#311 Unit 2)
 
 An explicit Copy reads one exact immutable node identity through native
-`history.get` against the selected owner. The body's UTF-8 cursor is scoped to
+`history.read` against the selected owner. The body's UTF-8 cursor is scoped to
 node, source revision, encoding and projection. A different revision, missing
 or pruned source, or tombstone refuses copy; the client never copies an excerpt
 or a successfully read prefix instead. Requests use at most 64 KiB per page;

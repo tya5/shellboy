@@ -962,7 +962,7 @@ impl ThreadView {
                 .is_some_and(|id| self.provisional_nodes.contains(id))
         {
             // Keep this frame while resolving real ordinals and source
-            // offsets. No provisional ID is sent to history.get.
+            // offsets. No provisional ID is sent to history.read.
             self.start_rebase_navigation();
             let action = UiAction::RebaseHistory {
                 thread_id,

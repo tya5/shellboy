@@ -118,10 +118,10 @@ fn previously_missing_flags_have_typed_effects() {
     assert!(
         matches!(send.command(&c.cwd).unwrap(),Command::MessageSend(args)if args.resume_recovery&&args.deliver==Deliver::Now&&args.sender_label.as_deref()==Some("operator"))
     );
-    let mut history = Form::new(OpKind::HistoryGet, &c);
+    let mut history = Form::new(OpKind::HistoryRead, &c);
     set(&mut history, "end_message_only", "true");
     assert!(
-        matches!(history.command(&c.cwd).unwrap(),Command::HistoryGet(args)if args.end_message_only)
+        matches!(history.command(&c.cwd).unwrap(),Command::HistoryRead(args)if args.end_message_only)
     );
     let mut rebuild = Form::new(OpKind::IndexRebuild, &c);
     set(&mut rebuild, "dimensions", "512");

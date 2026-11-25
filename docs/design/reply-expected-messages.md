@@ -84,8 +84,8 @@ These correct or sharpen assumptions in the issue thread.
    normal `driver::next` completion (control.md #52). Only
    `state::complete_answer_turn` writes the node, and it keeps the Turn open
    while the Turn has unapplied accepted receipts.
-8. **`history get --final-answer-only` is not redundant with ordinary reads.**
-   Ordinary `history get` of an assistant node flattens reasoning and natural
+8. **`history read --final-answer-only` is not redundant with ordinary reads.**
+   Ordinary `history read` of an assistant node flattens reasoning and natural
    text; the projection returns only the last `final_answer` (or unphased)
    assistant message and has its own cursor scope. Today it fails with
    `target_unavailable` when the node holds no such message.
@@ -254,7 +254,7 @@ name). Items are `{message_id, created_at, asked_by, sender, recipient, excerpt}
 oldest first, with `--limit` / `--cursor`. `thread get` returns
 `pending_replies.owed_by` / `.asked_by` as `{count, exact}`, exact through 16.
 Bodies are read with
-`message get` / `history get --node`. Besides that, every reply-expected message
+`message get` / `history read --node`. Besides that, every reply-expected message
 is announced with its ID when admitted, and the Run-end reminder lists the
 remaining ones, so a model that lost the ID to compaction can recover it.
 
@@ -279,7 +279,7 @@ Removes `answer_node_id`. Adds, only when relevant:
 - `reply_to: ORIGINAL_ID` when the message is itself a reply delivered to a
   model sender.
 
-Reading the reply body is `history get --node REPLY_NODE_ID`, as for any node.
+Reading the reply body is `history read --node REPLY_NODE_ID`, as for any node.
 
 ### `message cancel`
 
@@ -423,7 +423,7 @@ contracts from "answer" to "end message" so it is no longer read as a reply:
 | `status` item `answer_node_id` | run/turn/attempt items: `end_message_node_id`; message items: `reply_node_id` (from the receipt, no longer the Turn's answer) |
 | interruption context `answer_node_id` | `end_message_node_id` |
 | `message get` `answer_node_id` | removed; see `reply` |
-| `history get --final-answer-only` / `HistoryGetArgs.final_answer_only` / cursor scope `history.get.final_answer` | `--end-message-only` / `end_message_only` / `history.get.end_message` (same projection; see [Decisions](#decisions) Q12) |
+| `history read --final-answer-only` / `HistoryReadArgs.final_answer_only` / cursor scope `history.read.final_answer` | `--end-message-only` / `end_message_only` / `history.read.end_message` (same projection; see [Decisions](#decisions) Q12) |
 | `exec` diagnostics `answer_node_id` | `reply_node_id` or `end_message_node_id`, by `--result` mode |
 
 Guides describe it as "the last assistant message of the Turn; not a reply and
@@ -444,9 +444,9 @@ sender-label rules; repairs are sent in the same mode.
 
 | Mode | Send | Wait | Result text |
 |---|---|---|---|
-| `reply` (default) | `message ask --thread` | `reply_received` on the message **and** `run_ended` on the Run the message was assigned to | the reply node (`message get` → `reply.node_id` → `history get --node`) |
-| `turn-end` | ordinary `message send`, no reply duty | `turn_completed` on the Turn the message was assigned to | that Turn's end message (`turn get` → `end_message_node_id` → `history get --end-message-only`) |
-| `run-end` | ordinary `message send`, no reply duty | `run_ended` on the Run the message was assigned to | that Run's end message (`run get` → `end_message_node_id` → `history get --end-message-only`) |
+| `reply` (default) | `message ask --thread` | `reply_received` on the message **and** `run_ended` on the Run the message was assigned to | the reply node (`message get` → `reply.node_id` → `history read --node`) |
+| `turn-end` | ordinary `message send`, no reply duty | `turn_completed` on the Turn the message was assigned to | that Turn's end message (`turn get` → `end_message_node_id` → `history read --end-message-only`) |
+| `run-end` | ordinary `message send`, no reply duty | `run_ended` on the Run the message was assigned to | that Run's end message (`run get` → `end_message_node_id` → `history read --end-message-only`) |
 
 The composed request keeps today's "return ONLY one JSON value matching this
 Schema" contract. In `reply` mode it says to put that value in the reply to
@@ -491,7 +491,7 @@ Two user decisions (D10, D11) separate these cases:
   `--schema` is given. Schema validation and repairs apply only to non-empty
   text, so an empty end message is never a mismatch and never triggers a
   repair. Exit 0 therefore means "valid JSON, or an empty end message".
-  `history get --end-message-only` returns empty text for such a node instead
+  `history read --end-message-only` returns empty text for such a node instead
   of today's `target_unavailable`.
 - **No end message (D11).** The Turn completed without producing an end
   message at all: a Turn ended by Esc completes with `end_message_node_id`
@@ -556,7 +556,7 @@ target, as today's probe expects), an older owner
 rejects the unknown condition (exit 6 `owner_version_mismatch`). `reply_received`
 and the end-message rename land before the exec change (see the plan), so one
 probe covers all modes. A refusal at the end-message read still exits 6 with
-the known IDs and the advice to use ordinary `history get --node`.
+the known IDs and the advice to use ordinary `history read --node`.
 
 Behaviour change of the default: the model must call `shellboy message reply`.
 A model that only writes a final text gets one reminder Turn and then exec
@@ -583,7 +583,7 @@ Every flow in `docs/guides/delegation.md` and the Agent Guide.
 | Check assignment / pending | `message get` (`assignment`, `held` reason) | unchanged; also shows `reply.state` | no |
 | Wait for one child | `wait turn_completed CHILD_TURN` | `wait reply_received CHILD_MESSAGE` (+ `thread_settled` for recovery/stop if wanted) | no; waits on the specific request rather than whichever Turn answered |
 | Wait for any of several | several `turn_completed` (any) or `thread_settled` with cursor | several `reply_received` (any); `thread_settled` + cursor unchanged | no |
-| Get the result | `turn get` → `answer_node_id` → `history get` | the reply arrives in the parent's own conversation as a message; or `message get` → `reply.node_id` → `history get` | no; the result is now the child's deliberate reply, not its last text |
+| Get the result | `turn get` → `answer_node_id` → `history read` | the reply arrives in the parent's own conversation as a message; or `message get` → `reply.node_id` → `history read` | no; the result is now the child's deliberate reply, not its last text |
 | Child finished without a result | parent sees an answer node or none | reminder once, then `ignored` notice wakes the parent; `last_end_message` still readable | no; failure is now explicit |
 | Progress reports | child `message send --thread PARENT` (ordinary) | unchanged; ordinary messages (D3) | no |
 | Wait for all owned work to drain | `wait run_ended` | unchanged | no |
@@ -626,7 +626,7 @@ decided here without an explicit user answer (see [Decisions](#decisions)).
 | G7 | `--deliver now` | Decided | combinable (D2); no reply-specific effect |
 | G8 | `--deliver complete` and Run-end ordering | Design | waiting `complete` messages are delivered first; the reminder is checked only when none wait, so a `complete` message can still be answered before any reminder |
 | G9 | Forks (`thread fork`) | Decided | receipts stay with the original target Thread; the fork shares the node but cannot reply and has no reminder (Q13) |
-| G10 | Compaction replacing original or reply nodes | Design | node rows stay (receipt and Turn roots), so `message get` and `history get` still work; the model regains IDs from `message list --awaiting` and the reminder |
+| G10 | Compaction replacing original or reply nodes | Design | node rows stay (receipt and Turn roots), so `message get` and `history read` still work; the model regains IDs from `message list --awaiting` and the reminder |
 | G11 | Attachments in replies | Decided | text only, like `message send`; a human can send attachments as an ordinary message (Q8) |
 | G12 | Who may reply | Decided | recipient model (D4) and humans; parent-for-child not allowed (Q5) |
 | G13 | Who may cancel | Decided | sender may cancel (decided); authority reuses the existing cancel rule |
@@ -652,7 +652,7 @@ decided here without an explicit user answer (see [Decisions](#decisions)).
 | G33 | Child completion before Revisit boundary | Superseded by #302 | Child lifecycle events no longer wake a parent Run. Completion is handled by owner state, independently of user messages. |
 | G34 | Thread title derived from first user body | Design | a reply node on a sender Thread is a user node like any message; no special case |
 | G35 | `thread request` debug command | Decided | unchanged; it shows the new notice nodes in rebuilt requests (Q1) |
-| G36 | `history get --final-answer-only` | Judgement | kept and renamed `--end-message-only`, because `exec --result turn-end\|run-end` needs it (see Q12) |
+| G36 | `history read --final-answer-only` | Judgement | kept and renamed `--end-message-only`, because `exec --result turn-end\|run-end` needs it (see Q12) |
 | G37 | Watch views (`/threads active`) using the answer for "completed / unseen" | Design | same fact, renamed end message; no behaviour change |
 | G38 | Logical capacity at send | Design | reply text uses the existing `draft_bytes` limit and capacity admission |
 | G39 | Sender label on replies | Design | `--sender-label` accepted, self-asserted as today |
@@ -671,13 +671,13 @@ owner, as with #187). The internal column `turn.answer_node_id` keeps its name.
 
 Public names only: `answer_node_id` → `end_message_node_id` on Run, Turn, wait
 turn snapshot, `status` run/turn/attempt items, interruption context; `last_answer` →
-`last_end_message`; `history get --final-answer-only` → `--end-message-only`
-(`HistoryGetArgs.end_message_only`, cursor scope `history.get.end_message`);
+`last_end_message`; `history read --final-answer-only` → `--end-message-only`
+(`HistoryReadArgs.end_message_only`, cursor scope `history.read.end_message`);
 exec diagnostics `answer_node_id` → `end_message_node_id` and its probe/refusal
 text. `message get` `answer_node_id` stays until step 2.
 
 - Protocol/Core: `src/protocol.rs` (RunDetails, TurnDetails, ThreadSummary,
-  ThreadDetails, HistoryGetArgs), `src/control/db.rs`,
+  ThreadDetails, HistoryReadArgs), `src/control/db.rs`,
   `src/control/db/thread_summary.rs`, `src/control/state.rs`,
   `src/control/wait.rs`, `src/control/interruption.rs`, `src/status.rs`,
   `src/status/observation.rs`, `src/thread_observation.rs`,
@@ -868,7 +868,7 @@ the memo gave no single recommendation, the choice made here is marked
 | Q9 | Reminder count | Once per message for its whole life, not per Run |
 | Q10 | Names | Public names `end_message_node_id`, `last_end_message`. **Judgement:** the TUI assistant row label `回答` is unchanged (the memo gave no recommendation; UI wording is not changed without approval). The detail field label `回答node ID` follows its field to `終了メッセージnode ID` |
 | Q11 | Esc | User: after Esc ends a Turn, an unanswered message is still reminded once at Run end. The reminder is once per message, so a second Esc lets the Run end; the TUI shows that a reminder is running |
-| Q12 | Remove `history get --final-answer-only` | **Judgement:** not removed. The recommendation assumed exec would stop using it, but the user's Q14 answer (`--result turn-end\|run-end`) needs the end-message projection. It is renamed `--end-message-only` with the rest of the "answer" vocabulary |
+| Q12 | Remove `history read --final-answer-only` | **Judgement:** not removed. The recommendation assumed exec would stop using it, but the user's Q14 answer (`--result turn-end\|run-end`) needs the end-message projection. It is renamed `--end-message-only` with the rest of the "answer" vocabulary |
 | Q13 | Forks | A fork does not inherit the duty to reply; only the original Thread can reply |
 | Q14 | exec strictness | User: replaced by `exec --result reply\|turn-end\|run-end`, default `reply`. `reply` reminds once and then exits 4 `ignored`; `turn-end` and `run-end` send an ordinary message with no reply duty and never produce the reply outcomes. See [exec](#exec) |
 | Q15 | Cap (superseded by #262 user decision, 2026-11-08) | 16 pending duties per recipient Thread; the 17th ask is refused with `reply_limit` and details containing limit/current_count. Withdraw a request you sent, or wait for a reply |

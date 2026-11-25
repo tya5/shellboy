@@ -204,7 +204,7 @@ Semantics:
 | Surface | Archived Thread |
 |---|---|
 | `thread list` (CLI, TUI, Web) | hidden by default; `--archived only` lists them, `--archived include` lists both |
-| `thread get`, `history get/search`, `status`, `wait`, `usage`, `thread branches`, `message get` | unchanged: readable, searchable, counted. Items gain `archived_at` (branches: `archived: bool`) so viewers can mark them |
+| `thread get`, `history read/search`, `status`, `wait`, `usage`, `thread branches`, `message get` | unchanged: readable, searchable, counted. Items gain `archived_at` (branches: `archived: bool`) so viewers can mark them |
 | Receiving messages | allowed; a model or human can still send |
 | **New Run starts on it** | **clears `archived_at`** (auto-unarchive) and records a context entry `thread_unarchived {reason:"run_started"}`. Messages into a live Run and held `--deliver complete` reservations do not unarchive (a `--deliver complete` or reply on an idle Thread starts a Run and does); only the moment new work actually starts |
 | Archiving a Thread with a live Run | allowed for an explicit single target (user's choice); list hides it, `status`/`watch` still show live work. Bulk calls skip Threads with live/stopping Runs and report them as `skipped` |

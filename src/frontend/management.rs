@@ -464,8 +464,8 @@ pub(super) fn follow_target_in(
         })?;
         if matches!(mode, ManagementFollow::Read) {
             let source=row.get("source_node_id").and_then(Value::as_str).filter(|s|!s.is_empty()).ok_or_else(||ApiError::new(ErrorCode::TargetUnavailable,"Saved attachment source node is unavailable; select its metadata to inspect saved selection"))?;
-            return Ok(FollowTarget::Command(Box::new(Command::HistoryGet(
-                HistoryGetArgs {
+            return Ok(FollowTarget::Command(Box::new(Command::HistoryRead(
+                HistoryReadArgs {
                     node_id: source.into(),
                     end_message_only: false,
                     parts: false,
@@ -563,7 +563,7 @@ fn follow_in(
             | Command::TurnGet(_)
             | Command::MessageGet(_)
             | Command::ThreadGet(_)
-            | Command::HistoryGet(_)
+            | Command::HistoryRead(_)
             | Command::ShellGet(_)
             | Command::ShellRead(_) => Ok(command),
             _ => Err(unavailable()),
@@ -595,7 +595,7 @@ fn follow_in(
         | "answer_node_id"
         | "end_message_node_id"
         | "request_node_id"
-        | "result_node_id" => Ok(Command::HistoryGet(HistoryGetArgs {
+        | "result_node_id" => Ok(Command::HistoryRead(HistoryReadArgs {
             end_message_only: false,
             parts: false,
             node_id: id,
@@ -1162,10 +1162,10 @@ mod attachment_reference_tests {
             matches!(follow_target(&value,"/attachments/0/attachment_id",ManagementFollow::Inspect).unwrap(),FollowTarget::Attachment{thread_id,attachment_id} if thread_id=="foreign"&&attachment_id=="a")
         );
         assert!(
-            matches!(follow_target(&value,"/attachments/0/attachment_id",ManagementFollow::Read).unwrap(),FollowTarget::Command(command) if matches!(command.as_ref(),Command::HistoryGet(a) if a.node_id=="source"))
+            matches!(follow_target(&value,"/attachments/0/attachment_id",ManagementFollow::Read).unwrap(),FollowTarget::Command(command) if matches!(command.as_ref(),Command::HistoryRead(a) if a.node_id=="source"))
         );
         assert!(
-            matches!(follow(&value,"/attachments/0/source_node_id",ManagementFollow::Inspect).unwrap(),Command::HistoryGet(a) if a.node_id=="source")
+            matches!(follow(&value,"/attachments/0/source_node_id",ManagementFollow::Inspect).unwrap(),Command::HistoryRead(a) if a.node_id=="source")
         );
         let missing =
             serde_json::json!({"thread_id":"viewer","attachments":[{"attachment_id":"a"}]});

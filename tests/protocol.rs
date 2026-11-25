@@ -132,7 +132,7 @@ fn all_public_commands_have_typed_roundtrip_fixtures() {
             json!({"conditions":[{"type":"run_ended","run_id":"r"}]}),
         ),
         ("history.list", json!({"thread_id":"t"})),
-        ("history.get", json!({"node_id":"n"})),
+        ("history.read", json!({"node_id":"n"})),
         ("history.search", json!({"query":"query"})),
         (
             "history.relations",
@@ -184,7 +184,7 @@ fn all_public_commands_have_typed_roundtrip_fixtures() {
 fn rejects_unknown_fields_and_invalid_limits_without_echoing_inputs() {
     for value in [
         json!({"protocol_version":PROTOCOL_VERSION,"operation_id":"op","command":"thread.list","args":{"limit":201}}),
-        json!({"protocol_version":PROTOCOL_VERSION,"operation_id":"op","command":"history.get","args":{"node_id":"n","limit_bytes":65537}}),
+        json!({"protocol_version":PROTOCOL_VERSION,"operation_id":"op","command":"history.read","args":{"node_id":"n","limit_bytes":65537}}),
         json!({"protocol_version":PROTOCOL_VERSION,"operation_id":"op","command":"history.search","args":{"query":"q","limit":51}}),
         json!({"protocol_version":PROTOCOL_VERSION,"operation_id":"op","command":"thread.list","args":{"secret":"do not echo"}}),
         json!({"protocol_version":PROTOCOL_VERSION,"operation_id":"op","command":"thread.list","args":{},"unknown":"do not echo"}),
@@ -703,7 +703,7 @@ fn argument_local_validation_keeps_first_error_order_and_distinct_units() {
             "limit must be in 1..=50",
         ),
         (
-            json!({"command":"history.get","args":{"node_id":"","encoding":"","limit_bytes":0}}),
+            json!({"command":"history.read","args":{"node_id":"","encoding":"","limit_bytes":0}}),
             "node_id must not be empty",
         ),
         (
@@ -1807,4 +1807,15 @@ fn exact_target_wire_names_reject_retired_selectors() {
             serde_json::from_value(json!({"command":operation,"args":args})).unwrap();
         accepted.validate().unwrap();
     }
+}
+
+#[test]
+fn history_read_dispatch_rejects_the_retired_wire_verb() {
+    let args = json!({"node_id":"n"});
+    assert!(
+        serde_json::from_value::<Command>(json!({"command":"history.get","args":args})).is_err()
+    );
+    let read: Command =
+        serde_json::from_value(json!({"command":"history.read","args":args})).unwrap();
+    assert!(matches!(read, Command::HistoryRead(ref a) if a.node_id == "n"));
 }

@@ -96,7 +96,7 @@ fn node(db: &Connection, id: &str) -> Result<(String, i64, Value, Option<String>
     else {
         return Err(err(
             "revision_unavailable",
-            "History payload was collected; metadata may remain available through history get",
+            "History payload was collected; metadata may remain available through history read",
         ));
     };
     if payload.len() > MAX_INPUT {

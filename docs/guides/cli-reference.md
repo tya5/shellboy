@@ -81,16 +81,16 @@ For important changes, explicitly retain an ID in the already known same-instanc
 ### Inspect held input
 
 `message get --message MESSAGE_ID` already includes the saved `context.hold_reason`.
-Use `history get --node MESSAGE_ID` for the retained original body; no resend is
+Use `history read --node MESSAGE_ID` for the retained original body; no resend is
 needed. A terminal-before-admission hold reason is not a terminal receipt or proof
 of body loss. See [held input inspection](recovery-and-storage.md#inspect-a-held-message-without-resending-it)
 for path/body distinctions and the duplicate-instruction risk of manual resend.
 
 ### Saved execution context
 
-`run get`, `turn get`, `message get`, and `history get` require `context`. `thread get` can omit it for a fork. `history get` requires `provenance`; every `history list` item requires `provenance`, `context`, and `selection`. It includes meaningful state, saved created_at/updated_at/ended_at, thread_id/run_id/turn_id/node_id, Thread parent_thread_id versus Run owner_run_id, and structured recovery_reason. Unrecorded started_at and Thread created_at are omitted. Run/Turn `lifetime_ms` is wall-clock creation-to-end time including preparation/waits and is absent before termination. A node's Thread is its origin, not a fork's selected path.
+`run get`, `turn get`, `message get`, and `history read` require `context`. `thread get` can omit it for a fork. `history read` requires `provenance`; every `history list` item requires `provenance`, `context`, and `selection`. It includes meaningful state, saved created_at/updated_at/ended_at, thread_id/run_id/turn_id/node_id, Thread parent_thread_id versus Run owner_run_id, and structured recovery_reason. Unrecorded started_at and Thread created_at are omitted. Run/Turn `lifetime_ms` is wall-clock creation-to-end time including preparation/waits and is absent before termination. A node's Thread is its origin, not a fork's selected path.
 
-`history get --node SUMMARY_NODE --parts` (not with `--end-message-only`) reads the saved historical per-part cache records of a `summary` node. New summaries do not generate those records. The response keeps the usual `history get` fields (`text` is the paged body, `next_cursor` continues it with `--cursor`, `--limit-bytes` caps one page) and adds `parts.items` plus `parts.reduce_keys_recorded`. Each item has `key`, `listed_as` (the historical part list that named the key), `state` (`retained`, `not_retained` when the record was collected or overwritten, or `unreadable`) and, for a retained part, `stage` and `round` when saved by the historical writer, `sources` (`first`, `last`, `count`), `characters`, `usage`. `usage` is only what the provider reported in the saved response (input, output, total tokens and cached/reasoning details); it is `null` when the provider reported none. Records saved before these fields existed report `stage`, `round` and `sources` as `null`, and summaries without `summary_reduce_keys` report `reduce_keys_recorded:false`; nothing is reconstructed. `text` is the retained bodies in that order, each after a `--- part KEY ---` line. A retry with the same key overwrites the part, so this shows the current record, not past history; a part also disappears when its conversation is deleted. One call reads at most 1024 parts (`input_limit` beyond that). If parts change between pages the continuation fails with `cursor_expired`; restart without `--cursor`.
+`history read --node SUMMARY_NODE --parts` (not with `--end-message-only`) reads the saved historical per-part cache records of a `summary` node. New summaries do not generate those records. The response keeps the usual `history read` fields (`text` is the paged body, `next_cursor` continues it with `--cursor`, `--limit-bytes` caps one page) and adds `parts.items` plus `parts.reduce_keys_recorded`. Each item has `key`, `listed_as` (the historical part list that named the key), `state` (`retained`, `not_retained` when the record was collected or overwritten, or `unreadable`) and, for a retained part, `stage` and `round` when saved by the historical writer, `sources` (`first`, `last`, `count`), `characters`, `usage`. `usage` is only what the provider reported in the saved response (input, output, total tokens and cached/reasoning details); it is `null` when the provider reported none. Records saved before these fields existed report `stage`, `round` and `sources` as `null`, and summaries without `summary_reduce_keys` report `reduce_keys_recorded:false`; nothing is reconstructed. `text` is the retained bodies in that order, each after a `--- part KEY ---` line. A retry with the same key overwrites the part, so this shows the current record, not past history; a part also disappears when its conversation is deleted. One call reads at most 1024 parts (`input_limit` beyond that). If parts change between pages the continuation fails with `cursor_expired`; restart without `--cursor`.
 
 `operation get` `state/outcome` is the saved acceptance-operation result. `replay_policy=return_saved_outcome` returns the original result; `do_not_reexecute` means pending effects are not restarted. `result_uncertain=true` is not evidence of nonexecution. `targets` includes only IDs in the saved result; `downstream` shows compaction processing or current message delivery. Otherwise follow targets to get commands; inspect indexing per space with `index status`. The query itself creates no receipt and rereads current values under one query ID. `result_expired=true` / `replay_policy=operation_expired` means the original outcome body was collected and that mutation ID will not execute again.
 
@@ -236,7 +236,7 @@ Creation order puts null last and breaks ties by descending Thread ID.
 
 `thread list` / `thread get` fill empty saved `title` from the first user body, preferring the selected path then accepted/held messages in the same Thread if no body exists. `thread list --query` can match that display name. Stored title/history are unchanged; no model API naming occurs.
 
-Prune with the three-step flow `thread prune --thread THREAD --before NODE --dry-run`, then `thread prune --thread THREAD --before NODE`, then, optionally to confirm, `shellboy storage collect --category history` and read `nodes_tombstoned` and `history_bytes_collected`. Only the Thread's own hold is released: an original that another live Thread (for example a fork) still holds on its path or Turn, a pin, a message with a receipt to a live Thread, or an attachment delivery is kept, and a replacement that another live Thread holds is skipped and counted in `shared_replacements_kept`. After the GC reclaims an original, `history get` returns `target_unavailable` ("pruned ... not retained"; the check applies before collection too), a restore of that summary is refused with `invalid_state`, the original no longer appears in search, and partial-summary cache entries and rewinds into the range are gone. Summary and spill placeholder nodes stay readable. GC frees pages inside the database file for reuse but does not shrink the file; there is no automatic VACUUM. To shrink it, stop the owner and run `shellboy storage vacuum` (see Storage). Nothing prunes automatically.
+Prune with the three-step flow `thread prune --thread THREAD --before NODE --dry-run`, then `thread prune --thread THREAD --before NODE`, then, optionally to confirm, `shellboy storage collect --category history` and read `nodes_tombstoned` and `history_bytes_collected`. Only the Thread's own hold is released: an original that another live Thread (for example a fork) still holds on its path or Turn, a pin, a message with a receipt to a live Thread, or an attachment delivery is kept, and a replacement that another live Thread holds is skipped and counted in `shared_replacements_kept`. After the GC reclaims an original, `history read` returns `target_unavailable` ("pruned ... not retained"; the check applies before collection too), a restore of that summary is refused with `invalid_state`, the original no longer appears in search, and partial-summary cache entries and rewinds into the range are gone. Summary and spill placeholder nodes stay readable. GC frees pages inside the database file for reuse but does not shrink the file; there is no automatic VACUUM. To shrink it, stop the owner and run `shellboy storage vacuum` (see Storage). Nothing prunes automatically.
 
 Set with `thread set --thread THREAD --title 'Investigation and fixes'`. `--title ''` or whitespace-only clears to conversation-derived display; omission preserves saved title. Trimmed titles have at most 512 characters and no newlines/control characters. Title-only updates do not change model, effort, or reasoning epoch. External CLI requires `--thread`; omission from an agent targets itself.
 
@@ -276,7 +276,7 @@ instance/thread/run/turn/execution IDs, `external_cli` for a new external CLI
 send without Origin, `human` for a recorded in-process TUI submission, or
 `unknown` when saved evidence cannot establish it. A no-Origin CLI is not proof
 of a human. Sender IDs remain readable after the originating Thread is deleted.
-User-node `history get` and `history list` expose the same facts at
+User-node `history read` and `history list` expose the same facts at
 `provenance.sender`, joined by the accepted `message_id`, including later input
 appended to an already-running Run. Legacy null sender records are `unknown`
 in these sender facts: old records cannot distinguish a TUI sender from an
@@ -554,7 +554,7 @@ not assert such work. Exit markers and Revisit are independent of activity.
 
 ### Observing long-running shells (Issue #45)
 
-`shell background --execution ID` releases the current foreground tool wait without stopping the process or closing stdin. It acknowledges the release request, not completion. Inspect the execution with `shell get` and the Turn tool result with `history get`.
+`shell background --execution ID` releases the current foreground tool wait without stopping the process or closing stdin. It acknowledges the release request, not completion. Inspect the execution with `shell get` and the Turn tool result with `history read`.
 
 `shell get --execution ID` and shell entries in `status` expose saved
 `started_at`, nullable `last_output_at` (latest retained output sequence),
@@ -599,7 +599,7 @@ create no reply duty.
 ```sh
 shellboy wait --conditions-json '[{"type":"reply_received","message_id":"MESSAGE_ID"}]' --timeout-ms 30000
 shellboy message get --message MESSAGE_ID
-shellboy history get --node REPLY_NODE_ID
+shellboy history read --node REPLY_NODE_ID
 ```
 
 The reply arrives in a model sender's conversation: finish the sending Turn
@@ -617,7 +617,7 @@ to detect stalls. See [Delegation](delegation.md).
 
 `shellboy chat [--thread THREAD] [--until turn-end|run-end|reply] [--timeout-ms N] [--json]` is a thin
 line client over the owner RPCs a script could call itself: `thread create`,
-`message send`, `turn get` / `run get`, `events wait`, `shell list` and `history get`. It adds no table,
+`message send`, `turn get` / `run get`, `events wait`, `shell list` and `history read`. It adds no table,
 event, worker or queue and keeps no state beyond its own loop. An owner must already be
 running (`shellboy serve --data-dir DIR` or the TUI); otherwise chat exits 6 with a message
 that suggests `shellboy serve`. Without `--thread` it creates a Thread on the first input
@@ -763,7 +763,7 @@ items and schema-valued additionalProperties. Do not assume full draft support.
 Schema64KiB/depth32/nodes2048, composed request128KiB, result1MiB and100000
 validation steps are bounded; excess is explicit failure, not accepted truncation.
 
-To inspect exactly what was validated, use `history get --node END_MESSAGE_NODE_ID
+To inspect exactly what was validated, use `history read --node END_MESSAGE_NODE_ID
 --end-message-only`. Normal history reads still include the original natural
 text/reasoning. End-message-only cursors cannot be reused for the ordinary projection.
 Use an owner matching this CLI version for that additive read option.
@@ -802,7 +802,7 @@ Before Thread creation/message send, exec makes a read-only end_message_only
 probe with a random missing node. A current owner decodes the argument and reports
 target_unavailable; old-style argument rejection exits6 before work. A refusal
 at end-message read also exits6 (owner_version_mismatch), retaining known node IDs
-and recommending ordinary history get --node END_MESSAGE_NODE_ID without the new flag.
+and recommending ordinary history read --node END_MESSAGE_NODE_ID without the new flag.
 Do not resend completed work as if this were an input/schema error. Closed-wire
 support failures are owner/capability errors6, not input2. This is detection only,
 not an old-Core format shim or automatic legacy-protocol downgrade.
@@ -1082,7 +1082,7 @@ section (with `model_attempt_records` and `summary_requests` counts plus combine
 token counters), `input_per_request` (mean/max/nearest-rank p50/p95,
 known/unknown counts, `max_attempt` with attempt/Turn/Run/Thread references), and
 `cache` (paired cached/input ratio and coverage counts). Inspect a max request
-with `turn get --turn TURN_ID`, then use history list/get for that Turn's saved
+with `turn get --turn TURN_ID`, then use history list/read for that Turn's saved
 nodes; an attempt ID is not a history node ID. Input statistics use terminal
 completed/failed/incomplete attempts. Missing usage is not zero; a zero cache
 ratio denominator is null. Provider inconsistencies are not clamped or repaired.
@@ -1182,7 +1182,7 @@ there can be at most 16 pending duties per recipient Thread. The 17th ask is rej
 `--text-stdin`. It must be applied and still pending. `message get` exposes
 `expect_reply`, `reply` (state and optional timestamp, node, sender), or
 `reply_to` for a delivered reply; it no longer borrows a Turn's end message.
-Use `history get --node REPLY_NODE_ID` for the body. If `message reply` gets
+Use `history read --node REPLY_NODE_ID` for the body. If `message reply` gets
 `target_unavailable` for an unknown or unavailable ID, `error.details.pending_duty_ids` lists
 up to 16 duties the caller Thread owes, excluding questions it sent.
 
@@ -1260,7 +1260,7 @@ completion time. Failed/partial/time-out and empty writes keep the previous time
 
 Recovery rewind is available as `shellboy thread rewind --thread THREAD_ID --node NODE_ID --run RUN_ID`. It atomically stops only that exact `recovery_wait` Run and rewinds the selected path. Refusal leaves the Run and path untouched; ordinary `thread rewind` and `run stop` remain unchanged.
 
-`history get` and `history list` expose `provenance.output_limit` for an adopted
+`history read` and `history list` expose `provenance.output_limit` for an adopted
 [output-limited answer](../design/events-and-external-protocol.md#output-limit-adoption).
 
 ### Export a Thread

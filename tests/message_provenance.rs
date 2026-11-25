@@ -50,7 +50,7 @@ async fn saved_request_relation_survives_replay_and_window_read() {
     assert_eq!(first, replay);
     let node = first["message_id"].as_str().unwrap();
     let command: Command = serde_json::from_value(
-        serde_json::json!({"command":"history.get","args":{"node_id":node}}),
+        serde_json::json!({"command":"history.read","args":{"node_id":node}}),
     )
     .unwrap();
     let body = store.execute(request(command), None).await.unwrap().result;
@@ -186,7 +186,7 @@ async fn ambiguous_or_oversized_direct_receipts_do_not_project_operation_id() {
         .await
         .unwrap();
     let get = || {
-        request(Command::HistoryGet(HistoryGetArgs {
+        request(Command::HistoryRead(HistoryReadArgs {
             node_id: node.clone(),
             ..serde_json::from_value(serde_json::json!({"node_id":node})).unwrap()
         }))
@@ -260,7 +260,7 @@ async fn human_reply_only_reverse_relation_is_exact_across_unrelated_send() {
         .result;
     let reply = result["message_id"].as_str().unwrap();
     let command: Command = serde_json::from_value(
-        serde_json::json!({"command":"history.get","args":{"node_id":reply}}),
+        serde_json::json!({"command":"history.read","args":{"node_id":reply}}),
     )
     .unwrap();
     let body = store.execute(request(command), None).await.unwrap().result;
@@ -346,7 +346,7 @@ async fn invalid_relation_preserves_independent_sender_and_body_after_reopen() {
     let node = accepted["message_id"].as_str().unwrap().to_owned();
     let command = || {
         serde_json::from_value::<Command>(
-            serde_json::json!({"command":"history.get","args":{"node_id":node}}),
+            serde_json::json!({"command":"history.read","args":{"node_id":node}}),
         )
         .unwrap()
     };
@@ -430,7 +430,7 @@ async fn notification_marker_survives_delivery_removal_and_all_official_history_
         Ok(())
     }).await.unwrap();
     for raw in [
-        serde_json::json!({"command":"history.get","args":{"node_id":"nn"}}),
+        serde_json::json!({"command":"history.read","args":{"node_id":"nn"}}),
         serde_json::json!({"command":"history.list","args":{"thread_id":"recipient"}}),
         serde_json::json!({"command":"history.window","args":{"thread_id":"recipient","items":true}}),
     ] {

@@ -141,7 +141,7 @@ Reuse `summarize_recorded` unchanged in its bounds:
   earlier work in the active Turn replacing N source nodes (FIRST through LAST).
   Tools it describes were already executed and their side effects remain;
   inspect current state before repeating an operation. Originals: shellboy
-  history get --node <source_node_id>." One out-of-band field
+  history read --node <source_node_id>." One out-of-band field
   `summary_scope: "active_turn"` is added to the payload (not sent).
 
 On any failure the selected path and originals are untouched; summary parts
@@ -208,7 +208,7 @@ gains the out-of-band `summary_scope` field and the item text prefix (section
 3), and the attempt record gains a `midturn` object (section 7). A fork copies
 the parent's current epoch, as today. `compact --restore` works
 only for omission markers today and is unchanged for summaries; originals stay
-readable through history get/details and fork.
+readable through history read/details and fork.
 
 ## 6. Atomic, fenced adoption
 
@@ -242,7 +242,7 @@ Tests (mock/synthetic only):
   dialect encodes the result (Anthropic tool_result-first merge, Chat tool
   messages after their call).
 - readback: `compact list` shows the automatic reduction with the scope;
-  history get returns the covered originals.
+  history read returns the covered originals.
 - fork: forking after adoption yields the same replay; provenance resolves in
   the child; GC keeps originals; forking from a covered original works.
 - driver: in a synthetic long Turn with fabricated reported usage over the

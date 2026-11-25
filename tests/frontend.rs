@@ -2061,7 +2061,7 @@ async fn structured_history_pages_details_url_copy_and_wait_cancel_keep_original
     })
     .await;
     assert!(canonical.starts_with(&(first.text.clone() + &second.text)));
-    send.send(UiAction::Manage(Command::HistoryGet(HistoryGetArgs {
+    send.send(UiAction::Manage(Command::HistoryRead(HistoryReadArgs {
         end_message_only: false,
         parts: false,
         node_id: "long".into(),
@@ -3346,7 +3346,7 @@ async fn mismatched_submission_snapshot_never_creates_receipt_attempt_or_submitt
 async fn external_input_copy_keeps_only_canonical_body_and_code_not_sender_metadata() {
     use shellboy::{
         history::{History, append_node},
-        protocol::HistoryGetArgs,
+        protocol::HistoryReadArgs,
     };
     let root = tempfile::tempdir().unwrap();
     let config = root.path().join("config.toml");
@@ -3384,7 +3384,7 @@ async fn external_input_copy_keeps_only_canonical_body_and_code_not_sender_metad
         "let answer = 42;\n"
     );
     let original = History::new(control.store.database.clone())
-        .get(HistoryGetArgs {
+        .read(HistoryReadArgs {
             node_id: "external-copy".into(),
             end_message_only: false,
             parts: false,

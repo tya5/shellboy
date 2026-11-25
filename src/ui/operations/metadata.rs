@@ -56,7 +56,7 @@ impl Form {
             "limit"
                 if matches!(
                     self.operation,
-                    OpKind::HistoryGet | OpKind::ShellRead | OpKind::DocsGet | OpKind::RagGet
+                    OpKind::HistoryRead | OpKind::ShellRead | OpKind::DocsGet | OpKind::RagGet
                 ) =>
             {
                 FieldId::LimitBytes
@@ -664,7 +664,7 @@ fn operation_label_for(id: OperationId, language: crate::config::UiLanguage) -> 
         OperationId::Wait => local!(language, "待機 · 条件を観測", "Wait · Observe conditions"),
         OperationId::HistoryList => local!(language, "履歴 · 一覧", "History · List"),
         OperationId::HistoryWindow => local!(language, "履歴 · 位置で読む", "History · Window"),
-        OperationId::HistoryGet => local!(language, "履歴 · 原文", "History · Original"),
+        OperationId::HistoryRead => local!(language, "履歴 · 原文", "History · Original"),
         OperationId::HistorySearch => local!(language, "履歴 · 検索", "History · Search"),
         OperationId::HistoryRelations => local!(language, "履歴 · 関係", "History · Relationships"),
         OperationId::ShellGet => local!(language, "shell · 詳細", "Shell · Details"),
@@ -992,7 +992,7 @@ fn operation_meaning_for(id: OperationId, language: crate::config::UiLanguage) -
             "採用経路を位置（末尾・位置・ノード）を基準に前後の件数だけ読み、全体の件数と経路の版を返します。",
             "Read the adopted path around an end, position or node by item counts, returning the total length and path revision."
         ),
-        OperationId::HistoryGet => local!(
+        OperationId::HistoryRead => local!(
             language,
             "指定ノードの保存原文と出典を取得します。終了メッセージのみを選ぶと推論や途中説明を除きます。",
             "Fetch a node's saved original and provenance. End-message-only excludes reasoning and interim explanations."

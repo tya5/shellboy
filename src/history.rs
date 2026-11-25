@@ -56,9 +56,9 @@ pub(crate) use search_bodies::search_bodies;
 
 use crate::{
     protocol::{
-        ApiError, ErrorCode, HistoryBody, HistoryExecutionLink, HistoryGetArgs, HistoryListArgs,
-        HistoryListFilters, HistoryListPage, HistorySelection, HistorySnippet, MAX_BODY_BYTES,
-        MAX_LIST_LIMIT, PageCursor, RecordPage, ThreadForkArgs,
+        ApiError, ErrorCode, HistoryBody, HistoryExecutionLink, HistoryListArgs,
+        HistoryListFilters, HistoryListPage, HistoryReadArgs, HistorySelection, HistorySnippet,
+        MAX_BODY_BYTES, MAX_LIST_LIMIT, PageCursor, RecordPage, ThreadForkArgs,
     },
     storage::{DbWorker, StorageError},
 };
@@ -94,9 +94,9 @@ impl History {
             .map_err(storage_error)?
     }
 
-    pub async fn get(&self, args: HistoryGetArgs) -> Result<HistoryBody, ApiError> {
+    pub async fn read(&self, args: HistoryReadArgs) -> Result<HistoryBody, ApiError> {
         self.database
-            .call(move |connection| Ok(get_node(connection, &args)))
+            .call(move |connection| Ok(read_node_body(connection, &args)))
             .await
             .map_err(storage_error)?
     }
@@ -759,14 +759,17 @@ fn execution_link_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<HistoryExecut
     })
 }
 
-pub fn get_node(connection: &Connection, args: &HistoryGetArgs) -> Result<HistoryBody, ApiError> {
+pub fn read_node_body(
+    connection: &Connection,
+    args: &HistoryReadArgs,
+) -> Result<HistoryBody, ApiError> {
     read_node(connection, args).map(|(body, _)| body)
 }
 
-/// `get_node`, plus the per-part facts when `args.parts` selects a summary's parts.
+/// `read_node_body`, plus the per-part facts when `args.parts` selects a summary's parts.
 fn read_node(
     connection: &Connection,
-    args: &HistoryGetArgs,
+    args: &HistoryReadArgs,
 ) -> Result<(HistoryBody, Option<Value>), ApiError> {
     if args.limit_bytes == 0 || args.limit_bytes > MAX_BODY_BYTES {
         return Err(ApiError::new(
@@ -809,7 +812,7 @@ fn read_node(
                 "Parts require a summary node",
             ));
         }
-        "history.get.parts"
+        "history.read.parts"
     } else if args.end_message_only {
         if kind != "assistant_response" {
             return Err(ApiError::new(
@@ -817,9 +820,9 @@ fn read_node(
                 "End-message projection requires an assistant response node",
             ));
         }
-        "history.get.end_message"
+        "history.read.end_message"
     } else {
-        "history.get"
+        "history.read"
     };
     let (start, cursor_watermark) = if let Some(token) = &args.cursor {
         let cursor = PageCursor::decode(

@@ -33,7 +33,7 @@ shellboy turn get --turn ID
 shellboy wait --conditions-json JSON [--timeout-ms 30000]
 shellboy history list --thread ID [--limit 50] [--cursor TOKEN]
 shellboy history window --thread ID [--ordinal N [--expect-node ID] | --node ID] [--before 20] [--after 20] [--excerpt-chars 512]
-shellboy history get --node ID [--limit-bytes 65536] [--segments] [--cursor TOKEN] [--encoding UTF-8]
+shellboy history read --node ID [--limit-bytes 65536] [--segments] [--cursor TOKEN] [--encoding UTF-8]
 shellboy history search --query TEXT [--limit 10] [--thread ID] [--kind KIND]... [--exclude-kind KIND]... [--from RFC3339] [--to RFC3339]
 shellboy history relations --node ID --relation (previous|next|sources|replacements) [--limit 50] [--cursor TOKEN]
 shellboy shell get --execution ID
@@ -159,7 +159,7 @@ exercise only loopback mocks. See [configuration](config.md#first-run-setup-69).
 
 `chat [--thread ID] [--until turn-end|run-end|reply] [--timeout-ms N] [--json]` is a thin owner
 client like `exec`: it composes `thread.create`, `message.send`, `turn.get`/`run.get`, `wait`,
-`shell.list` and `history.get` and adds no table, event, worker, queue or Core path. The
+`shell.list` and `history.read` and adds no table, event, worker, queue or Core path. The
 Thread is created on the first input (caller cwd by default) unless `--thread` is given.
 Input is one line per message, a trailing backslash continues, `/exit` or EOF leaves. Progress
 comes only from saved facts polled while the assigned Turn/Run is followed: Turn state changes
@@ -225,11 +225,11 @@ final answer1MiB,100000 validation steps and8 bounded diagnostics. Exceeding a b
 is explicit failure, never silently accepting or truncating a validated result.
 
 
-End-message retrieval needs one additive read projection: existing history.get
+End-message retrieval needs one additive read projection: existing history.read
 normally flattens reasoning and natural text together. Optional end_message_only
 (default false and omitted on ordinary serialized requests) selects the last
 final_answer assistant message, or the last unphased assistant message if no
-final phase exists. Commentary/reasoning are excluded. CLI history get exposes
+final phase exists. Commentary/reasoning are excluded. CLI history read exposes
 --end-message-only for exact diagnosis. Normal text projection and cursor scope
 remain unchanged; the final projection has its own cursor scope and node/revision
 binding. This does not add a Core execution path or change model output storage.
@@ -264,7 +264,7 @@ Before Thread creation/message send, exec makes a read-only end_message_only
 probe with a random missing node. A current owner decodes the argument and reports
 target_unavailable; old-style argument rejection exits6 before work. A refusal
 at answer read also exits6 (owner_version_mismatch), retaining known answer IDs
-and recommending ordinary history get --node END_MESSAGE_NODE_ID without the new flag.
+and recommending ordinary history read --node END_MESSAGE_NODE_ID without the new flag.
 Do not resend completed work as if this were an input/schema error. Closed-wire
 support failures are owner/capability errors6, not input2. This is detection only,
 not an old-Core format shim or automatic answer/protocol downgrade.

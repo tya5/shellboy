@@ -404,9 +404,9 @@ mod tests {
             details.context.hold_reason.as_deref(),
             Some("terminal_before_path_admission")
         );
-        let args: crate::protocol::HistoryGetArgs =
+        let args: crate::protocol::HistoryReadArgs =
             serde_json::from_value(json!({"node_id":"saved-held"})).unwrap();
-        let body = history::get_node(&db, &args).unwrap();
+        let body = history::read_node_body(&db, &args).unwrap();
         assert!(body.text.contains("synthetic retained instruction"));
         assert_eq!(
             db.query_row(

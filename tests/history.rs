@@ -2,7 +2,7 @@ use rusqlite::{Connection, params};
 use serde_json::{Value, json};
 use shellboy::{
     history::{History, append_node, select_path, text_of_payload},
-    protocol::{ErrorCode, HistoryGetArgs, HistoryListArgs, ThreadForkArgs},
+    protocol::{ErrorCode, HistoryListArgs, HistoryReadArgs, PageCursor, ThreadForkArgs},
     storage::{DbWorker, StorageError},
 };
 use tempfile::TempDir;
@@ -34,8 +34,8 @@ async fn append(database: &DbWorker, id: &str, kind: &str, payload: Value) {
         .unwrap();
 }
 
-fn body(node: &str, limit: u32, cursor: Option<String>) -> HistoryGetArgs {
-    HistoryGetArgs {
+fn body(node: &str, limit: u32, cursor: Option<String>) -> HistoryReadArgs {
+    HistoryReadArgs {
         end_message_only: false,
         parts: false,
         node_id: node.into(),
@@ -96,7 +96,7 @@ async fn append_is_immutable_atomic_and_updates_exact_path() {
         })
         .await;
     assert!(matches!(result, Err(StorageError::Sqlite(_))));
-    let item = history.get(body("a", 65536, None)).await.unwrap();
+    let item = history.read(body("a", 65536, None)).await.unwrap();
     assert_eq!(item.text, "first");
     assert_eq!(item.next_node_ids, vec!["b"]);
     database.call(|connection| {
@@ -124,7 +124,7 @@ async fn summary_can_precede_existing_suffix_and_fork_keeps_shared_sources() {
         tx.commit()?;
         Ok(())
     }).await.unwrap();
-    let summary = history.get(body("summary", 65536, None)).await.unwrap();
+    let summary = history.read(body("summary", 65536, None)).await.unwrap();
     assert_eq!(
         summary.source_node_ids,
         vec!["b", "a"],
@@ -133,7 +133,7 @@ async fn summary_can_precede_existing_suffix_and_fork_keeps_shared_sources() {
     assert_eq!(summary.next_node_ids, vec!["c"]);
     assert_eq!(
         history
-            .get(body("c", 65536, None))
+            .read(body("c", 65536, None))
             .await
             .unwrap()
             .previous_node_ids,
@@ -317,22 +317,51 @@ async fn body_pages_keep_utf8_boundaries_reject_encoding_change_and_expire_on_to
     let (_directory, database, history) = repository().await;
     let original = "あ😀e\n".repeat(10000);
     append(&database, "large", "user", json!({"text":original})).await;
-    let first = history.get(body("large", 7, None)).await.unwrap();
+    let first = history.read(body("large", 7, None)).await.unwrap();
     assert_eq!(first.text, "あ😀");
+    let token = first.next_cursor.as_deref().unwrap();
+    let revision = database
+        .call(|db| {
+            Ok(db.query_row(
+                "SELECT payload_revision FROM node WHERE id='large'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )?)
+        })
+        .await
+        .unwrap();
+    let mut legacy = PageCursor::decode(
+        token,
+        "history.read",
+        "large",
+        revision as u64,
+        Some("UTF-8"),
+    )
+    .unwrap();
+    legacy.scope = "history.get".into();
     assert_eq!(
-        history.get(body("large", 1, None)).await.unwrap_err().code,
+        history
+            .read(body("large", 7, Some(legacy.encode().unwrap())))
+            .await
+            .unwrap_err()
+            .code,
+        ErrorCode::CursorExpired
+    );
+
+    assert_eq!(
+        history.read(body("large", 1, None)).await.unwrap_err().code,
         ErrorCode::InvalidArgument
     );
     let mut changed = body("large", 7, first.next_cursor.clone());
     changed.encoding = "Shift_JIS".into();
     assert_eq!(
-        history.get(changed).await.unwrap_err().code,
+        history.read(changed).await.unwrap_err().code,
         ErrorCode::CursorEncodingMismatch
     );
     let mut assembled = String::new();
     let mut cursor = None;
     loop {
-        let page = history.get(body("large", 65536, cursor)).await.unwrap();
+        let page = history.read(body("large", 65536, cursor)).await.unwrap();
         assert!(page.text.len() <= 65536);
         assembled.push_str(&page.text);
         cursor = page.next_cursor;
@@ -347,13 +376,13 @@ async fn body_pages_keep_utf8_boundaries_reject_encoding_change_and_expire_on_to
     }).await.unwrap();
     assert_eq!(
         history
-            .get(body("large", 7, first.next_cursor))
+            .read(body("large", 7, first.next_cursor))
             .await
             .unwrap_err()
             .code,
         ErrorCode::CursorExpired
     );
-    let tombstone = history.get(body("large", 65536, None)).await.unwrap();
+    let tombstone = history.read(body("large", 65536, None)).await.unwrap();
     assert_eq!(tombstone.text, "");
     assert_eq!(
         tombstone.tombstone_reason.as_deref(),
@@ -500,7 +529,7 @@ async fn history_metadata_links_real_executions_and_preserves_fork_origin() {
     let indexed_list =
         serde_json::to_value(history.list(listing("fork", 20, None)).await.unwrap()).unwrap();
     let indexed_get =
-        serde_json::to_value(history.get(body("calls", 65536, None)).await.unwrap()).unwrap();
+        serde_json::to_value(history.read(body("calls", 65536, None)).await.unwrap()).unwrap();
     database
         .call(|db| {
             let sql = shellboy::history::execution_links_statement_for_tests();
@@ -520,7 +549,7 @@ async fn history_metadata_links_real_executions_and_preserves_fork_origin() {
     let unindexed_list =
         serde_json::to_value(history.list(listing("fork", 20, None)).await.unwrap()).unwrap();
     let unindexed_get =
-        serde_json::to_value(history.get(body("calls", 65536, None)).await.unwrap()).unwrap();
+        serde_json::to_value(history.read(body("calls", 65536, None)).await.unwrap()).unwrap();
     assert_eq!(
         indexed_list, unindexed_list,
         "list content and order must be index-independent"
@@ -711,7 +740,7 @@ async fn audit_received_originals_page_exact_saved_json_without_changing_replay_
         let mut cursor = None;
         let mut actual = String::new();
         loop {
-            let page = history.get(body(&source, 47, cursor)).await.unwrap();
+            let page = history.read(body(&source, 47, cursor)).await.unwrap();
             actual.push_str(&page.text);
             if page.next_cursor.is_none() {
                 break;
@@ -937,21 +966,21 @@ async fn final_answer_projection_excludes_reasoning_and_binds_its_own_cursor_sco
         {"type":"message","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":answer}]},
         {"type":"message","role":"assistant","phase":"commentary","content":[{"type":"output_text","text":"later commentary"}]}
     ]})).await;
-    let default = history.get(body("final-node", 65536, None)).await.unwrap();
+    let default = history.read(body("final-node", 65536, None)).await.unwrap();
     assert!(default.text.contains("private reasoning"));
     assert!(default.text.contains("later commentary"));
-    let request = HistoryGetArgs {
+    let request = HistoryReadArgs {
         end_message_only: true,
         parts: false,
         ..body("final-node", 8, None)
     };
-    let first = history.get(request.clone()).await.unwrap();
+    let first = history.read(request.clone()).await.unwrap();
     let token = first.next_cursor.clone().unwrap();
     let mut complete = first.text;
     let mut cursor = Some(token.clone());
     while let Some(next) = cursor {
         let part = history
-            .get(HistoryGetArgs {
+            .read(HistoryReadArgs {
                 cursor: Some(next),
                 ..request.clone()
             })
@@ -963,14 +992,14 @@ async fn final_answer_projection_excludes_reasoning_and_binds_its_own_cursor_sco
     assert_eq!(complete, answer);
     assert!(
         history
-            .get(body("final-node", 8, Some(token)))
+            .read(body("final-node", 8, Some(token)))
             .await
             .is_err()
     );
-    let ordinary = history.get(body("final-node", 8, None)).await.unwrap();
+    let ordinary = history.read(body("final-node", 8, None)).await.unwrap();
     assert!(
         history
-            .get(HistoryGetArgs {
+            .read(HistoryReadArgs {
                 cursor: ordinary.next_cursor,
                 ..request
             })
@@ -1002,7 +1031,7 @@ async fn adjacent_described_commands_larger_than_preview_budget_reach_exact_tail
         let mut collected = String::new();
         let mut pages = 0;
         loop {
-            let page = history.get(body("exact-source", 4096, cursor)).await.unwrap();
+            let page = history.read(body("exact-source", 4096, cursor)).await.unwrap();
             assert!(page.text.len() <= 4096);
             collected.push_str(&page.text);
             pages += 1;

@@ -1329,7 +1329,7 @@ impl Details {
                 self.scroll.set(0);
             }
             code if Action::Operations.matches(code) => {
-                return Outcome::Operation(super::operations::OpKind::HistoryGet);
+                return Outcome::Operation(super::operations::OpKind::HistoryRead);
             }
             code if Action::Copy.matches(code) => {
                 let text = match self.mode {

@@ -10,7 +10,7 @@
 
 既存 `history search --query TEXT [--limit N]` に `--thread THREAD`、繰り返せる `--kind KIND` と `--exclude-kind KIND`、`--from RFC3339`／`--to RFC3339` を追加する。未指定の検索範囲は従来どおり全体で、モデルの自Threadを暗黙に補わない。
 
-条件間はAND、kind内はOR、exclude-kindは除外。tool結果を除く場合は `--exclude-kind tool_result` とし、別のboolと重複定義しない。kindはnodeの保存kindと一致する文字列で、history list/getで確認できる。fromは作成時刻以上、toは未満。時差付きRFC3339を絶対時刻として比較し、日付だけや時差なし、逆転／空範囲は拒否する。kind一覧は各32件以内、1値64 Unicode文字以内。
+条件間はAND、kind内はOR、exclude-kindは除外。tool結果を除く場合は `--exclude-kind tool_result` とし、別のboolと重複定義しない。kindはnodeの保存kindと一致する文字列で、history list/readで確認できる。fromは作成時刻以上、toは未満。時差付きRFC3339を絶対時刻として比較し、日付だけや時差なし、逆転／空範囲は拒否する。kind一覧は各32件以内、1値64 Unicode文字以内。
 
 Thread条件は「そのThreadが現在採用するpathと、そこからcompleted summary/spill置換の出典を再帰的に辿ったnode」を意味する。共有nodeはどちらのforkからも対象にできるが、親Threadの未採用分岐へ広げない。圧縮によって保護された元の原文も検索できる。存在しない／削除済みThreadは空配列で隠さずThreadNotFoundを返す。
 
@@ -123,7 +123,7 @@ cursorは対象node・relation種別・payload revision・初回watermarkへ結�
 
 時間だけによるTTLは設けない。対象nodeのrevision変更やscope／位置の不整合で失効する。
 
-このwatermarkは関係の追加を制限するもので、ページ間のDB全体のsnapshotや原文保持を保証しない。関係先nodeのprovenanceは各ページ取得時の現在値で、関係先だけがtombstoneになっても対象nodeのcursorは失効しない。既存GCはnodeのmetadata、会話edge、置換出典を残し、本文を回収してpayload revisionとdeleted_reasonを更新する。置換itemのsource_revision／source_hashは作成当時の記録を保持し、provenance.source_revisionは現在値を返す。原文を読むときは `history get` のtombstone_reasonも確認する。本文が空であることだけを根拠に元から空の会話と判定しない。
+このwatermarkは関係の追加を制限するもので、ページ間のDB全体のsnapshotや原文保持を保証しない。関係先nodeのprovenanceは各ページ取得時の現在値で、関係先だけがtombstoneになっても対象nodeのcursorは失効しない。既存GCはnodeのmetadata、会話edge、置換出典を残し、本文を回収してpayload revisionとdeleted_reasonを更新する。置換itemのsource_revision／source_hashは作成当時の記録を保持し、provenance.source_revisionは現在値を返す。原文を読むときは `history read` のtombstone_reasonも確認する。本文が空であることだけを根拠に元から空の会話と判定しない。
 
 関係参照はGC rootや長期pinを追加しない。ページを読んでいる間も通常の保持・GC規則が適用される。cursorがあるため本文を後で必ず読める、すべてのページのmetadataが同一時点である、といった保証はしない。
 
@@ -170,7 +170,7 @@ Thread論理削除時は最後のthread_path/thread_replacementを所有証拠�
 
 ## 履歴一覧の抜粋制限と保存本文の大きさ（Issue #23）
 
-`history list --excerpt-chars N` はUnicode scalarで0〜4096、既定512。0ではexcerptは空文字とし、SQLのCASEでpayload_jsonを取得せず解析もしない。本文の存在や長さは別に `payload_chars` で返す。SQLite `length(payload_json)` による保存JSON全体の文字数であり、抽出本文長やモデルのtoken数ではない。tombstoneの回収済み本文はnull（不明）を返し、0と捏造しない。省略した一覧から必要なnodeだけhistory getで取得する。
+`history list --excerpt-chars N` はUnicode scalarで0〜4096、既定512。0ではexcerptは空文字とし、SQLのCASEでpayload_jsonを取得せず解析もしない。本文の存在や長さは別に `payload_chars` で返す。SQLite `length(payload_json)` による保存JSON全体の文字数であり、抽出本文長やモデルのtoken数ではない。tombstoneの回収済み本文はnull（不明）を返し、0と捏造しない。省略した一覧から必要なnodeだけhistory readで取得する。
 
 既存のPage/HistorySnippetとcontext/selection/provenance/実行リンクは保持し、上記fieldを加える。生成元Threadはfork先と異なるためcontext.thread_idをページの選択Threadへ置き換えない。今回は重複値のページ上位への移動を見送り、汎用field選択や別modeの枠組みを追加しない。既定値のcursor identityは維持し、512以外は抜粋上限もcursorへ束縛する。50件が常に16KiBに収まる保証はせず、固定fixtureで改善量を実測して記録する。
 

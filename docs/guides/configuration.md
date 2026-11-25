@@ -819,7 +819,7 @@ rewritten (migrations 40–42 are unchanged). Proactive failure stage 2 and argu
 summarizer. A summary that is not smaller than its source is not adopted; existing #50 recovery
 handling enters recovery wait. The prior spill stage may already be saved.
 
-Omitted history can stay omitted. Use bounded keyword RAG/`history get` first;
+Omitted history can stay omitted. Use bounded keyword RAG/`history read` first;
 when embeddings are configured, `history search` can help with differently worded
 facts but sends a potentially paid query embedding. Only summarize omitted
 history to reintroduce key facts. Summarizing an omitted range can

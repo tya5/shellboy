@@ -138,7 +138,7 @@ view modelへDBやControlの可変内部状態を露出せず、ID/revision付�
 | Run/Turn/復旧詳細 | run get/retry/stop、turn get。現在以外の対象も選択、所有関係と理由、retry主体 |
 | 実行一覧/詳細 | shell get/read/write/eof/stop。execution、encoding、出力量、stdin/EOF/部分write、対象停止 |
 | 待機/通知 | typed conditions、複数any、timeout、観測取消、matched/snapshot。自動status表示とは別の明示wait |
-| 履歴/原文/検索 | history list/get/search。任意node、出典/前後、page/encoding、query/limit |
+| 履歴/原文/検索 | history list/read/search。任意node、出典/前後、page/encoding、query/limit |
 | 添付管理 | add/list/remove、下書き/保存選択、kind、完全path、明示再読込 |
 | 圧縮 | compact。安全境界待ち・採用/失敗・原文参照、復旧待ちを勝手に解除しない |
 | 索引管理 | status/backfill/retry/rebuild。scope/space/thread/source、費用preview、既存成功と失敗範囲 |
@@ -250,7 +250,7 @@ frontendはChangedを受けた可視Threadについて、既存の有限read wor
 
 ### 回答の通常詳細と保存構造（X3実画面追補）
 
-既知assistant messageのfield一覧は回答の状態・本文・参照を中心にする。実schemaでmessage/assistantと確認できたitemだけについて、単一items/contentの件数、既知のrole/type、top-level group_id:nullとreasoning_epoch:0を通常一覧から除く。複数回答/本文は元の番号を残し、意味ある0、非既定世代、未知field/null、既知schemaでないitemは保持する。UI内の一覧投影だけで、保存payloadとPresentationFieldのkey/value、本文原文O、完全値copy、source対象は変更しない。Vは要点と保持中の内部項目の切替で、省いた既定値も元のfield値で確認/copyできる。O/HistoryGetはcanonical textでありpayload JSON全体ではない。既存metadata上限と省略表示を維持し、未取得の全payload構造への到達を新たに保証しない。本文を表示ラベルから再構成したり、未知配列の構造を推測して畳んだりしない。
+既知assistant messageのfield一覧は回答の状態・本文・参照を中心にする。実schemaでmessage/assistantと確認できたitemだけについて、単一items/contentの件数、既知のrole/type、top-level group_id:nullとreasoning_epoch:0を通常一覧から除く。複数回答/本文は元の番号を残し、意味ある0、非既定世代、未知field/null、既知schemaでないitemは保持する。UI内の一覧投影だけで、保存payloadとPresentationFieldのkey/value、本文原文O、完全値copy、source対象は変更しない。Vは要点と保持中の内部項目の切替で、省いた既定値も元のfield値で確認/copyできる。O/HistoryReadはcanonical textでありpayload JSON全体ではない。既存metadata上限と省略表示を維持し、未取得の全payload構造への到達を新たに保証しない。本文を表示ラベルから再構成したり、未知配列の構造を推測して畳んだりしない。
 
 
 実端末追補: 初回の詳細回帰はlegacy items形式だけを使い、実保存のoutput配列へ通常投影が適用されないことを見逃した。canonical output、既知response/output、legacy items/itemをそれぞれ実際の配列件数とmessage/assistant型で確認する。異なるcollectionが併存する曖昧なschemaは元の項目一覧へ戻す。実DB→frontend→F6/Enter/Vを通る回帰を追加し、単体投影だけを実画面成立の根拠としない。
@@ -435,7 +435,7 @@ URLの妥当性は `terminal_links::valid_link_target`、セル内の非表示�
 
 X16の引用記号と名前付きリンクの宛先併記は、pinned `tui-markdown 0.3.12` の標準表示として維持する調整不採用。引用の `>` は未処理のMarkdownではなくOSSが挿入する引用prefixであり、リンクの `label (destination)` と共に現公開StyleSheetには省略hookがない。出力文字列を一律削除すると、同じ文字を含む本文/コード、入れ子引用、表の列幅やリンクの対応を壊すため採らない。独自rendererや依存更新をこの修正へ混ぜない。将来OSSに引用prefix/宛先表示の正式な設定が追加された時点で、原文・F7/OSC8 target・表幅を維持したまま再評価する。
 
-回答と要約のMarkdownは同じOSS renderer・同じ実幅で生成する。種類ごとの別table rendererは置かない。回答の `●` は最初の本文行に置き、推論は `▸ 推論` と字下げで従属させる。推論の開閉は表示投影だけであり、元のsource範囲を保つ。要約は `◇ 要約`、出典数、F6→Oの原文導線で通常回答から区別する。既知の `shellboy-summary-v1` だけは検証済み `source_node_ids` の件数を置換node数として表示できる。元のThread上のordinalやTurn数は保存されていないため推測表示しない。F6詳細の出典IDおよび原文ページの前/後/出典参照から、`shellboy history get --node <ID>` で元nodeへ到達できる（CLIの実オプションはhelpに従う）。未知/legacy要約へ置換範囲を捏造しない。
+回答と要約のMarkdownは同じOSS renderer・同じ実幅で生成する。種類ごとの別table rendererは置かない。回答の `●` は最初の本文行に置き、推論は `▸ 推論` と字下げで従属させる。推論の開閉は表示投影だけであり、元のsource範囲を保つ。要約は `◇ 要約`、出典数、F6→Oの原文導線で通常回答から区別する。既知の `shellboy-summary-v1` だけは検証済み `source_node_ids` の件数を置換node数として表示できる。元のThread上のordinalやTurn数は保存されていないため推測表示しない。F6詳細の出典IDおよび原文ページの前/後/出典参照から、`shellboy history read --node <ID>` で元nodeへ到達できる（CLIの実オプションはhelpに従う）。未知/legacy要約へ置換範囲を捏造しない。
 
 添付chipのdecodeと型変換はfrontendの一つのhelperへ集約し、kindは既存 `AttachmentKind::parse` を使う。通常Sendはcwd Unicode検査の後、SendEditedはその前にdecodeする既存の失敗優先順を維持する。chip順序・UTF-8位置検証、画像lease、receipt/immutable sourceの確定境界は変更しない。
 

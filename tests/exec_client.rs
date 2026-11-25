@@ -181,7 +181,7 @@ impl Fixture {
                     sent = true;
                 }
                 let reject = after_send.is_some_and(|late| !late || sent)
-                    && matches!(&invocation.request.command,Command::HistoryGet(args)if args.end_message_only);
+                    && matches!(&invocation.request.command,Command::HistoryRead(args)if args.end_message_only);
                 if reject {
                     let _ = invocation.reply.send(Response::failure(
                         invocation.request.operation_id.clone(),
@@ -387,7 +387,7 @@ async fn native_stdout_is_only_validated_utf8_final_json_and_sender_is_recorded(
         tokio::process::Command::new(env!("CARGO_BIN_EXE_shellboy"))
             .arg("--data-dir")
             .arg(fixture.root.path().join("data"))
-            .args(["history", "get", "--node"])
+            .args(["history", "read", "--node"])
             .arg(diag["end_message_node_id"].as_str().unwrap())
             .arg("--end-message-only")
             .output(),
@@ -748,7 +748,7 @@ async fn old_owner_is_rejected_before_creating_or_sending_work() {
         diagnostic["message"]
             .as_str()
             .unwrap()
-            .contains("history get")
+            .contains("history read")
     );
     fixture
         .owner
@@ -806,7 +806,7 @@ async fn final_read_refusal_after_work_is_owner_error_with_answer_ids_and_no_res
         tokio::process::Command::new(env!("CARGO_BIN_EXE_shellboy"))
             .arg("--data-dir")
             .arg(fixture.root.path().join("data"))
-            .args(["history", "get", "--node"])
+            .args(["history", "read", "--node"])
             .arg(diagnostic["end_message_node_id"].as_str().unwrap())
             .output(),
     )

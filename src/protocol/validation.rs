@@ -677,7 +677,7 @@ impl HistoryListArgs {
     }
 }
 
-impl HistoryGetArgs {
+impl HistoryReadArgs {
     fn validate(&self) -> Result<(), ApiError> {
         nonempty(&self.node_id, "node_id")?;
         nonempty(&self.encoding, "encoding")?;
@@ -1072,7 +1072,7 @@ impl Command {
                 }
                 Ok(())
             }
-            Self::HistoryGet(a) => a.validate(),
+            Self::HistoryRead(a) => a.validate(),
             Self::HistorySearch(a) => a.validate(),
             Self::HistoryExport(a) => limit(a.limit, MAX_LIST_LIMIT),
             Self::HistoryRelations(a) => a.validate(),

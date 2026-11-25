@@ -1,6 +1,6 @@
 # Summary Parts: Inspection and Reuse (Study for #232)
 
-Status: **recommendation adopted for C0 and C1 (2026-11-05, #232/#233).** Decisions: parts are not nodes; deleting the conversation deletes its parts; no new node kind for search; legacy `sources: []` parts are collected by a general rule (missing/empty/invalid `sources` is stale), no one-off migration; CLI is `history get --node SUMMARY --parts`; CLI only first (TUI later). Implemented: reduce parts carry `sources`, parts record `stage`, summary nodes record `summary_reduce_keys`, S2 is tested (a fork reuses the parent's map parts). The text below is the original study. Evidence is from `origin/main` at `a65421c74b` (code reading, not a run). Claims not covered by an existing test are marked *unverified*.
+Status: **recommendation adopted for C0 and C1 (2026-11-05, #232/#233).** Decisions: parts are not nodes; deleting the conversation deletes its parts; no new node kind for search; legacy `sources: []` parts are collected by a general rule (missing/empty/invalid `sources` is stale), no one-off migration; CLI is `history read --node SUMMARY --parts`; CLI only first (TUI later). Implemented: reduce parts carry `sources`, parts record `stage`, summary nodes record `summary_reduce_keys`, S2 is tested (a fork reuses the parent's map parts). The text below is the original study. Evidence is from `origin/main` at `a65421c74b` (code reading, not a run). Claims not covered by an existing test are marked *unverified*.
 
 ## 1. What a summary part is today
 
@@ -44,7 +44,7 @@ Needs: **ID** stable handle; **Range** source node IDs; **Body**; **Usage**; **P
 | S2 | Compaction in a fork/sibling sharing the prefix | Summarize the shared prefix without re-paying | key match | **Yes in code** while settings/epoch match; *unverified by test* | No |
 | S3 | Compaction in an unrelated Thread with "the same" content | Cross-Thread reuse | identical node IDs | No; impossible (no ID sharing) | A node does not solve it either |
 | S4 | User via TUI/CLI | See each map part, its range and cost, to understand the final summary | ID, Range, Body, Usage | **No reader**; keys shown but not followable; reduce parts lack Range and linkage | No |
-| S5 | Model, same Thread | Read a finer-grained summary of an older span instead of the large raw source | ID, Range, Body | No (only summary node + raw sources via `history get`) | No |
+| S5 | Model, same Thread | Read a finer-grained summary of an older span instead of the large raw source | ID, Range, Body | No (only summary node + raw sources via `history read`) | No |
 | S6 | Model in another/child/forked Thread | Read another Thread's part as background | ID, Range, Body | No; fork inherits the summary node, parts unreachable | No (reader) |
 | S7 | Search/RAG | `history search` hit on a part as a mid-grain span summary | indexed body + Range | No; `search_bodies` indexes `summary` nodes only | Yes (or a second index source, worse) |
 | S8 | User/model after deleting the source conversation | Keep the paid summary as a standalone artifact | Perm | No, by design | Yes, plus a deletion-policy reversal |
@@ -56,7 +56,7 @@ Observations: money-saving reuse (S1, S2) already exists and depends only on exa
 
 ### A: keep cache, add read-only reader, record missing provenance
 - Storage: no table/column/migration. New records gain JSON fields: reduce parts get `sources` (ordered union of inputs' sources) and `stage` (`map` / `reduce` + round), optionally `created_at`. The summary node's out-of-band payload gains `summary_reduce_keys` (replay sends only `item`). Old records are not rewritten; readers report absent fields as unknown.
-- Reader: one bounded `app_meta` read by key. CLI e.g. `shellboy history get --node SUMMARY --parts` (or `compact parts --node SUMMARY [--key K]`), returning key, stage, source first/last/count, characters, usage from raw, `reusable`, and the body paged like `history get`. The TUI follows `summary_part_keys` through the existing inspection path; no new worker. The model uses the same CLI.
+- Reader: one bounded `app_meta` read by key. CLI e.g. `shellboy history read --node SUMMARY --parts` (or `compact parts --node SUMMARY [--key K]`), returning key, stage, source first/last/count, characters, usage from raw, `reusable`, and the body paged like `history read`. The TUI follows `summary_part_keys` through the existing inspection path; no new worker. The model uses the same CLI.
 - Replay/fork: unchanged; forks reach parts through the inherited summary node.
 - GC: rule unchanged. Reduce parts now carry `sources`, so the existing sweep collects them, closing the leak for new records. Map parts cannot vanish while their summary is live (sources protected via `replacement_source`); the reader still handles not-found (old, or overwritten by retry). Existing `[]` reduce parts: see open questions.
 - RAG: not indexed (S7 not served).
@@ -102,11 +102,11 @@ Observations: money-saving reuse (S1, S2) already exists and depends only on exa
 3. B touches replay, fork, GC roots, relations, Turn-boundary provenance and search scope, each a tested contract. A touches one JSON value and one read path.
 4. C0 is required regardless: reduce parts currently retain deleted conversations' derived text forever.
 
-Risks: old records lack the new fields, so show unknown and never reconstruct. Retry with the same key overwrites a part, so the reader shows the current record, not immutable history; state this. Bodies need `history get` paging and size limits. S2 needs a test before it is claimed.
+Risks: old records lack the new fields, so show unknown and never reconstruct. Retry with the same key overwrites a part, so the reader shows the current record, not immutable history; state this. Bodies need `history read` paging and size limits. S2 needs a test before it is claimed.
 
 ## 5. Open questions for the user
 1. Is S8 (paid summaries survive source deletion) wanted at all? If so, it is a deletion-policy decision before any storage design. This memo assumes not.
 2. Is S7 worth a new node kind, given that the summary and raw sources are searchable?
 3. Existing `sources: []` reduce parts: one-off cleanup (pre-1.0 debt), an orphan rule (needs `summary_reduce_keys`, so old ones remain unreachable), an explicit `storage collect` category, or leave them?
-4. CLI shape: `history get --node SUMMARY --parts` or `compact parts`?
+4. CLI shape: `history read --node SUMMARY --parts` or `compact parts`?
 5. TUI in the first step, or CLI-only (C1) first?

@@ -8,8 +8,8 @@ use shellboy::{
     config::Config,
     control::db::Store,
     gc::GcService,
-    history::{get_node, prune::prune_thread, reachability_for_tests},
-    protocol::{Command, ErrorCode, HistoryGetArgs, Request, ThreadPruneArgs},
+    history::{prune::prune_thread, reachability_for_tests, read_node_body},
+    protocol::{Command, ErrorCode, HistoryReadArgs, Request, ThreadPruneArgs},
     storage::DbWorker,
 };
 use std::sync::Arc;
@@ -26,8 +26,8 @@ fn now() -> chrono::DateTime<Utc> {
 fn scalar(db: &Connection, sql: &str) -> rusqlite::Result<i64> {
     db.query_row(sql, [], |r| r.get(0))
 }
-fn get(node: &str) -> HistoryGetArgs {
-    HistoryGetArgs {
+fn get(node: &str) -> HistoryReadArgs {
+    HistoryReadArgs {
         end_message_only: false,
         parts: false,
         node_id: node.into(),
@@ -412,7 +412,7 @@ async fn a_gc_job_in_progress_before_the_prune_is_conservative_and_the_next_job_
 async fn fetching_a_pruned_original_fails_clearly_before_and_after_collection() {
     let f = Fixture::new(basic()).await;
     f.db.call(|db| {
-        assert!(get_node(db, &get("big")).is_ok());
+        assert!(read_node_body(db, &get("big")).is_ok());
         Ok(())
     })
     .await
@@ -424,7 +424,7 @@ async fn fetching_a_pruned_original_fails_clearly_before_and_after_collection() 
         }
         f.db.call(|db| {
             for id in ["a", "big"] {
-                let error = get_node(db, &get(id)).unwrap_err();
+                let error = read_node_body(db, &get(id)).unwrap_err();
                 assert_eq!(error.code, ErrorCode::TargetUnavailable);
                 assert!(error.message.contains("pruned"), "{}", error.message);
                 assert!(
@@ -433,8 +433,8 @@ async fn fetching_a_pruned_original_fails_clearly_before_and_after_collection() 
                 );
             }
             // The summary and the spill placeholder remain readable.
-            assert!(get_node(db, &get("s1")).is_ok());
-            assert!(get_node(db, &get("sp")).is_ok());
+            assert!(read_node_body(db, &get("s1")).is_ok());
+            assert!(read_node_body(db, &get("sp")).is_ok());
             Ok(())
         })
         .await
@@ -455,7 +455,7 @@ async fn a_pruned_original_held_by_another_thread_stays_readable() {
     f.prune("tail", false).await.unwrap();
     f.collect().await;
     f.db.call(|db| {
-        assert!(get_node(db, &get("a")).is_ok());
+        assert!(read_node_body(db, &get("a")).is_ok());
         assert!(reachability_for_tests(db, "a")?);
         Ok(())
     })

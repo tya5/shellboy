@@ -86,7 +86,7 @@ impl Command {
             Self::HistoryWindow(_) => ("history.window", CommandRoute::Database),
             Self::HistoryRecall(_) => ("history.recall", CommandRoute::Database),
             Self::HistoryReceived(_) => ("history.received", CommandRoute::Database),
-            Self::HistoryGet(_) => ("history.get", CommandRoute::Database),
+            Self::HistoryRead(_) => ("history.read", CommandRoute::Database),
             Self::HistorySearch(_) => ("history.search", CommandRoute::Runtime),
             Self::HistoryExport(_) => ("history.export", CommandRoute::Database),
             Self::HistoryRelations(_) => ("history.relations", CommandRoute::Database),
@@ -214,7 +214,7 @@ impl Command {
             | Self::HistoryWindow(_)
             | Self::HistoryRecall(_)
             | Self::HistoryReceived(_)
-            | Self::HistoryGet(_)
+            | Self::HistoryRead(_)
             | Self::HistoryExport(_)
             | Self::HistoryRelations(_)
             | Self::ShellWrite(_)
@@ -300,7 +300,7 @@ impl Command {
             | Self::HistoryWindow(_)
             | Self::HistoryRecall(_)
             | Self::HistoryReceived(_)
-            | Self::HistoryGet(_)
+            | Self::HistoryRead(_)
             | Self::HistorySearch(_)
             | Self::HistoryExport(_)
             | Self::HistoryRelations(_)
@@ -399,7 +399,7 @@ impl Command {
             | Self::HistoryWindow(_)
             | Self::HistoryRecall(_)
             | Self::HistoryReceived(_)
-            | Self::HistoryGet(_)
+            | Self::HistoryRead(_)
             | Self::HistorySearch(_)
             | Self::HistoryExport(_)
             | Self::HistoryRelations(_)
@@ -471,7 +471,7 @@ impl Command {
             | Self::HistoryWindow(_)
             | Self::HistoryRecall(_)
             | Self::HistoryReceived(_)
-            | Self::HistoryGet(_)
+            | Self::HistoryRead(_)
             | Self::HistorySearch(_)
             | Self::HistoryExport(_)
             | Self::HistoryRelations(_)

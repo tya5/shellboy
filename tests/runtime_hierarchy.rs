@@ -204,7 +204,7 @@ async fn full_history(owner: &DataOwner, node: &str) -> String {
     let mut text = String::new();
     loop {
         let body = shellboy::history::History::new(owner.db.clone())
-            .get(HistoryGetArgs {
+            .read(HistoryReadArgs {
                 end_message_only: false,
                 parts: false,
                 node_id: node.into(),
@@ -501,7 +501,7 @@ async fn restart_exposes_interrupted_waits_and_assignments_only_on_explicit_new_
         "unknown"
     );
     let original = shellboy::history::History::new(owner.db.clone())
-        .get(HistoryGetArgs {
+        .read(HistoryReadArgs {
             end_message_only: false,
             parts: false,
             node_id: wait_nodes.last().unwrap().clone(),

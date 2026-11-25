@@ -97,10 +97,10 @@ impl Failure {
             error.code,
             ErrorCode::InvalidArgument | ErrorCode::ProtocolMismatch
         ) {
-            return Self {code:6,status:"owner_version_mismatch",message:"Owner/CLI version mismatch: the required end_message_only read was refused. Use matching owner and CLI versions. If work already ran, read the saved end message with history get --node <end_message_node_id> without --end-message-only; do not resend the work.".into(),api:Some(Box::new(error))};
+            return Self {code:6,status:"owner_version_mismatch",message:"Owner/CLI version mismatch: the required end_message_only read was refused. Use matching owner and CLI versions. If work already ran, read the saved end message with history read --node <end_message_node_id> without --end-message-only; do not resend the work.".into(),api:Some(Box::new(error))};
         }
         if error.code == ErrorCode::IoFailed {
-            return Self {code:6,status:"owner_capability_unavailable",message:"Cannot confirm the owner's end-message read support; check matching owner/CLI versions. If work already ran, inspect the reported IDs with ordinary history get rather than resending it.".into(),api:Some(Box::new(error))};
+            return Self {code:6,status:"owner_capability_unavailable",message:"Cannot confirm the owner's end-message read support; check matching owner/CLI versions. If work already ran, inspect the reported IDs with ordinary history read rather than resending it.".into(),api:Some(Box::new(error))};
         }
         Self::api(error)
     }
@@ -206,7 +206,7 @@ impl Session {
         let probe: Result<HistoryBody, Failure> = self
             .request(
                 "capability",
-                Command::HistoryGet(HistoryGetArgs {
+                Command::HistoryRead(HistoryReadArgs {
                     end_message_only: true,
                     parts: false,
                     node_id: uuid::Uuid::new_v4().to_string(),
@@ -234,7 +234,8 @@ impl Session {
         stage: &'static str,
         command: Command,
     ) -> Result<T, Failure> {
-        let end_message_read = matches!(&command,Command::HistoryGet(args)if args.end_message_only);
+        let end_message_read =
+            matches!(&command,Command::HistoryRead(args)if args.end_message_only);
         self.progress.stage = stage;
         if Instant::now() >= self.deadline {
             return Err(Failure::new(
@@ -465,7 +466,7 @@ impl Session {
             let page: HistoryBody = self
                 .request(
                     "answer",
-                    Command::HistoryGet(HistoryGetArgs {
+                    Command::HistoryRead(HistoryReadArgs {
                         end_message_only: mode != ResultMode::Reply,
                         parts: false,
                         node_id: node.clone(),
@@ -746,7 +747,7 @@ mod owner_version_tests {
             let failure =
                 Failure::end_message_read(ApiError::new(code, "synthetic final-read refusal"));
             assert_eq!(failure.code, 6);
-            assert!(failure.message.contains("history get"));
+            assert!(failure.message.contains("history read"));
             assert_eq!(failure.api.unwrap().code, code);
         }
         assert_eq!(

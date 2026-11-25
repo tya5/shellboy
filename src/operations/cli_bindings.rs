@@ -492,8 +492,8 @@ const MEANINGS: &[Meaning] = &[
         None,
     ),
     (
-        OperationId::HistoryGet,
-        &["history", "get"],
+        OperationId::HistoryRead,
+        &["history", "read"],
         &[
             ("node_id", FieldId::Node),
             ("limit_bytes", FieldId::LimitBytes),

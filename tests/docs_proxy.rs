@@ -114,7 +114,7 @@ deliver: Deliver::Next,
                 }
             }
             let child_answers: i64 = db.query_row("SELECT count(*) FROM thread c JOIN turn t ON t.thread_id=c.id JOIN node n ON n.id=t.answer_node_id JOIN run r ON r.id=t.run_id WHERE c.parent_thread_id IS NOT NULL AND r.owner_run_id IS NOT NULL AND t.state='completed' AND n.payload_json LIKE '%SHELLBOY_DOCS_CHILD_V1%'", [], |r|r.get(0))?;
-            let child_reads: i64 = db.query_row("SELECT count(*) FROM shell_execution WHERE instr(json_extract(shell_json,'$.command'),'history get')>0", [], |r|r.get(0))?;
+            let child_reads: i64 = db.query_row("SELECT count(*) FROM shell_execution WHERE instr(json_extract(shell_json,'$.command'),'history read')>0", [], |r|r.get(0))?;
             Ok((original, read_exact, child_answers, child_reads))
         }).await.map_err(|e|e.to_string())?;
         if evidence.0 != b"SHELLBOY_DOCS_DISCOVERY_V1" || !evidence.1 {

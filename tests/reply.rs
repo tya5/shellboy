@@ -100,7 +100,7 @@ async fn named_ask_leaves_only_its_recipient_list_after_reply() {
     let history = |id: &str| {
         request(
             serde_json::from_value(serde_json::json!({
-                "command":"history.get", "args":{"node_id":id}
+                "command":"history.read", "args":{"node_id":id}
             }))
             .unwrap(),
         )

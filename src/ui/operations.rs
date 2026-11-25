@@ -70,7 +70,7 @@ ThreadList,
     TurnGet,
     Wait,
     HistoryList,
-    HistoryGet,
+    HistoryRead,
     HistorySearch,
     ShellList,
     ShellGet,
@@ -1728,7 +1728,7 @@ impl Form {
                     }))
                 },
             ),
-            OpKind::HistoryGet => (
+            OpKind::HistoryRead => (
                 vec![
                     node(),
                     f(
@@ -1743,7 +1743,7 @@ impl Form {
                     f("encoding", "encoding", DEFAULT_ENCODING.into(), Text),
                 ],
                 |form, _cwd| {
-                    Ok(Command::HistoryGet(HistoryGetArgs {
+                    Ok(Command::HistoryRead(HistoryReadArgs {
                         end_message_only: form.boolean("end_message_only")?,
                         parts: form.boolean("parts")?,
                         node_id: form.owned("node")?,
@@ -2676,8 +2676,8 @@ mod tests {
                 json!({"thread_id":id(1),"limit":20}),
             ),
             (
-                OpKind::HistoryGet,
-                "history.get",
+                OpKind::HistoryRead,
+                "history.read",
                 json!({"node_id":id(2),"limit_bytes":65536,"encoding":"UTF-8"}),
             ),
             (
@@ -2974,7 +2974,7 @@ mod tests {
                         | "turn.get"
                         | "history.list"
                         | "history.window"
-                        | "history.get"
+                        | "history.read"
                         | "history.search"
                         | "history.relations"
                         | "shell.get"

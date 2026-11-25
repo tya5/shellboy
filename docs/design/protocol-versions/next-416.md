@@ -1,0 +1,4 @@
+`history get` becomes `history read` (wire `history.get` becomes `history.read`).
+Request and result fields, body bytes and projection options are unchanged.
+Restart body pagination at the new route: old history body cursor scopes are
+not accepted. `history.list`, `history.window`, and `shell.read` are unchanged.

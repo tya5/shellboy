@@ -138,7 +138,7 @@ def main():
         message = cli('message_context', 'message', 'get', '--message', 'obs-user')['result']['context']
         assert message['state'] == 'applied' and message['run_id'] == 'obs-owner'
         assert message['created_at'] == '2026-10-25T00:00:01Z' and message['updated_at'] == '2026-10-25T00:00:03Z'
-        node = cli('history_context', 'history', 'get', '--node', 'obs-user')['result']['context']
+        node = cli('history_context', 'history', 'read', '--node', 'obs-user')['result']['context']
         assert node['thread_id'] == 'obs-root' and node['turn_id'] == 'obs-turn'
         facts['contexts'] = {'thread_parent': thread['parent_thread_id'], 'run_owner': run['owner_run_id'], 'closed_run_lifetime_ms': run['lifetime_ms'], 'turn_failure_code': turn['failure_reason']['code'], 'message_state': message['state'], 'invented_started_at': False}
         fork = cli('fork_shared_path', 'thread', 'fork', '--thread', 'obs-root', '--node', 'obs-answer')['result']['thread_id']
@@ -173,7 +173,7 @@ def main():
         cli('seed_child_survives', 'thread', 'get', '--thread', 'obs-child')
         cli('deleted_preview_unavailable', 'thread', 'delete-preview', '--thread', 'obs-root', error='thread_not_found')
         assert cli('fork_still_available', 'thread', 'get', '--thread', fork)['result']['thread_id'] == fork
-        assert cli('original_still_readable', 'history', 'get', '--node', 'obs-user')['result']['context']['thread_id'] == 'obs-root'
+        assert cli('original_still_readable', 'history', 'read', '--node', 'obs-user')['result']['context']['thread_id'] == 'obs-root'
         assert hashlib.sha256(external.read_bytes()).hexdigest() == original_hash
     finally:
         owner.close()

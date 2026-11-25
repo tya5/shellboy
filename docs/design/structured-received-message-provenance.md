@@ -18,7 +18,7 @@ an older Studio checkout contains these files.
 | --- | --- | --- |
 | Credential-free sender kind/IDs/label | src/protocol/sender.rs: MessageSender::recorded/from_saved; docs/design/protocol.md sender inspection #59 | Reuse exactly. Model IDs come from validated Origin, label is self-asserted. Human flag is an unverified client claim, not authentication; model Origin wins. Old insufficient evidence stays unknown. Existing legacy complete OriginIdentity reader is saved-fact interpretation, NOT a new alias. |
 | Body and receipt stored together | src/control/db.rs: send/send_content, especially1981-2021 | Actual accepted message_id is node ID; receipt.message_node_id binds sender_json to that body. MessageAccepted.message_id/thread_id is the public client name. No body rewrite/new sender table needed. |
-| Existing history sender projection | src/history/relations.rs: provenance; protocol.rs NodeProvenance | User-node provenance.sender already reads exact body receipt; non-user sender omitted. list/history.get/window (with and without items) use the same provenance helper. Do not implement another sender resolver. |
+| Existing history sender projection | src/history/relations.rs: provenance; protocol.rs NodeProvenance | User-node provenance.sender already reads exact body receipt; non-user sender omitted. list/history.read/window (with and without items) use the same provenance helper. Do not implement another sender resolver. |
 | Typed body items | src/history/items.rs; history/window.rs; history/list.rs | Item identity/body ordering is separate. Node-level provenance on HistorySnippet covers each of its #296 items, including unavailable/deferred items; do not duplicate metadata per part or infer identity from text. |
 | Request/reply durable links | src/control/reply.rs: reply; src/control/db.rs: message_details; protocol.rs MessageDetails | Original request receipt stores expect_reply, reply.state/node_id/by; delivered reply receipt stores reply_to=original message ID. message.get already exposes these; history provenance does not expose request/reply metadata yet. |
 | Reply without delivery receipt | src/control/reply.rs: target=None branch | A reply to a human/external/unknown sender is a separate user node attached to original receipt.reply.node_id/by, not necessarily a new send receipt or selected-path entry. Existing provenance has a reverse fallback for its sender. Do not invent selection membership. |
@@ -52,7 +52,7 @@ history without being presented as conversation items.
 
 Keep `NodeProvenance.sender: Option<MessageSender>` exactly as now. Add ONE optional
 `NodeProvenance.message: Option<MessageProvenance>`; same declaration is shared by
-history.get, list and window/items, no per-endpoint aliases. Proposed typed shape:
+history.read, list and window/items, no per-endpoint aliases. Proposed typed shape:
 
 ```text
 MessageProvenance {

@@ -392,7 +392,7 @@ pub enum ThreadCommand {
     Delete(ThreadDeleteOptions),
     /// Release this Thread's hold on originals of summaries and spills adopted before a node (irreversible).
     #[command(
-        after_help = "Explicit only; nothing prunes automatically. Preview first, then run:\n  shellboy thread prune --thread THREAD_ID --before NODE_ID --dry-run\n  shellboy thread prune --thread THREAD_ID --before NODE_ID\n  shellboy storage collect --category history   # optional: reclaim now and read the counts\n\nOmitting --thread targets the calling Thread. Originals still held by another live Thread (a fork) are kept. After the history GC reclaims them, a summary restore, original search and `history get` of those nodes report them as pruned. GC frees pages inside the database file but does not shrink it (no automatic VACUUM). Use `history get` to read what you need before pruning."
+        after_help = "Explicit only; nothing prunes automatically. Preview first, then run:\n  shellboy thread prune --thread THREAD_ID --before NODE_ID --dry-run\n  shellboy thread prune --thread THREAD_ID --before NODE_ID\n  shellboy storage collect --category history   # optional: reclaim now and read the counts\n\nOmitting --thread targets the calling Thread. Originals still held by another live Thread (a fork) are kept. After the history GC reclaims them, a summary restore, original search and `history read` of those nodes report them as pruned. GC frees pages inside the database file but does not shrink it (no automatic VACUUM). Use `history read` to read what you need before pruning."
     )]
     Prune(ThreadPruneOptions),
     /// Cut this Thread's selected path back to a node; the removed part stays as a child Thread.
@@ -443,7 +443,7 @@ pub enum ThreadCommand {
 pub enum MessageCommand {
     /// Save an instruction; acceptance is separate from execution and answer completion.
     #[command(
-        after_help = "Submit and follow the returned assignment:\n  shellboy message send --thread THREAD_ID --text 'Summarize the findings'\n  shellboy message get --message MESSAGE_ID\n  shellboy turn get --turn TURN_ID\n  shellboy history get --node END_MESSAGE_NODE_ID\n\nUse only IDs returned for this request. pending has no assigned Turn yet; inspect the same message instead of sending it again. Guide: shellboy docs get --id shellboy/delegation"
+        after_help = "Submit and follow the returned assignment:\n  shellboy message send --thread THREAD_ID --text 'Summarize the findings'\n  shellboy message get --message MESSAGE_ID\n  shellboy turn get --turn TURN_ID\n  shellboy history read --node END_MESSAGE_NODE_ID\n\nUse only IDs returned for this request. pending has no assigned Turn yet; inspect the same message instead of sending it again. Guide: shellboy docs get --id shellboy/delegation"
     )]
     Send(MessageSendOptions),
     /// Request a reply from a named recipient or another Thread.
@@ -452,9 +452,9 @@ pub enum MessageCommand {
     List(MessageListOptions),
     /// Reply once to a received reply-expected message.
     Reply(MessageReplyOptions),
-    /// Inspect saved delivery facts; read the original body separately with history get.
+    /// Inspect saved delivery facts; read the original body separately with history read.
     #[command(
-        after_help = "  shellboy message get --message MESSAGE_ID\n  shellboy history get --node MESSAGE_ID\n\nInspect delivery_status and existing context.hold_reason. terminal_before_path_admission is a held reason: the assigned Run/Turn ended before path admission, not proof of receipt termination or body loss. Saved context is not live delivery proof; history get reads retained body without resending it. A missing body is unknown/unavailable, not permission to invent it.\nA rewind does not by itself prove these inputs were lost. Explicit human resume can admit eligible old held inputs, so a fresh manual resend can duplicate their instructions. Do not automatically repair, resend or create a new sender notice.\nGuide: shellboy docs get --id shellboy/recovery-and-storage"
+        after_help = "  shellboy message get --message MESSAGE_ID\n  shellboy history read --node MESSAGE_ID\n\nInspect delivery_status and existing context.hold_reason. terminal_before_path_admission is a held reason: the assigned Run/Turn ended before path admission, not proof of receipt termination or body loss. Saved context is not live delivery proof; history read reads retained body without resending it. A missing body is unknown/unavailable, not permission to invent it.\nA rewind does not by itself prove these inputs were lost. Explicit human resume can admit eligible old held inputs, so a fresh manual resend can duplicate their instructions. Do not automatically repair, resend or create a new sender notice.\nGuide: shellboy docs get --id shellboy/recovery-and-storage"
     )]
     Get(MessageOptions),
     /// Cancel queued delivery or withdraw your pending reply request after delivery. Admitted history is retained.
@@ -482,9 +482,9 @@ pub enum RunCommand {
 }
 #[derive(Debug, Clone, Subcommand)]
 pub enum TurnCommand {
-    /// Inspect state and end_message_node_id; fetch the end message with history get.
+    /// Inspect state and end_message_node_id; fetch the end message with history read.
     #[command(
-        after_help = "  shellboy turn get --turn TURN_ID\n  shellboy history get --node END_MESSAGE_NODE_ID\n\nFetch only a returned end_message_node_id; stopped/failed terminal states need not have an end message. Guide: shellboy docs get --id shellboy/delegation"
+        after_help = "  shellboy turn get --turn TURN_ID\n  shellboy history read --node END_MESSAGE_NODE_ID\n\nFetch only a returned end_message_node_id; stopped/failed terminal states need not have an end message. Guide: shellboy docs get --id shellboy/delegation"
     )]
     Get(TurnOptions),
     /// Interrupt this Turn without stopping the Run.
@@ -498,7 +498,7 @@ pub enum HistoryCommand {
         after_help = "  shellboy history window --thread THREAD_ID --before 20\n  shellboy history window --thread THREAD_ID --ordinal 4000 --before 10 --after 10\n\nWith no --ordinal/--node the window ends at the last node. Each item carries selection.ordinal; total is one past the last ordinal and revision changes on append, rewind and compaction. An append keeps every earlier position valid; a stale position fails with cursor_expired (details: revision, total). Pass --expect-node with --ordinal to detect a rewound or compacted path."
     )]
     Window(HistoryWindowOptions),
-    Get(HistoryGetOptions),
+    Read(HistoryReadOptions),
     Search(SearchOptions),
     Relations(HistoryRelationsOptions),
 }
@@ -1263,7 +1263,7 @@ pub struct HistoryWindowOptions {
     pub excerpt_chars: u32,
 }
 #[derive(Debug, Clone, Args)]
-pub struct HistoryGetOptions {
+pub struct HistoryReadOptions {
     /// Read only the saved end message (final assistant message); exclude reasoning and commentary.
     #[arg(long)]
     pub end_message_only: bool,
@@ -2077,7 +2077,7 @@ impl Cli {
                     after: a.after,
                     excerpt_chars: a.excerpt_chars,
                 }),
-                HistoryCommand::Get(a) => C::HistoryGet(wire::HistoryGetArgs {
+                HistoryCommand::Read(a) => C::HistoryRead(wire::HistoryReadArgs {
                     end_message_only: a.end_message_only,
                     parts: a.parts,
                     node_id: a.node_id,

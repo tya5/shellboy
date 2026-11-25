@@ -19,8 +19,8 @@ impl CopyError {
     fn error(&self, language: UiLanguage) -> ApiError {
         let (code, message) = match self {
             Self::Limit => (ErrorCode::InputLimit, local!(language,
-                "コピーの取得上限を超えました。oで原文を開き、nで続きを確認してください（history getでも取得できます）",
-                "Copy retrieval limit exceeded. Press o to open the source and n to continue (also available through history get)").into()),
+                "コピーの取得上限を超えました。oで原文を開き、nで続きを確認してください（history readでも取得できます）",
+                "Copy retrieval limit exceeded. Press o to open the source and n to continue (also available through history read)").into()),
             Self::ReferenceChanged => (ErrorCode::TargetUnavailable, local!(language,
                 "原文の参照先が変わりました", "The source reference has changed").into()),
             Self::Unavailable(reason) => (ErrorCode::OutputExpired, match language {
@@ -53,7 +53,7 @@ async fn source(
     for _ in 0..SOURCE_PAGES {
         let body = super::inspection_history::native_body(
             data_dir,
-            HistoryGetArgs {
+            HistoryReadArgs {
                 end_message_only: false,
                 parts: false,
                 node_id: node_id.clone(),
@@ -186,8 +186,8 @@ mod tests {
         let reason = "fixture reason: \u{4fdd}\u{5b58}\u{6e08}\u{307f} \u{25c9}";
         for (failure, code, japanese, english) in [
             (CopyError::Limit, ErrorCode::InputLimit,
-             "コピーの取得上限を超えました。oで原文を開き、nで続きを確認してください（history getでも取得できます）".into(),
-             "Copy retrieval limit exceeded. Press o to open the source and n to continue (also available through history get)".into()),
+             "コピーの取得上限を超えました。oで原文を開き、nで続きを確認してください（history readでも取得できます）".into(),
+             "Copy retrieval limit exceeded. Press o to open the source and n to continue (also available through history read)".into()),
             (CopyError::ReferenceChanged, ErrorCode::TargetUnavailable,
              "原文の参照先が変わりました".into(), "The source reference has changed".into()),
             (CopyError::Unavailable(reason.into()), ErrorCode::OutputExpired,
@@ -212,7 +212,7 @@ mod tests {
         assert!(
             limit(UiLanguage::Ja)
                 .message
-                .contains("（history getでも取得できます）")
+                .contains("（history readでも取得できます）")
         );
     }
 

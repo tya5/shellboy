@@ -29,7 +29,7 @@ async fn history_handler_drops_only_relation_at_exact_frame_boundary() {
         .result;
     let node = saved["message_id"].as_str().unwrap();
     let command: Command =
-        serde_json::from_value(json!({"command":"history.get","args":{"node_id":node}})).unwrap();
+        serde_json::from_value(json!({"command":"history.read","args":{"node_id":node}})).unwrap();
     let (baseline, _) = control
         .evaluate(
             Request::new(format!("{}:x", owner.instance_id), command.clone()),
@@ -119,7 +119,7 @@ async fn notification_all_history_handlers_fit_receipt_and_replay_at_exact_frame
         tx.execute("UPDATE node SET notification_event_id='ne' WHERE id='nn'",[])?;tx.commit()?;Ok(())
     }).await.unwrap();
     for raw in [
-        json!({"command":"history.get","args":{"node_id":"nn"}}),
+        json!({"command":"history.read","args":{"node_id":"nn"}}),
         json!({"command":"history.list","args":{"thread_id":"recipient"}}),
         json!({"command":"history.window","args":{"thread_id":"recipient","items":true}}),
     ] {
@@ -242,7 +242,7 @@ async fn notification_all_history_handlers_fit_receipt_and_replay_at_exact_frame
 }
 
 #[tokio::test]
-async fn history_get_keeps_summary_parts_text_and_cursor_at_exact_frame_boundary() {
+async fn history_read_keeps_summary_parts_text_and_cursor_at_exact_frame_boundary() {
     let root = tempfile::tempdir().unwrap();
     let config = root.path().join("config.toml");
     std::fs::write(&config, "").unwrap();
@@ -265,7 +265,7 @@ async fn history_get_keeps_summary_parts_text_and_cursor_at_exact_frame_boundary
         Ok(())
     }).await.unwrap();
     let command: Command = serde_json::from_value(
-        json!({"command":"history.get","args":{"node_id":"summary","parts":true,"limit_bytes":32}}),
+        json!({"command":"history.read","args":{"node_id":"summary","parts":true,"limit_bytes":32}}),
     )
     .unwrap();
     let short = format!("{}:parts", owner.instance_id);

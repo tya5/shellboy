@@ -137,7 +137,7 @@ async fn all_public_cli_operations_map_to_shared_typed_contracts() {
             "wait",
         ),
         (&["history", "list", "--thread", "t"], "history.list"),
-        (&["history", "get", "--node", "n"], "history.get"),
+        (&["history", "read", "--node", "n"], "history.read"),
         (
             &[
                 "history",
@@ -335,7 +335,7 @@ async fn defaults_globals_and_effort_clear_preserve_owner_and_wire_semantics() {
         matches!(convert(&["message","send","--text",""]).await,Command::MessageSend(a) if a.thread_id.is_none() && a.text.is_empty())
     );
     assert!(
-        matches!(convert(&["history","get","--node","n"]).await,Command::HistoryGet(a) if a.limit_bytes==65536 && a.encoding=="UTF-8")
+        matches!(convert(&["history","read","--node","n"]).await,Command::HistoryRead(a) if a.limit_bytes==65536 && a.encoding=="UTF-8")
     );
     assert!(
         matches!(convert(&["history","search","--query","q"]).await,Command::HistorySearch(a) if a.limit==10)
@@ -483,7 +483,7 @@ async fn invalid_flags_limits_wait_json_and_unselected_backfill_never_become_ope
         vec![
             "shellboy",
             "history",
-            "get",
+            "read",
             "--node",
             "n",
             "--limit-bytes",
@@ -897,8 +897,8 @@ async fn shared_defaults_keep_parser_and_wire_deserialization_identical() {
             serde_json::json!({"node_id":"n","relation":"previous"}),
         ),
         (
-            vec!["history", "get", "--node", "n"],
-            "history.get",
+            vec!["history", "read", "--node", "n"],
+            "history.read",
             serde_json::json!({"node_id":"n"}),
         ),
         (
@@ -1479,7 +1479,7 @@ fn message_get_help_uses_saved_context_and_body_read_without_resending() {
         .join(" ");
     for fact in [
         "context.hold_reason",
-        "history get --node MESSAGE_ID",
+        "history read --node MESSAGE_ID",
         "not proof of receipt termination or body loss",
         "fresh manual resend",
         "duplicate",
@@ -1708,4 +1708,10 @@ async fn exact_target_cli_names_reject_retired_selectors() {
             value
         );
     }
+}
+
+#[test]
+fn retired_history_get_verb_is_rejected() {
+    let error = Cli::try_parse_from(["shellboy", "history", "get", "--node", "n"]).unwrap_err();
+    assert_eq!(error.kind(), clap::error::ErrorKind::InvalidSubcommand);
 }

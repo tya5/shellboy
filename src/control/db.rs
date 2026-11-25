@@ -1641,8 +1641,8 @@ impl Store {
             Command::HistoryWindow(args) => {
                 MutationResult::value(history::rpc::selected_window(tx, args, operation_id)?)
             }
-            Command::HistoryGet(args) => {
-                MutationResult::value(history::rpc::get(tx, args, operation_id)?)
+            Command::HistoryRead(args) => {
+                MutationResult::value(history::rpc::read(tx, args, operation_id)?)
             }
             Command::HistoryExport(args) => MutationResult::value(history::export::read(
                 tx,
@@ -5266,9 +5266,9 @@ mod agents_reference_tests {
             let facts = store
                 .database
                 .call(move |db| {
-                    let body = history::get_node(
+                    let body = history::read_node_body(
                         db,
-                        &HistoryGetArgs {
+                        &HistoryReadArgs {
                             end_message_only: false,
                             parts: false,
                             node_id: node.clone(),

@@ -144,7 +144,7 @@ def main():
         assert link['request_node_id'] == 'request'
         assert cli('shell-get', 'shell', 'get', '--execution', link['execution_id'])['state'] == 'exited'
         assert cli('shell-read', 'shell', 'read', '--execution', link['execution_id'])['text'] == 'WORK_STATUS_NATIVE_V1'
-        cli('original', 'history', 'get', '--node', link['request_node_id'])
+        cli('original', 'history', 'read', '--node', link['request_node_id'])
         os.write(owner[1], b'/status all\r')
         deadline = time.monotonic() + 10
         def rendered_text():

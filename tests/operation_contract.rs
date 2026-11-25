@@ -560,8 +560,8 @@ async fn measure_current_instance_receipt_sizes() {
             }),
         ),
         (
-            "history.get (64KiB page)",
-            Command::HistoryGet(HistoryGetArgs {
+            "history.read (64KiB page)",
+            Command::HistoryRead(HistoryReadArgs {
                 end_message_only: false,
                 parts: false,
                 node_id: "body".into(),

@@ -106,7 +106,7 @@ fn provenance_with_sender_evidence(
     Ok((result, operation_id))
 }
 
-/// Only history get/list/window publish the separately budgeted optional relation.
+/// Only history read/list/window publish the separately budgeted optional relation.
 pub(super) fn projected_provenance(
     connection: &Connection,
     node_id: &str,

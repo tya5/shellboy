@@ -220,7 +220,7 @@ async fn accepted_send_operation_id_is_projected_after_driver_admission() {
     for (node, operation_id) in expected {
         let get = command(
             &control,
-            Command::HistoryGet(serde_json::from_value(json!({"node_id":node})).unwrap()),
+            Command::HistoryRead(serde_json::from_value(json!({"node_id":node})).unwrap()),
         )
         .await;
         assert_eq!(

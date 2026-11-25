@@ -5,7 +5,7 @@
 ## 採用範囲
 
 - operation受付と後続message／compact／索引等の完了を分ける。既存state/outcomeと同ID・同要求・同呼出元再送、異内容conflict、旧instance記録なしのexpiredを保つ。外部副作用の不明を再実行可と解釈しない。監査と是正は [operation-observability](operation-observability.md)。
-- Thread／Run／Turn／messageのget、history getへ任意contextを追加する。保存された時刻・所有・状態・構造化理由だけを公開し、未知・不適用のfieldは省略する。Run/Turnのlifetime_msはcreated_atからended_atまでの閉じた壁時計時間で、準備・待ちを含む。開始時刻をcreated_atから捏造せず、全状態遷移のログ基盤を増設しない。[execution-context](execution-context.md)。
+- Thread／Run／Turn／messageのget、history readへ任意contextを追加する。保存された時刻・所有・状態・構造化理由だけを公開し、未知・不適用のfieldは省略する。Run/Turnのlifetime_msはcreated_atからended_atまでの閉じた壁時計時間で、準備・待ちを含む。開始時刻をcreated_atから捏造せず、全状態遷移のログ基盤を増設しない。[execution-context](execution-context.md)。
 - `thread delete-preview --thread ID [--descendants]`（wire `thread.delete_preview`）を新設する。削除阻害Run、対象・子孫、添付参照、直接共有・置換出典を同snapshotで返す。容量は現GCでThread単位に安全に算定できないためnullと理由を返す。独自のGC判定器を作らず、実削除transactionの再判定を正本とする。[deletion-impact](deletion-impact.md)。
 
 ## 公開経路

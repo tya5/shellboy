@@ -80,7 +80,7 @@ Provenance (`src/gc/history.rs` `provenance_step` ~180) expands every replacemen
 The path plus the sources of `state='completed'` replacements, expanded recursively.
 
 ### Replacements
-Production code writes only `state='completed'` (`src/compaction.rs` ~1436). The output node kind is `summary` or `spill`. Restore re-inserts the originals at the marker and keeps the `thread_replacement` row ("the audit record and GC root stay in `thread_replacement`", `compaction.md`). A spill placeholder tells the model `retrieve: shellboy history get --node <original_node_id>` (`src/compaction.rs` ~2037).
+Production code writes only `state='completed'` (`src/compaction.rs` ~1436). The output node kind is `summary` or `spill`. Restore re-inserts the originals at the marker and keeps the `thread_replacement` row ("the audit record and GC root stay in `thread_replacement`", `compaction.md`). A spill placeholder tells the model `retrieve: shellboy history read --node <original_node_id>` (`src/compaction.rs` ~2037).
 
 ### Attachments (`src/attachments/selection.rs` ~59)
 An `active` selection whose source node leaves the path is still listed as active. Only `context_replacement` exclusions off the path count as detached. `/edit` deletes the edited node's selection in its fork explicitly.
@@ -151,9 +151,9 @@ The closure is bounded at 65,536 nodes, the restore provenance budget. If it is 
 - `compact --restore` for pruned markers. It is refused with `invalid_state` and reason `pruned`, and `compact list` shows the state.
 - Rewind or fork into the range. It was already impossible without a restore.
 - Raw search hits for the originals. Their vectors are deleted.
-- `history get` returns `tombstone_reason=pruned_unreachable`.
+- `history read` returns `tombstone_reason=pruned_unreachable`.
 - Summary-part cache entries for the range, and therefore cheap re-summarization.
-- The summary and omission texts are immutable, so restore hints inside them become stale. A follow-up `history get` shows the tombstone.
+- The summary and omission texts are immutable, so restore hints inside them become stale. A follow-up `history read` shows the tombstone.
 
 What is kept: summary nodes, node IDs, edges, `replacement_source` rows (provenance as IDs), shell raw output (it has its own retention), and usage records.
 
@@ -166,7 +166,7 @@ What is kept: summary nodes, node IDs, edges, `replacement_source` rows (provena
 | Byte estimate | Re-implements reachability | Drop it. Report `candidate_payload_bytes` as a fact and `reclaimable_bytes: null`. |
 | Shared-kept counts | Two indexed EXISTS per candidate, within the bounded closure | Keep. This is how the "nothing shared is deleted" promise becomes visible. |
 | Spills | — | Excluded in v1. No flag. |
-| Export before prune | — | Not built in. `history get` and `readback` already exist. |
+| Export before prune | — | Not built in. `history read` and `readback` already exist. |
 | A separate prune worker | — | None. The existing GC job does the work. |
 
 Is prune just the existing delete/GC path? The GC half is entirely the existing
@@ -356,8 +356,8 @@ shellboy history list    --thread T --branch B         # stage 4: read/compare
 Each stage is useful alone. P1 does not depend on R1. If R1 lands later, P1 gains the anchor-skip check.
 
 ## 9. Open questions for the user
-1. Include spills in prune? They hold the largest bytes, but their placeholder tells the model to `history get` the original. Option: `--include-spills` later.
-2. Should prune offer an export? Default: no, use `history get` and `readback`.
+1. Include spills in prune? They hold the largest bytes, but their placeholder tells the model to `history read` the original. Option: `--include-spills` later.
+2. Should prune offer an export? Default: no, use `history read` and `readback`.
 3. Is the B2 migration acceptable, or is B1 (rewind saves the tail as a fork Thread; no forward in place) preferred for zero schema?
 4. Should `/edit` stay "edit and fork", or become rewind in place followed by a send (which then creates an in-thread branch)?
 5. Which F-key opens the panel? F1–F10 are bound. F11 and F12 are free in the app but commonly captured by terminals or the OS. Alternatively, use only `/branches` and the F8 entry.

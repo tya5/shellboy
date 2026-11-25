@@ -264,7 +264,7 @@ async fn management_request_trigger(
     }
     if matches!(
         command,
-        Command::HistoryGet(_) | Command::HistoryList(_) | Command::HistoryWindow(_)
+        Command::HistoryRead(_) | Command::HistoryList(_) | Command::HistoryWindow(_)
     ) {
         return match inspection_history::request(data_dir, command, cancel).await {
             Ok(value) => Ok(value),
@@ -3016,7 +3016,7 @@ async fn run_client(
                         if !spawn_read(&mut read_workers, &read_slots, &read_cancel, async move {
                             match request(
                                 &control,
-                                Command::HistoryGet(HistoryGetArgs { end_message_only: false, parts: false,
+                                Command::HistoryRead(HistoryReadArgs { end_message_only: false, parts: false,
                                     node_id,
                                     cursor,
                                     limit_bytes: MAX_BODY_BYTES,

@@ -635,7 +635,7 @@ impl<W: Write> Chat<'_, W> {
         let mut text = String::new();
         for _ in 0..65 {
             let page: HistoryBody = self
-                .call(Command::HistoryGet(HistoryGetArgs {
+                .call(Command::HistoryRead(HistoryReadArgs {
                     end_message_only: self.until != ResultMode::Reply,
                     parts: false,
                     node_id: node.clone(),
@@ -651,7 +651,7 @@ impl<W: Write> Chat<'_, W> {
             if text.len() > ANSWER_LIMIT {
                 return Err(ChatError::new(
                     6,
-                    format!("End message exceeds 1MiB; read it with history get --node {node}"),
+                    format!("End message exceeds 1MiB; read it with history read --node {node}"),
                 ));
             }
             match page.next_cursor {

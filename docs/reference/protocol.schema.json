@@ -1625,10 +1625,10 @@
         {
           "properties": {
             "args": {
-              "$ref": "#/definitions/HistoryGetArgs"
+              "$ref": "#/definitions/HistoryReadArgs"
             },
             "command": {
-              "const": "history.get",
+              "const": "history.read",
               "type": "string"
             }
           },
@@ -3934,41 +3934,6 @@
       ],
       "type": "object"
     },
-    "HistoryGetArgs": {
-      "additionalProperties": false,
-      "properties": {
-        "cursor": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "encoding": {
-          "default": "UTF-8",
-          "type": "string"
-        },
-        "end_message_only": {
-          "type": "boolean"
-        },
-        "limit_bytes": {
-          "default": 65536,
-          "format": "uint32",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "node_id": {
-          "type": "string"
-        },
-        "parts": {
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "node_id"
-      ],
-      "type": "object"
-    },
     "HistoryItem": {
       "oneOf": [
         {
@@ -4211,6 +4176,41 @@
       "required": [
         "thread_id",
         "excerpt_chars"
+      ],
+      "type": "object"
+    },
+    "HistoryReadArgs": {
+      "additionalProperties": false,
+      "properties": {
+        "cursor": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "encoding": {
+          "default": "UTF-8",
+          "type": "string"
+        },
+        "end_message_only": {
+          "type": "boolean"
+        },
+        "limit_bytes": {
+          "default": 65536,
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "node_id": {
+          "type": "string"
+        },
+        "parts": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "node_id"
       ],
       "type": "object"
     },
@@ -8882,10 +8882,10 @@
           "additionalProperties": false,
           "properties": {
             "args": {
-              "$ref": "#/definitions/HistoryGetArgs"
+              "$ref": "#/definitions/HistoryReadArgs"
             },
             "command": {
-              "const": "history.get",
+              "const": "history.read",
               "type": "string"
             },
             "operation_id": {
@@ -14632,7 +14632,40 @@
       "title": "HistoryExportPage",
       "type": "object"
     },
-    "history.get": {
+    "history.list": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "description": "A resumable owner record list. Readers own selection and cursor issuance;\nthis envelope owns the public page fields.",
+      "properties": {
+        "filters": {
+          "$ref": "#/definitions/HistoryListFilters"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/definitions/HistorySnippet"
+          },
+          "type": "array"
+        },
+        "limit": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "next_cursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "items",
+        "limit",
+        "filters"
+      ],
+      "title": "RecordPage",
+      "type": "object"
+    },
+    "history.read": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
         "context": {
@@ -14692,39 +14725,6 @@
         "next_node_ids"
       ],
       "title": "HistoryBody",
-      "type": "object"
-    },
-    "history.list": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "description": "A resumable owner record list. Readers own selection and cursor issuance;\nthis envelope owns the public page fields.",
-      "properties": {
-        "filters": {
-          "$ref": "#/definitions/HistoryListFilters"
-        },
-        "items": {
-          "items": {
-            "$ref": "#/definitions/HistorySnippet"
-          },
-          "type": "array"
-        },
-        "limit": {
-          "format": "uint32",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "next_cursor": {
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      },
-      "required": [
-        "items",
-        "limit",
-        "filters"
-      ],
-      "title": "RecordPage",
       "type": "object"
     },
     "history.recall": {

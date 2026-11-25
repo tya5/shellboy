@@ -100,7 +100,7 @@ shellboy run retry --run RUN_ID
 shellboy wait --conditions-json '[{"type":"turn_completed","turn_id":"ACK_TURN_ID"}]' --timeout-ms 30000
 shellboy turn get --turn ACK_TURN_ID
 # Only if turn get returns end_message_node_id:
-shellboy history get --node END_MESSAGE_NODE_ID
+shellboy history read --node END_MESSAGE_NODE_ID
 ```
 
 Read the wait snapshot's `state` and then saved Turn facts. `satisfied` can mean
@@ -160,7 +160,7 @@ Use the existing message ID to read saved delivery context and then its body:
 
 ```sh
 shellboy message get --message MESSAGE_ID
-shellboy history get --node MESSAGE_ID
+shellboy history read --node MESSAGE_ID
 ```
 
 `message get` already exposes `context.hold_reason`; it is not a new DTO field.
@@ -170,7 +170,7 @@ ended before the input was admitted to the selected path. It is not a terminal
 receipt state, an answer, proof of consumption or proof that the body was lost.
 Saved context reports recorded facts, not the present OS/process state.
 
-`history get` reads the retained node body and its provenance without submitting
+`history read` reads the retained node body and its provenance without submitting
 another instruction. Follow `next_cursor` with `--cursor` for a paged body. An
 unselected input can remain saved and readable without appearing on the current
 recipient path or a rewind backup branch. A missing/unavailable body must be

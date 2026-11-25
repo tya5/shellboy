@@ -110,7 +110,7 @@ fn operation_result_schemas(
     result!("history.window", HistoryWindow);
     result!("history.recall", HistoryRecallResult);
     result!("history.received", HistoryReceivedPage);
-    result!("history.get", HistoryBody);
+    result!("history.read", HistoryBody);
     result!("history.search", Page<SearchMatch>);
     result!("history.relations", RelationListPage);
     result!("shell.get", ShellDetails);
@@ -1281,7 +1281,7 @@ fn is_true(value: &bool) -> bool {
 fn default_true() -> bool {
     true
 }
-args!(HistoryGetArgs { #[serde(default, skip_serializing_if = "is_false")] end_message_only: bool, #[serde(default, skip_serializing_if = "is_false")] parts: bool, node_id: String, #[serde(default = "body_limit")] limit_bytes: u32, #[serde(default)] cursor: Option<String>, #[serde(default = "utf8")] encoding: String });
+args!(HistoryReadArgs { #[serde(default, skip_serializing_if = "is_false")] end_message_only: bool, #[serde(default, skip_serializing_if = "is_false")] parts: bool, node_id: String, #[serde(default = "body_limit")] limit_bytes: u32, #[serde(default)] cursor: Option<String>, #[serde(default = "utf8")] encoding: String });
 args!(HistorySearchArgs {
     query: String,
     #[serde(default = "search_limit")]
@@ -1790,8 +1790,8 @@ pub enum Command {
     HistoryRecall(HistoryRecallArgs),
     #[serde(rename = "history.received")]
     HistoryReceived(HistoryReceivedArgs),
-    #[serde(rename = "history.get")]
-    HistoryGet(HistoryGetArgs),
+    #[serde(rename = "history.read")]
+    HistoryRead(HistoryReadArgs),
     #[serde(rename = "history.search")]
     HistorySearch(HistorySearchArgs),
     #[serde(rename = "history.export")]
@@ -3023,7 +3023,7 @@ mod message_acknowledgement_tests {
             "history.window",
             "history.recall",
             "history.received",
-            "history.get",
+            "history.read",
             "history.search",
             "history.relations",
             "history.export",

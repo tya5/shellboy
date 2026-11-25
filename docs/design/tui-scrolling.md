@@ -77,7 +77,7 @@ NodeWindowは既に順序が分かっているnodeの本文更新だけを行う
 
 一時IDをUI内で明示的に追跡する。非追従時の新たなStreamは新着として扱い、保存履歴cacheへ追加しない。既存output_itemのattempt→node参照を既存履歴読取時に取得し、UI内部の確定通知を履歴pageより先に送る。本文の一致から同一性を推測せず、コア状態・EngineEvent・DB schema・公開protocolは変更しない。
 
-閲覧中の一時項目が確定した場合はnode IDとanchor/focusの参照を引き継ぎ、既存RebaseHistoryで現在の選択経路・ordinalを再取得する。取得完了まで表示済みframeを保持し、旧取得を無効にして新たなスクロール量は復旧後へ適用する。追従時は従来の正式tail置換を用いる。復旧中のtail refreshで旧frameだけを整形し直したり、一時IDをhistory getへ渡したりしない。一時IDの追跡も保持中nodeの範囲へ制限する。
+閲覧中の一時項目が確定した場合はnode IDとanchor/focusの参照を引き継ぎ、既存RebaseHistoryで現在の選択経路・ordinalを再取得する。取得完了まで表示済みframeを保持し、旧取得を無効にして新たなスクロール量は復旧後へ適用する。追従時は従来の正式tail置換を用いる。復旧中のtail refreshで旧frameだけを整形し直したり、一時IDをhistory readへ渡したりしない。一時IDの追跡も保持中nodeの範囲へ制限する。
 
 ## スクロール状態のフラグと書込み箇所の棚卸し（#118 第1段、2026-11-01）
 
@@ -140,7 +140,7 @@ stay on ThreadView; they are not another scroll state machine.
 | Awaiting read | Unrelated / stale reply | Do not release the owned read or change its frame |
 | Awaiting read | Failure / action rejection | Release ownership; first preserve current deferred-delta semantics |
 | Provisional anchor | Commit / invalidation | Rebase source correspondence, retain frame and deferred movement |
-| Rebasing | Tail refresh | Retain frame; no provisional ID passed to history.get |
+| Rebasing | Tail refresh | Retain frame; no provisional ID passed to history.read |
 | Any | Resize / projection revision | Reproject source checkpoint; first preserve render-time settlement |
 | Any | Cancel / replacement view | Fence old replies, discard owned movement as currently specified |
 

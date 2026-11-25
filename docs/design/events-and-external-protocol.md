@@ -619,5 +619,5 @@ Item-projected history windows retain retired admission notice ordinals as `kind
 An adopted output-limited Conversation ends with `outcome: adopted` and the
 existing `output_limit` evidence. A fenced attempt ends `not_adopted`. The
 adopted answer saves the same evidence in `NodeProvenance.output_limit` for
-`history.get` and `history.list`. The evidence is outside model replay output;
+`history.read` and `history.list`. The evidence is outside model replay output;
 clients need not infer it from text, nor from current connection settings. Migration `0057_answer_output_limit` stores only the exact answer-to-attempt link, including for empty answers. History derives the evidence from the linked attempt using the same saved facts as `usage.get`. Existing nodes have no such link.

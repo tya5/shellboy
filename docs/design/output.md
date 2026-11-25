@@ -14,7 +14,7 @@ cursorはbase64url JSONのopaque version1。execution ID、全stream共通sequen
 
 unknown executionはtarget_unavailable、不正/別対象/stream不一致cursorはcursor_expired、旧encodingはcursor_encoding_mismatch、原文回収・欠落・generation変更はoutput_expired。回収時はexecution/gen/最古の残存sequenceをdetailsへ返し、黙って末尾へ飛ばさない。Run所有の出力では最古位置が0以外なら初回読取りも明示失敗する。Thread所有の出力がローテーションされた場合は、カーソルなしで残存範囲の先頭から読み直し、`oldest_sequence` とstreamごとの開始offsetを確認する。欠落を空文字の成功としない。
 
-**採用したP1型修正:** ShellReadArgs.encodingはOption<String>。CLIの `--encoding` 未指定はexecutionの現在保存値を使用し、Someで明示した時だけDBのoutput_encodingを更新する。以前のString/UTF-8既定は、CP932で起動したexecutionを引数省略で勝手にUTF-8へ変更するため修正した。HistoryGetやshellツール起動のUTF-8既定とは別。再decodeは旧cursorを外して要求し、過去のrawは変えない。
+**採用したP1型修正:** ShellReadArgs.encodingはOption<String>。CLIの `--encoding` 未指定はexecutionの現在保存値を使用し、Someで明示した時だけDBのoutput_encodingを更新する。以前のString/UTF-8既定は、CP932で起動したexecutionを引数省略で勝手にUTF-8へ変更するため修正した。HistoryReadやshellツール起動のUTF-8既定とは別。再decodeは旧cursorを外して要求し、過去のrawは変えない。
 
 ## decoderとbounded取得
 

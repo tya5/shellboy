@@ -1,14 +1,14 @@
 //! Public history result assembly over the caller's existing DB snapshot.
 use super::{list_nodes, message_budget, read_node, window};
 use crate::protocol::{
-    ApiError, ErrorCode, HistoryGetArgs, HistoryListArgs, HistoryWindowArgs, Response,
+    ApiError, ErrorCode, HistoryListArgs, HistoryReadArgs, HistoryWindowArgs, Response,
 };
 use rusqlite::Connection;
 use serde_json::Value;
 
-pub(crate) fn get(
+pub(crate) fn read(
     db: &Connection,
-    args: &HistoryGetArgs,
+    args: &HistoryReadArgs,
     operation: &str,
 ) -> Result<Value, ApiError> {
     let (body, parts) = read_node(db, args)?;
@@ -17,7 +17,7 @@ pub(crate) fn get(
     if let (Some(parts), Some(object)) = (parts, value.as_object_mut()) {
         object.insert("parts".into(), parts);
     }
-    finish("history.get", operation, value)
+    finish("history.read", operation, value)
 }
 
 pub(crate) fn list(
@@ -58,7 +58,7 @@ pub(crate) fn fit_response(
     response: &mut Response<Value>,
 ) -> Result<(), serde_json::Error> {
     let slots = match command {
-        "history.get" => message_budget::Slots::Body,
+        "history.read" => message_budget::Slots::Body,
         "history.list" | "history.window" => message_budget::Slots::Nodes,
         _ => return Ok(()),
     };
