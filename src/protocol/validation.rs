@@ -959,7 +959,7 @@ impl Command {
                 Ok(())
             }
             Self::DraftList(a) => {
-                if !(1..=200).contains(&a.limit) {
+                if !(1..=MAX_LIST_LIMIT).contains(&a.limit) {
                     return Err(invalid("limit must be 1..=200"));
                 }
                 if let Some(thread) = &a.thread_id {

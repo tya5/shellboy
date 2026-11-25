@@ -705,6 +705,78 @@ mod retention_tests {
     use serde_json::json;
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn draft_list_pages_preserve_archive_scope_and_order() {
+        use crate::protocol::{DraftListArgs, DraftListKind, DraftListPage, DraftRecord};
+        let (_root, owner, control, server) = crate::frontend::control_tests::fixture().await;
+        owner.db.call(|db| {
+            db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('other','/fixture','','fixture','fixture','now')", [])?;
+            for (id, thread) in [("a", Some("thread")), ("b", None), ("c", Some("other"))] {
+                db.execute("INSERT INTO draft VALUES(?1,?2,1,?3,'archived','same')", params![id, thread, json!({"text":"é".repeat(200)}).to_string()])?;
+            }
+            Ok(())
+        }).await.unwrap();
+        let request = DraftListArgs {
+            thread_id: Some("thread".into()),
+            kind: DraftListKind::Restorable,
+            limit: 1,
+            cursor: None,
+        };
+        let list = |args| compose_call::<DraftListPage>(&control, Command::DraftList(args), None);
+        let first = list(request.clone()).await.unwrap();
+        assert_eq!(first.limit, 1);
+        assert_eq!(first.filters.thread_id.as_deref(), Some("thread"));
+        assert_eq!(first.filters.kind, DraftListKind::Restorable);
+        assert!(
+            matches!(first.items.as_slice(), [DraftRecord::Unconfirmed { draft_id, excerpt }] if draft_id == "b" && excerpt == &"é".repeat(80))
+        );
+        let continuation = DraftListArgs {
+            cursor: first.next_cursor.clone(),
+            ..request.clone()
+        };
+        assert!(continuation.cursor.is_some());
+        let second = list(continuation.clone()).await.unwrap();
+        assert!(
+            matches!(second.items.as_slice(), [DraftRecord::Unconfirmed { draft_id, .. }] if draft_id == "a")
+        );
+        assert!(second.next_cursor.is_none());
+        assert_eq!(
+            list(DraftListArgs {
+                thread_id: Some("other".into()),
+                ..continuation.clone()
+            })
+            .await
+            .unwrap_err()
+            .code,
+            ErrorCode::CursorExpired
+        );
+        assert_eq!(
+            list(DraftListArgs {
+                kind: DraftListKind::Submitted,
+                ..continuation
+            })
+            .await
+            .unwrap_err()
+            .code,
+            ErrorCode::CursorExpired
+        );
+        for limit in [0, 201] {
+            assert_eq!(
+                list(DraftListArgs {
+                    limit,
+                    ..request.clone()
+                })
+                .await
+                .unwrap_err()
+                .code,
+                ErrorCode::InvalidArgument
+            );
+        }
+        drop(server);
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn cancelled_copy_is_retired_but_text_and_attachment_restore_without_sending() {
         let (root, owner, control, server) = crate::frontend::control_tests::fixture().await;
         let path = root.path().join("retention-file.txt");
