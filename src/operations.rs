@@ -2595,6 +2595,7 @@ impl OperationId {
             | Command::DraftSubmit(_)
             | Command::DraftSave(_)
             | Command::DraftGet(_)
+            | Command::DraftList(_)
             | Command::DraftRestore(_)
             | Command::EventsWait(_)
             | Command::ConfigGet(_)
