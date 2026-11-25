@@ -580,7 +580,10 @@ async fn a_filter_excludes_other_threads_and_the_cursor_moves_past_them() {
                 tokio::time::sleep(Duration::from_millis(5)).await;
             }
             let filtered = poll(&control, Some(&at), &[&a], 0).await;
-            assert!(matches!(filtered["status"].as_str(), Some("timeout" | "text")));
+            assert!(matches!(
+                filtered["status"].as_str(),
+                Some("timeout" | "text")
+            ));
             if filtered["status"] == "text" {
                 assert!(entry(&filtered, &a).unwrap()["receive_age_ms"].is_number());
             }
