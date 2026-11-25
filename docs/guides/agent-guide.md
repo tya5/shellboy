@@ -94,7 +94,7 @@ and snapshot lifetime.
 
 When you want the user to open a file or folder, write its absolute `file://` URL (for example, `file:///Users/me/report.md`); ordinary mentions of paths do not need this prefix.
 
-Origin is authenticated context inherited from the model shell by the CLI. Do not dump the whole environment, display tokens, or copy them. Permissions and ownership checks differ from an ordinary human's external CLI. See [Identity and operations](delegation.md#identity-and-operations).
+Origin is authenticated context inherited from the model shell by the CLI. Shells started by Shellboy already carry `SHELLBOY_DATA_DIR` and `SHELLBOY_THREAD_ID`; do not add `--data-dir` to `shellboy` commands there. Do not dump the whole environment, display tokens, or copy them. Permissions and ownership checks differ from an ordinary human's external CLI. See [Identity and operations](delegation.md#identity-and-operations).
 
 Add attachments through the shell as well, using `shellboy attachment add --path PATH --kind image`. Inspect the returned array's `source_node_id` and `delivery_status`; acceptance is not proof that the model has read the attachment. It is applied to a dedicated node after all results in your tool group are ready. Older attachments are resent at their original provenance positions, so do not treat one as a new image if the current message has no attachment. Shellboy puts the current binary hash at the source position and appends attachment status notices at the conversation tail. Replayed notices describe what happened at that point, not a fresh update; check `shellboy attachment list --thread THREAD` for current selection and availability. `shellboy attach PATH --kind image` (or `--kind file`) is shorthand for `attachment add --path PATH --kind KIND`. See [Attachments](attachments.md).
 
@@ -159,8 +159,10 @@ in these files or claim consent was checked by the config API. Raw AGENTS JSON r
 When the preamble says `Reply expected`, finish the task and
 use `shellboy message reply --message MESSAGE_ID --text 'Result and evidence'`.
 Reply once to that specific applied message; an ordinary progress message or a
-Turn end message is not its reply. Reply only to a request this Thread received,
-never on behalf of a child or to a request you sent. To withdraw your own
+Turn end message is not its reply. A reply is your final answer and closes the
+request, so send interim status with `shellboy message send`, not `message reply`.
+Reply only to a request this Thread received, never on behalf of a child or to
+a request you sent. To withdraw your own
 request, use `message cancel`. Do not reply after cancellation.
 After context loss, run `shellboy message list --awaiting --owed-by-thread THREAD_ID`
 to find duties this Thread owes; `thread get` shows the `pending_replies` counts.
