@@ -23,6 +23,7 @@ The JSON's `result.text` contains the text; use `next_cursor` to continue. The f
 |---|---|---|
 | Ask a person or another Thread | `shellboy message ask --text 'Question'` or add `--thread CHILD_THREAD_ID` | [Ask and reply](#reply-to-a-request) |
 | Reply to an applied request | `shellboy message reply --message MESSAGE_ID --text 'Result'` | Inspect `message get` if delivery is uncertain |
+| Deliver a result to the person (a report, a generated file, a document, or a built page) | `shellboy artifact add --thread "$SHELLBOY_THREAD_ID" --uri PATH_OR_URI --title TITLE` | Revise with `shellboy artifact update` to keep versions. See [Thread artifacts](#thread-artifacts). |
 | Wait for a shell or read its output | [Waiting for a shell](#waiting-for-a-shell-and-leaving-shells-behind) | Use the work execution ID, not the ID of the wait command |
 | Run a command once or periodically | `shellboy schedule --help` | [Scheduled checks](#scheduled-checks) |
 | Keep a watcher running independently of a Run | `shellboy service --help` | [Services](#services-for-long-running-commands) |
@@ -201,6 +202,12 @@ a separate ask for the next assignment. Use ordinary `message send` for progress
 There are no automatic child Turn/Run lifecycle notices; an unanswered applied duty
 can get a Run-end reminder. The child's Run is independent: your Run ending neither
 waits for nor stops that Run. See [Delegation](delegation.md).
+
+## Thread artifacts
+
+Register every output meant for the person as a Thread artifact rather than only pasting its path in a reply. Clients show registered artifacts to the person. Register each result once and update that artifact when you revise it, rather than creating duplicates. Mention the artifact in your final reply.
+
+Register an output explicitly with `shellboy artifact add --thread "$SHELLBOY_THREAD_ID" --uri URI --title TITLE`. Add `--mime MIME` if needed. Use the URI format your client or system prompt specifies. For both `artifact add` and `artifact update`, you can pass a relative file path: the CLI joins it to your current directory before sending it, without checking that the target exists. Absolute paths and URIs with a scheme are sent unchanged. `shellboy artifact update --artifact A --uri URI` appends a version and retains the title unless replaced. Omitted MIME is not inherited. Use `artifact list --thread T`, `artifact get --artifact A` (optionally `--version N`), and `artifact remove --artifact A`. Pass `next_cursor` back as `--cursor` to continue list or version history.
 
 ## Waiting for a shell, and leaving shells behind
 
@@ -1110,7 +1117,3 @@ boundary, not by when the preview or a sent message arrived.
 To export a Thread for the user, run `shellboy thread export --thread ID --out PATH`. The file can include private conversation data and encrypted reasoning, so use the requested destination and do not share it without permission. This is a live export of retained history, not a snapshot or a recovery of deleted data.
 
 To import a retained-history JSONL export at the user's request, run `shellboy thread import --in PATH`. It creates a new Thread, does not resume execution, and does not replay the source provider's opaque reasoning.
-
-## Thread artifacts
-
-Register an output explicitly with `shellboy artifact add --thread "$SHELLBOY_THREAD_ID" --uri URI --title TITLE`. Add `--mime MIME` if needed. Use the URI format your client or system prompt specifies. For both `artifact add` and `artifact update`, you can pass a relative file path: the CLI joins it to your current directory before sending it, without checking that the target exists. Absolute paths and URIs with a scheme are sent unchanged. `shellboy artifact update --artifact A --uri URI` appends a version and retains the title unless replaced. Omitted MIME is not inherited. Use `artifact list --thread T`, `artifact get --artifact A` (optionally `--version N`), and `artifact remove --artifact A`. Pass `next_cursor` back as `--cursor` to continue list or version history.
