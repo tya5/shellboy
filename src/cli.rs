@@ -927,6 +927,8 @@ pub enum ShellCommand {
 pub enum AttachmentCommand {
     Add(AttachmentAddOptions),
     List(AttachmentListOptions),
+    /// Re-read selected attachment files without starting a Turn or sending anything.
+    Reload(AttachmentReloadOptions),
     Remove(AttachmentRemoveOptions),
 }
 #[derive(Debug, Clone, Subcommand)]
@@ -1089,6 +1091,11 @@ pub struct ShellListOptions {
 pub struct ThreadOptions {
     #[arg(long = "thread")]
     pub thread_id: Option<String>,
+}
+#[derive(Debug, Clone, Args)]
+pub struct AttachmentReloadOptions {
+    #[arg(long = "thread")]
+    pub thread_id: String,
 }
 #[derive(Debug, Clone, Args)]
 pub struct AttachmentListOptions {
@@ -2423,6 +2430,9 @@ impl Cli {
                     thread_id: a.thread_id,
                     limit: a.limit,
                     cursor: a.cursor,
+                }),
+                AttachmentCommand::Reload(a) => C::AttachmentReload(wire::AttachmentReloadArgs {
+                    thread_id: a.thread_id,
                 }),
                 AttachmentCommand::Remove(a) => C::AttachmentRemove(wire::AttachmentRemoveArgs {
                     thread_id: a.thread_id,

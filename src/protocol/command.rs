@@ -98,6 +98,7 @@ impl Command {
             Self::ShellStop(_) => ("shell.stop", CommandRoute::Runtime),
             Self::AttachmentAdd(_) => ("attachment.add", CommandRoute::Database),
             Self::AttachmentList(_) => ("attachment.list", CommandRoute::Database),
+            Self::AttachmentReload(_) => ("attachment.reload", CommandRoute::Runtime),
             Self::AttachmentRemove(_) => ("attachment.remove", CommandRoute::Database),
             Self::Compact(_) => ("compact", CommandRoute::Database),
             Self::ContextEdit(_) => ("context.edit", CommandRoute::Database),
@@ -159,6 +160,7 @@ impl Command {
             | Self::HistorySearch(_)
             | Self::ShellGet(_)
             | Self::ShellRead(_)
+            | Self::AttachmentReload(_)
             | Self::EventsWait(_)
             | Self::IndexBackfill(_)
             | Self::IndexRetry(_)
@@ -311,6 +313,7 @@ impl Command {
             | Self::ShellRead(_)
             | Self::ShellWrite(_)
             | Self::AttachmentAdd(_)
+            | Self::AttachmentReload(_)
             | Self::AttachmentList(_)
             | Self::AttachmentRemove(_)
             | Self::Compact(_)
@@ -410,6 +413,7 @@ impl Command {
             | Self::HistoryRelations(_)
             | Self::ShellGet(_)
             | Self::ShellRead(_)
+            | Self::AttachmentReload(_)
             | Self::ShellWrite(_)
             | Self::ShellEof(_)
             | Self::ShellStop(_)
@@ -482,6 +486,7 @@ impl Command {
             | Self::HistoryRelations(_)
             | Self::ShellGet(_)
             | Self::ShellRead(_)
+            | Self::AttachmentReload(_)
             | Self::AttachmentList(_)
             | Self::EventsWait(_)
             | Self::IndexStatus(_)
