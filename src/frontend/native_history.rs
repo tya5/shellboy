@@ -165,6 +165,92 @@ fn invalid_response() -> ApiError {
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn native_display_hydrates_the_exact_window_until_selection_changes() {
+        use crate::{app::DataOwner, control::Control, ipc::LocalServer};
+        use serde_json::json;
+
+        let root = tempfile::tempdir().unwrap();
+        let data_dir = root.path().join("data");
+        let data = DataOwner::start(None, Some(data_dir.clone()), root.path().into())
+            .await
+            .unwrap();
+        let text = "\u{754c}".repeat(4500);
+        let saved = text.clone();
+        data.db.call(move |db| {
+            let tx = db.transaction()?;
+            tx.execute("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','test','/','','p','m','2026-01-01T00:00:00Z')", [])?;
+            crate::history::append_node(&tx,"t","thought",None,"reasoning",&json!({"text": saved}),"2026-01-01T00:00:00Z")?;
+            tx.commit()?;
+            Ok(())
+        }).await.unwrap();
+        let control = Control::new(&data, root.path().into());
+        let (sender, receiver) = tokio::sync::mpsc::channel(16);
+        let server = LocalServer::bind(&data, sender).await.unwrap();
+        let dispatch = tokio::spawn(control.clone().serve(receiver));
+        control.start().await.unwrap();
+        let owner = Owner {
+            data_dir: &data_dir,
+            instance: &control.store.instance_id,
+        };
+        let window = owner
+            .window(serde_json::from_value(json!({"thread_id":"t"})).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(window.items.len(), 1);
+        let node = &window.items[0].node_id;
+        let selected = HistoryDisplaySelection {
+            thread_id: window.thread_id,
+            revision: window.revision,
+        };
+        let extent = owner
+            .display(node, Some(selected.clone()), HistoryDisplayPosition::Tail)
+            .await
+            .unwrap();
+        assert_eq!(extent.text, text);
+        assert_eq!(
+            extent.reasoning,
+            [HistoryDisplayRange {
+                start: 0,
+                end: 4500
+            }]
+        );
+
+        data.db
+            .call(|db| {
+                let tx = db.transaction()?;
+                crate::history::append_node(
+                    &tx,
+                    "t",
+                    "later",
+                    None,
+                    "user",
+                    &json!({"text":"later"}),
+                    "2026-01-01T00:00:01Z",
+                )?;
+                tx.commit()?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let stale = owner
+            .display(node, Some(selected.clone()), HistoryDisplayPosition::Tail)
+            .await;
+        assert!(matches!(stale, Err(error) if error.code == ErrorCode::CursorExpired));
+        let wrong_owner = Owner {
+            data_dir: &data_dir,
+            instance: "different-instance",
+        };
+        let refused = wrong_owner
+            .display(node, Some(selected), HistoryDisplayPosition::Tail)
+            .await;
+        assert!(matches!(refused, Err(error) if error.code == ErrorCode::ProtocolMismatch));
+        server.shutdown().await.unwrap();
+        dispatch.await.unwrap();
+        drop(control);
+        data.shutdown().await.unwrap();
+    }
+
     fn page(start: u64, end: u64) -> HistoryDisplayPage {
         HistoryDisplayPage {
             extent: HistoryDisplayRange { start: 40, end: 44 },
