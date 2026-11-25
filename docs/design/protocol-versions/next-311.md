@@ -23,6 +23,8 @@ in its own language. No TUI layout, localized label or raw payload is added.
 `events.wait` with `include_text` can also report `receive_age_ms` for a live
 attempt, including provider keepalives, without exposing provider payloads or
 reasoning text. The age is measured by the owner in milliseconds at readback.
+Receive timing alone neither advances the event cursor nor completes a wait;
+it accompanies the normal response, including a timeout.
 
 `recovery_transitions` contains committed recovery notifications since the
 cursor, identified by Thread and event sequence. Baselines and gaps do not ring

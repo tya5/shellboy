@@ -140,7 +140,7 @@ async fn native_preview_is_scoped_answer_only_and_instance_fenced() {
     assert!(hidden.record(0, "hidden answer", false));
     assert!(selected.record(0, "synthetic reasoning", true));
     assert!(selected.record(19, "visible answer", false));
-    selected.received(std::time::Instant::now(), true);
+    selected.received(std::time::Instant::now());
     let page = super::wait_scoped(data_dir, instance, None, false, Some("thread".into()))
         .await
         .unwrap();
