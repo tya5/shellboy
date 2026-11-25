@@ -1591,9 +1591,10 @@ fn schedule_add_refuses_retired_positional_command_with_help() {
             "echo hello",
         ],
         vec![
+            "--config=PRIVATE_CONFIG",
+            "schedule",
             "--data-dir",
             "PRIVATE_DIRECTORY",
-            "schedule",
             "add",
             "--in",
             "10m",
