@@ -349,7 +349,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     },
     Migration {
         version: 66,
-        sql: include_str!("../../migrations/next_run_stop_settlement_failure.sql"),
+        sql: include_str!("../../migrations/0066_run_stop_settlement_failure.sql"),
         foreign_keys: Some(Impact::IndexOnly),
     },
 ];

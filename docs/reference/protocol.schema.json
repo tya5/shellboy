@@ -1,5 +1,5 @@
 {
-  "$id": "https://shellboy.dev/schema/protocol-v40.json",
+  "$id": "https://shellboy.dev/schema/protocol-v41.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "capabilities": [
     "events.reasoning_activity",
@@ -17062,6 +17062,6 @@
       "type": "object"
     }
   },
-  "protocol_version": 40,
-  "title": "Shellboy local RPC protocol v40"
+  "protocol_version": 41,
+  "title": "Shellboy local RPC protocol v41"
 }
