@@ -528,7 +528,7 @@ mod tests {
         let state: DraftState = compose_call(
             &control,
             Command::DraftGet(DraftGetArgs {
-                thread_id: thread,
+                thread_id: Some(thread),
                 operation_id: None,
             }),
             None,
