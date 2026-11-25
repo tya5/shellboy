@@ -51,6 +51,7 @@ fn operation_result_schemas(
     result!("owner.shutdown", Accepted);
     result!("draft.save", Accepted);
     result!("draft.get", DraftState);
+    result!("draft.list", DraftListPage);
     result!("draft.restore", crate::ui::DraftSnapshot);
     result!("draft.submit", MessageAccepted);
     result!("status", StatusResult);
@@ -1887,12 +1888,52 @@ record!(DraftImageAttachment {
     path: std::path::PathBuf
 });
 
-args!(DraftGetArgs { thread_id: String });
+args!(DraftGetArgs {
+    thread_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")] operation_id: Option<String>,
+});
+args!(DraftListArgs {
+    #[serde(default)] thread_id: Option<String>,
+    #[serde(default)] kind: DraftListKind,
+    #[serde(default = "list_limit")] limit: u32,
+    #[serde(default)] cursor: Option<String>,
+});
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, clap::ValueEnum,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum DraftListKind {
+    #[default]
+    Restorable,
+    Submitted,
+}
+record!(DraftListFilters { thread_id: Option<String>, kind: DraftListKind });
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum DraftRecord {
+    Cancelled {
+        draft_id: String,
+        source_message_id: Option<String>,
+    },
+    Unconfirmed {
+        draft_id: String,
+        excerpt: String,
+    },
+    Submitted {
+        draft_id: String,
+        operation_id: String,
+        source_draft_id: String,
+        source_revision: u64,
+        message_id: String,
+    },
+}
+pub type DraftListPage = RecordPage<DraftRecord, DraftListFilters>;
 args!(DraftRestoreArgs { archive_id: String });
 record!(DraftState {
     selection_revision: u64,
     draft: Option<crate::ui::DraftSnapshot>,
     view: Option<DraftView>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] record: Option<DraftRecord>,
 });
 record!(DraftView {
     anchor: crate::ui::ViewAnchor,
@@ -1920,6 +1961,8 @@ pub enum Command {
     DraftSave(DraftSaveArgs),
     #[serde(rename = "draft.get")]
     DraftGet(DraftGetArgs),
+    #[serde(rename = "draft.list")]
+    DraftList(DraftListArgs),
     #[serde(rename = "draft.restore")]
     DraftRestore(DraftRestoreArgs),
     #[serde(rename = "draft.submit")]
@@ -3381,6 +3424,7 @@ mod message_acknowledgement_tests {
             "owner.shutdown",
             "draft.save",
             "draft.get",
+            "draft.list",
             "draft.restore",
             "draft.submit",
             "status",

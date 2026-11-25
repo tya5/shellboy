@@ -951,7 +951,25 @@ impl Command {
                 Self::ThreadCreate(a.create.clone()).validate()
             }
             Self::DraftRestore(a) => nonempty(&a.archive_id, "archive_id"),
-            Self::DraftGet(a) => nonempty(&a.thread_id, "thread_id"),
+            Self::DraftGet(a) => {
+                nonempty(&a.thread_id, "thread_id")?;
+                if let Some(id) = &a.operation_id {
+                    nonempty(id, "operation_id")?;
+                }
+                Ok(())
+            }
+            Self::DraftList(a) => {
+                if !(1..=200).contains(&a.limit) {
+                    return Err(invalid("limit must be 1..=200"));
+                }
+                if let Some(thread) = &a.thread_id {
+                    nonempty(thread, "thread_id")?;
+                }
+                if a.kind == DraftListKind::Submitted && a.thread_id.is_none() {
+                    return Err(invalid("submitted drafts require thread_id"));
+                }
+                Ok(())
+            }
             Self::DraftSave(a) => {
                 nonempty(&a.thread_id, "thread_id")?;
                 nonempty(&a.draft.draft_id, "draft_id")

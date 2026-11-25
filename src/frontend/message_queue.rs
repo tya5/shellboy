@@ -47,23 +47,99 @@ pub(super) fn submission_snapshot(
     crate::ui::draft::validate_positions(&snapshot, limit)?;
     Ok(snapshot)
 }
+const DRAFT_VIEW_LIMIT: u32 = 128;
+
+async fn draft_records(
+    control: &Control,
+    thread_id: Option<String>,
+    kind: crate::protocol::DraftListKind,
+) -> Result<Vec<crate::protocol::DraftRecord>, ApiError> {
+    let page: crate::protocol::DraftListPage = compose_call(
+        control,
+        Command::DraftList(crate::protocol::DraftListArgs {
+            thread_id,
+            kind,
+            limit: DRAFT_VIEW_LIMIT,
+            cursor: None,
+        }),
+        None,
+    )
+    .await?;
+    Ok(page.items)
+}
+
+pub(super) async fn submitted(
+    control: &Control,
+    thread: &str,
+) -> Result<Vec<SubmittedMessage>, ApiError> {
+    draft_records(
+        control,
+        Some(thread.into()),
+        crate::protocol::DraftListKind::Submitted,
+    )
+    .await?
+    .into_iter()
+    .map(|record| match record {
+        crate::protocol::DraftRecord::Submitted {
+            operation_id,
+            source_draft_id,
+            source_revision,
+            message_id,
+            ..
+        } => Ok(SubmittedMessage {
+            operation_id,
+            source_draft_id,
+            revision: source_revision,
+            message_id,
+        }),
+        _ => Err(ApiError::new(
+            ErrorCode::ProtocolMismatch,
+            "Invalid submitted draft record",
+        )),
+    })
+    .collect()
+}
+
 pub(super) async fn archives(
     control: &Control,
     thread: Option<String>,
 ) -> Result<Vec<(String, String)>, ApiError> {
+    use crate::protocol::DraftRecord;
     let language = control.store.config.ui.language;
-    let submission_fence = crate::control::submission_retention::fence(
-        "json_extract(current.body_json,'$._submission.source_draft_id')",
-        "json_extract(current.body_json,'$._submission.source_revision')",
-        "COALESCE(current.thread_id,?1)",
-    );
-    let result=control.store.database.call(move|db|{
-        let mut stmt=db.prepare(&format!("SELECT id,json_extract(body_json,'$.kind'),json_extract(body_json,'$.source_message_id'),substr(json_extract(body_json,'$.text'),1,80) FROM draft current WHERE state IN ('archived','submitting') AND (current.thread_id IS NULL OR EXISTS(SELECT 1 FROM thread t WHERE t.id=current.thread_id AND t.deleted_at IS NULL)) AND (thread_id=?1 OR thread_id IS NULL) AND (state<>'submitting' OR NOT {submission_fence}) ORDER BY updated_at DESC,id DESC LIMIT 128"))?;
-        let rows=stmt.query_map([thread],|row|Ok((row.get::<_,String>(0)?,row.get::<_,Option<String>>(1)?,row.get::<_,Option<String>>(2)?,row.get::<_,Option<String>>(3)?)))?.collect::<Result<Vec<_>,_>>()?;
-        let result=rows.into_iter().map(|(id,kind,source,text)|{let separator=crate::ui::text_width::glyphs::separator(); let label=if kind.as_deref()==Some("cancelled_message") {match language { UiLanguage::Ja=>format!("取消した入力{separator}{}",source.as_deref().unwrap_or("不明")),UiLanguage::En=>format!("Cancelled input{separator}{}",source.as_deref().unwrap_or("unknown")) }} else {match language {UiLanguage::Ja=>format!("未確定の送信{separator}{}",text.as_deref().unwrap_or("")),UiLanguage::En=>format!("Unconfirmed send{separator}{}",text.as_deref().unwrap_or(""))}};(id,label)}).collect();
-        Ok(result)
-    }).await.map_err(storage_error);
-    checked_storage(control, result).await
+    let separator = crate::ui::text_width::glyphs::separator();
+    draft_records(control, thread, crate::protocol::DraftListKind::Restorable)
+        .await?
+        .into_iter()
+        .map(|record| match record {
+            DraftRecord::Cancelled {
+                draft_id,
+                source_message_id,
+            } => Ok((
+                draft_id,
+                match language {
+                    UiLanguage::Ja => format!(
+                        "取消した入力{separator}{}",
+                        source_message_id.as_deref().unwrap_or("不明")
+                    ),
+                    UiLanguage::En => format!(
+                        "Cancelled input{separator}{}",
+                        source_message_id.as_deref().unwrap_or("unknown")
+                    ),
+                },
+            )),
+            DraftRecord::Unconfirmed { draft_id, excerpt } => Ok((
+                draft_id,
+                match language {
+                    UiLanguage::Ja => format!("未確定の送信{separator}{excerpt}"),
+                    UiLanguage::En => format!("Unconfirmed send{separator}{excerpt}"),
+                },
+            )),
+            DraftRecord::Submitted { .. } => Err(ApiError::new(
+                ErrorCode::ProtocolMismatch,
+                "Invalid restorable draft record",
+            )),
+        })
+        .collect()
 }
 pub(super) async fn restore_archive(
     control: &Control,
@@ -708,6 +784,27 @@ mod retention_tests {
             })
             .await
             .unwrap();
+        let records = submitted(&control, "thread").await.unwrap();
+        let [record] = records.as_slice() else {
+            panic!("expected one retained submission")
+        };
+        assert_eq!(record.operation_id, "retention-op");
+        assert_eq!(record.source_draft_id, "retention-composer");
+        assert_eq!(record.revision, 7);
+        let exact: crate::protocol::DraftState = compose_call(
+            &control,
+            Command::DraftGet(crate::protocol::DraftGetArgs {
+                thread_id: "thread".into(),
+                operation_id: Some(record.operation_id.clone()),
+            }),
+            None,
+        )
+        .await
+        .unwrap();
+        assert!(exact.draft.is_none());
+        assert!(
+            matches!(exact.record, Some(crate::protocol::DraftRecord::Submitted { operation_id, message_id, source_revision: 7, .. }) if operation_id == record.operation_id && message_id == record.message_id)
+        );
         // Simulate a crash-before-ack editable copy and an older unfinished submission.
         owner.db.call(|db| {
             let snapshot=serde_json::to_string(&DraftSnapshot{draft_id:"retention-composer".into(),revision:7,text:"stale unsent copy".into(),..Default::default()}).unwrap();

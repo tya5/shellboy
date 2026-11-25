@@ -57,7 +57,7 @@ macro_rules! named_jobs {
 
 // The exhaustive match ensures every future protocol variant gets a fixed label.
 named_jobs! {
-    DraftImage => draft_image, DraftSubmit => draft_submit, DraftSave => draft_save, DraftGet => draft_get, DraftRestore => draft_restore, OwnerShutdown => owner_shutdown, Status => status, ModelList => model_list,
+    DraftImage => draft_image, DraftSubmit => draft_submit, DraftSave => draft_save, DraftGet => draft_get, DraftList => draft_list, DraftRestore => draft_restore, OwnerShutdown => owner_shutdown, Status => status, ModelList => model_list,
     ThreadList => thread_list, ThreadGet => thread_get, ThreadBranches => thread_branches, UsageGet => usage_get,
     ArtifactAdd => artifact_add, ArtifactUpdate => artifact_update, ArtifactList => artifact_list, ArtifactGet => artifact_get, ArtifactRemove => artifact_remove, ArtifactRead => artifact_read,
     ServiceAdd => service_add, ServiceList => service_list, ServiceGet => service_get, ServiceSet => service_set, ServiceEndpoint => service_endpoint, ServiceStart => service_start, ServiceStop => service_stop, ServiceRemove => service_remove,
@@ -111,6 +111,7 @@ impl Kind {
         use Classification::*;
         match self {
             Kind::DraftGet
+            | Kind::DraftList
             | Kind::DraftRestore
             | Kind::Status
             | Kind::ThreadList

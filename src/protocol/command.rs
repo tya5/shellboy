@@ -15,6 +15,7 @@ impl Command {
             Self::DraftSubmit(_) => ("draft.submit", CommandRoute::Database),
             Self::DraftRestore(_) => ("draft.restore", CommandRoute::Database),
             Self::DraftGet(_) => ("draft.get", CommandRoute::Database),
+            Self::DraftList(_) => ("draft.list", CommandRoute::Database),
             Self::DraftSave(_) => ("draft.save", CommandRoute::Database),
             Self::OwnerShutdown(_) => ("owner.shutdown", CommandRoute::Database),
             Self::Status(a) => (
@@ -142,6 +143,7 @@ impl Command {
         match self {
             Self::DraftSave(_)
             | Self::DraftGet(_)
+            | Self::DraftList(_)
             | Self::DraftRestore(_)
             | Self::DraftSubmit(_) => false,
             Self::ArtifactAdd(_)
@@ -245,6 +247,7 @@ impl Command {
         match self {
             Self::DraftSave(_)
             | Self::DraftGet(_)
+            | Self::DraftList(_)
             | Self::DraftRestore(_)
             | Self::DraftSubmit(_) => false,
             Self::ArtifactAdd(_)
@@ -345,7 +348,9 @@ impl Command {
     /// Must finish admission before the graceful-shutdown context capture?
     pub(crate) fn changes_context(&self) -> bool {
         match self {
-            Self::DraftSave(_) | Self::DraftGet(_) | Self::DraftRestore(_) => false,
+            Self::DraftSave(_) | Self::DraftGet(_) | Self::DraftList(_) | Self::DraftRestore(_) => {
+                false
+            }
             Self::DraftSubmit(_) => true,
             Self::ArtifactAdd(_)
             | Self::ArtifactUpdate(_)
@@ -447,7 +452,7 @@ impl Command {
     pub fn is_read_only(&self) -> bool {
         match self {
             Self::TurnInterrupt(_) | Self::ShellBackground(_) => false,
-            Self::DraftGet(_) | Self::DraftRestore(_) => true,
+            Self::DraftGet(_) | Self::DraftList(_) | Self::DraftRestore(_) => true,
             Self::DraftSave(_) | Self::DraftSubmit(_) => false,
             Self::ArtifactAdd(_)
             | Self::ArtifactUpdate(_)
