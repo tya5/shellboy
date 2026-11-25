@@ -821,7 +821,7 @@ pub fn scheduled_command_argument_error(error: &clap::Error, words: &[String]) -
             received.push(word);
         }
     }
-    if !received.iter().any(|word| *word == argument) && argument != "--" {
+    if !received.contains(&argument) && argument != "--" {
         return None;
     }
     Some(format!(
