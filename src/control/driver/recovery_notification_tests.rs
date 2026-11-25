@@ -220,11 +220,12 @@ async fn frontend_delivers_background_and_child_recovery_without_selecting_them(
         owner,
         server,
     ));
-    // Initialize confirms subscription. Leave the UI on its empty draft: the
+    // BrowserResync confirms the owner-wide native baseline was adopted. Leave
+    // the UI on its empty draft: the
     // recovering Thread has no frontend selection/generation or pending send.
     crate::test_watchdog::watchdog("src/control/driver/recovery_notification_tests.rs: frontend_delivers_background_and_child_recovery_without_selecting_them", async {
         loop {
-            if matches!(incoming.try_recv(), Ok(UiUpdate::Initialize { .. })) {
+            if matches!(incoming.try_recv(), Ok(UiUpdate::BrowserResync { .. })) {
                 break;
             }
             tokio::task::yield_now().await;
