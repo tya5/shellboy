@@ -38,6 +38,95 @@ pub fn project(
     p
 }
 
+/// Project a verified native extent without reconstructing a storage payload.
+pub(crate) fn project_display(
+    kind: &str,
+    text: &str,
+    base: usize,
+    outline: &crate::protocol::HistoryDisplayOutline,
+) -> NodePresentation {
+    use crate::protocol::{HistoryDisplayNode as Node, HistoryDisplayRole as Role};
+    let (mut p, fallback) = initial(kind, &Value::Null);
+    let mut structured = false;
+    match &outline.node {
+        Node::HiddenAdmission | Node::Received => return p,
+        Node::Trim { .. } => set_trim_title(&mut p),
+        Node::Reclaimed { reason } => set_reclaimed_title(&mut p, reason),
+        Node::Summary { source_node_ids, structured: parts } => {
+            structured = *parts;
+            set_summary_title(&mut p, source_node_ids.len(), structured);
+        }
+        _ => {}
+    }
+    let field = |f: &crate::protocol::HistoryDisplayField| PresentationField {
+        key: f.path.clone(),
+        value: f.value.clone(),
+        value_omitted: f.omitted,
+        ..Default::default()
+    };
+    p.fields = outline.fields.iter().map(field).collect();
+    let mut walk = WindowProjection {
+        window: text,
+        base,
+        end: base + text.chars().count(),
+        blocks: Vec::new(),
+        links: Vec::new(),
+        envelopes: Vec::new(),
+        omitted_chars: 0,
+    };
+    let offsets = text.char_indices().map(|(offset, _)| offset)
+        .chain(std::iter::once(text.len())).collect::<Vec<_>>();
+    for block in &outline.blocks {
+        let start = block.range.start as usize;
+        let end = block.range.end as usize;
+        let Some((&lo, &hi)) = offsets.get(start.saturating_sub(base))
+            .zip(offsets.get(end.saturating_sub(base))) else { continue };
+        let role = match block.role {
+            Role::Plain => BlockKind::Plain,
+            Role::Prose => BlockKind::Prose,
+            Role::Reasoning => BlockKind::Reasoning,
+            Role::ToolCall => BlockKind::ToolCall,
+            Role::ToolResult => BlockKind::ToolResult,
+            Role::Event => BlockKind::Event,
+        };
+        let is_call = role == BlockKind::ToolCall;
+        walk.leaf(&text[lo..hi], role, start, end, None, None);
+        if let Some(saved) = &block.tool
+            && let Some(presented) = walk.blocks.last_mut()
+        {
+            presented.tool = Some(ToolPresentation {
+                call_id: saved.call_id.clone().unwrap_or_default(),
+                group_id: saved.group_id.clone(),
+                ordinal: saved.ordinal,
+                execution_id: saved.execution_id.clone(),
+                command: saved.command.clone().unwrap_or_default(),
+                description: crate::tool_description::label(saved.description.as_deref()),
+                status: saved.status.clone().unwrap_or_else(|| {
+                    if is_call { "requested".into() } else { String::new() }
+                }),
+                exit_code: saved.exit_code,
+                ..Default::default()
+            });
+        }
+        if walk.envelopes.last().is_some_and(Option::is_none) {
+            p.fields.extend(block.fields.iter().map(field));
+        }
+    }
+    p.blocks = walk.blocks;
+    p.links = walk.links;
+    for link in &outline.links {
+        add_link(&mut p.links, &link.label, &link.url, link.range.start as usize, link.range.end as usize);
+    }
+    p.metadata_limited = outline.limited;
+    limits::markdown(&mut p);
+    if !outline.limited || structured {
+        fallback_window(&mut p, text, base, fallback, structured);
+    }
+    envelopes::apply(&mut p, kind, base, walk.envelopes.into_iter());
+    limits::finish(&mut p, &Value::Null);
+    p
+}
+
 fn initial(kind: &str, payload: &Value) -> (NodePresentation, BlockKind) {
     let (display_kind, title, block_kind) = match kind {
         "user" | "user_message" | "message" => (PresentationKind::User, "あなた", BlockKind::Plain),
@@ -91,24 +180,30 @@ fn initial(kind: &str, payload: &Value) -> (NodePresentation, BlockKind) {
     {
         // A trim is a reversible input replacement, not a routine lifecycle
         // event. Keep its notice visible and its canonical text unchanged.
-        p.kind = PresentationKind::Spill;
-        p.title = CONTEXT_TRIM_TITLE.into();
-        p.ui_messages.title = Some(Message::Text(Text::ContextTrim));
+        set_trim_title(&mut p);
     }
     if let Some(reason) = payload.get("tombstone_reason").and_then(Value::as_str) {
-        p.ui_messages.title = Some(Message::Reclaimed {
-            reason: short(reason, 256),
-        });
-        p.title = crate::ui::text_width::glyphs::formatted!(
-            "原文回収済み · {reason}",
-            "原文回収済み | {reason}"
-        );
-        p.kind = PresentationKind::Unknown;
+        set_reclaimed_title(&mut p, reason);
     }
     if p.kind == PresentationKind::Unknown && payload.get("tombstone_reason").is_none() {
         p.title = format!("未対応の項目: {kind}");
     }
     (p, block_kind)
+}
+
+fn set_trim_title(p: &mut NodePresentation) {
+    p.kind = PresentationKind::Spill;
+    p.title = CONTEXT_TRIM_TITLE.into();
+    p.ui_messages.title = Some(messages::Message::Text(messages::Text::ContextTrim));
+}
+
+fn set_reclaimed_title(p: &mut NodePresentation, reason: &str) {
+    p.ui_messages.title = Some(messages::Message::Reclaimed { reason: short(reason, 256) });
+    p.title = crate::ui::text_width::glyphs::formatted!(
+        "原文回収済み · {reason}",
+        "原文回収済み | {reason}"
+    );
+    p.kind = PresentationKind::Unknown;
 }
 
 struct WindowProjection<'a> {
@@ -215,26 +310,26 @@ fn summary_projection<'a>(
             .and_then(Value::as_array)
             .filter(|sources| sources.iter().all(Value::is_string))
     {
-        p.ui_messages.title = Some(super::messages::Message::Summary {
-            count: sources.len(),
-            replaced: decoded_summary.is_some(),
-        });
-        p.title = if decoded_summary.is_some() {
-            crate::ui::text_width::glyphs::formatted!(
-                "要約 · 置換{}件 · 出典{}件 · F6→O 原文",
-                "要約 | 置換{}件 | 出典{}件 | F6>O 原文",
-                sources.len(),
-                sources.len()
-            )
-        } else {
-            crate::ui::text_width::glyphs::formatted!(
-                "要約 · 出典{}件 · F6→O 原文",
-                "要約 | 出典{}件 | F6>O 原文",
-                sources.len()
-            )
-        };
+        set_summary_title(p, sources.len(), decoded_summary.is_some());
     }
     decoded_summary
+}
+
+fn set_summary_title(p: &mut NodePresentation, count: usize, replaced: bool) {
+    p.ui_messages.title = Some(messages::Message::Summary { count, replaced });
+    p.title = if replaced {
+        crate::ui::text_width::glyphs::formatted!(
+            "要約 · 置換{}件 · 出典{}件 · F6→O 原文",
+            "要約 | 置換{}件 | 出典{}件 | F6>O 原文",
+            count, count
+        )
+    } else {
+        crate::ui::text_width::glyphs::formatted!(
+            "要約 · 出典{}件 · F6→O 原文",
+            "要約 | 出典{}件 | F6>O 原文",
+            count
+        )
+    };
 }
 
 fn project_window<'a>(
