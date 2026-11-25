@@ -6071,6 +6071,69 @@
       ],
       "type": "string"
     },
+    "OperationReceiptDownstream": {
+      "oneOf": [
+        {
+          "properties": {
+            "hold_reason": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "kind": {
+              "const": "message",
+              "type": "string"
+            },
+            "state": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "ended_at": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "kind": {
+              "const": "compact",
+              "type": "string"
+            },
+            "outcome": true,
+            "result_uncertain": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "state": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "state"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "OperationReplayPolicy": {
+      "enum": [
+        "do_not_reexecute",
+        "operation_expired",
+        "return_saved_outcome"
+      ],
+      "type": "string"
+    },
     "OperationTarget": {
       "additionalProperties": false,
       "properties": {
@@ -15507,7 +15570,67 @@
       "title": "ModelListResult",
       "type": "object"
     },
-    "operation.get": true,
+    "operation.get": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "description": "Existing `operation.get` projection; saved outcomes are operation-specific JSON.",
+      "properties": {
+        "created_at": {
+          "type": "string"
+        },
+        "current_instance": {
+          "type": "boolean"
+        },
+        "downstream": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/OperationReceiptDownstream"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "instance_id": {
+          "type": "string"
+        },
+        "operation_id": {
+          "type": "string"
+        },
+        "outcome": true,
+        "replay_policy": {
+          "$ref": "#/definitions/OperationReplayPolicy"
+        },
+        "result_expired": {
+          "type": "boolean"
+        },
+        "result_uncertain": {
+          "type": "boolean"
+        },
+        "state": {
+          "type": "string"
+        },
+        "targets": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        }
+      },
+      "required": [
+        "operation_id",
+        "instance_id",
+        "created_at",
+        "current_instance",
+        "state",
+        "outcome",
+        "result_uncertain",
+        "result_expired",
+        "replay_policy",
+        "targets"
+      ],
+      "title": "OperationReceiptDetails",
+      "type": "object"
+    },
     "owner.shutdown": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {

@@ -1,4 +1,6 @@
-# Operation evidence (#421, Unit 2)
+# Protocol next (#421)
+
+## Operation evidence (Unit 2)
 
 `operation.get` now registers `OperationReceiptDetails` in the public result
 schema. Its existing owner payload is unchanged: opaque nullable `outcome`,
