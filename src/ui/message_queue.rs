@@ -852,6 +852,41 @@ mod tests {
         assert_eq!(ui.view().pending_messages.items.len(), 1);
     }
     #[test]
+    fn exact_submission_waits_for_local_operation_identity() {
+        let mut ui = ui();
+        ui.insert("original", false);
+        let actions = ui.event(key(KeyCode::Enter, KeyModifiers::NONE));
+        let UiAction::Send {
+            draft_id,
+            revision,
+            generation,
+            ..
+        } = &actions[0]
+        else {
+            panic!("send expected");
+        };
+        let exact = || UiUpdate::ExactSubmission {
+            operation_id: "operation".into(),
+            draft_id: draft_id.clone(),
+            revision: *revision,
+            generation: *generation,
+            thread_id: "thread".into(),
+            message_id: "saved".into(),
+        };
+        ui.apply(exact());
+        assert!(!ui.view().pending.is_empty());
+        ui.apply(UiUpdate::SendOperation {
+            draft_id: draft_id.clone(),
+            revision: *revision,
+            operation_id: "operation".into(),
+        });
+        ui.apply(exact());
+        ui.apply(exact());
+        assert!(ui.view().pending.is_empty());
+        assert_eq!(ui.view().thread_id.as_deref(), Some("thread"));
+        assert!(ui.view().draft.text.is_empty());
+    }
+    #[test]
     fn saved_ack_after_db_reconciliation_still_applies_newer_queue_without_clearing_edits() {
         let mut ui = ui();
         ui.insert("original", false);

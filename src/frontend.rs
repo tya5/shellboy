@@ -4081,6 +4081,45 @@ fn reconcile_compose<'a>(
         }
         let operations: Vec<_> = compose_unknown.keys().cloned().collect();
         for operation in operations {
+            if let Some(UnknownCompose::Send {
+                draft_id,
+                revision,
+                generation,
+                ..
+            }) = compose_unknown.get(&operation)
+            {
+                match message_queue::exact_submission(
+                    control,
+                    &operation,
+                    draft_id,
+                    *revision,
+                    *generation,
+                )
+                .await
+                {
+                    Ok((thread, fact)) => {
+                        let Some(UnknownCompose::Send {
+                            draft_id,
+                            attachments,
+                            ..
+                        }) = compose_unknown.remove(&operation)
+                        else {
+                            unreachable!()
+                        };
+                        images.end_send(&draft_id, &attachments);
+                        images.sent(&draft_id, &attachments);
+                        images.associate(&draft_id, &thread);
+                        update(updates, fact).await;
+                        selection.sent(&thread, &draft_id);
+                        dirty_threads.insert(thread);
+                        continue;
+                    }
+                    // Only look up an explicit failure; a successful operation
+                    // receipt cannot replace the exact draft binding.
+                    Err(error) if error.code == ErrorCode::TargetUnavailable => {}
+                    Err(error) => return Err(error),
+                }
+            }
             let receipt: Value = compose_call(
                 control,
                 Command::OperationGet(crate::protocol::OperationTarget {
@@ -4104,6 +4143,17 @@ fn reconcile_compose<'a>(
                     format!("Operation {operation} is still unconfirmed"),
                 )
             })?;
+            if outcome.is_ok()
+                && matches!(
+                    compose_unknown.get(&operation),
+                    Some(UnknownCompose::Send { .. })
+                )
+            {
+                return Err(ApiError::new(
+                    ErrorCode::TargetUnavailable,
+                    "Exact saved draft binding is unavailable",
+                ));
+            }
             match compose_unknown.remove(&operation).expect("known operation") {
                 UnknownCompose::Save => {}
                 UnknownCompose::Image { draft_id } => {
@@ -4118,64 +4168,24 @@ fn reconcile_compose<'a>(
                 UnknownCompose::Send {
                     draft_id,
                     revision,
-                    generation,
                     attachments,
+                    ..
                 } => {
+                    let Err(error) = outcome else {
+                        unreachable!("unconfirmed send was retained")
+                    };
                     images.end_send(&draft_id, &attachments);
-                    match outcome {
-                        Ok(value) => {
-                            images.sent(&draft_id, &attachments);
-                            if let Some(thread_id) = value["thread_id"].as_str() {
-                                update(
-                                    updates,
-                                    UiUpdate::SavedMessagePending {
-                                        draft_id: draft_id.clone(),
-                                        revision,
-                                        generation,
-                                        thread_id: thread_id.into(),
-                                    },
-                                )
-                                .await;
-                                if let Some(node_id) = value["message_id"].as_str() {
-                                    update(
-                                        updates,
-                                        UiUpdate::ReceiptSource {
-                                            draft_id: draft_id.clone(),
-                                            revision,
-                                            node_id: node_id.into(),
-                                        },
-                                    )
-                                    .await;
-                                }
-                                update(
-                                    updates,
-                                    UiUpdate::Receipt {
-                                        draft_id: draft_id.clone(),
-                                        revision,
-                                        thread_id: Some(thread_id.into()),
-                                        status: ReceiptStatus::Accepted,
-                                        message: None,
-                                    },
-                                )
-                                .await;
-                                selection.sent(thread_id, &draft_id);
-                                dirty_threads.insert(thread_id.into());
-                            }
-                        }
-                        Err(error) => {
-                            update(
-                                updates,
-                                UiUpdate::Receipt {
-                                    draft_id,
-                                    revision,
-                                    thread_id: None,
-                                    status: ReceiptStatus::Failed,
-                                    message: Some(error.to_string()),
-                                },
-                            )
-                            .await
-                        }
-                    }
+                    update(
+                        updates,
+                        UiUpdate::Receipt {
+                            draft_id,
+                            revision,
+                            thread_id: None,
+                            status: ReceiptStatus::Failed,
+                            message: Some(error.to_string()),
+                        },
+                    )
+                    .await;
                 }
             }
         }
@@ -4268,7 +4278,7 @@ async fn select_thread(
         let state: crate::protocol::DraftState = compose_call(
             control,
             Command::DraftGet(crate::protocol::DraftGetArgs {
-                thread_id: thread.into(),
+                thread_id: Some(thread.into()),
                 operation_id: None,
             }),
             None,

@@ -1817,7 +1817,7 @@ record!(DraftImageAttachment {
 });
 
 args!(DraftGetArgs {
-    thread_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")] thread_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")] operation_id: Option<String>,
 });
 args!(DraftListArgs {
@@ -1849,6 +1849,7 @@ pub enum DraftRecord {
     },
     Submitted {
         draft_id: String,
+        thread_id: String,
         operation_id: String,
         source_draft_id: String,
         source_revision: u64,

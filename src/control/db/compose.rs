@@ -114,29 +114,37 @@ pub(super) fn get(
     tx: &Transaction<'_>,
     args: &DraftGetArgs,
 ) -> super::Result<crate::protocol::DraftState> {
-    let thread = &args.thread_id;
-    let selection_revision = history::selection_revision(tx, thread, ThreadScope::Live)
-        .optional()
-        .map_err(sql_error)?
-        .ok_or_else(|| {
-            error(
-                ErrorCode::TargetUnavailable,
-                "Draft Thread is not available",
-            )
-        })?;
     if let Some(operation) = &args.operation_id {
-        let row = tx.query_row(&format!("{SUBMITTED} WHERE operation_id=?2 {SUBMISSION_GROUP} ORDER BY accepted_at DESC LIMIT 1"),
-            params![thread,operation], submitted_row).optional().map_err(sql_error)?;
-        let record = row
+        let record = tx
+            .query_row(
+                &format!("{EXACT_EVIDENCE}{BINDINGS}{SUBMISSION_GROUP}"),
+                params![
+                    operation,
+                    super::DraftSubmission::id_for_operation(operation),
+                    args.thread_id
+                ],
+                submitted_row,
+            )
+            .optional()
+            .map_err(sql_error)?
             .map(|(_, _, record)| record)
             .ok_or_else(|| error(ErrorCode::TargetUnavailable, "Submitted draft not found"))?;
+        let DraftRecord::Submitted { thread_id, .. } = &record else {
+            unreachable!()
+        };
+        let selection_revision = live_selection(tx, thread_id)?;
         return Ok(crate::protocol::DraftState {
-            selection_revision: selection_revision as u64,
+            selection_revision,
             draft: None,
             view: None,
             record: Some(record),
         });
     }
+    let thread = args
+        .thread_id
+        .as_deref()
+        .ok_or_else(|| error(ErrorCode::InvalidArgument, "Missing draft Thread"))?;
+    let selection_revision = live_selection(tx, thread)?;
     let fence = submission_retention::fence("current.id", "current.revision", "?1");
     let body: Option<String> = tx.query_row(
         &format!("SELECT body_json FROM draft current WHERE state='editing' AND thread_id=?1 AND NOT {fence} ORDER BY updated_at DESC,id DESC LIMIT 1"),
@@ -166,34 +174,65 @@ pub(super) fn get(
         .optional()
         .map_err(sql_error)?;
     Ok(crate::protocol::DraftState {
-        selection_revision: selection_revision as u64,
+        selection_revision,
         draft,
         view,
         record: None,
     })
 }
 
-// Group identical evidence from the frozen copy and its receipt marker. A
-// second distinct binding for one operation must never win by timestamp.
-const SUBMITTED: &str = "WITH evidence AS (
+fn live_selection(tx: &Transaction<'_>, thread: &str) -> super::Result<u64> {
+    history::selection_revision(tx, thread, ThreadScope::Live)
+        .optional()
+        .map_err(sql_error)?
+        .map(|revision| revision as u64)
+        .ok_or_else(|| {
+            error(
+                ErrorCode::TargetUnavailable,
+                "Draft Thread is not available",
+            )
+        })
+}
+
+// Exact reconciliation uses the frozen copy's primary key and the unique
+// delivery operation index, even when the caller never learned the Thread.
+const EXACT_EVIDENCE: &str = "WITH evidence AS (
     SELECT json_extract(body_json,'$._submission.operation_id') AS operation_id,
            json_extract(body_json,'$._submission.source_draft_id') AS source_draft_id,
            json_extract(body_json,'$._submission.source_revision') AS source_revision,
            json_extract(body_json,'$._submission.message_id') AS message_id,
-           updated_at AS accepted_at
+           updated_at AS accepted_at, thread_id
+      FROM draft WHERE id=?2 AND state='submitted' AND (?3 IS NULL OR thread_id=?3)
+       AND json_extract(body_json,'$._submission.operation_id')=?1
+    UNION ALL
+    SELECT client_operation_id,json_extract(result_json,'$.draft_submission.source_draft_id'),
+           json_extract(result_json,'$.draft_submission.source_revision'),message_node_id,created_at,target_thread_id
+      FROM receipt WHERE client_operation_id=?1 AND (?3 IS NULL OR target_thread_id=?3)
+       AND json_extract(result_json,'$.draft_submission.operation_id')=client_operation_id
+       AND json_extract(result_json,'$.draft_submission.message_id')=message_node_id
+)";
+const LIST_EVIDENCE: &str = "WITH evidence AS (
+    SELECT json_extract(body_json,'$._submission.operation_id') AS operation_id,
+           json_extract(body_json,'$._submission.source_draft_id') AS source_draft_id,
+           json_extract(body_json,'$._submission.source_revision') AS source_revision,
+           json_extract(body_json,'$._submission.message_id') AS message_id,
+           updated_at AS accepted_at, thread_id
       FROM draft WHERE thread_id=?1 AND state='submitted'
     UNION ALL
     SELECT client_operation_id,json_extract(result_json,'$.draft_submission.source_draft_id'),
-           json_extract(result_json,'$.draft_submission.source_revision'),message_node_id,created_at
+           json_extract(result_json,'$.draft_submission.source_revision'),message_node_id,created_at,target_thread_id
       FROM receipt WHERE target_thread_id=?1
        AND json_extract(result_json,'$.draft_submission.operation_id')=client_operation_id
        AND json_extract(result_json,'$.draft_submission.message_id')=message_node_id
-), bindings AS (
-    SELECT max(accepted_at) AS accepted_at,operation_id,source_draft_id,source_revision,message_id
-      FROM evidence GROUP BY operation_id,source_draft_id,source_revision,message_id
+)";
+// Identical copy and receipt evidence describe one record. Conflicting
+// bindings for an operation cannot win by timestamp.
+const BINDINGS: &str = ", bindings AS (
+    SELECT max(accepted_at) AS accepted_at,operation_id,source_draft_id,source_revision,message_id,thread_id
+      FROM evidence GROUP BY operation_id,source_draft_id,source_revision,message_id,thread_id
 )
 SELECT max(accepted_at) AS accepted_at,operation_id,source_draft_id,source_revision,message_id,
-       count(*) AS bindings FROM bindings";
+       count(*) AS bindings,thread_id FROM bindings";
 const SUBMISSION_GROUP: &str = " GROUP BY operation_id";
 
 type DraftRow = (String, String, DraftRecord);
@@ -215,6 +254,7 @@ fn submitted_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<DraftRow> {
         operation_id.clone(),
         DraftRecord::Submitted {
             draft_id: super::DraftSubmission::id_for_operation(&operation_id),
+            thread_id: row.get(6)?,
             operation_id,
             source_draft_id,
             source_revision,
@@ -272,7 +312,7 @@ pub(super) fn list(tx: &Transaction<'_>, args: &DraftListArgs) -> super::Result<
                     })?.collect()
             }
             DraftListKind::Submitted => {
-                tx.prepare(&format!("{SUBMITTED}{SUBMISSION_GROUP} HAVING ?2 IS NULL OR (max(accepted_at),operation_id)<(?2,?3) ORDER BY accepted_at DESC,operation_id DESC LIMIT ?4"))?
+                tx.prepare(&format!("{LIST_EVIDENCE}{BINDINGS}{SUBMISSION_GROUP} HAVING ?2 IS NULL OR (max(accepted_at),operation_id)<(?2,?3) ORDER BY accepted_at DESC,operation_id DESC LIMIT ?4"))?
                     .query_map(params![args.thread_id,time,key,count], submitted_row)?.collect()
             }
         }
