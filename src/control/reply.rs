@@ -90,7 +90,8 @@ pub(super) fn list_pending(
         json!([index, key, value])
     } else {
         json!([index, key])
-    }.to_string();
+    }
+    .to_string();
     let (time, id): (String, String) = if let Some(token) = &args.cursor {
         let cursor = PageCursor::decode_live(token, scope, &filter, 0, None)?;
         serde_json::from_str(&cursor.last_sort_key)
