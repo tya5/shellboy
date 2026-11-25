@@ -397,9 +397,10 @@ Shellboy. The bridge is a program you adapt, not a built-in connector.
 2. Register the program with `shellboy service add --thread THREAD_ID --cwd
    BRIDGE_DIRECTORY --command 'python bridge.py'` (use the installed Python 3
    command; the owner interprets the single command string in its configured
-   shell). The service receives `SHELLBOY_DATA_DIR`, `SHELLBOY_THREAD_ID`, and
-   the local `SHELLBOY_SOCKET` where applicable. Do not add `--data-dir` to the
-   calls in the template. A service is not a model shell and has no model Origin.
+   shell). The service receives `SHELLBOY_DATA_DIR`, `SHELLBOY_THREAD_ID`,
+   `SHELLBOY_INSTANCE_ID`, and the local `SHELLBOY_SOCKET` where applicable.
+   Do not add `--data-dir` to the calls in the template. A service is not a
+   model shell and has no model Origin.
 3. **Self-check:** The template sends one heartbeat immediately, then once a
    minute, and logs its accepted `message_id`. Use `shellboy service list
    --thread THREAD_ID` and take `latest.execution_id` for the service. Use
@@ -426,10 +427,11 @@ Shellboy. The bridge is a program you adapt, not a built-in connector.
    data directory. In the template the CLI inherits `SHELLBOY_DATA_DIR`; from
    a separate terminal, select that same directory explicitly. A successful
    lookup reads the original Ask result from `result.outcome.result` in the
-   CLI envelope. Persist its `message_id` before waiting. If the receipt is
-   missing, pending, expired, or has no saved acceptance, retain the journal
-   entry and report uncertainty; never issue a fresh Ask. A wait timeout is
-   not a failed delivery: resume the bounded wait on the same `message_id`.
+   CLI envelope; the saved outcome has no `ok` field, only `result` or `error`.
+   Persist its `message_id` before waiting. If the receipt is missing,
+   pending, expired, or has no saved acceptance, retain the journal entry and
+   report uncertainty; never issue a fresh Ask. A wait timeout is not a failed
+   delivery: resume the bounded wait on the same `message_id`.
 6. Post only an actual reply, to the same external conversation. Use the
    external event key for the post's idempotency if the destination supports
    it; otherwise do not automatically repeat an uncertain post. Record the
@@ -473,13 +475,12 @@ def ask(thread_id, operation_id, text):
                 or (step.get("args") or {}).get("operation_id") != operation_id):
             raise
         receipt = shellboy("operation", "get", "--operation", operation_id)
+        # A saved success is {"result": ACK}; a failure or expiry is {"error": ...}.
         outcome = receipt.get("outcome")
+        accepted = outcome.get("result") if isinstance(outcome, dict) else None
         if (receipt.get("operation_id") != operation_id
                 or receipt.get("state") != "completed"
-                or not isinstance(outcome, dict) or outcome.get("ok") is not True):
-            raise
-        accepted = outcome.get("result")
-        if not isinstance(accepted, dict) or not accepted.get("message_id"):
+                or not isinstance(accepted, dict) or not accepted.get("message_id")):
             raise
     return accepted["message_id"]
 
