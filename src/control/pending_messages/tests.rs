@@ -805,7 +805,7 @@ async fn cancellation_and_admission_commit_boundary_prevents_retraction_or_parti
                 .collect::<rusqlite::Result<_>>()?;
             assert_eq!(pending, ["second"]);
             crate::history::append_existing_nodes(&tx, "t", 0, &pending, "admit")?;
-            crate::control::message_delivery::mark_admitted_tx(&tx, "t", &pending)?;
+            crate::control::message_delivery::mark_admitted_tx(&tx, "t", &pending, "admit")?;
             tx.commit()?;
             Ok(())
         })
@@ -834,6 +834,87 @@ async fn cancellation_and_admission_commit_boundary_prevents_retraction_or_parti
         assert_eq!(db.query_row("SELECT count(*) FROM draft WHERE id='cancelled-message:third'",[],|r|r.get::<_,i64>(0))?,0);
         Ok(())
     }).await.unwrap();
+    store.database.shutdown().await.unwrap();
+}
+#[tokio::test]
+async fn only_explicit_unadmitted_now_input_releases_foreground_wait() {
+    let (_root, store) = store().await;
+    let queued = store
+        .execute(
+            Request::new(
+                "fixture:queued",
+                Command::MessageSend(MessageSendArgs {
+                    max_model_requests: None,
+                    resume_recovery: false,
+                    human: false,
+                    sender_label: None,
+                    thread_id: Some("t".into()),
+                    text: "ordinary".into(),
+                    deliver: Deliver::Next,
+                }),
+            ),
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(queued.quiet_wake_threads, ["t"]);
+    assert!(queued.wake_threads.is_empty());
+    store
+        .database
+        .call(|db| {
+            assert!(!has_immediate_pending_tx(db, "u")?);
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let now = store
+        .execute(
+            Request::new(
+                "fixture:now",
+                Command::MessageSend(MessageSendArgs {
+                    max_model_requests: None,
+                    resume_recovery: false,
+                    human: false,
+                    sender_label: None,
+                    thread_id: Some("t".into()),
+                    text: "urgent".into(),
+                    deliver: Deliver::Now,
+                }),
+            ),
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(now.wake_threads, ["t"]);
+    assert!(now.quiet_wake_threads.is_empty());
+    assert_eq!(now.result["deliver"], "now");
+    let id = now.result["message_id"].as_str().unwrap().to_owned();
+    store
+        .database
+        .call(move |db| {
+            assert!(has_immediate_pending_tx(db, "u")?);
+            let tx = db.transaction()?;
+            crate::history::append_existing_nodes(&tx, "t", 0, std::slice::from_ref(&id), "admit")?;
+            crate::control::message_delivery::mark_admitted_tx(
+                &tx,
+                "t",
+                std::slice::from_ref(&id),
+                "admit",
+            )?;
+            assert!(
+                !has_immediate_pending_tx(&tx, "u")?,
+                "accepted but admitted now input cannot release a later call"
+            );
+            tx.execute("DELETE FROM thread_path WHERE node_id=?1", [id])?;
+            assert!(
+                !has_immediate_pending_tx(&tx, "u")?,
+                "rewinding cannot re-arm an immediate send"
+            );
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+        .unwrap();
     store.database.shutdown().await.unwrap();
 }
 fn submission(op: &str, source: &str, revision: u64, text: &str) -> DraftSubmission {
@@ -1498,7 +1579,7 @@ async fn admitted_copy_retires_atomically_replay_stays_exact_and_storage_does_no
                     "INSERT INTO thread_path(thread_id,ordinal,node_id)VALUES('t',?1,?2)",
                     params![ordinal, selected],
                 )?;
-                crate::control::message_delivery::mark_admitted_tx(&tx, "t", &[selected])?;
+                crate::control::message_delivery::mark_admitted_tx(&tx, "t", &[selected], "admit")?;
                 tx.commit()?;
                 Ok(())
             })

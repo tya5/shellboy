@@ -61,9 +61,10 @@ pub(crate) fn mark_admitted_tx(
     db: &Connection,
     thread: &str,
     nodes: &[String],
+    at: &str,
 ) -> rusqlite::Result<()> {
     for node in nodes {
-        db.execute("UPDATE receipt SET path_admission='admitted' WHERE target_thread_id=?1 AND message_node_id=?2 AND path_admission<>'admitted' AND EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id=?1 AND p.node_id=?2)", params![thread,node])?;
+        db.execute("UPDATE receipt SET path_admission='admitted',result_json=CASE WHEN json_extract(result_json,'$.reply.state')='pending' THEN json_set(COALESCE(result_json,'{}'),'$.reply.applied_at',COALESCE(json_extract(result_json,'$.reply.applied_at'),?3)) ELSE result_json END WHERE target_thread_id=?1 AND message_node_id=?2 AND path_admission<>'admitted' AND EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id=?1 AND p.node_id=?2)", params![thread,node,at])?;
         let operation: Option<String> = db.query_row("SELECT client_operation_id FROM receipt WHERE target_thread_id=?1 AND message_node_id=?2",params![thread,node],|r|r.get(0)).optional()?;
         if let Some(operation) = operation {
             super::submission_retention::collect_operation(db, &operation)?;
@@ -242,7 +243,7 @@ pub(crate) fn append_admission_plan_tx(
     }
     let nodes = plan.admitted_nodes.as_slice();
     history::append_existing_nodes(tx, thread, revision, nodes, at)?;
-    mark_admitted_tx(tx, thread, nodes)?;
+    mark_admitted_tx(tx, thread, nodes, at)?;
     Ok(())
 }
 
@@ -945,7 +946,7 @@ mod tests {
     fn admission_fact_requires_real_target_path_and_survives_path_removal() {
         let mut db = fixture();
         input(&db, "input", "unadmitted", "0");
-        mark_admitted_tx(&db, "t", &["input".into()]).unwrap();
+        mark_admitted_tx(&db, "t", &["input".into()], "now").unwrap();
         assert_eq!(
             db.query_row("SELECT path_admission FROM receipt", [], |r| r
                 .get::<_, String>(0))
@@ -954,7 +955,7 @@ mod tests {
         );
         let tx = db.transaction().unwrap();
         history::append_existing_nodes(&tx, "t", 0, &["input".into()], "now").unwrap();
-        mark_admitted_tx(&tx, "t", &["input".into()]).unwrap();
+        mark_admitted_tx(&tx, "t", &["input".into()], "now").unwrap();
         tx.execute("DELETE FROM thread_path", []).unwrap();
         repair_terminal_tx(&tx, "stopped").unwrap();
         assert_eq!(state(&tx, "input").0, "applied");

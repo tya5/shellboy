@@ -12284,3 +12284,8 @@ Purpose coverage adds a multi-page attachment list assertion for first-page and 
   `applied_to_running_owner: true`. A repeat against the adopted value is a
   true no-op. A real-machine live-owner follow-up is separate from the
   temporary-store witness; no installed-owner test is claimed.
+
+
+## Core #433 awaiting-own-ask (local evidence)
+
+The five added unit witnesses cover the existing Turn-end duty settlement with a later unanswered ask, exact blocker visibility in `message list` and `message get`, the Thread `pending_replies` waiting summary, re-owing after a blocking Ask's terminal outcome, subsequent reminder/ignore behavior, and a pre-existing Ask not blocking a duty. The first focused run passed 12 reply tests and exposed a fixture that tried to re-open a duty while its blocker was still pending; the fixture was corrected to transition the blocker before testing re-owing. The corrected focused run is in progress. No hosted CI or integration/real-owner test is claimed.
