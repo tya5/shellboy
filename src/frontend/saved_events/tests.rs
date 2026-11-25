@@ -154,3 +154,71 @@ async fn native_preview_is_scoped_answer_only_and_instance_fenced() {
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
 }
+
+// Prepared fixture rows satisfy the same indexed admission read as a real frame.
+pub(in crate::frontend) async fn install_preview_attempt(control: &crate::control::Control) {
+    control.store.database.call(|db| {
+        db.execute("UPDATE turn SET state='running' WHERE id='target-run'", [])?;
+        db.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at) VALUES('conversation','thread','fixture-attempt','target-run',0,0,'fixture','fixture-model',0,'inflight','{}','now')", [])?;
+        Ok(())
+    }).await.unwrap();
+}
+
+#[tokio::test]
+async fn native_preview_resync_without_replacement_retires_displayed_suffix() {
+    let (root, owner, control, server) = control_tests::fixture().await;
+    install_preview_attempt(&control).await;
+    let live = control.fixture_live_text("thread");
+    assert!(live.record(0, "provisional suffix", false));
+    let mut ui = UiState::new(&control.store.config, root.path().into());
+    let (send, receive) = actions::channel(32);
+    let (updates, incoming) = std::sync::mpsc::sync_channel(128);
+    let bridge = tokio::spawn(run(
+        control.clone(),
+        receive,
+        updates,
+        root.path().into(),
+        owner,
+        server,
+    ));
+    for action in ui.select_thread("thread".into()) {
+        send.try_send(action).unwrap();
+    }
+    crate::test_watchdog::watchdog("native preview resync without replacement", async {
+        while !ui
+            .view()
+            .nodes()
+            .iter()
+            .any(|node| node.text == "provisional suffix")
+        {
+            while let Ok(update) = incoming.try_recv() {
+                ui.apply(update);
+            }
+            tokio::task::yield_now().await;
+        }
+        drop(live);
+        control.expire_saved_event_cursor_for_test();
+        loop {
+            if let Ok(update) = incoming.try_recv() {
+                let gap = matches!(&update, UiUpdate::PreviewGap { thread_id, generation }
+                    if thread_id == "thread" && *generation == ui.view().generation);
+                ui.apply(update);
+                if gap {
+                    assert!(
+                        !ui.view()
+                            .nodes()
+                            .iter()
+                            .any(|node| node.node_id == "fixture-attempt")
+                    );
+                    break;
+                }
+            } else {
+                tokio::task::yield_now().await;
+            }
+        }
+    })
+    .await
+    .unwrap();
+    send.try_send(UiAction::Quit).unwrap();
+    control_tests::finish_bridge(bridge, &incoming).await;
+}

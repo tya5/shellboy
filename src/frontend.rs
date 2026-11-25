@@ -1095,7 +1095,7 @@ async fn run_client(
     let mut pending_index: Option<u64> = None;
     let mut pending_deletion: Option<u64> = None;
     let cancel = CancellationToken::new();
-    let mut ui_subscription = control.subscribe_ui();
+    let mut ui_subscription = control.subscribe();
     let event_instance = &control.store.instance_id;
     let event_directory = &client_context.data_dir;
     let mut saved_events = Some(Box::pin(saved_events::wait(
@@ -3374,6 +3374,8 @@ async fn run_client(
                             pending.retain(|_, value| !ids.contains(&value.thread));
                             if selection.active_thread.as_ref().is_some_and(|thread| ids.contains(thread)) {
                                 selection.activate_draft(uuid::Uuid::new_v4().to_string());
+                                preview_events = None;
+                                preview_scope = None;
                                 draft_pause_dirty = true;
                                 streams.clear();
                                 stream_retry = None;
@@ -3814,20 +3816,23 @@ async fn run_client(
                     }
                 }
             },
-            event = async { preview_events.as_mut().expect("guarded live wait").await }, if preview_events.is_some() => {
+            event = async { preview_events.as_mut().expect("guarded live wait").await }, if preview_events.is_some() && !stream_inflight && updates.main_ready() => {
                 let (thread, generation) = preview_scope.as_ref().expect("guarded selected Thread");
                 match event {
                     Ok(page) => {
-                        if page.status == crate::protocol::EventsWaitStatus::ResyncRequired {
+                        let live_text = page.live_text.unwrap_or_default();
+                        let resync = page.status == crate::protocol::EventsWaitStatus::ResyncRequired;
+                        if resync || live_text.iter().any(|live| &live.thread_id == thread && live.gap) {
+                            // With no frame in flight, this ordered update retires any
+                            // already displayed preview before a retained suffix can arrive.
                             streams.clear();
                             stream_retry = None;
                             dirty_threads.insert(thread.clone());
+                            update(&updates, UiUpdate::PreviewGap {
+                                thread_id: thread.clone(), generation: *generation,
+                            }).await;
                         }
-                        for live in page.live_text.unwrap_or_default().into_iter().filter(|live| &live.thread_id == thread) {
-                            if live.gap {
-                                streams.forget_attempt(thread, &live.attempt_id);
-                                dirty_threads.insert(thread.clone());
-                            }
+                        for live in live_text.into_iter().filter(|live| &live.thread_id == thread) {
                             if let Some(age) = live.receive_age_ms
                                 && let Some(observed_at) = std::time::Instant::now().checked_sub(Duration::from_millis(age)) {
                                 update(&updates, UiUpdate::ModelReceive {
@@ -3851,9 +3856,8 @@ async fn run_client(
                     }
                 }
             },
-            event=ui_subscription.receiver.recv()=> match event {
+            event=ui_subscription.recv()=> match event {
                 Ok(EngineEvent::Changed { .. }) => {}
-                Ok(EngineEvent::Stream { .. } | EngineEvent::ModelReceive { .. }) => {}
                 Ok(EngineEvent::Error { thread_id, error }) => {
                     if activity::saved_execution_recovery(&error) {
                         // Saved execution recovery owns its reactive footer, not an operation notice.

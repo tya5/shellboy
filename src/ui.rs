@@ -1219,6 +1219,10 @@ pub enum UiUpdate {
         // of an unrelated history page. This is not a canonical ordinal.
         nodes: Vec<(String, UiNode)>,
     },
+    PreviewGap {
+        thread_id: String,
+        generation: u64,
+    },
     StreamSettled {
         thread_id: String,
         generation: u64,
@@ -3435,6 +3439,17 @@ impl UiState {
                 {
                     view.received_revision = root_revision;
                     view.on_incomplete_responses(nodes);
+                }
+            }
+            UiUpdate::PreviewGap {
+                thread_id,
+                generation,
+            } => {
+                let view = self.active_view_mut();
+                if view.matches(&thread_id, generation) {
+                    view.activity.clear_receive_observation();
+                    let retired = view.settle_other_streams("");
+                    self.deferred_actions.extend(retired);
                 }
             }
             UiUpdate::StreamSettled {

@@ -585,13 +585,18 @@ mod tests {
                 tokio::time::sleep(Duration::from_millis(5)).await;
             }
         }).await.unwrap();
-        control.emit_test_event(EngineEvent::Stream {
-            thread_id: "thread".into(),
-            node_id: "deleted-attempt".into(),
-            text: "pending output".into(),
-            reasoning: false,
-            stream_char_offset: 0,
-        });
+        let live = control.fixture_live_text("thread");
+        assert!(live.record(0, "pending output", false));
+        live.received(std::time::Instant::now(), true);
+        crate::test_watchdog::watchdog("native preview owned before deletion", async {
+            loop {
+                if matches!(incoming.try_recv(), Ok(UiUpdate::ModelReceive { thread_id, attempt_id, .. })
+                    if thread_id == "thread" && attempt_id == "fixture-attempt") {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        }).await.unwrap();
         let draft = DraftSnapshot {
             draft_id: "worker-draft".into(),
             text: "queued autosave".into(),
@@ -639,18 +644,24 @@ mod tests {
         assert!(matches!(deleted, ThreadDeletionReply::Deleted(ids) if ids == ["thread"]));
         // After the deletion result is delivered, stale stream/receive events
         // cannot keep the deleted selection alive or repopulate its display.
-        control.emit_test_event(EngineEvent::ModelReceive {
-            thread_id: "thread".into(),
-            attempt_id: "after-deletion".into(),
-            observed_at: std::time::Instant::now(),
-        });
-        control.emit_test_event(EngineEvent::Stream {
-            thread_id: "thread".into(),
-            node_id: "deleted-attempt".into(),
-            text: "late output".into(),
-            reasoning: false,
-            stream_char_offset: 14,
-        });
+        let stale = control.fixture_live_text("thread");
+        assert!(stale.record(0, "late output", false));
+        stale.received(std::time::Instant::now(), true);
+        let late = super::super::saved_events::wait_scoped(
+            &root.path().join("data"),
+            &control.store.instance_id,
+            None,
+            false,
+            Some("thread".into()),
+        )
+        .await
+        .unwrap();
+        assert!(
+            late.live_text
+                .unwrap()
+                .iter()
+                .any(|attempt| attempt.receive_age_ms.is_some())
+        );
         control.emit_test_event(EngineEvent::Error {
             thread_id: "independent".into(),
             error: ApiError::new(ErrorCode::IoFailed, "post-deletion-event-fence"),
@@ -660,7 +671,8 @@ mod tests {
                 while let Ok(update) = incoming.try_recv() {
                     match update {
                         UiUpdate::Stream { thread_id, .. }
-                        | UiUpdate::ModelReceive { thread_id, .. } => {
+                        | UiUpdate::ModelReceive { thread_id, .. }
+                        | UiUpdate::PreviewGap { thread_id, .. } => {
                             assert_ne!(
                                 thread_id, "thread",
                                 "deleted selection must release stream ownership"
