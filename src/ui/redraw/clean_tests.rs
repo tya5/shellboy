@@ -146,33 +146,42 @@ fn differences(
 }
 
 #[test]
-fn clean_redraw_after_a_help_width_mismatch_matches_a_fresh_screen() {
+fn synthetic_help_width_mismatch_leaves_residue_in_diff() {
     text_width::set_terminal_width(Some(1));
-    let mut ui = fixture();
-    ui.config.ui.clean_redraw = true;
-    let mut terminal = terminal(80);
-    let mut screen = vt100::Parser::new(30, 80, 0);
-    screen.process(&frame(&mut terminal, &mut ui));
-    ui.slash("/help");
-    // Reach the copy shortcuts below the everyday task routes.
-    for _ in 0..8 {
-        ui.event(Event::Key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)));
+    for enabled in [false, true] {
+        let mut ui = fixture();
+        ui.config.ui.clean_redraw = enabled;
+        let mut terminal = terminal(80);
+        let mut screen = vt100::Parser::new(30, 80, 0);
+        screen.process(&frame(&mut terminal, &mut ui));
+        ui.slash("/help");
+        // Place the copy shortcuts over the compact layout's conversation rows.
+        for _ in 0..12 {
+            ui.event(Event::Key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)));
+        }
+        let help = frame(&mut terminal, &mut ui);
+        assert!(String::from_utf8_lossy(&help).contains('→'));
+        // vt100 has fixed Unicode widths. A two-cell CJK proxy models a terminal
+        // advancing two cells for the app's one-cell arrow; it is not font evidence.
+        let mismatch = String::from_utf8(help).unwrap().replace('→', "界");
+        screen.process(mismatch.as_bytes());
+        ui.event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
+        let close = frame(&mut terminal, &mut ui);
+        assert_eq!(close.windows(4).any(|b| b == b"\x1b[2J"), enabled);
+        screen.process(&close);
+        let mut fresh = vt100::Parser::new(30, 80, 0);
+        ui.full_redraw_requested = true;
+        fresh.process(&frame(&mut terminal, &mut ui));
+        let diff = differences(screen.screen(), fresh.screen(), 80);
+        if enabled {
+            assert!(diff.is_empty(), "full redraw must match fresh: {diff:?}");
+        } else {
+            assert!(
+                !diff.is_empty(),
+                "baseline should expose the synthetic residue"
+            );
+        }
     }
-    let help = frame(&mut terminal, &mut ui);
-    assert!(String::from_utf8_lossy(&help).contains('→'));
-    // vt100 has fixed Unicode widths. A two-cell CJK proxy models a terminal
-    // advancing two cells for the app's one-cell arrow; it is not font evidence.
-    let mismatch = String::from_utf8(help).unwrap().replace('→', "界");
-    screen.process(mismatch.as_bytes());
-    ui.event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
-    let close = frame(&mut terminal, &mut ui);
-    assert!(close.windows(4).any(|b| b == b"\x1b[2J"));
-    screen.process(&close);
-    let mut fresh = vt100::Parser::new(30, 80, 0);
-    ui.full_redraw_requested = true;
-    fresh.process(&frame(&mut terminal, &mut ui));
-    let diff = differences(screen.screen(), fresh.screen(), 80);
-    assert!(diff.is_empty(), "full redraw must match fresh: {diff:?}");
     text_width::clear_terminal_width();
 }
 
