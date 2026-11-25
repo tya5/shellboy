@@ -989,6 +989,30 @@ impl DbWorker {
         self.shared.activity_updates.subscribe()
     }
 
+    /// The owner observes the worker without acquiring a request slot or polling.
+    pub(crate) async fn observe_slow_jobs(&self) {
+        let mut activity = self.subscribe_activity();
+        loop {
+            let active = activity.borrow_and_update().active.clone();
+            if let Some(job) = active {
+                let deadline = tokio::time::Instant::from_std(job.started + SLOW_JOB_THRESHOLD);
+                tokio::select! {
+                    biased;
+                    changed = activity.changed() => {
+                        if changed.is_err() { return; }
+                        continue;
+                    }
+                    _ = tokio::time::sleep_until(deadline) => {
+                        self.report_active_job_slow(job.id, Instant::now());
+                    }
+                }
+            }
+            if activity.changed().await.is_err() {
+                return;
+            }
+        }
+    }
+
     /// Emit one bounded diagnostic when an observed active job crosses the slow threshold.
     pub(crate) fn report_active_job_slow(&self, id: u64, now: Instant) {
         let active = {

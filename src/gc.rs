@@ -1022,6 +1022,7 @@ impl GcService {
             Background::Deferred => Ok(Background::Deferred),
         }
     }
+    #[cfg(test)]
     pub(crate) fn subscribe_history_diagnostics(&self) -> watch::Receiver<Option<GcDiagnostics>> {
         self.history_diagnostics.subscribe()
     }

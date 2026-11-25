@@ -541,60 +541,6 @@ fn failed_submissions_restore_only_an_unchanged_composer_including_attachment_me
 }
 
 #[test]
-fn long_unchanged_db_debug_item_cannot_hide_submitting_or_later_state_updates() {
-    use crate::storage::{ActiveDbJob, DbJobLane, DbWorkerActivity};
-    for language in [crate::config::UiLanguage::En, crate::config::UiLanguage::Ja] {
-        let mut ui = ui_in(language);
-        let _ = send(&mut ui, "queued while DB is busy");
-        let started = Instant::now();
-        ui.apply(UiUpdate::DbWorkerActivity(DbWorkerActivity {
-            active: Some(ActiveDbJob {
-                id: 1,
-                kind: "control::db::execute_kind::history_list",
-                lane: DbJobLane::Foreground,
-                started_at: std::time::SystemTime::now(),
-                started,
-            }),
-            no_progress: vec![],
-        }));
-        ui.animation_tick(started + Duration::from_secs(227));
-        let text = footer(&ui);
-        assert!(
-            text.contains(if language == crate::config::UiLanguage::En {
-                "Accepting input"
-            } else {
-                "送信受付中"
-            }),
-            "{text}"
-        );
-        assert!(
-            text.contains("DB control::db::execute kind::history list"),
-            "debug wording is unchanged: {text}"
-        );
-        ui.apply(UiUpdate::Status {
-            thread_id: None,
-            text: "live status update".into(),
-        });
-        assert!(footer(&ui).contains("live status update"));
-        ui.insert("next input", false);
-        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
-        terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
-        let screen = terminal
-            .backend()
-            .buffer()
-            .content
-            .iter()
-            .map(|c| c.symbol())
-            .collect::<String>();
-        assert!(screen.contains("next input"));
-        assert_eq!(
-            ui.view().pending.values().next().unwrap().status,
-            ReceiptStatus::Accepting
-        );
-    }
-}
-
-#[test]
 fn durable_commit_after_observed_failure_clears_only_untouched_automatic_restore() {
     for edited in [false, true] {
         let mut ui = ui();
@@ -641,28 +587,6 @@ fn edited_send_uses_the_same_local_handoff_and_failure_restore() {
     ui.action_rejected(&action);
     assert_eq!(ui.view().draft.text, "edited request");
     assert_eq!(ui.view().draft.edit, Some(target));
-}
-
-#[test]
-fn narrow_footer_preserves_primary_state_ahead_of_any_long_db_job() {
-    for language in [crate::config::UiLanguage::En, crate::config::UiLanguage::Ja] {
-        let mut ui = ui_in(language);
-        let _ = send(&mut ui, "pending input");
-        for width in [24, 40, 60] {
-            ui.db_status = Some("DB control::db::execute kind::history list 3m47s".into());
-            let text = footer_at(&ui, width);
-            assert!(
-                text.contains(if language == crate::config::UiLanguage::En {
-                    "Accepting input"
-                } else {
-                    "送信受付中"
-                }),
-                "width {width}: {text}"
-            );
-            assert!(text.contains("DB"), "width {width}: {text}");
-            assert_eq!(text.lines().count(), 2);
-        }
-    }
 }
 
 #[test]

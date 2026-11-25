@@ -54,71 +54,6 @@ impl Page {
         }
     }
 
-    pub(super) fn is_guide(&self) -> bool {
-        matches!(self.content, Content::Guide(_))
-    }
-
-    pub(super) fn with_gc(
-        mut self,
-        gc: Option<&crate::gc::GcDiagnostics>,
-        now: std::time::Instant,
-        language: UiLanguage,
-    ) -> Self {
-        if let (Some(gc), Content::Guide(rows)) = (gc, &mut self.content) {
-            let elapsed = gc
-                .completed
-                .unwrap_or(now)
-                .saturating_duration_since(gc.started)
-                .as_secs();
-            let age = now.saturating_duration_since(gc.last_advance).as_secs();
-            let labels = match language {
-                UiLanguage::Ja => [
-                    "GC 段階",
-                    "走査",
-                    "予算中断",
-                    "再開始",
-                    "経過秒",
-                    "最終進捗から秒",
-                    "予算超過で保持",
-                    "予算超過で保持した受領",
-                    "予算超過で残した印",
-                ],
-                UiLanguage::En => [
-                    "GC stage",
-                    "Scanned",
-                    "Deferrals",
-                    "Restarts",
-                    "Elapsed seconds",
-                    "Seconds since cursor advance",
-                    "Retained over budget",
-                    "Receipts retained over budget",
-                    "Marks left over budget",
-                ],
-            };
-            let values = [
-                gc.stage.clone(),
-                gc.scanned.to_string(),
-                gc.deferrals.to_string(),
-                gc.restarts.to_string(),
-                elapsed.to_string(),
-                age.to_string(),
-                gc.kept_over_budget.to_string(),
-                gc.kept_receipts.to_string(),
-                gc.kept_marks.to_string(),
-            ];
-            let mut details = vec![Row::Section("DB / GC".into())];
-            details.extend(
-                labels
-                    .into_iter()
-                    .zip(values)
-                    .map(|(label, value)| Row::Entry(label.into(), value)),
-            );
-            details.push(Row::Blank);
-            rows.splice(0..0, details);
-        }
-        self
-    }
-
     pub fn guide(config: &Config) -> Self {
         let mut page = Guide {
             rows: Vec::new(),
@@ -1365,62 +1300,6 @@ mod tests {
             })
             .collect::<Vec<_>>()
             .join("\n")
-    }
-    #[test]
-    fn gc_diagnostics_are_visible_in_both_languages_and_update_in_memory() {
-        use std::time::{Duration, Instant};
-        let now = Instant::now();
-        let gc = crate::gc::GcDiagnostics {
-            stage: "sweep".into(),
-            scanned: 123,
-            deferrals: 4,
-            restarts: 2,
-            kept_over_budget: 3,
-            kept_receipts: 6,
-            kept_marks: 7,
-            started: now - Duration::from_secs(10),
-            last_advance: now - Duration::from_secs(5),
-            completed: None,
-        };
-        for language in [UiLanguage::En, UiLanguage::Ja] {
-            let mut config = Config::default();
-            config.ui.language = language;
-            let page = Page::guide(&config).with_gc(Some(&gc), now, language);
-            let rendered = page
-                .lines(80)
-                .iter()
-                .map(ToString::to_string)
-                .collect::<Vec<_>>()
-                .join("\n");
-            for expected in [
-                "DB / GC", "sweep", "123", "4", "2", "10", "5", "3", "6", "7",
-            ] {
-                assert!(rendered.contains(expected), "{expected}: {rendered}");
-            }
-            let (receipts, marks) = match language {
-                UiLanguage::En => ("Receipts retained over budget", "Marks left over budget"),
-                UiLanguage::Ja => ("予算超過で保持した受領", "予算超過で残した印"),
-            };
-            for (label, value) in [(receipts, "6"), (marks, "7")] {
-                // A long label may wrap its value onto the following line.
-                let lines = rendered.lines().collect::<Vec<_>>();
-                let at = lines.iter().position(|line| line.contains(label));
-                assert!(
-                    at.is_some_and(|at| lines[at..lines.len().min(at + 2)]
-                        .iter()
-                        .any(|line| line.trim_end().ends_with(value))),
-                    "{label}: {rendered}"
-                );
-            }
-            let mut ui = UiState::new(&config, std::env::temp_dir());
-            ui.apply(crate::ui::UiUpdate::GcDiagnostics(Some(gc.clone())));
-            key(&mut ui, KeyCode::F(1));
-            let shown = screen(&mut ui, 80, 24);
-            assert!(
-                shown.contains("DB / GC") && shown.contains("sweep"),
-                "{shown}"
-            );
-        }
     }
 
     #[test]

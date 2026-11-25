@@ -2,7 +2,6 @@
 //! through finite action queues; only terminal event/drawing I/O runs here.
 pub mod actions;
 mod autosave;
-mod db_activity;
 mod update_batch;
 
 use crate::presentation::{NodePresentation, PresentationField};
@@ -785,7 +784,6 @@ pub enum UiAction {
         generation: u64,
         view_revision: u64,
         known_view: Option<(ViewAnchor, bool)>,
-        preview_sources: Vec<UiNode>,
     },
     ActivateDraft {
         draft_id: String,
@@ -904,10 +902,7 @@ pub enum UiUpdate {
         error: Option<String>,
     },
 
-    MemoryProbe(crate::memory::UiMemoryReply),
     ProgramStatus(crate::program_status::Snapshot),
-    DbWorkerActivity(crate::storage::DbWorkerActivity),
-    GcDiagnostics(Option<crate::gc::GcDiagnostics>),
 
     BrowserPatch {
         patch: Box<thread_patch::BrowserPatch>,
@@ -1836,10 +1831,6 @@ pub struct UiState {
     #[cfg(test)]
     retention_passes: usize,
     animation: activity::Animation,
-    db_activity: crate::storage::DbWorkerActivity,
-    gc_diagnostics: Option<crate::gc::GcDiagnostics>,
-    gc_help_second: Option<u64>,
-    db_status: Option<String>,
     key_hints: key_hints::Cache,
     pub views: BTreeMap<String, ThreadView>,
     pub active: String,
@@ -1990,10 +1981,6 @@ impl UiState {
             diagnostics: None,
             bell: bell::Bell::default(),
             animation: activity::Animation::new(Instant::now()),
-            db_activity: Default::default(),
-            gc_diagnostics: None,
-            gc_help_second: None,
-            db_status: None,
             key_hints: key_hints::Cache::default(),
             views: BTreeMap::from([(active.clone(), view)]),
             active,
@@ -2363,20 +2350,6 @@ impl UiState {
         std::mem::take(&mut self.terminal_requests)
     }
     pub fn apply(&mut self, update: UiUpdate) {
-        if let UiUpdate::MemoryProbe(reply) = update {
-            if !reply.is_closed() {
-                let working = self.retained_working_node_ids();
-                let body = self
-                    .views
-                    .iter()
-                    .map(|(key, view)| {
-                        retained_body_bytes(view, if key == &self.active { &working } else { &[] })
-                    })
-                    .sum::<usize>();
-                reply.finish(serde_json::json!({"body":crate::memory::cache(body,self.config.cache.body_bytes,self.views.len(),"view"),"layout":crate::memory::cache(self.layout_cache.bytes,self.config.cache.layout_bytes,self.layout_cache.entries.len()+self.layout_cache.units.len(),"layout_or_unit")}));
-            }
-            return;
-        }
         if let UiUpdate::CurrentView {
             generation,
             details,
@@ -2622,22 +2595,6 @@ impl UiState {
         self.dirty = true;
     }
     fn apply_inner(&mut self, update: UiUpdate) {
-        let update = match update {
-            UiUpdate::GcDiagnostics(snapshot) => {
-                self.gc_diagnostics = snapshot;
-                self.refresh_gc_help(Instant::now());
-                self.refresh_db_status(Instant::now());
-                return;
-            }
-            UiUpdate::DbWorkerActivity(activity) => {
-                if self.db_activity != activity {
-                    self.db_activity = activity;
-                    self.refresh_db_status(Instant::now());
-                }
-                return;
-            }
-            update => update,
-        };
         let language = self.config.ui.language;
         if let UiUpdate::ProgramStatus(snapshot) = update {
             if self.config.ui.program_status == crate::config::ProgramStatus::Off {
@@ -2844,9 +2801,6 @@ impl UiState {
         };
         let mut retry_window = false;
         match update {
-            UiUpdate::DbWorkerActivity(_) | UiUpdate::GcDiagnostics(_) => {
-                unreachable!("handled before per-view updates")
-            }
             UiUpdate::SendOperation {
                 draft_id,
                 revision,
@@ -2941,7 +2895,7 @@ impl UiState {
                 result,
             } => self.apply_thread_deletion(request_id, args, execute, result),
             UiUpdate::SavedMessage { .. } => unreachable!("handled as atomic saved projection"),
-            UiUpdate::ProgramStatus(_) | UiUpdate::MemoryProbe(_) => {
+            UiUpdate::ProgramStatus(_) => {
                 unreachable!("handled before view updates")
             }
             UiUpdate::CurrentView { .. } => unreachable!("handled as atomic current view"),
@@ -4584,7 +4538,6 @@ impl UiState {
             generation,
             view_revision: view.navigation.view_revision,
             known_view: remembered,
-            preview_sources: view.provisional_sources(),
         });
         self.trim_bodies();
         self.dirty = true;
@@ -4622,49 +4575,13 @@ impl UiState {
         self.dirty = true;
         actions
     }
-    fn general_help(&self, now: Instant) -> help::Page {
-        help::Page::guide(&self.config).with_gc(
-            self.gc_diagnostics.as_ref(),
-            now,
-            self.config.ui.language,
-        )
-    }
-
-    fn refresh_gc_help(&mut self, now: Instant) {
-        if !self.help_visible || !self.help_page.is_guide() || self.gc_diagnostics.is_none() {
-            self.gc_help_second = None;
-            return;
-        }
-        let second = now
-            .saturating_duration_since(self.gc_diagnostics.as_ref().unwrap().started)
-            .as_secs();
-        if self.gc_help_second != Some(second) {
-            self.gc_help_second = Some(second);
-            self.help_page = self.general_help(now);
-            self.help_cache.clear();
-            self.dirty = true;
-        }
-    }
-
-    fn refresh_db_status(&mut self, now: Instant) {
-        let status = db_activity::status_label(&self.db_activity, now, self.config.ui.language)
-            .or_else(|| {
-                self.gc_diagnostics
-                    .as_ref()
-                    .filter(|gc| gc.completed.is_none())
-                    .map(|gc| format!("DB GC {} (F1)", gc.stage))
-            });
-        if self.db_status != status {
-            self.db_status = status;
-            self.dirty = true;
-        }
+    fn general_help(&self) -> help::Page {
+        help::Page::guide(&self.config)
     }
 
     /// Animation deadlines only invalidate the visible footer; no worker action
     /// or history revision is produced by the display clock.
     pub fn animation_tick(&mut self, now: Instant) {
-        self.refresh_db_status(now);
-        self.refresh_gc_help(now);
         // Commit the existing UI clock before drawing: a delayed observation
         // cannot move an already displayed second back into the past.
         // Display clocks never change a persisted draft or source anchor.
@@ -5120,7 +5037,7 @@ impl UiState {
                     ..Default::default()
                 }))
             }
-            "/help" => self.show_help(self.general_help(Instant::now())),
+            "/help" => self.show_help(self.general_help()),
             "/new" => self.new_chat(),
             "/threads" => {
                 let drafts = self.local_drafts(argument);
@@ -6866,17 +6783,14 @@ fn draw_status(frame: &mut Frame<'_>, area: Rect, state: &UiState) {
         .key_hints
         .text(state.hint_context(), area.width, &state.config);
     let context = state.live_context_bar();
-    let lines = chrome::footer_lines_with_db(
+    let lines = chrome::footer_lines(
         view,
         area.width,
         &hints,
         state.palette,
         spans,
         notice,
-        chrome::FooterTrailing {
-            context,
-            db_status: state.db_status.as_deref(),
-        },
+        context,
     );
     frame.render_widget(Paragraph::new(lines), area);
 }
@@ -7561,35 +7475,6 @@ mod layout_cache_tests {
             selection_revision: 1,
             total_nodes: 1,
         });
-    }
-    #[test]
-    fn memory_probe_uses_body_and_layout_accounting_without_f8_changes() {
-        use ratatui::{Terminal, backend::TestBackend};
-        fn probe(ui: &mut UiState) -> serde_json::Value {
-            let (reply, mut receive) = crate::memory::UiMemoryReply::new();
-            ui.apply(UiUpdate::MemoryProbe(reply));
-            receive.try_recv().unwrap()
-        }
-        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
-        let before = probe(&mut ui);
-        ui.active_view_mut().thread_id = Some("memory-thread".into());
-        history(&mut ui, "memory-thread", &"cache data ".repeat(4096));
-        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
-        terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
-        ui.new_chat();
-        let after = probe(&mut ui);
-        for key in ["body", "layout"] {
-            assert!(
-                after[key]["retained_bytes"].as_u64().unwrap()
-                    > before[key]["retained_bytes"].as_u64().unwrap(),
-                "{after}"
-            );
-            assert!(
-                after[key]["retained_bytes"].as_u64().unwrap()
-                    <= after[key]["limit_bytes"].as_u64().unwrap()
-            );
-            assert!(after[key]["entries"].as_u64().unwrap() > 0);
-        }
     }
 
     #[test]
