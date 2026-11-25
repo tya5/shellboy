@@ -285,8 +285,8 @@ async fn preview_gap(still_live: bool) {
             control.fixture_end_live_text("thread");
             loop {
                 if let Ok(update) = incoming.try_recv() {
-                    let ended = matches!(&update, UiUpdate::StreamSettled { attempt_id, .. }
-                        if attempt_id == "fixture-attempt");
+                    let ended = matches!(&update, UiUpdate::PreviewEnded { attempts, .. }
+                        if attempts.iter().any(|attempt| attempt == "fixture-attempt"));
                     ui.apply(update);
                     if ended {
                         assert!(
