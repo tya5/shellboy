@@ -273,7 +273,15 @@ async fn management_request_trigger(
         };
     }
     let is_read_projection = !command.requires_receipt();
-    let response = if matches!(
+    let response = if matches!(command, Command::ScheduleList(_) | Command::ServiceList(_)) {
+        match tokio::select! { biased;
+            _ = cancel.cancelled() => return Err(ApiError::new(ErrorCode::InvalidState, "Observation closed")),
+            response = crate::ipc::call_selected_operation(data_dir, &control.store.instance_id, command, None) => response,
+        } {
+            Ok(response) => response,
+            Err(error) => return Ok(serde_json::json!({"error":error})),
+        }
+    } else if matches!(
         command,
         Command::ThreadArchive(_)
             | Command::ThreadUnarchive(_)

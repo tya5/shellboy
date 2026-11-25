@@ -1,5 +1,13 @@
 # Validation record
 
+## Core #311 native recurring-work lists
+
+Two focused macOS tests passed. Schedule and Service lists returned the exact
+rows from the connected owner, refused another instance with the same Thread
+ID, did not fall back if the listener was absent, and respected cancellation.
+The existing recurring-work mutation witness also passed. This does not test
+subscription removal or detached startup.
+
 ## Core #311 saved change delivery
 
 Two focused macOS tests passed. A real native cursor gap reached the TUI
