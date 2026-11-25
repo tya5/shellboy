@@ -532,7 +532,20 @@ fn read_sources_batch(
 pub(super) fn apply(nodes: &mut [UiNode], facts: &ToolFacts) {
     clear_observations(nodes);
     super::notices::apply(nodes, &facts.notices);
-    for source in &facts.sources {
+    apply_calls(nodes, &facts.sources, &facts.truncated_nodes, false);
+}
+
+pub(super) fn apply_window(nodes: &mut [UiNode], facts: &crate::protocol::HistoryWindowTools) {
+    apply_calls(nodes, &facts.calls, &facts.limited_node_ids, true);
+}
+
+fn apply_calls(
+    nodes: &mut [UiNode],
+    calls: &[CallSource],
+    limited_node_ids: &[String],
+    require_group_match: bool,
+) {
+    for source in calls {
         let Some(node) = nodes.iter_mut().find(|node| node.node_id == source.node_id) else {
             continue;
         };
@@ -541,7 +554,13 @@ pub(super) fn apply(nodes: &mut [UiNode], facts: &ToolFacts) {
             let Some(tool) = &mut block.tool else {
                 continue;
             };
-            if tool.call_id != source.call_id {
+            if tool.call_id != source.call_id
+                || (require_group_match
+                    && tool
+                        .group_id
+                        .as_ref()
+                        .is_some_and(|group| group != &source.group_id))
+            {
                 continue;
             }
             tool.ordinal = Some(source.ordinal);
@@ -615,7 +634,7 @@ pub(super) fn apply(nodes: &mut [UiNode], facts: &ToolFacts) {
         }
     }
     for node in nodes {
-        if facts.truncated_nodes.iter().any(|id| id == &node.node_id) {
+        if limited_node_ids.iter().any(|id| id == &node.node_id) {
             node.presentation.metadata_limited = true;
             node.presentation.details_omitted = true;
         }
