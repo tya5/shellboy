@@ -416,6 +416,34 @@ impl Control {
                 ErrorCode::IoFailed,
                 "Cannot encode shell output",
             ),
+            Command::AttachmentReload(args) => {
+                let cancel = disconnected.child_token();
+                let _cancel_on_drop = cancel.clone().drop_guard();
+                // Let the worker take ownership of selection pins even if the caller disconnects.
+                let owner = self.clone();
+                let prepared = tokio::spawn(async move {
+                    owner
+                        .attachments
+                        .prepare(&args.thread_id, cancel, true)
+                        .await
+                })
+                .await
+                .map_err(|_| {
+                    ApiError::new(ErrorCode::InvalidState, "Attachment reload worker failed")
+                })??;
+                encode_result(
+                    crate::protocol::AttachmentReloadResult {
+                        thread_id: prepared.thread_id,
+                        selection_revision: prepared.selection_revision,
+                        attachments: prepared.manifest,
+                        notices: prepared.notices,
+                        would_exclude: prepared.excluded_ids,
+                        sent: false,
+                    },
+                    ErrorCode::IoFailed,
+                    "Cannot encode attachment reload",
+                )
+            }
             Command::ShellWrite(args) => {
                 let shell = match self.live.clone_shell_handle(&args.execution_id).await {
                     Some(shell) => shell,

@@ -2163,7 +2163,13 @@ async fn run_client(
                         let outcomes = updates.worker();
                         spawn_work(&mut workers, permit, async move {
                             let title = ui_diagnostics::attachments_reloaded(language, &thread_id);
-                            let response = control.reload_attachments(thread_id).await;
+                            let response = compose_call::<crate::protocol::AttachmentReloadResult>(
+                                &control,
+                                Command::AttachmentReload(crate::protocol::AttachmentReloadArgs { thread_id }),
+                                None,
+                            ).await.and_then(|result| serde_json::to_value(result).map_err(|_| {
+                                ApiError::new(ErrorCode::ProtocolMismatch, "Invalid attachment reload response")
+                            }));
                             command_outcome(&outcomes, submission, &response).await;
                             if let Some(owner) = notice_owner {
                                 update(

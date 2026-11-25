@@ -598,6 +598,12 @@ const MEANINGS: &[Meaning] = &[
         None,
     ),
     (
+        OperationId::AttachmentReload,
+        &["attachment", "reload"],
+        &[("thread_id", FieldId::Thread)],
+        None,
+    ),
+    (
         OperationId::AttachmentRemove,
         &["attachment", "remove"],
         &[

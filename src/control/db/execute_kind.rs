@@ -71,7 +71,7 @@ named_jobs! {
     TurnInterrupt => turn_interrupt, ShellBackground => shell_background, TurnGet => turn_get, Wait => wait, EventsWait => events_wait, HistoryList => history_list, HistoryWindow => history_window, HistoryRecall => history_recall, HistoryReceived => history_received, HistoryRead => history_read,
     HistorySearch => history_search, HistoryRelations => history_relations, HistoryExport => history_export, ShellGet => shell_get,
     ShellRead => shell_read, ShellWrite => shell_write, ShellEof => shell_eof, ShellStop => shell_stop,
-    AttachmentAdd => attachment_add, AttachmentList => attachment_list, AttachmentRemove => attachment_remove,
+    AttachmentAdd => attachment_add, AttachmentList => attachment_list, AttachmentReload => attachment_reload, AttachmentRemove => attachment_remove,
     Compact => compact, ContextEdit => context_edit, IndexStatus => index_status,
     IndexPreview => index_preview, IndexBackfill => index_backfill, IndexRetry => index_retry,
     IndexRebuild => index_rebuild, IndexProbe => index_probe, IndexShrink => index_shrink, IndexRemove => index_remove, StorageStatus => storage_status,
@@ -188,6 +188,7 @@ impl Kind {
             | Kind::HistorySearch
             | Kind::ShellGet
             | Kind::ShellRead
+            | Kind::AttachmentReload
             | Kind::ShellWrite
             | Kind::TurnInterrupt
             | Kind::ShellBackground

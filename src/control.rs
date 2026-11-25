@@ -702,31 +702,6 @@ impl Control {
             )
         })
     }
-    /// Re-read current attachment bytes without sending a model request or
-    /// changing the last successful-send baseline/selection.
-    pub async fn reload_attachments(
-        self: &Arc<Self>,
-        thread_id: String,
-    ) -> Result<Value, ApiError> {
-        let control = self.clone();
-        tokio::spawn(async move {
-            let _guard = control.admit(true)?;
-            let prepared = control
-                .attachments
-                .prepare(&thread_id, control.stop.child_token(), true)
-                .await?;
-            Ok(serde_json::json!({
-                "thread_id": prepared.thread_id,
-                "selection_revision": prepared.selection_revision,
-                "attachments": prepared.manifest,
-                "notices": prepared.notices,
-                "would_exclude": prepared.excluded_ids,
-                "sent": false
-            }))
-        })
-        .await
-        .map_err(|_| ApiError::new(ErrorCode::InvalidState, "Attachment reload worker failed"))?
-    }
     pub async fn send_new_thread(
         self: &Arc<Self>,
         operation_id: String,
