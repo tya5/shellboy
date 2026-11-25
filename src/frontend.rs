@@ -37,7 +37,6 @@ mod live_output;
 mod live_work;
 mod message_metadata;
 mod message_queue;
-pub(crate) use message_queue::read_revision as saved_view_sequence;
 mod preview_reads;
 mod receipt_delivery;
 mod received;
@@ -3781,6 +3780,14 @@ async fn run_client(
                 let (thread, generation) = preview_scope.as_ref().expect("guarded selected Thread");
                 match event {
                     Ok(page) => {
+                        let page_seq = match crate::protocol::EventCursor::decode(&page.cursor) {
+                            Ok(cursor) => cursor.seq,
+                            Err(error) => {
+                                preview_events = None;
+                                status(&updates, Some(thread.clone()), error).await;
+                                continue;
+                            }
+                        };
                         let live_text = page.live_text.unwrap_or_default();
                         let resync = page.status == crate::protocol::EventsWaitStatus::ResyncRequired;
                         if resync || live_text.iter().any(|live| &live.thread_id == thread && live.gap) {
@@ -3793,7 +3800,24 @@ async fn run_client(
                                 thread_id: thread.clone(), generation: *generation,
                             }).await;
                         }
+                        let ended = page.attempt_ends.unwrap_or_default();
+                        for end in ended.iter().filter(|end| &end.thread_id == thread) {
+                            dirty_threads.insert(end.thread_id.clone());
+                            streams.retire(thread, &end.attempt_id);
+                            update(&updates, UiUpdate::StreamSettled {
+                                thread_id: thread.clone(), generation: *generation,
+                                attempt_id: end.attempt_id.clone(), owner_end_seq: Some(end.seq),
+                                received_source: None, ack: None,
+                            }).await;
+                        }
                         for live in live_text.into_iter().filter(|live| &live.thread_id == thread) {
+                            if ended.iter().any(|end| &end.thread_id == thread && end.attempt_id == live.attempt_id) {
+                                continue;
+                            }
+                            let source = crate::presentation::PreviewSource {
+                                input_through_node_id: live.input_through_node_id,
+                                page_seq,
+                            };
                             if let Some(age) = live.receive_age_ms
                                 && let Some(observed_at) = std::time::Instant::now().checked_sub(Duration::from_millis(age)) {
                                 update(&updates, UiUpdate::ModelReceive {
@@ -3804,19 +3828,10 @@ async fn run_client(
                             if live.gap {
                                 // A gap can contain only omitted reasoning; retain its
                                 // provenance even when there is no answer to render yet.
-                                streams.observe_answer(thread, &live.attempt_id, "", true);
+                                streams.observe_answer(thread, &live.attempt_id, "", true, &source);
                             }
                             for delta in live.deltas.into_iter().filter(|delta| !delta.reasoning) {
-                                streams.observe_answer(thread, &live.attempt_id, &delta.text, false);
-                            }
-                        }
-                        for ended in page.attempt_ends.unwrap_or_default().into_iter().filter(|ended| &ended.thread_id == thread) {
-                            dirty_threads.insert(ended.thread_id);
-                            if streams.retire(thread, &ended.attempt_id) {
-                                update(&updates, UiUpdate::StreamSettled {
-                                    thread_id: thread.clone(), generation: *generation,
-                                    attempt_id: ended.attempt_id, received_source: None, ack: None,
-                                }).await;
+                                streams.observe_answer(thread, &live.attempt_id, &delta.text, false, &source);
                             }
                         }
                         preview_events = Some(Box::pin(saved_events::wait_scoped(event_directory, event_instance, Some(page.cursor), page.more, Some(thread.clone()))));

@@ -1227,6 +1227,7 @@ pub enum UiUpdate {
         thread_id: String,
         generation: u64,
         attempt_id: String,
+        owner_end_seq: Option<u64>,
         received_source: Option<(String, String)>,
         ack: Option<Arc<tokio::sync::Notify>>,
     },
@@ -3407,8 +3408,10 @@ impl UiState {
                     return;
                 };
                 if verified
-                    && view.preview_retired_at > 0
-                    && presentation.preview_observation <= view.preview_retired_at
+                    && presentation
+                        .preview_source
+                        .as_ref()
+                        .is_some_and(|source| !view.accepts_preview(&node_id, source))
                 {
                     return;
                 }
@@ -3482,6 +3485,7 @@ impl UiState {
                 thread_id,
                 generation,
                 attempt_id,
+                owner_end_seq,
                 received_source,
                 ack,
             } => {
@@ -3489,6 +3493,9 @@ impl UiState {
                     ack.notify_one();
                 }
                 if let Some(view) = self.view_for(&thread_id, generation) {
+                    if let Some(seq) = owner_end_seq {
+                        view.observe_attempt_end(&attempt_id, seq);
+                    }
                     if let Some((source, kind)) = received_source {
                         view.retain_incomplete_stream(&attempt_id, source, &kind);
                     } else if let Some(action) = view.settle_stream(&attempt_id) {
@@ -9026,7 +9033,9 @@ mod tool_refresh_tests {
         };
         let tail = |ui: &UiState, revision, total| {
             let mut update = frame(ui, revision, None);
-            if let UiUpdate::CurrentView { history, .. } = &mut update
+            if let UiUpdate::CurrentView {
+                history, details, ..
+            } = &mut update
                 && let UiUpdate::History {
                     nodes,
                     total_nodes,
@@ -9035,6 +9044,7 @@ mod tool_refresh_tests {
                     ..
                 } = history.as_mut()
             {
+                details.turn_id = Some("turn".into());
                 *first_ordinal = 0;
                 *selection_revision = total;
                 *total_nodes = total;
@@ -9050,23 +9060,25 @@ mod tool_refresh_tests {
             ui.view().operation_notice.is_none(),
             "baseline is history, not a notice"
         );
-        let observation = crate::frontend::saved_view_sequence();
-        let stream = |generation| UiUpdate::Stream {
+        let stream = |generation, attempt: &str, input: &str, page_seq| UiUpdate::Stream {
             thread_id: "t".into(),
             generation,
-            node_id: "attempt".into(),
+            node_id: attempt.into(),
             role: "assistant".into(),
             text: "transient".into(),
             base_char_offset: 0,
             total_chars: 9,
             reasoning_ranges: Vec::new(),
             presentation: NodePresentation {
-                preview_observation: observation,
+                preview_source: Some(crate::presentation::PreviewSource {
+                    input_through_node_id: Some(input.into()),
+                    page_seq,
+                }),
                 ..Default::default()
             },
             ack: Some(Arc::new(tokio::sync::Notify::new())),
         };
-        ui.apply(stream(ui.view().generation));
+        ui.apply(stream(ui.view().generation, "attempt", "old", 7));
         assert!(
             ui.view()
                 .nodes()
@@ -9100,7 +9112,8 @@ mod tool_refresh_tests {
                 .iter()
                 .any(|node| node.node_id == "attempt")
         );
-        ui.apply(stream(ui.view().generation));
+        // The old native page is only processed now, after saved adoption.
+        ui.apply(stream(ui.view().generation, "attempt", "old", 8));
         assert!(
             !ui.view()
                 .nodes()
@@ -9108,12 +9121,78 @@ mod tool_refresh_tests {
                 .any(|node| node.node_id == "attempt"),
             "late frame cannot restore retired preview"
         );
+        let generation = ui.view().generation;
+        ui.apply(UiUpdate::StreamSettled {
+            thread_id: "t".into(),
+            generation,
+            attempt_id: "ended".into(),
+            owner_end_seq: Some(10),
+            received_source: None,
+            ack: None,
+        });
+        ui.apply(stream(generation, "ended", "new", 9));
+        assert!(!ui.view().nodes().iter().any(|node| node.node_id == "ended"));
+        ui.apply(stream(generation, "next", "new", 10));
+        assert!(ui.view().nodes().iter().any(|node| node.node_id == "next"));
         assert!(ui.view().nodes().iter().any(|node| node.node_id == "new"));
         ui.view_mut().clear_operation_notice();
         ui.apply(tail(&ui, 3, 2));
         assert!(
             ui.view().operation_notice.is_none(),
             "reread must not replay the notice"
+        );
+    }
+
+    #[test]
+    fn saved_path_rewrite_is_a_notice_baseline_even_when_old_results_move() {
+        use crate::presentation::{BlockKind, PresentationBlock, ToolPresentation};
+        let mut ui = UiState::new(&Config::default(), PathBuf::from("/"));
+        ui.select_thread("t".into());
+        let result = |id: &str| UiNode {
+            node_id: id.into(),
+            role: "tool".into(),
+            presentation: NodePresentation {
+                blocks: vec![PresentationBlock {
+                    kind: BlockKind::ToolResult,
+                    tool: Some(ToolPresentation {
+                        call_id: id.into(),
+                        status: "cancelled".into(),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let adopt = |ui: &mut UiState, revision, nodes: Vec<UiNode>| {
+            ui.apply(UiUpdate::History {
+                thread_id: "t".into(),
+                generation: ui.view().generation,
+                total_nodes: nodes.len() as u64,
+                nodes,
+                pending: Default::default(),
+                read_revision: revision,
+                before_cursor: None,
+                append: false,
+                first_ordinal: 0,
+                selection_revision: revision,
+            });
+        };
+        adopt(&mut ui, 1, vec![result("old")]);
+        adopt(&mut ui, 2, vec![result("inserted"), result("old")]);
+        assert!(
+            ui.view().operation_notice.is_none(),
+            "new positions on a replaced path are a baseline"
+        );
+        adopt(
+            &mut ui,
+            3,
+            vec![result("inserted"), result("old"), result("appended")],
+        );
+        assert!(
+            ui.view().operation_notice.is_some(),
+            "append on the replacement path still notifies"
         );
     }
 
