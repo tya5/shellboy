@@ -207,8 +207,9 @@ only to ask another Thread for a reply, never to ask your own Thread.
 When the person submits ordinary input in the asking Thread in Studio or the
 TUI, Shellboy admits it as the reply to the pending human question and closes
 that duty. The reply is linked by `reply_to` and starts a Run if needed. A later
-`message reply` for that question returns `invalid_state` (`reply is already terminal`).
-Never use `message reply` on your own question.
+external CLI reply (no model Origin) returns `invalid_state` (`reply is already
+terminal`). Never use `message reply` on your own question: the asking model
+gets `invalid_argument` (`cannot reply to a request you sent`).
 
 To withdraw a pending question, use `shellboy message cancel --message MESSAGE_ID`.
 
@@ -420,10 +421,15 @@ Shellboy. The bridge is a program you adapt, not a built-in connector.
    new event, form `SHELLBOY_INSTANCE_ID:EVENT_KEY` with the namespaced event ID
    as the nonce. Reuse that exact key and payload on redelivery; never replace
    the prefix after a restart. The same retained operation returns its saved
-   outcome. If the outcome cannot be recovered or the operation is expired,
-   stop and report uncertainty rather than issue a new Ask. Persist its
-   `message_id` before waiting. A timeout is not a failed delivery: keep the
-   same ID and resume the bounded wait later, not the Ask.
+   outcome. If the Ask response is lost and `error.details.next_operation`
+   supplies `operation.get` for that exact ID, follow it against the same owner
+   data directory. In the template the CLI inherits `SHELLBOY_DATA_DIR`; from
+   a separate terminal, select that same directory explicitly. A successful
+   lookup reads the original Ask result from `result.outcome.result` in the
+   CLI envelope. Persist its `message_id` before waiting. If the receipt is
+   missing, pending, expired, or has no saved acceptance, retain the journal
+   entry and report uncertainty; never issue a fresh Ask. A wait timeout is
+   not a failed delivery: resume the bounded wait on the same `message_id`.
 6. Post only an actual reply, to the same external conversation. Use the
    external event key for the post's idempotency if the destination supports
    it; otherwise do not automatically repeat an uncertain post. Record the
@@ -437,6 +443,12 @@ import subprocess
 import time
 
 
+class ShellboyError(RuntimeError):
+    def __init__(self, error):
+        super().__init__(error.get("code", "cli_failed"))
+        self.error = error
+
+
 def shellboy(*args, text=None):
     # Do not log raw request bodies or command diagnostics to the service log.
     process = subprocess.run(
@@ -445,15 +457,31 @@ def shellboy(*args, text=None):
     )
     response = json.loads(process.stdout)
     if process.returncode or not response["ok"]:
-        raise RuntimeError(response.get("error", {}).get("code", "cli_failed"))
+        raise ShellboyError(response.get("error", {}))
     return response["result"]
 
 
 def ask(thread_id, operation_id, text):
-    return shellboy(
-        "--operation-id", operation_id, "message", "ask", "--thread", thread_id,
-        "--text-stdin", text=text,
-    )["message_id"]
+    try:
+        accepted = shellboy(
+            "--operation-id", operation_id, "message", "ask", "--thread", thread_id,
+            "--text-stdin", text=text,
+        )
+    except ShellboyError as exc:
+        step = (exc.error.get("details") or {}).get("next_operation") or {}
+        if (step.get("command") != "operation.get"
+                or (step.get("args") or {}).get("operation_id") != operation_id):
+            raise
+        receipt = shellboy("operation", "get", "--operation", operation_id)
+        outcome = receipt.get("outcome")
+        if (receipt.get("operation_id") != operation_id
+                or receipt.get("state") != "completed"
+                or not isinstance(outcome, dict) or outcome.get("ok") is not True):
+            raise
+        accepted = outcome.get("result")
+        if not isinstance(accepted, dict) or not accepted.get("message_id"):
+            raise
+    return accepted["message_id"]
 
 
 def observe(message_id):
