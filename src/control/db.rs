@@ -2936,17 +2936,8 @@ pub fn run_details(connection: &Connection, id: &str) -> Result<RunDetails> {
         Some(turn) => recovery_status(connection, &row.0, turn, recovery_hint)?,
         None => recovery_hint,
     };
-    let stop_settlement_failure = row
-        .5
-        .map(|reason| {
-            RunStopSettlementFailure::parse(&reason).ok_or_else(|| {
-                error(
-                    ErrorCode::InvalidState,
-                    "unknown saved stop settlement failure",
-                )
-            })
-        })
-        .transpose()?;
+    let stop_settlement_failure =
+        crate::readback::decode_stop_settlement_failure(row.5.as_deref())?;
     Ok(RunDetails {
         stop_settlement_failure,
         model_requests: row.2.map(|ceiling| crate::protocol::RunModelRequests {
@@ -6604,6 +6595,19 @@ mod driverless_child_stop_notification_tests {
                     }),
                 ))
             };
+            let inspect = || {
+                owner
+                    .db
+                    .call(|db| crate::frontend::inspect_run_fields_for_test(db, "run-3"))
+            };
+            let fields = inspect().await.unwrap();
+            assert_eq!(
+                fields
+                    .iter()
+                    .find(|field| field.key == "/stop_settlement_failure")
+                    .map(|field| field.displayed()),
+                fail_drain.then_some("storage")
+            );
             let after = get().await.result.unwrap();
             if fail_drain {
                 assert_eq!(after["state"], "stopping");
@@ -6637,6 +6641,13 @@ mod driverless_child_stop_notification_tests {
                 let settled = get().await.result.unwrap();
                 assert_eq!(settled["state"], "stopped");
                 assert!(settled.get("stop_settlement_failure").is_none());
+                assert!(
+                    !inspect()
+                        .await
+                        .unwrap()
+                        .iter()
+                        .any(|field| field.key == "/stop_settlement_failure")
+                );
             }
             control.live.test_drivers().lock().await.clear();
             control.shutdown().await.unwrap();
