@@ -2,7 +2,8 @@
 use crate::protocol::{
     ApiError, Command, ErrorCode, HistoryBody, HistoryDisplayOutline, HistoryDisplayPage,
     HistoryDisplayPosition, HistoryDisplayRange, HistoryDisplayRead, HistoryDisplaySelection,
-    HistoryReadArgs, HistoryWindow, HistoryWindowArgs, MAX_BODY_BYTES,
+    HistoryReadArgs, HistorySnippet, HistoryWindow, HistoryWindowArgs, HistoryWindowObservation,
+    MAX_BODY_BYTES,
 };
 use std::path::Path;
 
@@ -43,6 +44,49 @@ impl Owner<'_> {
         Ok(window)
     }
 
+    /// Load one window's immutable sources without replacing its mutable facts.
+    pub(super) async fn selected(
+        &self,
+        args: HistoryWindowArgs,
+        expected_revision: Option<u64>,
+        position: impl Fn(&HistorySnippet) -> HistoryDisplayPosition,
+    ) -> Result<SelectedWindow, ApiError> {
+        let mut window = self.window(args).await?;
+        if expected_revision.is_some_and(|revision| window.revision != revision) {
+            return Err(source_changed());
+        }
+        let selection = HistoryDisplaySelection {
+            thread_id: window.thread_id,
+            revision: window.revision,
+        };
+        let mut nodes = Vec::with_capacity(window.items.len());
+        for source in window.items {
+            if source.selection.thread_id != selection.thread_id
+                || source.selection.ordinal >= window.total
+                || nodes.last().is_some_and(|node: &SelectedNode| {
+                    node.source.selection.ordinal.checked_add(1) != Some(source.selection.ordinal)
+                })
+            {
+                return Err(invalid_response());
+            }
+            let display = self
+                .display(&source.node_id, Some(selection.clone()), position(&source))
+                .await?;
+            if display.kind != source.kind
+                || display.source_revision != source.provenance.source_revision
+            {
+                return Err(source_changed());
+            }
+            nodes.push(SelectedNode { source, display });
+        }
+        Ok(SelectedWindow {
+            selection,
+            total: window.total,
+            observation: window.observation.take().ok_or_else(invalid_response)?,
+            nodes,
+        })
+    }
+
     pub(super) async fn display(
         &self,
         node_id: &str,
@@ -61,7 +105,7 @@ impl Owner<'_> {
             cursor: None,
             encoding: "UTF-8".into(),
         };
-        let mut extent = None;
+        let mut extent: Option<DisplayExtent> = None;
         for _ in 0..MAX_PAGES {
             let body: HistoryBody = self.call(Command::HistoryRead(args.clone())).await?;
             if body.node_id != node_id {
@@ -69,11 +113,19 @@ impl Owner<'_> {
             }
             let mut page = body.display.ok_or_else(invalid_response)?;
             let display = match &mut extent {
+                Some(display) if display.source_revision != body.provenance.source_revision => {
+                    return Err(source_changed());
+                }
                 Some(display) if page.outline.is_none() => display,
                 Some(_) => return Err(invalid_response()),
                 None => {
                     let outline = page.outline.take().ok_or_else(invalid_response)?;
-                    extent.insert(DisplayExtent::new(body.kind.clone(), &page, outline))
+                    extent.insert(DisplayExtent::new(
+                        body.kind.clone(),
+                        body.provenance.source_revision,
+                        &page,
+                        outline,
+                    ))
                 }
             };
             let more = body.next_cursor.is_some();
@@ -90,8 +142,21 @@ impl Owner<'_> {
     }
 }
 
+pub(super) struct SelectedWindow {
+    pub selection: HistoryDisplaySelection,
+    pub total: u64,
+    pub observation: HistoryWindowObservation,
+    pub nodes: Vec<SelectedNode>,
+}
+
+pub(super) struct SelectedNode {
+    pub source: HistorySnippet,
+    pub display: DisplayExtent,
+}
+
 pub(super) struct DisplayExtent {
     pub kind: String,
+    pub source_revision: i64,
     pub outline: HistoryDisplayOutline,
     pub text: String,
     pub range: HistoryDisplayRange,
@@ -103,9 +168,15 @@ pub(super) struct DisplayExtent {
 }
 
 impl DisplayExtent {
-    fn new(kind: String, page: &HistoryDisplayPage, outline: HistoryDisplayOutline) -> Self {
+    fn new(
+        kind: String,
+        source_revision: i64,
+        page: &HistoryDisplayPage,
+        outline: HistoryDisplayOutline,
+    ) -> Self {
         Self {
             kind,
+            source_revision,
             outline,
             text: String::new(),
             range: page.extent.clone(),
@@ -162,6 +233,10 @@ impl DisplayExtent {
     }
 }
 
+fn source_changed() -> ApiError {
+    ApiError::new(ErrorCode::CursorExpired, "Selected history source changed")
+}
+
 fn invalid_response() -> ApiError {
     ApiError::new(
         ErrorCode::ProtocolMismatch,
@@ -202,19 +277,19 @@ mod tests {
             instance: &control.store.instance_id,
         };
         let window = owner
-            .window(serde_json::from_value(json!({"thread_id":"t"})).unwrap())
+            .selected(
+                serde_json::from_value(json!({"thread_id":"t"})).unwrap(),
+                None,
+                |_| HistoryDisplayPosition::Tail,
+            )
             .await
             .unwrap();
-        assert_eq!(window.items.len(), 1);
-        let node = &window.items[0].node_id;
-        let selected = HistoryDisplaySelection {
-            thread_id: window.thread_id,
-            revision: window.revision,
-        };
-        let extent = owner
-            .display(node, Some(selected.clone()), HistoryDisplayPosition::Tail)
-            .await
-            .unwrap();
+        assert_eq!(window.total, 1);
+        assert_eq!(window.observation.pending.total, 0);
+        assert_eq!(window.nodes.len(), 1);
+        let node = &window.nodes[0].source.node_id;
+        let selected = window.selection;
+        let extent = &window.nodes[0].display;
         assert_eq!(extent.text, text);
         assert_eq!(extent.outline.blocks.len(), 1);
         assert_eq!(
@@ -296,7 +371,7 @@ mod tests {
     #[test]
     fn native_display_assembles_contiguous_unicode_and_reasoning_coordinates() {
         let first = page(40, 42);
-        let mut extent = DisplayExtent::new("assistant_response".into(), &first, outline());
+        let mut extent = DisplayExtent::new("assistant_response".into(), 1, &first, outline());
         extent
             .push("assistant_response", &first, "a\u{1f980}", true)
             .unwrap();
@@ -313,7 +388,7 @@ mod tests {
     #[test]
     fn native_display_refuses_partial_or_discontinuous_extent() {
         let first = page(40, 42);
-        let mut extent = DisplayExtent::new("assistant_response".into(), &first, outline());
+        let mut extent = DisplayExtent::new("assistant_response".into(), 1, &first, outline());
         assert_eq!(
             extent
                 .push("assistant_response", &first, "ab", false)
