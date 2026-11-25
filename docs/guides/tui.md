@@ -252,6 +252,8 @@ Restore failed/cancelled send snapshots with `/restore REVISION`. Unaccepted or 
 
 ## Slash commands
 
+For `/ask`, quote text containing spaces. The owner applies the same routing rules as the CLI: named recipients (`--to`, or `human` when no target is supplied) require an authenticated model origin, which the TUI does not have. Use `--thread` from the TUI. For piped text, use `shellboy message ask --text-stdin` with the desired CLI target; `/ask` does not read stdin.
+
 `/status` lists stored work across all Threads. `/status thread` limits it to the current Thread; `/status all` includes terminal work. Runs, Turns, background shells, unapplied requests, and model attempts each occupy one row. Up/Down select, Enter opens ownership/model/timestamp details, O queries the target, S reads shell source output, R refreshes, and N fetches the next list page. Within a detail page, N continues that detail. Esc returns to the conversation, retaining the draft and reading position.
 
 This observes saved state, not OS process liveness, in-flight searches, or standalone RAG stores. The Run's background shells can remain active after a Turn completes; inspect Turn and Run states separately. Use F8 `作業 | 状態一覧` for filters such as failures, `/index status` for indexing, and CLI `shellboy rag status` for RAG.
@@ -267,6 +269,7 @@ Replace `ID` and connection names below with real values. `/attach` and `/cwd`, 
 | `/actions`, `/operations` | Typed action forms |
 | `/cancel-wait` | Cancel observation of a TUI-started wait, without stopping its target |
 | `/new` | New draft |
+| `/ask --thread ID --text 'Question'` | Request one reply from a Thread. Use the [CLI Ask flags](cli-reference.md#message--operation), including `--deliver` for a Thread and optional `--sender-label`. Ordinary Send does not request a reply. |
 | `/config get`, `/config set`, `/config check` | Use the [CLI config verb flags](cli-reference.md#configuration-through-the-owner-2-commands). Get and Set target the selected owner. Pass the `file.content_hash` from Get to Set as `--expected-hash` and quote arguments containing spaces or TOML quotes. Check uses the current session's config path and performs the same model-catalog GET as the CLI. |
 | `/schedule list\|add\|set\|enable\|disable\|remove` and `/service list\|add\|start\|stop\|remove` | Same arguments as the [CLI](cli-reference.md); quote values with spaces, for example `/service add --command 'echo hello'`. For `/schedule add`, pass the whole shell program after `--` as one quoted slash argument, keeping the inner shell quotes intact: `/schedule add --in 10m -- "printf '%s' 'hello world'"`. |
 | `/threads [FILTER]` | Threads and unsent drafts |

@@ -133,11 +133,11 @@ impl Page {
             );
         }
         page.entry(
-            "shellboy message ask",
+            "/ask --thread ID --text TEXT",
             local!(
                 config.ui.language,
-                "返信が必要な依頼はCLIで --thread と --text を指定",
-                "For a required reply, use the CLI with --thread and --text"
+                "別の会話に返信を依頼。通常の送信は返信を依頼しません",
+                "Ask another conversation for a reply. Ordinary sends do not request replies"
             ),
         );
         page.entry(
@@ -1591,12 +1591,17 @@ mod tests {
             match language {
                 UiLanguage::En => &[
                     "Common actions",
-                    "shellboy message ask",
+                    "/ask --thread ID --text TEXT",
                     "F6 / Ctrl+C",
                     "F8",
                     "Conversation",
                 ],
-                UiLanguage::Ja => &["よく使う操作", "shellboy message ask", "F6 / Ctrl+C", "F8"],
+                UiLanguage::Ja => &[
+                    "よく使う操作",
+                    "/ask --thread ID --text TEXT",
+                    "F6 / Ctrl+C",
+                    "F8",
+                ],
             }
         }
         super::super::i18n::verify_screen(show, expected);
@@ -1622,7 +1627,7 @@ mod tests {
             "Ctrl+Enter",
             "次の区切りでメッセージを渡す",
             "改行",
-            "shellboy message ask",
+            "/ask --thread ID --text TEXT",
             "F6 / Ctrl+C",
             "F8",
             "内容の詳細を確認",

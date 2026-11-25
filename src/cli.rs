@@ -1134,7 +1134,7 @@ pub struct ThreadSetOptions {
     #[arg(long = "parent-thread")]
     pub parent_thread_id: Option<String>,
 }
-#[derive(Debug, Clone, Args)]
+#[derive(Debug, Clone, Default, Args)]
 #[group(required = true, multiple = false)]
 pub struct TextOptions {
     #[arg(long, conflicts_with = "text_stdin")]
@@ -1200,6 +1200,41 @@ pub struct MessageAskOptions {
     #[command(flatten)]
     pub text: TextOptions,
 }
+impl MessageAskOptions {
+    fn into_command(self, text: String) -> wire::Command {
+        wire::Command::MessageAsk(wire::MessageAskArgs {
+            human: false,
+            sender_label: self.sender_label,
+            thread_id: self.thread_id,
+            to: self.to,
+            deliver: self.deliver.unwrap_or_default(),
+            text,
+        })
+    }
+}
+
+#[derive(Debug, Parser)]
+#[command(name = "/ask")]
+struct AskSlash {
+    #[command(flatten)]
+    options: MessageAskOptions,
+}
+
+pub(crate) fn ask_slash(text: &str) -> Result<wire::Command, String> {
+    let words = shlex::split(text).ok_or_else(|| "Unclosed quote or escape".to_owned())?;
+    let AskSlash { mut options } =
+        AskSlash::try_parse_from(std::iter::once("/ask").chain(words.iter().map(String::as_str)))
+            .map_err(|error| error.to_string())?;
+    let text = options
+        .text
+        .text
+        .take()
+        .ok_or("Use shellboy message ask --text-stdin for piped text.")?;
+    let command = options.into_command(inline_text(text).map_err(|error| error.message)?);
+    command.validate().map_err(|error| error.message)?;
+    Ok(command)
+}
+
 #[derive(Debug, Clone, Args)]
 pub struct MessageReplyOptions {
     /// ID from a received message's `Reply expected` preamble. Withdraw your own requests with message cancel.
@@ -2044,14 +2079,10 @@ impl Cli {
                     limit: a.limit,
                     cursor: a.cursor,
                 }),
-                MessageCommand::Ask(a) => C::MessageAsk(wire::MessageAskArgs {
-                    human: false,
-                    sender_label: a.sender_label,
-                    thread_id: a.thread_id,
-                    to: a.to,
-                    deliver: a.deliver.unwrap_or_default(),
-                    text: read_text(a.text, stdin).await?,
-                }),
+                MessageCommand::Ask(mut a) => {
+                    let text = read_text(std::mem::take(&mut a.text), stdin).await?;
+                    a.into_command(text)
+                }
                 MessageCommand::Reply(a) => C::MessageReply(wire::MessageReplyArgs {
                     message_id: a.message_id,
                     sender_label: a.sender_label,
@@ -2353,22 +2384,22 @@ impl Cli {
 fn invalid(message: &str) -> ApiError {
     ApiError::new(ErrorCode::InvalidArgument, message)
 }
+fn inline_text(text: String) -> Result<String, ApiError> {
+    if text.len() > MAX_STDIN_TEXT_BYTES {
+        return Err(ApiError::new(
+            ErrorCode::InputLimit,
+            "text exceeds the CLI byte limit",
+        ));
+    }
+    Ok(text)
+}
 async fn read_text<R: AsyncRead + Unpin>(
     options: TextOptions,
     reader: &mut R,
 ) -> Result<String, ApiError> {
     let max_bytes = MAX_STDIN_TEXT_BYTES;
     match (options.text, options.text_stdin) {
-        (Some(text), false) => {
-            if text.len() > max_bytes {
-                Err(ApiError::new(
-                    ErrorCode::InputLimit,
-                    "text exceeds the CLI byte limit",
-                ))
-            } else {
-                Ok(text)
-            }
-        }
+        (Some(text), false) => inline_text(text),
         (None, true) => {
             let mut bytes = Vec::new();
             reader

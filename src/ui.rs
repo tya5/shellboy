@@ -5029,6 +5029,10 @@ impl UiState {
         self.active_view_mut().operation_notice = None;
         let thread_id = self.view().thread_id.clone();
         match command {
+            "/ask" => match crate::cli::ask_slash(argument) {
+                Ok(command) => self.execute_operation(command),
+                Err(error) => self.command_error(error.trim()),
+            },
             "/config" => match crate::cli::config_slash(argument) {
                 Ok(crate::cli::ConfigSlashAction::Owner(command)) => self.execute_operation(*command),
                 Ok(crate::cli::ConfigSlashAction::Check) => self.execute_client_operation(
@@ -9272,6 +9276,8 @@ mod tool_refresh_tests {
     }
 }
 
+#[cfg(test)]
+mod ask_slash_tests;
 #[cfg(test)]
 mod config_slash_tests;
 #[cfg(test)]
