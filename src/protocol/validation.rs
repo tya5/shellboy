@@ -681,12 +681,22 @@ impl HistoryListArgs {
 }
 
 impl HistoryReadArgs {
-    fn validate(&self) -> Result<(), ApiError> {
+    pub(crate) fn validate(&self) -> Result<(), ApiError> {
         nonempty(&self.node_id, "node_id")?;
         nonempty(&self.encoding, "encoding")?;
         limit(self.limit_bytes, MAX_BODY_BYTES)?;
         if self.parts && self.end_message_only {
             return Err(invalid("parts and end_message_only cannot be combined"));
+        }
+        if let Some(display) = &self.display {
+            if self.parts || self.end_message_only {
+                return Err(invalid(
+                    "display cannot be combined with parts or end_message_only",
+                ));
+            }
+            if let Some(selection) = &display.selection {
+                nonempty(&selection.thread_id, "display.selection.thread_id")?;
+            }
         }
         optional_nonempty(self.cursor.as_deref(), "cursor")
     }

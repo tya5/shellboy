@@ -1,5 +1,6 @@
 //! Read-only display of saved failed responses; never a model replay source.
 use super::*;
+use crate::history::display_source::received_body as body;
 mod list;
 use crate::{
     config::UiLanguage,
@@ -20,81 +21,6 @@ pub(super) fn source(
            (json_type(n.payload_json,'$.attempt_id') IS NULL AND n.payload_json=a.error_json))
       ORDER BY CASE WHEN json_extract(n.payload_json,'$.attempt_id')=a.id THEN 0 ELSE 1 END,n.rowid DESC LIMIT 1"#,
       [attempt],|row|Ok((row.get(0)?,row.get(1)?))).optional()
-}
-
-/// Prefer received answer deltas. Alternatives are mutually exclusive so the
-/// final event and item-done copies never repeat the same paid response.
-pub(super) fn body(payload: &Value) -> (String, Vec<(usize, usize)>) {
-    fn fallback(payload: &Value, reasoning: bool) -> String {
-        let wanted = if reasoning { "reasoning" } else { "message" };
-        let messages = |items: Vec<&Value>| {
-            items
-                .into_iter()
-                .filter(|item| item.get("type").and_then(Value::as_str) == Some(wanted))
-                .map(|item| display_payload(item).0)
-                .filter(|text| !text.is_empty())
-                .collect::<Vec<_>>()
-                .join("\n")
-        };
-        let final_text = || {
-            payload
-                .pointer("/raw_response/output")
-                .and_then(Value::as_array)
-                .map(|items| messages(items.iter().collect()))
-                .unwrap_or_default()
-        };
-        let done_text = || {
-            let mut items = payload
-                .get("completed_items")
-                .and_then(Value::as_object)
-                .map(|items| {
-                    items
-                        .iter()
-                        .filter_map(|(index, item)| {
-                            index.parse::<u64>().ok().map(|index| (index, item))
-                        })
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
-            items.sort_by_key(|(index, _)| *index);
-            messages(items.into_iter().map(|(_, item)| item).collect())
-        };
-        let observation =
-            payload.get("classification").and_then(Value::as_str) == Some("stream_difference");
-        let first = if observation {
-            done_text()
-        } else {
-            final_text()
-        };
-        if !first.is_empty() {
-            first
-        } else if observation {
-            final_text()
-        } else {
-            done_text()
-        }
-    }
-
-    let channel = |key: &str, reasoning| {
-        payload
-            .get(key)
-            .and_then(Value::as_str)
-            .filter(|s| !s.is_empty())
-            .map(str::to_owned)
-            .unwrap_or_else(|| fallback(payload, reasoning))
-    };
-    let reasoning = channel("partial_reasoning", true);
-    let answer = channel("partial_text", false);
-    let count = reasoning.chars().count();
-    let ranges = if count > 0 { vec![(0, count)] } else { vec![] };
-    let text = if reasoning.is_empty() {
-        answer
-    } else if answer.is_empty() {
-        reasoning
-    } else {
-        format!("{reasoning}\n{answer}")
-    };
-    (text, ranges)
 }
 
 fn received_title(language: UiLanguage, observation: bool) -> String {
@@ -762,6 +688,7 @@ mod tests {
         assert!(list_page(Some("invalid".into())).await.is_err());
         let raw = crate::history::History::new(owner.db.clone())
             .read(crate::protocol::HistoryReadArgs {
+                display: None,
                 end_message_only: false,
                 parts: false,
                 node_id: "n0".into(),

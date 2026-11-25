@@ -261,6 +261,7 @@ mod tests {
             Ok(())
         }).await.unwrap();
         let args = HistoryReadArgs {
+            display: None,
             node_id: "summary".into(),
             cursor: None,
             limit_bytes: 32,
@@ -287,6 +288,7 @@ mod tests {
         );
         let cursor = report["next_cursor"].as_str().unwrap().to_owned();
         let next = read(HistoryReadArgs {
+            display: None,
             cursor: Some(cursor),
             ..args.clone()
         })
@@ -296,6 +298,7 @@ mod tests {
         assert_ne!(next["text"], report["text"]);
         assert!(
             read(HistoryReadArgs {
+                display: None,
                 parts: false,
                 ..args
             })
@@ -334,6 +337,7 @@ mod tests {
             request(
                 &owner.loaded.data_dir,
                 Command::HistoryRead(HistoryReadArgs {
+                    display: None,
                     node_id: "inspection-source".into(),
                     cursor,
                     limit_bytes: 4,
@@ -414,6 +418,7 @@ mod tests {
     fn body_identity_never_infers_selection_from_creation_or_viewer_and_limits_do_not_copy_bad_ids()
     {
         let command = Command::HistoryRead(HistoryReadArgs {
+            display: None,
             node_id: "n".into(),
             cursor: None,
             limit_bytes: 65536,

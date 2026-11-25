@@ -210,6 +210,7 @@ impl Session {
             .request(
                 "capability",
                 Command::HistoryRead(HistoryReadArgs {
+                    display: None,
                     end_message_only: true,
                     parts: false,
                     node_id: uuid::Uuid::new_v4().to_string(),
@@ -543,6 +544,7 @@ impl Session {
                 .request(
                     "answer",
                     Command::HistoryRead(HistoryReadArgs {
+                        display: None,
                         end_message_only: mode != ResultMode::Reply,
                         parts: false,
                         node_id: node.clone(),
