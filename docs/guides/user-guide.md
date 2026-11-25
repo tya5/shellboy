@@ -488,7 +488,9 @@ open a reply duty.
 
 To answer a model's Ask to `human`, type and submit ordinary input in the same
 Thread. Shellboy admits it as the reply and closes the pending duty. A later
-`message reply` on that question returns `invalid_state` (`reply is already terminal`).
+`message reply` from a regular terminal (no model Origin) returns `invalid_state`
+(`reply is already terminal`). The asking model cannot reply to its own request:
+it gets `invalid_argument` (`cannot reply to a request you sent`).
 
 Keep the returned `message_id`. Read the reply state with
 `shellboy message get --message MESSAGE_ID`; when `reply.state` is `replied`,

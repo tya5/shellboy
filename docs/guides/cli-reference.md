@@ -1201,8 +1201,9 @@ up to 16 duties the caller Thread owes, excluding questions it sent.
 
 For a model's `message ask --to human`, ordinary input submitted by the person
 in the asking Thread is admitted as the reply and closes the pending duty.
-A subsequent `message reply` for it returns `invalid_state` with
-`reply is already terminal`.
+A subsequent external CLI `message reply` (no model Origin) returns `invalid_state`
+with `reply is already terminal`. The asking model gets `invalid_argument`
+with `cannot reply to a request you sent`, regardless of the duty state.
 
 For the external `reply_received` wait example and result meanings, see
 [Reply-expected delegation](#reply-expected-delegation). `thread get` includes `pending_replies` `{owed_by, asked_by}` counts (`{count, exact}`, exact through 16); `message list --awaiting` pages the duties oldest first. Cancelling a queued request cancels both input and duty;
