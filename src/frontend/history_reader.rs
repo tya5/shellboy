@@ -119,6 +119,15 @@ pub(super) struct RawHistory {
     info: HistoryInfo,
 }
 impl RawHistory {
+    pub(super) async fn adopt_submitted(
+        &mut self,
+        control: &Control,
+        thread: &str,
+    ) -> Result<(), ApiError> {
+        self.info.pending.submitted = message_queue::submitted(control, thread).await?;
+        Ok(())
+    }
+
     pub(super) fn project_message_holds(
         &mut self,
         db: &Connection,
@@ -235,7 +244,7 @@ impl<'a> HistoryReader<'a> {
             .to_owned();
         let target = thread.clone();
         let holds = control.message_holds();
-        let (raw, before_cursor) = control
+        let (mut raw, before_cursor) = control
             .store
             .database
             .call(move |db| {
@@ -248,6 +257,7 @@ impl<'a> HistoryReader<'a> {
             })
             .await
             .map_err(storage_error)?;
+        raw.adopt_submitted(control, &thread).await?;
         let language = control.store.config.ui.language;
         let (mut nodes, info, _) =
             presentation_work(move || raw.project_page(width, None, language)).await?;
@@ -302,7 +312,9 @@ impl<'a> HistoryReader<'a> {
             })
             .await
             .map_err(storage_error);
-        let (raw, ordinal) = checked_storage(self.control, result).await?;
+        let (mut raw, ordinal) = checked_storage(self.control, result).await?;
+        raw.adopt_submitted(self.control, &reply.target.thread)
+            .await?;
         let width = self.width;
         let language = self.control.store.config.ui.language;
         let (mut nodes, info, anchor) = presentation_work(move || {
@@ -349,7 +361,7 @@ impl<'a> HistoryReader<'a> {
             let ordinal = request.ordinal;
             let position = request.position;
             let holds = self.control.message_holds();
-            let raw = self
+            let mut raw = self
                 .control
                 .store
                 .database
@@ -364,6 +376,8 @@ impl<'a> HistoryReader<'a> {
                 })
                 .await
                 .map_err(storage_error)?;
+            raw.adopt_submitted(self.control, &reply.target.thread)
+                .await?;
             let width = self.width;
             let language = self.control.store.config.ui.language;
             let (mut nodes, info, anchor) = presentation_work(move || {
@@ -411,7 +425,7 @@ impl<'a> HistoryReader<'a> {
             let append = before.is_some();
             let db_anchor = anchor.clone();
             let holds = self.control.message_holds();
-            let (raw, before_cursor) = self
+            let (mut raw, before_cursor) = self
                 .control
                 .store
                 .database
@@ -424,6 +438,7 @@ impl<'a> HistoryReader<'a> {
                 })
                 .await
                 .map_err(storage_error)?;
+            raw.adopt_submitted(self.control, &reply.thread).await?;
             let width = self.width;
             let language = self.control.store.config.ui.language;
             let (mut nodes, info, _) =

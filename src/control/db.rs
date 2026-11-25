@@ -1271,7 +1271,8 @@ impl Store {
                 &args.archive_id,
                 self.config.limits.draft_bytes,
             )?),
-            Command::DraftGet(args) => MutationResult::value(compose::get(tx, &args.thread_id)?),
+            Command::DraftGet(args) => MutationResult::value(compose::get(tx, args)?),
+            Command::DraftList(args) => MutationResult::value(compose::list(tx, args)?),
             Command::DraftSave(args) => {
                 compose::save(tx, args, self.config.limits.draft_bytes, now)?;
                 MutationResult::value(crate::protocol::Accepted { accepted: true })

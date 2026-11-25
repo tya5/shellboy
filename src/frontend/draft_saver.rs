@@ -527,7 +527,10 @@ mod tests {
         assert!(incoming.recv().await.is_none());
         let state: DraftState = compose_call(
             &control,
-            Command::DraftGet(DraftGetArgs { thread_id: thread }),
+            Command::DraftGet(DraftGetArgs {
+                thread_id: thread,
+                operation_id: None,
+            }),
             None,
         )
         .await
