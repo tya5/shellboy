@@ -1,6 +1,6 @@
 //! Human/model CLI syntax. Conversion produces the same typed operations as TUI.
 use crate::protocol::{self as wire, ApiError, ErrorCode};
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 use std::{
     future::Future,
     path::{Component, Path, PathBuf},
@@ -487,12 +487,15 @@ pub enum MessageCommand {
     Send(MessageSendOptions),
     /// Request a reply from a named recipient or another Thread.
     #[command(
-        after_help = "  shellboy message ask --thread CHILD_THREAD_ID --text 'Report what you verified'\n  shellboy message ask --to human --text 'Choose A or B'\n  shellboy message ask --to claude --text 'Review the proposed change'\n  shellboy message get --message MESSAGE_ID\n\nAcceptance opens one reply duty. It does not prove delivery, execution, or an answer. Check delivery_status on the same message, inspect assigned Run and Turn IDs when present, and use reply.state and reply.node_id to identify the actual reply. A cancelled or otherwise closed duty without a reply is not an answer. Named recipients require model origin; thread_id identifies the asking Thread. Guide: shellboy docs get --id shellboy/delegation"
+        after_help = "  shellboy message ask --thread CHILD_THREAD_ID --text 'Report what you verified'\n  shellboy message ask --to human --text 'Choose A or B'\n  shellboy message ask --to claude --text 'Review the proposed change'\n  shellboy message get --message MESSAGE_ID\n\nFor an Ask to human, their ordinary input in the asking Thread closes the pending duty. Acceptance opens one reply duty. It does not prove delivery, execution, or an answer. Check delivery_status on the same message, inspect assigned Run and Turn IDs when present, and use reply.state and reply.node_id to identify the actual reply. A cancelled or otherwise closed duty without a reply is not an answer. Named recipients require model origin; thread_id identifies the asking Thread. Guide: shellboy docs get --id shellboy/delegation"
     )]
     Ask(MessageAskOptions),
     /// List pending replies without marking them read.
     List(MessageListOptions),
     /// Reply once to a received reply-expected message.
+    #[command(
+        after_help = "If ordinary input already answered a human Ask in its Thread, a later reply returns invalid_state: reply is already terminal."
+    )]
     Reply(MessageReplyOptions),
     /// Inspect saved delivery facts; read the original body separately with history read.
     #[command(
@@ -796,20 +799,59 @@ pub fn scheduled_command_argument_error(error: &clap::Error, words: &[String]) -
     let ContextValue::String(argument) = error.get(ContextKind::InvalidArg)? else {
         return None;
     };
-    let tail = words
-        .iter()
-        .position(|word| word == "--")
-        .map(|index| &words[index + 1..]);
-    let received = match tail {
-        Some(tail) if !tail.is_empty() && (argument == "--" || tail.first() == Some(argument)) => {
-            tail
+    let root = Cli::command();
+    let mut words = words.iter();
+    let command = loop {
+        let word = words.next()?;
+        if skip_scheduled_option(&root, word, &mut words) {
+            continue;
         }
-        _ if !argument.starts_with('-') => std::slice::from_ref(argument),
-        _ => return None,
+        break root.find_subcommand(word)?;
     };
+    let add = command.find_subcommand(words.next()?)?;
+    let mut received = Vec::new();
+    while let Some(word) = words.next() {
+        if word == "--" {
+            received.extend(words);
+            break;
+        }
+        if !skip_scheduled_option(add, word, &mut words)
+            && !skip_scheduled_option(&root, word, &mut words)
+        {
+            received.push(word);
+        }
+    }
+    if !received.iter().any(|word| *word == argument) && argument != "--" {
+        return None;
+    }
     Some(format!(
         "Unexpected positional arguments: {received:?}. Pass the entire shell program as --command '...'"
     ))
+}
+
+// Scheduled Add and the global options have one value per flag. Consult Clap's
+// declarations so the error cannot accidentally echo those recognized values.
+fn skip_scheduled_option(
+    command: &clap::Command,
+    word: &str,
+    words: &mut std::slice::Iter<'_, String>,
+) -> bool {
+    let Some(long) = word.strip_prefix("--") else {
+        return false;
+    };
+    let (name, inline) = long
+        .split_once('=')
+        .map_or((long, false), |(name, _)| (name, true));
+    let Some(arg) = command
+        .get_arguments()
+        .find(|arg| arg.get_long() == Some(name))
+    else {
+        return false;
+    };
+    if !inline && arg.get_action().takes_values() {
+        words.next();
+    }
+    true
 }
 
 fn parse_schedule_delay(input: &str) -> Result<u64, String> {
