@@ -250,7 +250,7 @@ jobs:
           MACOS_TEST_SHARD: ${{ matrix.shard }}
         run: python scripts/test-timings.py --artifacts .local/ci-timings/cargo-artifacts.jsonl --output .local/ci-timings/shard-${{ matrix.shard }}
       - name: Verify real CLI against fallback Unix namespace
-        if: runner.os != 'Windows' && (runner.os != 'macOS' || matrix.shard == '1')
+        if: runner.os != 'Windows' && (runner.os != 'macOS' || matrix.shard == '2')
         shell: bash
         run: |
           # Tests already built the default-feature CLI for integration tests.
@@ -259,10 +259,10 @@ jobs:
         if: runner.os != 'macOS' || matrix.shard == '1'
         run: cargo test --locked --features test-db-observation --test db_observation_feature
       - name: Observe closed-proxy retry phases and timings
-        if: inputs.diagnostics == true
+        if: inputs.diagnostics == true && (runner.os != 'macOS' || matrix.shard == '2')
         run: cargo test --locked --test integration response_upload_recovery::refused_proxy_connections_keep_retrying_beyond_two_and_recover_when_it_listens -- --exact --nocapture
       - name: Repeat attachment preparation observations in fresh processes
-        if: inputs.diagnostics == true
+        if: inputs.diagnostics == true && (runner.os != 'macOS' || matrix.shard == '2')
         shell: bash
         run: |
           set -euo pipefail
