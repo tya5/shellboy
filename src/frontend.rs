@@ -41,6 +41,10 @@ mod preview_reads;
 mod receipt_delivery;
 mod received;
 mod saved_events;
+#[cfg(test)]
+pub(crate) use saved_events::tests::{
+    Observed as SavedEventObservation, observe_run as observe_saved_event_run,
+};
 mod snapshot;
 mod thread_deletion;
 mod update_delivery;

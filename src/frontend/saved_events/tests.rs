@@ -7,7 +7,7 @@ use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-pub(in crate::frontend) enum Observed {
+pub(crate) enum Observed {
     Baseline,
     Page {
         generation: u64,
@@ -17,6 +17,13 @@ pub(in crate::frontend) enum Observed {
 
 tokio::task_local! {
     static OBSERVE: mpsc::Sender<Observed>;
+}
+
+pub(crate) async fn observe_run<T>(
+    sender: mpsc::Sender<Observed>,
+    run: impl Future<Output = T>,
+) -> T {
+    OBSERVE.scope(sender, run).await
 }
 
 pub(in crate::frontend) fn observe(event: Observed) {
