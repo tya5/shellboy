@@ -640,6 +640,14 @@ impl Page {
             ),
         );
         page.entry(
+            "/config get /config set /config check",
+            local!(
+                config.ui.language,
+                "設定の取得・変更・確認。オプションはCLIと同じ",
+                "Read, change, or check settings. Flags match the CLI"
+            ),
+        );
+        page.entry(
             "/schedule list",
             local!(
                 config.ui.language,

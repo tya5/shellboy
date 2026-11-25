@@ -98,6 +98,11 @@ impl CommandHint {
                 "受信記録（失敗・ストリーム差分）を読む",
                 "Read received records and stream diffs"
             ),
+            "/config" => local!(
+                language,
+                "CLIと同じ構文で設定を取得・変更・確認",
+                "Read, change, or check settings with CLI syntax"
+            ),
             "/schedule" => local!(
                 language,
                 "CLIと同じ引数で予定を操作",
@@ -235,6 +240,7 @@ impl CommandHint {
 const COMMANDS: &[CommandHint] = &[
     CommandHint { name: "/agents" },
     CommandHint { name: "/received" },
+    CommandHint { name: "/config" },
     CommandHint { name: "/schedule" },
     CommandHint { name: "/service" },
     CommandHint { name: "/status" },
@@ -944,6 +950,7 @@ mod contract_tests {
                 "/search" => "needle",
                 "/restore" => "0",
                 "/paste" => "0 show",
+                "/config" => "get",
                 _ => "",
             };
             let text = format!("{}{argument}", ui.view().draft.text);

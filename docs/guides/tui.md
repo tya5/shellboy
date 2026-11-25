@@ -267,6 +267,7 @@ Replace `ID` and connection names below with real values. `/attach` and `/cwd`, 
 | `/actions`, `/operations` | Typed action forms |
 | `/cancel-wait` | Cancel observation of a TUI-started wait, without stopping its target |
 | `/new` | New draft |
+| `/config get`, `/config set`, `/config check` | Use the [CLI config verb flags](cli-reference.md#configuration-through-the-owner-2-commands). Get and Set target the selected owner. Pass the `file.content_hash` from Get to Set as `--expected-hash` and quote arguments containing spaces or TOML quotes. Check uses the current session's config path and performs the same model-catalog GET as the CLI. |
 | `/schedule list\|add\|set\|enable\|disable\|remove` and `/service list\|add\|start\|stop\|remove` | Same arguments as the [CLI](cli-reference.md); quote values with spaces, for example `/service add --command 'echo hello'`. For `/schedule add`, pass the whole shell program after `--` as one quoted slash argument, keeping the inner shell quotes intact: `/schedule add --in 10m -- "printf '%s' 'hello world'"`. |
 | `/threads [FILTER]` | Threads and unsent drafts |
 | `/threads active` | Watch saved work across conversations |
