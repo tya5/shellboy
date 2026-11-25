@@ -738,6 +738,22 @@
         {
           "properties": {
             "args": {
+              "$ref": "#/definitions/DraftListArgs"
+            },
+            "command": {
+              "const": "draft.list",
+              "type": "string"
+            }
+          },
+          "required": [
+            "command",
+            "args"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "args": {
               "$ref": "#/definitions/DraftRestoreArgs"
             },
             "command": {
@@ -2830,6 +2846,12 @@
     "DraftGetArgs": {
       "additionalProperties": false,
       "properties": {
+        "operation_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "thread_id": {
           "type": "string"
         }
@@ -2957,6 +2979,140 @@
         "path"
       ],
       "type": "object"
+    },
+    "DraftListArgs": {
+      "additionalProperties": false,
+      "properties": {
+        "cursor": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "$ref": "#/definitions/DraftListKind",
+          "default": "restorable"
+        },
+        "limit": {
+          "default": 50,
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "thread_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "DraftListFilters": {
+      "properties": {
+        "kind": {
+          "$ref": "#/definitions/DraftListKind"
+        },
+        "thread_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "DraftListKind": {
+      "enum": [
+        "restorable",
+        "submitted"
+      ],
+      "type": "string"
+    },
+    "DraftRecord": {
+      "oneOf": [
+        {
+          "properties": {
+            "draft_id": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "cancelled",
+              "type": "string"
+            },
+            "source_message_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "draft_id"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "draft_id": {
+              "type": "string"
+            },
+            "excerpt": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "unconfirmed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "draft_id",
+            "excerpt"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "draft_id": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "submitted",
+              "type": "string"
+            },
+            "message_id": {
+              "type": "string"
+            },
+            "operation_id": {
+              "type": "string"
+            },
+            "source_draft_id": {
+              "type": "string"
+            },
+            "source_revision": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "draft_id",
+            "operation_id",
+            "source_draft_id",
+            "source_revision",
+            "message_id"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "DraftRestoreArgs": {
       "additionalProperties": false,
@@ -8546,6 +8702,35 @@
             },
             "command": {
               "const": "draft.get",
+              "type": "string"
+            },
+            "operation_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "origin": true,
+            "protocol_version": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "args",
+            "command",
+            "operation_id",
+            "protocol_version"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "args": {
+              "$ref": "#/definitions/DraftListArgs"
+            },
+            "command": {
+              "const": "draft.list",
               "type": "string"
             },
             "operation_id": {
@@ -15930,6 +16115,16 @@
             }
           ]
         },
+        "record": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/DraftRecord"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "selection_revision": {
           "format": "uint64",
           "minimum": 0,
@@ -16019,6 +16214,39 @@
         }
       ],
       "title": "DraftImageResult"
+    },
+    "draft.list": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "description": "A resumable owner record list. Readers own selection and cursor issuance;\nthis envelope owns the public page fields.",
+      "properties": {
+        "filters": {
+          "$ref": "#/definitions/DraftListFilters"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/definitions/DraftRecord"
+          },
+          "type": "array"
+        },
+        "limit": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "next_cursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "items",
+        "limit",
+        "filters"
+      ],
+      "title": "RecordPage",
+      "type": "object"
     },
     "draft.restore": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
