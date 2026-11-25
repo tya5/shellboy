@@ -5,6 +5,8 @@
 - **Record pages (#416):** Owner lists report `items`, the effective `limit`, typed `filters`, and `next_cursor` when more coverage is available. Even an empty page can have a continuation; repeat the read with the same selectors. `compact list` is a fixed report with `more`, not a cursor-based list. Schedule and service status report the latest execution, not an execution page.
 - **Work and history observations (#416):** Work `status` reports `limit` at the top level and no longer echoes `filters.cursor` or `filters.memory`. History execution counts state their exactness independently of excerpt or history coverage. `history read` returns the same body and projections as the former `history get`.
 - **Message sender attribution (#420):** Use `--sender-label` on Send and Ask to supply a single-line display label, up to 64 Unicode scalars. A label does not authenticate a sender. A reply to a named duty takes its label from the saved addressee. A Thread reply has model provenance only when its caller is authenticated for that Thread; an originless Thread reply is external CLI. Replies to `human` retain human attribution.
+- **Ask acceptance (#421 Unit 3):** `message.ask` now declares its existing flat `MessageAccepted` result, shared with `message.send`. Acceptance records the request and its initial delivery state; it is not execution or an answer. For a named Ask, the result's `thread_id` identifies the asking Thread.
+- **Reply result (#422):** `message.reply` now declares its existing `MessageReplied` result. The outer `message_id` identifies the answer and `reply_to` identifies the Ask. The optional nested `delivery` records acceptance for routing and can initially be held; standalone replies omit it. Use `message get --message MESSAGE_ID` with the answer ID to check current delivery.
 - **Branch revisions (#418):** Each `thread branches` row has `selection_revision`, the same value as `history window` reports in `revision` for that Thread. Compare the revisions before using branch path positions; a rewind followed by an append can restore the same length without restoring the same path. When present, `divergence.parent_selection_revision` identifies the parent path used for the comparison.
 
 ## Terminal UI
@@ -17,6 +19,7 @@
 ## Guides and reliability
 
 - **Getting started (#410, #417):** The README opens with a quickstart for the downloaded binary. Offline guide verification follows continuation pages and checks both link targets and complete guide bodies.
+- **Delivering results (#424):** The Agent Guide shows how to register an output as a Thread artifact, update that artifact on revision, and mention it in the final reply.
 - **Recovery guidance (#400):** Saved indexing failures use the same model transport guidance as conversation failures. The guidance does not rerun work.
 - **Replay budget (#385):** A selected resend that exceeds the assembly budget is refused before provider admission. The history retained for future resend is not reduced by this check.
 
