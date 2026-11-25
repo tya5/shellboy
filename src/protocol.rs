@@ -2206,11 +2206,16 @@ impl Default for PendingReplyCount {
         }
     }
 }
+record!(AwaitingOwnAsk {
+    message_id: String,
+    blocking_message_id: String
+});
 record!(
     #[derive(Default)]
     PendingReplyCounts {
         owed_by: PendingReplyCount,
-        asked_by: PendingReplyCount
+        asked_by: PendingReplyCount,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")] awaiting_own_ask: Vec<AwaitingOwnAsk>
     }
 );
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

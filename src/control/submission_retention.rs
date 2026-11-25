@@ -204,8 +204,13 @@ mod tests {
         {
             let tx = db.transaction().unwrap();
             assert!(
-                crate::control::message_delivery::mark_admitted_tx(&tx, "t", &["admit".into()])
-                    .is_err()
+                crate::control::message_delivery::mark_admitted_tx(
+                    &tx,
+                    "t",
+                    &["admit".into()],
+                    "now"
+                )
+                .is_err()
             );
         }
         assert_eq!(
@@ -227,7 +232,8 @@ mod tests {
         );
         db.execute_batch("DROP TRIGGER fail_retirement").unwrap();
         let tx = db.transaction().unwrap();
-        crate::control::message_delivery::mark_admitted_tx(&tx, "t", &["admit".into()]).unwrap();
+        crate::control::message_delivery::mark_admitted_tx(&tx, "t", &["admit".into()], "now")
+            .unwrap();
         tx.commit().unwrap();
         assert_eq!(
             db.query_row(

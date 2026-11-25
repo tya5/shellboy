@@ -41,6 +41,23 @@ what it returns with `--result reply|turn-end|run-end` (default `reply`).
 | Q1–Q17 | Answers to the memo's questions | [Decisions](#decisions) |
 | Earlier comments | Sender may cancel; cancelled recipient is notified through the existing event mechanism; fail-safe count cap reusing an existing queue bound; reply carries the original ID; both messages are stored in the DB and read on demand | [Data model](#data-model) |
 
+## Awaiting an answer to an own ask (#433)
+
+At the existing Turn-end reply-duty settlement, an owed duty is not ignored if
+its Thread has a still-pending reply-expected ask created after the duty was
+applied. The duty is saved as `reply.state = awaiting_own_ask` with
+`reply.blocking_message_id`; the first application time is saved with the duty so
+an older pending ask cannot block it. The same settlement transaction reads the
+Thread's pending asks. When the blocking ask is replied to, cancelled, ignored or
+otherwise terminal, the existing outcome path restores the duty to `pending`.
+The normal reminder/ignore rule then applies if the Thread ends a later Turn
+without replying.
+
+`message list --awaiting`, `message get`, and the Thread's `pending_replies`
+summary expose the state and exact blocking message ID. The state adds no timer,
+setting, nesting limit, or event fact; existing saved reply outcomes wake the
+Thread. A reply actually given continues to close its duty as before.
+
 ## Facts found while reading the code
 
 These correct or sharpen assumptions in the issue thread.

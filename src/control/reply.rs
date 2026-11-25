@@ -57,9 +57,13 @@ pub(super) fn pending_counts(
             exact: count <= cap,
         })
     };
+    let waiting_on_own_ask = db.prepare("SELECT message_node_id,json_extract(result_json,'$.reply.blocking_message_id') FROM receipt INDEXED BY receipt_target WHERE target_thread_id=?1 AND json_extract(result_json,'$.reply.state')='awaiting_own_ask' ORDER BY created_at,id LIMIT ?2")?
+        .query_map(params![thread, crate::protocol::MAX_PENDING_REPLY_DUTIES as i64], |row| Ok(crate::protocol::AwaitingOwnAsk { message_id: row.get(0)?, blocking_message_id: row.get(1)? }))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(crate::protocol::PendingReplyCounts {
         owed_by: count(Some(thread), None)?,
         asked_by: count(None, Some(thread))?,
+        awaiting_own_ask: waiting_on_own_ask,
     })
 }
 
@@ -83,7 +87,7 @@ pub(super) fn list_pending(
         (String::new(), String::new())
     };
     let sql = format!(
-        "SELECT r.created_at,r.id,r.message_node_id,r.target_thread_id,json_extract(r.result_json,'$.ask_name'),r.sender_json,n.payload_json FROM receipt r INDEXED BY {index} LEFT JOIN node n ON n.id=r.message_node_id WHERE json_extract(r.result_json,'$.reply.state')='pending' AND {predicate} AND (r.created_at,r.id)>(?2,?3) ORDER BY r.created_at,r.id LIMIT ?4"
+        "SELECT r.created_at,r.id,r.message_node_id,r.target_thread_id,json_extract(r.result_json,'$.ask_name'),r.sender_json,n.payload_json,r.result_json FROM receipt r LEFT JOIN node n ON n.id=r.message_node_id WHERE json_extract(r.result_json,'$.reply.state') IN ('pending','awaiting_own_ask') AND {predicate} AND (r.created_at,r.id)>(?2,?3) ORDER BY r.created_at,r.id LIMIT ?4"
     );
     let read = || -> rusqlite::Result<Vec<_>> {
         db.prepare(&sql)?.query_map(params![key,time,id,i64::from(args.limit)+1], |row| {
@@ -94,7 +98,7 @@ pub(super) fn list_pending(
             let sender = crate::protocol::MessageSender::from_saved(Some(&row.get::<_,String>(5)?));
             let payload: Option<String> = row.get(6)?;
             let excerpt = payload.and_then(|v|serde_json::from_str::<Value>(&v).ok()).map(|v|crate::history::conversation_excerpt(&v,512)).unwrap_or_default();
-            let item = json!({"message_id":row.get::<_,String>(2)?,"created_at":time,"asked_by":model_thread_identity(&sender),"sender":sender,"recipient":match name {Some(name)=>json!({"kind":"name","name":name}),None=>json!({"kind":"thread","thread_id":thread})},"excerpt":crate::presentation::sanitize_plain(excerpt.lines().next().unwrap_or(""),0).0});
+            let item = json!({"message_id":row.get::<_,String>(2)?,"created_at":time,"asked_by":model_thread_identity(&sender),"sender":sender,"recipient":match name {Some(name)=>json!({"kind":"name","name":name}),None=>json!({"kind":"thread","thread_id":thread})},"reply":serde_json::from_str::<Value>(&row.get::<_,String>(7)?).ok().and_then(|v|v.get("reply").cloned()),"excerpt":crate::presentation::sanitize_plain(excerpt.lines().next().unwrap_or(""),0).0});
             Ok((time,id,item))
         })?.collect()
     };
@@ -384,6 +388,7 @@ impl super::db::Store {
                 "reply state changed",
             ));
         }
+        reopen_blocked_duty_tx(tx, &args.message_id).map_err(sql)?;
         tx.execute(
             "UPDATE thread SET revision=revision+1,updated_at=?2 WHERE id=?1",
             params![row.0, at],
@@ -430,6 +435,14 @@ pub(crate) fn complete_tx(
     for (message, sender, saved) in rows {
         let value: Value = serde_json::from_str(&saved)
             .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+        let applied_at = value["reply"]["applied_at"].as_str().unwrap_or("");
+        let blocking: Option<String> = db.query_row(
+            "SELECT q.message_node_id FROM receipt q INDEXED BY receipt_pending_asked WHERE json_extract(q.sender_json,'$.thread_id')=?1 AND json_extract(q.sender_json,'$.kind')='model' AND q.created_at>?2 AND json_extract(q.result_json,'$.reply.state')='pending' ORDER BY q.created_at,q.id LIMIT 1",
+            params![thread, applied_at], |row| row.get(0)).optional()?;
+        if let Some(blocking) = blocking {
+            db.execute("UPDATE receipt SET result_json=json_set(result_json,'$.reply.state','awaiting_own_ask','$.reply.blocking_message_id',?2),updated_at=?3 WHERE message_node_id=?1 AND json_extract(result_json,'$.reply.state')='pending'",params![message,blocking,at])?;
+            continue;
+        }
         if value["reply"].get("reminded_at").is_some() {
             if db.execute("UPDATE receipt SET result_json=json_set(result_json,'$.reply.state','ignored','$.reply.at',?2),updated_at=?2 WHERE message_node_id=?1 AND json_extract(result_json,'$.reply.state')='pending'",params![message,at])? == 1
                 { keys.push(Key::Reply(message.clone())); if let Some(thread) = outcome_tx(db, &message, &sender, "ignored", at)? { wakes.push(thread); } }
@@ -516,7 +529,7 @@ pub(crate) fn terminal_batch_tx(
         }
         let terminal:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM run WHERE id=?1 AND state IN ('completed','stopped','failed'))",[run],|r|r.get(0))?;
         if terminal && db.execute("UPDATE receipt SET result_json=json_set(result_json,'$.reply.state','ignored','$.reply.at',?2),updated_at=?2 WHERE message_node_id=?1 AND json_extract(result_json,'$.reply.state')='pending'",params![message,at])?==1
-            { keys.push(Key::Reply(message.clone())); if let Some(thread)=outcome_tx(db,&message,&sender,"ignored",at)? {wakes.push(thread);} }
+            { keys.push(Key::Reply(message.clone())); reopen_blocked_duty_tx(db,&message)?; if let Some(thread)=outcome_tx(db,&message,&sender,"ignored",at)? {wakes.push(thread);} }
     }
     Ok(OutcomeBatch {
         cursor,
@@ -562,6 +575,14 @@ pub(crate) fn cancellation_wakes_tx(
     Ok(wakes)
 }
 
+fn reopen_blocked_duty_tx(db: &Connection, ask: &str) -> rusqlite::Result<()> {
+    db.execute(
+        "UPDATE receipt SET result_json=json_set(json_remove(result_json,'$.reply.blocking_message_id'),'$.reply.state','pending') WHERE json_extract(result_json,'$.reply.state')='awaiting_own_ask' AND json_extract(result_json,'$.reply.blocking_message_id')=?1 AND target_thread_id=(SELECT json_extract(sender_json,'$.thread_id') FROM receipt WHERE message_node_id=?1) AND EXISTS(SELECT 1 FROM receipt q WHERE q.message_node_id=?1 AND json_extract(q.result_json,'$.reply.state')<>'pending')",
+        [ask],
+    )?;
+    Ok(())
+}
+
 fn outcome_tx(
     db: &Connection,
     message: &str,
@@ -569,6 +590,7 @@ fn outcome_tx(
     state: &str,
     at: &str,
 ) -> rusqlite::Result<Option<String>> {
+    reopen_blocked_duty_tx(db, message)?;
     let sender = crate::protocol::MessageSender::from_saved(Some(raw_sender));
     if sender.kind != crate::protocol::SenderKind::Model {
         return Ok(None);
@@ -732,6 +754,117 @@ pub(crate) fn deleted_sender_receipt_tx(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn awaiting_fixture(applied_at: &str, asked_at: &str, reminded: bool) -> Connection {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('t','/','','p','m','0'),('q-target','/','','p','m','0'); INSERT INTO run(id,thread_id,state,created_at) VALUES('r','t','live','0'); INSERT INTO node(id,kind,created_at,payload_json) VALUES('d','user','0','{}'),('q','user','0','{}');").unwrap();
+        let reply = if reminded {
+            json!({"state":"pending","applied_at":applied_at,"reminded_at":"1"})
+        } else {
+            json!({"state":"pending","applied_at":applied_at})
+        };
+        db.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,run_id,state,created_at,result_json) VALUES('d','d','{\"kind\":\"human\"}','t','d','r','applied','0',?1)", [json!({"expect_reply":true,"reply":reply}).to_string()]).unwrap();
+        db.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,result_json) VALUES('q','q',?1,'q-target','q','applied',?2,'{\"expect_reply\":true,\"reply\":{\"state\":\"pending\"}}')", params![json!({"kind":"model","thread_id":"t"}).to_string(),asked_at]).unwrap();
+        db
+    }
+
+    fn settle(db: &Connection, at: &str) {
+        let tx = db.unchecked_transaction().unwrap();
+        complete_tx(&tx, "t", "r", at, &mut Vec::new(), &mut Vec::new()).unwrap();
+        tx.commit().unwrap();
+    }
+
+    #[test]
+    fn ask_back_keeps_the_existing_duty_open_with_its_blocker() {
+        let db = awaiting_fixture("10", "20", false);
+        settle(&db, "30");
+        let (state, blocker): (String, String) = db.query_row("SELECT json_extract(result_json,'$.reply.state'),json_extract(result_json,'$.reply.blocking_message_id') FROM receipt WHERE id='d'", [], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
+        assert_eq!(
+            (state.as_str(), blocker.as_str()),
+            ("awaiting_own_ask", "q")
+        );
+        let args = crate::protocol::MessageListArgs {
+            owed_by_thread_id: Some("t".into()),
+            asked_by_thread_id: None,
+            to: None,
+            limit: 10,
+            cursor: None,
+        };
+        let listed = serde_json::to_value(list_pending(&db, &args).unwrap()).unwrap();
+        assert_eq!(listed["items"][0]["reply"]["state"], "awaiting_own_ask");
+        assert_eq!(listed["items"][0]["reply"]["blocking_message_id"], "q");
+        let detail =
+            serde_json::to_value(crate::control::db::message_details(&db, "d").unwrap()).unwrap();
+        assert_eq!(detail["reply"]["blocking_message_id"], "q");
+    }
+
+    #[test]
+    fn answer_reowes_the_blocked_duty_and_exposes_it_in_thread_summary() {
+        let db = awaiting_fixture("10", "20", false);
+        settle(&db, "30");
+        db.execute("UPDATE receipt SET result_json=json_set(result_json,'$.reply.state','replied') WHERE id='q'", []).unwrap();
+        reopen_blocked_duty_tx(&db, "q").unwrap();
+        let counts = pending_counts(&db, "t").unwrap();
+        assert!(counts.awaiting_own_ask.is_empty());
+        assert_eq!(counts.owed_by.count, 1);
+    }
+
+    #[test]
+    fn unanswered_reowed_duty_closes_as_ignored_after_its_reminder() {
+        let db = awaiting_fixture("10", "20", true);
+        settle(&db, "30");
+        db.execute("UPDATE receipt SET result_json=json_set(result_json,'$.reply.state','replied') WHERE id='q'", []).unwrap();
+        reopen_blocked_duty_tx(&db, "q").unwrap();
+        settle(&db, "40");
+        let state: String = db
+            .query_row(
+                "SELECT json_extract(result_json,'$.reply.state') FROM receipt WHERE id='d'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(state, "ignored");
+    }
+
+    #[test]
+    fn cancelled_blocking_ask_reowes_the_duty() {
+        let db = awaiting_fixture("10", "20", false);
+        settle(&db, "30");
+        db.execute("UPDATE receipt SET result_json=json_set(result_json,'$.reply.state','cancelled') WHERE id='q'", []).unwrap();
+        outcome_tx(
+            &db,
+            "q",
+            r#"{"kind":"model","thread_id":"t"}"#,
+            "cancelled",
+            "40",
+        )
+        .unwrap();
+        let state: String = db
+            .query_row(
+                "SELECT json_extract(result_json,'$.reply.state') FROM receipt WHERE id='d'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(state, "pending");
+    }
+
+    #[test]
+    fn ask_sent_before_the_duty_was_applied_does_not_block_it() {
+        let db = awaiting_fixture("30", "20", false);
+        settle(&db, "40");
+        let state: String = db
+            .query_row(
+                "SELECT json_extract(result_json,'$.reply.state') FROM receipt WHERE id='d'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(state, "pending");
+        assert_eq!(pending_counts(&db, "t").unwrap().awaiting_own_ask.len(), 0);
+    }
+
     #[test]
     fn admitted_messages_replay_receipt_facts_without_notice_nodes() {
         let mut db = Connection::open_in_memory().unwrap();
@@ -1306,8 +1439,13 @@ mod tests {
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
         assert_eq!(path, ["a", "b"]);
-        super::super::message_delivery::mark_admitted_tx(&tx, "t", &["a".into(), "b".into()])
-            .unwrap();
+        super::super::message_delivery::mark_admitted_tx(
+            &tx,
+            "t",
+            &["a".into(), "b".into()],
+            "now",
+        )
+        .unwrap();
         assert_eq!(
             tx.query_row(
                 "SELECT count(*) FROM receipt WHERE path_admission='admitted'",
