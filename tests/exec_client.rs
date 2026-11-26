@@ -1393,6 +1393,92 @@ async fn reply_mode_interruption_names_the_snapshot_state_and_leaves_the_duty_op
     fixture.close().await;
 }
 
+/// #446: the Run-end and Turn-end waits follow the reply wait's rule. Input
+/// for the Thread whose shell runs exec ends exec's observation with exit 5
+/// naming the target, which keeps running.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn end_mode_interruption_names_the_running_target_and_leaves_it_running() {
+    for (mode, unfinished) in [
+        ("turn-end", "has not completed"),
+        ("run-end", "has not ended"),
+    ] {
+        let mut fixture = Fixture::new().await;
+        let created = fixture
+            .control
+            .request(Request::new(
+                format!("{}:{}", fixture.owner.instance_id, uuid::Uuid::new_v4()),
+                Command::ThreadCreate(ThreadCreateArgs {
+                    agents: None,
+                    connection: None,
+                    cwd: None,
+                    model: None,
+                    effort: None,
+                    parent_thread_id: None,
+                }),
+            ))
+            .await;
+        assert!(created.ok, "{:?}", created.error);
+        let recipient = created.result.unwrap()["thread_id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let schema = fixture.schema();
+        let (caller, first) = fixture.active().await;
+        first
+            .reply
+            .send(cli_call(&[
+                "exec",
+                "--result",
+                mode,
+                "--schema",
+                schema.to_str().unwrap(),
+                "--thread",
+                &recipient,
+                "work",
+            ]))
+            .unwrap();
+        // The recipient's Turn stays running on its held model request.
+        let held = model_request(&mut fixture).await;
+        let input = fixture
+            .control
+            .request(Request::new(
+                format!("{}:{}", fixture.owner.instance_id, uuid::Uuid::new_v4()),
+                Command::MessageSend(MessageSendArgs {
+                    max_model_requests: None,
+                    resume_recovery: false,
+                    human: false,
+                    sender_label: None,
+                    deliver: Deliver::Next,
+                    thread_id: Some(caller.thread_id.clone()),
+                    text: "new input".into(),
+                }),
+            ))
+            .await;
+        assert!(input.ok, "{:?}", input.error);
+        let after = model_request(&mut fixture).await;
+        let body = after.body.to_string();
+        assert!(body.contains("interrupted"), "{mode}: {body}");
+        assert!(body.contains(unfinished), "{mode}: {body}");
+        let target = recipient.clone();
+        let running: String = fixture
+            .owner
+            .db
+            .call(move |db| {
+                Ok(
+                    db.query_row("SELECT state FROM run WHERE thread_id=?1", [target], |r| {
+                        r.get(0)
+                    })?,
+                )
+            })
+            .await
+            .unwrap();
+        assert_eq!(running, "live", "{mode}: the target keeps running");
+        after.reply.send(answer("Handled.")).unwrap();
+        held.reply.send(answer(r#"{"value":"done"}"#)).unwrap();
+        fixture.close().await;
+    }
+}
+
 // ---- shellboy chat: thin client over the same owner RPCs ----
 
 fn chat_command(fixture: &Fixture, args: &[&str]) -> tokio::process::Command {

@@ -271,6 +271,31 @@ impl Session {
         )
         .map_err(|_| Failure::new(6, "owner_error", "Owner returned an invalid typed result"))
     }
+    /// One owner `wait` for the rest of the client deadline, shared by every
+    /// exec wait (#441, #446): no slices, no re-arm. Callers classify its
+    /// result with [`deadline_expired`] and [`interrupted`].
+    async fn wait_once(&mut self, condition: WaitCondition) -> Result<WaitResult, Failure> {
+        let remaining = self
+            .deadline
+            .saturating_duration_since(Instant::now())
+            .as_millis() as u64;
+        if remaining == 0 {
+            return Err(Failure::new(
+                5,
+                "timeout",
+                "Client deadline expired; no target was stopped",
+            ));
+        }
+        self.request(
+            "wait",
+            Command::Wait(WaitArgs {
+                after: None,
+                conditions: vec![condition],
+                timeout_ms: remaining,
+            }),
+        )
+        .await
+    }
     /// `--result reply`: the saved duty is classified by the owner's open-state
     /// rule; only an open duty gets one `reply_received` wait for the rest of
     /// the client deadline, whose snapshot of the message decides (#441).
@@ -284,28 +309,14 @@ impl Session {
         let Some(state) = open_state(saved) else {
             return ended_reply(saved["state"].as_str(), saved["node_id"].as_str());
         };
-        let remaining = self
-            .deadline
-            .saturating_duration_since(Instant::now())
-            .as_millis() as u64;
-        if remaining == 0 {
-            return Err(duty_timeout(state));
-        }
-        // The deadline can also expire inside the wait request before the
-        // owner answers; this path owns that diagnostic, naming the saved state.
-        let wait: WaitResult = self
-            .request(
-                "wait",
-                Command::Wait(WaitArgs {
-                    after: None,
-                    conditions: vec![WaitCondition::ReplyReceived {
-                        message_id: message.to_owned(),
-                    }],
-                    timeout_ms: remaining,
-                }),
-            )
+        // The deadline can also expire before the owner answers; this path
+        // owns that diagnostic, naming the saved state.
+        let wait = self
+            .wait_once(WaitCondition::ReplyReceived {
+                message_id: message.to_owned(),
+            })
             .await
-            .map_err(|failure| failure.at_deadline(state))?;
+            .map_err(|failure| failure.at_deadline(&open_duty(state)))?;
         // The owner's status decides; its snapshot of this exact message
         // carries the reply state and node.
         let reply = reply_snapshot(&wait.snapshot, message).unwrap_or(Value::Null);
@@ -313,16 +324,8 @@ impl Session {
             (WaitStatus::Satisfied, None) if reply["state"].is_string() => {
                 ended_reply(reply["state"].as_str(), reply["node_id"].as_str())
             }
-            (WaitStatus::Timeout, Some(state)) => Err(duty_timeout(state)),
-            // Input for the calling Thread ends this observation; the target
-            // and its duty continue.
-            (WaitStatus::Interrupted, Some(state)) => Err(Failure::new(
-                5,
-                "interrupted",
-                format!(
-                    "Reply wait was interrupted by input for the calling Thread while the reply duty is {state}; no target was stopped"
-                ),
-            )),
+            (WaitStatus::Timeout, Some(state)) => Err(deadline_expired(&open_duty(state))),
+            (WaitStatus::Interrupted, Some(state)) => Err(interrupted(&open_duty(state))),
             _ => Err(impossible_reply_wait()),
         }
     }
@@ -332,6 +335,8 @@ impl Session {
         }
         if matches!(mode, ResultMode::RunEnd | ResultMode::Reply) {
             let run = self.progress.run_id.clone().expect("assigned run");
+            let target = format!("Run {run} has not ended");
+            let mut waited = false;
             loop {
                 let facts: RunDetails = self
                     .request(
@@ -392,45 +397,28 @@ impl Session {
                             "Run ended without a successful end message",
                         ));
                     }
+                    // A satisfied wait means the Run ended; it is never re-armed.
+                    _ if waited => return Err(unended_after_wait()),
                     _ => {}
                 }
-                let remaining = self
-                    .deadline
-                    .saturating_duration_since(Instant::now())
-                    .as_millis()
-                    .min(30_000) as u64;
-                if remaining == 0 {
-                    return Err(Failure::new(
-                        5,
-                        "timeout",
-                        "Client deadline expired; no target was stopped",
-                    ));
-                }
-                let wait: WaitResult = self
-                    .request(
-                        "wait",
-                        Command::Wait(WaitArgs {
-                            after: None,
-                            conditions: vec![WaitCondition::RunEnded {
-                                run_id: run.clone(),
-                            }],
-                            timeout_ms: remaining,
-                        }),
-                    )
-                    .await?;
-                if wait.status == WaitStatus::RecoveryWait {
-                    return Err(Failure::new(
-                        4,
-                        "recovery_wait",
-                        "Target requires explicit recovery",
-                    ));
-                }
-                if wait.status == WaitStatus::Unavailable {
-                    return Err(Failure::new(
-                        4,
-                        "execution_unavailable",
-                        "Wait target became unavailable",
-                    ));
+                let wait = self
+                    .wait_once(WaitCondition::RunEnded {
+                        run_id: run.clone(),
+                    })
+                    .await
+                    .map_err(|failure| failure.at_deadline(&target))?;
+                match wait.status {
+                    WaitStatus::Satisfied => waited = true,
+                    WaitStatus::Timeout => return Err(deadline_expired(&target)),
+                    WaitStatus::Interrupted => return Err(interrupted(&target)),
+                    WaitStatus::RecoveryWait => {
+                        return Err(Failure::new(
+                            4,
+                            "recovery_wait",
+                            "Target requires explicit recovery",
+                        ));
+                    }
+                    WaitStatus::Unavailable => return Err(wait_unavailable()),
                 }
             }
         } else {
@@ -441,6 +429,8 @@ impl Session {
                     "Message has no assigned Turn; inspect its saved receipt",
                 )
             })?;
+            let target = format!("Turn {turn} has not completed");
+            let mut waited = false;
             loop {
                 let facts: TurnDetails = self
                     .request(
@@ -488,47 +478,31 @@ impl Session {
                             "Target ended without a successful answer",
                         ));
                     }
+                    // A satisfied wait means the Turn ended; it is never re-armed.
+                    _ if waited => return Err(unended_after_wait()),
                     _ => {}
                 }
-                let remaining = self
-                    .deadline
-                    .saturating_duration_since(Instant::now())
-                    .as_millis()
-                    .min(30_000) as u64;
-                if remaining == 0 {
-                    return Err(Failure::new(
-                        5,
-                        "timeout",
-                        "Client deadline expired; no target was stopped",
-                    ));
+                let wait = self
+                    .wait_once(WaitCondition::TurnCompleted {
+                        turn_id: turn.clone(),
+                    })
+                    .await
+                    .map_err(|failure| failure.at_deadline(&target))?;
+                // Satisfied is an observation, not success evidence: the
+                // saved Turn is read again.
+                match wait.status {
+                    WaitStatus::Satisfied => waited = true,
+                    WaitStatus::Timeout => return Err(deadline_expired(&target)),
+                    WaitStatus::Interrupted => return Err(interrupted(&target)),
+                    WaitStatus::RecoveryWait => {
+                        return Err(Failure::new(
+                            4,
+                            "recovery_wait",
+                            "Target requires explicit recovery; no automatic retry was requested",
+                        ));
+                    }
+                    WaitStatus::Unavailable => return Err(wait_unavailable()),
                 }
-                let wait: WaitResult = self
-                    .request(
-                        "wait",
-                        Command::Wait(WaitArgs {
-                            after: None,
-                            conditions: vec![WaitCondition::TurnCompleted {
-                                turn_id: turn.clone(),
-                            }],
-                            timeout_ms: remaining,
-                        }),
-                    )
-                    .await?;
-                if wait.status == WaitStatus::RecoveryWait {
-                    return Err(Failure::new(
-                        4,
-                        "recovery_wait",
-                        "Target requires explicit recovery; no automatic retry was requested",
-                    ));
-                }
-                if wait.status == WaitStatus::Unavailable {
-                    return Err(Failure::new(
-                        4,
-                        "execution_unavailable",
-                        "Wait target became unavailable",
-                    ));
-                }
-                // Satisfied, interrupted and timeout are observations, not success evidence.
             }
         }
         let node = self.progress.end_message_node_id.clone().ok_or_else(|| {
@@ -604,18 +578,44 @@ impl Session {
         ))
     }
 }
-fn duty_timeout(state: &str) -> Failure {
+/// The client deadline ended exec's observation while `target` is still open.
+fn deadline_expired(target: &str) -> Failure {
     Failure::new(
         5,
         "timeout",
-        format!("Client deadline expired while the reply duty is {state}; no target was stopped"),
+        format!("Client deadline expired while {target}; no target was stopped"),
+    )
+}
+/// Input for the calling Thread ended exec's observation (the owner's
+/// `interrupted`) while `target` is still open; it keeps running.
+fn interrupted(target: &str) -> Failure {
+    Failure::new(
+        5,
+        "interrupted",
+        format!(
+            "Wait was interrupted by input for the calling Thread while {target}; no target was stopped"
+        ),
+    )
+}
+fn open_duty(state: &str) -> String {
+    format!("the reply duty is {state}")
+}
+fn wait_unavailable() -> Failure {
+    Failure::new(4, "execution_unavailable", "Wait target became unavailable")
+}
+/// A saved target still open after the owner reported its wait satisfied.
+fn unended_after_wait() -> Failure {
+    Failure::new(
+        6,
+        "owner_error",
+        "Owner reported the wait satisfied but the target has not ended",
     )
 }
 impl Failure {
-    /// A client-deadline failure during the reply wait names the open duty state.
-    fn at_deadline(self, state: &str) -> Self {
+    /// A client-deadline failure during a wait names the target still open.
+    fn at_deadline(self, target: &str) -> Self {
         if self.code == 5 && self.status == "timeout" {
-            duty_timeout(state)
+            deadline_expired(target)
         } else {
             self
         }
