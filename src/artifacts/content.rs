@@ -4,7 +4,7 @@
 use super::{Result, missing, sql};
 use crate::{
     attachments::BlockingFiles,
-    protocol::{ApiError, ArtifactContent, ArtifactReadArgs, ErrorCode, MAX_FRAME_BYTES},
+    protocol::{ApiError, ArtifactContent, ArtifactReadArgs, ErrorCode, MAX_FRAME_BYTES, Response},
     storage::DbWorker,
 };
 use base64::{Engine, engine::general_purpose::STANDARD};
@@ -18,8 +18,6 @@ use tokio_util::sync::CancellationToken;
 
 /// A folder published as a web app; `artifact.read` serves files inside it.
 pub(crate) const APP_SCHEME: &str = "shellboy-app";
-/// The largest file whose base64 text alone still fits one reply frame.
-const FRAME_RAW_BYTES: u64 = (MAX_FRAME_BYTES as u64 / 4) * 3;
 
 /// RFC 3986 scheme: a letter, then letters, digits, `+`, `-` or `.`, then `:`.
 pub(crate) fn uri_scheme(uri: &str) -> Option<&str> {
@@ -169,6 +167,23 @@ fn read_file(target: Target, limit: u64) -> Result<(u64, String)> {
     Ok((bytes.len() as u64, STANDARD.encode(&bytes)))
 }
 
+/// The single read bound: `limits.attachment_file_bytes`, and the largest file
+/// whose reply to this request, envelope included, still fits one frame.
+fn effective_limit(file_limit: u64, operation_id: &str, args: &ArtifactReadArgs) -> u64 {
+    let empty = ArtifactContent {
+        artifact_id: args.artifact_id.clone(),
+        version: args.version,
+        path: args.path.clone(),
+        raw_bytes: u64::MAX,
+        base64: String::new(),
+    };
+    let envelope = serde_json::to_vec(&Response::success(operation_id, empty))
+        .map_or(MAX_FRAME_BYTES, |bytes| bytes.len());
+    // Base64 needs no JSON escaping: n bytes become 4 * ceil(n / 3) characters.
+    let room = MAX_FRAME_BYTES.saturating_sub(envelope) / 4 * 3;
+    file_limit.min(room as u64)
+}
+
 pub(super) fn version_uri(db: &Connection, args: &ArtifactReadArgs) -> Result<String> {
     super::check_thread(db, &args.thread_id)?;
     db.query_row(
@@ -181,8 +196,9 @@ pub(super) fn version_uri(db: &Connection, args: &ArtifactReadArgs) -> Result<St
     .ok_or_else(missing)
 }
 
-/// Bounded by `limits.attachment_file_bytes` and by one reply frame.
+/// Bounded by [`effective_limit`]; larger files are refused before any read.
 pub(crate) async fn read(
+    operation_id: &str,
     database: &DbWorker,
     files: &BlockingFiles,
     file_limit: u64,
@@ -196,7 +212,7 @@ pub(crate) async fn read(
         .await
         .map_err(|error| error.into_api_error())?;
     let target = target(source(&uri)?, args.path.as_deref())?;
-    let limit = file_limit.min(FRAME_RAW_BYTES);
+    let limit = effective_limit(file_limit, operation_id, &args);
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
     // Pool errors carry attachment-selection hints that do not apply here.
     let (raw_bytes, base64) = files

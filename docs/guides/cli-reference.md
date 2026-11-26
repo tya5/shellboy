@@ -1341,7 +1341,7 @@ On add and update, the CLI joins a relative file path, and the relative folder o
 - A `file:` URI or an absolute path is that one file. `--path` is refused (`path_not_allowed`).
 - `http:`, `https:`, relative paths and other schemes are refused (`uri_not_readable`); the owner never fetches them.
 
-A file is returned only up to `limits.attachment_file_bytes`, and never more than 6 MiB because the encoded reply must fit one 8 MiB frame; a larger file fails with `input_limit` (`file_too_large`). A missing or unreadable file is `target_unavailable`.
+A file is returned only up to `limits.attachment_file_bytes`, and never beyond what fits base64-encoded in one 8 MiB reply (a little under 6 MiB); a larger file fails with `input_limit` (`file_too_large`), whose `details.limit_bytes` is the effective limit for that request. A missing or unreadable file is `target_unavailable`.
 
 ### Next actions for shell, attachment and search failures
 

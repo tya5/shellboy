@@ -339,6 +339,7 @@ impl Control {
             Command::ModelList(args) => self.runtime_models(args, caller, disconnected).await,
             Command::ArtifactRead(args) => encode_result(
                 crate::artifacts::read(
+                    &request.operation_id,
                     &self.store.database,
                     &self.attachments.workers,
                     self.store.config.limits.attachment_file_bytes,

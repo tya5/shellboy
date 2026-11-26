@@ -22,9 +22,11 @@ larger than one frame or a folder entry without naming it.
 - Wire and CLI output: no operation returns raw bytes outside the JSON frame,
   so `artifact.read` carries `base64` with `raw_bytes`, and the CLI prints the
   usual JSON envelope rather than adding a second stdout mode.
-- Bound: `limits.attachment_file_bytes`, and the base64 text must fit one 8 MiB
-  reply frame (6 MiB raw, derived from `MAX_FRAME_BYTES`). With the 20 MiB
-  default the frame is the effective cap; a ranged read is the extension point.
+- Bound: one effective limit, the smaller of `limits.attachment_file_bytes` and
+  the largest file whose reply to this request (envelope included) fits
+  `MAX_FRAME_BYTES`, computed in `artifacts::content::effective_limit`. Larger
+  files are refused by size before reading. With the 20 MiB default the frame
+  is the cap; no ranged read is built.
 - A folder read requires `path` (no implied `index.html`), and any `..`
   component is refused even when it would stay inside; links are checked after
   resolution. A same-user process swapping files during the read is outside
