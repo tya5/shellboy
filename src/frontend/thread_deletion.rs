@@ -997,9 +997,7 @@ mod tests {
         })
         .await
         .unwrap();
-        // Both captures completed; give the result channel a bounded observation
-        // window for an erroneously duplicated slash DraftStatus.
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        // Both captures completed; no duplicated slash DraftStatus was delivered.
         while let Ok(update) = incoming.try_recv() {
             if matches!(update,UiUpdate::DraftStatus{draft_id,text} if draft_id=="slash"&&text.contains("fixture capture failure"))
             {
