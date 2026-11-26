@@ -2,7 +2,8 @@
 use crate::protocol::{
     ApiError, Command, ErrorCode, HistoryBody, HistoryDisplayOutline, HistoryDisplayPage,
     HistoryDisplayPosition, HistoryDisplayRange, HistoryDisplayRead, HistoryDisplaySelection,
-    HistoryReadArgs, HistoryWindow, HistoryWindowArgs, HistoryWindowObservation, MAX_BODY_BYTES,
+    HistoryReadArgs, HistorySnippet, HistoryWindow, HistoryWindowArgs, HistoryWindowObservation,
+    MAX_BODY_BYTES,
 };
 use std::path::Path;
 
@@ -43,44 +44,97 @@ impl Owner<'_> {
         Ok(window)
     }
 
+    /// One fenced window, then each node's extent at that selection revision,
+    /// keeping the window's mutable facts from the same owner observation.
+    pub(super) async fn selected(
+        &self,
+        args: HistoryWindowArgs,
+        expected_revision: Option<u64>,
+        keep: impl FnOnce(&[HistorySnippet]) -> std::ops::Range<usize>,
+        position: impl Fn(&HistorySnippet) -> HistoryDisplayPosition,
+    ) -> Result<SelectedWindow, ApiError> {
+        let mut window = self.window(args).await?;
+        if expected_revision.is_some_and(|revision| window.revision != revision) {
+            return Err(source_changed());
+        }
+        let selection = HistoryDisplaySelection {
+            thread_id: window.thread_id,
+            revision: window.revision,
+        };
+        // Hydrate only the kept contiguous part; the observation is unchanged.
+        let kept = keep(&window.items);
+        if kept.start > kept.end || kept.end > window.items.len() {
+            return Err(invalid_response());
+        }
+        let mut nodes = Vec::with_capacity(kept.len());
+        for source in window.items.drain(kept) {
+            if source.selection.thread_id != selection.thread_id
+                || source.selection.ordinal >= window.total
+                || nodes.last().is_some_and(|node: &SelectedNode| {
+                    node.source.selection.ordinal.checked_add(1) != Some(source.selection.ordinal)
+                })
+            {
+                return Err(invalid_response());
+            }
+            let display = self
+                .display(&source.node_id, Some(selection.clone()), position(&source))
+                .await?;
+            if display.kind != source.kind
+                || display.source_revision != source.provenance.source_revision
+            {
+                return Err(source_changed());
+            }
+            nodes.push(SelectedNode { source, display });
+        }
+        Ok(SelectedWindow {
+            revision: selection.revision,
+            total: window.total,
+            observation: window.observation.take().ok_or_else(invalid_response)?,
+            nodes,
+        })
+    }
+
     /// One positioned node by ID, plus the selected window's facts for it. A
-    /// received response is never on a path and has no window facts; any other
+    /// received response is never on a path: its observation is the selected
+    /// tail's, which orders the install but has no facts for it. Any other
     /// node must still be selected at the same source revision.
     pub(super) async fn node(
         &self,
         thread_id: &str,
         node_id: &str,
         position: HistoryDisplayPosition,
-    ) -> Result<(DisplayExtent, Option<HistoryWindowObservation>), ApiError> {
+    ) -> Result<(DisplayExtent, HistoryWindowObservation), ApiError> {
         use crate::protocol::HistoryDisplayNode as Node;
         let display = self.display(node_id, None, position).await?;
-        if matches!(display.outline.node, Node::Received | Node::HiddenAdmission) {
-            return Ok((display, None));
-        }
+        let received = matches!(display.outline.node, Node::Received);
         let mut window = self
             .window(HistoryWindowArgs {
                 thread_id: thread_id.to_owned(),
                 include_observation: true,
+                observe_node_ids: Vec::new(),
                 items: false,
                 ordinal: None,
-                node_id: Some(node_id.to_owned()),
+                node_id: (!received).then(|| node_id.to_owned()),
                 expect_node_id: None,
                 before: 0,
                 after: 0,
                 excerpt_chars: 0,
             })
             .await?;
-        match window.items.as_slice() {
-            [item] if item.node_id == node_id => {
-                if item.kind != display.kind
-                    || item.provenance.source_revision != display.source_revision
-                {
-                    return Err(source_changed());
+        if !received {
+            match window.items.as_slice() {
+                [item] if item.node_id == node_id => {
+                    if item.kind != display.kind
+                        || item.provenance.source_revision != display.source_revision
+                    {
+                        return Err(source_changed());
+                    }
                 }
+                _ => return Err(invalid_response()),
             }
-            _ => return Err(invalid_response()),
         }
-        Ok((display, window.observation.take()))
+        let observation = window.observation.take().ok_or_else(invalid_response)?;
+        Ok((display, observation))
     }
 
     pub(super) async fn display(
@@ -137,6 +191,18 @@ impl Owner<'_> {
         }
         Err(invalid_response())
     }
+}
+
+pub(super) struct SelectedWindow {
+    pub revision: u64,
+    pub total: u64,
+    pub observation: HistoryWindowObservation,
+    pub nodes: Vec<SelectedNode>,
+}
+
+pub(super) struct SelectedNode {
+    pub source: HistorySnippet,
+    pub display: DisplayExtent,
 }
 
 pub(super) struct DisplayExtent {
@@ -326,58 +392,80 @@ fn invalid_response() -> ApiError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::HistorySnippet;
 
-    struct SelectedWindow {
-        observation: HistoryWindowObservation,
-        nodes: Vec<SelectedNode>,
+    /// The saved-payload projection the TUI used before native extents: the
+    /// parity oracle for the owner's display reads.
+    struct SavedNode {
+        id: String,
+        kind: String,
+        payload: Option<String>,
+        reason: Option<String>,
+        received_recovery_wait: bool,
+        output_limited: bool,
     }
-
-    struct SelectedNode {
-        source: HistorySnippet,
-        display: DisplayExtent,
-    }
-
-    /// The planned window install: one fenced window, then each node's extent
-    /// at that selection revision, keeping the window's mutable facts.
-    async fn selected(
-        owner: &Owner<'_>,
-        args: HistoryWindowArgs,
-        expected_revision: Option<u64>,
-        position: impl Fn(&HistorySnippet) -> HistoryDisplayPosition,
-    ) -> Result<SelectedWindow, ApiError> {
-        let mut window = owner.window(args).await?;
-        if expected_revision.is_some_and(|revision| window.revision != revision) {
-            return Err(source_changed());
-        }
-        let selection = HistoryDisplaySelection {
-            thread_id: window.thread_id,
-            revision: window.revision,
-        };
-        let mut nodes = Vec::with_capacity(window.items.len());
-        for source in window.items {
-            if source.selection.thread_id != selection.thread_id
-                || source.selection.ordinal >= window.total
-                || nodes.last().is_some_and(|node: &SelectedNode| {
-                    node.source.selection.ordinal.checked_add(1) != Some(source.selection.ordinal)
-                })
-            {
-                return Err(invalid_response());
+    impl SavedNode {
+        fn into_ui_node(
+            self,
+            position: Option<super::super::NodePosition>,
+            width: u16,
+            language: crate::config::UiLanguage,
+        ) -> crate::ui::UiNode {
+            use crate::ui::UiNode;
+            if crate::history::is_legacy_admission_node(&self.id, &self.kind) {
+                return UiNode {
+                    node_id: self.id,
+                    role: "context".into(),
+                    ..UiNode::default()
+                };
             }
-            let display = owner
-                .display(&source.node_id, Some(selection.clone()), position(&source))
-                .await?;
-            if display.kind != source.kind
-                || display.source_revision != source.provenance.source_revision
-            {
-                return Err(source_changed());
+            let (payload, text, mut reasoning_ranges) = crate::history::display_source::decode(
+                &self.kind,
+                self.payload.as_deref(),
+                self.reason.as_deref(),
+            );
+            let offset = position.map(|position| position.offset(text.chars().count()));
+            if self.kind == "reasoning" && !text.is_empty() {
+                reasoning_ranges = vec![(0, text.chars().count())];
             }
-            nodes.push(SelectedNode { source, display });
+            let (extent, total_chars) = crate::history::display_source::extent(&text, offset);
+            let base_char_offset = text[..extent.start].chars().count();
+            let text = text[extent].to_owned();
+            let window_end = base_char_offset + text.chars().count();
+            reasoning_ranges.retain(|range| range.1 > base_char_offset && range.0 < window_end);
+            if matches!(
+                self.kind.as_str(),
+                "incomplete_response" | "model_stream_observation"
+            ) {
+                return super::super::received::project(
+                    &self.kind,
+                    UiNode {
+                        node_id: self.id,
+                        text,
+                        base_char_offset,
+                        total_chars,
+                        reasoning_ranges,
+                        ..Default::default()
+                    },
+                    width,
+                    false,
+                    self.received_recovery_wait,
+                    language,
+                );
+            }
+            let mut presentation =
+                crate::presentation::project(&self.kind, &payload, &text, base_char_offset);
+            presentation.output_limited = self.output_limited;
+            crate::presentation::render_markdown(&mut presentation, width.max(1));
+            UiNode {
+                presentation,
+                node_id: self.id,
+                role: super::super::node_role(&self.kind).into(),
+                text,
+                base_char_offset,
+                total_chars,
+                reasoning_ranges,
+            }
         }
-        Ok(SelectedWindow {
-            observation: window.observation.take().ok_or_else(invalid_response)?,
-            nodes,
-        })
     }
 
     #[tokio::test]
@@ -408,14 +496,15 @@ mod tests {
             data_dir: &data_dir,
             instance: &control.store.instance_id,
         };
-        let window = selected(
-            &owner,
-            serde_json::from_value(json!({"thread_id":"t"})).unwrap(),
-            None,
-            |_| HistoryDisplayPosition::Tail,
-        )
-        .await
-        .unwrap();
+        let window = owner
+            .selected(
+                serde_json::from_value(json!({"thread_id":"t"})).unwrap(),
+                None,
+                |items| 0..items.len(),
+                |_| HistoryDisplayPosition::Tail,
+            )
+            .await
+            .unwrap();
         assert_eq!(window.observation.pending.total, 0);
         assert_eq!(window.nodes.len(), 1);
         let node = &window.nodes[0].source.node_id;
@@ -611,7 +700,7 @@ mod tests {
                     "SELECT kind,payload_json,deleted_reason,output_limit_attempt_id IS NOT NULL FROM node WHERE id=?1",
                     [&id],
                     |row| {
-                        Ok(super::super::RawNode {
+                        Ok(SavedNode {
                             id: id.clone(),
                             kind: row.get(0)?,
                             payload: row.get(1)?,
@@ -636,7 +725,15 @@ mod tests {
                 80,
                 language,
             )];
-            super::super::tools::apply(&mut expected, &Default::default());
+            // Without owner facts a saved payload group is not shown.
+            for tool in expected[0]
+                .presentation
+                .blocks
+                .iter_mut()
+                .filter_map(|block| block.tool.as_mut())
+            {
+                tool.group_id = None;
+            }
             let position = offset.map_or(HistoryDisplayPosition::Tail, |offset| {
                 HistoryDisplayPosition::Absolute {
                     offset: offset as u64,
@@ -737,14 +834,15 @@ mod tests {
             instance: &control.store.instance_id,
         };
         let language = crate::config::UiLanguage::En;
-        let window = selected(
-            &owner,
-            serde_json::from_value(json!({"thread_id":"t","excerpt_chars":0})).unwrap(),
-            None,
-            |_| HistoryDisplayPosition::Tail,
-        )
-        .await
-        .unwrap();
+        let window = owner
+            .selected(
+                serde_json::from_value(json!({"thread_id":"t","excerpt_chars":0})).unwrap(),
+                None,
+                |items| 0..items.len(),
+                |_| HistoryDisplayPosition::Tail,
+            )
+            .await
+            .unwrap();
         assert_eq!(
             window.observation.tools.notices.len(),
             1,
@@ -758,56 +856,21 @@ mod tests {
             .collect::<Vec<_>>();
         apply_observation(&mut native, &window.observation, language);
 
-        let ids = nodes
+        // The saved tool, notice, recovery and usage rows annotate the nodes.
+        let call = native
             .iter()
-            .map(|(id, ..)| id.to_string())
-            .collect::<Vec<_>>();
-        let expected = data
-            .db
-            .call(move |db| {
-                let mut rows = Vec::new();
-                for id in &ids {
-                    rows.push(db.query_row(
-                        "SELECT kind,payload_json FROM node WHERE id=?1",
-                        [id],
-                        |row| {
-                            Ok(super::super::RawNode {
-                                id: id.clone(),
-                                kind: row.get(0)?,
-                                payload: row.get(1)?,
-                                reason: None,
-                                received_recovery_wait: false,
-                                output_limited: false,
-                            })
-                        },
-                    )?);
-                }
-                let mut nodes = rows
-                    .into_iter()
-                    .map(|row| row.into_ui_node(None, 80, language))
-                    .collect::<Vec<_>>();
-                let tools = super::super::tools::read_nodes_tx(db, &ids)?;
-                super::super::tools::apply(&mut nodes, &tools);
-                let events = super::super::recovery::requests(&nodes);
-                let recovery = super::super::recovery::read_tx(db, &events)?;
-                super::super::recovery::apply(&mut nodes, recovery, language);
-                let assistants = super::super::usage::requests(&nodes);
-                let usage = super::super::usage::read_tx(db, &assistants)?;
-                super::super::usage::apply(&mut nodes, usage);
-                Ok(nodes)
-            })
-            .await
+            .find(|node| node.node_id == "call")
+            .and_then(|node| node.presentation.blocks[0].tool.clone())
             .unwrap();
-        assert_eq!(native.len(), expected.len());
-        for (native, expected) in native.iter().zip(&expected) {
-            let (native, expected) = (comparable(native), comparable(expected));
-            assert!(
-                native == expected,
-                "{}: {}",
-                expected.node_id,
-                difference(&native, &expected)
-            );
-        }
+        assert_eq!(call.status, "completed");
+        assert_eq!(call.group_id.as_deref(), Some("g"));
+        assert_eq!(call.execution_id.as_deref(), Some("exec"));
+        assert_eq!(call.result_node_id.as_deref(), Some("result"));
+        assert!(call.background);
+        let answer = native.iter().find(|node| node.node_id == "answer").unwrap();
+        assert!(answer.presentation.fields.iter().any(|field| field.key
+            == crate::presentation::fields::ATTEMPT_CACHED_TOKENS
+            && field.value == "17"));
         let notice = native
             .iter()
             .find(|node| node.node_id == "ended-event")

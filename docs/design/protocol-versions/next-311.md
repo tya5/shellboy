@@ -32,7 +32,9 @@ Thread coalesced.
 
 ## Selected history observation
 
-`history.window` accepts `include_observation: true`. The result adds
+`history.window` accepts `include_observation: true`, and with it an optional
+`observe_node_ids` list of at most 128 other saved node IDs whose tool facts
+(calls, limits and notices) join the same observation and `read_sequence`. The result adds
 `observation` even if its selected path is empty. The default response does
 not include this field. The owner observes the window, its pending-message
 prefix and typed holds, the selected Thread's activity IDs, and exact saved
@@ -73,7 +75,11 @@ the typed response filter echo still omits the named recipient itself.
 ## Saved hold kinds
 
 `held_by` (on `message.get` and window pending rows) also reports the saved,
-verified hold reasons `previous_instance_interrupted` and
-`terminal_before_path_admission` as their own kinds, like `run_completion`
+verified hold reasons `previous_instance_interrupted`,
+`terminal_before_path_admission` and `uncertain_path_admission` as their own
+kinds, like `run_completion`
 and `recovery_wait`; neither carries an execution ID. `unknown` remains only
 for unresolved live evidence.
+
+`message.get` now reads on the owner's read-only inspection lane, so it never
+waits behind the writer.

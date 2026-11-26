@@ -754,6 +754,19 @@ impl HistoryWindowArgs {
         if self.excerpt_chars > MAX_HISTORY_EXCERPT_CHARS {
             return Err(invalid("excerpt-chars must be in 0..=4096"));
         }
+        if !self.observe_node_ids.is_empty() && !self.include_observation {
+            return Err(invalid("observe_node_ids needs include_observation"));
+        }
+        if self.observe_node_ids.len() > 128
+            || self
+                .observe_node_ids
+                .iter()
+                .any(|id| id.is_empty() || id.len() > 512)
+        {
+            return Err(invalid(
+                "observe_node_ids takes at most 128 nonempty node IDs",
+            ));
+        }
         Ok(())
     }
 }

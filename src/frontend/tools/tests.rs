@@ -2,6 +2,22 @@ use super::*;
 use crate::{app::DataOwner, presentation, ui::UiNode};
 use serde_json::json;
 
+/// The native install path: the owner's window readers, then client apply.
+async fn enrich(control: &Control, nodes: &mut [UiNode]) -> Result<(), ApiError> {
+    crate::frontend::window_facts::apply_saved(control, nodes, crate::config::UiLanguage::Ja).await
+}
+
+fn apply(nodes: &mut [UiNode], facts: &ToolFacts) {
+    apply_window(
+        nodes,
+        &crate::protocol::HistoryWindowTools {
+            calls: facts.sources.clone(),
+            limited_node_ids: facts.truncated_nodes.clone(),
+            notices: facts.notices.clone(),
+        },
+    );
+}
+
 #[tokio::test]
 async fn repeated_call_ids_in_other_groups_cannot_replace_a_cancelled_calls_source() {
     let root = tempfile::tempdir().unwrap();
@@ -183,11 +199,10 @@ async fn call_and_background_result_share_current_exit_facts_and_failed_reads_cl
         })
         .await
         .unwrap();
+    // A native install is all or nothing: a failed read changes no node, and
+    // the UI separately labels that refresh as unconfirmed.
     assert!(failure.is_err());
     for (node, text) in nodes.iter().zip(original) {
-        let tool = node.presentation.blocks[0].tool.as_ref().unwrap();
-        assert_eq!(tool.current_state, None);
-        assert_eq!(tool.current_exit_code, None);
         assert_eq!(node.text, text);
     }
     control.shutdown().await.unwrap();

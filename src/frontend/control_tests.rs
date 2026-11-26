@@ -12,9 +12,23 @@ fn unexpected_no_rows_is_not_reclassified_as_a_missing_ui_target() {
 async fn missing_history_targets_are_local_errors_and_do_not_stop_other_runs() {
     let (_root, owner, control, server) = fixture().await;
     let (updates, incoming) = std::sync::mpsc::sync_channel(32);
+    // A continuation names saved positions: page before ordinal 10 of 11.
     let revision = owner
         .db
         .call(|db| {
+            let tx = db.transaction()?;
+            for ordinal in 0..11 {
+                crate::history::append_node(
+                    &tx,
+                    "thread",
+                    &format!("page-{ordinal}"),
+                    None,
+                    "user",
+                    &serde_json::json!({"role":"user","content":[{"type":"input_text","text":"page"}]}),
+                    "now",
+                )?;
+            }
+            tx.commit()?;
             Ok(
                 crate::history::selection_revision(db, "thread", crate::history::ThreadScope::Live)?
                     as u64,
@@ -2087,7 +2101,7 @@ async fn ordinary_thread_selection_reads_only_lightweight_metadata_and_detail_op
     for target in ["thread", "independent"] {
         crate::usage_totals::with_test_elapsed(
             std::time::Duration::from_millis(100),
-            super::select_thread(&control, &updates, target, 1, 0, None, 80),
+            super::select_thread(&control, &updates, target, 1, 0, None, 80, Vec::new()),
         )
         .await
         .unwrap();

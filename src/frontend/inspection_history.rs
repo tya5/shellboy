@@ -392,6 +392,7 @@ mod tests {
             &owner.loaded.data_dir,
             Command::HistoryWindow(crate::protocol::HistoryWindowArgs {
                 include_observation: false,
+                observe_node_ids: Vec::new(),
                 thread_id: "thread".into(),
                 ordinal: None,
                 node_id: Some("omitted-source".into()),

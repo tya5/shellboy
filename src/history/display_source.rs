@@ -276,3 +276,46 @@ pub(crate) fn decode(
     };
     (payload, text, reasoning)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The extent's text, its starting character, and the source length.
+    fn extent_window(text: &str, offset: Option<usize>) -> (String, usize, usize) {
+        let (range, total) = extent(text, offset);
+        (
+            text[range.clone()].into(),
+            text[..range.start].chars().count(),
+            total,
+        )
+    }
+
+    #[test]
+    fn anchored_history_body_windows_are_smaller_and_centered_near_the_anchor() {
+        let text = "0123456789界".repeat(5000);
+        let (window, base, total) = extent_window(&text, Some(30_000));
+        assert!(window.len() <= MAX_ANCHORED_BODY_BYTES);
+        assert!(base <= 30_000 && base + window.chars().count() > 30_000);
+        assert_eq!(total, text.chars().count());
+
+        let (tail, _, _) = extent_window(&text, None);
+        assert!(tail.len() <= MAX_BODY_BYTES as usize);
+        assert!(tail.len() > window.len());
+    }
+
+    #[test]
+    fn anchored_code_window_keeps_its_fence_open_and_close_delimiters() {
+        let prefix = "ordinary text\n".repeat(900);
+        let code = format!("```rust\n{}\n```\n", "let value = 42;\n".repeat(400));
+        let source = format!("{prefix}{code}{}", "after code\n".repeat(9000));
+        let anchor = prefix.chars().count()
+            + "```rust\n".chars().count()
+            + 200 * "let value = 42;\n".chars().count();
+        let (window, base, _) = extent_window(&source, Some(anchor));
+        assert!(base <= anchor);
+        assert!(window.starts_with("```rust\n"));
+        assert!(window.contains("\n```\n"));
+        assert!(window.len() <= MAX_BODY_BYTES as usize);
+    }
+}

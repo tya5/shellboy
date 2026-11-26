@@ -1,6 +1,5 @@
 //! Historical failure evidence for a saved resume observation, never a live target.
 use crate::{
-    control::Control,
     presentation::{BlockKind, PresentationField},
     protocol::{ApiError, ErrorCode},
     ui::UiNode,
@@ -96,7 +95,7 @@ impl Evidence {
 
     pub(super) fn into_window(
         self,
-        items: &[crate::protocol::HistorySnippet],
+        items: &[(String, String)],
     ) -> crate::protocol::HistoryWindowRecovery {
         use crate::protocol::{HistoryWindowRecovery, HistoryWindowRecoveryReason};
         let reason = self.model_error().map(|error| HistoryWindowRecoveryReason {
@@ -109,7 +108,7 @@ impl Evidence {
             truncated: error.message.chars().nth(256).is_some(),
         });
         HistoryWindowRecovery {
-            node_id: items[self.index].node_id.clone(),
+            node_id: items[self.index].0.clone(),
             failure_count: self.count as u64,
             latest_attempt_id: self.attempt,
             source_node_id: self.source,
@@ -118,16 +117,6 @@ impl Evidence {
     }
 }
 
-pub(super) fn requests(nodes: &[UiNode]) -> Vec<(usize, String)> {
-    nodes
-        .iter()
-        .enumerate()
-        .filter(|(_, node)| node.presentation.kind == crate::presentation::PresentationKind::Event)
-        .map(|(index, node)| (index, node.node_id.clone()))
-        .collect()
-}
-
-/// Owned bounded SQL facts; decoding and display formatting happen in apply.
 pub(super) fn read_tx(
     db: &rusqlite::Connection,
     requests: &[(usize, String)],
@@ -193,29 +182,6 @@ fn read_tx_reference(
     Ok(evidence)
 }
 
-pub(super) async fn enrich(control: &Control, nodes: &mut [UiNode]) -> Result<(), ApiError> {
-    enrich_language(control, nodes, control.store.config.ui.language).await
-}
-
-async fn enrich_language(
-    control: &Control,
-    nodes: &mut [UiNode],
-    language: crate::config::UiLanguage,
-) -> Result<(), ApiError> {
-    let requests = requests(nodes);
-    if requests.is_empty() {
-        return Ok(());
-    }
-    let evidence = control
-        .store
-        .database
-        .call(move |db| read_tx(db, &requests))
-        .await
-        .map_err(|error| error.into_api_error())?;
-    apply(nodes, evidence, language);
-    Ok(())
-}
-
 /// Saved failure reason as shown: a sanitized 256-character excerpt plus the
 /// F6 value. The window observation carries only the bounded excerpt.
 struct Reason {
@@ -229,34 +195,6 @@ struct Saved {
     attempt: String,
     reason: Option<Reason>,
     source: Option<String>,
-}
-
-pub(super) fn apply(
-    nodes: &mut [UiNode],
-    evidence: Vec<Evidence>,
-    language: crate::config::UiLanguage,
-) {
-    for saved in evidence {
-        let reason = saved.model_error().map(|error| Reason {
-            excerpt: crate::presentation::sanitize_plain(
-                &error.message.chars().take(256).collect::<String>(),
-                0,
-            )
-            .0,
-            truncated: error.message.chars().count() > 256,
-            detail: error.to_string(),
-        });
-        present(
-            &mut nodes[saved.index].presentation,
-            Saved {
-                count: saved.count as u64,
-                attempt: saved.attempt,
-                reason,
-                source: saved.source,
-            },
-            language,
-        );
-    }
 }
 
 /// Apply the selected window's recovery facts to the nodes they name.
@@ -387,8 +325,47 @@ fn present(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{app::DataOwner, presentation};
+    use crate::{app::DataOwner, control::Control, presentation};
     use serde_json::json;
+
+    fn requests(nodes: &[UiNode]) -> Vec<(usize, String)> {
+        nodes
+            .iter()
+            .enumerate()
+            .filter(|(_, node)| {
+                node.presentation.kind == crate::presentation::PresentationKind::Event
+            })
+            .map(|(index, node)| (index, node.node_id.clone()))
+            .collect()
+    }
+
+    /// Saved evidence as the window observation carries it, then applied.
+    fn apply(nodes: &mut [UiNode], evidence: Vec<Evidence>, language: crate::config::UiLanguage) {
+        let items = nodes
+            .iter()
+            .map(|node| (node.node_id.clone(), "event".to_owned()))
+            .collect::<Vec<_>>();
+        let window = evidence
+            .into_iter()
+            .map(|fact| fact.into_window(&items))
+            .collect::<Vec<_>>();
+        apply_window(nodes, &window, language);
+    }
+
+    async fn enrich_language(
+        control: &Control,
+        nodes: &mut [UiNode],
+        language: crate::config::UiLanguage,
+    ) -> Result<(), crate::protocol::ApiError> {
+        crate::frontend::window_facts::apply_saved(control, nodes, language).await
+    }
+
+    async fn enrich(
+        control: &Control,
+        nodes: &mut [UiNode],
+    ) -> Result<(), crate::protocol::ApiError> {
+        enrich_language(control, nodes, control.store.config.ui.language).await
+    }
 
     #[tokio::test]
     async fn saved_resume_history_excludes_later_other_turn_and_current_recovery_targets() {

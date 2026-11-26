@@ -114,6 +114,9 @@ impl PendingMessage {
                 "中断前の未反映",
                 "Not delivered before interruption"
             ),
+            HeldBy::UncertainPathAdmission => {
+                i18n::local!(language, "反映を確認できず", "Not verified")
+            }
             HeldBy::Unknown => return None,
         })
     }

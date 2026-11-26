@@ -18,23 +18,10 @@ impl Control {
         self: &Arc<Self>,
         id: &str,
     ) -> Result<MutationResult, ApiError> {
-        let target = id.to_owned();
-        let holds = self.message_holds();
-        let detail = self
-            .store
-            .database
-            .call(move |db| {
-                let tx = db.transaction()?;
-                let mut detail = match db::message_details(&tx, &target) {
-                    Ok(detail) => detail,
-                    Err(error) => return Ok(Err(error)),
-                };
-                detail.held_by = holds.read(&tx, [&*target])?.pop().flatten();
-                Ok(Ok(detail))
-            })
+        // A pure read: the owner's read-only inspection lane, never the writer.
+        self.store
+            .observe_message(id.to_owned(), self.message_holds())
             .await
-            .map_err(storage_error)??;
-        MutationResult::value(detail)
     }
 }
 
@@ -89,6 +76,7 @@ impl MessageHolds {
                 Some("terminal_before_path_admission") => {
                     MessageHeldBy::TerminalBeforePathAdmission
                 }
+                Some("uncertain_path_admission") => MessageHeldBy::UncertainPathAdmission,
                 _ => MessageHeldBy::Unknown,
             }));
         }

@@ -61,38 +61,6 @@ pub(super) struct SourceFacts {
     rows: Vec<RawSource>,
 }
 
-impl SourceFacts {
-    /// Merge bounded sets captured in the same current-view transaction.
-    pub(super) fn append(&mut self, other: Self) -> Result<(), StorageError> {
-        if self.viewed != other.viewed || self.parent != other.parent {
-            return Err(ApiError::new(
-                ErrorCode::InvalidState,
-                "Source metadata scopes do not match",
-            )
-            .into());
-        }
-        let mut seen = self
-            .rows
-            .iter()
-            .map(|row| row.node_id.clone())
-            .collect::<std::collections::HashSet<_>>();
-        let added = other
-            .rows
-            .into_iter()
-            .filter(|row| seen.insert(row.node_id.clone()))
-            .collect::<Vec<_>>();
-        if self.rows.len() + added.len() > 2 * MAX_NODES {
-            return Err(ApiError::new(
-                ErrorCode::InputLimit,
-                "Combined source metadata exceeds its bounded sets",
-            )
-            .into());
-        }
-        self.rows.extend(added);
-        Ok(())
-    }
-}
-
 pub(super) fn read_tx(
     db: &Connection,
     viewed: Option<&str>,
@@ -761,20 +729,14 @@ mod tests {
             Some(r#"{"kind":"external_cli","label":"human"}"#),
             "applied",
         );
-        let mut facts = read_tx(&db, Some("child"), &["legacy-null".into()]).unwrap();
-        assert_eq!(facts.rows[0].sender.as_deref(), Some("null"));
-        facts
-            .append(read_tx(&db, Some("child"), &["named-cli".into()]).unwrap())
-            .unwrap();
-        facts
-            .append(read_tx(&db, Some("child"), &["legacy-null".into()]).unwrap())
-            .unwrap();
+        let facts = read_tx(
+            &db,
+            Some("child"),
+            &["named-cli".into(), "legacy-null".into()],
+        )
+        .unwrap();
         assert_eq!(facts.rows.len(), 2);
-        assert!(
-            facts
-                .append(read_tx(&db, Some("fork"), &["legacy-null".into()]).unwrap())
-                .is_err()
-        );
+        assert_eq!(facts.rows[1].sender.as_deref(), Some("null"));
         drop(db);
         let mut nodes = ["named-cli", "legacy-null"]
             .into_iter()
@@ -813,17 +775,8 @@ mod tests {
     }
 
     #[test]
-    fn separate_bounded_source_sets_merge_above_128_without_silent_truncation() {
+    fn source_sets_above_128_are_refused_without_silent_truncation() {
         let db = fixture();
-        let first = (0..128).map(|n| format!("missing-{n}")).collect::<Vec<_>>();
-        let second = (128..178)
-            .map(|n| format!("missing-{n}"))
-            .collect::<Vec<_>>();
-        let mut facts = read_tx(&db, Some("child"), &first).unwrap();
-        facts
-            .append(read_tx(&db, Some("child"), &second).unwrap())
-            .unwrap();
-        assert_eq!(facts.rows.len(), 178);
         assert_eq!(
             read_tx(&db, Some("child"), &vec!["missing".into(); 129])
                 .err()

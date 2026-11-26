@@ -422,6 +422,7 @@ mod items_source_guard_tests {
     fn args(items: bool) -> crate::protocol::HistoryWindowArgs {
         crate::protocol::HistoryWindowArgs {
             include_observation: false,
+            observe_node_ids: Vec::new(),
             thread_id: "t".into(),
             items,
             ordinal: Some(0),

@@ -1342,8 +1342,11 @@ fn window_side() -> u32 {
 // `after` count items around the anchor; `before + after + 1` is capped at
 // `MAX_LIST_LIMIT`. `expect_node_id` pairs with `ordinal` to detect a path
 // that was rewound or compacted since the caller last saw it.
+// `observe_node_ids` (with `include_observation`, at most 128) adds the
+// mutable tool facts of other saved nodes, read in the same observation.
 args!(HistoryWindowArgs { thread_id: String,
     #[serde(default, skip_serializing_if = "is_false")] include_observation: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")] observe_node_ids: Vec<String>,
     #[serde(default, skip_serializing_if = "is_false")] items: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")] ordinal: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")] node_id: Option<String>,
@@ -2410,6 +2413,7 @@ pub enum MessageHeldBy {
     Stopping,
     PreviousInstanceInterrupted,
     TerminalBeforePathAdmission,
+    UncertainPathAdmission,
     Unknown,
 }
 

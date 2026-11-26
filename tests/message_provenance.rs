@@ -143,6 +143,7 @@ async fn shared_node_has_no_client_operation_id_in_nonorigin_thread() {
         .execute(
             request(Command::HistoryWindow(HistoryWindowArgs {
                 include_observation: false,
+                observe_node_ids: Vec::new(),
                 thread_id: "sender".into(),
                 before: 0,
                 after: 0,
