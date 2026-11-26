@@ -1421,7 +1421,15 @@ fn protocol_v6_handshake_and_typed_results_cover_existing_wire_modes() {
     );
     assert_eq!(
         schema["definitions"]["ShellListItem"]["properties"]["command_characters"]["type"],
-        "integer"
+        json!(["integer", "null"])
+    );
+    assert!(
+        !schema["definitions"]["ShellListItem"]["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|field| field == "command_characters" || field == "run_id"),
+        "an execution without a saved command or owning Run omits the count and has no Run"
     );
 }
 

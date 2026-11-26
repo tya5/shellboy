@@ -1,0 +1,17 @@
+# Protocol next (#452)
+
+## Shell list rows without a saved command or owning Run
+
+`command_characters` in a `shell.list` item is the character count of the
+saved command text. The saved shell record does not require that text, so a
+row without it has no count: the item omits `command_characters` (it was
+`null`, which the typed item and schema declared as a required integer). It is
+never `0`, which would claim an empty command. `command_excerpt` stays `null`
+for the same row.
+
+`run_id` is `null` for a scheduled or service execution, which has no owning
+Run; the typed item and schema now declare it nullable and optional instead of
+a required string. The wire value is unchanged.
+
+Typed clients decode every listed row, including scheduled and service
+executions, without skipping fields.

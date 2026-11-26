@@ -10649,7 +10649,10 @@
         "command_characters": {
           "format": "uint64",
           "minimum": 0,
-          "type": "integer"
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "command_excerpt": {
           "type": [
@@ -10692,7 +10695,11 @@
           ]
         },
         "run_id": {
-          "type": "string"
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "started_at": {
           "type": [
@@ -10733,10 +10740,8 @@
       },
       "required": [
         "execution_id",
-        "run_id",
         "thread_id",
         "state",
-        "command_characters",
         "command_excerpt_redacted",
         "command_excerpt_truncated",
         "started_at_known"

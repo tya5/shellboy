@@ -2585,7 +2585,7 @@ record!(StorageStatus { #[serde(default, skip_serializing_if = "Vec::is_empty")]
 record!(ShellListItem {
     #[serde(default, skip_serializing_if = "Option::is_none")] foreground: Option<bool>,
     execution_id: String,
-    run_id: String,
+    #[serde(default)] run_id: Option<String>,
     thread_id: String,
     #[serde(default)] turn_id: Option<String>,
     #[serde(default)] stdin_open: Option<bool>,
@@ -2596,7 +2596,7 @@ record!(ShellListItem {
     exit_code: Option<i32>,
     #[serde(default, skip_serializing_if = "Option::is_none")] description: Option<String>,
     command_excerpt: Option<String>,
-    command_characters: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")] command_characters: Option<u64>,
     command_excerpt_redacted: bool,
     command_excerpt_truncated: bool,
     started_at_known: bool,
