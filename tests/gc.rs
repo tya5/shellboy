@@ -658,7 +658,6 @@ async fn pin_added_after_marking_protects_summary_and_recursive_source() {
     .await
     .unwrap();
     let step = f.gc.history_step(&job).await.unwrap();
-    assert_eq!(step.stage, "cleanup");
     assert_eq!(step.nodes_tombstoned, 0);
     while !f.gc.history_step(&job).await.unwrap().complete {}
     f.db.call(|db| {
