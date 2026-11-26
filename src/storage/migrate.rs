@@ -362,6 +362,11 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         sql: include_str!("../../migrations/0068_schedule_notify.sql"),
         foreign_keys: Some(Impact::IndexOnly),
     },
+    Migration {
+        version: 69,
+        sql: include_str!("../../migrations/next_instruction_snapshot_turns.sql"),
+        foreign_keys: Some(Impact::IndexOnly),
+    },
 ];
 
 pub(super) fn run(

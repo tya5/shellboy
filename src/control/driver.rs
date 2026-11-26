@@ -653,13 +653,22 @@ async fn turn_instructions(
             (source_path.to_string_lossy().into_owned(),"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855".into(),String::new(),None)
         };
         let (thread,run):(String,String)=tx.query_row("SELECT thread_id,run_id FROM turn WHERE id=?1",[&turn],|r|Ok((r.get(0)?,r.get(1)?)))?;
-        let previous:Option<(String,String,Option<i64>)>=tx.query_row("SELECT s.source_path,s.content_hash,s.observed_size FROM turn t JOIN instruction_snapshot s ON s.id=t.instruction_snapshot_id WHERE t.thread_id=?1 AND t.id<>?2 ORDER BY t.created_at DESC,t.rowid DESC LIMIT 1",params![thread,turn],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).optional()?;
-        if previous.as_ref()!=Some(&(path.clone(),hash.clone(),size)) {
+        let previous:Option<(String,String,Option<i64>,String)>=tx.query_row("SELECT s.source_path,s.content_hash,s.observed_size,s.id FROM turn t JOIN instruction_snapshot s ON s.id=t.instruction_snapshot_id WHERE t.thread_id=?1 AND t.id<>?2 ORDER BY t.created_at DESC,t.rowid DESC LIMIT 1",params![thread,turn],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional()?;
+        // An unchanged observation (same path, hash and size) shares the previous
+        // Turn's immutable row; history GC removes rows no Turn references.
+        let reused=previous.as_ref().filter(|(p,h,s,_)|*p==path&&*h==hash&&*s==size).map(|(_,_,_,id)|id.clone());
+        if reused.is_none() {
             use super::notification::{Fact,Observation};
             let observation=if size.is_none() {Observation::Removed} else if previous.is_none() {Observation::FirstSeen} else {Observation::Updated};
-            super::context::record_fact(&tx,&thread,"instructions_observed",json!({"kind":"shellboy","run_id":run}),json!({"before":previous.map(|(path,hash,size)|json!({"path":path,"hash":hash,"present":size.is_some()})),"after":{"path":path,"hash":hash,"present":size.is_some()}}),&now(),Fact::InstructionsObserved{observation})?;
+            super::context::record_fact(&tx,&thread,"instructions_observed",json!({"kind":"shellboy","run_id":run}),json!({"before":previous.map(|(path,hash,size,_)|json!({"path":path,"hash":hash,"present":size.is_some()})),"after":{"path":path,"hash":hash,"present":size.is_some()}}),&now(),Fact::InstructionsObserved{observation})?;
         }
-        tx.execute("INSERT INTO instruction_snapshot(id,source_path,content_hash,body,observed_size,created_at) VALUES(?1,?2,?3,?4,?5,?6)",params![snapshot_id,path,hash,body,size,now()])?;
+        let snapshot_id=match reused {
+            Some(previous)=>previous,
+            None=>{
+                tx.execute("INSERT INTO instruction_snapshot(id,source_path,content_hash,body,observed_size,created_at) VALUES(?1,?2,?3,?4,?5,?6)",params![snapshot_id,path,hash,body,size,now()])?;
+                snapshot_id
+            }
+        };
         let saved = tx.execute("UPDATE turn SET instruction_snapshot_id=?2 WHERE id=?1 AND instruction_snapshot_id IS NULL",params![turn,snapshot_id])?;
         if saved != 0 {
             let warnings = (!warnings.is_empty()).then(|| json!(warnings).to_string());

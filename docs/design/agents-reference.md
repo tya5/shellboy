@@ -82,7 +82,9 @@ AGENTS file, and files should be short guides pointing to capabilities rather th
 
 The existing immutable instruction snapshot stores the composed bodies and source hashes/sizes. Same-Turn tool
 continuations, retries and recovered/resumed attempts reuse it, including after restart. New Turns read again;
-file edits and configuration changes never enter an already prepared Turn. An unprepared failed Turn can retry
+file edits and configuration changes never enter an already prepared Turn. A new Turn whose observation matches
+the Thread's previous Turn (same source path, content hash and size) references that Turn's snapshot row instead
+of copying the body again (#450); history GC removes a snapshot no Turn references ([GC](gc.md#shared-instruction-snapshots-450)). An unprepared failed Turn can retry
 preparation after the cause is fixed. `config.set` adopts this list without restart; direct disk edits remain
 restart-only. This per-Turn rule deliberately differs from per-Run connection-generation pinning.
 

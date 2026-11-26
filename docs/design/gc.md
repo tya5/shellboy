@@ -172,6 +172,23 @@ conservative; the prune's own job reclaims them. Tombstones record
 stay. Closure bound: 65,536 replacements or sources, checked while sources are read so an oversized prune fails early with `input_limit`. Messages with a receipt to a live Thread stay roots (rule 3); the result reports them as `kept_receipt_messages`, apart from the candidates. A hidden-marker re-summary also revalidates `state<>'pruned'` in its adoption transaction. Spills
 are included in the one rule. See [thread prune study](thread-prune-rewind-branches.md).
 
+## Shared instruction snapshots (#450)
+
+Turn preparation reuses the previous Turn's `instruction_snapshot` row when the
+new observation has the same source path, content hash and size, so an
+unchanged AGENTS/instruction bundle is stored once per change rather than once
+per Turn. Rows stay immutable. A row nobody references (a capture that lost the
+race to save its Turn, or a row whose Turns are gone) is garbage: the history
+job's `instructions` stage, between `receipts` and `roots`, walks
+`instruction_snapshot` by rowid up to the horizon saved when the job started, at
+most one batch per transaction, and deletes a row only if the DELETE itself
+still finds no referencing Turn. Its bytes count toward
+`history_bytes_collected`. Migration `next_instruction_snapshot_turns` adds the
+`turn(instruction_snapshot_id)` index so that check and the foreign-key check
+are seeks. The batch size and over-budget retention follow the stage rules
+below. Existing per-Turn copies stay referenced by their Turns; nothing
+rewrites a Turn.
+
 ## Budget-resumable history GC (#225)
 
 Each history stage persists its cursor with its data changes. Deferred batches

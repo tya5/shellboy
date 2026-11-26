@@ -77,6 +77,9 @@ pub(super) fn history_step(
             keep,
             &mut keys,
         )?,
+        Stage::Instructions => {
+            instructions_step(&tx, &mut progress, &mut report, batch, candidate, keep)?
+        }
         Stage::Roots => roots_step(&tx, job, &mut progress, &mut report, batch, candidate, keep)?,
 
         Stage::Provenance => {
@@ -154,6 +157,41 @@ fn receipts_step(
         progress.last_rowid = *rowid;
     }
     report.reply_wake_threads = wake_threads.into_iter().collect();
+    report.scanned = rows.len() as u64;
+    if rows.len() < batch {
+        progress.stage = Stage::Instructions;
+        progress.last_rowid = 0;
+    }
+    Ok(())
+}
+
+/// Turns with an unchanged observation share one immutable instruction
+/// snapshot, so a row is garbage only when no Turn references it. The DELETE
+/// rechecks that in this transaction; the finite rowid horizon bounds the pass.
+fn instructions_step(
+    tx: &Transaction<'_>,
+    progress: &mut Progress,
+    report: &mut HistoryStep,
+    batch: usize,
+    candidate: &std::sync::Mutex<Option<String>>,
+    keep: Option<&str>,
+) -> Result<()> {
+    let rows = tx.prepare("SELECT rowid,id,octet_length(body) FROM instruction_snapshot WHERE rowid>?1 AND rowid<=?2 ORDER BY rowid LIMIT ?3").map_err(sql_error)?
+        .query_map(params![progress.last_rowid, progress.instruction_horizon, batch as i64], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?))).map_err(sql_error)?
+        .collect::<rusqlite::Result<Vec<_>>>().map_err(sql_error)?;
+    let mut delete = tx
+        .prepare_cached("DELETE FROM instruction_snapshot WHERE id=?1 AND NOT EXISTS(SELECT 1 FROM turn WHERE instruction_snapshot_id=?1)")
+        .map_err(sql_error)?;
+    for (rowid, id, bytes) in &rows {
+        // A single over-budget delete is retained for this pass.
+        if keep != Some(id.as_str()) {
+            *candidate.lock().expect("history candidate") = Some(id.clone());
+            if delete.execute([id]).map_err(sql_error)? != 0 {
+                report.bytes_collected += (*bytes).max(0) as u64;
+            }
+        }
+        progress.last_rowid = *rowid;
+    }
     report.scanned = rows.len() as u64;
     if rows.len() < batch {
         progress.stage = Stage::Roots;
@@ -558,6 +596,7 @@ mod tests {
         for (stage, literal) in [
             (Stage::Reset, "reset"),
             (Stage::Receipts, "receipts"),
+            (Stage::Instructions, "instructions"),
             (Stage::Roots, "roots"),
             (Stage::Provenance, "provenance"),
             (Stage::Sweep, "sweep"),

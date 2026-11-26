@@ -299,6 +299,8 @@ struct Progress {
     #[serde(default)]
     job_horizon: i64,
     #[serde(default)]
+    instruction_horizon: i64,
+    #[serde(default)]
     kept_count: u64,
     #[serde(default)]
     kept_receipts: u64,
@@ -312,6 +314,7 @@ struct Progress {
 enum Stage {
     Reset,
     Receipts,
+    Instructions,
     Roots,
     Provenance,
     Sweep,
@@ -323,6 +326,7 @@ impl Stage {
         match self {
             Self::Reset => "reset",
             Self::Receipts => "receipts",
+            Self::Instructions => "instructions",
             Self::Roots => "roots",
             Self::Provenance => "provenance",
             Self::Sweep => "sweep",
@@ -1137,7 +1141,8 @@ impl GcService {
         }
         self.history_diagnostics.send_replace(Some(diagnostic));
         drop(diagnostic_job);
-        if step.nodes_tombstoned > 0 {
+        // Tombstoned payloads, receipts and instruction snapshots all lower logical usage.
+        if step.nodes_tombstoned > 0 || step.bytes_collected > 0 {
             self.availability_changed.notify_one();
         }
         Ok(step)
@@ -1361,7 +1366,7 @@ fn reset(tx: &Transaction<'_>, job: &str, root: i64) -> Result<()> {
             row.get(0)
         })
         .map_err(sql_error)?;
-    tx.execute("UPDATE gc_job SET root_revision=?2,cursor_json=?3,state='running',error_json=NULL WHERE id=?1",params![job,root,serde_json::to_string(&Progress{stage:Stage::Reset,last_rowid:0,horizon,revalidate_roots:false,retain_all:false,kept_count:0,kept_receipts:0,kept_marks:0,kept_ids:Vec::new(),job_horizon:tx.query_row("SELECT COALESCE(MAX(rowid),0) FROM gc_job",[],|r|r.get(0)).map_err(sql_error)?,receipt_horizon:tx.query_row("SELECT COALESCE(MAX(rowid),0) FROM receipt",[],|r|r.get(0)).map_err(sql_error)?}).unwrap()]).map_err(sql_error)?;
+    tx.execute("UPDATE gc_job SET root_revision=?2,cursor_json=?3,state='running',error_json=NULL WHERE id=?1",params![job,root,serde_json::to_string(&Progress{stage:Stage::Reset,last_rowid:0,horizon,revalidate_roots:false,retain_all:false,kept_count:0,kept_receipts:0,kept_marks:0,kept_ids:Vec::new(),job_horizon:tx.query_row("SELECT COALESCE(MAX(rowid),0) FROM gc_job",[],|r|r.get(0)).map_err(sql_error)?,receipt_horizon:tx.query_row("SELECT COALESCE(MAX(rowid),0) FROM receipt",[],|r|r.get(0)).map_err(sql_error)?,instruction_horizon:tx.query_row("SELECT COALESCE(MAX(rowid),0) FROM instruction_snapshot",[],|r|r.get(0)).map_err(sql_error)?}).unwrap()]).map_err(sql_error)?;
     Ok(())
 }
 fn start_history(db: &mut Connection, after: i64) -> Result<(Option<String>, i64, bool, bool)> {
