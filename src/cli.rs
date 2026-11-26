@@ -683,7 +683,7 @@ pub struct ScheduleAddOptions {
     cwd: Option<String>,
     #[arg(long)]
     description: Option<String>,
-    /// Owner notice to send to the Thread, repeatable; `skipped` wakes a Turn per skipped occurrence.
+    /// Owner notice to send to the Thread, repeatable; `skipped` sends one ordinary message per skipped occurrence.
     #[arg(long, value_enum)]
     notify: Vec<wire::ScheduleNotify>,
     /// A single shell command string, interpreted by the owner's configured shell.

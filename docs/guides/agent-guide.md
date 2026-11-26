@@ -418,10 +418,11 @@ shellboy schedule add --thread THREAD --cron '0 3 * * *' --command 'shellboy mes
 An occurrence whose previous execution is still active is skipped; `schedule
 list` shows `last_skipped_at`. To learn about skips without polling, add
 `--notify skipped` to `schedule add` or `schedule set --schedule ID`. Every
-skipped occurrence then sends one message from `schedule:<id>` naming the
-skipped time and the still-active execution, and each message wakes a Turn in
-the owning Thread. Enable it for a job that should finish within its interval;
-leave it off when overlap is expected. On a notice, inspect the execution with
+skipped occurrence then sends one ordinary message from `schedule:<id>` to the
+owning Thread, naming the skipped time and the still-active execution. It goes
+through normal admission like any other input: it may be held, or join a Turn
+that is already running, and gets no special wake. Enable it for a job that
+should finish within its interval; leave it off when overlap is expected. On a notice, inspect the execution with
 `shell read --execution EXECUTION_ID`, then stop it, fix the command or lengthen
 the interval. `schedule set --schedule ID --notify none` turns the notices off.
 

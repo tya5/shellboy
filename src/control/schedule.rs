@@ -1761,24 +1761,16 @@ mod tests {
         owner.shutdown().await.unwrap();
     }
 
-    #[tokio::test]
-    async fn skipped_occurrence_notifies_only_when_enabled_and_once_per_occurrence() {
+    #[cfg(unix)]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn skipped_occurrences_each_reach_the_model_only_when_notify_is_set() {
+        use super::super::shell_lifecycle_tests::{answer, fixture, incoming, rpc};
         use crate::{
             app::DataOwner,
-            protocol::{MessageTarget, ScheduleAddArgs, ScheduleSetArgs, ThreadTarget},
+            protocol::{ScheduleAddArgs, ScheduleSetArgs, ThreadCreateArgs, ThreadTarget},
         };
-        async fn call(control: &Arc<Control>, command: Command) -> serde_json::Value {
-            let result = control
-                .request(Request::new(
-                    format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
-                    command,
-                ))
-                .await;
-            assert!(result.ok, "{:?}", result.error);
-            result.result.unwrap()
-        }
         async fn listed(control: &Arc<Control>, thread: &str) -> Vec<serde_json::Value> {
-            call(
+            rpc(
                 control,
                 Command::ScheduleList(ThreadTarget {
                     thread_id: Some(thread.into()),
@@ -1804,24 +1796,50 @@ mod tests {
                 dispatch(control).await.unwrap();
             }
         }
-        async fn notices(owner: &DataOwner, schedule: &str) -> Vec<(String, String)> {
+        async fn notices(owner: &DataOwner, schedule: &str) -> Vec<String> {
             let prefix = format!("schedule-skipped:{schedule}:");
             owner.db.call(move |db| {
-                let mut query = db.prepare("SELECT client_operation_id,message_node_id FROM receipt WHERE substr(client_operation_id,1,length(?1))=?1 ORDER BY client_operation_id")?;
-                Ok(query.query_map([prefix], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<Vec<_>>>()?)
+                let mut query = db.prepare("SELECT client_operation_id FROM receipt WHERE substr(client_operation_id,1,length(?1))=?1 ORDER BY client_operation_id")?;
+                Ok(query.query_map([prefix], |r| r.get(0))?.collect::<rusqlite::Result<Vec<_>>>()?)
             }).await.unwrap()
         }
-        let (_root, owner, control, accepted) =
-            super::super::driver::preparation_tests::fixture("http://127.0.0.1:1/v1").await;
-        let thread = accepted.thread_id;
-        let hold = if cfg!(windows) {
-            "Start-Sleep -Seconds 600"
-        } else {
-            "exec sleep 600"
-        };
+        fn texts(value: &serde_json::Value, out: &mut Vec<String>) {
+            match value {
+                serde_json::Value::String(text) => out.push(text.clone()),
+                serde_json::Value::Array(items) => items.iter().for_each(|item| texts(item, out)),
+                serde_json::Value::Object(map) => map.values().for_each(|item| texts(item, out)),
+                _ => {}
+            }
+        }
+        // The model request carries an input naming this schedule, skipped
+        // time and still-active execution.
+        fn carries(request: &serde_json::Value, schedule: &str, at: i64, execution: &str) -> bool {
+            let at = DateTime::from_timestamp(at, 0).unwrap().to_rfc3339();
+            let mut found = Vec::new();
+            texts(&request["input"], &mut found);
+            found.iter().any(|text| {
+                text.contains(schedule) && text.contains(&at) && text.contains(execution)
+            })
+        }
+        let (_root, owner, control, mut requests, server) = fixture().await;
+        let thread = rpc(
+            &control,
+            Command::ThreadCreate(ThreadCreateArgs {
+                agents: None,
+                connection: None,
+                model: None,
+                effort: None,
+                cwd: None,
+                parent_thread_id: None,
+            }),
+        )
+        .await["thread_id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
         let mut ids = Vec::new();
         for notify in [vec![ScheduleNotify::Skipped], Vec::new()] {
-            let added = call(
+            let added = rpc(
                 &control,
                 Command::ScheduleAdd(ScheduleAddArgs {
                     thread_id: Some(thread.clone()),
@@ -1831,64 +1849,66 @@ mod tests {
                     cwd: None,
                     description: None,
                     notify,
-                    command: hold.into(),
+                    command: "exec sleep 600".into(),
                 }),
             )
             .await;
             ids.push(added["schedule_id"].as_str().unwrap().to_owned());
         }
         let (notified, silent) = (ids[0].clone(), ids[1].clone());
-        let notify_of = |items: &[serde_json::Value], id: &str| {
-            items.iter().find(|item| item["schedule_id"] == id).unwrap()["notify"].clone()
+        let item = |items: &[serde_json::Value], id: &str| {
+            items
+                .iter()
+                .find(|item| item["schedule_id"] == id)
+                .unwrap()
+                .clone()
         };
         let items = listed(&control, &thread).await;
-        assert_eq!(notify_of(&items, &notified), json!(["skipped"]));
-        assert_eq!(notify_of(&items, &silent), json!([]));
+        assert_eq!(item(&items, &notified)["notify"], json!(["skipped"]));
+        assert_eq!(item(&items, &silent)["notify"], json!([]));
 
-        // The first occurrence starts both; the second finds both still active.
+        // The first occurrence starts both; later ones find both still active.
         occur(&control, &owner, 60).await;
         let running = listed(&control, &thread).await;
-        occur(&control, &owner, 120).await;
-        let skipped_at = DateTime::from_timestamp(120, 0).unwrap().to_rfc3339();
-        let items = listed(&control, &thread).await;
-        for id in [&notified, &silent] {
-            let item = items
-                .iter()
-                .find(|item| item["schedule_id"] == **id)
-                .unwrap();
-            let before = running
-                .iter()
-                .find(|item| item["schedule_id"] == **id)
-                .unwrap();
-            assert_eq!(item["last_skipped_at"], skipped_at);
+        let execution = item(&running, &notified)["latest"]["execution_id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let silent_execution = item(&running, &silent)["latest"]["execution_id"].clone();
+        for (at, nth) in [(120, 1), (180, 2)] {
+            occur(&control, &owner, at).await;
+            let items = listed(&control, &thread).await;
+            for id in [&notified, &silent] {
+                let listed = item(&items, id);
+                assert_eq!(
+                    listed["last_skipped_at"],
+                    DateTime::from_timestamp(at, 0).unwrap().to_rfc3339()
+                );
+            }
+            assert_eq!(item(&items, &notified)["latest"]["execution_id"], execution);
             assert_eq!(
-                item["latest"]["execution_id"],
-                before["latest"]["execution_id"]
+                item(&items, &silent)["latest"]["execution_id"],
+                silent_execution
             );
+            // Each distinct skip of the same execution reaches the model.
+            let (request, reply) = incoming(&mut requests).await;
+            assert!(carries(&request, &notified, at, &execution), "{request}");
+            reply.send(answer()).unwrap();
+            assert_eq!(notices(&owner, &notified).await.len(), nth);
         }
         assert!(notices(&owner, &silent).await.is_empty());
         let sent = notices(&owner, &notified).await;
         assert_eq!(
-            sent.iter().map(|(key, _)| key.as_str()).collect::<Vec<_>>(),
-            [format!("schedule-skipped:{notified}:120")]
+            sent,
+            [120, 180].map(|at| format!("schedule-skipped:{notified}:{at}"))
         );
-        let message = call(
-            &control,
-            Command::MessageGet(MessageTarget {
-                message_id: sent[0].1.clone(),
-            }),
-        )
-        .await;
-        assert_eq!(message["thread_id"], thread);
-        assert_eq!(message["sender"]["label"], format!("schedule:{notified}"));
-        assert!(message["turn_id"].is_string(), "the notice wakes a Turn");
 
-        // Meeting the same occurrence again sends nothing new.
-        occur(&control, &owner, 120).await;
+        // Meeting an already noticed occurrence again sends nothing new.
+        occur(&control, &owner, 180).await;
         assert_eq!(notices(&owner, &notified).await, sent);
 
         // Clearing the setting silences later skips.
-        call(
+        rpc(
             &control,
             Command::ScheduleSet(ScheduleSetArgs {
                 schedule_id: notified.clone(),
@@ -1898,14 +1918,15 @@ mod tests {
         )
         .await;
         assert_eq!(
-            notify_of(&listed(&control, &thread).await, &notified),
+            item(&listed(&control, &thread).await, &notified)["notify"],
             json!([])
         );
-        occur(&control, &owner, 180).await;
+        occur(&control, &owner, 240).await;
         assert_eq!(notices(&owner, &notified).await, sent);
         control.close_tool_start_admission();
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
+        server.abort();
     }
 
     #[tokio::test]
