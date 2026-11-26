@@ -147,6 +147,36 @@ pub(super) async fn enrich(control: &Control, nodes: &mut [UiNode]) -> Result<()
     Ok(())
 }
 
+/// Apply the selected window's adopted-attempt usage to the nodes it names.
+pub(super) fn apply_window(nodes: &mut [UiNode], usage: &[crate::protocol::HistoryWindowUsage]) {
+    let observations = usage
+        .iter()
+        .filter_map(|saved| {
+            let index = nodes
+                .iter()
+                .position(|node| node.node_id == saved.node_id)?;
+            let sources = saved
+                .sources
+                .iter()
+                .map(|source| Source {
+                    attempt: source.attempt_id.clone(),
+                    input_tokens: source.input_tokens,
+                    cached_tokens: source.cached_tokens,
+                    input_bytes: source.input_bytes.as_ref().and_then(|bytes| {
+                        crate::model::wire_bytes::InputBytes::from_value(&serde_json::json!({
+                            "unit": "utf8_bytes",
+                            "total": bytes.total,
+                            "categories": bytes.categories,
+                        }))
+                    }),
+                })
+                .collect();
+            Some(Observation { index, sources })
+        })
+        .collect();
+    apply(nodes, observations);
+}
+
 fn field(key: &str, value: String) -> PresentationField {
     PresentationField {
         value_omitted: false,

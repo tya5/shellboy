@@ -37,6 +37,15 @@ retention. A request beyond the bound enters existing Turn recovery with a
 typed `input_limit`; no shortened history is sent. See the
 [replay design](../design/replay-cache.md#resend-assembly-limit-385).
 
+## Core #311 selected history client (4e/4f, partial)
+
+Positioned node hydration uses one fenced native window with its observation
+and the positioned display extent; its private node read is gone. Window tool
+observations now include saved `shell_ended` notices. Refresh, page, window,
+rebase and saved-message installs still use the private snapshot until the
+open pending-row and field-label questions on #311 are decided; see
+[the TUI client design](../design/tui-client.md#unit-4e4f-selected-window-client).
+
 ## Core #311 saved change delivery
 
 The TUI now consumes saved Thread invalidation through instance-fenced native
