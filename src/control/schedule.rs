@@ -1796,11 +1796,12 @@ mod tests {
                 dispatch(control).await.unwrap();
             }
         }
-        async fn notices(owner: &DataOwner, schedule: &str) -> Vec<String> {
+        // (client_operation_id, saved message ID) of each notice for the schedule.
+        async fn notices(owner: &DataOwner, schedule: &str) -> Vec<(String, String)> {
             let prefix = format!("schedule-skipped:{schedule}:");
             owner.db.call(move |db| {
-                let mut query = db.prepare("SELECT client_operation_id FROM receipt WHERE substr(client_operation_id,1,length(?1))=?1 ORDER BY client_operation_id")?;
-                Ok(query.query_map([prefix], |r| r.get(0))?.collect::<rusqlite::Result<Vec<_>>>()?)
+                let mut query = db.prepare("SELECT client_operation_id,message_node_id FROM receipt WHERE substr(client_operation_id,1,length(?1))=?1 ORDER BY client_operation_id")?;
+                Ok(query.query_map([prefix], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<Vec<_>>>()?)
             }).await.unwrap()
         }
         fn texts(value: &serde_json::Value, out: &mut Vec<String>) {
@@ -1899,9 +1900,20 @@ mod tests {
         assert!(notices(&owner, &silent).await.is_empty());
         let sent = notices(&owner, &notified).await;
         assert_eq!(
-            sent,
+            sent.iter().map(|(key, _)| key.clone()).collect::<Vec<_>>(),
             [120, 180].map(|at| format!("schedule-skipped:{notified}:{at}"))
         );
+        for (_, message) in &sent {
+            let saved = rpc(
+                &control,
+                Command::MessageGet(crate::protocol::MessageTarget {
+                    message_id: message.clone(),
+                }),
+            )
+            .await;
+            assert_eq!(saved["thread_id"], thread);
+            assert_eq!(saved["sender"]["label"], format!("schedule:{notified}"));
+        }
 
         // Meeting an already noticed occurrence again sends nothing new.
         occur(&control, &owner, 180).await;
