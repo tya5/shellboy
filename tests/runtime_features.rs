@@ -6790,6 +6790,11 @@ async fn content_filter_recovery_readback_and_real_ui_are_bilingual_and_keep_unk
             .await
             .unwrap();
             let control = Control::new(&owner, root.path().into());
+            let (rpc_send, rpc_receive) = tokio::sync::mpsc::channel(16);
+            let listener = shellboy::ipc::LocalServer::bind(&owner, rpc_send)
+                .await
+                .unwrap();
+            tokio::spawn(control.clone().serve(rpc_receive));
             for verdicts in [true, false] {
                 let target = thread(&control).await;
                 let accepted: MessageAccepted = serde_json::from_value(
@@ -6912,6 +6917,7 @@ async fn content_filter_recovery_readback_and_real_ui_are_bilingual_and_keep_unk
                     "the completed content_filter Turn adds no retry attempt"
                 );
             }
+            listener.shutdown().await.unwrap();
             control.shutdown().await.unwrap();
             owner.shutdown().await.unwrap();
             server.abort();

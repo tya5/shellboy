@@ -1300,7 +1300,8 @@ impl Control {
                     Command::ShellList(_) => {
                         let mut result = self.store.execute(request, origin).await?;
                         if let Some(items) = result.result["items"].as_array_mut() {
-                            self.live.project_shell_foreground(items).await;
+                            self.live.project_shell_foreground(items.iter_mut()).await;
+                            self.project_shell_waits(items.iter_mut()).await?;
                         }
                         Ok(result)
                     }
@@ -1320,23 +1321,6 @@ impl Control {
                         result.result["change_position"] =
                             self.change_clock.thread_position(&thread).into();
                         Ok(result)
-                    }
-                    Command::ThreadGet(args) if !args.display => {
-                        let mut effects = self.store.execute(request, origin).await?;
-                        if let Some(thread) = effects
-                            .result
-                            .get("thread_id")
-                            .and_then(Value::as_str)
-                            .map(str::to_owned)
-                        {
-                            effects.result["context_usage"] =
-                                match self.compactor.context_metrics_display(&thread).await {
-                                    Ok(metrics) => metrics,
-                                    Err(error) if error.is_storage_failure() => return Err(error),
-                                    Err(error) => json!({"available":false,"error":error}),
-                                };
-                        }
-                        Ok(effects)
                     }
                     Command::Status(args)
                         if !args.memory

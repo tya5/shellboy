@@ -147,7 +147,7 @@ pub(super) fn read_tx(
 pub(super) fn read_tx_with_waits(
     db: &Connection,
     thread: &str,
-    waits: Option<&[(String, String)]>,
+    waits: Option<&[(String, crate::protocol::ShellWait)]>,
 ) -> Result<RawProjection, crate::storage::StorageError> {
     read_tx_with_limit(db, thread, waits, 3)
 }
@@ -155,7 +155,7 @@ pub(super) fn read_tx_with_waits(
 pub(super) fn read_tx_with_limit(
     db: &Connection,
     thread: &str,
-    waits: Option<&[(String, String)]>,
+    waits: Option<&[(String, crate::protocol::ShellWait)]>,
     limit: usize,
 ) -> Result<RawProjection, crate::storage::StorageError> {
     let run: Option<(String, String, Option<String>,Option<String>)> = db
@@ -526,38 +526,85 @@ pub(super) fn prepare_in(raw: RawProjection, language: crate::config::UiLanguage
 pub fn project(db: &Connection, thread: &str) -> Result<Projection, crate::storage::StorageError> {
     read_tx(db, thread).map(prepare)
 }
+/// The owner facts this projection joins: the waits of the Thread's running
+/// shells (`None` if one page does not cover them) and the index pause.
+async fn owner_facts(
+    owner: &super::native_history::Owner<'_>,
+    thread: &str,
+) -> Result<
+    (
+        super::live_work::ShellWaits,
+        Option<crate::index::PauseReason>,
+    ),
+    ApiError,
+> {
+    use crate::protocol::{Command, IndexArgs, IndexStatus, ShellListArgs, ShellWait};
+    // Only the page continuation and each row's identity and wait are read.
+    #[derive(serde::Deserialize)]
+    struct Row {
+        execution_id: String,
+        wait: Option<ShellWait>,
+    }
+    #[derive(serde::Deserialize)]
+    struct Page {
+        items: Vec<Row>,
+        next_cursor: Option<String>,
+    }
+    let shells: Page = owner
+        .call(Command::ShellList(ShellListArgs {
+            thread_id: Some(thread.to_owned()),
+            since: None,
+            until: None,
+            command_contains: None,
+            state: Some("running".into()),
+            exit_code: None,
+            limit: super::live_work::MAX_WAITS as u32,
+            cursor: None,
+        }))
+        .await?;
+    let waits = shells.next_cursor.is_none().then(|| {
+        shells
+            .items
+            .into_iter()
+            .filter_map(|row| row.wait.map(|wait| (row.execution_id, wait)))
+            .collect()
+    });
+    let index: IndexStatus = owner
+        .call(Command::IndexStatus(IndexArgs::default()))
+        .await?;
+    Ok((waits, crate::index::display_pause(&index)))
+}
+
+/// One projection over the embedded owner's own listener.
 pub async fn read(control: &Control, thread: &str) -> Result<Projection, ApiError> {
-    let target = thread.to_owned();
-    let waits = control.pending_wait_sources();
-    let limit = control.store.config.ui.live_work_rows;
-    let result = control
-        .store
-        .database
-        .call(move |db| read_tx_with_limit(db, &target, waits.as_deref(), limit))
-        .await
-        .map_err(super::storage_error);
-    let raw = super::checked_storage(control, result).await?;
-    let language = control.store.config.ui.language;
-    super::presentation_work(move || prepare_in(raw, language)).await
+    let owner = super::native_history::Owner {
+        data_dir: super::compose_data_dir(control),
+        instance: &control.store.instance_id,
+    };
+    read_cancellable(
+        control,
+        &owner,
+        thread,
+        tokio_util::sync::CancellationToken::new(),
+    )
+    .await
 }
 
 pub(super) async fn read_cancellable(
     control: &Control,
+    owner: &super::native_history::Owner<'_>,
     thread: &str,
     stop: tokio_util::sync::CancellationToken,
 ) -> Result<Projection, ApiError> {
+    let (waits, pause) = owner_facts(owner, thread).await?;
     let target = thread.to_owned();
-    let waits = control.pending_wait_sources();
     let limit = control.store.config.ui.live_work_rows;
     let path = control.store.database.path().to_path_buf();
-    let index = control.index.clone();
     let result = super::snapshot::read(path, stop, move |db| {
-        let raw = read_tx_with_limit(db, &target, waits.as_deref(), limit)?;
-        let pause = index.read_display_pause(db)?;
-        Ok((raw, pause))
+        read_tx_with_limit(db, &target, waits.as_deref(), limit)
     })
     .await;
-    let (raw, pause) = super::checked_storage(control, result).await?;
+    let raw = super::checked_storage(control, result).await?;
     let language = control.store.config.ui.language;
     super::presentation_work(move || {
         let mut projection = prepare_in(raw, language);

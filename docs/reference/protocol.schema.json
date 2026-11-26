@@ -12372,6 +12372,16 @@
             "string",
             "null"
           ]
+        },
+        "wait": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ShellWait"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -12576,6 +12586,16 @@
           "type": [
             "string",
             "null"
+          ]
+        },
+        "wait": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ShellWait"
+            },
+            {
+              "type": "null"
+            }
           ]
         }
       },
@@ -12803,6 +12823,39 @@
         "stopped"
       ],
       "type": "string"
+    },
+    "ShellWait": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "accepted_at": {
+          "type": "string"
+        },
+        "condition_count": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "first_condition": {
+          "$ref": "#/definitions/WaitCondition"
+        },
+        "operation_id": {
+          "type": "string"
+        },
+        "timeout_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "operation_id",
+        "accepted_at",
+        "timeout_ms",
+        "condition_count",
+        "first_condition"
+      ],
+      "title": "ShellWait",
+      "type": "object"
     },
     "ShellWriteArgs": {
       "additionalProperties": false,
@@ -18021,6 +18074,16 @@
           "type": [
             "string",
             "null"
+          ]
+        },
+        "wait": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ShellWait"
+            },
+            {
+              "type": "null"
+            }
           ]
         }
       },

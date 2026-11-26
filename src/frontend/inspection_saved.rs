@@ -391,6 +391,7 @@ pub(super) fn prepare(raw: RawSaved) -> Result<PreparedSaved, ApiError> {
             let details = ShellDetails {
                 settlement_detail: None,
                 foreground: None,
+                wait: None,
                 stdin_open,
                 stdin_last_write_at,
                 execution_id: raw.id,

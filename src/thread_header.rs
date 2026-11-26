@@ -303,6 +303,10 @@ impl RawHeader {
     pub(crate) fn thread_id(&self) -> &str {
         &self.details.thread_id
     }
+    /// The `thread.get` context usage the owner attached to this header.
+    pub(crate) fn context_usage(&self) -> Option<&serde_json::Value> {
+        self.details.context_usage.as_ref()
+    }
     /// Borrow raw title witnesses: sharing this header never duplicates source JSON.
     #[cfg(test)]
     pub(crate) fn prepare(&self) -> ThreadDetails {

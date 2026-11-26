@@ -1108,13 +1108,18 @@ async fn run_client(
             && !draft_pause_running
             && !updates.backpressured()
         {
-            let index = control.index.clone();
-            let path = control.store.database.path().to_path_buf();
-            let stop = read_cancel.clone();
+            let data_dir = compose_data_dir(&control).to_path_buf();
+            let instance = control.store.instance_id.clone();
             let sender = background_tx.clone();
             if spawn_read(&mut read_workers, &read_slots, &read_cancel, async move {
-                let result =
-                    snapshot::read(path, stop, move |db| index.read_display_pause(db)).await;
+                let owner = native_history::Owner {
+                    data_dir: &data_dir,
+                    instance: &instance,
+                };
+                let result = owner
+                    .call(Command::IndexStatus(IndexArgs::default()))
+                    .await
+                    .map(|status| crate::index::display_pause(&status));
                 let _ = sender.send(BackgroundResult::DraftIndexPause(result)).await;
             }) {
                 draft_pause_dirty = false;
@@ -2433,7 +2438,11 @@ async fn run_client(
                                     Err(error) => load_failed(&sender, target, generation, error).await,
                                     Ok(()) => {
                                         if let Ok(_permit) = progress_slots.acquire_owned().await {
-                                            let result = activity::read_cancellable(&control, &target, stop).await;
+                                            let owner = native_history::Owner {
+                                                data_dir: compose_data_dir(&control),
+                                                instance: &control.store.instance_id,
+                                            };
+                                            let result = activity::read_cancellable(&control, &owner, &target, stop).await;
                                             let _ = results
                                                 .send(BackgroundResult::Progress {
                                                     thread_id: target,

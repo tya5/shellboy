@@ -46,19 +46,6 @@ impl RawContextUsage {
         })
     }
 }
-impl RawContextUsage {
-    /// Provider-reported usage of the same latest attempt; all-unknown when none.
-    pub(crate) fn reported_usage(&self) -> StandardUsage {
-        if self
-            .coverage
-            .as_ref()
-            .is_some_and(|coverage| !coverage.latest_complete)
-        {
-            return StandardUsage::default();
-        }
-        self.latest.as_ref().map(|l| l.usage).unwrap_or_default()
-    }
-}
 #[cfg(test)]
 impl RawContextUsage {
     fn scope(&self) -> (&str, &str, &str) {
@@ -205,6 +192,7 @@ pub(crate) fn prepare_context_usage(raw: RawContextUsage) -> (Value, Scope) {
             "attempt_id": latest.attempt_id,
             "input_tokens": latest.usage.input_tokens,
             "cached_tokens": latest.usage.cached_tokens,
+            "output_tokens": latest.usage.output_tokens,
             "started_at": latest.started_at,
             "ended_at": latest.ended_at,
             "next_request_pending": latest.next_request_pending
@@ -296,7 +284,10 @@ mod tests {
             "completed",
             "p",
             "m",
-            Some(json!({"input_tokens":5,"input_tokens_details":{"cached_tokens":1}}).to_string()),
+            Some(
+                json!({"input_tokens":5,"input_tokens_details":{"cached_tokens":1},"output_tokens":3})
+                    .to_string(),
+            ),
             "2020-01-01T00:00:00Z",
         )
         .await;
@@ -346,7 +337,7 @@ mod tests {
             }
             Ok(())
         }).await.unwrap();
-        let expected = json!({"last_successful_attempt":{"attempt_id":"newest","input_tokens":5,"cached_tokens":1,"started_at":"2020-01-01T00:00:00Z","ended_at":null,"next_request_pending":true}});
+        let expected = json!({"last_successful_attempt":{"attempt_id":"newest","input_tokens":5,"cached_tokens":1,"output_tokens":3,"started_at":"2020-01-01T00:00:00Z","ended_at":null,"next_request_pending":true}});
         assert_eq!(compactor.context_metrics("t").await.unwrap(), expected);
         let raw = db
             .call(|db| {
@@ -832,8 +823,11 @@ mod bounded_cost_tests {
         assert_eq!(exact["last_successful_attempt"]["attempt_id"], "a000099-39");
         // The newest 20 turns have only failed attempts but the witness is within 33 turns.
         let raw = read_context_usage_tx(&db, "t", Some(512)).unwrap();
-        assert_eq!(raw.reported_usage().input_tokens, Some(1000 + 99 * 10 + 39));
         let shown = prepare_context_usage(raw).0;
+        assert_eq!(
+            shown["last_successful_attempt"]["input_tokens"],
+            1000 + 99 * 10 + 39
+        );
         assert_eq!(
             shown["last_successful_attempt"]["attempt_id"],
             exact["last_successful_attempt"]["attempt_id"]
@@ -933,6 +927,8 @@ mod bounded_cost_tests {
         assert!(exact.latest.as_ref().unwrap().usage.input_tokens.is_none());
         let bounded = read_context_usage_tx(&db, "t", Some(512)).unwrap();
         assert_eq!(bounded.latest.as_ref().unwrap().attempt_id, "late-rowid");
-        assert!(bounded.reported_usage().input_tokens.is_none());
+        assert!(
+            prepare_context_usage(bounded).0["last_successful_attempt"]["input_tokens"].is_null()
+        );
     }
 }

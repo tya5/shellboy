@@ -434,6 +434,8 @@ impl Control {
                 self.live
                     .project_shell_foreground(std::iter::once(&mut result))
                     .await;
+                self.project_shell_waits(std::iter::once(&mut result))
+                    .await?;
                 Ok(result)
             }
             Command::ShellRead(args) => encode_result(

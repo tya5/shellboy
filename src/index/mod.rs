@@ -304,49 +304,17 @@ fn pause_reason(raw: &str) -> PauseReason {
     }
 }
 
-fn read_display_pause_tx(
-    db: &Connection,
-    profile: Option<&str>,
-    family: Option<&str>,
-) -> Result<Option<PauseReason>, StorageError> {
-    if profile.is_none() && family.is_none() {
-        return Ok(None);
-    }
-    for scope in family.into_iter().chain(profile) {
-        let pause_key = IndexKeys::new(scope).pause();
-        let size: Option<i64> = db
-            .query_row(
-                "SELECT length(CAST(value AS BLOB)) FROM app_meta WHERE key=?1",
-                [&pause_key],
-                |row| row.get(0),
-            )
-            .optional()?;
-        let Some(size) = size else { continue };
-        // Keep malformed oversized saved values bounded, but do not hide the marker.
-        if size > MAX_DISPLAY_PAUSE_BYTES as i64 {
-            return Ok(Some(PauseReason::Other));
-        }
-        if let Some(value) = meta(db, &pause_key)? {
-            return Ok(Some(pause_reason(&value)));
-        }
-        return Ok(None);
-    }
-    Ok(None)
+/// The display classification of an `index.status` pause; `None` when not paused.
+pub(crate) fn display_pause(status: &crate::protocol::IndexStatus) -> Option<PauseReason> {
+    status.paused.then(|| {
+        status
+            .reason
+            .as_deref()
+            .map_or(PauseReason::Other, pause_reason)
+    })
 }
 
 impl IndexService {
-    /// Read the saved pause fact in the caller's snapshot.
-    pub(crate) fn read_display_pause(
-        &self,
-        db: &Connection,
-    ) -> Result<Option<PauseReason>, StorageError> {
-        read_display_pause_tx(
-            db,
-            self.profile_key.as_deref(),
-            self.endpoint_family_key.as_deref(),
-        )
-    }
-
     pub fn new(database: DbWorker, config: Arc<Config>) -> Arc<Self> {
         Self::with_instance(database, config, format!("index-{}", id()))
     }
@@ -1804,18 +1772,7 @@ mod saved_notification_tests;
 mod display_pause_tests {
     use super::*;
 
-    #[test]
-    fn absent_configured_scopes_do_not_query_database() {
-        let db = Connection::open_in_memory().unwrap();
-        assert_eq!(read_display_pause_tx(&db, None, None).unwrap(), None);
-    }
-
-    #[tokio::test]
-    async fn real_retry_clears_persisted_pause_and_notifies() {
-        let temp = tempfile::tempdir().unwrap();
-        let db = DbWorker::open(temp.path().join("pause.sqlite"))
-            .await
-            .unwrap();
+    fn configured(auto_history: bool) -> Config {
         let mut config = Config::default();
         config.connections.insert(
             "fixture".into(),
@@ -1826,98 +1783,96 @@ mod display_pause_tests {
         );
         config.embedding.connection = Some("fixture".into());
         config.embedding.model = Some("synthetic".into());
-        let mut disabled_config = config.clone();
-        disabled_config.indexing.auto_history = false;
-        let disabled = IndexService::new(db.clone(), Arc::new(disabled_config));
-        assert!(disabled.profile_key.is_some());
-        assert!(disabled.endpoint_family_key.is_some());
-        let index = disabled.clone();
-        assert_eq!(
-            db.call(move |db| index.read_display_pause(db))
-                .await
-                .unwrap(),
-            None
-        );
-        let service = IndexService::new(db.clone(), Arc::new(config));
-        let family = service.endpoint_family_key.clone().unwrap();
-        let profile = service.profile_key.clone().unwrap();
+        config.indexing.auto_history = auto_history;
+        config
+    }
+    async fn shown(index: &IndexService) -> Option<PauseReason> {
+        display_pause(&index.status(IndexArgs::default()).await.unwrap())
+    }
+    async fn save_pause(db: &DbWorker, key: String, value: &'static str) {
         db.call(move |db| {
             let tx = db.transaction()?;
-            for key in [family, profile] {
-                set_meta(
-                    &tx,
-                    &IndexKeys::new(&key).pause(),
-                    r#"{"kind":"transport","message":"private"}"#,
-                )?;
-            }
+            set_meta(&tx, &IndexKeys::new(&key).pause(), value)?;
             tx.commit()?;
             Ok(())
         })
         .await
         .unwrap();
-        for index in [service.clone(), disabled.clone()] {
-            assert_eq!(
-                db.call(move |db| index.read_display_pause(db))
-                    .await
-                    .unwrap(),
-                Some(PauseReason::Transport)
-            );
+    }
+
+    #[tokio::test]
+    async fn real_retry_clears_persisted_pause_and_notifies() {
+        let temp = tempfile::tempdir().unwrap();
+        let db = DbWorker::open(temp.path().join("pause.sqlite"))
+            .await
+            .unwrap();
+        let disabled = IndexService::new(db.clone(), Arc::new(configured(false)));
+        assert!(disabled.profile_key.is_some());
+        assert!(disabled.endpoint_family_key.is_some());
+        assert_eq!(shown(&disabled).await, None);
+        let service = IndexService::new(db.clone(), Arc::new(configured(true)));
+        let family = service.endpoint_family_key.clone().unwrap();
+        let profile = service.profile_key.clone().unwrap();
+        for key in [family, profile] {
+            save_pause(&db, key, r#"{"kind":"transport","message":"private"}"#).await;
+        }
+        for index in [&service, &disabled] {
+            assert_eq!(shown(index).await, Some(PauseReason::Transport));
         }
         service.retry(IndexArgs::default()).await.unwrap();
         crate::test_watchdog::watchdog("saved pause retry notification", service.pause_changed())
             .await
             .unwrap();
-        for index in [service.clone(), disabled] {
-            assert_eq!(
-                db.call(move |db| index.read_display_pause(db))
-                    .await
-                    .unwrap(),
-                None
-            );
+        for index in [&service, &disabled] {
+            assert_eq!(shown(index).await, None);
         }
         db.shutdown().await.unwrap();
     }
 
-    #[test]
-    fn persisted_pause_uses_family_then_profile_and_clears_on_retry() {
-        let db = Connection::open_in_memory().unwrap();
-        db.execute_batch("CREATE TABLE app_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL); INSERT INTO app_meta VALUES('index.pause.other','{}');").unwrap();
-        assert_eq!(read_display_pause_tx(&db, None, None).unwrap(), None);
-        assert_eq!(
-            read_display_pause_tx(&db, Some("p"), Some("f")).unwrap(),
-            None
-        );
-        db.execute(
-            "INSERT INTO app_meta VALUES('index.pause.p',?1)",
-            [r#"{"kind":"transport","message":"private"}"#],
+    /// `index.status` resolves the pause scope like the owner's context
+    /// observation: the endpoint family before the profile.
+    #[tokio::test]
+    async fn status_pause_uses_family_before_profile() {
+        let temp = tempfile::tempdir().unwrap();
+        let db = DbWorker::open(temp.path().join("pause.sqlite"))
+            .await
+            .unwrap();
+        let service = IndexService::new(db.clone(), Arc::new(configured(true)));
+        let family = service.endpoint_family_key.clone().unwrap();
+        let profile = service.profile_key.clone().unwrap();
+        assert_ne!(family, profile);
+        save_pause(&db, "other".into(), "{}").await;
+        assert_eq!(shown(&service).await, None);
+        save_pause(
+            &db,
+            profile.clone(),
+            r#"{"kind":"transport","message":"private"}"#,
         )
+        .await;
+        assert_eq!(shown(&service).await, Some(PauseReason::Transport));
+        save_pause(&db, family.clone(), r#"{"kind":"provider","status":401}"#).await;
+        assert_eq!(shown(&service).await, Some(PauseReason::Authentication));
+        db.call(move |db| {
+            db.execute(
+                "DELETE FROM app_meta WHERE key=?1",
+                [IndexKeys::new(&profile).pause()],
+            )?;
+            Ok(())
+        })
+        .await
         .unwrap();
-        assert_eq!(
-            read_display_pause_tx(&db, Some("p"), Some("f")).unwrap(),
-            Some(PauseReason::Transport)
-        );
-        db.execute(
-            "INSERT INTO app_meta VALUES('index.pause.f',?1)",
-            [r#"{"kind":"provider","status":401}"#],
-        )
+        assert_eq!(shown(&service).await, Some(PauseReason::Authentication));
+        db.call(move |db| {
+            db.execute(
+                "DELETE FROM app_meta WHERE key=?1",
+                [IndexKeys::new(&family).pause()],
+            )?;
+            Ok(())
+        })
+        .await
         .unwrap();
-        assert_eq!(
-            read_display_pause_tx(&db, Some("p"), Some("f")).unwrap(),
-            Some(PauseReason::Authentication)
-        );
-        assert_eq!(
-            read_display_pause_tx(&db, None, Some("f")).unwrap(),
-            Some(PauseReason::Authentication)
-        );
-        db.execute(
-            "DELETE FROM app_meta WHERE key IN ('index.pause.p','index.pause.f')",
-            [],
-        )
-        .unwrap();
-        assert_eq!(
-            read_display_pause_tx(&db, Some("p"), Some("f")).unwrap(),
-            None
-        );
+        assert_eq!(shown(&service).await, None);
+        db.shutdown().await.unwrap();
     }
 
     #[test]
@@ -1940,18 +1895,6 @@ mod display_pause_tests {
         assert_eq!(
             pause_reason(&"x".repeat(MAX_DISPLAY_PAUSE_BYTES + 1)),
             PauseReason::Other
-        );
-        let db = Connection::open_in_memory().unwrap();
-        db.execute_batch("CREATE TABLE app_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL)")
-            .unwrap();
-        db.execute(
-            "INSERT INTO app_meta VALUES('index.pause.f', ?1)",
-            ["x".repeat(1_000_000)],
-        )
-        .unwrap();
-        assert_eq!(
-            read_display_pause_tx(&db, Some("p"), Some("f")).unwrap(),
-            Some(PauseReason::Other)
         );
     }
 }
