@@ -765,7 +765,7 @@ async fn fork_selection_sharing_and_path_reattachment_keep_managed_image_active(
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_clipboard_save_cancelled_after_its_insert_was_admitted_releases_the_pin() {
+async fn a_clipboard_save_cancelled_after_its_insert_was_admitted_releases_and_fails_its_row() {
     let f = Fixture::new(Config::default()).await;
     // Hold the DB worker so the save's insert is admitted but not yet run.
     let (open, gate) = std::sync::mpsc::channel::<()>();
@@ -794,8 +794,19 @@ async fn a_clipboard_save_cancelled_after_its_insert_was_admitted_releases_the_p
     }
     open.send(()).unwrap();
     held.receive().await.unwrap();
-    // The insert commits after the cancellation; its pin must still go.
+    // The insert commits after the cancellation; its pin must still go, and
+    // the abandoned `creating` row becomes reclaimable.
     f.wait_pins(0).await;
+    let state: String =
+        f.db.call(|db| Ok(db.query_row("SELECT state FROM managed_file", [], |r| r.get(0))?))
+            .await
+            .unwrap();
+    assert_eq!(state, "failed");
+    let report = f.service.collect_managed(chrono::Utc::now()).await.unwrap();
+    assert!(
+        !report.deleted.is_empty(),
+        "the abandoned save is collected"
+    );
     f.db.shutdown().await.unwrap();
 }
 
@@ -804,8 +815,12 @@ async fn startup_removes_crash_left_temporary_images_but_not_a_live_save() {
     let f = Fixture::new(Config::default()).await;
     let tmp = f.path.join("tmp");
     std::fs::create_dir_all(&tmp).unwrap();
-    for name in ["crashed.png.tmp", "live.png.tmp", "unrelated.tmp"] {
+    for name in ["live.png.tmp", "unrelated.tmp"] {
         std::fs::write(tmp.join(name), b"partial").unwrap();
+    }
+    // More crash leftovers than one sweep batch, so discovery takes several.
+    for i in 0..300 {
+        std::fs::write(tmp.join(format!("crashed-{i}.png.tmp")), b"partial").unwrap();
     }
     let live = f
         .path
@@ -820,7 +835,12 @@ async fn startup_removes_crash_left_temporary_images_but_not_a_live_save() {
     .await
     .unwrap();
     f.service.restart_cleanup().await.unwrap();
-    assert!(!tmp.join("crashed.png.tmp").exists());
+    let left: Vec<_> = std::fs::read_dir(&tmp)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+        .filter(|name| name.starts_with("crashed-"))
+        .collect();
+    assert!(left.is_empty(), "crash leftovers remain: {left:?}");
     assert!(
         tmp.join("live.png.tmp").exists(),
         "a save of this instance keeps its file"

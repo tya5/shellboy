@@ -258,9 +258,8 @@ impl OutputStreamReader {
                 decode_errors |= bad;
             }
             self.done = true;
-            if let Some(mut pin) = self.pin.take() {
-                pin.release().await?;
-            }
+            // Dropping the lease queues its release on the DB worker.
+            drop(self.pin.take());
         }
         Ok(Some(DecodedOutputPage {
             text,
@@ -301,9 +300,11 @@ impl ShellOutputReader {
         let pin = ReadPin::new(self.database.clone(), self.instance.to_string());
         let execution = execution_id.to_owned();
         let pin_id = pin.id();
+        let insert = pin.insert_token();
         let instance = pin.instance.clone();
         let state = self
             .db(move |db| {
+                let _insert = insert;
                 let tx = db.transaction().map_err(sql_error)?;
                 let mut state = snapshot(&tx, &execution)?;
                 set_raw_start(&tx, &mut state, &execution)?;
@@ -395,14 +396,16 @@ impl ShellOutputReader {
             .as_deref()
             .map(OutputCursor::decode)
             .transpose()?;
-        let mut pin = ReadPin::new(self.database.clone(), self.instance.to_string());
+        let pin = ReadPin::new(self.database.clone(), self.instance.to_string());
         let execution = args.execution_id.clone();
         let pin_id = pin.id();
+        let insert = pin.insert_token();
         let instance = pin.instance.clone();
         let expected = old.clone();
         let requested = canonical.clone();
         let wakes = self.database.wait_wakes();
         let prepared=self.db(move|db|{
+            let _insert = insert;
             let tx=db.transaction().map_err(sql_error)?;
             let mut state=snapshot(&tx,&execution)?;
             if let Some(cursor)=&expected{validate_cursor(&tx,&state,&execution,cursor,requested.as_deref(),Some(streams))?;}
@@ -433,14 +436,8 @@ impl ShellOutputReader {
             }
             Err(error) => Err(error),
         };
-        let released = pin.release().await;
-        match result {
-            Ok(value) => {
-                released?;
-                Ok(value)
-            }
-            Err(error) => Err(error),
-        }
+        drop(pin);
+        result
     }
     async fn read_pinned(
         &self,
@@ -575,12 +572,14 @@ impl ShellOutputReader {
         if limit_bytes == 0 {
             return Ok(String::new());
         }
-        let mut pin = ReadPin::new(self.database.clone(), self.instance.to_string());
+        let pin = ReadPin::new(self.database.clone(), self.instance.to_string());
         let execution = execution_id.to_owned();
         let pin_id = pin.id();
+        let insert = pin.insert_token();
         let instance = pin.instance.clone();
         let prepared = self
             .db(move |db| {
+                let _insert = insert;
                 let tx = db.transaction().map_err(sql_error)?;
                 let mut state = snapshot(&tx, &execution)?;
                 set_raw_start(&tx, &mut state, &execution)?;
@@ -593,12 +592,9 @@ impl ShellOutputReader {
             Ok(state) => self.excerpt_pinned(execution_id, state, limit_bytes).await,
             Err(error) => Err(error),
         };
-        let released = pin.release().await;
+        drop(pin);
         match result {
-            Ok(value) => {
-                released?;
-                Ok(value)
-            }
+            Ok(value) => Ok(value),
             Err(error) if error.code == ErrorCode::OutputExpired => {
                 let reason = error
                     .details
@@ -870,19 +866,16 @@ impl ReadPin {
     }
     fn new(database: DbWorker, instance: String) -> Self {
         Self {
-            // Releasing a read pin marks no maintenance work, as before.
-            lease: crate::runtime_pin::PinLease::new(database, &[]),
+            lease: crate::runtime_pin::PinLease::new(database),
             instance,
         }
     }
     fn id(&self) -> String {
         crate::runtime_pin::pin_id(&self.lease.prefix(), 0)
     }
-    async fn release(&mut self) -> Result<()> {
-        self.lease
-            .release()
-            .await
-            .map_err(StorageError::into_api_error)
+    /// Move into the registering job's closure; the release waits for it.
+    fn insert_token(&self) -> Arc<()> {
+        self.lease.insert_token()
     }
 }
 fn error(code: ErrorCode, message: impl Into<String>) -> ApiError {

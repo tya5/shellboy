@@ -6,11 +6,6 @@ mod draft_image;
 mod registration;
 mod selection;
 use crate::runtime_pin::PinLease;
-/// Released managed-file pins can make managed images and raw output collectable.
-const SEND_PINS: [crate::maintenance::Work; 2] = [
-    crate::maintenance::Work::Managed,
-    crate::maintenance::Work::Raw,
-];
 use selection::snapshot_selection_tx;
 mod success;
 use crate::{
@@ -446,11 +441,12 @@ impl AttachmentService {
         let thread = thread_id.to_owned();
         let instance = self.instance_id.clone();
         // The lease exists before its rows: a failed or cancelled preparation releases them.
-        let pins = Arc::new(PinLease::new(self.database.clone(), &SEND_PINS));
-        let prefix = pins.prefix();
+        let mut pins = PinLease::new(self.database.clone());
+        let (prefix, insert) = (pins.prefix(), pins.insert_token());
         let snapshot = self
             .database
             .call(move |db| {
+                let _insert = insert;
                 let tx = db.transaction()?;
                 let snapshot =
                     snapshot_selection_tx(&tx, &thread, &instance, expected_revision, &prefix)?;
@@ -467,6 +463,7 @@ impl AttachmentService {
         if pinned == 0 {
             pins.nothing_inserted();
         }
+        let pins = Arc::new(pins);
         let deadline = self.deadline();
         let mut sizes = BTreeMap::new();
         let file_limit = self.config.limits.attachment_file_bytes;
@@ -1263,10 +1260,14 @@ impl AttachmentService {
         let row = managed.clone();
         let location = path.to_string_lossy().into_owned();
         let instance = self.instance_id.clone();
-        // The lease exists before its row: a failed or cancelled save releases it.
-        let lease = Arc::new(PinLease::new(self.database.clone(), &SEND_PINS));
-        let pin_id = crate::runtime_pin::pin_id(&lease.prefix(), 0);
-        self.database.call(move|db|{let tx=db.transaction()?;tx.execute("INSERT INTO managed_file(id,absolute_path,state,created_at)VALUES(?1,?2,'creating',?3)",params![row,location,now()])?;tx.execute("INSERT INTO runtime_pin(id,instance_id,resource_kind,resource_id,generation,created_at)VALUES(?1,?2,'managed_file',?3,0,?4)",params![pin_id,instance,row,now()])?;tx.commit()?;Ok(())}).await.map_err(storage_error)?;
+        // The lease exists before its row: a failed or cancelled save releases
+        // its pin and, if the row is still `creating`, fails it for collection.
+        let lease = Arc::new(PinLease::creating(self.database.clone(), managed.clone()));
+        let (pin_id, insert) = (
+            crate::runtime_pin::pin_id(&lease.prefix(), 0),
+            lease.insert_token(),
+        );
+        self.database.call(move|db|{let _insert=insert;let tx=db.transaction()?;tx.execute("INSERT INTO managed_file(id,absolute_path,state,created_at)VALUES(?1,?2,'creating',?3)",params![row,location,now()])?;tx.execute("INSERT INTO runtime_pin(id,instance_id,resource_kind,resource_id,generation,created_at)VALUES(?1,?2,'managed_file',?3,0,?4)",params![pin_id,instance,row,now()])?;tx.commit()?;Ok(())}).await.map_err(storage_error)?;
         let worker_lease = lease.clone();
         let output = path.clone();
         let limit = self.config.limits.attachment_file_bytes;
@@ -1359,66 +1360,87 @@ impl AttachmentService {
         self.collect_managed(chrono::Utc::now()).await
     }
     /// Startup, under the owner lock (#450): remove `tmp/<id>.png.tmp` files a
-    /// crashed or abandoned clipboard save left. A file whose managed row is
-    /// still `creating` belongs to a save of this instance and stays; its row
-    /// is inserted before its file, so listing first and reading rows second
-    /// cannot miss one. Other files in `tmp` are not touched.
+    /// crashed or abandoned clipboard save left, in batches of at most
+    /// `MANAGED_UNIT` names: one bounded directory scan, one bounded row
+    /// lookup and the unlinks per batch. A file whose managed row is still
+    /// `creating` belongs to a save of this instance and stays (its row is
+    /// inserted before its file, so listing first and reading rows second
+    /// cannot miss one); later batches skip it. Other files are not touched.
     async fn sweep_temporary_images(&self) -> Result<(), ApiError> {
         const SUFFIX: &str = ".png.tmp";
+        let batch = MANAGED_UNIT.get() as usize;
         let directory = self.data_dir.join("tmp");
-        let listing = directory.clone();
-        let listed = self
-            .control_workers
-            .execute(self.deadline(), CancellationToken::new(), move || {
-                let entries = match std::fs::read_dir(&listing) {
-                    Ok(entries) => entries,
-                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-                    Err(e) => return Err(io_error(e.to_string())),
-                };
-                let mut ids = Vec::new();
-                for entry in entries {
-                    let entry = entry.map_err(|e| io_error(e.to_string()))?;
-                    let name = entry.file_name();
-                    let Some(id) = name.to_str().and_then(|name| name.strip_suffix(SUFFIX)) else {
-                        continue;
-                    };
-                    if entry
-                        .file_type()
-                        .map_err(|e| io_error(e.to_string()))?
-                        .is_file()
-                    {
-                        ids.push(id.to_owned());
-                    }
-                }
-                Ok(ids)
-            })
-            .await?;
-        if listed.is_empty() {
-            return Ok(());
-        }
-        let listed = json!(listed).to_string();
-        let stale = self
-            .database
-            .call(move |db| {
-                Ok(db
-                    .prepare("SELECT j.value FROM json_each(?1) j WHERE NOT EXISTS(SELECT 1 FROM managed_file m WHERE m.id=j.value AND m.state='creating')")?
-                    .query_map([listed], |r| r.get::<_, String>(0))?
-                    .collect::<rusqlite::Result<Vec<_>>>()?)
-            })
-            .await
-            .map_err(storage_error)?;
-        self.control_workers
-            .execute(self.deadline(), CancellationToken::new(), move || {
-                for id in stale {
-                    match std::fs::remove_file(directory.join(format!("{id}{SUFFIX}"))) {
-                        Ok(()) => {}
-                        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        let mut kept = std::collections::BTreeSet::new();
+        loop {
+            let (listing, skip) = (directory.clone(), kept.clone());
+            let listed = self
+                .control_workers
+                .execute(self.deadline(), CancellationToken::new(), move || {
+                    let entries = match std::fs::read_dir(&listing) {
+                        Ok(entries) => entries,
+                        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                            return Ok(Vec::new());
+                        }
                         Err(e) => return Err(io_error(e.to_string())),
+                    };
+                    let mut ids = Vec::new();
+                    for entry in entries {
+                        let entry = entry.map_err(|e| io_error(e.to_string()))?;
+                        let name = entry.file_name();
+                        let Some(id) = name.to_str().and_then(|name| name.strip_suffix(SUFFIX))
+                        else {
+                            continue;
+                        };
+                        if skip.contains(id)
+                            || !entry
+                                .file_type()
+                                .map_err(|e| io_error(e.to_string()))?
+                                .is_file()
+                        {
+                            continue;
+                        }
+                        ids.push(id.to_owned());
+                        if ids.len() == batch {
+                            break;
+                        }
                     }
-                }
-                Ok(())
-            })
-            .await
+                    Ok(ids)
+                })
+                .await?;
+            let last = listed.len() < batch;
+            if listed.is_empty() {
+                return Ok(());
+            }
+            let ids = json!(listed).to_string();
+            let live = self
+                .database
+                .call(move |db| {
+                    Ok(db
+                        .prepare("SELECT j.value FROM json_each(?1) j WHERE EXISTS(SELECT 1 FROM managed_file m WHERE m.id=j.value AND m.state='creating')")?
+                        .query_map([ids], |r| r.get::<_, String>(0))?
+                        .collect::<rusqlite::Result<std::collections::BTreeSet<_>>>()?)
+                })
+                .await
+                .map_err(storage_error)?;
+            let stale: Vec<String> = listed.into_iter().filter(|id| !live.contains(id)).collect();
+            kept.extend(live);
+            let target = directory.clone();
+            self.control_workers
+                .execute(self.deadline(), CancellationToken::new(), move || {
+                    for id in stale {
+                        match std::fs::remove_file(target.join(format!("{id}{SUFFIX}"))) {
+                            Ok(()) => {}
+                            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                            Err(e) => return Err(io_error(e.to_string())),
+                        }
+                    }
+                    Ok(())
+                })
+                .await?;
+            if last {
+                return Ok(());
+            }
+        }
     }
     pub async fn collect_managed(
         &self,

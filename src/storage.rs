@@ -451,6 +451,8 @@ struct Shared {
     slow_limit: Arc<Mutex<SlowJobLimit>>,
     /// Committed-change signals for background maintenance requesters.
     signals: Arc<crate::maintenance::Signals>,
+    /// Runtime-pin releases of dropped leases, drained by the worker thread.
+    pin_releases: Arc<crate::runtime_pin::Releases>,
     checkpoint_attempts: Arc<AtomicUsize>,
     #[cfg(test)]
     background_steps: StepLog,
@@ -809,6 +811,8 @@ impl DbWorker {
         let slow_limit = Arc::new(Mutex::new(SlowJobLimit::new()));
         let next_job_id = Arc::new(AtomicU64::new(0));
         let checkpoint_attempts = Arc::new(AtomicUsize::new(0));
+        let signals: Arc<crate::maintenance::Signals> = Arc::default();
+        let pin_releases: Arc<crate::runtime_pin::Releases> = Arc::default();
         #[cfg(test)]
         let background_steps = Arc::new(Mutex::new(Vec::new()));
         let worker = WorkerState {
@@ -821,6 +825,8 @@ impl DbWorker {
             next_job_id: next_job_id.clone(),
             checkpoint_attempts: checkpoint_attempts.clone(),
             gc_coordinator: crate::compaction::WriterGcCoordinator::default(),
+            signals: signals.clone(),
+            pin_releases: pin_releases.clone(),
             #[cfg(test)]
             background_steps: background_steps.clone(),
         };
@@ -859,7 +865,8 @@ impl DbWorker {
                 active_job,
                 activity_updates,
                 slow_limit,
-                signals: Arc::default(),
+                signals,
+                pin_releases,
                 checkpoint_attempts,
                 #[cfg(test)]
                 background_steps,
@@ -985,6 +992,9 @@ impl DbWorker {
     /// Producers mark committed changes here; the maintenance requester waits on it.
     pub fn signals(&self) -> &Arc<crate::maintenance::Signals> {
         &self.shared.signals
+    }
+    pub(crate) fn pin_releases(&self) -> &crate::runtime_pin::Releases {
+        &self.shared.pin_releases
     }
 
     /// Subscribe to active-job and no-progress snapshots without using the DB queue.
@@ -1643,6 +1653,8 @@ struct WorkerState {
     next_job_id: Arc<AtomicU64>,
     checkpoint_attempts: Arc<AtomicUsize>,
     gc_coordinator: crate::compaction::WriterGcCoordinator,
+    signals: Arc<crate::maintenance::Signals>,
+    pin_releases: Arc<crate::runtime_pin::Releases>,
     #[cfg(test)]
     background_steps: StepLog,
 }
@@ -1780,6 +1792,8 @@ fn run_worker(
                 if lane == Lane::Foreground {
                     state.foreground_waiting.fetch_sub(1, Ordering::AcqRel);
                 }
+                // Every job observes the pins of leases dropped before it.
+                state.pin_releases.drain(&mut connection, &state.signals);
                 lanes.background_turn = lane == Lane::Foreground;
                 let started = Instant::now();
                 let queue = started.duration_since(queued_at);
@@ -1820,6 +1834,8 @@ fn run_worker(
                     .filter(|c| c.counter_scope.is_some() || c.rows.is_some());
                 drop(observation);
                 let run = started.elapsed();
+                // A lease dropped while this job held its insert releases now.
+                state.pin_releases.drain(&mut connection, &state.signals);
                 let diagnostics = state.diagnostics.try_lock().ok();
                 let diagnostics = diagnostics.as_ref().and_then(|guard| guard.as_ref());
                 let name = || kind.replace("::", ".");

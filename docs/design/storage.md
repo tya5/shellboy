@@ -381,6 +381,20 @@ the `db_job_slow` names.
   a full pass from the start (explicit collect) and 0 otherwise.
   `gc.GcService.details` (`storage status`) runs the full split on a reader
   connection through `presentation::work`, not on the writer.
+- **Raw markers (#450).** `RawMarkers` is a maintenance kind owned by raw
+  retention: one full sweep of `raw_tombstone.*` markers in 128-key units,
+  marked after commit by definition removal, Thread deletion, a reservation
+  that supersedes an already collected execution, startup and an explicit raw
+  collect. A deferred unit keeps the in-memory position and restores the kind.
+  See [GC](gc.md#raw-markers-and-thread-owned-executions-450).
+- **Runtime-pin release queue (#450).** Why: a lease dropped without awaiting
+  (cancellation, a lease held by a file worker) must still release its rows,
+  and only after its insert job ran. Owner: the DB worker; `PinLease::drop`
+  pushes one entry and never spawns or waits. Bound: one entry per lease
+  dropped and not yet released; the worker thread drains at most 128 ready
+  entries per job boundary in its own transaction and keeps them on failure.
+  Shutdown: entries left when the worker exits belong to this instance, whose
+  pins startup cleanup deletes. See [GC](gc.md#runtime-pin-release-and-crash-temporaries-450).
 - **Schema22 (`0022_logical_usage_counters`).** Four `quota_counter` rows
   (`logical.history`, `logical.raw`, `logical.managed`, `logical.index`)
   maintained by AFTER INSERT/UPDATE OF/DELETE triggers on the 12 counted
