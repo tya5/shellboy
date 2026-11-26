@@ -104,6 +104,16 @@ impl PendingMessage {
             ),
             HeldBy::RecoveryWait => i18n::local!(language, "復旧待ち", "Waiting for recovery"),
             HeldBy::Stopping => i18n::local!(language, "停止", "Stopped"),
+            HeldBy::PreviousInstanceInterrupted => i18n::local!(
+                language,
+                "前回の終了で中断",
+                "Interrupted by previous shutdown"
+            ),
+            HeldBy::TerminalBeforePathAdmission => i18n::local!(
+                language,
+                "中断前の未反映",
+                "Not delivered before interruption"
+            ),
             HeldBy::Unknown => return None,
         })
     }
@@ -1155,7 +1165,7 @@ mod tests {
         let mut pending = queued("id");
         pending.excerpt = "visible\x1b[2J text".into();
         pending.held = true;
-        pending.held_by = Some(crate::protocol::MessageHeldBy::Stopping);
+        pending.held_by = Some(crate::protocol::MessageHeldBy::TerminalBeforePathAdmission);
         ui.active_view_mut().pending_messages = PendingMessages {
             items: vec![pending],
             total: 1,
@@ -1180,7 +1190,7 @@ mod tests {
             }
             shown.push('\n');
         }
-        assert!(shown.contains("停止"));
+        assert!(shown.contains("中断前の未反映"));
         assert!(!shown.contains('\x1b'));
     }
     #[test]
@@ -1461,7 +1471,7 @@ mod language_tests {
         let item = &mut ui.view_mut().pending_messages.items[0];
         item.sender_thread = Some("12345678-rest".into());
         item.uncertain = true;
-        item.held_by = Some(crate::protocol::MessageHeldBy::RecoveryWait);
+        item.held_by = Some(crate::protocol::MessageHeldBy::TerminalBeforePathAdmission);
     }
     #[test]
     fn pending_popup_shows_the_full_action_in_both_languages() {
@@ -1483,11 +1493,12 @@ mod language_tests {
             UiLanguage::En => &[
                 "Conversation 12345678",
                 "Delivery unknown",
-                "Waiting",
-                "for",
-                "recovery",
+                "Not",
+                "delivered",
+                "before",
+                "interruption",
             ],
-            UiLanguage::Ja => &["会話 12345678", "反映状況不明", "復旧待ち"],
+            UiLanguage::Ja => &["会話 12345678", "反映状況不明", "中断前の未反映"],
         });
         use crate::ui::text_width::UnicodeWidthStr;
         for observed in [Some(1), Some(2), None] {

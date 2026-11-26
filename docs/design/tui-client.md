@@ -222,7 +222,11 @@ gap, not yet witnessed).
 
 The refresh, page, window, rebase and saved-message installs still use the
 private snapshot; their move also needs human duties from the combined
-`message.list` and known-draft settlement through `operation.get`.
+`message.list` and known-draft settlement through `operation.get`, and the
+owner's `read_sequence` replaces the client read counter for all of them at
+once. Open on #311: the refresh also annotates pinned tool nodes outside the
+selected window (up to 128), whose mutable facts the window observation does
+not cover.
 
 ### Draft save and selected view
 

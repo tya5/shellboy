@@ -919,6 +919,47 @@ mod tests {
             serde_json::from_value(response.result.unwrap()).unwrap();
         let row = &window.observation.unwrap().pending.items[0];
         assert!(row.expect_reply && row.admission_uncertain && row.completion_scheduled);
+        // Saved hold reasons Core verified are typed holds, not `unknown`.
+        for (reason, held_by) in [
+            (
+                "terminal_before_path_admission",
+                crate::protocol::MessageHeldBy::TerminalBeforePathAdmission,
+            ),
+            (
+                "previous_instance_interrupted",
+                crate::protocol::MessageHeldBy::PreviousInstanceInterrupted,
+            ),
+            ("stopping", crate::protocol::MessageHeldBy::Stopping),
+        ] {
+            owner
+                .db
+                .call(move |db| {
+                    db.execute(
+                        "UPDATE receipt SET hold_reason=?1 WHERE message_node_id='held-paired'",
+                        [reason],
+                    )?;
+                    Ok(())
+                })
+                .await
+                .unwrap();
+            let response = crate::ipc::call_selected_operation(
+                &owner.loaded.data_dir,
+                &control.store.instance_id,
+                Command::HistoryWindow(
+                    serde_json::from_value(json!({"thread_id": "t", "include_observation": true}))
+                        .unwrap(),
+                ),
+                None,
+            )
+            .await
+            .unwrap();
+            let window: crate::protocol::HistoryWindow =
+                serde_json::from_value(response.result.unwrap()).unwrap();
+            assert_eq!(
+                window.observation.unwrap().pending.items[0].held_by,
+                Some(held_by)
+            );
+        }
 
         server.shutdown().await.unwrap();
         dispatcher.await.unwrap();
