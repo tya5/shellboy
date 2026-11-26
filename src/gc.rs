@@ -108,9 +108,8 @@ pub struct GcService {
     /// The GC background requester: one outstanding unit (storage design #171).
     requester: Arc<Mutex<BackgroundRequester>>,
     raw_cursor: Arc<std::sync::Mutex<RawCursor>>,
-    /// Position of the full raw-marker sweep (#450); a deferred sweep resumes
-    /// here, a completed one starts over. Restart repeats.
-    raw_marker_cursor: Arc<std::sync::Mutex<String>>,
+    /// The marker owner requests one full sweep on its first pass (#450).
+    marker_sweep_requested: Arc<std::sync::atomic::AtomicBool>,
     history_batch: Arc<std::sync::Mutex<HistoryBatch>>,
     history_discovery: Arc<std::sync::Mutex<i64>>,
     history_candidate: Arc<std::sync::Mutex<Option<String>>>,
@@ -365,7 +364,7 @@ impl GcService {
         Self {
             requester: Arc::new(Mutex::new(BackgroundRequester::new(database.clone()))),
             raw_cursor: Arc::default(),
-            raw_marker_cursor: Arc::default(),
+            marker_sweep_requested: Arc::default(),
             history_batch: Arc::new(std::sync::Mutex::new(HistoryBatch::new(String::new()))),
             history_discovery: Arc::default(),
             history_candidate: Arc::default(),
@@ -494,10 +493,11 @@ impl GcService {
             StorageCategory::ManagedImages => &[Work::Managed],
         };
         self.raw_cursor.lock().expect("raw cursor").rescan = true;
-        self.raw_marker_cursor
-            .lock()
-            .expect("raw marker cursor")
-            .clear();
+        if works.contains(&Work::RawMarkers) {
+            // An explicit collect also sweeps every marker once.
+            self.marker_sweep_requested
+                .store(false, std::sync::atomic::Ordering::Release);
+        }
         let mut hold = self.hold().await;
         self.collect_held(&mut hold, works, at).await
     }
@@ -938,12 +938,10 @@ impl GcService {
                     report.raw_bytes_collected += step.0;
                     total = total.saturating_sub(step.0);
                     if step.1 {
-                        // Collection is the eligibility change: settle this
-                        // definition's superseded collected runs now.
-                        if let Some(schedule) = &candidate.schedule
-                            && !self.settle_schedule(requester, schedule, report).await?
-                        {
-                            return Ok(());
+                        if candidate.schedule.is_some() {
+                            // raw_step recorded the definition's settlement
+                            // with the collection; the marker owner runs it.
+                            self.database.signals().mark(Work::RawMarkers);
                         }
                         break;
                     }
@@ -972,66 +970,51 @@ impl GcService {
         report.raw_due = next_due;
         Ok(())
     }
-    /// Deletes one definition's collected, superseded executions with their
-    /// markers (#450), one bounded unit at a time. Returns false when a unit
-    /// was deferred; the kind is then restored for the next pass.
-    async fn settle_schedule(
-        &self,
-        requester: &mut BackgroundRequester,
-        schedule: &str,
-        report: &mut CollectionReport,
-    ) -> Result<bool> {
-        loop {
-            let schedule = schedule.to_owned();
-            let unit = requester
-                .unit(UNIT, move |db, limit| {
-                    settle_schedule_tx(db, &schedule, limit.rows())
-                })
-                .await
-                .map_err(crate::app::storage_error)?;
-            let Background::Done((executions, more)) = unit else {
-                report.defer(Work::Raw);
-                return Ok(false);
-            };
-            self.publish_settled(executions);
-            if !more {
-                return Ok(true);
-            }
-        }
-    }
-    /// The full raw-marker sweep (#450): a marker whose execution row is gone
-    /// is deleted, and a collected execution that is no longer its
-    /// definition's latest is deleted with its marker. `RawMarkers` is marked
-    /// by the changes that make such markers without collecting anything:
-    /// startup, a definition or Thread removal, and a reservation that
-    /// supersedes an already collected execution. One unit is at most 128
-    /// markers; a deferred unit keeps the position and restores the kind, so
-    /// the next pass continues; a completed sweep starts over next time.
+    /// The raw-marker owner (#450). Its pending work is persisted in
+    /// `app_meta` by the transactions that make markers settleable: a
+    /// `raw_settle.def.<definition>` request by a collection or a superseding
+    /// reservation, and `raw_settle.all` (a full sweep with its key cursor) by
+    /// definition or Thread removal, startup and explicit collect. Each unit
+    /// settles at most 128 rows and saves its progress in the same
+    /// transaction, so a deferred or interrupted pass continues from the
+    /// saved state; the byte total and age deadline never gate it.
     async fn collect_raw_markers(
         &self,
         requester: &mut BackgroundRequester,
         report: &mut CollectionReport,
     ) -> Result<()> {
+        let mut request = !self
+            .marker_sweep_requested
+            .swap(true, std::sync::atomic::Ordering::AcqRel);
         loop {
-            let after = self
-                .raw_marker_cursor
-                .lock()
-                .expect("raw marker cursor")
-                .clone();
             let unit = requester
                 .unit(UNIT, move |db, limit| {
-                    settle_markers_tx(db, &after, limit.rows())
+                    let tx = db.transaction()?;
+                    if request {
+                        request_marker_sweep_tx(&tx)?;
+                    }
+                    let outcome = settle_pending_tx(&tx, limit.rows())?;
+                    tx.commit()?;
+                    Ok(outcome)
                 })
-                .await
-                .map_err(crate::app::storage_error)?;
-            let Background::Done((executions, next)) = unit else {
+                .await;
+            if unit.is_err() && request {
+                // The sweep request was not committed; the next pass makes it.
+                self.marker_sweep_requested
+                    .store(false, std::sync::atomic::Ordering::Release);
+            }
+            let unit = unit.map_err(crate::app::storage_error)?;
+            let Background::Done((executions, more)) = unit else {
+                if request {
+                    self.marker_sweep_requested
+                        .store(false, std::sync::atomic::Ordering::Release);
+                }
                 report.defer(Work::RawMarkers);
                 return Ok(());
             };
+            request = false;
             self.publish_settled(executions);
-            let wrapped = next.is_none();
-            *self.raw_marker_cursor.lock().expect("raw marker cursor") = next.unwrap_or_default();
-            if wrapped {
+            if !more {
                 return Ok(());
             }
         }
@@ -1430,6 +1413,17 @@ fn raw_step(
             [format!("{RAW_PREFIX}{execution}")],
         )
         .map_err(sql_error)?;
+        // A collected schedule/service run can make older runs settleable.
+        let schedule: Option<String> = tx
+            .query_row(
+                "SELECT schedule_id FROM shell_execution WHERE id=?1",
+                [execution],
+                |r| r.get(0),
+            )
+            .map_err(sql_error)?;
+        if let Some(schedule) = schedule {
+            request_definition_settlement_tx(&tx, &schedule).map_err(sql_error)?;
+        }
     }
     tx.commit().map_err(sql_error)?;
     if bytes != 0 {
@@ -1442,8 +1436,8 @@ fn raw_step(
 
 /// A settled execution (#450): a terminal schedule/service execution whose
 /// raw marker says `deleted`, with no chunk, no read pin, and a newer execution
-/// of the same definition, so `schedule list` keeps its latest. The one rule
-/// both the per-definition and the full-sweep settlement use.
+/// of the same definition, so `schedule list` keeps its latest. The marker
+/// owner's one rule, for a definition request and the full sweep alike.
 const SETTLED: &str = "s.schedule_id IS NOT NULL AND s.state IN ('exited','failed','stopped') AND EXISTS(SELECT 1 FROM app_meta k WHERE k.key='raw_tombstone.'||s.id AND CASE WHEN json_valid(k.value) THEN json_extract(k.value,'$.state') END='deleted') AND NOT EXISTS(SELECT 1 FROM output_chunk c WHERE c.execution_id=s.id) AND NOT EXISTS(SELECT 1 FROM runtime_pin p WHERE p.resource_kind='shell_output' AND p.resource_id=s.id) AND EXISTS(SELECT 1 FROM shell_execution n WHERE n.schedule_id=s.schedule_id AND n.rowid>s.rowid)";
 
 fn delete_settled(tx: &Transaction<'_>, execution: &str) -> rusqlite::Result<()> {
@@ -1455,62 +1449,109 @@ fn delete_settled(tx: &Transaction<'_>, execution: &str) -> rusqlite::Result<()>
     Ok(())
 }
 
-/// One definition's settled executions; returns them and whether more remain.
-fn settle_schedule_tx(
-    db: &mut Connection,
-    schedule: &str,
-    limit: usize,
-) -> std::result::Result<(Vec<String>, bool), StorageError> {
-    let tx = db.transaction()?;
-    let executions = tx
-        .prepare(&format!(
-            "SELECT s.id FROM shell_execution s WHERE s.schedule_id=?1 AND {SETTLED} LIMIT ?2"
-        ))?
-        .query_map(params![schedule, limit as i64], |r| r.get::<_, String>(0))?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    for execution in &executions {
-        delete_settled(&tx, execution)?;
-    }
-    tx.commit()?;
-    let more = executions.len() == limit;
-    Ok((executions, more))
+const SETTLE_DEFINITION: &str = "raw_settle.def.";
+const SETTLE_ALL: &str = "raw_settle.all";
+
+/// Records, in the caller's transaction, that `definition` may have collected,
+/// superseded executions to settle (#450).
+pub(crate) fn request_definition_settlement_tx(
+    tx: &Connection,
+    definition: &str,
+) -> rusqlite::Result<()> {
+    tx.execute(
+        "INSERT OR IGNORE INTO app_meta(key,value)VALUES(?1,'')",
+        [format!("{SETTLE_DEFINITION}{definition}")],
+    )?;
+    Ok(())
 }
 
-/// One key-range page of raw markers: deletes markers whose execution row is
-/// gone and settled executions with their markers. Returns the deleted
-/// executions and the next cursor, or `None` at the end of the key range.
-fn settle_markers_tx(
-    db: &mut Connection,
-    after: &str,
+/// Records, in the caller's transaction, a full marker sweep from the start
+/// (#450): removed definitions and Threads leave markers of executions that
+/// are gone.
+pub(crate) fn request_marker_sweep_tx(tx: &Connection) -> rusqlite::Result<()> {
+    tx.execute(
+        "INSERT OR REPLACE INTO app_meta(key,value)VALUES(?1,'')",
+        [SETTLE_ALL],
+    )?;
+    Ok(())
+}
+
+/// One unit of the marker owner: the first pending definition (at most
+/// `limit` settled executions), else one page of the full sweep (`limit`
+/// markers). Progress is saved in `tx`. Returns the deleted executions and
+/// whether any request remains.
+fn settle_pending_tx(
+    tx: &Transaction<'_>,
     limit: usize,
-) -> std::result::Result<(Vec<String>, Option<String>), StorageError> {
-    let after = if after.is_empty() { RAW_PREFIX } else { after };
-    let tx = db.transaction()?;
-    let rows = tx
-        .prepare(&format!("SELECT m.key,s.id IS NULL,s.id IS NOT NULL AND {SETTLED} FROM app_meta m LEFT JOIN shell_execution s ON s.id=substr(m.key,15) WHERE m.key>?1 AND m.key<'raw_tombstone/' ORDER BY m.key LIMIT ?2"))?
-        .query_map(params![after, limit as i64], |r| {
-            Ok((
-                r.get::<_, String>(0)?,
-                r.get::<_, bool>(1)?,
-                r.get::<_, bool>(2)?,
-            ))
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
+) -> std::result::Result<(Vec<String>, bool), StorageError> {
+    let definition: Option<String> = tx
+        .query_row(
+            "SELECT key FROM app_meta WHERE key>?1 AND key<'raw_settle.def/' ORDER BY key LIMIT 1",
+            [SETTLE_DEFINITION],
+            |r| r.get(0),
+        )
+        .optional()?;
     let mut executions = Vec::new();
-    for (key, gone, settled) in &rows {
-        if *settled {
-            let execution = &key[RAW_PREFIX.len()..];
-            delete_settled(&tx, execution)?;
-            executions.push(execution.to_owned());
-        } else if *gone {
-            tx.execute("DELETE FROM app_meta WHERE key=?1", [key])?;
+    if let Some(key) = definition {
+        let schedule = &key[SETTLE_DEFINITION.len()..];
+        executions = tx
+            .prepare(&format!(
+                "SELECT s.id FROM shell_execution s WHERE s.schedule_id=?1 AND {SETTLED} LIMIT ?2"
+            ))?
+            .query_map(params![schedule, limit as i64], |r| r.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        for execution in &executions {
+            delete_settled(tx, execution)?;
+        }
+        if executions.len() < limit {
+            tx.execute("DELETE FROM app_meta WHERE key=?1", [&key])?;
+        }
+    } else if let Some(after) = tx
+        .query_row(
+            "SELECT value FROM app_meta WHERE key=?1",
+            [SETTLE_ALL],
+            |r| r.get::<_, String>(0),
+        )
+        .optional()?
+    {
+        let after = if after.is_empty() {
+            RAW_PREFIX.to_owned()
+        } else {
+            after
+        };
+        let rows = tx
+            .prepare(&format!("SELECT m.key,s.id IS NULL,s.id IS NOT NULL AND {SETTLED} FROM app_meta m LEFT JOIN shell_execution s ON s.id=substr(m.key,15) WHERE m.key>?1 AND m.key<'raw_tombstone/' ORDER BY m.key LIMIT ?2"))?
+            .query_map(params![after, limit as i64], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, bool>(1)?, r.get::<_, bool>(2)?))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        for (key, gone, settled) in &rows {
+            if *settled {
+                let execution = &key[RAW_PREFIX.len()..];
+                delete_settled(tx, execution)?;
+                executions.push(execution.to_owned());
+            } else if *gone {
+                tx.execute("DELETE FROM app_meta WHERE key=?1", [key])?;
+            }
+        }
+        match rows.last().filter(|_| rows.len() == limit) {
+            Some((last, _, _)) => {
+                tx.execute(
+                    "UPDATE app_meta SET value=?2 WHERE key=?1",
+                    params![SETTLE_ALL, last],
+                )?;
+            }
+            None => {
+                tx.execute("DELETE FROM app_meta WHERE key=?1", [SETTLE_ALL])?;
+            }
         }
     }
-    tx.commit()?;
-    let next = (rows.len() == limit)
-        .then(|| rows.last().map(|r| r.0.clone()))
-        .flatten();
-    Ok((executions, next))
+    let more: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM app_meta WHERE key>=?1 AND key<'raw_settle/')",
+        ["raw_settle."],
+        |r| r.get(0),
+    )?;
+    Ok((executions, more))
 }
 
 fn work_tables(db: &Connection) -> Result<()> {
@@ -2008,6 +2049,76 @@ mod tests {
             result,
             (0, LEGACY as i64, LEGACY as i64, UNRELATED as i64, 1)
         );
+        db.shutdown().await.unwrap();
+    }
+
+    /// #450: the marker owner saves its sweep position with each unit, so a
+    /// pass interrupted mid-sweep is finished by the next signalled pass
+    /// without an explicit collect.
+    #[tokio::test]
+    async fn an_interrupted_marker_sweep_is_finished_by_the_next_maintenance_pass() {
+        use super::{Work, WorkSet};
+        use std::sync::Arc;
+        let temp = tempfile::tempdir().unwrap();
+        let db = crate::storage::DbWorker::open(temp.path().join("fixture.db"))
+            .await
+            .unwrap();
+        let config = crate::config::Config::default();
+        let attachments = Arc::new(crate::attachments::AttachmentService::new(
+            db.clone(),
+            &config,
+            temp.path().to_owned(),
+            "fixture".into(),
+        ));
+        let gc = super::GcService::new(
+            db.clone(),
+            Arc::new(config),
+            temp.path().to_owned(),
+            attachments,
+        );
+        // Markers of executions a removed definition took with it, more than
+        // one unit, and a failure in the middle of the sweep.
+        db.call(|db| {
+            for i in 0..300 {
+                db.execute(
+                    "INSERT INTO app_meta(key,value)VALUES(?1,'{\"state\":\"deleted\"}')",
+                    [format!("raw_tombstone.gone-{i:03}")],
+                )?;
+            }
+            db.execute_batch("CREATE TRIGGER interrupt_sweep BEFORE DELETE ON app_meta WHEN OLD.key='raw_tombstone.gone-200' BEGIN SELECT RAISE(ABORT,'injected'); END;")?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        let markers = || {
+            let db = db.clone();
+            async move {
+                db.call(|db| {
+                    Ok(db.query_row(
+                        "SELECT count(*) FROM app_meta WHERE key>='raw_tombstone.' AND key<'raw_tombstone/'",
+                        [],
+                        |r| r.get::<_, i64>(0),
+                    )?)
+                })
+                .await
+            }
+        };
+        let mut set = WorkSet::default();
+        set.insert(Work::RawMarkers);
+        assert!(gc.collect_kinds(set, chrono::Utc::now()).await.is_err());
+        let left = markers().await.unwrap();
+        assert!(
+            left > 0 && left < 300,
+            "the committed units before the failure stay done"
+        );
+        db.call(|db| {
+            db.execute_batch("DROP TRIGGER interrupt_sweep")?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        gc.collect_kinds(set, chrono::Utc::now()).await.unwrap();
+        assert_eq!(markers().await.unwrap(), 0);
         db.shutdown().await.unwrap();
     }
 
