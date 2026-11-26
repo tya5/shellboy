@@ -603,3 +603,79 @@ async fn held_answer_or_outcome_across_stop_is_owned_by_the_run_that_admits_it()
         f.shutdown().await;
     }
 }
+
+#[tokio::test]
+async fn interruption_after_outcome_admission_retires_the_notice_and_keeps_the_owner() {
+    let f = fixture(&["worker", "helper"]).await;
+    let (duty, first_run) = f.ask(None, Some("worker"), None).await;
+    let first = f.admit("worker", &first_run).await;
+    f.adopt(&first).await;
+    let (question, _) = f
+        .ask(
+            Some(origin("worker", &first_run, &first.turn)),
+            Some("helper"),
+            None,
+        )
+        .await;
+    f.end_turn(&first).await;
+    assert!(matches!(
+        next(&f.control, "worker", &first_run).await.unwrap(),
+        Next::Done
+    ));
+    f.execute(
+        Command::MessageCancel(MessageCancelArgs {
+            message_ids: vec![question.clone()],
+        }),
+        None,
+    )
+    .await;
+    let outcome_run = f.live_run("worker").await;
+    let handling = f.admit("worker", &outcome_run).await;
+    let notice = format!("reply-outcome-{question}");
+    assert!(handling.events.contains(&notice));
+    assert_eq!(
+        f.reply_fact(&duty).await.0["owner_run_id"],
+        outcome_run.as_str()
+    );
+
+    // A human interrupts the Turn that admitted the notice, before adoption.
+    let turn = handling.turn.clone();
+    f.control
+        .store
+        .database
+        .call(move |db| {
+            db.execute(
+                "UPDATE turn SET interrupt_requested_at='interrupt' WHERE id=?1",
+                [turn],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    super::super::turn_interrupt::acknowledge(&f.control, "worker", &outcome_run)
+        .await
+        .unwrap();
+    let (unadmitted, target, delivery) = f
+        .control
+        .store
+        .database
+        .call(move |db| {
+            Ok((
+                db.query_row("SELECT count(*) FROM event WHERE kind='reply_outcome' AND target_run_id IS NULL", [], |r| r.get::<_, i64>(0))?,
+                db.query_row("SELECT target_run_id FROM event WHERE id=?1", [&notice], |r| r.get::<_, Option<String>>(0))?,
+                db.query_row("SELECT state FROM delivery WHERE event_id=?1", [&notice], |r| r.get::<_, String>(0))?,
+            ))
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        unadmitted, 0,
+        "the interrupted Turn's notice leaves the index"
+    );
+    assert_eq!(target.as_deref(), Some(outcome_run.as_str()));
+    assert_eq!(delivery, "processed");
+    let reply = f.reply_fact(&duty).await.0;
+    assert_eq!(reply["state"], "pending");
+    assert_eq!(reply["owner_run_id"], outcome_run.as_str());
+    f.shutdown().await;
+}

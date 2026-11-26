@@ -201,8 +201,8 @@ pub(super) async fn acknowledge(
         if group_running{return Ok(false);}
         let at=state::now();
         // Settle only notifications that were already in this Turn's input.
-        tx.execute("UPDATE delivery SET state='processed' WHERE recipient_id=?1 AND state='pending' AND (included_attempt_id IN (SELECT id FROM model_attempt WHERE turn_id=?2) OR event_id IN (SELECT json_extract(payload_json,'$.event_id') FROM node WHERE turn_id=?2 AND kind='event'))",params![run,turn])?;
-        tx.execute("UPDATE event SET target_run_id=?1 WHERE kind='context_changed' AND target_run_id IS NULL AND id IN (SELECT event_id FROM delivery WHERE recipient_id=?1 AND state='processed')",[&run])?;
+        let admitted:Vec<String>=tx.prepare("SELECT event_id FROM delivery WHERE recipient_id=?1 AND state='pending' AND (included_attempt_id IN (SELECT id FROM model_attempt WHERE turn_id=?2) OR event_id IN (SELECT json_extract(payload_json,'$.event_id') FROM node WHERE turn_id=?2 AND kind='event'))")?.query_map(params![run,turn],|r|r.get(0))?.collect::<rusqlite::Result<_>>()?;
+        for event in &admitted { message_delivery::settle_notification_tx(&tx,event,&run,None)?; }
         tx.execute("UPDATE turn SET state='stopped',ended_at=?2 WHERE id=?1",params![turn,at])?;
         message_delivery::repair_terminal_tx(&tx,&at)?;
         let carried_count:i64=tx.query_row("SELECT count(*) FROM receipt WHERE turn_id=?1 AND target_thread_id=?2 AND state='held' AND path_admission='unadmitted'",params![turn,thread],|r|r.get(0))?;
@@ -222,6 +222,7 @@ pub(super) async fn acknowledge(
         let envelope=json!({"event_id":event,"kind":"context_changed","payload":payload});
         crate::history::append_node(&tx,&thread,&format!("event-{event}"),Some(&turn),"event",&json!({"role":"developer","content":[{"type":"input_text","text":format!("Shellboy event v1: {envelope}")}],"event_id":event}),&at)?;
         tx.execute("INSERT INTO delivery(event_id,recipient_id,state)VALUES(?1,?2,'processed')",params![event,run])?;
+        message_delivery::settle_notification_tx(&tx,&event,&run,None)?;
         let mut admitted_count=0_i64;
         let mut admitted_ids=Vec::new();
         let mut deferred_ids=Vec::new();

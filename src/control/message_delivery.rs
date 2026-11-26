@@ -56,6 +56,27 @@ pub(crate) fn held_hint(reason: Option<&str>) -> &'static str {
 
 const TERMINAL: &str = "(EXISTS(SELECT 1 FROM run r WHERE r.id=receipt.run_id AND r.state IN ('completed','stopped','failed')) OR EXISTS(SELECT 1 FROM turn u WHERE u.id=receipt.turn_id AND u.state IN ('completed','stopped','failed')))";
 
+/// The one notification settlement: the Run's delivery is processed and an
+/// untargeted context observation or reply outcome records the admitting Run,
+/// which also retires an outcome from `reply_outcome_unadmitted` (#433). Used by
+/// adoption and by Turn interruption.
+pub(crate) fn settle_notification_tx(
+    db: &Connection,
+    event: &str,
+    run: &str,
+    attempt: Option<&str>,
+) -> rusqlite::Result<()> {
+    db.execute(
+        "UPDATE delivery SET state='processed',processed_attempt_id=COALESCE(?3,processed_attempt_id) WHERE event_id=?1 AND recipient_id=?2",
+        params![event, run, attempt],
+    )?;
+    db.execute(
+        "UPDATE event SET target_run_id=?2 WHERE id=?1 AND kind IN ('context_changed','reply_outcome') AND target_run_id IS NULL",
+        params![event, run],
+    )?;
+    Ok(())
+}
+
 /// Call only at an actual message-delivery path boundary, not generic history selection.
 pub(crate) fn mark_admitted_tx(
     db: &Connection,
