@@ -5255,6 +5255,12 @@
         "at": {
           "type": "string"
         },
+        "differs_from_final": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "excerpt": {
           "type": [
             "string",
@@ -5263,6 +5269,12 @@
         },
         "excerpt_limited": {
           "type": "boolean"
+        },
+        "follows_node_id": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "kind": {
           "type": "string"
@@ -7234,7 +7246,8 @@
         "pending",
         "replied",
         "ignored",
-        "cancelled"
+        "cancelled",
+        "recipient_deleted"
       ],
       "type": "string"
     },

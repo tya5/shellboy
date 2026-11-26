@@ -41,11 +41,11 @@ typed `input_limit`; no shortened history is sent. See the
 
 4c (`draft.list`, submitted outcome on the draft record) and 4g
 (`attachment.reload`) are restacked on 4e/4f. Slice 1 (history facts) moves
-input sources, branch and compaction markers and the detail panel's current
-executions to owner reads
+input sources, branch and compaction markers, the received snapshot and the
+detail panel's current executions to owner reads
 ([design](../design/tui-client.md#unit-4d-slice-1-history-facts)). The TUI
-still owns `Control`: the received snapshot and the remaining reads and wakes
-in [the cutover gaps](../design/tui-client.md#unit-4d-cutover-gaps) have no
+still owns `Control`: the remaining reads and wakes in
+[the cutover gaps](../design/tui-client.md#unit-4d-cutover-gaps) have no
 protocol read yet. Next: slices 2 (live work) and 3 (wakes, including
 `retention_changed` for `output_available`).
 

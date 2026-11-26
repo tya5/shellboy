@@ -40,13 +40,7 @@ pub(super) fn saved_relation(raw: &str, body: &str, thread: &str) -> Option<Mess
     } else if accepted.expect_reply {
         let reply = value.get("reply")?.as_object()?;
         let state = reply.get("state")?.as_str()?;
-        relation.reply_state = Some(match state {
-            "pending" => MessageReplyState::Pending,
-            "replied" => MessageReplyState::Replied,
-            "ignored" => MessageReplyState::Ignored,
-            "cancelled" => MessageReplyState::Cancelled,
-            _ => return None,
-        });
+        relation.reply_state = Some(MessageReplyState::parse(state)?);
         if state == "replied" {
             let target = reply.get("node_id")?.as_str()?;
             if !id(target, body) {
@@ -265,6 +259,17 @@ mod tests {
     fn strict_states_conflicts_and_depth_are_fail_closed() {
         let accepted = serde_json::json!({"message_id":"body","thread_id":"thread","delivery_status":"accepted","assignment":"pending","expect_reply":true,"reply":{"state":"pending"}});
         assert!(saved_relation(&accepted.to_string(), "body", "thread").is_some());
+        // Every terminal saved state stays visible, including a deleted recipient.
+        for (state, expected) in [
+            ("ignored", MessageReplyState::Ignored),
+            ("cancelled", MessageReplyState::Cancelled),
+            ("recipient_deleted", MessageReplyState::RecipientDeleted),
+        ] {
+            let mut terminal = accepted.clone();
+            terminal["reply"] = serde_json::json!({"state": state});
+            let relation = saved_relation(&terminal.to_string(), "body", "thread").unwrap();
+            assert_eq!(relation.reply_state, Some(expected));
+        }
         for reply in [
             serde_json::json!({"state":"unknown"}),
             serde_json::json!({"state":"pending","node_id":null}),

@@ -3032,7 +3032,7 @@ mod received_tests {
                 generation,
                 selection_revision: 7,
                 view_revision: None,
-                root_revision: 10,
+                request_sequence: 10,
                 nodes: vec![("selected-predecessor".into(), incoming)],
             });
             let view = ui.view();
@@ -3191,13 +3191,13 @@ mod received_tests {
         ui.view_mut().selection_revision = 7;
         ui.view_mut().navigation.view_revision = 5;
         ui.view_mut().received_window_revision = Some(5);
-        let refresh = |selection_revision, view_revision, root_revision, nodes| {
+        let refresh = |selection_revision, view_revision, request_sequence, nodes| {
             UiUpdate::IncompleteResponses {
                 thread_id: "t".into(),
                 generation,
                 selection_revision,
                 view_revision,
-                root_revision,
+                request_sequence,
                 nodes,
             }
         };
@@ -3248,12 +3248,12 @@ mod received_tests {
                 char_offset: 0,
             },
         };
-        let received = |revision, root_revision| UiUpdate::IncompleteResponses {
+        let received = |revision, request_sequence| UiUpdate::IncompleteResponses {
             thread_id: "t".into(),
             generation,
             selection_revision: 7,
             view_revision: Some(revision),
-            root_revision,
+            request_sequence,
             nodes: vec![("anchor".into(), node("paid", "received_response"))],
         };
         ui.view_mut().navigation.select_reading();
@@ -3289,7 +3289,7 @@ mod received_tests {
             generation,
             selection_revision: 7,
             view_revision: Some(6),
-            root_revision: 12,
+            request_sequence: 12,
             nodes: vec![],
         });
         assert!(!ui.view().nodes.iter().any(|node| node.node_id == "paid"));
@@ -3427,7 +3427,7 @@ mod received_tests {
             generation: generation + 100,
             selection_revision: 0,
             view_revision: None,
-            root_revision: 0,
+            request_sequence: 0,
             nodes: vec![],
         });
         assert_eq!(ui.view().thread_id.as_deref(), Some("other"));

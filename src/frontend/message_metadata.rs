@@ -131,6 +131,7 @@ pub(super) fn apply(node: &mut UiNode, provenance: &NodeProvenance, sources: &So
             MessageReplyState::Replied => ReplyState::Replied,
             MessageReplyState::Ignored => ReplyState::Ignored,
             MessageReplyState::Cancelled => ReplyState::Cancelled,
+            MessageReplyState::RecipientDeleted => ReplyState::RecipientDeleted,
         });
     presentation.reply_excerpt = message
         .and_then(|message| message.reply_to.as_deref())

@@ -43,6 +43,7 @@ pub(super) async fn read(
             request_limited,
             excerpt,
             excerpt_limited,
+            ..
         } in page.items
         {
             let limited_request = request_limited.then(|| {
@@ -166,6 +167,7 @@ mod tests {
           CREATE TABLE node(id TEXT,turn_id TEXT,created_at TEXT,kind TEXT,payload_json TEXT,deleted_reason TEXT);
           CREATE TABLE receipt(turn_id TEXT,target_thread_id TEXT,message_node_id TEXT,created_at TEXT,state TEXT NOT NULL DEFAULT 'applied');
           CREATE INDEX node_turn ON node(turn_id,id);
+          CREATE TABLE thread_path(thread_id TEXT,ordinal INTEGER,node_id TEXT);
           CREATE INDEX receipt_target ON receipt(target_thread_id,state,created_at);
           INSERT INTO thread VALUES('thread','UNRELATED THREAD TITLE',NULL);
           INSERT INTO turn(id,thread_id,state) VALUES('turn-a','thread','recovery_wait'),('turn-b','thread','completed'),('turn-stop','thread','stopped'),('turn-unknown','thread','unknown');").unwrap();

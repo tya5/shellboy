@@ -27,7 +27,7 @@ struct Current {
     details: ThreadDetails,
     page: Page,
     before_cursor: Option<String>,
-    received: Option<received::Prepared>,
+    received: Vec<(String, UiNode)>,
     activity: activity::Projection,
     context_usage: crate::ui::ContextUsage,
     tool_scope: Option<ToolObservation>,
@@ -79,20 +79,15 @@ async fn read_current(
     let before_cursor = history_reader::before_cursor(thread, page.info.first, page.info.revision)?;
     let read_revision = page.info.read_revision;
     let target = thread.to_owned();
-    let selection_revision = page.info.revision;
+    let mut received = received::snapshot(owner, thread, render_width, language).await?;
+    for (_, node) in &mut received {
+        node.presentation.read_revision = read_revision;
+    }
     // Read-only snapshot reads: they never wait behind the owner's writer.
     let raw = snapshot::read(
         control.store.database.path().to_path_buf(),
         stop.clone(),
         move |db| {
-            let received = received::query_tx(
-                db,
-                &target,
-                received::Scope {
-                    selection_revision,
-                    view_revision: None,
-                },
-            )?;
             // Existing bounded display read; a limit error is an unknown value.
             let usage = match crate::compaction::context_usage::read_context_usage_tx(
                 db,
@@ -103,11 +98,11 @@ async fn read_current(
                 Err(crate::storage::StorageError::Operation(_)) => Default::default(),
                 Err(error) => return Err(error),
             };
-            Ok((received, usage))
+            Ok(usage)
         },
     )
     .await;
-    let (received, context_usage) = checked_storage(control, raw).await?;
+    let context_usage = checked_storage(control, raw).await?;
     if let Some(scope) = &mut tool_scope {
         let tools = page.observation.tools.clone();
         let mut nodes = std::mem::take(&mut scope.nodes);
@@ -122,19 +117,6 @@ async fn read_current(
         .await?;
         scope.nodes = nodes;
     }
-    let received = match received {
-        Some(snapshot) => Some(
-            presentation_work(move || {
-                let mut prepared = received::prepare(snapshot, render_width, language);
-                for (_, node) in &mut prepared.nodes {
-                    node.presentation.read_revision = read_revision;
-                }
-                prepared
-            })
-            .await?,
-        ),
-        None => None,
-    };
     let activity = activity::read_cancellable(control, thread, stop).await?;
     Ok(Current {
         details: details.prepare_for_ui(language),
@@ -200,9 +182,9 @@ pub(super) async fn run(
             // Raw previews are owned by visible UI items, not every Changed snapshot.
             streams::seal_nodes(&mut nodes).await?;
             if let Some(scope)=&mut tool_scope {scope.nodes=nodes.split_off(page_len);}
-            let received=received.map(|received|Box::new(UiUpdate::IncompleteResponses {
-                thread_id:thread.clone(),generation,selection_revision:received.selection_revision,
-                view_revision:None,root_revision:received.root_revision,nodes:received.nodes,
+            let received=Some(Box::new(UiUpdate::IncompleteResponses {
+                thread_id:thread.clone(),generation,selection_revision:info.revision,
+                view_revision:None,request_sequence:info.read_revision,nodes:received,
             }));
             update(&updates,UiUpdate::CurrentView {
                 generation,details,context_usage,

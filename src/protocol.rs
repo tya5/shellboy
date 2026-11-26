@@ -1431,8 +1431,13 @@ args!(HistoryReceivedArgs { thread_id: String,
 record!(HistoryReceivedPage { items: Vec<HistoryReceivedRow>,
     #[serde(default, skip_serializing_if = "Option::is_none")] next_cursor: Option<String>
 });
+// `follows_node_id`: the last selected-path node of the same Turn saved before
+// the response. `differs_from_final` (stream differences only): whether the
+// observed stream differs from the saved final response.
 record!(HistoryReceivedRow { node_id: String, turn_id: String, kind: String, at: String,
-    state: String, request: Option<String>, request_limited: bool, excerpt: Option<String>, excerpt_limited: bool
+    state: String, request: Option<String>, request_limited: bool, excerpt: Option<String>, excerpt_limited: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")] follows_node_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] differs_from_final: Option<bool>
 });
 args!(HistoryRecallArgs { thread_id: String, older: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")] anchor: Option<HistoryRecallAnchor>,
@@ -1560,7 +1565,7 @@ pub enum HistoryExportRecord {
     },
 }
 args!(HistoryRelationsArgs { node_id: String, relation: HistoryRelation, #[serde(default = "list_limit")] limit: u32, #[serde(default, skip_serializing_if = "Option::is_none")] cursor: Option<String> });
-states!(MessageReplyState { Pending => "pending", Replied => "replied", Ignored => "ignored", Cancelled => "cancelled" });
+states!(MessageReplyState { Pending => "pending", Replied => "replied", Ignored => "ignored", Cancelled => "cancelled", RecipientDeleted => "recipient_deleted" });
 // Why a saved input was delivered, from its receipt: a revisit after the
 // target Run completed, or a held message carried into the next Turn.
 states!(MessageDeliveryReason { RunCompletion => "run_completion", CarriedAfterTurnInterruption => "carried_after_turn_interruption" });

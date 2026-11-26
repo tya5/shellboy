@@ -130,3 +130,13 @@ Each `tools.calls` entry adds `output_available`: whether saved output bytes
 remain for its execution. Retention can reclaim them while `output_revision`
 keeps its sequence. No event fact announces that change yet; a later window
 read observes it.
+
+`history.received` rows add `follows_node_id`, the last selected-path node of
+the same Turn saved before the response (absent when there is none), and, for
+a stream difference, `differs_from_final`: whether its observed body differs
+from the final response saved with it. A payload above 1 MiB or without a
+comparable final response reports `false`.
+
+The reply relation in node provenance (`provenance.message.reply_state`) also
+reports `recipient_deleted`, the saved terminal state of a reply duty whose
+recipient Thread was deleted.

@@ -1,6 +1,5 @@
 //! Read-only display of saved failed responses; never a model replay source.
 use super::*;
-use crate::history::display_source::received_body as body;
 mod list;
 use crate::{
     config::UiLanguage,
@@ -8,7 +7,6 @@ use crate::{
 };
 
 pub(super) const ROLE: &str = "received_response";
-const SAVED_BYTES: usize = 1024 * 1024;
 
 fn received_title(language: UiLanguage, observation: bool) -> String {
     match language {
@@ -100,187 +98,94 @@ pub(super) fn project(
     node
 }
 
-fn preview_visible(kind: &str, payload: &Value, text: &str) -> bool {
-    if text.is_empty() {
-        return false;
-    }
-    if kind != "model_stream_observation" {
-        return true;
-    }
-    // Mismatch classifications describe JSON structure as well as prose. A
-    // metadata/content/call-id difference must not duplicate a paid answer.
-    let Some(final_response) = payload.get("raw_response") else {
-        return false;
-    };
-    if !final_response.get("output").is_some_and(Value::is_array) {
-        return false;
-    }
-    let final_body = body(&serde_json::json!({"raw_response": final_response}));
-    body(payload) != final_body
-}
+/// Received responses one snapshot shows, newest first by saved time.
+const SNAPSHOT_ROWS: usize = 2;
 
-struct PreviewRow {
-    id: String,
-    after: Option<String>,
-    kind: String,
-    partial: String,
-    reasoning: String,
-    total: i64,
-    saved: Option<String>,
-    differences: Option<String>,
-    delta_differences: Option<String>,
-    recovery_wait: bool,
-}
 #[derive(Clone, Copy)]
 pub(super) struct Scope {
     pub(super) selection_revision: u64,
     pub(super) view_revision: Option<u64>,
-}
-pub(super) struct RawSnapshot {
-    rows: Vec<PreviewRow>,
-    selection_revision: u64,
-    root_revision: u64,
+    /// The owner `read_sequence` of the page this snapshot accompanies.
+    pub(super) request_sequence: u64,
 }
 
-pub(super) struct Prepared {
-    pub(super) nodes: Vec<(String, UiNode)>,
-    pub(super) selection_revision: u64,
-    pub(super) root_revision: u64,
-}
-
-/// Read in the caller's transaction; at most two bounded saved responses.
-pub(super) fn query_tx(
-    db: &rusqlite::Connection,
+/// The two newest received responses (by saved time) on the first
+/// `history.received` page, each after the selected-path node it follows, as
+/// positioned owner display extents. A stream difference that matches its
+/// final response and an empty body show nothing.
+pub(super) async fn snapshot(
+    owner: &native_history::Owner<'_>,
     thread: &str,
-    scope: Scope,
-) -> Result<Option<RawSnapshot>, crate::storage::StorageError> {
-    let selection =
-        crate::history::selection_revision(db, thread, crate::history::ThreadScope::Live)?;
-    if selection as u64 != scope.selection_revision {
-        return Ok(None);
+    width: u16,
+    language: UiLanguage,
+) -> Result<Vec<(String, UiNode)>, ApiError> {
+    use crate::protocol::{
+        HistoryDisplayNode, HistoryDisplayPosition, HistoryReceivedArgs, HistoryReceivedPage,
+    };
+    let page: HistoryReceivedPage = owner
+        .call(Command::HistoryReceived(HistoryReceivedArgs {
+            thread_id: thread.to_owned(),
+            cursor: None,
+        }))
+        .await?;
+    let mut rows = page.items;
+    rows.sort_by(|a, b| (&b.at, &b.node_id).cmp(&(&a.at, &a.node_id)));
+    rows.truncate(SNAPSHOT_ROWS);
+    let mut nodes = Vec::with_capacity(rows.len());
+    for row in rows.into_iter().rev() {
+        let Some(after) = row.follows_node_id else {
+            continue;
+        };
+        if row.differs_from_final == Some(false) {
+            continue;
+        }
+        let display = match owner
+            .display(&row.node_id, None, HistoryDisplayPosition::Tail)
+            .await
+        {
+            Ok(display) => display,
+            // Collected after the page was read: nothing to show.
+            Err(error) if error.code == ErrorCode::TargetUnavailable => continue,
+            Err(error) => return Err(error),
+        };
+        if display.total_chars == 0 || !matches!(display.outline.node, HistoryDisplayNode::Received)
+        {
+            continue;
+        }
+        let node_id = row.node_id;
+        let node =
+            presentation_work(move || display.into_ui_node(node_id, width, language)).await?;
+        nodes.push((after, node));
     }
-    let root_revision = db
-        .query_row(
-            "SELECT value FROM app_meta WHERE key='root_revision'",
-            [],
-            |row| row.get::<_, String>(0),
-        )?
-        .parse::<i64>()
-        .ok()
-        .and_then(|revision| u64::try_from(revision).ok())
-        .ok_or_else(|| {
-            crate::storage::StorageError::Schema("root revision metadata is malformed".into())
-        })?;
-    let mut statement=db.prepare(r#"SELECT n.id,n.kind,
-          coalesce(substr(json_extract(n.payload_json,'$.partial_text'),1,16384),''),
-          coalesce(substr(json_extract(n.payload_json,'$.partial_reasoning'),1,16384),''),
-          coalesce(length(json_extract(n.payload_json,'$.partial_text')),0)+coalesce(length(json_extract(n.payload_json,'$.partial_reasoning')),0),
-          CASE WHEN length(CAST(n.payload_json AS BLOB))<=?2 THEN n.payload_json END,
-          substr(json_extract(n.payload_json,'$.differences'),1,4096),
-          substr(json_extract(n.payload_json,'$.delta_differences'),1,4096),
-          (SELECT p.node_id FROM thread_path p JOIN node prior ON prior.id=p.node_id
-           WHERE p.thread_id=u.thread_id AND prior.turn_id=n.turn_id AND prior.rowid<n.rowid
-           ORDER BY p.ordinal DESC LIMIT 1),u.state='recovery_wait'
-          FROM node n JOIN turn u ON u.id=n.turn_id JOIN thread t ON t.id=u.thread_id
-          WHERE u.thread_id=?1 AND t.deleted_at IS NULL
-            AND n.kind IN ('incomplete_response','model_stream_observation')
-            AND n.deleted_reason IS NULL AND json_valid(n.payload_json)
-          ORDER BY n.rowid DESC LIMIT 2"#)?;
-    let rows = statement
-        .query_map(rusqlite::params![thread, SAVED_BYTES as i64], |r| {
-            Ok(PreviewRow {
-                id: r.get(0)?,
-                after: r.get(8)?,
-                kind: r.get(1)?,
-                partial: r.get(2)?,
-                reasoning: r.get(3)?,
-                total: r.get(4)?,
-                saved: r.get(5)?,
-                differences: r.get(6)?,
-                delta_differences: r.get(7)?,
-                recovery_wait: r.get(9)?,
-            })
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    Ok(Some(RawSnapshot {
-        rows,
-        selection_revision: selection as u64,
-        root_revision,
-    }))
+    Ok(nodes)
 }
 
-pub(super) fn prepare(snapshot: RawSnapshot, width: u16, language: UiLanguage) -> Prepared {
-    let RawSnapshot {
-        rows,
-        selection_revision,
-        root_revision,
-    } = snapshot;
-    let nodes = rows.into_iter().rev().filter_map(|row|{
-        let after=row.after?;
-        let full_saved=row.saved.is_some();
-        let payload=row.saved.and_then(|s|serde_json::from_str::<Value>(&s).ok()).unwrap_or_else(||serde_json::json!({"classification":if row.kind=="model_stream_observation"{"stream_difference"}else{"incomplete_response"},"partial_text":row.partial,"partial_reasoning":row.reasoning,"differences":row.differences.and_then(|s|serde_json::from_str::<Value>(&s).ok()),"delta_differences":row.delta_differences.and_then(|s|serde_json::from_str::<Value>(&s).ok())}));
-        let (text,mut reasoning)=body(&payload);
-        if !preview_visible(&row.kind,&payload,&text){return None;}
-        let known=text.chars().count();
-        let omitted=!full_saved && row.total>known as i64;
-        let (extent,total)=crate::history::display_source::extent(&text,None);
-        let base=text[..extent.start].chars().count();
-        let text=text[extent].to_owned();
-        reasoning.retain(|range|range.1>base && range.0<base+text.chars().count());
-        let mut node=project(&row.kind,UiNode{node_id:row.id,text,base_char_offset:base,total_chars:total,reasoning_ranges:reasoning,..Default::default()},width,!full_saved,row.recovery_wait,language);
-        if omitted{node.presentation.body_omitted_chars=(row.total as usize).saturating_sub(known);}
-        streams::seal_node(&mut node);
-        Some((after,node))
-    }).collect();
-    Prepared {
-        nodes,
-        selection_revision,
-        root_revision,
-    }
-}
-
-pub(super) async fn apply(
+/// Read and deliver the snapshot for an installed page.
+pub(super) async fn refresh(
+    owner: &native_history::Owner<'_>,
     updates: &dyn UpdateTarget,
     thread: &str,
     generation: u64,
+    width: u16,
+    language: UiLanguage,
     scope: Scope,
-    prepared: Prepared,
-) {
+) -> Result<(), ApiError> {
+    let mut nodes = snapshot(owner, thread, width, language).await?;
+    for (_, node) in &mut nodes {
+        node.presentation.read_revision = scope.request_sequence;
+    }
     update(
         updates,
         UiUpdate::IncompleteResponses {
             thread_id: thread.into(),
             generation,
-            selection_revision: prepared.selection_revision,
+            selection_revision: scope.selection_revision,
             view_revision: scope.view_revision,
-            root_revision: prepared.root_revision,
-            nodes: prepared.nodes,
+            request_sequence: scope.request_sequence,
+            nodes,
         },
     )
     .await;
-}
-
-pub(super) async fn refresh(
-    control: &Control,
-    updates: &dyn UpdateTarget,
-    thread: &str,
-    generation: u64,
-    width: u16,
-    scope: Scope,
-) -> Result<(), ApiError> {
-    let language = control.store.config.ui.language;
-    let target = thread.to_owned();
-    let snapshot = control
-        .store
-        .database
-        .call(move |db| query_tx(db, &target, scope))
-        .await
-        .map_err(storage_error)?;
-    let Some(snapshot) = snapshot else {
-        return Ok(());
-    };
-    let prepared = presentation_work(move || prepare(snapshot, width, language)).await?;
-    apply(updates, thread, generation, scope, prepared).await;
     Ok(())
 }
 
@@ -297,6 +202,14 @@ pub(super) async fn list(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    async fn snapshot_of(control: &Control) -> Vec<(String, UiNode)> {
+        let owner = native_history::Owner {
+            data_dir: compose_data_dir(control),
+            instance: &control.store.instance_id,
+        };
+        snapshot(&owner, "t", 80, UiLanguage::En).await.unwrap()
+    }
 
     #[test]
     fn received_labels_follow_ui_language_without_changing_source_facts() {
@@ -408,145 +321,6 @@ mod tests {
             assert_eq!(node.text, "RAW_RESPONSE");
         }
     }
-    #[test]
-    fn prepared_saved_response_retains_snapshot_fences_and_paid_body() {
-        let prepared = prepare(
-            RawSnapshot {
-                selection_revision: 7,
-                root_revision: 11,
-                rows: vec![PreviewRow {
-                    id: "saved-response".into(),
-                    after: Some("anchor".into()),
-                    kind: "incomplete_response".into(),
-                    partial: "bounded fallback".into(),
-                    reasoning: String::new(),
-                    total: 100_000,
-                    saved: Some(
-                        json!({"partial_text":"保存済み回答🦀","partial_reasoning":"保存済み理由"})
-                            .to_string(),
-                    ),
-                    differences: None,
-                    delta_differences: None,
-                    recovery_wait: true,
-                }],
-            },
-            80,
-            UiLanguage::Ja,
-        );
-        assert_eq!(
-            (prepared.selection_revision, prepared.root_revision),
-            (7, 11)
-        );
-        assert_eq!(prepared.nodes.len(), 1);
-        let (anchor, node) = &prepared.nodes[0];
-        assert_eq!(anchor, "anchor");
-        assert_eq!(node.node_id, "saved-response");
-        assert_eq!(node.text, "保存済み理由\n保存済み回答🦀");
-        assert!(!node.presentation.body_extent_unknown);
-        assert!(node.presentation.requires_attention());
-    }
-    #[test]
-    fn paid_channels_choose_one_source_and_never_show_tool_or_encrypted_metadata() {
-        let payload = json!({"partial_reasoning":"考え","partial_text":"回答","raw_response":{"output":[{"type":"message","content":[{"type":"output_text","text":"回答"}]},{"type":"function_call","arguments":"PRIVATE_TOOL"},{"type":"reasoning","encrypted_content":"PRIVATE_OPAQUE","summary":[{"type":"summary_text","text":"考え"}]}]}});
-        assert_eq!(body(&payload), ("考え\n回答".into(), vec![(0, 2)]));
-        let mut fallback = payload;
-        fallback
-            .as_object_mut()
-            .unwrap()
-            .remove("partial_reasoning");
-        fallback.as_object_mut().unwrap().remove("partial_text");
-        assert_eq!(body(&fallback), ("考え\n回答".into(), vec![(0, 2)]));
-        let mut differing = json!({"raw_response":{"output":[{"type":"message","content":[{"type":"output_text","text":"最終"}]}]},"completed_items":{"0":{"type":"message","content":[{"type":"output_text","text":"途中"}]}}});
-        assert_eq!(body(&differing).0, "最終");
-        differing["classification"] = json!("stream_difference");
-        assert_eq!(body(&differing).0, "途中");
-        assert!(!preview_visible(
-            "model_stream_observation",
-            &json!({"differences":[{"field":"metadata"}]}),
-            "same final answer"
-        ));
-        assert!(!preview_visible(
-            "model_stream_observation",
-            &json!({"differences":[{"field":"arguments"}]}),
-            ""
-        ));
-        assert!(preview_visible(
-            "model_stream_observation",
-            &json!({"partial_text":"paid differing text","raw_response":{"output":[]}}),
-            "paid differing text"
-        ));
-        assert!(!preview_visible("incomplete_response", &json!({}), ""));
-        assert!(preview_visible(
-            "model_stream_observation",
-            &json!({"partial_text":"paid delta","raw_response":{"output":[]},"differences":[{"field":"metadata"}],"delta_differences":["text"]}),
-            "paid delta"
-        ));
-
-        assert_eq!(body(&json!({"completed_items":{"10":{"type":"message","content":[{"type":"refusal","refusal":"後"}]},"2":{"type":"message","content":[{"type":"output_text","text":"先"}]}}})).0,"先\n後");
-    }
-    #[test]
-    fn empty_receipts_and_structural_differences_do_not_invent_or_duplicate_body() {
-        let message =
-            json!({"type":"message","content":[{"type":"output_text","text":"same answer"}]});
-        let mut payload = json!({"partial_text":"same answer","completed_items":{"0":message},"raw_response":{"output":[message]},"differences":[{"field":"content"},{"field":"call_id"},{"field":"arguments"}],"delta_differences":[]});
-        assert!(!preview_visible(
-            "model_stream_observation",
-            &payload,
-            &body(&payload).0
-        ));
-        payload["partial_text"] = json!("different paid answer");
-        assert!(preview_visible(
-            "model_stream_observation",
-            &payload,
-            &body(&payload).0
-        ));
-        payload["partial_text"] = json!("");
-        assert!(!preview_visible(
-            "model_stream_observation",
-            &payload,
-            &body(&payload).0
-        ));
-        let empty = json!({"partial_text":"","partial_reasoning":"","completed_items":{},"classification":"http_500"});
-        assert!(body(&empty).0.is_empty());
-        assert!(!preview_visible(
-            "incomplete_response",
-            &empty,
-            &body(&empty).0
-        ));
-        let reason = json!({"partial_reasoning":"paid reasoning","partial_text":"same answer","raw_response":{"output":[message,{"type":"reasoning","summary":[{"type":"summary_text","text":"final reasoning"}]}]}});
-        assert!(preview_visible(
-            "model_stream_observation",
-            &reason,
-            &body(&reason).0
-        ));
-    }
-    #[test]
-    fn done_only_prose_and_reasoning_are_compared_to_final_channels() {
-        let message =
-            |text| json!({"type":"message","content":[{"type":"output_text","text":text}]});
-        let reasoning =
-            |text| json!({"type":"reasoning","summary":[{"type":"summary_text","text":text}]});
-        let mut payload = json!({"classification":"stream_difference","partial_text":"","partial_reasoning":"","completed_items":{"0":message("done answer"),"1":reasoning("done reasoning")},"raw_response":{"output":[message("final answer"),reasoning("final reasoning")]}});
-        assert_eq!(body(&payload).0, "done reasoning\ndone answer");
-        assert!(preview_visible(
-            "model_stream_observation",
-            &payload,
-            &body(&payload).0
-        ));
-        payload["raw_response"]["output"] =
-            json!([message("done answer"), reasoning("final reasoning")]);
-        assert!(
-            preview_visible("model_stream_observation", &payload, &body(&payload).0),
-            "reasoning-only difference remains visible"
-        );
-        payload["raw_response"]["output"] =
-            json!([message("done answer"), reasoning("done reasoning")]);
-        assert!(!preview_visible(
-            "model_stream_observation",
-            &payload,
-            &body(&payload).0
-        ));
-    }
     #[tokio::test]
     async fn saved_previews_survive_reopen_and_all_old_sources_are_paged_without_replay() {
         let root = tempfile::tempdir().unwrap();
@@ -565,7 +339,7 @@ mod tests {
             for i in 0..35 {
                 let kind=if i==34{"model_stream_observation"}else{"incomplete_response"};
                 let body=json!({"partial_text":format!("有料本文{i}"),"partial_reasoning":"理由","attempt_id":format!("a{i}"),"raw_response":{"output":[]}}).to_string();
-                db.execute("INSERT INTO node(id,turn_id,kind,payload_json,payload_bytes,created_at)VALUES(?1,'u',?2,?3,length(?3),'2026-01-01T00:00:00Z')",rusqlite::params![format!("n{i}"),kind,body])?;
+                db.execute("INSERT INTO node(id,turn_id,kind,payload_json,payload_bytes,created_at)VALUES(?1,'u',?2,?3,length(?3),?4)",rusqlite::params![format!("n{i}"),kind,body,format!("2026-01-01T00:00:{i:02}Z")])?;
             }
             Ok(())
         }).await.unwrap();
@@ -582,23 +356,7 @@ mod tests {
         let server = crate::ipc::LocalServer::bind(&owner, rpc).await.unwrap();
         tokio::spawn(control.clone().serve(receive));
         let list_page = |cursor| list(&owner.loaded.data_dir, UiLanguage::En, "t".into(), cursor);
-        let (tx, rx) = std::sync::mpsc::sync_channel(8);
-        refresh(
-            &control,
-            &tx,
-            "t",
-            7,
-            80,
-            Scope {
-                selection_revision: 0,
-                view_revision: None,
-            },
-        )
-        .await
-        .unwrap();
-        let UiUpdate::IncompleteResponses { nodes, .. } = rx.try_recv().unwrap() else {
-            panic!()
-        };
+        let nodes = snapshot_of(&control).await;
         assert_eq!(
             nodes
                 .iter()
@@ -678,22 +436,7 @@ mod tests {
                 INSERT INTO node(id,turn_id,kind,payload_json,payload_bytes,created_at)VALUES('empty','u','incomplete_response','{"partial_text":"","partial_reasoning":"","completed_items":{}}',62,'2026-01-01T00:01:01Z');"#)?;
             Ok(())
         }).await.unwrap();
-        refresh(
-            &control,
-            &tx,
-            "t",
-            7,
-            80,
-            Scope {
-                selection_revision: 0,
-                view_revision: None,
-            },
-        )
-        .await
-        .unwrap();
-        let UiUpdate::IncompleteResponses { nodes, .. } = rx.try_recv().unwrap() else {
-            panic!()
-        };
+        let nodes = snapshot_of(&control).await;
         assert_eq!(nodes.len(), 1);
         assert_eq!(nodes[0].0, "anchor");
         assert_eq!(nodes[0].1.node_id, "n34");
@@ -701,66 +444,6 @@ mod tests {
         assert!(title.contains("32+ records"));
         let empty = latest.iter().find(|field| field.value == "empty").unwrap();
         assert_eq!(empty.displayed(), "No request text");
-        refresh(
-            &control,
-            &tx,
-            "t",
-            7,
-            80,
-            Scope {
-                selection_revision: 99,
-                view_revision: None,
-            },
-        )
-        .await
-        .unwrap();
-        assert!(matches!(
-            rx.try_recv(),
-            Err(std::sync::mpsc::TryRecvError::Empty)
-        ));
-        for malformed in ["-1", "not-a-revision"] {
-            owner
-                .db
-                .call(move |db| {
-                    db.execute(
-                        "UPDATE app_meta SET value=?1 WHERE key='root_revision'",
-                        [malformed],
-                    )?;
-                    Ok(())
-                })
-                .await
-                .unwrap();
-            assert!(
-                refresh(
-                    &control,
-                    &tx,
-                    "t",
-                    7,
-                    80,
-                    Scope {
-                        selection_revision: 0,
-                        view_revision: None
-                    }
-                )
-                .await
-                .is_err()
-            );
-            assert!(matches!(
-                rx.try_recv(),
-                Err(std::sync::mpsc::TryRecvError::Empty)
-            ));
-        }
-        owner
-            .db
-            .call(|db| {
-                db.execute(
-                    "UPDATE app_meta SET value='0' WHERE key='root_revision'",
-                    [],
-                )?;
-                Ok(())
-            })
-            .await
-            .unwrap();
         server.shutdown().await.unwrap();
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
@@ -790,7 +473,7 @@ mod tests {
         let (rpc, receive) = tokio::sync::mpsc::channel(16);
         let server = crate::ipc::LocalServer::bind(&owner, rpc).await.unwrap();
         tokio::spawn(control.clone().serve(receive));
-        let (tx, rx) = std::sync::mpsc::sync_channel(8);
+        let (tx, _rx) = std::sync::mpsc::sync_channel(8);
         for (state, attention) in [
             ("recovery_wait", true),
             ("running", false),
@@ -807,22 +490,7 @@ mod tests {
                 })
                 .await
                 .unwrap();
-            refresh(
-                &control,
-                &tx,
-                "t",
-                1,
-                80,
-                Scope {
-                    selection_revision: 0,
-                    view_revision: None,
-                },
-            )
-            .await
-            .unwrap();
-            let UiUpdate::IncompleteResponses { nodes, .. } = rx.try_recv().unwrap() else {
-                panic!()
-            };
+            let nodes = snapshot_of(&control).await;
             assert_eq!(nodes.len(), 1);
             let preview = &nodes[0].1;
             assert_eq!(preview.text, "paid reasoning\npaid answer");
@@ -870,22 +538,10 @@ mod tests {
             .await
             .unwrap();
         let control = Control::new(&owner, root.path().into());
-        refresh(
-            &control,
-            &tx,
-            "t",
-            2,
-            80,
-            Scope {
-                selection_revision: 0,
-                view_revision: None,
-            },
-        )
-        .await
-        .unwrap();
-        let UiUpdate::IncompleteResponses { nodes, .. } = rx.try_recv().unwrap() else {
-            panic!()
-        };
+        let (rpc, receive) = tokio::sync::mpsc::channel(16);
+        let server = crate::ipc::LocalServer::bind(&owner, rpc).await.unwrap();
+        tokio::spawn(control.clone().serve(receive));
+        let nodes = snapshot_of(&control).await;
         assert_eq!(nodes.len(), 1);
         assert!(!nodes[0].1.presentation.requires_attention());
         let original = owner
@@ -912,6 +568,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(original, (payload.clone(), payload, 1));
+        server.shutdown().await.unwrap();
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
     }

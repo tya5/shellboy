@@ -133,6 +133,7 @@ fn valid(value: &Value, relation: &MessageProvenance) -> bool {
                     MessageReplyState::Pending
                         | MessageReplyState::Ignored
                         | MessageReplyState::Cancelled
+                        | MessageReplyState::RecipientDeleted
                 ),
                 None
             )
@@ -203,6 +204,17 @@ mod tests {
                 .get("message")
                 .is_some()
         );
+        for state in ["ignored", "cancelled", "recipient_deleted"] {
+            let mut terminal = Response::success(
+                "op",
+                json!({"provenance":{"message":{"expect_reply":true,"reply_state":state}}}),
+            );
+            fit(&mut terminal, Slots::Body).unwrap();
+            assert_eq!(
+                terminal.result.as_ref().unwrap()["provenance"]["message"]["reply_state"],
+                state
+            );
+        }
     }
     #[test]
     fn opaque_payload_provenance_is_never_visited() {

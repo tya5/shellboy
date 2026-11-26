@@ -224,8 +224,8 @@ their labels. A window recovery reason is a 256-character excerpt; when it is
 cut short the event points at the F6 source node. Reasoning ranges are clipped
 to each display page (recorded gap, not yet witnessed).
 
-Still private and separate from these reads: the received-response snapshot,
-activity and index pause, and context usage (see the 4d gaps below).
+Still private and separate from these reads: activity and index pause, and
+context usage (see the 4d gaps below).
 
 ### Unit 4d cutover gaps
 
@@ -241,12 +241,6 @@ the selected endpoint, and the index pause value (`index.status`
 
 No protocol read or wake fact exists for these:
 
-- The received-response snapshot. `history.received` and a positioned
-  `history.read` give the saved response, its Turn and recovery wait, but not
-  the selected-path node it follows (the private read takes the last path node
-  of the same Turn saved before it), nor whether a stream difference differs
-  from the final response (the private read compares the saved
-  `raw_response` body).
 - Wait-to-shell relations for live work. The owner's pending wait registry is
   in memory; the saved run wait reason has no waited execution.
 - Wakes that `events.wait` does not report: index saved/pause change, storage
@@ -275,12 +269,22 @@ panel's current executions are one tail `history.window` observing the
 selected sources (`observe_node_ids`), and its saved-output row is the call's
 `output_available`; the internal output retention generation row is retired.
 
+The received-response snapshot is the first `history.received` page: its two
+newest rows by saved time (`at`, then node ID), each placed after its
+`follows_node_id` and shown from a positioned `history.read` display extent.
+A stream difference with `differs_from_final: false`, a row with no
+`follows_node_id` and an empty body show nothing. The snapshot carries the
+selected revision and the owner `read_sequence` of the page it accompanies;
+the UI keeps only the newest snapshot for its installed selection.
+
 Changes a user can see: a saved input whose receipt sender is the pre-kind
-`null` is shown as unknown rather than human, and a reply whose recipient
-Thread was deleted no longer shows a reply state (the owner's typed reply
-relation has no such state). Branch and compaction markers now also appear
-on the current view, which previously skipped them. `output_available` changes when retention
-reclaims output, but nothing wakes the client for it yet; a retention wake is
+`null` is shown as unknown rather than human. That value was the absent model
+Origin of every non-model send, so it does not identify a human, and no saved
+fact separates those sends. Branch and compaction markers now also appear on
+the current view, which previously skipped them. A received response older
+than the first `history.received` page (its bound is 32 Turns, 32 rows and
+200 scanned nodes) is no longer previewed. `output_available` changes when
+retention reclaims output, but nothing wakes the client for it yet; a retention wake is
 slice 3's `retention_changed`. Until then the next window read for any other
 reason shows it.
 

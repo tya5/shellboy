@@ -483,16 +483,19 @@ impl<'a> HistoryReader<'a> {
         };
         let anchor = page.anchor.clone().unwrap_or_default();
         let selection_revision = page.info.revision;
+        let request_sequence = page.info.read_revision;
         reply.deliver(self.updates, page, anchor).await;
         received::refresh(
-            self.control,
+            &self.owner(),
             self.updates,
             thread,
             reply.target.generation,
             self.width,
+            self.control.store.config.ui.language,
             received::Scope {
                 selection_revision,
                 view_revision: Some(reply.view_revision),
+                request_sequence,
             },
         )
         .await
@@ -551,16 +554,19 @@ impl<'a> HistoryReader<'a> {
             )
         })?;
         let selection_revision = page.info.revision;
+        let request_sequence = page.info.read_revision;
         reply.deliver(self.updates, page, anchor).await;
         received::refresh(
-            self.control,
+            &self.owner(),
             self.updates,
             &reply.target.thread,
             reply.target.generation,
             self.width,
+            self.control.store.config.ui.language,
             received::Scope {
                 selection_revision,
                 view_revision: Some(reply.view_revision),
+                request_sequence,
             },
         )
         .await
@@ -642,6 +648,7 @@ impl<'a> HistoryReader<'a> {
         let before_cursor = before_cursor(thread, page.info.first, page.info.revision)?;
         let Page { nodes, info, .. } = page;
         let selection_revision = info.revision;
+        let request_sequence = info.read_revision;
         stream_commits(self.updates, thread, reply.generation, info.committed).await;
         update(
             self.updates,
@@ -660,14 +667,16 @@ impl<'a> HistoryReader<'a> {
         )
         .await;
         received::refresh(
-            self.control,
+            &self.owner(),
             self.updates,
             thread,
             reply.generation,
             self.width,
+            self.control.store.config.ui.language,
             received::Scope {
                 selection_revision,
                 view_revision: None,
+                request_sequence,
             },
         )
         .await

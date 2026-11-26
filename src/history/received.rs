@@ -171,9 +171,11 @@ pub(crate) fn read(
             }
             nodes_left -= 1;
             if is_received {
-                let (kind, at, excerpt, excerpt_limited) = db.query_row(
+                let (kind, at, excerpt, excerpt_limited): (String, String, Option<String>, bool) = db.query_row(
                     "SELECT kind,CASE WHEN octet_length(created_at)<=128 THEN created_at ELSE '' END,CASE WHEN octet_length(payload_json)<=?2 THEN substr(json_extract(payload_json,'$.partial_text'),1,80) END,COALESCE(octet_length(payload_json)>?2,0) FROM node WHERE id=?1", params![id,SOURCE_BYTES],
                     |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)))?;
+                let (follows_node_id, differs_from_final) =
+                    placement(db, thread, &turn.id, &id, &kind)?;
                 result.items.push(HistoryReceivedRow {
                     node_id: id.clone(),
                     turn_id: turn.id.clone(),
@@ -184,6 +186,8 @@ pub(crate) fn read(
                     request_limited: false,
                     excerpt,
                     excerpt_limited,
+                    follows_node_id,
+                    differs_from_final,
                 });
             }
             turn.position.node_id = Some(id);
@@ -194,6 +198,68 @@ pub(crate) fn read(
     }
     populate_requests(db, thread, &mut result.items)?;
     Ok(result)
+}
+
+/// Saved payloads compared with their final response are read up to this size;
+/// a larger stream difference is not compared and reports no difference.
+const COMPARED_BYTES: i64 = 1024 * 1024;
+
+/// Where a received response sits and, for a stream difference, whether it
+/// differs from the final response saved with it.
+fn placement(
+    db: &Connection,
+    thread: &str,
+    turn: &str,
+    node: &str,
+    kind: &str,
+) -> rusqlite::Result<(Option<String>, Option<bool>)> {
+    // The Turn's own nodes are the bounded side; the path is joined by node.
+    let follows = db
+        .query_row(
+            "SELECT CASE WHEN octet_length(p.node_id)<=512 THEN p.node_id END
+               FROM node prior INDEXED BY node_turn
+               JOIN thread_path p ON p.thread_id=?1 AND p.node_id=prior.id
+              WHERE prior.turn_id=?2 AND prior.rowid<(SELECT rowid FROM node WHERE id=?3)
+              ORDER BY p.ordinal DESC LIMIT 1",
+            params![thread, turn, node],
+            |r| r.get::<_, Option<String>>(0),
+        )
+        .optional()?
+        .flatten();
+    let differs = if kind == "model_stream_observation" {
+        let payload: Option<String> = db
+            .query_row(
+                "SELECT CASE WHEN octet_length(payload_json)<=?2 THEN payload_json END FROM node WHERE id=?1",
+                params![node, COMPARED_BYTES],
+                |r| r.get(0),
+            )
+            .optional()?
+            .flatten();
+        Some(
+            payload
+                .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+                .is_some_and(|payload| differs_from_final(&payload)),
+        )
+    } else {
+        None
+    };
+    Ok((follows, differs))
+}
+
+/// Mismatch classifications describe JSON structure as well as prose. A
+/// metadata/content/call-id difference alone must not duplicate a paid answer.
+fn differs_from_final(payload: &serde_json::Value) -> bool {
+    use super::display_source::received_body as body;
+    let Some(final_response) = payload.get("raw_response") else {
+        return false;
+    };
+    if !final_response
+        .get("output")
+        .is_some_and(serde_json::Value::is_array)
+    {
+        return false;
+    }
+    body(payload) != body(&serde_json::json!({"raw_response": final_response}))
 }
 
 fn candidate(row: &rusqlite::Row<'_>) -> rusqlite::Result<(String, bool)> {
@@ -260,4 +326,71 @@ fn request_excerpt(
       COALESCE(octet_length(payload_json)>?2,0)
       FROM node WHERE id=?1 AND deleted_reason IS NULL"#,
         params![node, SOURCE_BYTES], |r| Ok((r.get(0)?, r.get(1)?))).optional()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::differs_from_final;
+    use crate::history::display_source::received_body as body;
+    use serde_json::json;
+
+    #[test]
+    fn paid_channels_choose_one_source_and_never_show_tool_or_encrypted_metadata() {
+        let payload = json!({"partial_reasoning":"考え","partial_text":"回答","raw_response":{"output":[{"type":"message","content":[{"type":"output_text","text":"回答"}]},{"type":"function_call","arguments":"PRIVATE_TOOL"},{"type":"reasoning","encrypted_content":"PRIVATE_OPAQUE","summary":[{"type":"summary_text","text":"考え"}]}]}});
+        assert_eq!(body(&payload), ("考え\n回答".into(), vec![(0, 2)]));
+        let mut fallback = payload;
+        fallback
+            .as_object_mut()
+            .unwrap()
+            .remove("partial_reasoning");
+        fallback.as_object_mut().unwrap().remove("partial_text");
+        assert_eq!(body(&fallback), ("考え\n回答".into(), vec![(0, 2)]));
+        let mut differing = json!({"raw_response":{"output":[{"type":"message","content":[{"type":"output_text","text":"最終"}]}]},"completed_items":{"0":{"type":"message","content":[{"type":"output_text","text":"途中"}]}}});
+        assert_eq!(body(&differing).0, "最終");
+        differing["classification"] = json!("stream_difference");
+        assert_eq!(body(&differing).0, "途中");
+        // Without a comparable final response nothing differs.
+        assert!(!differs_from_final(
+            &json!({"differences":[{"field":"metadata"}]})
+        ));
+        assert!(differs_from_final(
+            &json!({"partial_text":"paid differing text","raw_response":{"output":[]}})
+        ));
+        assert!(differs_from_final(
+            &json!({"partial_text":"paid delta","raw_response":{"output":[]},"differences":[{"field":"metadata"}],"delta_differences":["text"]})
+        ));
+        assert_eq!(body(&json!({"completed_items":{"10":{"type":"message","content":[{"type":"refusal","refusal":"後"}]},"2":{"type":"message","content":[{"type":"output_text","text":"先"}]}}})).0,"先\n後");
+    }
+
+    #[test]
+    fn structural_differences_alone_do_not_duplicate_the_final_answer() {
+        let message =
+            json!({"type":"message","content":[{"type":"output_text","text":"same answer"}]});
+        let mut payload = json!({"partial_text":"same answer","completed_items":{"0":message},"raw_response":{"output":[message]},"differences":[{"field":"content"},{"field":"call_id"},{"field":"arguments"}],"delta_differences":[]});
+        assert!(!differs_from_final(&payload));
+        payload["partial_text"] = json!("different paid answer");
+        assert!(differs_from_final(&payload));
+        let reason = json!({"partial_reasoning":"paid reasoning","partial_text":"same answer","raw_response":{"output":[message,{"type":"reasoning","summary":[{"type":"summary_text","text":"final reasoning"}]}]}});
+        assert!(differs_from_final(&reason));
+    }
+
+    #[test]
+    fn done_only_prose_and_reasoning_are_compared_to_final_channels() {
+        let message =
+            |text| json!({"type":"message","content":[{"type":"output_text","text":text}]});
+        let reasoning =
+            |text| json!({"type":"reasoning","summary":[{"type":"summary_text","text":text}]});
+        let mut payload = json!({"classification":"stream_difference","partial_text":"","partial_reasoning":"","completed_items":{"0":message("done answer"),"1":reasoning("done reasoning")},"raw_response":{"output":[message("final answer"),reasoning("final reasoning")]}});
+        assert_eq!(body(&payload).0, "done reasoning\ndone answer");
+        assert!(differs_from_final(&payload));
+        payload["raw_response"]["output"] =
+            json!([message("done answer"), reasoning("final reasoning")]);
+        assert!(
+            differs_from_final(&payload),
+            "reasoning-only difference remains visible"
+        );
+        payload["raw_response"]["output"] =
+            json!([message("done answer"), reasoning("done reasoning")]);
+        assert!(!differs_from_final(&payload));
+    }
 }

@@ -1222,7 +1222,9 @@ pub enum UiUpdate {
         generation: u64,
         selection_revision: u64,
         view_revision: Option<u64>,
-        root_revision: u64,
+        // The owner read_sequence of the page this snapshot accompanies;
+        // an older snapshot never replaces a newer one.
+        request_sequence: u64,
         // A saved preview belongs after this selected node, never at the tail
         // of an unrelated history page. This is not a canonical ordinal.
         nodes: Vec<(String, UiNode)>,
@@ -3478,16 +3480,16 @@ impl UiState {
                 generation,
                 selection_revision,
                 view_revision,
-                root_revision,
+                request_sequence,
                 nodes,
             } => {
                 if let Some(view) = self.view_for(&thread_id, generation)
                     && view.selection_revision == selection_revision
                     && view_revision
                         .is_none_or(|revision| view.received_window_revision == Some(revision))
-                    && root_revision >= view.received_revision
+                    && request_sequence >= view.received_revision
                 {
-                    view.received_revision = root_revision;
+                    view.received_revision = request_sequence;
                     view.on_incomplete_responses(nodes);
                 }
             }
