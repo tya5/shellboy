@@ -725,8 +725,11 @@ cat request.txt | shellboy exec --schema result.schema.json --text-stdin
 ```
 
 `--result reply|turn-end|run-end` selects a saved result; default `reply` sends
-an expected-reply message, waits for `reply_received` and the assigned Run to
-end, and reads the reply node. `turn-end` sends an ordinary message and waits
+an expected-reply message, waits for the assigned Run to end and then, while the
+reply duty is still open (`pending` or `awaiting_own_ask` after the recipient
+asked back), for `reply_received` until `--timeout-ms`, and reads the reply node.
+A terminal state without a reply exits 4 and the deadline exits 5, naming the
+state. `turn-end` sends an ordinary message and waits
 for the assigned Turn; `run-end` sends an ordinary message and waits for the
 assigned Run, reading its last Turn's end message. An existing Turn can handle
 other input; a Run can continue into later Turns and wait for owned work. Neither

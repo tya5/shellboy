@@ -96,9 +96,9 @@ that owns them.
 
 Not built: a timer, a per-Thread setting, a nesting limit, a new event fact, or
 any change to replies that were actually given. Clients own how they word the
-waiting duty. `exec --result reply` still reads the reply when the recipient Run
-completes, so a recipient that asks back and ends its Run exits 4 with the duty
-`awaiting_own_ask`.
+waiting duty. `exec --result reply` keeps waiting while the duty is open
+([#441](#exec)), so a recipient that asks back and ends its Run does not end
+the exec.
 
 ## Facts found while reading the code
 
@@ -506,7 +506,7 @@ sender-label rules; repairs are sent in the same mode.
 
 | Mode | Send | Wait | Result text |
 |---|---|---|---|
-| `reply` (default) | `message ask --thread` | `reply_received` on the message **and** `run_ended` on the Run the message was assigned to | the reply node (`message get` → `reply.node_id` → `history read --node`) |
+| `reply` (default) | `message ask --thread` | `run_ended` on the Run the message was assigned to, then `reply_received` on the message while its duty is open (#441) | the reply node (`message get` → `reply.node_id` → `history read --node`) |
 | `turn-end` | ordinary `message send`, no reply duty | `turn_completed` on the Turn the message was assigned to | that Turn's end message (`turn get` → `end_message_node_id` → `history read --end-message-only`) |
 | `run-end` | ordinary `message send`, no reply duty | `run_ended` on the Run the message was assigned to | that Run's end message (`run get` → `end_message_node_id` → `history read --end-message-only`) |
 
@@ -517,6 +517,15 @@ form); in `turn-end` / `run-end` mode it says to make it the final message, as
 today. All modes keep today's checks: the send must be assigned (`run_id` and,
 for `turn-end`, `turn_id` present), otherwise exit 4 `held`; the message must be
 `applied` before its result is read.
+
+**Open duty in `reply` mode (#441, decision 2026-11-26).** When the assigned Run
+ends (completed, or stopped or failed with the message applied), exec reads the
+duty. While it is open (`pending`, or `awaiting_own_ask` after the recipient asked
+back, #433) exec keeps waiting with the existing `reply_received` wait, bounded by
+its own `--timeout-ms`, and rereads the duty after each wait. It returns the reply
+node once `replied`; a terminal state without a reply (`ignored`, `cancelled`,
+`recipient_deleted`) exits 4 `reply_unavailable`, and the client deadline exits 5
+`timeout`; both messages name the state. No timer or owner behaviour is added.
 
 **Which end message.** Both modes read the saved end message of a Turn: the
 last assistant node of a Turn that completed normally. A Turn ended by Esc
