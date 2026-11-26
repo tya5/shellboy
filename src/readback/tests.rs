@@ -561,6 +561,32 @@ fn shell_list_common_description_is_bounded_sanitized_and_does_not_replace_comma
 }
 
 #[test]
+fn service_execution_without_saved_command_decodes_as_a_typed_list_row() {
+    watchdog(|| {
+        let c = db();
+        shell_row(&c, "commanded", "t", "2026-10-31T00:00:00Z", "printf é", 0);
+        c.execute_batch("INSERT INTO schedule(id,thread_id,kind,enabled,cwd,command) VALUES('service','t','service',1,'/','echo saved');
+            INSERT INTO shell_execution(id,schedule_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at,ended_at,exit_code)VALUES('no-command','service','no-command','exited','/','{}','UTF-8','UTF-8','closed','2026-10-31T00:00:30Z','2026-10-31T00:01:00Z',0);").unwrap();
+        let mut a = args();
+        a.thread_id = Some("t".into());
+        let result = shells(&c, &a).unwrap();
+        let wire = &result["items"][0];
+        assert_eq!(wire["execution_id"], "no-command");
+        assert!(wire.get("command_characters").is_none());
+        let typed: crate::protocol::ShellListResult = serde_json::from_value(result).unwrap();
+        let [service, commanded] = &typed.page.items[..] else {
+            panic!("two rows")
+        };
+        assert_eq!(service.thread_id, "t");
+        assert_eq!(service.run_id, None);
+        assert_eq!(service.command_excerpt, None);
+        assert_eq!(service.command_characters, None);
+        assert_eq!(commanded.command_characters, Some(8));
+        assert_eq!(commanded.run_id.as_deref(), Some("t"));
+    });
+}
+
+#[test]
 fn automatic_metrics_reason_falls_back_to_failure_without_a_replacement() {
     let c = db();
     for (id, outcome, result) in [

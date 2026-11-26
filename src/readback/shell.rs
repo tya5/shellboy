@@ -166,6 +166,10 @@ pub(crate) fn list(db: &Connection, a: &ShellListArgs, instance: &str) -> Result
         } else {
             obj.remove("description");
         }
+        if obj["command_characters"].is_null() {
+            // No saved command text: there is no count to report (#452).
+            obj.remove("command_characters");
+        }
         obj.remove("raw_command");
         obj.remove("sec");
         obj.remove("nano");
