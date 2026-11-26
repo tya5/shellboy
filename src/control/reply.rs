@@ -1211,7 +1211,15 @@ mod tests {
                 }
             }
             assert!(finished);
-            assert_eq!(db.query_row("SELECT count(*) FROM receipt WHERE run_id='r' AND json_extract(result_json,'$.reply.state')='ignored'",[],|r|r.get::<_,i64>(0)).unwrap(),261);
+            assert_eq!(
+                named_reply_states(
+                    &db,
+                    message_ids(&db, "SELECT message_node_id FROM receipt WHERE run_id='r'")
+                )
+                .get("ignored")
+                .copied(),
+                Some(261)
+            );
             assert_eq!(
                 db.query_row(
                     "SELECT count(*) FROM event WHERE kind='reply_outcome'",
@@ -1222,7 +1230,18 @@ mod tests {
                 261
             );
             assert_eq!(db.query_row("SELECT count(*) FROM delivery d JOIN event e ON e.id=d.event_id WHERE e.kind='reply_outcome'",[],|r|r.get::<_,i64>(0)).unwrap(),261);
-            assert_eq!(db.query_row("SELECT count(*) FROM receipt WHERE state='held' AND json_extract(result_json,'$.reply.state')='pending'",[],|r|r.get::<_,i64>(0)).unwrap(),4096);
+            assert_eq!(
+                named_reply_states(
+                    &db,
+                    message_ids(
+                        &db,
+                        "SELECT message_node_id FROM receipt WHERE state='held'"
+                    )
+                )
+                .get("pending")
+                .copied(),
+                Some(4096)
+            );
             assert!(
                 terminal_tx(&db, "r", "4", &mut Vec::new())
                     .unwrap()
@@ -1300,7 +1319,7 @@ mod tests {
             } else {
                 "ignored"
             };
-            assert_eq!(tx.query_row("SELECT json_extract(result_json,'$.reply.state') FROM receipt WHERE id='request'",[],|r|r.get::<_,String>(0)).unwrap(),expected);
+            assert_eq!(named_reply_state(&tx, "request"), expected);
             assert_eq!(
                 wakes,
                 if state == "recovery_wait" {
@@ -1324,6 +1343,22 @@ mod tests {
             }
             tx.commit().unwrap();
         }
+    }
+
+    fn named_reply_state(db: &Connection, message: &str) -> String {
+        named_reply_states(db, [message.to_owned()])
+            .into_keys()
+            .next()
+            .unwrap()
+    }
+
+    fn message_ids(db: &Connection, sql: &str) -> Vec<String> {
+        db.prepare(sql)
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
     }
 
     /// Reply states as the owner's named-message read reports them.
@@ -1505,11 +1540,14 @@ mod tests {
             "sender-question",
             "cancel-question",
         ] {
-            let (reply, admission): (String, String) = db.query_row(
-                "SELECT json_extract(result_json,'$.reply.state'),path_admission FROM receipt WHERE message_node_id=?1",
-                [message],
-                |row| Ok((row.get(0)?,row.get(1)?)),
-            ).unwrap();
+            let reply = named_reply_state(&db, message);
+            let admission: String = db
+                .query_row(
+                    "SELECT path_admission FROM receipt WHERE message_node_id=?1",
+                    [message],
+                    |row| row.get(0),
+                )
+                .unwrap();
             let expected = match message {
                 "bulk-question" | "gc-question" => "recipient_deleted",
                 "sender-question" | "cancel-question" => "cancelled",
@@ -1576,15 +1614,7 @@ mod tests {
             .unwrap(),
             1
         );
-        assert_eq!(
-            db.query_row(
-                "SELECT json_extract(result_json,'$.reply.state') FROM receipt WHERE id='m'",
-                [],
-                |r| r.get::<_, String>(0)
-            )
-            .unwrap(),
-            "ignored"
-        );
+        assert_eq!(named_reply_state(&db, "m"), "ignored");
     }
     #[test]
     fn path_admission_remains_transactional_without_notice_events() {

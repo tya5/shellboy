@@ -229,21 +229,34 @@ async fn human_question_reply_cancel_and_attachment_frontier_preserve_fifo() {
         .await
         .unwrap();
     assert_eq!(late_cancel.result["items"][0]["outcome"], "unavailable");
-    let late_cancel_state: (String, String) = store.database.call({
-        let id = second_id.clone();
-        move |db| db.query_row(
-            "SELECT path_admission,json_extract(result_json,'$.reply.state') FROM receipt WHERE message_node_id=?1",
-            [&id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        ).map_err(Into::into)
-    }).await.unwrap();
+    let late_cancel_state: (String, String) = store
+        .database
+        .call({
+            let id = second_id.clone();
+            move |db| {
+                let admission: String = db.query_row(
+                    "SELECT path_admission FROM receipt WHERE message_node_id=?1",
+                    [&id],
+                    |row| row.get(0),
+                )?;
+                Ok((
+                    admission,
+                    crate::control::db::named_reply_state(db, &id).unwrap(),
+                ))
+            }
+        })
+        .await
+        .unwrap();
     assert_eq!(late_cancel_state, ("unadmitted".into(), "replied".into()));
     let before_attachment: (String,String,String,bool,bool) = store.database.call({
         let id=second_id.clone();
-        move |db| db.query_row(
-            "SELECT r.state,r.path_admission,json_extract(r.result_json,'$.reply.state'),EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id='t' AND p.node_id=r.message_node_id),EXISTS(SELECT 1 FROM draft d WHERE json_extract(d.body_json,'$.source_message_id')=r.message_node_id) FROM receipt r WHERE r.message_node_id=?1",
-            [&id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?)),
-        ).map_err(Into::into)
+        move |db| {
+            let (state,admission,in_path,has_draft):(String,String,bool,bool)=db.query_row(
+                "SELECT r.state,r.path_admission,EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id='t' AND p.node_id=r.message_node_id),EXISTS(SELECT 1 FROM draft d WHERE json_extract(d.body_json,'$.source_message_id')=r.message_node_id) FROM receipt r WHERE r.message_node_id=?1",
+                [&id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)),
+            )?;
+            Ok((state,admission,crate::control::db::named_reply_state(db,&id).unwrap(),in_path,has_draft))
+        }
     }).await.unwrap();
     assert_eq!(
         before_attachment,
@@ -384,10 +397,13 @@ async fn human_question_reply_cancel_and_attachment_frontier_preserve_fifo() {
     assert_eq!(outcome.result["items"][0]["outcome"], "cancelled");
     let audit: (String,String,String,String,String,String) = store.database.call({
         let id=cancelled_id.clone();
-        move |db| db.query_row(
-            "SELECT r.id,r.client_operation_id,r.state,r.path_admission,d.body_json,json_extract(r.result_json,'$.reply.state') FROM receipt r JOIN draft d ON d.state='archived' AND json_extract(d.body_json,'$.source_message_id')=r.message_node_id WHERE r.message_node_id=?1",
-            [&id], |r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?)),
-        ).map_err(Into::into)
+        move |db| {
+            let (receipt,operation,state,admission,body):(String,String,String,String,String)=db.query_row(
+                "SELECT r.id,r.client_operation_id,r.state,r.path_admission,d.body_json FROM receipt r JOIN draft d ON d.state='archived' AND json_extract(d.body_json,'$.source_message_id')=r.message_node_id WHERE r.message_node_id=?1",
+                [&id], |r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?)),
+            )?;
+            Ok((receipt,operation,state,admission,body,crate::control::db::named_reply_state(db,&id).unwrap()))
+        }
     }).await.unwrap();
     assert_eq!(audit.2, "cancelled");
     assert_eq!(audit.3, "unadmitted");
@@ -588,10 +604,11 @@ async fn bounded_admission_prefix_keeps_the_129th_question_before_its_reply() {
         replies.push(answer.result["message_id"].as_str().unwrap().to_owned());
     }
     let before_plan: (i64, i64) = store.database.call(|db| {
-        Ok((
-            db.query_row("SELECT count(*) FROM receipt WHERE target_thread_id='t' AND state='applied' AND path_admission='unadmitted' AND json_extract(result_json,'$.to_human')=1 AND json_extract(result_json,'$.reply.state') IN ('pending','replied')", [], |row| row.get(0))?,
-            db.query_row("SELECT count(*) FROM receipt WHERE target_thread_id='t' AND state='applied' AND path_admission='unadmitted' AND run_id IS NULL AND turn_id IS NULL AND json_extract(result_json,'$.to_human')=1 AND json_extract(result_json,'$.reply.state') IN ('pending','replied')", [], |row| row.get(0))?,
-        ))
+        let owed = |extra: &str| {
+            let counts = crate::control::db::named_reply_counts(db, &format!("target_thread_id='t' AND state='applied' AND path_admission='unadmitted'{extra} AND json_extract(result_json,'$.to_human')=1"));
+            counts.get("pending").copied().unwrap_or(0) + counts.get("replied").copied().unwrap_or(0)
+        };
+        Ok((owed(""), owed(" AND run_id IS NULL AND turn_id IS NULL")))
     }).await.unwrap();
     assert_eq!(before_plan, (DUTIES as i64, DUTIES as i64));
     let (plan, selected) = store

@@ -1264,7 +1264,7 @@ async fn schema_thirty_nine_detaches_runs_preserving_shells_turns_and_metadata()
                 )?,
                 "preserve"
             );
-            assert_eq!(db.query_row("SELECT json_extract(result_json,'$.reply.state') FROM receipt WHERE id='pending-request'",[],|r|r.get::<_,String>(0))?,"pending");
+            assert_eq!(shellboy::control::db::message_details(db,"pending-request")?.reply.unwrap()["state"],"pending");
             assert_eq!(
                 db.query_row("PRAGMA foreign_keys", [], |r| r.get::<_, i64>(0))?,
                 1

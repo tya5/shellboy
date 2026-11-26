@@ -879,11 +879,23 @@ async fn recovery_wait_keeps_pending_and_recovered_reply_wakes_completed_sender_
     }).await.unwrap();
     let recovering = accepted["turn_id"].as_str().unwrap().to_owned();
     let recovery_id = id.clone();
-    store.database.call(move|db| {
-        db.execute("UPDATE turn SET state='recovery_wait' WHERE id=?1",[&recovering])?;
-        assert_eq!(db.query_row("SELECT json_extract(result_json,'$.reply.state') FROM receipt WHERE message_node_id=?1",[recovery_id],|r|r.get::<_,String>(0))?,"pending");
-        Ok(())
-    }).await.unwrap();
+    store
+        .database
+        .call(move |db| {
+            db.execute(
+                "UPDATE turn SET state='recovery_wait' WHERE id=?1",
+                [&recovering],
+            )?;
+            assert_eq!(
+                shellboy::control::db::message_details(db, &recovery_id)?
+                    .reply
+                    .unwrap()["state"],
+                "pending"
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
     store
         .execute(
             request(Command::RunRetry(RunTarget {
@@ -987,9 +999,8 @@ async fn deletion_terminalizes_replies_before_gc_and_recipient_wins() {
             .unwrap();
         let m = message.clone();
         store.database.call(move|db| {
-            let raw:String=db.query_row("SELECT result_json FROM receipt WHERE message_node_id=?1",[&m],|r|r.get(0))?;
-            let value:serde_json::Value=serde_json::from_str(&raw).unwrap();
-            assert_eq!(value["reply"]["state"],if deleted=="sender"{"pending"}else{"recipient_deleted"});
+            let reply=shellboy::control::db::message_details(db,&m)?.reply.unwrap();
+            assert_eq!(reply["state"],if deleted=="sender"{"pending"}else{"recipient_deleted"});
             if deleted=="sender" {
                 assert_eq!(db.query_row("SELECT count(*) FROM event WHERE json_extract(payload_ref_json,'$.kind')='reply_cancelled'",[],|r|r.get::<_,i64>(0))?,0,"sender cleanup is deferred");
             }
@@ -1032,11 +1043,10 @@ async fn deletion_terminalizes_replies_before_gc_and_recipient_wins() {
             .database
             .call(move |db| {
                 if deleted == "sender" {
-                    let raw: String = db.query_row("SELECT result_json FROM receipt WHERE message_node_id=?1", [&message], |r|r.get(0))?;
-                    let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
-                    assert_eq!(value["reply"]["state"], "cancelled");
-                    assert_eq!(value["reply"]["cancel_reason"], "sender_deleted");
-                    assert_eq!(value["reply"]["cancelled_by"]["thread_id"], "sender");
+                    let reply = shellboy::control::db::message_details(db, &message)?.reply.unwrap();
+                    assert_eq!(reply["state"], "cancelled");
+                    assert_eq!(reply["cancel_reason"], "sender_deleted");
+                    assert_eq!(reply["cancelled_by"]["thread_id"], "sender");
                     assert_eq!(db.query_row("SELECT count(*) FROM event WHERE json_extract(payload_ref_json,'$.kind')='reply_cancelled'",[],|r|r.get::<_,i64>(0))?,1);
                 }
                 assert_eq!(

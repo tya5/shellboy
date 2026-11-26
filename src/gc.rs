@@ -1681,10 +1681,17 @@ mod tests {
             Ok(wakes)
         }).await.unwrap();
         assert_eq!(sync_wakes.len(), 2);
-        let after_sync = db.call(|db| Ok(db.query_row(
-            "SELECT sum(json_extract(result_json,'$.reply.state')='pending'),sum(json_extract(result_json,'$.reply.state')='recipient_deleted') FROM receipt WHERE target_thread_id='deleted-target'",
-            [], |r| Ok((r.get::<_, Option<i64>>(0)?.unwrap_or(0), r.get::<_, Option<i64>>(1)?.unwrap_or(0))),
-        )?)).await.unwrap();
+        let after_sync = db
+            .call(|db| {
+                let counts =
+                    crate::control::db::named_reply_counts(db, "target_thread_id='deleted-target'");
+                Ok((
+                    counts.get("pending").copied().unwrap_or(0),
+                    counts.get("recipient_deleted").copied().unwrap_or(0),
+                ))
+            })
+            .await
+            .unwrap();
         assert_eq!(after_sync, (LEGACY as i64 - 16, 16));
 
         let job = gc.start_history().await.unwrap().unwrap();
@@ -1718,10 +1725,17 @@ mod tests {
             rolled_back,
             "outcome insertion fault aborts one receipt batch transaction"
         );
-        let after_rollback = db.call(|db| Ok(db.query_row(
-            "SELECT sum(json_extract(result_json,'$.reply.state')='pending'),sum(json_extract(result_json,'$.reply.state')='recipient_deleted') FROM receipt WHERE target_thread_id='deleted-target'",
-            [], |r| Ok((r.get::<_, Option<i64>>(0)?.unwrap_or(0), r.get::<_, Option<i64>>(1)?.unwrap_or(0))),
-        )?)).await.unwrap();
+        let after_rollback = db
+            .call(|db| {
+                let counts =
+                    crate::control::db::named_reply_counts(db, "target_thread_id='deleted-target'");
+                Ok((
+                    counts.get("pending").copied().unwrap_or(0),
+                    counts.get("recipient_deleted").copied().unwrap_or(0),
+                ))
+            })
+            .await
+            .unwrap();
         assert_eq!(
             after_rollback,
             (LEGACY as i64 - 16, 16),
@@ -1806,10 +1820,10 @@ mod tests {
             "finite receipt horizon and monotonically advancing rowid cursor complete the existing job"
         );
         let result = db.call(|db| Ok((
-            db.query_row("SELECT count(*) FROM receipt WHERE target_thread_id='deleted-target' AND json_extract(result_json,'$.reply.state')='pending'", [], |r| r.get::<_, i64>(0))?,
+            crate::control::db::named_reply_counts(db, "target_thread_id='deleted-target'").get("pending").copied().unwrap_or(0),
             db.query_row("SELECT count(*) FROM event WHERE kind='reply_outcome' AND target_thread_id IN ('sender-a','sender-b')", [], |r| r.get::<_, i64>(0))?,
             db.query_row("SELECT count(*) FROM delivery d JOIN event e ON e.id=d.event_id WHERE e.kind='reply_outcome' AND d.state='pending'", [], |r| r.get::<_, i64>(0))?,
-            db.query_row("SELECT count(*) FROM receipt WHERE target_thread_id='unrelated' AND json_extract(result_json,'$.reply.state')='pending'", [], |r| r.get::<_, i64>(0))?,
+            crate::control::db::named_reply_counts(db, "target_thread_id='unrelated'").get("pending").copied().unwrap_or(0),
             db.query_row("SELECT count(*) FROM gc_job WHERE id='delete-job' AND state='done'", [], |r| r.get::<_, i64>(0))?,
         ))).await.unwrap();
         assert_eq!(

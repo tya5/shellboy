@@ -784,11 +784,14 @@ mod question_admission_migration_tests {
             "recipient-deleted",
             "missing",
         ] {
-            let (admission, reply): (String, Option<String>) = db.query_row(
-                "SELECT path_admission,json_extract(result_json,'$.reply.state') FROM receipt WHERE id=?1",
-                [id],
-                |row| Ok((row.get(0)?,row.get(1)?)),
-            ).unwrap();
+            let admission: String = db
+                .query_row(
+                    "SELECT path_admission FROM receipt WHERE id=?1",
+                    [id],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            let reply = crate::control::db::named_reply_state_of_receipt(&db, id);
             assert_eq!(admission, "admitted", "{id}");
             let expected = match id {
                 "pending" => Some("pending"),
@@ -821,21 +824,37 @@ mod question_admission_migration_tests {
                 "{id}"
             );
         }
-        let admitted_before_rerun: Vec<(String,String,Option<String>)> = db
-            .prepare("SELECT id,path_admission,json_extract(result_json,'$.reply.state') FROM receipt ORDER BY id")
+        let admitted_before_rerun: Vec<(String, String, Option<String>)> = db
+            .prepare("SELECT id,path_admission FROM receipt ORDER BY id")
             .unwrap()
-            .query_map([], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?)))
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
             .unwrap()
-            .collect::<rusqlite::Result<_>>()
-            .unwrap();
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap()
+            .into_iter()
+            .map(|(id, admission)| {
+                let reply = crate::control::db::named_reply_state_of_receipt(&db, &id);
+                (id, admission, reply)
+            })
+            .collect();
         run(&mut db, super::super::SCHEMA_VERSION, &|_, _| {}, &|| {}).unwrap();
-        let admitted_after_rerun: Vec<(String,String,Option<String>)> = db
-            .prepare("SELECT id,path_admission,json_extract(result_json,'$.reply.state') FROM receipt ORDER BY id")
+        let admitted_after_rerun: Vec<(String, String, Option<String>)> = db
+            .prepare("SELECT id,path_admission FROM receipt ORDER BY id")
             .unwrap()
-            .query_map([], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?)))
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
             .unwrap()
-            .collect::<rusqlite::Result<_>>()
-            .unwrap();
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap()
+            .into_iter()
+            .map(|(id, admission)| {
+                let reply = crate::control::db::named_reply_state_of_receipt(&db, &id);
+                (id, admission, reply)
+            })
+            .collect();
         assert_eq!(admitted_after_rerun, admitted_before_rerun);
     }
 
@@ -929,10 +948,18 @@ mod question_admission_migration_tests {
 
         migrate(&mut db).unwrap();
         for id in ["legacy-preserve", "legacy-ancestor"] {
-            let state:(String,String,Option<String>)=db.query_row(
-                "SELECT state,path_admission,json_extract(result_json,'$.reply.state') FROM receipt WHERE id=?1",
-                [id],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?)),
-            ).unwrap();
+            let (receipt_state, admission): (String, String) = db
+                .query_row(
+                    "SELECT state,path_admission FROM receipt WHERE id=?1",
+                    [id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap();
+            let state = (
+                receipt_state,
+                admission,
+                crate::control::db::named_reply_state_of_receipt(&db, id),
+            );
             assert_eq!(
                 state,
                 ("applied".into(), "admitted".into(), Some("pending".into()))
@@ -1065,13 +1092,18 @@ mod question_admission_migration_tests {
             );
         }
         for id in ["legacy-preserve", "legacy-ancestor"] {
-            let state: (String, String, Option<String>) = db
+            let (receipt_state, admission): (String, String) = db
                 .query_row(
-                    "SELECT state,path_admission,json_extract(result_json,'$.reply.state') FROM receipt WHERE id=?1",
+                    "SELECT state,path_admission FROM receipt WHERE id=?1",
                     [id],
-                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                    |row| Ok((row.get(0)?, row.get(1)?)),
                 )
                 .unwrap();
+            let state = (
+                receipt_state,
+                admission,
+                crate::control::db::named_reply_state_of_receipt(&db, id),
+            );
             assert_eq!(
                 state,
                 ("applied".into(), "admitted".into(), Some("pending".into()))
@@ -1157,13 +1189,16 @@ mod question_admission_migration_tests {
             0
         );
         assert_eq!(
-            db.query_row(
-                "SELECT path_admission,json_extract(result_json,'$.reply.state') FROM receipt WHERE id='historical'",
-                [],
-                |r| Ok((r.get::<_, String>(0)?,r.get::<_,String>(1)?))
-            )
-            .unwrap(),
-            ("unadmitted".into(),"pending".into())
+            (
+                db.query_row(
+                    "SELECT path_admission FROM receipt WHERE id='historical'",
+                    [],
+                    |r| r.get::<_, String>(0)
+                )
+                .unwrap(),
+                crate::control::db::named_reply_state_of_receipt(&db, "historical").unwrap()
+            ),
+            ("unadmitted".into(), "pending".into())
         );
     }
 }
@@ -1723,7 +1758,12 @@ mod activity_migration_tests {
                 .unwrap(),
             crate::storage::SCHEMA_VERSION
         );
-        assert_eq!(db.query_row("SELECT count(*) FROM receipt WHERE target_thread_id='legacy' AND json_extract(result_json,'$.reply.state')='pending'", [], |row| row.get::<_, i64>(0)).unwrap(), 20);
+        assert_eq!(
+            crate::control::db::named_reply_counts(&db, "target_thread_id='legacy'")
+                .get("pending")
+                .copied(),
+            Some(20)
+        );
         assert_eq!(db.query_row("SELECT count(*) FROM sqlite_master WHERE type='index' AND name='receipt_human_reply_pending'", [], |row| row.get::<_, i64>(0)).unwrap(), 1);
         let plan: String = db.query_row("EXPLAIN QUERY PLAN SELECT target_thread_id FROM receipt INDEXED BY receipt_human_reply_pending WHERE target_thread_id='legacy' AND json_extract(result_json,'$.reply.state')='pending' AND json_extract(result_json,'$.to_human')=1", [], |row| row.get(3)).unwrap();
         assert!(plan.contains("receipt_human_reply_pending"), "{plan}");
