@@ -271,20 +271,25 @@ impl Session {
         )
         .map_err(|_| Failure::new(6, "owner_error", "Owner returned an invalid typed result"))
     }
-    /// `--result reply`: the owner's `reply_received` wait decides when the duty
-    /// has ended; while it reports the duty still open the client waits again,
-    /// up to the client deadline (#441).
+    /// `--result reply`: the saved duty, then each `reply_received` snapshot,
+    /// is classified by the owner's open-state rule; only an open duty is
+    /// waited on, up to the client deadline (#441).
     async fn await_reply(
         &mut self,
         message: &str,
         saved: Option<&Value>,
     ) -> Result<Option<String>, Failure> {
-        // The saved state only names the duty in a deadline diagnostic.
-        let mut state = saved
-            .and_then(|reply| reply["state"].as_str())
-            .ok_or_else(|| Failure::new(4, "reply_unavailable", "No reply outcome was saved"))?
-            .to_owned();
+        let mut reply = saved
+            .cloned()
+            .ok_or_else(|| Failure::new(4, "reply_unavailable", "No reply outcome was saved"))?;
         loop {
+            let Some(state) = reply["state"]
+                .as_str()
+                .filter(|state| crate::control::reply::is_open(Some(state)))
+                .map(str::to_owned)
+            else {
+                return ended_reply(reply["state"].as_str(), reply["node_id"].as_str());
+            };
             let remaining = self
                 .deadline
                 .saturating_duration_since(Instant::now())
@@ -294,7 +299,7 @@ impl Session {
                 return Err(duty_timeout(&state));
             }
             // The deadline can also expire inside the wait request; this path
-            // owns that diagnostic, naming the last observed state.
+            // owns that diagnostic, naming the last observed open state.
             let wait: WaitResult = self
                 .request(
                     "wait",
@@ -309,6 +314,18 @@ impl Session {
                 .await
                 .map_err(|failure| failure.at_deadline(&state))?;
             match wait.status {
+                WaitStatus::Satisfied | WaitStatus::Timeout => {}
+                // Input for the calling Thread ends this observation; the
+                // target and its duty continue.
+                WaitStatus::Interrupted => {
+                    return Err(Failure::new(
+                        5,
+                        "interrupted",
+                        format!(
+                            "Reply wait was interrupted by input for the calling Thread while the reply duty is {state}; no target was stopped"
+                        ),
+                    ));
+                }
                 WaitStatus::Unavailable => {
                     return Err(Failure::new(
                         4,
@@ -316,29 +333,11 @@ impl Session {
                         "Wait target became unavailable",
                     ));
                 }
-                WaitStatus::RecoveryWait => {
-                    return Err(Failure::new(
-                        4,
-                        "recovery_wait",
-                        "Target requires explicit recovery",
-                    ));
-                }
-                WaitStatus::Satisfied | WaitStatus::Timeout | WaitStatus::Interrupted => {}
+                WaitStatus::RecoveryWait => return Err(impossible_reply_wait()),
             }
             // The owner's snapshot of this exact message carries its reply
             // state and node; a finished wait always includes it.
-            let reply = reply_snapshot(&wait.snapshot, message).unwrap_or(Value::Null);
-            let Some(observed) = reply["state"].as_str() else {
-                return Err(Failure::new(
-                    6,
-                    "owner_error",
-                    "Reply wait returned no reply state for the message",
-                ));
-            };
-            if wait.status == WaitStatus::Satisfied {
-                return ended_reply(observed, reply["node_id"].as_str());
-            }
-            state = observed.to_owned();
+            reply = reply_snapshot(&wait.snapshot, message).ok_or_else(impossible_reply_wait)?;
         }
     }
     async fn answer(&mut self, mode: ResultMode) -> Result<String, Failure> {
@@ -644,16 +643,27 @@ fn reply_snapshot(snapshot: &Value, message: &str) -> Option<Value> {
         .find(|item| item["type"] == "reply" && item["message_id"] == message)
         .map(|item| json!({"state": item["state"], "node_id": item["reply_node_id"]}))
 }
-/// The result of a duty the owner's wait reported as ended.
-fn ended_reply(state: &str, node: Option<&str>) -> Result<Option<String>, Failure> {
-    if state == "replied" {
+/// The result of a duty that is no longer open.
+fn ended_reply(state: Option<&str>, node: Option<&str>) -> Result<Option<String>, Failure> {
+    if state == Some("replied") {
         return Ok(node.map(str::to_owned));
     }
     Err(Failure::new(
         4,
         "reply_unavailable",
-        format!("Reply ended with state {state} without a reply"),
+        format!(
+            "Reply ended with state {} without a reply",
+            state.unwrap_or("missing")
+        ),
     ))
+}
+/// A reply wait result the owner never produces for a single reply condition.
+fn impossible_reply_wait() -> Failure {
+    Failure::new(
+        6,
+        "owner_error",
+        "Owner returned an impossible result for the reply wait",
+    )
 }
 
 #[cfg(test)]
@@ -662,13 +672,15 @@ mod reply_mode_tests {
     #[test]
     fn terminal_nonreply_outcomes_are_exit_four() {
         for state in ["ignored", "cancelled", "recipient_deleted"] {
-            let Err(error) = ended_reply(state, None) else {
+            let Err(error) = ended_reply(Some(state), None) else {
                 panic!("{state} must fail");
             };
             assert_eq!(error.code, 4, "{state}");
             assert!(error.message.contains(state), "{}", error.message);
         }
-        assert!(matches!(ended_reply("replied", Some("reply")), Ok(Some(node)) if node == "reply"));
+        assert!(
+            matches!(ended_reply(Some("replied"), Some("reply")), Ok(Some(node)) if node == "reply")
+        );
     }
 
     #[test]
