@@ -105,6 +105,7 @@ unchanged.
 
 Like `shell.read` with transient raw-output pins, this bounded owner observation
 creates no operation receipt. Its worker can temporarily pin the selection and
-refresh its cache. Reload does not send to a model, change the saved selection or
+refresh its cache, so owner shutdown and context capture fence it like other
+context-changing requests. Reload does not send to a model, change the saved selection or
 successful-send baseline, or publish a new event fact. The TUI's explicit reload
 calls the same owner operation.
