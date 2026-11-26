@@ -480,7 +480,7 @@ fn inspect(
                     let reply = &saved["reply"];
                     let state = reply["state"].as_str().unwrap_or("pending");
                     snapshots.push(json!({"type":"reply","message_id":message_id,"state":state,"reply_node_id":reply["node_id"],"at":reply["at"],"by":reply["by"]}));
-                    if state != "pending" {
+                    if !super::reply::is_open(Some(state)) {
                         observation.matched.push(condition.clone());
                     }
                 } else {

@@ -64,7 +64,9 @@ pub(crate) fn mark_admitted_tx(
     at: &str,
 ) -> rusqlite::Result<()> {
     for node in nodes {
-        db.execute("UPDATE receipt SET path_admission='admitted',result_json=CASE WHEN json_extract(result_json,'$.reply.state')='pending' THEN json_set(COALESCE(result_json,'{}'),'$.reply.applied_at',COALESCE(json_extract(result_json,'$.reply.applied_at'),?3)) ELSE result_json END WHERE target_thread_id=?1 AND message_node_id=?2 AND path_admission<>'admitted' AND EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id=?1 AND p.node_id=?2)", params![thread,node,at])?;
+        // A pending duty saves when it entered the Thread: only an own ask sent
+        // after this time can keep the duty open at Run end (#433).
+        db.execute("UPDATE receipt SET path_admission='admitted',result_json=CASE WHEN json_extract(result_json,'$.reply.state')='pending' THEN json_set(result_json,'$.reply.admitted_at',?3) ELSE result_json END WHERE target_thread_id=?1 AND message_node_id=?2 AND path_admission<>'admitted' AND EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id=?1 AND p.node_id=?2)", params![thread,node,at])?;
         let operation: Option<String> = db.query_row("SELECT client_operation_id FROM receipt WHERE target_thread_id=?1 AND message_node_id=?2",params![thread,node],|r|r.get(0)).optional()?;
         if let Some(operation) = operation {
             super::submission_retention::collect_operation(db, &operation)?;

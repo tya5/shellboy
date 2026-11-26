@@ -58,7 +58,7 @@ pub(super) fn query(
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
-    let mut query = db.prepare("SELECT r.message_node_id,substr(r.sender_json,1,8193),r.created_at,r.state,COALESCE((SELECT substr(json_extract(n.payload_json,'$.content[0].text'),1,513) FROM node n WHERE n.id=r.message_node_id),''),COALESCE(json_extract(r.result_json,'$.to_human')=1,0),CAST((julianday('now')-julianday(r.created_at))*86400000 AS INTEGER) FROM receipt r INDEXED BY receipt_reply_pending WHERE r.target_thread_id=?1 AND r.state IN ('applied','accepted','held') AND json_extract(r.result_json,'$.reply.state')='pending' AND COALESCE(json_extract(r.result_json,'$.to_human'),0)=1 ORDER BY r.created_at,r.rowid LIMIT ?2")?;
+    let mut query = db.prepare("SELECT r.message_node_id,substr(r.sender_json,1,8193),r.created_at,r.state,COALESCE((SELECT substr(json_extract(n.payload_json,'$.content[0].text'),1,513) FROM node n WHERE n.id=r.message_node_id),''),COALESCE(json_extract(r.result_json,'$.to_human')=1,0),CAST((julianday('now')-julianday(r.created_at))*86400000 AS INTEGER) FROM receipt r INDEXED BY receipt_reply_pending WHERE r.target_thread_id=?1 AND r.state IN ('applied','accepted','held') AND json_extract(r.result_json,'$.reply.state') IN ('pending','awaiting_own_ask') AND json_extract(r.result_json,'$.reply.state')='pending' AND COALESCE(json_extract(r.result_json,'$.to_human'),0)=1 ORDER BY r.created_at,r.rowid LIMIT ?2")?;
     let awaiting_replies = query
         .query_map(
             rusqlite::params![thread, crate::protocol::MAX_PENDING_REPLY_DUTIES as i64],

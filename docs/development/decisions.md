@@ -1,5 +1,19 @@
 # 開発判断
 
+## Reopened reply duties (#433)
+
+Three calls the owner rule left to the implementation. Recheck if a real flow
+shows a duty ignored before its owner saw the answer.
+
+- Evidence is the duty's path-admission time (`reply.admitted_at`, the one
+  writer `mark_admitted_tx`), compared with the ask's `created_at` from the same
+  clock. Equal timestamps do not block, so an ambiguous order keeps today's rule.
+- The answer or outcome is the reopened duty's one wake, as the structure
+  comment states: its owner Run's end without a reply ignores it, no reminder.
+- When the asker's Run is stopping, the held answer cannot name a new Run; the
+  stopping Run owns the duty and its stop settles it as `ignored`, like every
+  other duty of a stopped Run.
+
 ## Scoped migration validation (#397)
 
 Use declared scopes for both the rebuild transaction and restart-persistent

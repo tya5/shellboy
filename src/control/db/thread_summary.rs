@@ -27,13 +27,15 @@ fn columns_from() -> String {
     let limit = crate::protocol::MAX_HUMAN_REPLY_SUMMARY_DUTIES;
     let (revisit_pending, revisit_delivered) =
         crate::control::revisit::summary_sql("t.id", "latest.id");
+    // Owed duties: both open reply states (#433).
+    let open = crate::control::reply::open_reply!("q.");
     format!(
         "SELECT t.id,t.title,t.cwd,t.parent_thread_id,t.updated_at,
     {CURRENT_STATE}, latest.stop_reason,latest.id,{ACTIVITY_COLUMNS},
     {revisit_pending},{revisit_delivered},
     u.id,u.answer_node_id,latest.ended_at,a.started_at,u.generation,t.archived_at,
-    (SELECT count(*) FROM (SELECT 1 FROM receipt q INDEXED BY receipt_reply_pending WHERE q.target_thread_id=t.id AND json_extract(q.result_json,'$.reply.state')='pending' LIMIT {sample_limit})),
-    (SELECT count(*) FROM (SELECT 1 FROM receipt q INDEXED BY receipt_other_reply_pending WHERE q.target_thread_id=t.id AND json_extract(q.result_json,'$.reply.state')='pending' AND COALESCE(json_extract(q.result_json,'$.to_human'),0)<>1 LIMIT {sample_limit})),
+    (SELECT count(*) FROM (SELECT 1 FROM receipt q INDEXED BY receipt_reply_pending WHERE q.target_thread_id=t.id AND {open} LIMIT {sample_limit})),
+    (SELECT count(*) FROM (SELECT 1 FROM receipt q INDEXED BY receipt_other_reply_pending WHERE q.target_thread_id=t.id AND {open} AND COALESCE(json_extract(q.result_json,'$.to_human'),0)<>1 LIMIT {sample_limit})),
     (SELECT count(*) FROM (SELECT 1 FROM receipt q INDEXED BY receipt_human_reply_pending WHERE q.target_thread_id=t.id AND json_extract(q.result_json,'$.reply.state')='pending' AND json_extract(q.result_json,'$.to_human')=1 LIMIT {sample_limit})),
     CASE WHEN (SELECT count(*) FROM (SELECT 1 FROM receipt q INDEXED BY receipt_human_reply_pending WHERE q.target_thread_id=t.id AND json_extract(q.result_json,'$.reply.state')='pending' AND json_extract(q.result_json,'$.to_human')=1 LIMIT {sample_limit}))<={limit} THEN (SELECT min(q.created_at) FROM (SELECT r.created_at FROM receipt r INDEXED BY receipt_human_reply_pending WHERE r.target_thread_id=t.id AND json_extract(r.result_json,'$.reply.state')='pending' AND json_extract(r.result_json,'$.to_human')=1 ORDER BY r.created_at LIMIT {sample_limit}) q) END, t.created_at
 FROM thread t {activity_joins}

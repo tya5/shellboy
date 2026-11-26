@@ -43,20 +43,50 @@ what it returns with `--result reply|turn-end|run-end` (default `reply`).
 
 ## Awaiting an answer to an own ask (#433)
 
-At the existing Turn-end reply-duty settlement, an owed duty is not ignored if
-its Thread has a still-pending reply-expected ask created after the duty was
-applied. The duty is saved as `reply.state = awaiting_own_ask` with
-`reply.blocking_message_id`; the first application time is saved with the duty so
-an older pending ask cannot block it. The same settlement transaction reads the
-Thread's pending asks. When the blocking ask is replied to, cancelled, ignored or
-otherwise terminal, the existing outcome path restores the duty to `pending`.
-The normal reminder/ignore rule then applies if the Thread ends a later Turn
-without replying.
+Decision A (user, 2026-11-26) and the owner rule on #433. Reply-duty settlement
+in `control::reply` is the single owner of a duty's lifecycle, with one state set:
 
-`message list --awaiting`, `message get`, and the Thread's `pending_replies`
-summary expose the state and exact blocking message ID. The state adds no timer,
-setting, nesting limit, or event fact; existing saved reply outcomes wake the
-Thread. A reply actually given continues to close its duty as before.
+| Set | States |
+|---|---|
+| open (owed) | `pending`, `awaiting_own_ask` |
+| terminal (never reopens) | `replied`, `ignored`, `cancelled`, `recipient_deleted` |
+
+Every path uses that rule: an ask blocks a duty while the ask is open; `message
+reply` and `message cancel` accept a duty in either open state; Thread deletion
+settles open duties; a `reply_received` wait ends only at a terminal state; the
+Run-end rule and the terminal-Run sweeps settle only `pending` duties of the Run
+that owns them.
+
+- **Evidence.** Path admission saves `reply.admitted_at` on a pending duty. At
+  the [Run-end rule](#run-end-rule), before the reminder/ignore step, a duty with
+  that evidence becomes `awaiting_own_ask` when its Thread has an open ask it sent
+  (`created_at`) after `admitted_at`; `reply.blocking_message_id` names the oldest
+  such ask. A duty admitted before this evidence was saved is never blocked. The
+  ask is read in the same transaction from index `receipt_pending_asked`.
+- **Reopening.** When the blocking ask becomes terminal (answered, cancelled,
+  ignored, recipient deleted), the transaction that delivers its answer or
+  `reply_outcome` to the asker also returns each duty awaiting it to `pending`
+  and saves `reply.owner_run_id`: the asker's live Run that receives the
+  delivery (a new Run if the Thread was idle; the stopping Run if the delivery is
+  held). The duty's delivery `run_id`/`turn_id` never change.
+- **Owner Run.** A duty's owner Run is `reply.owner_run_id` once reopened,
+  otherwise its delivery `run_id` (index `receipt_reply_owner_pending`). Run end,
+  explicit stop and the startup sweep settle only pending duties of their owner
+  Run, so an earlier Run's sweep never settles a reopened or awaiting duty.
+- **One wake.** The answer or outcome is the reopened duty's one wake: if the
+  owner Run reaches the Run-end rule with the duty unanswered and no other later
+  open own ask, it becomes `ignored` without a reminder.
+- **Reads.** `message list --awaiting` items and `message get` carry the saved
+  `reply` object; `thread get.pending_replies.awaiting_own_ask` lists up to 16
+  `{message_id, blocking_message_id}` pairs. Open-duty reads use partial indexes
+  over both open states (migration `next_open_reply_duties`); the bound is the
+  existing 16-duty cap per Thread, which counts both open states.
+
+Not built: a timer, a per-Thread setting, a nesting limit, a new event fact, or
+any change to replies that were actually given. Studio owns the wording of its
+reply row. `exec --result reply` still reads the reply when the recipient Run
+completes, so a recipient that asks back and ends its Run exits 4 with the duty
+`awaiting_own_ask`.
 
 ## Facts found while reading the code
 
@@ -346,12 +376,15 @@ Placed in `driver::next`, in the completion branch, immediately after
 are always delivered first), and skipped once the shutdown start gate is closed
 (as Revisit is):
 
-1. `P` = this Thread's receipts with `reply.state = pending` and
-   `state = applied` (index `receipt_reply_pending`). Queued or held
+1. `P` = the receipts with `reply.state = pending` and `state = applied` that
+   this Run owns (index `receipt_reply_owner_pending`, see
+   [#433](#awaiting-an-answer-to-an-own-ask-433)). Queued or held
    reply-expected messages are not in `P`: the model has not seen them.
 2. `P` empty → complete the Run as today.
-3. Every message in `P` that already has `reminded_at` becomes `ignored`
-   (one transition each; notice to model senders; waits released).
+3. A message in `P` whose Thread has a later open own ask becomes
+   `awaiting_own_ask` (#433) and leaves `P`. Every remaining message that already
+   has `reminded_at`, or was reopened after awaiting (`owner_run_id`), becomes
+   `ignored` (one transition each; notice to model senders; waits released).
 4. Messages in `P` without `reminded_at` get `reminded_at`/`reminded_run_id`
    and one `reply_reminder` event listing them is delivered to this Run; the
    existing event path creates a new Turn and the Run continues.

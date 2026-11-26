@@ -107,7 +107,7 @@ pub(super) fn history_step(
 
 // Keyset the entire finite receipt horizon: LIMIT bounds examination as well as
 // deletion, even when most receipts remain owned. Recheck inside the DELETE.
-const RECEIPT_ELIGIBLE: &str = "EXISTS(SELECT 1 FROM thread t WHERE t.id=receipt.target_thread_id AND t.deleted_at IS NOT NULL) AND json_extract(COALESCE(receipt.result_json,'{}'),'$.reply.state') IS NOT 'pending' AND NOT EXISTS(SELECT 1 FROM thread sender WHERE sender.id=json_extract(receipt.sender_json,'$.thread_id') AND json_extract(receipt.sender_json,'$.kind')='model' AND sender.deleted_at IS NULL)";
+const RECEIPT_ELIGIBLE: &str = "EXISTS(SELECT 1 FROM thread t WHERE t.id=receipt.target_thread_id AND t.deleted_at IS NOT NULL) AND COALESCE(json_extract(COALESCE(receipt.result_json,'{}'),'$.reply.state'),'') NOT IN ('pending','awaiting_own_ask') AND NOT EXISTS(SELECT 1 FROM thread sender WHERE sender.id=json_extract(receipt.sender_json,'$.thread_id') AND json_extract(receipt.sender_json,'$.kind')='model' AND sender.deleted_at IS NULL)";
 fn receipts_step(
     tx: &Transaction<'_>,
     progress: &mut Progress,

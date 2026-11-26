@@ -2191,8 +2191,8 @@ impl Store {
         if expects_reply {
             let limit = crate::protocol::MAX_PENDING_REPLY_DUTIES;
             let pending: i64 = tx.query_row(
-                "SELECT count(*) FROM (SELECT 1 FROM receipt INDEXED BY receipt_reply_pending \
-                 WHERE target_thread_id=?1 AND json_extract(result_json,'$.reply.state')='pending' LIMIT ?2)",
+                concat!("SELECT count(*) FROM (SELECT 1 FROM receipt INDEXED BY receipt_reply_pending \
+                 WHERE target_thread_id=?1 AND ", super::reply::open_reply!(""), " LIMIT ?2)"),
                 params![id, (limit + 1) as i64],
                 |row| row.get(0),
             ).map_err(sql_error)?;

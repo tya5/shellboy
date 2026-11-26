@@ -261,6 +261,7 @@ pub(super) fn apply(nodes: &mut [UiNode], facts: &SourceFacts) {
         use crate::presentation::ReplyState;
         node.presentation.reply_state = match raw.reply_state.as_deref() {
             Some("pending") => Some(ReplyState::Pending),
+            Some("awaiting_own_ask") => Some(ReplyState::AwaitingOwnAsk),
             Some("replied") => Some(ReplyState::Replied),
             Some("ignored") => Some(ReplyState::Ignored),
             Some("cancelled") => Some(ReplyState::Cancelled),

@@ -483,7 +483,11 @@ fn find_chain(
 /// Reply-expected messages this Thread sent that are still unanswered: their
 /// replies can land in the Thread after the rewind.
 fn pending_replies_sent(tx: &Transaction<'_>, thread: &str) -> Result<Value, ApiError> {
-    const WHERE: &str = "FROM receipt WHERE json_extract(result_json,'$.reply.state')='pending' AND json_extract(sender_json,'$.thread_id')=?1";
+    const WHERE: &str = concat!(
+        "FROM receipt WHERE ",
+        crate::control::reply::open_reply!(""),
+        " AND json_extract(sender_json,'$.thread_id')=?1"
+    );
     let count: i64 = tx
         .query_row(&format!("SELECT count(*) {WHERE}"), [thread], |r| r.get(0))
         .map_err(sql_error)?;

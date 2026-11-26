@@ -42,6 +42,7 @@ pub(super) fn saved_relation(raw: &str, body: &str, thread: &str) -> Option<Mess
         let state = reply.get("state")?.as_str()?;
         relation.reply_state = Some(match state {
             "pending" => MessageReplyState::Pending,
+            "awaiting_own_ask" => MessageReplyState::AwaitingOwnAsk,
             "replied" => MessageReplyState::Replied,
             "ignored" => MessageReplyState::Ignored,
             "cancelled" => MessageReplyState::Cancelled,
@@ -206,7 +207,7 @@ mod tests {
                     .unwrap();
                 db.execute_batch("PRAGMA foreign_keys=OFF; DROP INDEX node_notification_event; ALTER TABLE node DROP COLUMN notification_event_id; ALTER TABLE event DROP COLUMN semantic_json; DROP INDEX receipt_reply_node_lookup; DROP INDEX IF EXISTS attachment_page_order; DELETE FROM schema_migration WHERE version>=41; PRAGMA user_version=40;").unwrap();
             } else {
-                db.execute_batch("CREATE TABLE schema_migration(version INTEGER PRIMARY KEY,name TEXT); CREATE TABLE receipt(id TEXT PRIMARY KEY,target_thread_id TEXT,message_node_id TEXT,result_json TEXT); CREATE INDEX receipt_reply_pending ON receipt(target_thread_id) WHERE json_extract(result_json,'$.reply.state')='pending';").unwrap();
+                db.execute_batch("CREATE TABLE schema_migration(version INTEGER PRIMARY KEY,name TEXT); CREATE TABLE receipt(id TEXT PRIMARY KEY,target_thread_id TEXT,message_node_id TEXT,result_json TEXT); CREATE INDEX receipt_reply_pending ON receipt(target_thread_id) WHERE json_extract(result_json,'$.reply.state') IN ('pending','awaiting_own_ask');").unwrap();
             }
             for i in 0..512 {
                 let thread = if i < 256 { "t" } else { "other" };
@@ -234,7 +235,7 @@ mod tests {
                     .unwrap();
                 (plan, stmt.get_status(StatementStatus::VmStep), values)
             };
-            let query = "SELECT rowid FROM receipt WHERE target_thread_id='t' AND json_extract(result_json,'$.reply.state')='pending'";
+            let query = "SELECT rowid FROM receipt WHERE target_thread_id='t' AND json_extract(result_json,'$.reply.state') IN ('pending','awaiting_own_ask')";
             let before = measure(query);
             db.execute_batch(include_str!(
                 "../../migrations/0041_receipt_reply_node_lookup.sql"
@@ -242,7 +243,7 @@ mod tests {
             .unwrap();
             let after = measure(query);
             let forced = measure(
-                "SELECT rowid FROM receipt INDEXED BY receipt_reply_pending WHERE target_thread_id='t' AND json_extract(result_json,'$.reply.state')='pending'",
+                "SELECT rowid FROM receipt INDEXED BY receipt_reply_pending WHERE target_thread_id='t' AND json_extract(result_json,'$.reply.state') IN ('pending','awaiting_own_ask')",
             );
             assert_eq!(before.2, after.2);
             assert_eq!(before.2, forced.2);
