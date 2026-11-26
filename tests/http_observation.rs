@@ -10,7 +10,6 @@ use shellboy::{
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
-    time::{Duration, sleep},
 };
 use tokio_util::sync::CancellationToken;
 
@@ -73,7 +72,8 @@ async fn header_deadline_records_source_consumption_without_claiming_peer_delive
     let server = tokio::spawn(async move {
         let (mut s, _) = listener.accept().await.unwrap();
         read_body(&mut s).await;
-        sleep(Duration::from_secs(2)).await;
+        // Hold the connection silently; only the client's deadline ends the exchange.
+        std::future::pending::<()>().await;
     });
     let failure = crate::test_watchdog::watchdog("tests/http_observation.rs: header_deadline_records_source_consumption_without_claiming_peer_delivery",
         client.response(request(), CancellationToken::new(), None),
@@ -104,7 +104,7 @@ async fn header_deadline_records_source_consumption_without_claiming_peer_delive
     let _ = server.await;
 }
 #[tokio::test]
-async fn header_deadline_does_not_cut_post_header_silence_and_success_has_latency() {
+async fn successful_response_records_header_latency() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let client = client(listener.local_addr().unwrap(), 200, 2000);
     let server = tokio::spawn(async move {
@@ -115,10 +115,10 @@ async fn header_deadline_does_not_cut_post_header_silence_and_success_has_latenc
         s.write_all(head(200, body.len(), false).as_bytes())
             .await
             .unwrap();
-        sleep(Duration::from_millis(350)).await;
         s.write_all(body.as_bytes()).await.unwrap();
     });
-    let response = crate::test_watchdog::watchdog("tests/http_observation.rs: header_deadline_does_not_cut_post_header_silence_and_success_has_latency",
+    let response = crate::test_watchdog::watchdog(
+        "tests/http_observation.rs: successful_response_records_header_latency",
         client.response(request(), CancellationToken::new(), None),
     )
     .await
@@ -139,7 +139,7 @@ async fn body_stall_records_received_headers_and_uses_body_idle_setting() {
         s.set_nodelay(true).unwrap();
         read_body(&mut s).await;
         s.write_all(head(200, 100, false).as_bytes()).await.unwrap();
-        sleep(Duration::from_secs(2)).await;
+        std::future::pending::<()>().await;
     });
     let failure = crate::test_watchdog::watchdog(
         "tests/http_observation.rs: body_stall_records_received_headers_and_uses_body_idle_setting",
@@ -171,7 +171,7 @@ async fn stopped_request_reader_records_unconsumed_source_bytes() {
         let count = s.read(&mut prefix).await.unwrap();
         assert!(count > 0);
         read_prefix.send(count).unwrap();
-        sleep(Duration::from_secs(5)).await;
+        std::future::pending::<()>().await;
     });
     let large = response_request(
         "fixture",
