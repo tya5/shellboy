@@ -4514,22 +4514,24 @@ impl RawNode {
         UiNode {
             presentation,
             node_id,
-            role: match kind.as_str() {
-                "user" | "user_message" | "message" => "user",
-                "tool_result" => "tool",
-                "event" => "shellboy",
-                // The model's saved context line (#183); not a transcript row.
-                "context" => "context",
-                "summary" | "compact_summary" => "summary",
-                "spill" => "spill",
-                _ => "assistant",
-            }
-            .into(),
+            role: node_role(&kind).into(),
             text,
             base_char_offset,
             total_chars,
             reasoning_ranges,
         }
+    }
+}
+fn node_role(kind: &str) -> &'static str {
+    match kind {
+        "user" | "user_message" | "message" => "user",
+        "tool_result" => "tool",
+        "event" => "shellboy",
+        // The model's saved context line (#183); not a transcript row.
+        "context" => "context",
+        "summary" | "compact_summary" => "summary",
+        "spill" => "spill",
+        _ => "assistant",
     }
 }
 fn image_acquisition_error(mut error: ApiError, language: crate::config::UiLanguage) -> ApiError {

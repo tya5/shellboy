@@ -197,6 +197,23 @@ The existing owner-wide saved-change wait remains metadata-only. No broadening
 of the live text audience, periodic polling, or compatibility path follows
 from this inventory.
 
+### Unit 4e/4f selected window client
+
+A positioned node load (an evicted body or a streaming rebase) assembles the
+node's display extent from `history.read` display pages by ID, then reads the
+one-node `history.window` with `include_observation` for its mutable tool,
+notice, recovery and usage facts; the window item must carry the same source
+revision. A received response is never on a path and has no window facts. Any
+other node no longer on the selected path is refused with `cursor_expired`.
+Layout stays client-side. A saved payload group
+selects the exact owner call; the group is shown only when the owner confirms
+that call. Links come from the same extent text and Markdown walk as before.
+
+Still open before the refresh, page, window and rebase installs move: pending
+rows carry no hold reason, path-admission uncertainty, delivery mode or
+completion schedule, which the queue rows show; outline fields carry no
+payload-shaped labels; window recovery reasons are 256-character excerpts.
+
 ### Draft save and selected view
 
 `draft.save` checks the live Thread and editing draft revision, then commits

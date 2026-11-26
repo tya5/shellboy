@@ -791,18 +791,16 @@ mod tests {
         observed.unwrap();
         let mut receipts_seen = false;
         while let Ok(result) = results.try_recv() {
-            match result {
-                BackgroundResult::Refreshed {
-                    receipts, progress, ..
-                } => {
-                    assert_eq!(
-                        receipts.unwrap(),
-                        [("held-paired".into(), ReceiptStatus::Held)]
-                    );
-                    assert!(progress.unwrap().is_ok());
-                    receipts_seen = true;
-                }
-                _ => {}
+            if let BackgroundResult::Refreshed {
+                receipts, progress, ..
+            } = result
+            {
+                assert_eq!(
+                    receipts.unwrap(),
+                    [("held-paired".into(), ReceiptStatus::Held)]
+                );
+                assert!(progress.unwrap().is_ok());
+                receipts_seen = true;
             }
         }
         assert!(receipts_seen);

@@ -127,16 +127,9 @@ pub(crate) fn project_display(
         }
     }
     p.blocks = walk.blocks;
+    // Links come from the same extent text and walk as a payload projection;
+    // the outline's own links serve clients without this Markdown walk.
     p.links = walk.links;
-    for link in &outline.links {
-        add_link(
-            &mut p.links,
-            &link.label,
-            &link.url,
-            link.range.start as usize,
-            link.range.end as usize,
-        );
-    }
     p.metadata_limited = outline.limited;
     limits::markdown(&mut p);
     if !outline.limited || structured {
