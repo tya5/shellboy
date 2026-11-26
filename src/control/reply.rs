@@ -1326,6 +1326,25 @@ mod tests {
         }
     }
 
+    /// Reply states as the owner's named-message read reports them.
+    fn named_reply_states(
+        db: &Connection,
+        messages: impl IntoIterator<Item = String>,
+    ) -> std::collections::BTreeMap<String, usize> {
+        let mut states = std::collections::BTreeMap::new();
+        for message in messages {
+            let details = crate::control::db::message_details(db, &message).unwrap();
+            let state = details
+                .reply
+                .as_ref()
+                .and_then(|reply| reply["state"].as_str())
+                .unwrap_or("none")
+                .to_owned();
+            *states.entry(state).or_default() += 1;
+        }
+        states
+    }
+
     #[test]
     fn deletion_uses_target_index_and_never_touches_unrelated_pending_replies() {
         let mut db = Connection::open_in_memory().unwrap();
@@ -1384,18 +1403,29 @@ mod tests {
             16
         );
         assert_eq!(
+            named_reply_states(&db, (0..128).map(|n| format!("0-{n}"))),
+            std::collections::BTreeMap::from([
+                ("pending".to_owned(), 112),
+                ("recipient_deleted".to_owned(), 16),
+            ])
+        );
+        assert_eq!(
+            named_reply_states(
+                &db,
+                (1..33).flat_map(|group| (0..128).map(move |n| format!("{group}-{n}")))
+            ),
+            std::collections::BTreeMap::from([("pending".to_owned(), 4096)])
+        );
+        assert_eq!(
             db.query_row(
-                concat!(
-                    "SELECT count(*) FROM receipt WHERE target_thread_id='target-0' AND ",
-                    open_reply!("")
-                ),
+                "SELECT count(*) FROM receipt WHERE target_thread_id!='target-0' AND updated_at=''",
                 [],
                 |r| r.get::<_, i64>(0)
             )
             .unwrap(),
-            112
+            4096,
+            "unrelated receipts are untouched"
         );
-        assert_eq!(db.query_row(concat!("SELECT count(*) FROM receipt WHERE target_thread_id!='target-0' AND updated_at='' AND ", open_reply!("")),[],|r|r.get::<_,i64>(0)).unwrap(),4096);
     }
 
     #[test]
@@ -1418,24 +1448,12 @@ mod tests {
                 deleted_threads_tx(&tx, &["target".into()], "now", &mut Vec::new()).unwrap();
             assert!(wakes.is_empty());
             tx.commit().unwrap();
-            // Read duties through the owner's open-reply rule: 16 terminalized, the rest still owed.
             assert_eq!(
-                db.query_row(
-                    concat!("SELECT count(*) FROM receipt WHERE NOT ", open_reply!("")),
-                    [],
-                    |r| r.get::<_, i64>(0)
-                )
-                .unwrap(),
-                16
-            );
-            assert_eq!(
-                db.query_row(
-                    concat!("SELECT count(*) FROM receipt WHERE ", open_reply!("")),
-                    [],
-                    |r| r.get::<_, i64>(0)
-                )
-                .unwrap(),
-                count as i64 - 16
+                named_reply_states(&db, (0..count).map(|index| format!("message-{index}"))),
+                std::collections::BTreeMap::from([
+                    ("pending".to_owned(), count - 16),
+                    ("recipient_deleted".to_owned(), 16),
+                ])
             );
         }
     }
