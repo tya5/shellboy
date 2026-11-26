@@ -12314,5 +12314,5 @@ drives real `message ask`/`reply`/`cancel` commands and `driver::next` Run ends
 EXPLAIN QUERY PLAN that every open-duty read, the blocker search, reopening and
 the owner-Run claim and settlement, and the rewind preview's open-ask count
 and page search their partial index without a temporary B-tree.
-No hosted CI, real owner, Studio or `exec --result reply` follow-through is
+No hosted CI, real owner, client or `exec --result reply` follow-through is
 claimed; results are in the branch report.

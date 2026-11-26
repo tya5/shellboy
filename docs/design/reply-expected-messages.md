@@ -95,8 +95,8 @@ that owns them.
   existing 16-duty cap per Thread, which counts both open states.
 
 Not built: a timer, a per-Thread setting, a nesting limit, a new event fact, or
-any change to replies that were actually given. Studio owns the wording of its
-reply row. `exec --result reply` still reads the reply when the recipient Run
+any change to replies that were actually given. Clients own how they word the
+waiting duty. `exec --result reply` still reads the reply when the recipient Run
 completes, so a recipient that asks back and ends its Run exits 4 with the duty
 `awaiting_own_ask`.
 
