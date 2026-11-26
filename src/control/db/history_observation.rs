@@ -154,18 +154,41 @@ fn pending(
         (SELECT count(*) FROM attachment_ref a WHERE a.source_node_id=n.id)
         FROM node n WHERE n.id=?1",
     )?;
+    // Saved receipt facts the queue row shows; the hold itself is `held_by`.
+    let mut receipt = db.prepare_cached(
+        "SELECT substr(sender_json,1,8193),
+            COALESCE(json_extract(result_json,'$.reply.state')='pending',0),
+            path_admission='unknown',
+            COALESCE(json_extract(result_json,'$.deliver')='complete',0)
+         FROM receipt WHERE rowid=?1",
+    )?;
     let mut items = Vec::with_capacity(PENDING_LIMIT.min(candidates.len()));
-    for ((created_at, _), message_id, operation_id, delivery_status) in candidates
+    for ((created_at, rowid), message_id, operation_id, delivery_status) in candidates
         .into_iter()
         .take_while(|(key, ..)| first_unproven.as_ref().is_none_or(|bound| key < bound))
         .take(PENDING_LIMIT)
     {
         let (excerpt, attachment_count): (String, i64) =
             display.query_row([&message_id], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        let (sender, expect_reply, admission_uncertain, completion_scheduled) =
+            receipt.query_row([rowid], |row| {
+                Ok((
+                    crate::protocol::MessageSender::from_saved(
+                        row.get::<_, Option<String>>(0)?.as_deref(),
+                    ),
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                ))
+            })?;
         items.push(HistoryWindowPendingMessage {
             message_id,
             operation_id,
             delivery_status,
+            sender,
+            expect_reply,
+            admission_uncertain,
+            completion_scheduled,
             created_at,
             excerpt_truncated: excerpt.chars().count() > 512,
             excerpt: excerpt.chars().take(512).collect(),

@@ -1421,6 +1421,10 @@ record!(HistoryWindowInputBytes { total: u64, categories: std::collections::BTre
 record!(HistoryWindowPending { items: Vec<HistoryWindowPendingMessage>, total: u64, total_exact: bool });
 record!(HistoryWindowPendingMessage {
     message_id: String, operation_id: String, delivery_status: DeliveryStatus,
+    sender: MessageSender,
+    expect_reply: bool,
+    admission_uncertain: bool,
+    completion_scheduled: bool,
     created_at: String,
     excerpt: String,
     excerpt_truncated: bool,
