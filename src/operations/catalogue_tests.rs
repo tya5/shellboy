@@ -2,6 +2,8 @@
 pub(crate) const CLI_ONLY_OWNER_OPERATIONS: &[OperationId] = &[
     OperationId::ShellBackground,
     OperationId::TurnInterrupt,
+    // The TUI reloads attachments from its own explicit action (#311 4g).
+    OperationId::AttachmentReload,
     OperationId::ArtifactAdd,
     OperationId::ArtifactUpdate,
     OperationId::ArtifactList,
