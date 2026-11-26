@@ -2408,6 +2408,8 @@ pub enum MessageHeldBy {
     RunCompletion,
     RecoveryWait,
     Stopping,
+    PreviousInstanceInterrupted,
+    TerminalBeforePathAdmission,
     Unknown,
 }
 

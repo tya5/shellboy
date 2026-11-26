@@ -85,6 +85,10 @@ impl MessageHolds {
                 Some("run_completion") => MessageHeldBy::RunCompletion,
                 Some("recovery_wait") => MessageHeldBy::RecoveryWait,
                 Some("stopping") => MessageHeldBy::Stopping,
+                Some("previous_instance_interrupted") => MessageHeldBy::PreviousInstanceInterrupted,
+                Some("terminal_before_path_admission") => {
+                    MessageHeldBy::TerminalBeforePathAdmission
+                }
                 _ => MessageHeldBy::Unknown,
             }));
         }

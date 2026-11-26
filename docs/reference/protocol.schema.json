@@ -6787,6 +6787,30 @@
         {
           "properties": {
             "kind": {
+              "const": "previous_instance_interrupted",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "terminal_before_path_admission",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
               "const": "unknown",
               "type": "string"
             }
