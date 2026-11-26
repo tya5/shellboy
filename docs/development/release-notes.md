@@ -14,6 +14,19 @@ no alias. Otherwise eligible conversation and summary failures no longer stop
 solely because output was received. `response_max_retries = 0` still disables
 automatic retries for the connection.
 
+## Terminal held input and saved failure reasons (#311)
+
+The TUI queue shows the owner's typed hold (#423) as the reason for held
+input and no longer shows a "deliver now" mark, which Core removed. A recovery
+event whose saved failure reason is longer than its 256-character excerpt
+points at the F6 source node, whose original holds the full reason, instead of
+promising the full reason in F6 itself.
+
+TUI の保留中入力の理由は、所有プロセスの型付き保留情報（#423）で表示し、Core で
+廃止した「すぐ渡す」表示はなくなりました。復旧イベントの保存済み失敗理由が
+256 文字の抜粋より長い場合は、F6 で全文を示すとは表示せず、全文を持つ F6 の
+失敗原文ノードを案内します。
+
 ## Terminal saved notices and preview (#311)
 
 The TUI now takes tool notices from newly observed saved results, rather than a
