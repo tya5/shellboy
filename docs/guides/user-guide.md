@@ -813,4 +813,4 @@ an unexpected-exit notice before deciding whether to restart the service.
 
 ## Thread artifacts
 
-Artifacts keep named, versioned references with a Thread. Use `shellboy artifact list --thread T` to find them and `shellboy artifact get --artifact A --version N` to retrieve an older reference. Clients determine URI formats and previews. Archive retains the references; deleting the Thread or removing the artifact deletes only metadata, not the files or other targets.
+Artifacts keep named, versioned references with a Thread. Use `shellboy artifact list --thread T` to find them and `shellboy artifact get --artifact A --version N` to retrieve an older reference. Clients choose how to show an artifact. They read its content through the owner, which opens only local files and `shellboy-app:` web app folders and never fetches remote URIs; see `shellboy artifact read` in the [CLI reference](cli-reference.md#thread-artifacts). Archive retains the references; deleting the Thread or removing the artifact deletes only metadata, not the files or other targets.

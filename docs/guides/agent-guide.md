@@ -256,6 +256,10 @@ Register every output meant for the person as a Thread artifact rather than only
 
 Register an output explicitly with `shellboy artifact add --thread "$SHELLBOY_THREAD_ID" --uri URI --title TITLE`. Add `--mime MIME` if needed. Use the URI format your client or system prompt specifies. For both `artifact add` and `artifact update`, you can pass a relative file path: the CLI joins it to your current directory before sending it, without checking that the target exists. Absolute paths and URIs with a scheme are sent unchanged. `shellboy artifact update --artifact A --uri URI` appends a version and retains the title unless replaced. Omitted MIME is not inherited. Use `artifact list --thread T`, `artifact get --artifact A` (optionally `--version N`), and `artifact remove --artifact A`. Pass `next_cursor` back as `--cursor` to continue list or version history.
 
+To publish a web app, write it into its own folder with an `index.html` entry, refer to its other files by relative URLs, and register the folder: `shellboy artifact add --thread "$SHELLBOY_THREAD_ID" --uri shellboy-app:./kanban --title Kanban`. The CLI turns `./kanban` into an absolute folder. Clients then read `index.html` and the files it loads through the owner, which serves only regular files inside that folder; links or paths that leave it are refused. Keep everything the app needs inside the folder, and update the artifact after a change so clients reload it. A single file is shared with a plain path or `file:` URI instead.
+
+`shellboy artifact read --thread T --artifact A --version N [--path P]` returns one file of that exact version as base64 (`--path` only for `shellboy-app:` folders). Use it to check what a client will receive; read your own working files directly.
+
 ## Waiting for a shell, and leaving shells behind
 
 A background shell has no time limit. A shell that never ends keeps your Run

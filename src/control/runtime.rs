@@ -337,6 +337,19 @@ impl Control {
             }
             Command::TurnInterrupt(args) => self.interrupt_turn(args.turn_id).await,
             Command::ModelList(args) => self.runtime_models(args, caller, disconnected).await,
+            Command::ArtifactRead(args) => encode_result(
+                crate::artifacts::read(
+                    &self.store.database,
+                    &self.attachments.workers,
+                    self.store.config.limits.attachment_file_bytes,
+                    self.store.config.io.file_prepare_timeout_ms,
+                    self.stop.child_token(),
+                    args,
+                )
+                .await?,
+                ErrorCode::IoFailed,
+                "Cannot encode artifact content",
+            ),
             Command::StorageStatus(_) => encode_result(
                 self.gc.details().await?,
                 ErrorCode::InvalidState,

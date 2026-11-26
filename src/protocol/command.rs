@@ -52,6 +52,8 @@ impl Command {
             Self::ArtifactList(_) => ("artifact.list", CommandRoute::Database),
             Self::ArtifactGet(_) => ("artifact.get", CommandRoute::Database),
             Self::ArtifactRemove(_) => ("artifact.remove", CommandRoute::Database),
+            // Database lookup, then a bounded blocking file read; see artifacts::content.
+            Self::ArtifactRead(_) => ("artifact.read", CommandRoute::Runtime),
             Self::ServiceAdd(_) => ("service.add", CommandRoute::Database),
             Self::ServiceList(_) => ("service.list", CommandRoute::Database),
             Self::ServiceStart(_) => ("service.start", CommandRoute::Database),
@@ -153,6 +155,7 @@ impl Command {
             | Self::ServiceRemove(_) => false,
             Self::Status(a) => a.memory,
             Self::ModelList(_)
+            | Self::ArtifactRead(_)
             | Self::IndexPreview(_)
             | Self::HistorySearch(_)
             | Self::ShellGet(_)
@@ -261,6 +264,7 @@ impl Command {
             | Self::ThreadBranches(_)
             | Self::ArtifactList(_)
             | Self::ArtifactGet(_)
+            | Self::ArtifactRead(_)
             | Self::ScheduleList(_)
             | Self::ServiceList(_)
             | Self::ThreadTags(_)
@@ -376,6 +380,7 @@ impl Command {
             | Self::ThreadBranches(_)
             | Self::ArtifactList(_)
             | Self::ArtifactGet(_)
+            | Self::ArtifactRead(_)
             | Self::ScheduleList(_)
             | Self::ServiceList(_)
             | Self::ThreadTags(_)
@@ -451,6 +456,7 @@ impl Command {
             | Self::ThreadBranches(_)
             | Self::ArtifactList(_)
             | Self::ArtifactGet(_)
+            | Self::ArtifactRead(_)
             | Self::ScheduleList(_)
             | Self::ServiceList(_)
             | Self::ThreadTags(_)

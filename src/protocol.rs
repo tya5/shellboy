@@ -83,6 +83,7 @@ fn operation_result_schemas(
     result!("artifact.list", RecordPage<ArtifactSummary, ThreadScopeFilter>);
     result!("artifact.get", ArtifactGetResult);
     result!("artifact.remove", Accepted);
+    result!("artifact.read", ArtifactContent);
     opaque!("schedule.add");
     opaque!("schedule.list");
     opaque!("schedule.set");
@@ -873,6 +874,9 @@ args!(ArtifactRemoveArgs {
 });
 args!(ArtifactListArgs { thread_id: String, #[serde(default)] cursor: Option<String>, #[serde(default="artifact_page_limit")] limit: u32 });
 args!(ArtifactGetArgs { artifact_id: String, #[serde(default)] version: Option<i64>, #[serde(default)] cursor: Option<String>, #[serde(default)] limit: Option<u32> });
+args!(ArtifactReadArgs { thread_id: String, artifact_id: String, version: i64, #[serde(default, skip_serializing_if = "Option::is_none")] path: Option<String> });
+// One regular file of an exact artifact version, base64-encoded in the reply.
+record!(ArtifactContent { artifact_id: String, version: i64, #[serde(default, skip_serializing_if = "Option::is_none")] path: Option<String>, raw_bytes: u64, base64: String });
 record!(ArtifactVersion { version: i64, uri: String, title: String, mime: Option<String>, created_at: String });
 record!(ArtifactVersionStamp {
     version: i64,
@@ -1839,6 +1843,8 @@ pub enum Command {
     ArtifactGet(ArtifactGetArgs),
     #[serde(rename = "artifact.remove")]
     ArtifactRemove(ArtifactRemoveArgs),
+    #[serde(rename = "artifact.read")]
+    ArtifactRead(ArtifactReadArgs),
     #[serde(rename = "service.add")]
     ServiceAdd(ServiceAddArgs),
     #[serde(rename = "service.list")]
@@ -3131,6 +3137,7 @@ mod message_acknowledgement_tests {
             "artifact.list",
             "artifact.get",
             "artifact.remove",
+            "artifact.read",
             "draft.image",
             "owner.shutdown",
             "draft.save",

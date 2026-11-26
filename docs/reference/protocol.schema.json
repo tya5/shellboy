@@ -199,6 +199,33 @@
       ],
       "type": "object"
     },
+    "ArtifactReadArgs": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_id": {
+          "type": "string"
+        },
+        "path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "thread_id": {
+          "type": "string"
+        },
+        "version": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "thread_id",
+        "artifact_id",
+        "version"
+      ],
+      "type": "object"
+    },
     "ArtifactRemoveArgs": {
       "additionalProperties": false,
       "properties": {
@@ -1106,6 +1133,22 @@
             },
             "command": {
               "const": "artifact.remove",
+              "type": "string"
+            }
+          },
+          "required": [
+            "command",
+            "args"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "args": {
+              "$ref": "#/definitions/ArtifactReadArgs"
+            },
+            "command": {
+              "const": "artifact.read",
               "type": "string"
             }
           },
@@ -8119,6 +8162,35 @@
           "additionalProperties": false,
           "properties": {
             "args": {
+              "$ref": "#/definitions/ArtifactReadArgs"
+            },
+            "command": {
+              "const": "artifact.read",
+              "type": "string"
+            },
+            "operation_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "origin": true,
+            "protocol_version": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "args",
+            "command",
+            "operation_id",
+            "protocol_version"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "args": {
               "$ref": "#/definitions/ServiceAddArgs"
             },
             "command": {
@@ -14282,6 +14354,40 @@
         "filters"
       ],
       "title": "RecordPage",
+      "type": "object"
+    },
+    "artifact.read": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "artifact_id": {
+          "type": "string"
+        },
+        "base64": {
+          "type": "string"
+        },
+        "path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "raw_bytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "version": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "artifact_id",
+        "version",
+        "raw_bytes",
+        "base64"
+      ],
+      "title": "ArtifactContent",
       "type": "object"
     },
     "artifact.remove": {

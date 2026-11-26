@@ -596,6 +596,18 @@ pub enum ArtifactCommand {
         #[arg(long = "artifact")]
         artifact_id: String,
     },
+    /// Read one file of an exact artifact version (base64 in the JSON result).
+    Read {
+        #[arg(long = "thread")]
+        thread_id: String,
+        #[arg(long = "artifact")]
+        artifact_id: String,
+        #[arg(id = "artifact_version", long = "version")]
+        version: i64,
+        /// Relative path of a file inside a shellboy-app: folder.
+        #[arg(long)]
+        path: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, Subcommand)]
@@ -2336,6 +2348,17 @@ impl Cli {
                 ArtifactCommand::Remove { artifact_id } => {
                     C::ArtifactRemove(wire::ArtifactRemoveArgs { artifact_id })
                 }
+                ArtifactCommand::Read {
+                    thread_id,
+                    artifact_id,
+                    version,
+                    path,
+                } => C::ArtifactRead(wire::ArtifactReadArgs {
+                    thread_id,
+                    artifact_id,
+                    version,
+                    path,
+                }),
             },
             CliCommand::Service { command } => command.into(),
             CliCommand::Schedule { command } => command.into(),
@@ -2573,21 +2596,35 @@ fn absolute_attachment(path: PathBuf, cwd: &Path) -> Result<String, ApiError> {
     path_string(normalized)
 }
 
+/// Joins a relative schemeless path, or the relative folder of a `shellboy-app:`
+/// URI, to the CLI's working directory. Every other URI is sent unchanged.
 fn artifact_uri_from_cli(uri: String, cwd: &Path) -> Result<String, ApiError> {
-    let path = Path::new(&uri);
-    let has_scheme = uri.split_once(':').is_some_and(|(name, _)| {
-        let mut bytes = name.bytes();
-        bytes.next().is_some_and(|byte| byte.is_ascii_alphabetic())
-            && bytes.all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'-' | b'.'))
-    });
-    // Preserve Windows drive paths and UNC paths even on a Unix CLI, and vice versa.
-    if uri.is_empty()
-        || path.is_absolute()
-        || uri.starts_with('/')
-        || uri.starts_with(r"\\")
-        || has_scheme
+    let scheme = crate::artifacts::uri_scheme(&uri);
+    if let Some(name) = scheme
+        && name.eq_ignore_ascii_case(crate::artifacts::APP_SCHEME)
     {
+        let folder = &uri[name.len() + 1..];
+        return Ok(format!(
+            "{}:{}",
+            crate::artifacts::APP_SCHEME,
+            artifact_path_from_cli(folder, cwd)?
+        ));
+    }
+    if scheme.is_some() {
         return Ok(uri);
+    }
+    artifact_path_from_cli(&uri, cwd)
+}
+fn artifact_path_from_cli(path: &str, cwd: &Path) -> Result<String, ApiError> {
+    // Preserve Windows drive paths and UNC paths even on a Unix CLI, and vice versa.
+    let drive = path.as_bytes().get(1) == Some(&b':') && path.as_bytes()[0].is_ascii_alphabetic();
+    if path.is_empty()
+        || Path::new(path).is_absolute()
+        || path.starts_with('/')
+        || path.starts_with(r"\\")
+        || drive
+    {
+        return Ok(path.into());
     }
     cwd.join(path).into_os_string().into_string().map_err(|_| {
         ApiError::new(

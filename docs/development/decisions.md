@@ -14,6 +14,25 @@ update verb or a notice for a skip whose time was already noticed.
   already-noticed time again, and the receipt key is unique, so that occurrence
   sends nothing instead of failing the dispatch transaction.
 
+## Artifact reads (#445)
+
+Calls the Issue left to the implementation. Recheck if a client needs files
+larger than one frame or a folder entry without naming it.
+
+- Wire and CLI output: no operation returns raw bytes outside the JSON frame,
+  so `artifact.read` carries `base64` with `raw_bytes`, and the CLI prints the
+  usual JSON envelope rather than adding a second stdout mode.
+- Bound: `limits.attachment_file_bytes`, and the base64 text must fit one 8 MiB
+  reply frame (6 MiB raw, derived from `MAX_FRAME_BYTES`). With the 20 MiB
+  default the frame is the effective cap; a ranged read is the extension point.
+- A folder read requires `path` (no implied `index.html`), and any `..`
+  component is refused even when it would stay inside; links are checked after
+  resolution. A same-user process swapping files during the read is outside
+  this check, as for every same-user boundary.
+- Lookup on the database worker, file open and encoding on the attachment
+  blocking-file pool (`workers.attachment`), as a receipt-free runtime
+  observation; no new worker, queue or table.
+
 ## Reopened reply duties (#433)
 
 Three calls the owner rule left to the implementation. Recheck if a real flow

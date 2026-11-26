@@ -10,6 +10,18 @@ one owner notice from `schedule:<id>` in the transaction that advances
 `next_at`, keyed `schedule-skipped:<schedule>:<scheduled_at>`; a key already
 saved sends nothing. Default stays silent. Not landed.
 
+## Core #445 artifact.read and the URI scheme contract
+
+Branch `task/core445-artifact-read`: `artifact.read` returns one regular file of
+an exact artifact version as base64. The owner applies the scheme contract
+(`shellboy-app:` folder by relative path, `file:`/absolute path as one file,
+everything else refused), bounded by `limits.attachment_file_bytes` and one
+reply frame (6 MiB raw). The read runs on the attachment blocking-file pool.
+`artifact add/update --uri shellboy-app:./dir` joins the folder to the CLI cwd.
+Protocol notes in `protocol-versions/next-445.md`; no schema migration. Not
+landed. Open: the 8 MiB reply frame caps reads below the 20 MiB default
+`attachment_file_bytes`; larger app assets need a ranged read if wanted.
+
 ## Core #441 exec waits while the reply duty is open
 
 Branch `task/core441-exec-wait-open-duty`: `exec --result reply` classifies the

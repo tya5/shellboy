@@ -7,6 +7,7 @@ pub(crate) const CLI_ONLY_OWNER_OPERATIONS: &[OperationId] = &[
     OperationId::ArtifactList,
     OperationId::ArtifactGet,
     OperationId::ArtifactRemove,
+    OperationId::ArtifactRead,
     OperationId::ScheduleAdd,
     OperationId::ServiceAdd,
     OperationId::ServiceList,
