@@ -222,7 +222,6 @@ pub(super) async fn acknowledge(
         let envelope=json!({"event_id":event,"kind":"context_changed","payload":payload});
         crate::history::append_node(&tx,&thread,&format!("event-{event}"),Some(&turn),"event",&json!({"role":"developer","content":[{"type":"input_text","text":format!("Shellboy event v1: {envelope}")}],"event_id":event}),&at)?;
         tx.execute("INSERT INTO delivery(event_id,recipient_id,state)VALUES(?1,?2,'processed')",params![event,run])?;
-        message_delivery::settle_notification_tx(&tx,&event,&run,None)?;
         let mut admitted_count=0_i64;
         let mut admitted_ids=Vec::new();
         let mut deferred_ids=Vec::new();
