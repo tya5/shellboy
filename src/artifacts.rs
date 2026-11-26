@@ -1,11 +1,14 @@
-//! Metadata-only Thread artifacts. All mutations borrow the existing owner transaction.
+//! Thread artifacts: metadata mutations borrow the existing owner transaction;
+//! `artifact.read` applies the URI scheme contract in [`content`].
+mod content;
 use crate::protocol::{
     ARTIFACT_PAGE_LIMIT, ApiError, ArtifactAddArgs, ArtifactGetArgs, ArtifactGetResult,
     ArtifactHistory, ArtifactListArgs, ArtifactScopeFilter, ArtifactSelected, ArtifactSummary,
     ArtifactUpdateArgs, ArtifactVersion, ArtifactVersionStamp, ErrorCode, PageCursor, RecordPage,
     ThreadScopeFilter,
 };
-use rusqlite::{OptionalExtension, Row, Transaction, params};
+pub(crate) use content::{APP_SCHEME, read, uri_scheme};
+use rusqlite::{Connection, OptionalExtension, Row, Transaction, params};
 
 type Result<T> = std::result::Result<T, ApiError>;
 const LIST: &str = "artifact.list.updated_at_desc.id_asc";
@@ -23,7 +26,7 @@ fn missing() -> ApiError {
         "Artifact or version not found",
     )
 }
-fn check_thread(tx: &Transaction<'_>, thread: &str) -> Result<()> {
+fn check_thread(tx: &Connection, thread: &str) -> Result<()> {
     let exists: bool = tx
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM thread WHERE id=? AND deleted_at IS NULL)",

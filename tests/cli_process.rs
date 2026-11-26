@@ -1577,6 +1577,117 @@ async fn artifact_cli_round_trip_through_owner_changes_and_restart() {
     owner.shutdown().await.unwrap();
 }
 
+#[tokio::test]
+async fn artifact_read_serves_a_published_app_folder_and_refuses_escapes() {
+    use base64::Engine;
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(root.path().join("config.toml"), "default_connection='fixture'\ndefault_model='fixture'\n[connections.fixture]\nbase_url='http://127.0.0.1:1/v1'\n").unwrap();
+    let cwd = root.path().join("cli-cwd");
+    std::fs::create_dir_all(cwd.join("kanban")).unwrap();
+    std::fs::write(cwd.join("kanban").join("index.html"), "<script src=app.js>").unwrap();
+    std::fs::write(cwd.join("kanban").join("app.js"), "board()").unwrap();
+    std::fs::write(cwd.join("notes.txt"), "plain file").unwrap();
+    std::fs::write(cwd.join("secret"), "outside").unwrap();
+    let owner = DataOwner::start(
+        Some(root.path().join("config.toml")),
+        Some(root.path().join("data")),
+        root.path().into(),
+    )
+    .await
+    .unwrap();
+    let control = Control::new(&owner, root.path().into());
+    let (send, receive) = tokio::sync::mpsc::channel(8);
+    let local = LocalServer::bind(&owner, send).await.unwrap();
+    let serving = tokio::spawn(control.clone().serve(receive));
+    let cli = async |args: &[&str]| -> (bool, Value) {
+        let out = tokio::process::Command::new(env!("CARGO_BIN_EXE_shellboy"))
+            .arg("--data-dir")
+            .arg(&owner.loaded.data_dir)
+            .current_dir(&cwd)
+            .env_remove("SHELLBOY_SOCKET")
+            .env_remove("SHELLBOY_INSTANCE_ID")
+            .args(args)
+            .output()
+            .await
+            .unwrap();
+        let value: Value = serde_json::from_slice(&out.stdout).unwrap();
+        (out.status.success(), value)
+    };
+    let ok = async |args: &[&str]| -> Value {
+        let (success, value) = cli(args).await;
+        assert!(success, "{value}");
+        value["result"].clone()
+    };
+    let created = ok(&["thread", "create"]).await;
+    let thread = created["thread_id"].as_str().unwrap();
+    let added = ok(&[
+        "artifact",
+        "add",
+        "--thread",
+        thread,
+        "--uri",
+        "shellboy-app:./kanban",
+        "--title",
+        "Kanban",
+    ])
+    .await;
+    let id = added["artifact_id"].as_str().unwrap();
+    let uri = added["version"]["uri"].as_str().unwrap();
+    let folder = uri.strip_prefix("shellboy-app:").unwrap();
+    assert!(std::path::Path::new(folder).is_absolute(), "{uri}");
+    let listed = ok(&["artifact", "list", "--thread", thread]).await;
+    assert_eq!(listed["items"][0]["latest"]["uri"], uri);
+    let read = async |version: &str, path: Option<&str>| -> (bool, Value) {
+        let mut args = vec![
+            "artifact",
+            "read",
+            "--thread",
+            thread,
+            "--artifact",
+            id,
+            "--version",
+            version,
+        ];
+        if let Some(path) = path {
+            args.extend(["--path", path]);
+        }
+        cli(&args).await
+    };
+    let decode = |value: &Value| {
+        base64::engine::general_purpose::STANDARD
+            .decode(value["result"]["base64"].as_str().unwrap())
+            .unwrap()
+    };
+    for (path, expected) in [("index.html", "<script src=app.js>"), ("app.js", "board()")] {
+        let (success, value) = read("1", Some(path)).await;
+        assert!(success, "{value}");
+        assert_eq!(decode(&value), expected.as_bytes());
+    }
+    let (success, refused) = read("1", Some("../secret")).await;
+    assert!(!success);
+    assert_eq!(refused["error"]["code"], "invalid_argument");
+    assert_eq!(refused["error"]["details"]["reason"], "path_outside_folder");
+    ok(&["artifact", "update", "--artifact", id, "--uri", "notes.txt"]).await;
+    let (success, file) = read("2", None).await;
+    assert!(success, "{file}");
+    assert_eq!(decode(&file), b"plain file");
+    let (success, refused) = read("2", Some("index.html")).await;
+    assert!(!success);
+    assert_eq!(refused["error"]["details"]["reason"], "path_not_allowed");
+    // The older folder version still resolves exactly as saved.
+    let (success, value) = read("1", Some("app.js")).await;
+    assert!(success, "{value}");
+    assert_eq!(decode(&value), b"board()");
+    let (success, missing) = read("3", None).await;
+    assert!(!success);
+    assert_eq!(missing["error"]["code"], "target_unavailable");
+    local.shutdown().await.unwrap();
+    serving.abort();
+    let _ = serving.await;
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+}
+
 #[test]
 fn schedule_add_refuses_retired_positional_command_with_help() {
     for words in [

@@ -962,6 +962,17 @@ impl Command {
             Self::ArtifactList(a) => nonempty(&a.thread_id, "thread_id"),
             Self::ArtifactGet(a) => nonempty(&a.artifact_id, "artifact_id"),
             Self::ArtifactRemove(a) => nonempty(&a.artifact_id, "artifact_id"),
+            Self::ArtifactRead(a) => {
+                nonempty(&a.thread_id, "thread_id")?;
+                nonempty(&a.artifact_id, "artifact_id")?;
+                if a.version < 1 {
+                    return Err(invalid("artifact version must be positive"));
+                }
+                if a.path.as_deref().is_some_and(str::is_empty) {
+                    return Err(invalid("artifact path must not be empty"));
+                }
+                Ok(())
+            }
             Self::ServiceAdd(a) => optional_nonempty(a.thread_id.as_deref(), "thread_id"),
             Self::ServiceList(a) => optional_nonempty(a.thread_id.as_deref(), "thread_id"),
             Self::ServiceStart(a) | Self::ServiceStop(a) | Self::ServiceRemove(a) => {

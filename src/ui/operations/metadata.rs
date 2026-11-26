@@ -618,6 +618,7 @@ fn operation_label_for(id: OperationId, language: crate::config::UiLanguage) -> 
         OperationId::ArtifactList => local!(language, "成果物 · 一覧", "Artifact · List"),
         OperationId::ArtifactGet => local!(language, "成果物 · 参照", "Artifact · Get"),
         OperationId::ArtifactRemove => local!(language, "成果物 · 削除", "Artifact · Remove"),
+        OperationId::ArtifactRead => local!(language, "成果物 · 内容", "Artifact · Read"),
         OperationId::ServiceAdd => local!(language, "サービス · 追加", "Service · Add"),
         OperationId::ServiceList => local!(language, "サービス · 一覧", "Service · List"),
         OperationId::ServiceStart => local!(language, "サービス · 起動", "Service · Start"),
@@ -863,6 +864,11 @@ fn operation_meaning_for(id: OperationId, language: crate::config::UiLanguage) -
             language,
             "成果物の削除。",
             "Remove an artifact and its metadata."
+        ),
+        OperationId::ArtifactRead => local!(
+            language,
+            "成果物の版の内容を読みます。",
+            "Read one file of an artifact version."
         ),
         OperationId::ServiceAdd => local!(
             language,
@@ -1262,6 +1268,7 @@ fn field_label_for(id: FieldId, language: crate::config::UiLanguage) -> &'static
         FieldId::ArtifactTitle => local!(language, "題名", "Artifact title"),
         FieldId::ArtifactMime => local!(language, "MIME", "Optional MIME"),
         FieldId::ArtifactVersion => local!(language, "版", "Version number"),
+        FieldId::ArtifactPath => local!(language, "相対パス", "Relative path"),
         FieldId::Service => local!(language, "サービスID", "Service ID"),
         FieldId::Schedule => local!(language, "予定ID", "Schedule ID"),
         FieldId::Cron => local!(language, "cron式", "Cron expression"),
@@ -1647,6 +1654,11 @@ fn field_help_for(id: FieldId, language: crate::config::UiLanguage) -> &'static 
         FieldId::ArtifactVersion => {
             local!(language, "参照する版の番号を指定します。", "Version number")
         }
+        FieldId::ArtifactPath => local!(
+            language,
+            "フォルダ内のファイルを相対パスで指定します。",
+            "Relative path of a file inside a shellboy-app: folder"
+        ),
         FieldId::Service => local!(
             language,
             "サービスをIDで指定します。",

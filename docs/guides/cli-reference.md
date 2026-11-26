@@ -1331,7 +1331,17 @@ Recovery rewind is available as `shellboy thread rewind --thread THREAD_ID --nod
 - `shellboy artifact update --artifact ARTIFACT_ID --uri URI [--title TITLE] [--mime MIME]` appends a version.
 - `shellboy artifact list --thread THREAD_ID [--limit N] [--cursor CURSOR]` lists latest metadata, newest-updated first. Equal timestamps sort by artifact ID. Pass `next_cursor` to continue the same live list; start again without a cursor to see entries that moved ahead of it.
 
-On add and update, the CLI joins a relative file path to its own current working directory before sending it. It does not check file existence or normalize `..` beyond the path join. Absolute paths, URLs and custom-scheme URIs are left unchanged. The owner stores the resulting string without resolving it against its own working directory.
+- `shellboy artifact read --thread THREAD_ID --artifact ARTIFACT_ID --version N [--path RELATIVE_PATH]` reads one file of that exact version. The result carries the bytes as `base64` with their count in `raw_bytes`; decode it yourself, for example `shellboy artifact read ... | jq -r .result.base64 | base64 -d > copy`.
+
+On add and update, the CLI joins a relative file path, and the relative folder of `shellboy-app:./dir`, to its own current working directory before sending it. It does not check file existence or normalize `..` beyond the path join. Absolute paths, URLs and other custom-scheme URIs are left unchanged. The owner stores the resulting string without resolving it against its own working directory.
+
+`artifact read` is the only command that opens artifact content, and the owner decides what it may open from the version URI:
+
+- `shellboy-app:/abs/folder` is a web app folder whose entry is `index.html`. `--path` is required and names a file inside the folder, such as `index.html` or `assets/app.js`. A path with `..`, an absolute path, or a link that resolves outside the folder is refused with `details.reason` `path_outside_folder`.
+- A `file:` URI or an absolute path is that one file. `--path` is refused (`path_not_allowed`).
+- `http:`, `https:`, relative paths and other schemes are refused (`uri_not_readable`); the owner never fetches them.
+
+A file is returned only up to `limits.attachment_file_bytes`, and never more than 6 MiB because the encoded reply must fit one 8 MiB frame; a larger file fails with `input_limit` (`file_too_large`). A missing or unreadable file is `target_unavailable`.
 
 ### Next actions for shell, attachment and search failures
 

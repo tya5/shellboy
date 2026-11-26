@@ -58,6 +58,17 @@ const MEANINGS: &[Meaning] = &[
         None,
     ),
     (
+        OperationId::ArtifactRead,
+        &["artifact", "read"],
+        &[
+            ("thread_id", FieldId::Thread),
+            ("artifact_id", FieldId::Artifact),
+            ("artifact_version", FieldId::ArtifactVersion),
+            ("path", FieldId::ArtifactPath),
+        ],
+        None,
+    ),
+    (
         OperationId::ServiceAdd,
         &["service", "add"],
         &[
