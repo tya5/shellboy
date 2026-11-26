@@ -12301,8 +12301,9 @@ drives real `message ask`/`reply`/`cancel` commands and `driver::next` Run ends
 - a cancelled own ask reopens the duty; the Run admitting the outcome owns it,
   and that Run's reply settles it;
 - an answer held, or an outcome left untargeted, while the asker's Run is
-  stopping: Stop and the sweeps leave the duty open and unowned; the next Run
-  admits the answer or notice, owns the duty, and ignores it at its end;
+  stopping, and an outcome committed to a live Run that Stop settles before
+  Turn preparation: Stop and the sweeps leave the duty open and unowned; the
+  next Run admits the answer or notice, owns the duty, and ignores it at its end;
 - an ask older than the duty, and a duty without saved `admitted_at` (receipt
   admitted before this change), are not blocked: the ordinary reminder applies.
 

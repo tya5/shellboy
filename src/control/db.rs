@@ -6225,7 +6225,9 @@ mod thread_deletion_notification_tests {
                 let message = format!("owner-message-{n:03}");
                 let event = format!("reply-outcome-{message}");
                 assert_eq!(db.query_row("SELECT json_extract(result_json,'$.reply.state') FROM receipt WHERE id=?1", [&message], |r| r.get::<_,String>(0))?, "recipient_deleted");
-                assert_eq!(db.query_row("SELECT count(*) FROM event e JOIN fixture_reply_delivery d ON d.event=e.id JOIN run r ON r.id=d.run WHERE e.id=?1 AND e.kind='reply_outcome' AND e.target_thread_id='sender' AND r.thread_id='sender' AND json_extract(e.payload_ref_json,'$.message_id')=?2 AND json_extract(e.payload_ref_json,'$.state')='recipient_deleted'", params![event,message], |r| r.get::<_,i64>(0))?, 1);
+                // One outcome per message, delivered to a sender Run. A notice the
+                // stopped Run never admitted is offered again to the next Run (#433).
+                assert_eq!(db.query_row("SELECT count(DISTINCT e.id) FROM event e JOIN fixture_reply_delivery d ON d.event=e.id JOIN run r ON r.id=d.run WHERE e.id=?1 AND e.kind='reply_outcome' AND e.target_thread_id='sender' AND r.thread_id='sender' AND json_extract(e.payload_ref_json,'$.message_id')=?2 AND json_extract(e.payload_ref_json,'$.state')='recipient_deleted'", params![event,message], |r| r.get::<_,i64>(0))?, 1);
             }
             assert_eq!(db.query_row("SELECT count(*) FROM event WHERE kind='reply_outcome'", [], |r| r.get::<_,i64>(0))?, 129);
             assert_eq!(db.query_row("SELECT count(*) FROM fixture_reply_delivery d JOIN run r ON r.id=d.run WHERE d.event='reply-outcome-owner-message-128' AND r.thread_id='sender' AND r.id<>'sender-run'", [], |r| r.get::<_,i64>(0))?, 1, "reopened outcome uses a new independent sender Run");
