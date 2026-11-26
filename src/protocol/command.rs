@@ -368,7 +368,8 @@ impl Command {
             | Self::ServiceStart(_)
             | Self::ServiceStop(_)
             | Self::ServiceRemove(_) => false,
-            Self::TurnInterrupt(_) | Self::ShellBackground(_) => true,
+            // Reload takes owner selection pins, so shutdown and context capture fence it.
+            Self::TurnInterrupt(_) | Self::ShellBackground(_) | Self::AttachmentReload(_) => true,
             Self::ThreadImport(_)
             | Self::ThreadCreate(_)
             | Self::ThreadFork(_)
@@ -430,7 +431,6 @@ impl Command {
             | Self::HistoryRelations(_)
             | Self::ShellGet(_)
             | Self::ShellRead(_)
-            | Self::AttachmentReload(_)
             | Self::ShellWrite(_)
             | Self::ShellEof(_)
             | Self::ShellStop(_)
