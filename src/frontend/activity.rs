@@ -572,7 +572,7 @@ async fn owner_facts(
     let index: IndexStatus = owner
         .call(Command::IndexStatus(IndexArgs::default()))
         .await?;
-    Ok((waits, crate::index::display_pause(&index)))
+    Ok((waits, index.pause_kind))
 }
 
 /// One projection over the embedded owner's own listener.

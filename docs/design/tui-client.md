@@ -265,13 +265,19 @@ The selected activity takes each running shell's wait from `shell.list`
 saved pending record) for the selected Thread, at most 128 running shells in
 one page; a page that does not cover them leaves the wait count unknown. The
 activity snapshot keeps the waits of the selected Run and replaces each waiting
-shell's row with its wait. The index pause comes from `index.status`
-(`paused`, with `reason` classified as before; a reason that carries an
-appended explanation shows as another pause), and context usage from the
-header's `thread.get` `context_usage`. All three are owner reads on the
-read-only lane, so the current view still does not wait behind the writer.
-The remaining activity projection (Run, Turn, attempt and shell rows) is still
-a private snapshot read.
+shell's row with its wait. Only running shells report a wait: a wait whose
+shell is starting, stopping or already exited is not shown, and a shell
+running several waits shows its earliest accepted one.
+
+The index pause footer uses `index.status` `pause_kind`, the owner's
+classification of the saved pause (endpoint family before profile). The
+selected view reads it on each activity refresh, an O(embedding jobs) owner
+read, until an `events.wait` index change wake lets it read only on change.
+Context usage comes from the header's `thread.get` `context_usage`. All
+three are owner reads on the read-only inspection lane, so the current view
+still does not queue behind the writer. The remaining activity projection
+(Run, Turn, attempt and shell rows, and wait-target labels) is still a
+private snapshot read.
 
 ### Draft save and selected view
 

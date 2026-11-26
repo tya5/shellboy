@@ -255,7 +255,10 @@ impl IndexWorkers {
     }
 }
 /// A fixed classification of the persisted pause, never provider prose.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
 pub enum PauseReason {
     Transport,
     Authentication,
@@ -302,16 +305,6 @@ fn pause_reason(raw: &str) -> PauseReason {
     } else {
         PauseReason::Other
     }
-}
-
-/// The display classification of an `index.status` pause; `None` when not paused.
-pub(crate) fn display_pause(status: &crate::protocol::IndexStatus) -> Option<PauseReason> {
-    status.paused.then(|| {
-        status
-            .reason
-            .as_deref()
-            .map_or(PauseReason::Other, pause_reason)
-    })
 }
 
 impl IndexService {
@@ -1789,7 +1782,7 @@ mod display_pause_tests {
         config
     }
     async fn shown(index: &IndexService) -> Option<PauseReason> {
-        display_pause(&index.status(IndexArgs::default()).await.unwrap())
+        index.status(IndexArgs::default()).await.unwrap().pause_kind
     }
     async fn save_pause(db: &DbWorker, key: String, value: &'static str) {
         db.call(move |db| {
@@ -1831,7 +1824,7 @@ mod display_pause_tests {
         db.shutdown().await.unwrap();
     }
 
-    /// `index.status` resolves the pause scope like the owner's context
+    /// `index.status` classifies the pause scope like the owner's context
     /// observation: the endpoint family before the profile.
     #[tokio::test]
     async fn status_pause_uses_family_before_profile() {
@@ -1854,6 +1847,20 @@ mod display_pause_tests {
         assert_eq!(shown(&service).await, Some(PauseReason::Transport));
         save_pause(&db, family.clone(), r#"{"kind":"provider","status":401}"#).await;
         assert_eq!(shown(&service).await, Some(PauseReason::Authentication));
+        // An explanation appended to `reason` does not change the classification.
+        let recovery = IndexKeys::new(&profile).recovery_required();
+        db.call(move |db| {
+            db.execute("INSERT INTO app_meta(key,value)VALUES(?1,'{}')", [recovery])?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        let status = service.status(IndexArgs::default()).await.unwrap();
+        assert_ne!(
+            status.reason.as_deref(),
+            Some(r#"{"kind":"provider","status":401}"#)
+        );
+        assert_eq!(status.pause_kind, Some(PauseReason::Authentication));
         db.call(move |db| {
             db.execute(
                 "DELETE FROM app_meta WHERE key=?1",
