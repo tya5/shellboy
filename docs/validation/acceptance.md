@@ -12295,16 +12295,20 @@ drives real `message ask`/`reply`/`cancel` commands and `driver::next` Run ends
   `awaiting_own_ask` with the exact blocker in `message list --awaiting`,
   `message get` and `pending_replies.awaiting_own_ask`; the earlier Run's
   `terminal_tx` and startup `terminal_batch_tx` sweeps leave it open;
-- the answer starts a later Run that owns the duty (`reply.owner_run_id`;
-  delivery `run_id` unchanged); that Run's end without a reply ignores it
-  without a reminder;
-- a cancelled own ask reopens the duty for the Run that receives the outcome,
+- the answer starts a later Run; the duty is owned (`reply.owner_run_id`;
+  delivery `run_id` unchanged) only when that Run admits the answer, and that
+  Run's end without a reply ignores it without a reminder;
+- a cancelled own ask reopens the duty; the Run admitting the outcome owns it,
   and that Run's reply settles it;
+- an answer held, or an outcome left untargeted, while the asker's Run is
+  stopping: Stop and the sweeps leave the duty open and unowned; the next Run
+  admits the answer or notice, owns the duty, and ignores it at its end;
 - an ask older than the duty, and a duty without saved `admitted_at` (receipt
   admitted before this change), are not blocked: the ordinary reminder applies.
 
 `open_duty_reads_seek_state_qualified_indexes_for_both_open_states` checks with
 EXPLAIN QUERY PLAN that every open-duty read, the blocker search, reopening and
-the owner-Run settlement search their partial index without a temporary B-tree.
+the owner-Run claim and settlement, and the rewind preview's open-ask count
+and page search their partial index without a temporary B-tree.
 No hosted CI, real owner, Studio or `exec --result reply` follow-through is
 claimed; results are in the branch report.

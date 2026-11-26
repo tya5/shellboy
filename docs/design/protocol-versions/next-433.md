@@ -11,9 +11,10 @@ duty in either open state, and a `reply_received` wait is satisfied only by a
 terminal state. `MessageReplyState` in history provenance gains
 `awaiting_own_ask`.
 
-When the blocking ask ends, the duty returns to `pending` and saves
-`reply.owner_run_id`, the asker's Run that receives the answer or outcome; its
-delivery `run_id` and `turn_id` are unchanged. A pending duty also saves
+When the blocking ask ends, the duty returns to `pending` with
+`reply.reopened_after` naming that ask. The Run that admits the answer or
+outcome is saved as `reply.owner_run_id`; the delivery `run_id` and `turn_id`
+are unchanged. A pending duty also saves
 `reply.admitted_at` when it enters the Thread's history.
 
 ## Read surfaces

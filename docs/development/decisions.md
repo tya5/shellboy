@@ -10,9 +10,10 @@ shows a duty ignored before its owner saw the answer.
   clock. Equal timestamps do not block, so an ambiguous order keeps today's rule.
 - The answer or outcome is the reopened duty's one wake, as the structure
   comment states: its owner Run's end without a reply ignores it, no reminder.
-- When the asker's Run is stopping, the held answer cannot name a new Run; the
-  stopping Run owns the duty and its stop settles it as `ignored`, like every
-  other duty of a stopped Run.
+- The owner Run is saved at Turn preparation, the one point that admits both
+  answers (selected path) and outcome notices (deliveries to the Run). Until a
+  Run admits the answer the duty has no owner: an answer that is never admitted
+  (for example, rewound away) leaves the duty open and answerable, never ignored.
 
 ## Scoped migration validation (#397)
 
