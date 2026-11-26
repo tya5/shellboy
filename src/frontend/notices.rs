@@ -59,18 +59,7 @@ LEFT JOIN tool_result r ON r.group_id=c.group_id AND r.call_id=c.call_id
 LEFT JOIN node original ON original.id=r.node_id
 ";
 
-pub(super) struct Fact {
-    pub node_id: String,
-    execution: Option<String>,
-    command: Option<String>,
-    background: Option<bool>,
-    group: Option<String>,
-    call: Option<String>,
-    source: Option<String>,
-    available_execution: Option<String>,
-    source_deleted: Option<String>,
-    description: Option<String>,
-}
+pub(super) use crate::protocol::HistoryWindowNotice as Fact;
 
 pub(super) fn read_tx(db: &Connection, ids: &[String]) -> Result<Vec<Fact>, StorageError> {
     if ids.len() > 128 || ids.iter().any(|id| id.is_empty() || id.len() > 256) {
@@ -86,16 +75,17 @@ pub(super) fn read_tx(db: &Connection, ids: &[String]) -> Result<Vec<Fact>, Stor
     let encoded = serde_json::to_string(ids).expect("notification IDs serialize");
     db.prepare(SQL)?
         .query_map([encoded], |r| {
+            let source: Option<String> = r.get(7)?;
+            let source_deleted: Option<String> = r.get(9)?;
             Ok(Fact {
                 node_id: r.get(0)?,
-                execution: r.get(2)?,
+                execution_id: r.get(2)?,
                 command: r.get(3)?,
                 background: r.get(4)?,
-                group: r.get(5)?,
-                call: r.get(6)?,
-                source: r.get(7)?,
-                available_execution: r.get(8)?,
-                source_deleted: r.get(9)?,
+                group_id: r.get(5)?,
+                call_id: r.get(6)?,
+                source_node_id: source.filter(|_| source_deleted.is_none()),
+                execution_available: r.get::<_, Option<String>>(8)?.is_some(),
                 description: r.get(10)?,
             })
         })?
@@ -137,23 +127,23 @@ pub(super) fn apply(nodes: &mut [UiNode], facts: &[Fact]) {
             if let Some(description) = crate::tool_description::label(fact.description.as_deref()) {
                 fields.push(field("description", description));
             }
-            if let Some(execution) = &fact.execution {
+            if let Some(execution) = &fact.execution_id {
                 fields.push(field("execution_id", execution.clone()));
             }
-            if fact.source.is_none() || fact.source_deleted.is_some() {
+            if fact.source_node_id.is_none() {
                 fields.push(field(
                     "source_error",
                     NoticeText::SourceUnavailable.text().into(),
                 ));
             }
-            if let (Some(group), Some(call), Some(source), None) =
-                (&fact.group, &fact.call, &fact.source, &fact.source_deleted)
+            if let (Some(group), Some(call), Some(source)) =
+                (&fact.group_id, &fact.call_id, &fact.source_node_id)
             {
                 fields.push(field("group_id", group.clone()));
                 fields.push(field("call_id", call.clone()));
                 fields.push(field("source_node", source.clone()));
             }
-            if fact.available_execution.is_none() || fact.group.is_none() {
+            if !fact.execution_available || fact.group_id.is_none() {
                 NoticeText::CallUnavailable.text().into()
             } else {
                 let command = fact
@@ -187,9 +177,11 @@ pub(super) fn apply(nodes: &mut [UiNode], facts: &[Fact]) {
             node.presentation.metadata_limited = true;
         }
         node.presentation.fields.extend(fields);
-        let source_error = (fact.source.is_none() || fact.source_deleted.is_some())
+        let source_error = fact
+            .source_node_id
+            .is_none()
             .then_some(Text::NoticeSourceUnavailable);
-        let notice = if fact.available_execution.is_none() || fact.group.is_none() {
+        let notice = if !fact.execution_available || fact.group_id.is_none() {
             Message::Text(Text::NoticeCallUnavailable)
         } else {
             Message::CommandNotice {
@@ -274,8 +266,8 @@ mod tests {
             .iter_mut()
             .find(|fact| fact.node_id == "node-shell")
             .unwrap();
-        shell.source = None;
-        shell.group = None;
+        shell.source_node_id = None;
+        shell.group_id = None;
         apply(&mut nodes, &facts);
         assert_eq!(
             nodes[0].presentation.ui_messages.notice,
