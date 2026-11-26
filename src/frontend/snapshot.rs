@@ -25,16 +25,6 @@ pub(super) fn storage_error(error: StorageError) -> ApiError {
     super::storage_error(error)
 }
 
-/// Order visible observations before their asynchronous snapshot acquisition.
-/// A late old snapshot must not mint a token newer than an overtaking history read.
-pub(super) async fn read_sequenced<T: Send + 'static>(
-    path: PathBuf,
-    stop: CancellationToken,
-    collect: impl FnOnce(&Connection, u64) -> Result<T, StorageError> + Send + 'static,
-) -> Result<(T, u64), ApiError> {
-    read_sequenced_guarded(path, stop, || true, collect).await
-}
-
 /// A shared visible plan may close while waiting for the finite worker pool.
 /// Check its captured ownership before admission and immediately before SQLite.
 pub(super) async fn read_sequenced_guarded<T: Send + 'static>(
@@ -148,91 +138,6 @@ mod tests {
         writer.shutdown().await.unwrap();
     }
 
-    #[tokio::test]
-    async fn multiple_display_consumers_share_one_wal_snapshot() {
-        let root = tempfile::tempdir().unwrap();
-        let path = root.path().join("display.sqlite");
-        let writer = DbWorker::open(&path).await.unwrap();
-        writer
-            .call(|db| {
-                db.execute(
-                    "INSERT INTO app_meta(key,value)VALUES('display-test','before')",
-                    [],
-                )?;
-                db.execute("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at) VALUES('root','','','','','','now')", [])?;
-                Ok(())
-            })
-            .await
-            .unwrap();
-        let (entered, ready) = oneshot::channel();
-        let (release, blocked) = std::sync::mpsc::channel::<()>();
-        let reader = tokio::spawn(read_sequenced(
-            path,
-            CancellationToken::new(),
-            move |db, _sequence| {
-                let first: String = db.query_row(
-                    "SELECT value FROM app_meta WHERE key='display-test'",
-                    [],
-                    |row| row.get(0),
-                )?;
-                let _ = entered.send(());
-                let _ = blocked.recv();
-                let second: String = db.query_row(
-                    "SELECT value FROM app_meta WHERE key='display-test'",
-                    [],
-                    |row| row.get(0),
-                )?;
-                Ok((first, second))
-            },
-        ));
-        crate::test_watchdog::watchdog("E readonly observation", ready)
-            .await
-            .unwrap()
-            .unwrap();
-        let changed = writer
-            .call(|db| {
-                let transaction = db.transaction()?;
-                transaction.execute(
-                    "UPDATE app_meta SET value='after' WHERE key='display-test'",
-                    [],
-                )?;
-                crate::history::append_node(
-                    &transaction,
-                    "root",
-                    "new-answer",
-                    None,
-                    "assistant_response",
-                    &serde_json::json!({"text":"synthetic later answer"}),
-                    "2026-01-01T00:00:00Z",
-                )?;
-                let (raw, _) = crate::frontend::history_reader::query_page_tx(
-                    &transaction,
-                    "root",
-                    None,
-                    None,
-                )?;
-                let sequence = raw.info().read_revision;
-                assert_eq!(raw.info().total, 1);
-                transaction.commit()?;
-                Ok(sequence)
-            })
-            .await;
-        drop(release);
-        let newer_page_sequence = changed.unwrap();
-        let (observed, older_sequence) =
-            crate::test_watchdog::watchdog("E readonly observation", reader)
-                .await
-                .unwrap()
-                .unwrap()
-                .unwrap();
-        assert_eq!(observed, ("before".into(), "before".into()));
-        assert!(
-            older_sequence < newer_page_sequence,
-            "old WAL snapshot completion must not overtake a newer canonical history read"
-        );
-        writer.shutdown().await.unwrap();
-    }
-
     #[test]
     fn transient_read_errors_do_not_latch_a_writer_failure() {
         for code in [
@@ -259,11 +164,9 @@ mod tests {
     async fn cancelled_display_never_opens_an_invalid_path() {
         let stop = CancellationToken::new();
         stop.cancel();
-        let error = read_sequenced(
-            PathBuf::from("missing-parent/missing.sqlite"),
-            stop,
-            |_, _| Ok(()),
-        )
+        let error = read(PathBuf::from("missing-parent/missing.sqlite"), stop, |_| {
+            Ok(())
+        })
         .await
         .unwrap_err();
         assert_eq!(error.code, ErrorCode::InvalidState);

@@ -1,120 +1,9 @@
 //! Bounded current-input reads and source-backed draft restoration.
 use super::*;
-use rusqlite::Connection;
 use std::sync::atomic::{AtomicU64, Ordering};
 static READ_REVISION: AtomicU64 = AtomicU64::new(1);
 pub(crate) fn read_revision() -> u64 {
     READ_REVISION.fetch_add(1, Ordering::Relaxed)
-}
-pub(super) fn query(
-    db: &Connection,
-    thread: &str,
-) -> Result<PendingMessages, crate::storage::StorageError> {
-    const ELIGIBLE: &str = "r.target_thread_id=?1 AND r.state IN ('accepted','held') AND r.path_admission<>'admitted' AND NOT EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id=r.target_thread_id AND p.node_id=r.message_node_id)";
-    let total: i64 = db.query_row(
-        &format!("SELECT count(*) FROM receipt r WHERE {ELIGIBLE}"),
-        [thread],
-        |row| row.get(0),
-    )?;
-    // SQLite returns bounded text fragments; never load 128 full message blobs
-    // merely to draw a preview. Full canonical content stays source-addressable.
-    let mut stmt=db.prepare(&format!("SELECT r.message_node_id,r.client_operation_id,substr(r.sender_json,1,8193),r.created_at,r.state,r.hold_reason,r.path_admission,COALESCE(json_extract(r.result_json,'$.deliver')='now',0),COALESCE((SELECT substr(group_concat(fragment,''),1,513) FROM (SELECT substr(json_extract(j.value,'$.text'),1,513) AS fragment FROM json_each(n.payload_json,'$.content') j WHERE json_extract(j.value,'$.type') IN ('input_text','output_text') LIMIT 128)),''),(SELECT count(*) FROM attachment_ref a WHERE a.source_node_id=n.id),COALESCE(json_extract(r.result_json,'$.reply.state')='pending',0),COALESCE(json_extract(r.result_json,'$.deliver')='complete' AND (r.hold_reason='run_completion' OR json_extract(r.result_json,'$.delivery_context.reason')='run_completion'),0) FROM receipt r JOIN node n ON n.id=r.message_node_id WHERE {ELIGIBLE} ORDER BY r.created_at,r.rowid LIMIT 128"))?;
-    let items = stmt
-        .query_map([thread], |row| {
-            let sender: String = row.get(2)?;
-            let sender_thread = serde_json::from_str::<Value>(&sender).ok().and_then(|v| {
-                v.get("thread_id")
-                    .and_then(Value::as_str)
-                    .map(str::to_owned)
-            });
-            let excerpt: String = row.get(8)?;
-            Ok(PendingMessage {
-                held_by: None,
-                message_id: row.get(0)?,
-                operation_id: row.get(1)?,
-                sender_thread,
-                sender_kind: crate::protocol::MessageSender::from_saved(Some(&sender)).kind,
-                completion_scheduled: row.get(11)?,
-                created_at: row.get(3)?,
-                held: row.get::<_, String>(4)? == "held",
-                uncertain: row.get::<_, String>(6)? == "unknown",
-                excerpt_truncated: excerpt.chars().count() > 512,
-                excerpt: excerpt.chars().take(512).collect(),
-                attachment_count: row.get::<_, i64>(9)? as u64,
-                expect_reply: row.get(10)?,
-            })
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
-    let mut submitted=db.prepare("SELECT operation_id,source_draft_id,source_revision,message_id FROM (SELECT json_extract(body_json,'$._submission.operation_id') AS operation_id,json_extract(body_json,'$._submission.source_draft_id') AS source_draft_id,json_extract(body_json,'$._submission.source_revision') AS source_revision,json_extract(body_json,'$._submission.message_id') AS message_id,updated_at AS accepted_at FROM draft WHERE thread_id=?1 AND state='submitted' UNION ALL SELECT client_operation_id,json_extract(result_json,'$.draft_submission.source_draft_id'),json_extract(result_json,'$.draft_submission.source_revision'),message_node_id,created_at FROM receipt WHERE target_thread_id=?1 AND json_extract(result_json,'$.draft_submission.operation_id')=client_operation_id AND json_extract(result_json,'$.draft_submission.message_id')=message_node_id) GROUP BY operation_id,source_draft_id,source_revision,message_id ORDER BY max(accepted_at) DESC,operation_id DESC LIMIT 128")?;
-    let submitted = submitted
-        .query_map([thread], |row| {
-            Ok(SubmittedMessage {
-                operation_id: row.get(0)?,
-                source_draft_id: row.get(1)?,
-                revision: row.get::<_, i64>(2)? as u64,
-                message_id: row.get(3)?,
-            })
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
-    let mut query = db.prepare("SELECT r.message_node_id,substr(r.sender_json,1,8193),r.created_at,r.state,COALESCE((SELECT substr(json_extract(n.payload_json,'$.content[0].text'),1,513) FROM node n WHERE n.id=r.message_node_id),''),COALESCE(json_extract(r.result_json,'$.to_human')=1,0),CAST((julianday('now')-julianday(r.created_at))*86400000 AS INTEGER) FROM receipt r INDEXED BY receipt_reply_pending WHERE r.target_thread_id=?1 AND r.state IN ('applied','accepted','held') AND json_extract(r.result_json,'$.reply.state')='pending' AND COALESCE(json_extract(r.result_json,'$.to_human'),0)=1 ORDER BY r.created_at,r.rowid LIMIT ?2")?;
-    let awaiting_replies = query
-        .query_map(
-            rusqlite::params![thread, crate::protocol::MAX_PENDING_REPLY_DUTIES as i64],
-            |r| {
-                let sender_json: String = r.get(1)?;
-                let sender = crate::protocol::MessageSender::from_saved(Some(&sender_json));
-                let to_human: bool = r.get(5)?;
-                let label = if to_human {
-                    "Human decision".to_owned()
-                } else {
-                    sender
-                        .label
-                        .or(sender.thread_id)
-                        .unwrap_or_else(|| format!("{:?}", sender.kind))
-                };
-                let excerpt: String = r.get(4)?;
-                Ok(crate::ui::ReplyTarget {
-                    message_id: r.get(0)?,
-                    sender: crate::presentation::sanitize_plain(&label, 0)
-                        .0
-                        .replace(['\n', '\r'], " ")
-                        .chars()
-                        .take(128)
-                        .collect(),
-                    created_at: r.get::<_, String>(2)?.chars().take(128).collect(),
-                    applied: r.get::<_, String>(3)? == "applied",
-                    to_human,
-                    recipient_thread_id: thread.to_owned(),
-                    elapsed_ms: r.get::<_, i64>(6)?.max(0) as u64,
-                    excerpt: crate::presentation::sanitize_plain(&excerpt, 0)
-                        .0
-                        .chars()
-                        .take(512)
-                        .collect(),
-                })
-            },
-        )?
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(PendingMessages {
-        items,
-        total: total as u64,
-        submitted,
-        awaiting_replies,
-    })
-}
-pub(super) fn project_holds(
-    db: &Connection,
-    owner: &crate::control::message_delivery::MessageHolds,
-    pending: &mut PendingMessages,
-) -> rusqlite::Result<()> {
-    let blockers = owner.read(
-        db,
-        pending.items.iter().map(|item| item.message_id.as_str()),
-    )?;
-    for (item, held_by) in pending.items.iter_mut().zip(blockers) {
-        item.held_by = held_by;
-    }
-    Ok(())
 }
 pub(super) fn submission_snapshot(
     snapshot: Option<Box<DraftSnapshot>>,
@@ -408,80 +297,6 @@ mod tests {
     use rusqlite::params;
 
     #[test]
-    fn replies_are_thread_scoped_bounded_and_keep_saved_application_state() {
-        let db = fixture();
-        input(
-            &db,
-            "expected",
-            "applied",
-            "admitted",
-            "original",
-            serde_json::json!({"kind":"human"}),
-            false,
-        );
-        db.execute("UPDATE receipt SET result_json=json_set(json_set(result_json,'$.reply.state','pending'),'$.to_human',0) WHERE message_node_id='expected'",[]).unwrap();
-        let pending = query(&db, "thread").unwrap();
-        assert!(pending.awaiting_replies.is_empty());
-        assert!(query(&db, "elsewhere").unwrap().awaiting_replies.is_empty());
-        input(
-            &db,
-            "human-question",
-            "applied",
-            "admitted",
-            "choose A or B",
-            serde_json::json!({"kind":"model","thread_id":"sender"}),
-            false,
-        );
-        db.execute("UPDATE receipt SET result_json=json_set(json_set(result_json,'$.reply.state','pending'),'$.to_human',1) WHERE message_node_id='human-question'", []).unwrap();
-        db.execute(
-            "UPDATE receipt SET created_at='2026-10-30T00:00:00Z' WHERE message_node_id='expected'",
-            [],
-        )
-        .unwrap();
-        db.execute(
-            "UPDATE receipt SET created_at='2099-01-01' WHERE message_node_id='human-question'",
-            [],
-        )
-        .unwrap();
-        let pending = query(&db, "thread").unwrap();
-        assert_eq!(pending.awaiting_replies.len(), 1);
-        assert_eq!(pending.awaiting_replies[0].message_id, "human-question");
-        assert!(pending.awaiting_replies[0].to_human);
-        assert_eq!(pending.awaiting_replies[0].excerpt, "choose A or B");
-        assert_eq!(pending.awaiting_replies[0].elapsed_ms, 0);
-        db.execute(
-            "UPDATE receipt SET state='held',path_admission='unadmitted' WHERE message_node_id='expected'",
-            [],
-        )
-        .unwrap();
-        let pending = query(&db, "thread").unwrap();
-        assert_eq!(pending.awaiting_replies.len(), 1);
-        assert_eq!(pending.awaiting_replies[0].message_id, "human-question");
-        assert!(pending.items[0].expect_reply);
-        db.execute("UPDATE receipt SET result_json=json_set(result_json,'$.reply.state','cancelled') WHERE message_node_id='expected'",[]).unwrap();
-        let remaining = query(&db, "thread").unwrap().awaiting_replies;
-        assert_eq!(remaining.len(), 1);
-        assert_eq!(remaining[0].message_id, "human-question");
-        // Synthetic overflow checks the reader's bound even with corrupt over-cap input.
-        for i in 0..140 {
-            let id = format!("bounded-{i:03}");
-            input(
-                &db,
-                &id,
-                "applied",
-                "admitted",
-                "fixture",
-                serde_json::json!({"kind":"human"}),
-                false,
-            );
-            db.execute("UPDATE receipt SET result_json=json_set(json_set(result_json,'$.reply.state','pending'),'$.to_human',1) WHERE message_node_id=?1",[id]).unwrap();
-        }
-        assert_eq!(
-            query(&db, "thread").unwrap().awaiting_replies.len(),
-            crate::protocol::MAX_PENDING_REPLY_DUTIES as usize
-        );
-    }
-    #[test]
     fn cancellation_summary_uses_english_for_all_outcomes_and_counts() {
         let cases = [
             (MessageCancelOutcome::Cancelled, "cancelled"),
@@ -499,212 +314,6 @@ mod tests {
         }
     }
 
-    fn fixture() -> Connection {
-        let db = Connection::open_in_memory().unwrap();
-        db.execute_batch("CREATE TABLE receipt(message_node_id TEXT,client_operation_id TEXT,sender_json TEXT,created_at TEXT,state TEXT,hold_reason TEXT,path_admission TEXT,result_json TEXT,target_thread_id TEXT); CREATE TABLE node(id TEXT,payload_json TEXT); CREATE TABLE thread_path(thread_id TEXT,node_id TEXT); CREATE TABLE attachment_ref(source_node_id TEXT); CREATE TABLE draft(id TEXT,thread_id TEXT,state TEXT,updated_at TEXT,body_json TEXT); CREATE INDEX receipt_reply_pending ON receipt(target_thread_id) WHERE json_extract(result_json,'$.reply.state')='pending';").unwrap();
-        db
-    }
-    fn input(
-        db: &Connection,
-        id: &str,
-        state: &str,
-        admission: &str,
-        text: &str,
-        sender: Value,
-        now: bool,
-    ) {
-        let payload =
-            serde_json::json!({"role":"user","content":[{"type":"input_text","text":text}]})
-                .to_string();
-        db.execute("INSERT INTO node VALUES(?1,?2)", params![id, payload])
-            .unwrap();
-        db.execute(
-            "INSERT INTO receipt VALUES(?1,?2,?3,'2026-10-30T00:00:00Z',?4,?5,?6,?7,'thread')",
-            params![
-                id,
-                format!("fixture:{id}"),
-                sender.to_string(),
-                state,
-                (state == "held").then_some("terminal_before_path_admission"),
-                admission,
-                serde_json::json!({"deliver": if now { "now" } else { "next" }}).to_string()
-            ],
-        )
-        .unwrap();
-    }
-    #[test]
-    fn held_region_projects_saved_sender_and_completion_facts_without_null_guessing() {
-        use crate::protocol::SenderKind;
-        let db = fixture();
-        for (id, sender, expected) in [
-            (
-                "human",
-                serde_json::json!({"kind":"human"}),
-                SenderKind::Human,
-            ),
-            (
-                "external",
-                serde_json::json!({"kind":"external_cli"}),
-                SenderKind::ExternalCli,
-            ),
-            ("legacy-null", Value::Null, SenderKind::Unknown),
-            (
-                "incomplete-model",
-                serde_json::json!({"kind":"model", "thread_id":"other"}),
-                SenderKind::Unknown,
-            ),
-            (
-                "model",
-                serde_json::json!({"kind":"model", "thread_id":"other", "instance_id":"i", "run_id":"r", "turn_id":"t", "execution_id":"e"}),
-                SenderKind::Model,
-            ),
-        ] {
-            input(
-                &db,
-                id,
-                "held",
-                "unadmitted",
-                "synthetic excerpt",
-                sender,
-                false,
-            );
-            let pending = query(&db, "thread").unwrap();
-            let item = pending
-                .items
-                .iter()
-                .find(|item| item.message_id == id)
-                .unwrap();
-            assert_eq!(item.sender_kind, expected);
-            assert!(!item.completion_scheduled);
-        }
-        db.execute("UPDATE receipt SET hold_reason='run_completion',result_json='{\"deliver\":\"complete\"}' WHERE message_node_id='external'", []).unwrap();
-        let completion = |db: &Connection| {
-            query(db, "thread")
-                .unwrap()
-                .items
-                .into_iter()
-                .find(|item| item.message_id == "external")
-                .unwrap()
-                .completion_scheduled
-        };
-        assert!(completion(&db));
-        db.execute(
-            "UPDATE receipt SET hold_reason='recovery_wait' WHERE message_node_id='external'",
-            [],
-        )
-        .unwrap();
-        assert!(!completion(&db));
-        db.execute("UPDATE receipt SET hold_reason=NULL,state='accepted',result_json='{\"deliver\":\"complete\",\"delivery_context\":{\"reason\":\"run_completion\"}}' WHERE message_node_id='external'", []).unwrap();
-        assert!(completion(&db));
-        db.execute("UPDATE receipt SET result_json='{\"deliver\":\"next\",\"delivery_context\":{\"reason\":\"run_completion\"}}' WHERE message_node_id='external'", []).unwrap();
-        assert!(!completion(&db));
-    }
-
-    #[test]
-    fn queue_uses_saved_sender_admission_membership_and_original_receipt_order() {
-        let db = fixture();
-        input(
-            &db,
-            "z-first",
-            "accepted",
-            "unadmitted",
-            "first",
-            Value::Null,
-            false,
-        );
-        input(
-            &db,
-            "a-second",
-            "held",
-            "unknown",
-            "second",
-            serde_json::json!({"thread_id":"sender-thread"}),
-            true,
-        );
-        input(
-            &db,
-            "removed-but-admitted",
-            "accepted",
-            "admitted",
-            "removed",
-            Value::Null,
-            false,
-        );
-        input(
-            &db,
-            "selected",
-            "accepted",
-            "unadmitted",
-            "selected",
-            Value::Null,
-            false,
-        );
-        input(
-            &db,
-            "cancelled",
-            "cancelled",
-            "unadmitted",
-            "cancelled",
-            Value::Null,
-            false,
-        );
-        db.execute("INSERT INTO thread_path VALUES('thread','selected')", [])
-            .unwrap();
-        let before = query(&db, "thread").unwrap();
-        assert_eq!(
-            before
-                .items
-                .iter()
-                .map(|item| item.message_id.as_str())
-                .collect::<Vec<_>>(),
-            ["z-first", "a-second"]
-        );
-        assert_eq!(before.total, 2);
-        assert!(before.items[0].sender_thread.is_none());
-        assert_eq!(
-            before.items[1].sender_thread.as_deref(),
-            Some("sender-thread")
-        );
-        assert!(before.items[1].held && before.items[1].uncertain);
-        let tx = db.unchecked_transaction().unwrap();
-        tx.execute("INSERT INTO thread_path VALUES('thread','z-first')", [])
-            .unwrap();
-        let after = query(&tx, "thread").unwrap();
-        let selected: bool = tx
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM thread_path WHERE node_id='z-first')",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert!(selected && after.items.iter().all(|item| item.message_id != "z-first"));
-        tx.commit().unwrap();
-    }
-    #[test]
-    fn queue_bounds_rows_and_unicode_excerpts_without_hiding_the_total() {
-        let db = fixture();
-        for index in 0..130 {
-            input(
-                &db,
-                &format!("message-{index}"),
-                "accepted",
-                "unadmitted",
-                &"日".repeat(700),
-                Value::Null,
-                false,
-            );
-        }
-        let queue = query(&db, "thread").unwrap();
-        assert_eq!(queue.total, 130);
-        assert_eq!(queue.items.len(), 128);
-        assert!(
-            queue
-                .items
-                .iter()
-                .all(|item| item.excerpt.chars().count() == 512 && item.excerpt_truncated)
-        );
-        assert_eq!(queue.items[127].message_id, "message-127");
-    }
     #[test]
     fn frozen_submission_identity_and_content_cannot_diverge_from_sent_input() {
         let snapshot = DraftSnapshot {
@@ -841,7 +450,9 @@ mod tests {
         let (rpc, requests) = tokio::sync::mpsc::channel(8);
         let server = crate::ipc::LocalServer::bind(&owner, rpc).await.unwrap();
         tokio::spawn(control.clone().serve(requests));
-        let pending = owner.db.call(|db| query(db, "thread")).await.unwrap();
+        let pending = super::native_page::read_queue(&control, "thread")
+            .await
+            .unwrap();
         assert_eq!(
             pending
                 .items
@@ -914,7 +525,9 @@ mod tests {
         );
         let listed = archives(&control, Some("thread".into())).await.unwrap();
         assert_eq!(listed.len(), 2);
-        let pending = owner.db.call(|db| query(db, "thread")).await.unwrap();
+        let pending = super::native_page::read_queue(&control, "thread")
+            .await
+            .unwrap();
         assert_eq!(pending.total, 0);
         ui.apply(UiUpdate::History {
             thread_id: "thread".into(),
@@ -1083,12 +696,14 @@ mod retention_tests {
                         .get::<_, i64>(0))?,
                     before
                 );
-                assert!(
-                    query(db, "thread")?
-                        .submitted
-                        .iter()
-                        .any(|s| s.source_draft_id == "retention-composer" && s.revision == 7)
-                );
+                // The receipt keeps the sent draft's identity after retention.
+                assert!(db.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM receipt WHERE client_operation_id='retention-op'
+                       AND json_extract(result_json,'$.draft_submission.source_draft_id')='retention-composer'
+                       AND json_extract(result_json,'$.draft_submission.source_revision')=7)",
+                    [],
+                    |r| r.get::<_, bool>(0)
+                )?);
                 Ok(())
             })
             .await
@@ -1101,7 +716,7 @@ mod retention_tests {
             db.execute("INSERT INTO draft VALUES('older-submitting','thread',6,?1,'submitting','before')",[snapshot])?;Ok(())
         }).await.unwrap();
         let (updates, incoming) = std::sync::mpsc::sync_channel(128);
-        crate::frontend::select_thread(&control, &updates, "thread", 7, 0, None, 80)
+        crate::frontend::select_thread(&control, &updates, "thread", 7, 0, None, 80, Vec::new())
             .await
             .unwrap();
         assert!(

@@ -2082,6 +2082,7 @@ impl Form {
                 |form, _cwd| {
                     Ok(Command::HistoryWindow(HistoryWindowArgs {
                         include_observation: false,
+                        observe_node_ids: Vec::new(),
                         items: false,
                         thread_id: form.owned("thread")?,
                         ordinal: form.optional_number("ordinal")?,

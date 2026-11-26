@@ -556,7 +556,14 @@ mod tests {
         let extra = &raw.extras["t"];
         assert_eq!(
             extra.pending,
-            super::super::message_queue::query(&db, "t").unwrap().total
+            db.query_row(
+                "SELECT count(*) FROM receipt r WHERE r.target_thread_id='t' AND r.state IN ('accepted','held')
+                   AND r.path_admission<>'admitted' AND NOT EXISTS(SELECT 1 FROM thread_path p
+                   WHERE p.thread_id=r.target_thread_id AND p.node_id=r.message_node_id)",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap() as u64
         );
         assert_eq!(extra.execution.as_deref(), Some("s"));
         assert_eq!(extra.shell_state.as_deref(), Some("stopping"));

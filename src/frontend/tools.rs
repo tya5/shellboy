@@ -111,16 +111,16 @@ impl ToolFacts {
     }
 }
 
-fn clear_observations(nodes: &mut [UiNode]) {
-    for node in nodes {
-        for block in &mut node.presentation.blocks {
-            if let Some(tool) = &mut block.tool {
-                tool.clear_observation();
-                tool.group_id = None;
-                tool.call_node_id = None;
-                tool.result_node_id = None;
-            }
-        }
+/// Clear current observations but keep the saved group that selects each call.
+pub(super) fn reset_observations(nodes: &mut [UiNode]) {
+    for tool in nodes
+        .iter_mut()
+        .flat_map(|node| &mut node.presentation.blocks)
+        .filter_map(|block| block.tool.as_mut())
+    {
+        tool.clear_observation();
+        tool.call_node_id = None;
+        tool.result_node_id = None;
     }
 }
 
@@ -189,68 +189,6 @@ fn read_tx_reference(
     }
     Ok(ToolFacts {
         sources,
-        truncated_nodes: Vec::new(),
-        notices: Vec::new(),
-    })
-}
-
-// Preserve the existing saved-group-first, unique-result fallback for known
-// projected (node,call) pairs. Legacy evidence is resolved as one relation set,
-// never by searching for a call ID globally or executing a query per block.
-const PROJECTED_SOURCE_BATCH_SQL: &str = r"
-WITH requested AS MATERIALIZED (
- SELECT CAST(key AS INTEGER) AS position,json_extract(value,'$[0]') AS node_id,
-        json_extract(value,'$[1]') AS call_id FROM json_each(?1)
-), nodes AS MATERIALIZED (
- SELECT requested.*,CASE WHEN json_valid(n.payload_json) THEN json_extract(n.payload_json,'$.group_id') END AS saved_group
- FROM requested LEFT JOIN node n ON n.id=requested.node_id
-), missing AS MATERIALIZED (SELECT DISTINCT node_id,call_id FROM nodes WHERE saved_group IS NULL),
-legacy AS MATERIALIZED (
- SELECT r.node_id,r.call_id,CASE WHEN count(*)=1 THEN min(r.group_id) END AS group_id
- FROM missing JOIN tool_result r ON r.node_id=missing.node_id AND r.call_id=missing.call_id
- GROUP BY r.node_id,r.call_id
-), spilled AS MATERIALIZED (
- -- A spill carries no group of its own; its saved source results do.
- SELECT missing.node_id,missing.call_id,
-        CASE WHEN count(DISTINCT r.group_id)=1 THEN min(r.group_id) END AS group_id
- FROM missing JOIN node sp ON sp.id=missing.node_id AND sp.kind='spill' AND json_valid(sp.payload_json)
- JOIN json_each(sp.payload_json,'$.source_node_ids') s
- JOIN tool_result r ON r.node_id=s.value AND r.call_id=missing.call_id
- GROUP BY missing.node_id,missing.call_id
-)
-SELECT nodes.node_id,CAST(COALESCE(nodes.saved_group,legacy.group_id,spilled.group_id) AS TEXT),nodes.call_id
-FROM nodes LEFT JOIN legacy ON legacy.node_id=nodes.node_id AND legacy.call_id=nodes.call_id
-LEFT JOIN spilled ON spilled.node_id=nodes.node_id AND spilled.call_id=nodes.call_id
-WHERE COALESCE(nodes.saved_group,legacy.group_id,spilled.group_id) IS NOT NULL ORDER BY nodes.position";
-
-pub(super) fn read_tx(
-    db: &Connection,
-    requests: &[(String, String)],
-) -> Result<ToolFacts, StorageError> {
-    if requests.len() > MAX_NODES * MAX_GROUP_CALLS
-        || requests
-            .iter()
-            .map(|(node, _)| node)
-            .collect::<std::collections::HashSet<_>>()
-            .len()
-            > MAX_NODES
-    {
-        return Err(ApiError::new(
-            ErrorCode::InputLimit,
-            "Tool source metadata exceeds its input bound",
-        )
-        .into());
-    }
-    if requests.is_empty() {
-        return Ok(ToolFacts::default());
-    }
-    let encoded = serde_json::to_string(requests).expect("source requests serialize");
-    let resolved = db
-        .prepare(PROJECTED_SOURCE_BATCH_SQL)?
-        .query_map([encoded], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
-        .collect::<rusqlite::Result<Vec<(String, String, String)>>>()?;
-    Ok(ToolFacts {
-        sources: read_sources_batch(db, &resolved)?,
         truncated_nodes: Vec::new(),
         notices: Vec::new(),
     })
@@ -530,12 +468,6 @@ fn read_sources_batch(
     Ok(sources)
 }
 
-pub(super) fn apply(nodes: &mut [UiNode], facts: &ToolFacts) {
-    clear_observations(nodes);
-    super::notices::apply(nodes, &facts.notices);
-    apply_calls(nodes, &facts.sources, &facts.truncated_nodes, false);
-}
-
 pub(super) fn apply_window(nodes: &mut [UiNode], facts: &crate::protocol::HistoryWindowTools) {
     super::notices::apply(nodes, &facts.notices);
     apply_calls(nodes, &facts.calls, &facts.limited_node_ids, true);
@@ -662,51 +594,6 @@ fn apply_calls(
     }
 }
 
-pub(super) async fn enrich(control: &Control, nodes: &mut [UiNode]) -> Result<(), ApiError> {
-    clear_observations(nodes);
-    let requests = nodes
-        .iter()
-        .flat_map(|node| {
-            let mut seen = std::collections::HashSet::new();
-            node.presentation.blocks.iter().filter_map(move |block| {
-                let tool = block.tool.as_ref()?;
-                (!tool.call_id.is_empty() && seen.insert(tool.call_id.clone()))
-                    .then(|| (node.node_id.clone(), tool.call_id.clone()))
-            })
-        })
-        .collect::<Vec<_>>();
-    let notice_ids = nodes
-        .iter()
-        .filter(|node| node.presentation.kind == crate::presentation::PresentationKind::Event)
-        .take(MAX_NODES)
-        .map(|node| node.node_id.clone())
-        .collect::<Vec<_>>();
-    if requests.is_empty() && notice_ids.is_empty() {
-        return Ok(());
-    }
-    let facts = control
-        .store
-        .database
-        .call(move |db| {
-            let mut facts = read_tx(db, &requests)?;
-            facts.notices = super::notices::read_tx(db, &notice_ids)?;
-            Ok(facts)
-        })
-        .await
-        .map_err(StorageError::into_api_error)?;
-    let owned = nodes.iter_mut().map(std::mem::take).collect::<Vec<_>>();
-    let projected = super::presentation_work(move || {
-        let mut owned = owned;
-        apply(&mut owned, &facts);
-        owned
-    })
-    .await?;
-    for (target, node) in nodes.iter_mut().zip(projected) {
-        *target = node;
-    }
-    Ok(())
-}
-
 /// Resolve a saved source relation, never an execution borrowed by call ID alone.
 pub(super) async fn preview_source(
     control: &Control,
@@ -754,6 +641,11 @@ mod identity_tests {
     use super::*;
     use crate::{app::DataOwner, presentation};
     use serde_json::json;
+
+    async fn enrich(control: &Control, nodes: &mut [UiNode]) -> Result<(), ApiError> {
+        crate::frontend::window_facts::apply_saved(control, nodes, crate::config::UiLanguage::Ja)
+            .await
+    }
     #[tokio::test]
     async fn saved_group_and_node_relations_resolve_repeated_calls_without_global_fallback() {
         let root = tempfile::tempdir().unwrap();
@@ -772,7 +664,7 @@ mod identity_tests {
                 db.execute("INSERT INTO output_item(attempt_id,ordinal,item_type,status,payload_json,node_id)VALUES(?1,0,'function_call','completed',?2,?3)",rusqlite::params![attempt,json!({"call_id":"same"}).to_string(),call_node])?;
                 db.execute("INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state)VALUES(?1,'same',0,'shell','{}','completed')",[group])?;
             }
-            db.execute_batch("INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at)VALUES('exec','r','u','exec','exited','/','{\"completion\":{\"elapsed_ms\":123}}','UTF-8','UTF-8','closed','now'); UPDATE tool_call SET operation_id='exec' WHERE group_id='g'; INSERT INTO node(id,turn_id,kind,created_at,payload_json)VALUES('result','u','tool_result','now','{\"group_id\":\"g\"}'); INSERT INTO tool_result(group_id,call_id,node_id,status)VALUES('g','same','result','exited');")?;
+            db.execute_batch("INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at)VALUES('exec','r','u','exec','exited','/','{\"completion\":{\"elapsed_ms\":123}}','UTF-8','UTF-8','closed','now'); UPDATE tool_call SET operation_id='exec' WHERE group_id='g'; INSERT INTO node(id,turn_id,kind,created_at,payload_json)VALUES('result','u','tool_result','now','{\"group_id\":\"g\",\"item\":{\"type\":\"function_call_output\",\"call_id\":\"same\",\"output\":\"{\\\"status\\\":\\\"exited\\\"}\"}}'); INSERT INTO tool_result(group_id,call_id,node_id,status)VALUES('g','same','result','exited');")?;
             Ok(())
         }).await.unwrap();
         assert_eq!(

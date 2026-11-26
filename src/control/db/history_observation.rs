@@ -36,7 +36,13 @@ impl Store {
                     let tx = db.transaction().map_err(sql_error)?;
                     let sequence = READ_SEQUENCE.fetch_add(1, Ordering::Relaxed);
                     let mut window = history::window(&tx, &args)?;
-                    window.observation = Some(observe(&tx, &window, &holds, sequence)?);
+                    window.observation = Some(observe(
+                        &tx,
+                        &window,
+                        &args.observe_node_ids,
+                        &holds,
+                        sequence,
+                    )?);
                     tx.commit().map_err(sql_error)?;
                     Ok::<_, ApiError>(window)
                 },
@@ -65,9 +71,34 @@ impl Store {
     }
 }
 
+impl Store {
+    /// `message.get` with its live hold, read on the inspection lane.
+    pub(in crate::control) async fn observe_message(
+        &self,
+        id: String,
+        holds: MessageHolds,
+    ) -> Result<MutationResult> {
+        let observer = self.database.clone();
+        let queued_at = std::time::Instant::now();
+        let detail = inspection_work(move || {
+            let mut db = open_inspection(observer.path())?;
+            observer.observe_inspection(&mut db, "MessageGet", queued_at, None, |db| {
+                let tx = db.transaction().map_err(sql_error)?;
+                let mut detail = message_details(&tx, &id)?;
+                detail.held_by = holds.read(&tx, [&*id]).map_err(sql_error)?.pop().flatten();
+                tx.commit().map_err(sql_error)?;
+                Ok::<_, ApiError>(detail)
+            })
+        })
+        .await??;
+        MutationResult::value(detail)
+    }
+}
+
 fn observe(
     db: &Connection,
     window: &HistoryWindow,
+    extra: &[String],
     holds: &MessageHolds,
     read_sequence: u64,
 ) -> Result<HistoryWindowObservation> {
@@ -86,7 +117,12 @@ fn observe(
         node_id,
     })
     .collect();
-    let facts = crate::frontend::read_window_facts(db, &window.items)
+    let items = window
+        .items
+        .iter()
+        .map(|item| (item.node_id.clone(), item.kind.clone()))
+        .collect::<Vec<_>>();
+    let facts = crate::frontend::read_window_facts(db, &items, extra)
         .map_err(StorageError::into_api_error)?;
     Ok(HistoryWindowObservation {
         read_sequence,

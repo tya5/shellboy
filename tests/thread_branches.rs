@@ -198,6 +198,7 @@ async fn branch_revision_distinguishes_rewind_and_append_to_equal_length() {
     let window = |thread: &str| {
         Command::HistoryWindow(HistoryWindowArgs {
             include_observation: false,
+            observe_node_ids: Vec::new(),
             thread_id: thread.into(),
             items: true,
             ordinal: None,

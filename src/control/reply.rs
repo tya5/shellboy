@@ -841,6 +841,7 @@ mod tests {
         assert_eq!(text[6], "fixture shell finished");
         let args = |items| crate::protocol::HistoryWindowArgs {
             include_observation: false,
+            observe_node_ids: Vec::new(),
             thread_id: "t".into(),
             items,
             ordinal: Some(0),

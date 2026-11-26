@@ -38,6 +38,7 @@ mod live_work;
 mod message_metadata;
 mod message_queue;
 mod native_history;
+mod native_page;
 mod preview_reads;
 mod receipt_delivery;
 mod received;
@@ -820,36 +821,6 @@ async fn stream_commits(
         .await;
     }
 }
-fn receipt_states_tx(
-    db: &rusqlite::Connection,
-    ids: &[String],
-) -> Result<Vec<(String, ReceiptStatus)>, crate::storage::StorageError> {
-    use rusqlite::OptionalExtension;
-    let mut result = Vec::new();
-    for id in ids {
-        let state:Option<(String,Option<String>)>=db.query_row(
-            "SELECT r.state,u.state FROM receipt r LEFT JOIN turn u ON u.id=r.turn_id WHERE r.message_node_id=?1",
-            [id],|row|Ok((row.get(0)?,row.get(1)?))).optional()?;
-        if let Some((receipt, turn)) = state
-            && let Some(status) = receipt_delivery::project_state(&receipt, turn.as_deref())
-        {
-            result.push((id.clone(), status));
-        }
-    }
-    Ok(result)
-}
-async fn receipt_states(
-    control: &Control,
-    ids: Vec<String>,
-) -> Result<Vec<(String, ReceiptStatus)>, ApiError> {
-    let result = control
-        .store
-        .database
-        .call(move |db| receipt_states_tx(db, &ids))
-        .await
-        .map_err(storage_error);
-    checked_storage(control, result).await
-}
 async fn restore_snapshot(
     control: &Control,
     node_id: String,
@@ -1042,6 +1013,8 @@ async fn run_client(
     let read_cancel = CancellationToken::new();
     let progress_slots = Arc::new(Semaphore::new(1));
     let mut dirty_threads: HashSet<String> = HashSet::new();
+    // Draft operations this client submitted and has not seen settled, per Thread.
+    let mut known_submissions: HashMap<String, Vec<native_page::KnownSubmission>> = HashMap::new();
     let mut browser = browser::Browser::default();
     let mut descendants = lineage_observer::Observer::default();
     let mut view_read_next: Option<tokio::time::Instant> = None;
@@ -1186,6 +1159,7 @@ async fn run_client(
             refreshing.insert(thread.clone());
             selection.refresh_started(&thread, tokio::time::Instant::now());
             let tool_scope = visible.then(|| selection.tool_scope.clone()).flatten();
+            let known = known_submissions.get(&thread).cloned().unwrap_or_default();
             #[cfg(test)]
             stream_metrics::FRONTEND_RELOADS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             read_workers.spawn(refresh::run(
@@ -1199,6 +1173,7 @@ async fn run_client(
                     epoch: selection.progress_epoch,
                     render_width,
                     language: control.store.config.ui.language,
+                    known,
                     tool_scope,
                 },
                 control.clone(),
@@ -1633,6 +1608,21 @@ async fn run_client(
                         selection.active_draft = Some(draft_id.clone());
                         selection.active_thread = thread_id.clone();
                         let accepting=UiUpdate::SendOperation {draft_id:draft_id.clone(),revision,operation_id:trace.operation_id.clone()};
+                        if let Some(thread) = &thread_id {
+                            native_page::remember(
+                                known_submissions.entry(thread.clone()).or_default(),
+                                native_page::KnownSubmission {
+                                    operation_id: trace.operation_id.clone(),
+                                    draft_id: draft_id.clone(),
+                                    revision,
+                                },
+                            );
+                        }
+                        let known = thread_id
+                            .as_ref()
+                            .and_then(|thread| known_submissions.get(thread))
+                            .cloned()
+                            .unwrap_or_default();
                         if !actions.is_closing() {
                             update(&updates, accepting).await;
                         }
@@ -1675,7 +1665,7 @@ async fn run_client(
                             );
                             let projection=match &result {
                                 Ok(value)=>post_commit_projection(&projection_stop,
-                                    HistoryReader::saved(&control,render_width,draft_id.clone(),revision,generation,value)).await,
+                                    HistoryReader::saved(&control,render_width,known,draft_id.clone(),revision,generation,value)).await,
                                 Err(_)=>None,
                             };
                             let _ = sender
@@ -2283,7 +2273,7 @@ async fn run_client(
                             );
                             let projection=match &result {
                                 Ok(value)=>post_commit_projection(&projection_stop,
-                                    HistoryReader::saved(&control,render_width,draft_id.clone(),revision,generation,value)).await,
+                                    HistoryReader::saved(&control,render_width,Vec::new(),draft_id.clone(),revision,generation,value)).await,
                                 Err(_)=>None,
                             };
                             let _ = sender
@@ -2425,6 +2415,7 @@ async fn run_client(
                         let control = control.clone();
                         let sender = updates.worker();
                         let target = thread_id.clone();
+                        let known = known_submissions.get(&thread_id).cloned().unwrap_or_default();
                         let results = background_tx.clone();
                         let progress_slots = progress_slots.clone();
                         let epoch = selection.progress_epoch;
@@ -2443,6 +2434,7 @@ async fn run_client(
                                     view_revision,
                                     known_view,
                                     render_width,
+                                    known,
                                 )
                                 .await
                                 {
@@ -2484,6 +2476,7 @@ async fn run_client(
                         let control = control.clone();
                         let sender = updates.worker();
                         let target = thread_id.clone();
+                        let known = known_submissions.get(&thread_id).cloned().unwrap_or_default();
                         if !spawn_read(
                             &mut read_workers,
                             &read_slots,
@@ -2491,6 +2484,7 @@ async fn run_client(
                             async move {
                                 let reply = Reply::new(target, generation);
                                 if let Err(error) = HistoryReader::new(&control, &sender, render_width)
+                                    .with_submissions(known)
                                     .page(&reply, before_cursor, None)
                                     .await
                                 {
@@ -2574,6 +2568,7 @@ async fn run_client(
                         let control = control.clone();
                         let sender = updates.worker();
                         let target = thread_id.clone();
+                        let known = known_submissions.get(&thread_id).cloned().unwrap_or_default();
                         if !spawn_read(
                             &mut read_workers,
                             &read_slots,
@@ -2581,6 +2576,7 @@ async fn run_client(
                             async move {
                                 let reply = WindowReply::new(target, generation, view_revision);
                                 if let Err(error) = HistoryReader::new(&control, &sender, render_width)
+                                    .with_submissions(known)
                                     .rebase(&reply, anchor)
                                     .await
                                 {
@@ -2613,6 +2609,7 @@ async fn run_client(
                         let control = control.clone();
                         let sender = updates.worker();
                         let target = thread_id.clone();
+                        let known = known_submissions.get(&thread_id).cloned().unwrap_or_default();
                         if !spawn_read(
                             &mut read_workers,
                             &read_slots,
@@ -2626,6 +2623,7 @@ async fn run_client(
                                     selection_revision,
                                 );
                                 if let Err(error) = HistoryReader::new(&control, &sender, render_width)
+                                    .with_submissions(known)
                                     .window(&reply, query)
                                     .await
                                 {
@@ -3426,6 +3424,14 @@ async fn run_client(
                 }) => {
                     if !result.as_ref().err().is_some_and(|error| unknown_compose_operation(error).is_some()) {
                         images.end_send(&draft_id, &attachments);
+                        // A known outcome settles locally; an unknown one stays
+                        // for exact receipt settlement on the next installs.
+                        for known in known_submissions.values_mut() {
+                            known.retain(|submission| {
+                                submission.draft_id != draft_id || submission.revision != revision
+                            });
+                        }
+                        known_submissions.retain(|_, known| !known.is_empty());
                     }
                     match result {
                     Ok(value) => {
@@ -4241,6 +4247,7 @@ async fn native_header(
     }
     Ok(header::RawHeader::from_native(details))
 }
+#[allow(clippy::too_many_arguments)]
 async fn select_thread(
     control: &Arc<Control>,
     updates: &dyn UpdateTarget,
@@ -4249,6 +4256,7 @@ async fn select_thread(
     view_revision: u64,
     known_view: Option<(ViewAnchor, bool)>,
     render_width: u16,
+    known: Vec<native_page::KnownSubmission>,
 ) -> Result<(), ApiError> {
     let result = async {
         let header = native_header(
@@ -4294,6 +4302,7 @@ async fn select_thread(
                 .await;
             }
             HistoryReader::new(control, updates, render_width)
+                .with_submissions(known)
                 .page(
                     &Reply::new(thread, generation),
                     None,
@@ -4302,6 +4311,7 @@ async fn select_thread(
                 .await?;
         } else {
             HistoryReader::new(control, updates, render_width)
+                .with_submissions(known)
                 .page(&Reply::new(thread, generation), None, None)
                 .await?;
         }
@@ -4323,34 +4333,6 @@ pub async fn progress(
     Ok(projection.poll_running)
 }
 
-#[cfg(test)]
-use crate::history::display_source::MAX_ANCHORED_BODY_BYTES;
-fn window(text: &str, offset: Option<usize>) -> (String, usize, usize) {
-    let (extent, total) = crate::history::display_source::extent(text, offset);
-    (
-        text[extent.clone()].into(),
-        text[..extent.start].chars().count(),
-        total,
-    )
-}
-/// Read payload bytes on the DB worker; decode/project only on the bounded pool.
-struct RawNode {
-    id: String,
-    received_recovery_wait: bool,
-    output_limited: bool,
-    kind: String,
-    payload: Option<String>,
-    reason: Option<String>,
-}
-impl RawNode {
-    fn decode(&self) -> (Value, String, Vec<(usize, usize)>) {
-        crate::history::display_source::decode(
-            &self.kind,
-            self.payload.as_deref(),
-            self.reason.as_deref(),
-        )
-    }
-}
 fn expired_history_cursor() -> ApiError {
     ApiError::new(
         ErrorCode::CursorExpired,
@@ -4477,68 +4459,6 @@ impl NodePosition {
         match self {
             Self::At(offset) => offset.min(total),
             Self::FromEnd(offset) => total.saturating_sub(offset),
-        }
-    }
-}
-impl RawNode {
-    fn into_ui_node(
-        self,
-        position: Option<NodePosition>,
-        render_width: u16,
-        language: crate::config::UiLanguage,
-    ) -> UiNode {
-        if crate::history::is_legacy_admission_node(&self.id, &self.kind) {
-            return UiNode {
-                node_id: self.id,
-                role: "context".into(),
-                ..UiNode::default()
-            };
-        }
-        let (payload, text, mut reasoning_ranges) = self.decode();
-        let offset = position.map(|position| match position {
-            NodePosition::At(offset) => offset,
-            NodePosition::FromEnd(_) => position.offset(text.chars().count()),
-        });
-        let node_id = self.id;
-        let kind = self.kind;
-        if kind == "reasoning" && !text.is_empty() {
-            reasoning_ranges = vec![(0, text.chars().count())];
-        }
-        let (text, base_char_offset, total_chars) = window(&text, offset);
-        let window_end = base_char_offset + text.chars().count();
-        reasoning_ranges.retain(|range| range.1 > base_char_offset && range.0 < window_end);
-        if matches!(
-            kind.as_str(),
-            "incomplete_response" | "model_stream_observation"
-        ) {
-            return received::project(
-                &kind,
-                UiNode {
-                    node_id,
-                    text,
-                    base_char_offset,
-                    total_chars,
-                    reasoning_ranges,
-                    ..Default::default()
-                },
-                render_width,
-                false,
-                self.received_recovery_wait,
-                language,
-            );
-        }
-        let mut presentation =
-            crate::presentation::project(&kind, &payload, &text, base_char_offset);
-        presentation.output_limited = self.output_limited;
-        crate::presentation::render_markdown(&mut presentation, render_width.max(1));
-        UiNode {
-            presentation,
-            node_id,
-            role: node_role(&kind).into(),
-            text,
-            base_char_offset,
-            total_chars,
-            reasoning_ranges,
         }
     }
 }
@@ -4717,34 +4637,6 @@ mod stream_tests {
         assert_eq!(times[1].time, times[1].raw_updated_at);
     }
 
-    #[test]
-    fn anchored_history_body_windows_are_smaller_and_centered_near_the_anchor() {
-        let text = "0123456789界".repeat(5000);
-        let (window, base, total) = super::window(&text, Some(30_000));
-        assert!(window.len() <= super::MAX_ANCHORED_BODY_BYTES);
-        assert!(base <= 30_000 && base + window.chars().count() > 30_000);
-        assert_eq!(total, text.chars().count());
-
-        let (tail, _, _) = super::window(&text, None);
-        assert!(tail.len() <= super::MAX_BODY_BYTES as usize);
-        assert!(tail.len() > window.len());
-    }
-
-    #[test]
-    fn anchored_code_window_keeps_its_fence_open_and_close_delimiters() {
-        let prefix = "ordinary text\n".repeat(900);
-        let code = format!("```rust\n{}\n```\n", "let value = 42;\n".repeat(400));
-        let source = format!("{prefix}{code}{}", "after code\n".repeat(9000));
-        let anchor = prefix.chars().count()
-            + "```rust\n".chars().count()
-            + 200 * "let value = 42;\n".chars().count();
-        let (window, base, _) = super::window(&source, Some(anchor));
-        assert!(base <= anchor);
-        assert!(window.starts_with("```rust\n"));
-        assert!(window.contains("\n```\n"));
-        assert!(window.len() <= super::MAX_BODY_BYTES as usize);
-    }
-
     #[tokio::test(flavor = "current_thread")]
     async fn metadata_omission_rerender_stays_bounded_and_measures_worker_time() {
         let source = format!(
@@ -4755,23 +4647,27 @@ mod stream_tests {
         let anchor = source.find("[link]").unwrap();
         let payload = serde_json::to_string(&serde_json::json!({"text":source})).unwrap();
         let worker = crate::presentation::work(move || {
-            let make = || RawNode {
-                id: "answer".into(),
-                received_recovery_wait: false,
-                output_limited: false,
-                kind: "assistant".into(),
-                payload: Some(payload.clone()),
-                reason: None,
+            // The owner's display extent, projected and laid out like the client.
+            let make = |offset: Option<usize>| {
+                let (value, text, _) =
+                    crate::history::display_source::decode("assistant", Some(&payload), None);
+                let (extent, _) = crate::history::display_source::extent(&text, offset);
+                let window = &text[extent.clone()];
+                let base = text[..extent.start].chars().count();
+                let mut presentation =
+                    crate::presentation::project("assistant", &value, window, base);
+                crate::presentation::render_markdown(&mut presentation, 76);
+                UiNode {
+                    text: window.into(),
+                    presentation,
+                    ..Default::default()
+                }
             };
             let full_started = std::time::Instant::now();
-            let full = make().into_ui_node(None, 76, crate::config::UiLanguage::En);
+            let full = make(None);
             let full_elapsed = full_started.elapsed();
             let anchored_started = std::time::Instant::now();
-            let anchored = make().into_ui_node(
-                Some(NodePosition::At(anchor)),
-                76,
-                crate::config::UiLanguage::En,
-            );
+            let anchored = make(Some(anchor));
             let anchored_elapsed = anchored_started.elapsed();
             (full, anchored, full_elapsed, anchored_elapsed)
         })
@@ -4779,7 +4675,7 @@ mod stream_tests {
         .unwrap();
         let (full, anchored, full_elapsed, anchored_elapsed) = worker;
         assert!(full.presentation.metadata_limited);
-        assert!(anchored.text.len() <= MAX_ANCHORED_BODY_BYTES);
+        assert!(anchored.text.len() <= crate::history::display_source::MAX_ANCHORED_BODY_BYTES);
         assert!(anchored.presentation.metadata_limited);
         assert!(anchored.presentation.blocks.iter().any(|block| {
             block

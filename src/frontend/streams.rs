@@ -156,18 +156,6 @@ pub(super) async fn preview(
     execution_preview(control, execution, limit).await
 }
 
-pub(super) async fn enrich(
-    control: &Control,
-    nodes: &mut [UiNode],
-    width: u16,
-) -> Result<(), ApiError> {
-    super::tools::enrich(control, nodes).await?;
-    super::recovery::enrich(control, nodes).await?;
-    super::usage::enrich(control, nodes).await?;
-    let _ = width;
-    seal_nodes(nodes).await
-}
-
 /// Existing paused-tool refresh shares the same finite raw-preview work without
 /// reloading message bodies or unrelated recovery/usage metadata.
 #[cfg(test)]
@@ -489,6 +477,14 @@ pub(super) fn seal_node(node: &mut UiNode) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The native install path for saved nodes, then the preview seal.
+    async fn enrich(control: &Control, nodes: &mut [UiNode], width: u16) -> Result<(), ApiError> {
+        let _ = width;
+        crate::frontend::window_facts::apply_saved(control, nodes, crate::config::UiLanguage::Ja)
+            .await?;
+        seal_nodes(nodes).await
+    }
     use crate::{
         app::DataOwner,
         presentation::{NodePresentation, PresentationKind, ToolPresentation},
@@ -588,7 +584,7 @@ mod tests {
                 INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','t','r','completed','now');
                 INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='u'),'attempt','u',0,0,'p','m',0,'completed','{}','now');
                 INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES('g','attempt','u','completed','now');
-                INSERT INTO node(id,turn_id,kind,created_at,payload_json)VALUES('calls','u','assistant_response','now','{\"group_id\":\"g\"}');")?;
+                INSERT INTO node(id,turn_id,kind,created_at,payload_json)VALUES('calls','u','assistant_response','now','{\"group_id\":\"g\",\"output\":[{\"type\":\"function_call\",\"call_id\":\"a\"},{\"type\":\"function_call\",\"call_id\":\"b\"}]}');")?;
             for (ordinal,call) in [(0,"a"),(1,"b")] {
                 let execution=format!("exec-{call}");
                 db.execute("INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state,operation_id)VALUES('g',?1,?2,'shell','{}','completed',?3)",rusqlite::params![call,ordinal,execution])?;
@@ -618,9 +614,13 @@ mod tests {
             },
             ..Default::default()
         }];
-        super::super::tools::enrich(&control, &mut nodes)
-            .await
-            .unwrap();
+        crate::frontend::window_facts::apply_saved(
+            &control,
+            &mut nodes,
+            crate::config::UiLanguage::Ja,
+        )
+        .await
+        .unwrap();
         enrich_previews(&control, &mut nodes, 80).await.unwrap();
         let facts=control.store.database.call(|db| {
             let payload=serde_json::json!({"group_id":"g","output":[{"type":"function_call","call_id":"a"},{"type":"function_call","call_id":"b"}]}).to_string();
@@ -645,26 +645,9 @@ mod tests {
                 ErrorCode::TargetUnavailable
             );
         }
-        let ambiguous = control
-            .store
-            .database
-            .call(|db| {
-                super::super::tools::read_tx(
-                    db,
-                    &[("calls".into(), "a".into()), ("calls".into(), "a".into())],
-                )
-            })
-            .await
-            .unwrap();
-        assert_eq!(
-            observed_execution(&ambiguous, "calls", Some("g"), "a", Some("exec-a"))
-                .unwrap_err()
-                .code,
-            ErrorCode::TargetUnavailable
-        );
         let missing_shell=control.store.database.call(|db| {
             db.execute("UPDATE tool_call SET operation_id='unavailable-execution' WHERE group_id='g' AND call_id='b'",[])?;
-            let facts=super::super::tools::read_tx(db,&[("calls".into(),"b".into())])?;
+            let facts=super::super::tools::read_nodes_tx(db,&["calls".into()])?;
             db.execute("UPDATE tool_call SET operation_id='exec-b' WHERE group_id='g' AND call_id='b'",[])?;
             Ok(facts)
         }).await.unwrap();

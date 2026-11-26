@@ -1221,11 +1221,11 @@ async fn history_gc_f7_ordering(hint_first: bool) {
         tx.execute("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES('f7-parent','F7_PARENT',?1,'','fixture','fixture0',?2)",rusqlite::params![cwd,stamp])?;
         tx.execute("INSERT INTO run(id,thread_id,state,created_at,ended_at)VALUES('f7-run','f7-parent','completed',?1,?1)",[&stamp])?;
         tx.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at,ended_at)VALUES('f7-turn','f7-parent','f7-run','completed',?1,?1)",[&stamp])?;
-        tx.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='f7-turn'),'f7-attempt','f7-turn',0,0,'fixture','fixture0',0,'completed','{}',?1)",[&stamp])?;
-        tx.execute("INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES('f7-group','f7-attempt','f7-turn','completed',?1)",[&stamp])?;
+        tx.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='f7-turn'),'00000000-0000-4000-8000-0000000000f7','f7-turn',0,0,'fixture','fixture0',0,'completed','{}',?1)",[&stamp])?;
+        tx.execute("INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES('f7-group','00000000-0000-4000-8000-0000000000f7','f7-turn','completed',?1)",[&stamp])?;
         shellboy::history::append_node(&tx,"f7-parent","f7-paid-prefix",Some("f7-turn"),"assistant_response",&json!({"text":"PAID_R6_HISTORY shared parent prefix remains in the child"}),&stamp)?;
         shellboy::history::append_node(&tx,"f7-parent",CALL,Some("f7-turn"),"assistant_response",&call_payload,&stamp)?;
-        tx.execute("INSERT INTO output_item(attempt_id,ordinal,item_type,status,payload_json,node_id)VALUES('f7-attempt',0,'function_call','completed',?1,?2)",rusqlite::params![json!({"type":"function_call","call_id":"f7-call"}).to_string(),CALL])?;
+        tx.execute("INSERT INTO output_item(attempt_id,ordinal,item_type,status,payload_json,node_id)VALUES('00000000-0000-4000-8000-0000000000f7',0,'function_call','completed',?1,?2)",rusqlite::params![json!({"type":"function_call","call_id":"f7-call"}).to_string(),CALL])?;
         tx.execute("INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state)VALUES('f7-group','f7-call',0,'shell','{\"command\":\"printf F7_SOURCE_COMMAND\"}','completed')",[])?;
         shellboy::history::append_node(&tx,"f7-parent",RESULT,Some("f7-turn"),"tool_result",&result_payload,&stamp)?;
         tx.execute("INSERT INTO tool_result(group_id,call_id,node_id,status)VALUES('f7-group','f7-call',?1,'exited')",[RESULT])?;

@@ -223,7 +223,9 @@ pub(super) fn prepare(snapshot: RawSnapshot, width: u16, language: UiLanguage) -
         if !preview_visible(&row.kind,&payload,&text){return None;}
         let known=text.chars().count();
         let omitted=!full_saved && row.total>known as i64;
-        let(text,base,total)=window(&text,None);
+        let (extent,total)=crate::history::display_source::extent(&text,None);
+        let base=text[..extent.start].chars().count();
+        let text=text[extent].to_owned();
         reasoning.retain(|range|range.1>base && range.0<base+text.chars().count());
         let mut node=project(&row.kind,UiNode{node_id:row.id,text,base_char_offset:base,total_chars:total,reasoning_ranges:reasoning,..Default::default()},width,!full_saved,row.recovery_wait,language);
         if omitted{node.presentation.body_omitted_chars=(row.total as usize).saturating_sub(known);}

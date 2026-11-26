@@ -199,34 +199,34 @@ from this inventory.
 
 ### Unit 4e/4f selected window client
 
-A positioned node load (an evicted body or a streaming rebase) assembles the
-node's display extent from `history.read` display pages by ID, then reads the
-one-node `history.window` with `include_observation` for its mutable tool,
-notice, recovery and usage facts; the window item must carry the same source
-revision. A received response is never on a path and has no window facts. Any
-other node no longer on the selected path is refused with `cursor_expired`.
-Layout stays client-side. A saved payload group
-selects the exact owner call; the group is shown only when the owner confirms
-that call. Links come from the same extent text and Markdown walk as before.
+The selected current view, history pages, positioned windows, rebases, the
+saved-message install and node hydration all read one `history.window` with
+`include_observation` and assemble each kept node's display extent from fenced
+`history.read` display pages. Layout is client-side. The observation supplies
+the mutable tool, notice, recovery and usage facts, committed attempts and the
+pending rows; its `read_sequence` orders every install. Pinned tool nodes
+outside the current window join it through `observe_node_ids`.
 
-Window pending rows carry the saved sender, open reply duty, path-admission
-uncertainty, run-completion schedule (a saved `complete` delivery) and the
-#423 `held_by`, which is the queue row's only hold reason; the queue no longer
-shows a "deliver now" mark. Outline fields carry a typed path shape (object key,
-array index, collection count) and the client renders their labels. A window
-recovery reason is a 256-character excerpt; when it is cut short the event text
-points at the F6 source node, whose original holds the full reason, and claims
-nothing more without one. Reasoning ranges are clipped to each display page, so
-an anchor inside reasoning that starts before the extent can differ (recorded
-gap, not yet witnessed).
+The installed queue is the observation's pending rows (saved sender, reply
+duty, path-admission uncertainty, run-completion schedule and the typed
+`held_by` hold), this Thread's human duties from `message.list` with
+`to=human` and `asked_by_thread_id` (named asks are saved applied), and the
+client's own unsettled draft submissions, at most 128 per Thread, settled from
+their exact `operation.get` receipts. Tracked receipts use `message.get` and,
+when applied, `turn.get`.
 
-The refresh, page, window, rebase and saved-message installs still use the
-private snapshot; their move also needs human duties from the combined
-`message.list` and known-draft settlement through `operation.get`, and the
-owner's `read_sequence` replaces the client read counter for all of them at
-once. Open on #311: the refresh also annotates pinned tool nodes outside the
-selected window (up to 128), whose mutable facts the window observation does
-not cover.
+A node hydration reads the extent by ID and the one-node window at the same
+source revision; a received response, never on a path, takes the tail's
+observation for ordering only. Any other node no longer selected is refused
+with `cursor_expired`. A saved payload group selects the exact owner call and is
+shown only when the owner confirms it. Outline fields carry path shapes for
+their labels. A window recovery reason is a 256-character excerpt; when it is
+cut short the event points at the F6 source node. Reasoning ranges are clipped
+to each display page (recorded gap, not yet witnessed).
+
+Still private and separate from these reads: message metadata, branch and
+compaction markers, the received-response snapshot, activity and index pause,
+context usage, and the detail panel's current tool executions.
 
 ### Draft save and selected view
 

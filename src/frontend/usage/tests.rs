@@ -1,10 +1,28 @@
 use super::*;
 use crate::{
     app::DataOwner,
+    control::Control,
     presentation,
     ui::{UiState, UiUpdate},
 };
 use serde_json::json;
+
+fn requests(nodes: &[UiNode]) -> Vec<(usize, String)> {
+    nodes
+        .iter()
+        .enumerate()
+        .filter(|(_, node)| {
+            node.presentation.kind == crate::presentation::PresentationKind::Assistant
+                && !node.presentation.provisional_stream
+        })
+        .map(|(index, node)| (index, node.node_id.clone()))
+        .collect()
+}
+
+/// The native install path: the owner's window readers, then client apply.
+async fn enrich(control: &Control, nodes: &mut [UiNode]) -> Result<(), crate::protocol::ApiError> {
+    crate::frontend::window_facts::apply_saved(control, nodes, crate::config::UiLanguage::Ja).await
+}
 
 #[test]
 fn cached_usage_never_turns_missing_or_invalid_counts_into_zero() {

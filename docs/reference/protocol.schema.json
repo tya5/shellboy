@@ -5367,6 +5367,12 @@
             "null"
           ]
         },
+        "observe_node_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "ordinal": {
           "format": "uint64",
           "minimum": 0,
@@ -6717,6 +6723,18 @@
           "properties": {
             "kind": {
               "const": "terminal_before_path_admission",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "uncertain_path_admission",
               "type": "string"
             }
           },
