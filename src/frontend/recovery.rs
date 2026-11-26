@@ -319,13 +319,17 @@ fn present(
             .as_ref()
             .map(|reason| {
                 let excerpt = &reason.excerpt;
-                let suffix = if reason.truncated {
-                    match language {
-                        crate::config::UiLanguage::Ja => "… · 完全な理由はF6 詳細",
-                        crate::config::UiLanguage::En => "… · Full reason in F6 Details",
-                    }
-                } else {
-                    ""
+                // Point only at what F6 can open: its source node holds the
+                // full saved reason; without one, the excerpt is all we show.
+                let suffix = match (reason.truncated, saved.source.is_some()) {
+                    (false, _) => "",
+                    (true, false) => "…",
+                    (true, true) => match language {
+                        crate::config::UiLanguage::Ja => "… · 全文はF6 詳細の直近の失敗原文",
+                        crate::config::UiLanguage::En => {
+                            "… · Full text: F6 Details, source node for latest failure"
+                        }
+                    },
                 };
                 match language {
                     crate::config::UiLanguage::Ja => {
@@ -458,16 +462,23 @@ mod tests {
             serde_json::json!({"error": crate::model::ModelError::new("provider", "x".repeat(300))})
                 .to_string(),
         );
+        assert!(long_evidence[0].source.is_some());
         apply(
             &mut english_nodes,
-            long_evidence,
+            long_evidence.clone(),
             crate::config::UiLanguage::En,
         );
         assert!(
             english_nodes[0].presentation.blocks[0]
                 .text
-                .ends_with("… · Full reason in F6 Details")
+                .ends_with("… · Full text: F6 Details, source node for latest failure")
         );
+        // Without a source node the screen claims nothing beyond the excerpt.
+        long_evidence[0].source = None;
+        let mut unsourced = nodes.clone();
+        apply(&mut unsourced, long_evidence, crate::config::UiLanguage::En);
+        let shown = &unsourced[0].presentation.blocks[0].text;
+        assert!(shown.ends_with('…') && !shown.contains("F6"), "{shown}");
         apply(&mut nodes, evidence, crate::config::UiLanguage::Ja);
         assert_eq!(nodes[0].text, text);
         let p = &nodes[0].presentation;
