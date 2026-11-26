@@ -271,18 +271,19 @@ impl Session {
         )
         .map_err(|_| Failure::new(6, "owner_error", "Owner returned an invalid typed result"))
     }
-    /// `--result reply`: an open duty (pending, or awaiting the recipient's own
-    /// ask) keeps the client waiting on `reply_received` until a terminal reply
-    /// state or the client deadline (#441).
+    /// `--result reply`: the owner's `reply_received` wait decides when the duty
+    /// has ended; while it reports the duty still open the client waits again,
+    /// up to the client deadline (#441).
     async fn await_reply(
         &mut self,
         message: &str,
         saved: Option<&Value>,
     ) -> Result<Option<String>, Failure> {
-        let mut state = match reply_outcome(saved)? {
-            ReplyOutcome::Replied(node) => return Ok(node),
-            ReplyOutcome::Open(state) => state,
-        };
+        // The saved state only names the duty in a deadline diagnostic.
+        let mut state = saved
+            .and_then(|reply| reply["state"].as_str())
+            .ok_or_else(|| Failure::new(4, "reply_unavailable", "No reply outcome was saved"))?
+            .to_owned();
         loop {
             let remaining = self
                 .deadline
@@ -292,8 +293,8 @@ impl Session {
             if remaining == 0 {
                 return Err(duty_timeout(&state));
             }
-            // The deadline can also expire inside either request below; this
-            // path owns that diagnostic, naming the last observed open state.
+            // The deadline can also expire inside the wait request; this path
+            // owns that diagnostic, naming the last observed state.
             let wait: WaitResult = self
                 .request(
                     "wait",
@@ -307,21 +308,37 @@ impl Session {
                 )
                 .await
                 .map_err(|failure| failure.at_deadline(&state))?;
-            if wait.status == WaitStatus::Unavailable {
-                return Err(Failure::new(
-                    4,
-                    "execution_unavailable",
-                    "Wait target became unavailable",
-                ));
+            match wait.status {
+                WaitStatus::Unavailable => {
+                    return Err(Failure::new(
+                        4,
+                        "execution_unavailable",
+                        "Wait target became unavailable",
+                    ));
+                }
+                WaitStatus::RecoveryWait => {
+                    return Err(Failure::new(
+                        4,
+                        "recovery_wait",
+                        "Target requires explicit recovery",
+                    ));
+                }
+                WaitStatus::Satisfied | WaitStatus::Timeout | WaitStatus::Interrupted => {}
             }
             // The owner's snapshot of this exact message carries its reply
-            // state and node; without one the last observed state stands.
-            if let Some(reply) = reply_snapshot(&wait.snapshot, message) {
-                state = match reply_outcome(Some(&reply))? {
-                    ReplyOutcome::Replied(node) => return Ok(node),
-                    ReplyOutcome::Open(state) => state,
-                };
+            // state and node; a finished wait always includes it.
+            let reply = reply_snapshot(&wait.snapshot, message).unwrap_or(Value::Null);
+            let Some(observed) = reply["state"].as_str() else {
+                return Err(Failure::new(
+                    6,
+                    "owner_error",
+                    "Reply wait returned no reply state for the message",
+                ));
+            };
+            if wait.status == WaitStatus::Satisfied {
+                return ended_reply(observed, reply["node_id"].as_str());
             }
+            state = observed.to_owned();
         }
     }
     async fn answer(&mut self, mode: ResultMode) -> Result<String, Failure> {
@@ -627,50 +644,31 @@ fn reply_snapshot(snapshot: &Value, message: &str) -> Option<Value> {
         .find(|item| item["type"] == "reply" && item["message_id"] == message)
         .map(|item| json!({"state": item["state"], "node_id": item["reply_node_id"]}))
 }
-enum ReplyOutcome {
-    Replied(Option<String>),
-    /// An open duty: `pending` or `awaiting_own_ask`.
-    Open(String),
-}
-fn reply_outcome(reply: Option<&Value>) -> Result<ReplyOutcome, Failure> {
-    let reply =
-        reply.ok_or_else(|| Failure::new(4, "reply_unavailable", "No reply outcome was saved"))?;
-    match reply["state"].as_str() {
-        Some("replied") => Ok(ReplyOutcome::Replied(
-            reply["node_id"].as_str().map(str::to_owned),
-        )),
-        Some(state @ ("pending" | "awaiting_own_ask")) => Ok(ReplyOutcome::Open(state.into())),
-        state => Err(Failure::new(
-            4,
-            "reply_unavailable",
-            format!(
-                "Reply ended with state {} without a reply",
-                state.unwrap_or("missing")
-            ),
-        )),
+/// The result of a duty the owner's wait reported as ended.
+fn ended_reply(state: &str, node: Option<&str>) -> Result<Option<String>, Failure> {
+    if state == "replied" {
+        return Ok(node.map(str::to_owned));
     }
+    Err(Failure::new(
+        4,
+        "reply_unavailable",
+        format!("Reply ended with state {state} without a reply"),
+    ))
 }
 
 #[cfg(test)]
 mod reply_mode_tests {
     use super::*;
     #[test]
-    fn terminal_nonreply_outcomes_are_exit_four_and_open_duties_wait() {
+    fn terminal_nonreply_outcomes_are_exit_four() {
         for state in ["ignored", "cancelled", "recipient_deleted"] {
-            let Err(error) = reply_outcome(Some(&json!({"state": state}))) else {
+            let Err(error) = ended_reply(state, None) else {
                 panic!("{state} must fail");
             };
             assert_eq!(error.code, 4, "{state}");
             assert!(error.message.contains(state), "{}", error.message);
         }
-        for state in ["pending", "awaiting_own_ask"] {
-            assert!(
-                matches!(reply_outcome(Some(&json!({"state": state}))), Ok(ReplyOutcome::Open(open)) if open == state)
-            );
-        }
-        assert!(
-            matches!(reply_outcome(Some(&json!({"state":"replied", "node_id":"reply"}))), Ok(ReplyOutcome::Replied(Some(node))) if node == "reply")
-        );
+        assert!(matches!(ended_reply("replied", Some("reply")), Ok(Some(node)) if node == "reply"));
     }
 
     #[test]
