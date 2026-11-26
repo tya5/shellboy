@@ -424,7 +424,7 @@ pub enum ThreadCommand {
     },
     /// Create a saved Thread; send a message separately to start work.
     #[command(
-        after_help = "Delegate from a parent model shell:\n  shellboy thread create --parent-thread THREAD_ID\n  shellboy message send --thread CHILD_THREAD_ID --text 'Read-only audit; return findings and evidence'\n\nRead result.thread_id from create, then track the separate message_id/run_id/turn_id from send. Guide: shellboy docs get --id shellboy/delegation"
+        after_help = "Delegate from a parent model shell:\n  shellboy thread create --parent-thread THREAD_ID\n  shellboy message ask --thread CHILD_THREAD_ID --text 'Read-only audit; reply with findings and evidence'\n\nRead result.thread_id from create, then track the separate message_id/run_id/turn_id from ask; reply.state and reply.node_id identify the child's reply. Guide: shellboy docs get --id shellboy/delegation"
     )]
     Create(ThreadCreateOptions),
     Fork(ThreadForkOptions),

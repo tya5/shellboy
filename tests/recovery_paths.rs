@@ -44,11 +44,11 @@ async fn help_examples_parse_and_name_the_next_observation() {
         vec!["thread", "create", "--parent-thread", "THREAD_ID"],
         vec![
             "message",
-            "send",
+            "ask",
             "--thread",
             "CHILD_THREAD_ID",
             "--text",
-            "Read-only audit; return evidence",
+            "Read-only audit; reply with evidence",
         ],
         vec!["message", "get", "--message", "MESSAGE_ID"],
         vec!["turn", "get", "--turn", "TURN_ID"],
