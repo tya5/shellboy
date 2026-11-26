@@ -51,14 +51,11 @@ fn not_a_file() -> ApiError {
     )
     .details(json!({"reason": "not_a_file"}))
 }
-/// Windows device namespaces and reserved device names never name a regular
-/// file, and opening one can block; they are refused before any file access.
+/// Windows reserved device names never name a regular file, and opening one
+/// can block; they are refused before any file access. Device namespaces are
+/// refused earlier with network shares (see `unc`).
 #[cfg(windows)]
 fn is_device(path: &Path) -> bool {
-    let text = path.as_os_str().to_string_lossy().replace('/', "\\");
-    if text.starts_with(r"\\.\") || text.starts_with(r"\\?\") {
-        return true;
-    }
     path.components().any(|part| {
         let Component::Normal(name) = part else {
             return false;
@@ -73,9 +70,14 @@ fn is_device(path: &Path) -> bool {
         matches!(
             upper.as_str(),
             "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
-        ) || (upper.len() == 4
-            && (upper.starts_with("COM") || upper.starts_with("LPT"))
-            && matches!(upper.as_bytes()[3], b'1'..=b'9'))
+        ) || ["COM", "LPT"].iter().any(|port| {
+            let mut digit = upper.strip_prefix(port).unwrap_or_default().chars();
+            // Windows also reserves the superscript aliases COM¹-³ and LPT¹-³.
+            digit
+                .next()
+                .is_some_and(|c| matches!(c, '1'..='9' | '¹' | '²' | '³'))
+                && digit.next().is_none()
+        })
     })
 }
 #[cfg(not(windows))]
@@ -110,12 +112,31 @@ fn local_authority(rest: &str) -> bool {
     authority.is_empty() || authority.eq_ignore_ascii_case("localhost")
 }
 
+/// Two leading slashes of either kind name a network share (`\\server\share`,
+/// `//server/share`) or a Windows device namespace (`\\.\`, `\\?\`), never a
+/// local path.
+fn unc(path: &str) -> bool {
+    let slash = |c: char| c == '/' || c == '\\';
+    let mut chars = path.chars();
+    chars.next().is_some_and(slash) && chars.next().is_some_and(slash)
+}
+fn not_local_path() -> ApiError {
+    refused(
+        "uri_not_readable",
+        "The owner reads only local paths, not network shares",
+    )
+}
+
 fn source(uri: &str) -> Result<Source> {
     let scheme = uri_scheme(uri);
     if let Some(name) = scheme
         && name.eq_ignore_ascii_case(APP_SCHEME)
     {
-        let folder = Path::new(&uri[name.len() + 1..]);
+        let text = &uri[name.len() + 1..];
+        if unc(text) {
+            return Err(not_local_path());
+        }
+        let folder = Path::new(text);
         if !folder.is_absolute() {
             return Err(refused(
                 "uri_not_readable",
@@ -123,6 +144,9 @@ fn source(uri: &str) -> Result<Source> {
             ));
         }
         return Ok(Source::Folder(folder.into()));
+    }
+    if unc(uri) {
+        return Err(not_local_path());
     }
     if Path::new(uri).is_absolute() {
         return Ok(Source::File(uri.into()));

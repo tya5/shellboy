@@ -1338,8 +1338,8 @@ On add and update, the CLI joins a relative file path, and the relative folder o
 `artifact read` is the only command that opens artifact content, and the owner decides what it may open from the version URI:
 
 - `shellboy-app:/abs/folder` is a web app folder whose entry is `index.html`. `--path` is required and names a file inside the folder, such as `index.html` or `assets/app.js`. A path with `..`, an absolute path, or a link that resolves outside the folder is refused with `details.reason` `path_outside_folder`.
-- A `file:` URI or an absolute path is that one file. `--path` is refused (`path_not_allowed`).
-- `http:`, `https:`, relative paths and other schemes are refused (`uri_not_readable`); the owner never fetches them.
+- A local `file:` URI or an absolute path is that one file. `--path` is refused (`path_not_allowed`).
+- `http:`, `https:`, relative paths, network shares (`\\server\share`, `//server/share`, or a `file:` URI with a host other than `localhost`) and other schemes are refused (`uri_not_readable`); the owner never fetches them.
 
 A file is returned only up to `limits.attachment_file_bytes`, and never beyond what fits base64-encoded in one 8 MiB reply (a little under 6 MiB); a larger file fails with `input_limit` (`file_too_large`), whose `details.limit_bytes` is the effective limit for that request. A missing or unreadable file is `target_unavailable`.
 
