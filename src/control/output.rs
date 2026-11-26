@@ -300,7 +300,7 @@ impl ShellOutputReader {
     ) -> Result<OutputStreamReader> {
         let pin = ReadPin::new(self.database.clone(), self.instance.to_string());
         let execution = execution_id.to_owned();
-        let pin_id = pin.id.clone();
+        let pin_id = pin.id();
         let instance = pin.instance.clone();
         let state = self
             .db(move |db| {
@@ -397,7 +397,7 @@ impl ShellOutputReader {
             .transpose()?;
         let mut pin = ReadPin::new(self.database.clone(), self.instance.to_string());
         let execution = args.execution_id.clone();
-        let pin_id = pin.id.clone();
+        let pin_id = pin.id();
         let instance = pin.instance.clone();
         let expected = old.clone();
         let requested = canonical.clone();
@@ -577,7 +577,7 @@ impl ShellOutputReader {
         }
         let mut pin = ReadPin::new(self.database.clone(), self.instance.to_string());
         let execution = execution_id.to_owned();
-        let pin_id = pin.id.clone();
+        let pin_id = pin.id();
         let instance = pin.instance.clone();
         let prepared = self
             .db(move |db| {
@@ -851,11 +851,10 @@ pub(crate) fn canonical_encoding(label: &str) -> Result<&'static Encoding> {
             .ok_or_else(|| error(ErrorCode::InvalidArgument, "unknown output encoding")),
     }
 }
+/// One `shell_output` pin under its own lease, which releases it on drop.
 struct ReadPin {
-    database: DbWorker,
-    id: String,
+    lease: crate::runtime_pin::PinLease,
     instance: String,
-    armed: bool,
 }
 impl ReadPin {
     /// Register only after the caller's snapshot/raw/cursor checks, in that
@@ -871,41 +870,19 @@ impl ReadPin {
     }
     fn new(database: DbWorker, instance: String) -> Self {
         Self {
-            database,
-            id: uuid::Uuid::new_v4().to_string(),
+            // Releasing a read pin marks no maintenance work, as before.
+            lease: crate::runtime_pin::PinLease::new(database, &[]),
             instance,
-            armed: true,
         }
+    }
+    fn id(&self) -> String {
+        crate::runtime_pin::pin_id(&self.lease.prefix(), 0)
     }
     async fn release(&mut self) -> Result<()> {
-        let id = self.id.clone();
-        self.database
-            .call(move |db| {
-                db.execute("DELETE FROM runtime_pin WHERE id=?1", [id])?;
-                Ok(())
-            })
+        self.lease
+            .release()
             .await
-            .map_err(StorageError::into_api_error)?;
-        self.armed = false;
-        Ok(())
-    }
-}
-impl Drop for ReadPin {
-    fn drop(&mut self) {
-        if self.armed
-            && let Ok(runtime) = tokio::runtime::Handle::try_current()
-        {
-            let database = self.database.clone();
-            let id = self.id.clone();
-            runtime.spawn(async move {
-                let _ = database
-                    .call(move |db| {
-                        db.execute("DELETE FROM runtime_pin WHERE id=?1", [id])?;
-                        Ok(())
-                    })
-                    .await;
-            });
-        }
+            .map_err(StorageError::into_api_error)
     }
 }
 fn error(code: ErrorCode, message: impl Into<String>) -> ApiError {

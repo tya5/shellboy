@@ -48,4 +48,4 @@ raw GCの `app_meta.raw_tombstone.<execution_id>` がdeleting/deletedのどち�
 
 ## ReadPinの登録責務（R1-4）
 
-stream/read/excerptの同一runtime_pin INSERTをReadPinのprivate insert_txへ集める。既存id/instanceの値だけをDB closureへcloneし、RAII owner自体はclone/moveしない。snapshot→raw/cursor/encoding検証→pin登録→同TXcommitの位置と、その後の明示release/Drop時deleteを維持する。新しいpin wrapperやworkerを追加せず、取消し/DB error/EOF/stream dropでの解放境界も変えない。
+stream/read/excerptの同一runtime_pin INSERTをReadPinのprivate insert_txへ集める。既存id/instanceの値だけをDB closureへcloneし、RAII owner自体はclone/moveしない。snapshot→raw/cursor/encoding検証→pin登録→同TXcommitの位置と、その後の明示release/Drop時deleteを維持する。workerを追加せず、取消し/DB error/EOF/stream dropでの解放境界も変えない。ReadPinの削除は全runtime pin共通の `PinLease`（`src/runtime_pin.rs`、#450）が持つ。

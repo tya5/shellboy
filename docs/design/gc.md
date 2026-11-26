@@ -268,3 +268,21 @@ History, allowing foreground writes between batches. Sender `changed`/wake
 effects are emitted only after the GC transaction commits. Delete success only
 confirms deletion plus durable GC scheduling; legacy outcome delivery is eventual
 with no deadline.
+
+## Runtime pin release and crash temporaries (#450)
+
+Every `runtime_pin` row belongs to one `PinLease` (`src/runtime_pin.rs`): its
+id is the lease's prefix plus an ordinal, and the lease exists before the
+transaction that inserts the rows. Shell output reads, attachment preparation
+and clipboard saves therefore release their pins on every ending path, including
+an error after the insert committed and a caller cancelled after the DB worker
+admitted the insert: the lease's drop queues one range delete on the same
+foreground lane, behind the insert. An explicit release that fails leaves the
+lease armed, so its drop tries again. Only rows of an earlier owner instance,
+or a drop after the runtime has stopped, are left to startup cleanup, which
+deletes pins of other instances. That startup cleanup, run by the owner while it
+holds the owner lock, also removes `tmp/<id>.png.tmp` files that a crashed or
+abandoned clipboard save left: it lists the directory on the control file
+worker, keeps a file whose managed row is still `creating` (its row is inserted
+before its file, so a save of this instance cannot be missed), and unlinks the
+rest. Other files in `tmp` are not touched.
