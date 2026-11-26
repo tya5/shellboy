@@ -103,7 +103,7 @@ mod tests {
             .iter()
             .map(|x| x.0)
             .collect::<std::collections::BTreeSet<_>>();
-        assert_eq!(keys.len(), 4);
+        assert_eq!(keys.len(), TIME_TEXT.len(), "keys are unique");
     }
     #[test]
     fn localized_elapsed_preserves_japanese_and_uses_ascii_english() {

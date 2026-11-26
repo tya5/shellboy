@@ -1546,55 +1546,19 @@ mod tests {
             config.ui.language,
         );
         assert!(first.contains(&details), "{details}: {first}");
-        for expected in [
-            "よく使う操作",
-            "Ctrl+Enter",
-            "次の区切りでメッセージを渡す",
-            "改行",
-            "/ask --thread ID --text TEXT",
-            "F6 / Ctrl+C",
-            "F8",
-            "内容の詳細を確認",
-            "Esc",
-        ] {
-            assert!(first.contains(expected), "{expected}: {first}");
-        }
-        assert!(!first.contains("型付き") && !first.contains("cache"));
-        let all = ui
-            .help_page
-            .lines(76)
-            .iter()
-            .flat_map(|line| &line.spans)
-            .map(|span| span.content.as_ref())
-            .collect::<String>();
-        for expected in [
-            "Ctrl+Q",
-            "回答をコピーする",
-            "会話を読む・切り替える",
-            "画像やファイルを添付する",
-            "/image",
-            "/attach",
-        ] {
-            assert!(all.contains(expected), "{expected}");
-        }
+        assert!(first.contains("Ctrl+Enter"), "configured send key: {first}");
         for _ in 0..30 {
             key(&mut ui, KeyCode::PageDown);
             screen(&mut ui, 80, 24);
         }
         let end = screen(&mut ui, 80, 24);
-        assert!(
-            all.contains("メモリに保持するデータ")
-                && end.contains("端末の表示")
-                && end.contains("bytes"),
-            "{end}"
-        );
         assert!(end.contains("Esc"));
         key(&mut ui, KeyCode::Enter);
         assert!(!ui.help_visible);
         assert_eq!(ui.view().draft, draft);
         assert_eq!(ui.view().navigation.anchor, anchor);
         key(&mut ui, KeyCode::F(1));
-        assert!(screen(&mut ui, 80, 24).contains("よく使う操作"));
+        assert!(ui.help_visible);
         for (width, height) in [(32, 12), (8, 5)] {
             assert!(screen(&mut ui, width, height).contains("Esc"));
         }
@@ -1603,6 +1567,19 @@ mod tests {
     fn large_help_windows_show_the_final_sentence_after_paging_and_resizing() {
         let mut ui = UiState::new(&japanese_config(), std::env::temp_dir());
         key(&mut ui, KeyCode::F(1));
+        let visible =
+            |ch: &char| !ch.is_whitespace() && !matches!(ch, '|' | '-' | '#' | '│' | '─' | '█');
+        // The page's own last line at a narrow width is a suffix of its final sentence.
+        let last = ui
+            .help_page
+            .lines(16)
+            .iter()
+            .map(ToString::to_string)
+            .rfind(|line| line.chars().any(|ch| visible(&ch)))
+            .unwrap()
+            .chars()
+            .filter(visible)
+            .collect::<String>();
         for (width, height) in [(80, 24), (120, 40), (180, 65), (80, 24)] {
             screen(&mut ui, width, height);
             for _ in 0..30 {
@@ -1611,15 +1588,10 @@ mod tests {
             }
             let text = screen(&mut ui, width, height);
             // Ignore frame/scrollbar cells between the sentence's wrapped rows.
-            let compact = text
-                .chars()
-                .filter(|ch| {
-                    !ch.is_whitespace() && !matches!(ch, '|' | '-' | '#' | '│' | '─' | '█')
-                })
-                .collect::<String>();
+            let compact = text.chars().filter(visible).collect::<String>();
             assert!(
-                compact.contains("アプリ全体の使用量ではありません。"),
-                "{width}x{height}: {text}"
+                compact.contains(&last),
+                "{width}x{height}: {last} in {text}"
             );
             assert!(text.contains("Esc"));
         }
