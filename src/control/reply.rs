@@ -732,6 +732,18 @@ const CLAIM_REOPENED: &str = concat!(
     open_reply!(""),
     " AND json_extract(result_json,'$.reply.state')='pending' AND json_extract(result_json,'$.reply.reopened_after') IS NOT NULL AND json_extract(result_json,'$.reply.owner_run_id') IS NULL AND (EXISTS(SELECT 1 FROM receipt q JOIN thread_path p ON p.node_id=json_extract(q.result_json,'$.reply.node_id') AND p.thread_id=?1 WHERE q.message_node_id=json_extract(receipt.result_json,'$.reply.reopened_after')) OR EXISTS(SELECT 1 FROM delivery d WHERE d.event_id='reply-outcome-'||json_extract(receipt.result_json,'$.reply.reopened_after') AND d.recipient_id=?2))"
 );
+/// Outcome notices no Run has admitted yet, offered to a Turn that is already
+/// runnable (never a wake), like untargeted context observations.
+const OFFER_UNADMITTED_OUTCOMES: &str = "INSERT OR IGNORE INTO delivery(event_id,recipient_id,state) SELECT e.id,?2,'pending' FROM event e INDEXED BY reply_outcome_unadmitted WHERE e.target_thread_id=?1 AND e.kind='reply_outcome' AND e.target_run_id IS NULL AND NOT EXISTS(SELECT 1 FROM delivery d WHERE d.event_id=e.id AND d.state='processed')";
+pub(crate) fn offer_unadmitted_outcomes_tx(
+    db: &Connection,
+    thread: &str,
+    run: &str,
+) -> rusqlite::Result<()> {
+    db.execute(OFFER_UNADMITTED_OUTCOMES, params![thread, run])?;
+    Ok(())
+}
+
 /// Called by Turn preparation after it admitted this Run's input and notices.
 pub(crate) fn claim_reopened_tx(
     db: &Connection,
@@ -800,7 +812,10 @@ fn outcome_tx(
             }
         }
     };
-    db.execute("INSERT INTO event(id,target_thread_id,target_run_id,kind,payload_ref_json,created_at,source_json) VALUES(?1,?2,?3,?4,?5,?6,'{}')",params![id,thread,run,if run.is_some(){"reply_outcome"}else{"context_changed"},payload.to_string(),at])?;
+    // The notice belongs to the Thread until a Run admits it (#433): it stays
+    // untargeted, and the delivery below only wakes the receiving Run. If that
+    // Run stops first, the Thread's next runnable Turn admits it.
+    db.execute("INSERT INTO event(id,target_thread_id,target_run_id,kind,payload_ref_json,created_at,source_json) VALUES(?1,?2,NULL,'reply_outcome',?3,?4,'{}')",params![id,thread,payload.to_string(),at])?;
     reopen_awaiting_tx(db, message, &thread, at)?;
     if let Some(run) = run {
         db.execute(
@@ -950,6 +965,7 @@ mod tests {
         reads.push(("receipt_pending_asked", LATER_OWN_ASK.into()));
         reads.push(("receipt_pending_owed", REOPEN_AWAITING.into()));
         reads.push(("receipt_pending_owed", CLAIM_REOPENED.into()));
+        reads.push(("reply_outcome_unadmitted", OFFER_UNADMITTED_OUTCOMES.into()));
         for sql in crate::history::rewind::pending_replies_sent_sql() {
             reads.push(("receipt_pending_asked", sql));
         }

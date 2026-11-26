@@ -522,7 +522,10 @@ async fn older_ask_and_pre_upgrade_duty_are_never_blocked() {
 
 #[tokio::test]
 async fn held_answer_or_outcome_across_stop_is_owned_by_the_run_that_admits_it() {
-    for outcome in [false, true] {
+    // Held answer and untargeted outcome arrive while Stop is in progress; the
+    // committed outcome arrives before Stop and is never admitted by its Run.
+    for case in ["held_answer", "outcome_during_stop", "outcome_before_stop"] {
+        let outcome = case != "held_answer";
         let f = fixture(&["worker", "helper"]).await;
         let (duty, first_run) = f.ask(None, Some("worker"), None).await;
         let first = f.admit("worker", &first_run).await;
@@ -541,10 +544,10 @@ async fn held_answer_or_outcome_across_stop_is_owned_by_the_run_that_admits_it()
         ));
         assert_eq!(f.reply_fact(&duty).await.0["state"], "awaiting_own_ask");
 
-        // The worker is stopping when the answer or the outcome arrives: the
-        // stopping Run receives neither (held answer, untargeted notice).
         let stopping = f.send("worker").await;
-        f.begin_stop(&stopping).await;
+        if case != "outcome_before_stop" {
+            f.begin_stop(&stopping).await;
+        }
         if outcome {
             f.execute(
                 Command::MessageCancel(MessageCancelArgs {
@@ -562,6 +565,11 @@ async fn held_answer_or_outcome_across_stop_is_owned_by_the_run_that_admits_it()
         let reply = f.reply_fact(&duty).await.0;
         assert_eq!(reply["state"], "pending");
         assert!(reply.get("owner_run_id").is_none());
+        if case == "outcome_before_stop" {
+            // The live Run was woken for the notice, but Stop wins before it
+            // prepares a Turn.
+            f.begin_stop(&stopping).await;
+        }
 
         // Stop and every sweep leave the reopened duty open.
         f.finish_stop(&stopping, "worker").await;
