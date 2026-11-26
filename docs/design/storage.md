@@ -187,7 +187,7 @@ scope. Contract rule 4 below says where those jobs should run instead.
 | Requester (kind) | Bounded unit | Trigger after `Idle` | UX impact of the constraint | Mitigation |
 |---|---|---|---|---|
 | Receipt collection (`Store::collect_receipts`) | rowid window of 1024 receipts, at most 128 changed; the `app_meta` `json_each` check uses a key range instead of `LIKE` (seekable) | (a) deadline: oldest eligible result is 24 h old (current instance) or 7 days old (old instances); (b) admission needs space | Admission can wait while background windows reclaim capacity | Retry admission after each window; reject only after an exhausted stable pass |
-| GC raw retention (`collect_raw`: `raw_stats`, `raw_batch`, `begin_raw`, `raw_step`) | 128 executions on `shell_terminal_time` / 1 MiB of chunks per step; **`raw_stats` removed from the unit**: the total comes from an incrementally maintained raw-bytes counter | (a) capacity: shell output committed past the cap (producer: output save); (b) deadline: oldest terminal execution's `ended_at + tool_raw_days` | Reclaim starts after a trigger instead of within 60 s | Output producers signal only when the counter crosses the cap; work runs during idle gaps |
+| GC raw retention (`collect_raw`: `raw_stats`, `raw_batch`, `begin_raw`, `raw_step`) | 128 executions on `shell_terminal_time` / 1 MiB of chunks per step; **`raw_stats` removed from the unit**: the total comes from an incrementally maintained raw-bytes counter | (a) capacity: shell output committed past the cap (producer: output save); (b) deadline: oldest retained terminal execution's `ended_at + tool_raw_days`; (c) while that deadline is unknown (new owner, nothing retained), the next Run-end or shell-completion signal (#451) | Reclaim starts after a trigger instead of within 60 s | Output producers signal only when the counter crosses the cap; work runs during idle gaps |
 | GC history (`start_history`, `history_step`) | 128 rowids per stage (existing) | Thread deletion commit | Deleted Threads' space is reclaimed after the deletion signal, not on the next 60 s tick | Deletion signals immediately; steps run back to back |
 | GC submitted drafts (`submission_retention::collect_batch`) | 128 drafts, `ORDER BY updated_at,id` on the submitted-state index | Draft submission admitted or cancelled (commit) | None visible | — |
 | GC summary cache | keyset on `app_meta.key` from the last key, 128 keys | Source tombstones (history step that tombstoned >0, or Thread deletion) | Cache bytes freed later | Coalesced with the history trigger |
@@ -373,9 +373,13 @@ the `db_job_slow` names.
   `EventBacklog`: at startup (rows that predate this owner), on explicit
   `storage collect`, and on queue overflow.
 - **Raw retention without `raw_stats`.** The raw total is the schema22
-  counter. A raw pass touches no execution row unless the total exceeds
-  `tool_raw_bytes`, an age deadline is due, a tombstone is pending, or a rescan
-  was requested (release signal or explicit collect). Windows are 32
+  counter. A raw pass touches no execution row only while it knows a future
+  age deadline, the total is within `tool_raw_bytes`, no tombstone is pending,
+  no pinned candidate is waiting and no rescan was requested (explicit
+  collect). An unknown deadline is not idle (#451): a new owner's first raw
+  signal scans from the start, and after a pass that left nothing retained the
+  next signal scans only executions that ended after that pass's last
+  position. See [GC](gc.md#raw-age-deadline-451). Windows are 32
   executions on `shell_terminal_time` with a row-value keyset
   `(COALESCE(ended_at,started_at), rowid)`. `protected_raw_bytes` is exact for
   a full pass from the start (explicit collect) and 0 otherwise.

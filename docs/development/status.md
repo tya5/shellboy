@@ -1,5 +1,14 @@
 # Development status
 
+## Core #451 raw age retention starts without a collect
+
+Branch `task/core451-raw-retention-start`, stacked on
+`task/core450-growth-1-4-7`. The raw cursor treats an unknown age deadline as
+"scan" instead of idle: a new owner's first raw signal learns the oldest
+retained output's deadline, and after a pass that left nothing retained the
+next Run-end or shell-completion signal reads only later outputs. Pin-held
+candidates keep the resume position. Not landed.
+
 ## Core #450 items 1, 4 and 7: long-running growth
 
 Branch `task/core450-growth-1-4-7`. (1) A Turn with an unchanged instruction
@@ -16,7 +25,7 @@ marks `Work::Pins` and the maintenance owner deletes pins whose lease is not
 live and fails `creating` images of finished saves, in bounded units (no
 release queue, slots or retry). Startup removes crash-left
 `tmp/<uuid>.png.tmp` in one forward scan of bounded visits. Not landed. Raw age retention not arming without a
-collect or capacity excess is #451; items 2, 3, 5, 6 and 8 remain.
+collect or capacity excess is #451 (stacked branch above); items 2, 3, 5, 6 and 8 remain.
 
 ## Core #449 opt-in notice for skipped schedule occurrences
 
