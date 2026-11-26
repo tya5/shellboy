@@ -3714,6 +3714,12 @@
         "path": {
           "type": "string"
         },
+        "shape": {
+          "items": {
+            "$ref": "#/definitions/HistoryDisplayPathSegment"
+          },
+          "type": "array"
+        },
         "value": {
           "type": "string"
         }
@@ -3721,7 +3727,8 @@
       "required": [
         "path",
         "value",
-        "omitted"
+        "omitted",
+        "shape"
       ],
       "type": "object"
     },
@@ -3973,6 +3980,57 @@
         "received_recovery_wait"
       ],
       "type": "object"
+    },
+    "HistoryDisplayPathSegment": {
+      "description": "One step of a field path through the saved payload. `count` follows a\nstep whose value is a collection, so a client can name items and counts.",
+      "oneOf": [
+        {
+          "properties": {
+            "key": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "key",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "key"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "index": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "kind": {
+              "const": "index",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "index"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "count",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "HistoryDisplayPosition": {
       "oneOf": [
@@ -5492,10 +5550,16 @@
     },
     "HistoryWindowPendingMessage": {
       "properties": {
+        "admission_uncertain": {
+          "type": "boolean"
+        },
         "attachment_count": {
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
+        },
+        "completion_scheduled": {
+          "type": "boolean"
         },
         "created_at": {
           "type": "string"
@@ -5507,6 +5571,9 @@
           "type": "string"
         },
         "excerpt_truncated": {
+          "type": "boolean"
+        },
+        "expect_reply": {
           "type": "boolean"
         },
         "held_by": {
@@ -5524,12 +5591,19 @@
         },
         "operation_id": {
           "type": "string"
+        },
+        "sender": {
+          "$ref": "#/definitions/MessageSender"
         }
       },
       "required": [
         "message_id",
         "operation_id",
         "delivery_status",
+        "sender",
+        "expect_reply",
+        "admission_uncertain",
+        "completion_scheduled",
         "created_at",
         "excerpt",
         "excerpt_truncated",
