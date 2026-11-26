@@ -437,6 +437,38 @@ async fn history_keeps_shared_prefix_recursive_sources_live_creator_and_pending_
 }
 
 #[tokio::test]
+async fn history_gc_removes_instruction_snapshots_that_no_turn_references() {
+    let f = Fixture::new(Config::default()).await;
+    f.db.call(|db| {
+        db.execute_batch("INSERT INTO instruction_snapshot(id,source_path,content_hash,body,observed_size,created_at) VALUES('shared','/AGENTS.md','kept','shared instructions',19,'now'),('unreferenced','/AGENTS.md','old','superseded instructions',23,'now');
+            UPDATE turn SET instruction_snapshot_id='shared' WHERE id='turn';
+            INSERT INTO run(id,thread_id,state,created_at)VALUES('deleted-run','deleted','completed','now');
+            INSERT INTO turn(id,thread_id,run_id,state,created_at,instruction_snapshot_id)VALUES('deleted-turn','deleted','deleted-run','completed','now','shared');")?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+    f.job().await;
+    let report = collect_history(&f.gc, now()).await.unwrap();
+    assert!(report.history_bytes_collected > 0);
+    f.db.call(|db| {
+        let left = db
+            .prepare("SELECT id FROM instruction_snapshot ORDER BY id")?
+            .query_map([], |r| r.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        assert_eq!(
+            left,
+            ["shared"],
+            "a referenced snapshot stays; an unreferenced one goes"
+        );
+        Ok(())
+    })
+    .await
+    .unwrap();
+    f.db.shutdown().await.unwrap();
+}
+
+#[tokio::test]
 async fn root_revision_change_revalidates_before_destructive_batch() {
     let f = Fixture::new(Config::default()).await;
     f.node("late", None).await;

@@ -1887,9 +1887,9 @@ async fn shell_created_agents_waits_for_next_turn_and_survives_a_new_startup_cwd
         .unwrap();
     settled(&control, &thread).await;
     let query = next.turn_id.unwrap();
-    control.store.database.call(move|db|{
+    let observed_snapshot: String = control.store.database.call(move|db|{
         let (snapshot,size,body):(String,Option<i64>,String)=db.query_row("SELECT s.id,s.observed_size,s.body FROM turn t JOIN instruction_snapshot s ON s.id=t.instruction_snapshot_id WHERE t.id=?1",[query],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?)))?;
-        assert_ne!(snapshot,absent_snapshot);assert_eq!(size,Some(instruction.len()as i64));assert_eq!(body,instruction);Ok(())
+        assert_ne!(snapshot,absent_snapshot);assert_eq!(size,Some(instruction.len()as i64));assert_eq!(body,instruction);Ok(snapshot)
     }).await.unwrap();
     control.shutdown().await.unwrap();
     drop(control);
@@ -1930,12 +1930,14 @@ async fn shell_created_agents_waits_for_next_turn_and_survives_a_new_startup_cwd
         .await
         .unwrap();
     assert_eq!(actual_paths, original_paths);
-    send(
+    let unchanged = send_accepted(
         &control,
         &thread,
         "verify the persisted cwd after owner restart",
     )
-    .await;
+    .await
+    .turn_id
+    .unwrap();
     let after_reopen = incoming(&control, &mut receive).await;
     assert_eq!(count_instruction(&after_reopen.body, instruction), 1);
     assert_eq!(count_instruction(&after_reopen.body, unrelated), 0);
@@ -1944,6 +1946,20 @@ async fn shell_created_agents_waits_for_next_turn_and_survives_a_new_startup_cwd
         .send((200, answer("persisted cwd and agents path preserved")))
         .unwrap();
     settled(&control, &thread).await;
+    // An unchanged file is observed into the previous Turn's snapshot row.
+    let shared: String = control
+        .store
+        .database
+        .call(move |db| {
+            Ok(db.query_row(
+                "SELECT instruction_snapshot_id FROM turn WHERE id=?1",
+                [unchanged],
+                |r| r.get(0),
+            )?)
+        })
+        .await
+        .unwrap();
+    assert_eq!(shared, observed_snapshot);
     control.shutdown().await.unwrap();
     drop(control);
     reopened.shutdown().await.unwrap();

@@ -945,3 +945,9 @@ PRAGMA user_version=67;
 ALTER TABLE schedule ADD COLUMN notify_json TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(notify_json) AND json_type(notify_json)='array');
 INSERT INTO schema_migration(version,name) VALUES(68,'0068_schedule_notify');
 PRAGMA user_version=68;
+-- Turns share an unchanged instruction snapshot (#450). History GC deletes a
+-- snapshot no Turn references; this index makes that check, and the foreign-key
+-- check of the delete, a seek instead of a scan of every Turn.
+CREATE INDEX turns_by_instruction_snapshot ON turn(instruction_snapshot_id);
+INSERT INTO schema_migration(version,name) VALUES(69,'next_instruction_snapshot_turns');
+PRAGMA user_version=69;
