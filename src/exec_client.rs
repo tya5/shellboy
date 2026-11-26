@@ -306,33 +306,24 @@ impl Session {
             )
             .await
             .map_err(|failure| failure.at_deadline(state))?;
-        if wait.status == WaitStatus::Unavailable {
-            return Err(Failure::new(
-                4,
-                "execution_unavailable",
-                "Wait target became unavailable",
-            ));
-        }
-        // The owner's snapshot of this exact message carries its reply state
-        // and node with every other result.
-        let reply = reply_snapshot(&wait.snapshot, message).ok_or_else(impossible_reply_wait)?;
-        let Some(state) = open_state(&reply) else {
-            return ended_reply(reply["state"].as_str(), reply["node_id"].as_str());
-        };
-        match wait.status {
-            WaitStatus::Timeout => Err(duty_timeout(state)),
+        // The owner's status decides; its snapshot of this exact message
+        // carries the reply state and node.
+        let reply = reply_snapshot(&wait.snapshot, message).unwrap_or(Value::Null);
+        match (wait.status, open_state(&reply)) {
+            (WaitStatus::Satisfied, None) if reply["state"].is_string() => {
+                ended_reply(reply["state"].as_str(), reply["node_id"].as_str())
+            }
+            (WaitStatus::Timeout, Some(state)) => Err(duty_timeout(state)),
             // Input for the calling Thread ends this observation; the target
             // and its duty continue.
-            WaitStatus::Interrupted => Err(Failure::new(
+            (WaitStatus::Interrupted, Some(state)) => Err(Failure::new(
                 5,
                 "interrupted",
                 format!(
                     "Reply wait was interrupted by input for the calling Thread while the reply duty is {state}; no target was stopped"
                 ),
             )),
-            WaitStatus::Satisfied | WaitStatus::RecoveryWait | WaitStatus::Unavailable => {
-                Err(impossible_reply_wait())
-            }
+            _ => Err(impossible_reply_wait()),
         }
     }
     async fn answer(&mut self, mode: ResultMode) -> Result<String, Failure> {

@@ -2,10 +2,13 @@
 
 ## Core #441 exec waits while the reply duty is open
 
-Branch `task/core441-exec-wait-open-duty`, stacked on #433: `exec --result
-reply` keeps waiting with `reply_received` while the duty is `pending` or
-`awaiting_own_ask` and exits non-zero only on a terminal state without a reply
-(4) or its deadline (5), naming the state. Not landed.
+Branch `task/core441-exec-wait-open-duty`: `exec --result reply` classifies the
+saved duty with `control::reply::is_open` and returns an ended duty without a
+wait. An open duty (`pending` or `awaiting_own_ask`) gets one `reply_received`
+wait for the rest of the deadline: `satisfied` returns the reply or exits 4 on a
+terminal state without one; the deadline (5 `timeout`) and input for the calling
+Thread (5 `interrupted`) name the state from the wait's snapshot and leave the
+duty open; any other result is `owner_error` (6). Not landed.
 
 ## Core #433 reply duties awaiting an own ask
 
@@ -14,8 +17,8 @@ ends its Run becomes `awaiting_own_ask`; the asker's Run that receives the
 answer or outcome owes it again, and ignores it if that Run ends unanswered. One
 open/terminal state rule in `control::reply` drives blocking, reply, cancel,
 deletion and settlement; migration `0067_open_reply_duties` widens the
-open-duty indexes and adds the owner-Run index. Not landed. The exec follow-up
-is #441.
+open-duty indexes and adds the owner-Run index. Landed (Protocol 43, migration
+67). The exec follow-up is #441.
 
 ## Core #421 Unit 2: operation evidence
 
