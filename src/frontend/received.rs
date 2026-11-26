@@ -785,6 +785,9 @@ mod tests {
             Ok(())
         }).await.unwrap();
         let control = Control::new(&owner, root.path().into());
+        let (rpc, receive) = tokio::sync::mpsc::channel(16);
+        let server = crate::ipc::LocalServer::bind(&owner, rpc).await.unwrap();
+        tokio::spawn(control.clone().serve(receive));
         let (tx, rx) = std::sync::mpsc::sync_channel(8);
         for (state, attention) in [
             ("recovery_wait", true),
@@ -858,6 +861,7 @@ mod tests {
             })
             .await
             .unwrap();
+        server.shutdown().await.unwrap();
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
         let owner = crate::app::DataOwner::start(Some(config), Some(data), root.path().into())

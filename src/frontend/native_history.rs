@@ -2,8 +2,7 @@
 use crate::protocol::{
     ApiError, Command, ErrorCode, HistoryBody, HistoryDisplayOutline, HistoryDisplayPage,
     HistoryDisplayPosition, HistoryDisplayRange, HistoryDisplayRead, HistoryDisplaySelection,
-    HistoryReadArgs, HistorySnippet, HistoryWindow, HistoryWindowArgs, HistoryWindowObservation,
-    MAX_BODY_BYTES,
+    HistoryReadArgs, HistoryWindow, HistoryWindowArgs, HistoryWindowObservation, MAX_BODY_BYTES,
 };
 use std::path::Path;
 
@@ -44,47 +43,44 @@ impl Owner<'_> {
         Ok(window)
     }
 
-    /// Load one window's immutable sources without replacing its mutable facts.
-    pub(super) async fn selected(
+    /// One positioned node by ID, plus the selected window's facts for it. A
+    /// received response is never on a path and has no window facts; any other
+    /// node must still be selected at the same source revision.
+    pub(super) async fn node(
         &self,
-        args: HistoryWindowArgs,
-        expected_revision: Option<u64>,
-        position: impl Fn(&HistorySnippet) -> HistoryDisplayPosition,
-    ) -> Result<SelectedWindow, ApiError> {
-        let mut window = self.window(args).await?;
-        if expected_revision.is_some_and(|revision| window.revision != revision) {
-            return Err(source_changed());
+        thread_id: &str,
+        node_id: &str,
+        position: HistoryDisplayPosition,
+    ) -> Result<(DisplayExtent, Option<HistoryWindowObservation>), ApiError> {
+        use crate::protocol::HistoryDisplayNode as Node;
+        let display = self.display(node_id, None, position).await?;
+        if matches!(display.outline.node, Node::Received | Node::HiddenAdmission) {
+            return Ok((display, None));
         }
-        let selection = HistoryDisplaySelection {
-            thread_id: window.thread_id,
-            revision: window.revision,
-        };
-        let mut nodes = Vec::with_capacity(window.items.len());
-        for source in window.items {
-            if source.selection.thread_id != selection.thread_id
-                || source.selection.ordinal >= window.total
-                || nodes.last().is_some_and(|node: &SelectedNode| {
-                    node.source.selection.ordinal.checked_add(1) != Some(source.selection.ordinal)
-                })
-            {
-                return Err(invalid_response());
+        let mut window = self
+            .window(HistoryWindowArgs {
+                thread_id: thread_id.to_owned(),
+                include_observation: true,
+                items: false,
+                ordinal: None,
+                node_id: Some(node_id.to_owned()),
+                expect_node_id: None,
+                before: 0,
+                after: 0,
+                excerpt_chars: 0,
+            })
+            .await?;
+        match window.items.as_slice() {
+            [item] if item.node_id == node_id => {
+                if item.kind != display.kind
+                    || item.provenance.source_revision != display.source_revision
+                {
+                    return Err(source_changed());
+                }
             }
-            let display = self
-                .display(&source.node_id, Some(selection.clone()), position(&source))
-                .await?;
-            if display.kind != source.kind
-                || display.source_revision != source.provenance.source_revision
-            {
-                return Err(source_changed());
-            }
-            nodes.push(SelectedNode { source, display });
+            _ => return Err(invalid_response()),
         }
-        Ok(SelectedWindow {
-            selection,
-            total: window.total,
-            observation: window.observation.take().ok_or_else(invalid_response)?,
-            nodes,
-        })
+        Ok((display, window.observation.take()))
     }
 
     pub(super) async fn display(
@@ -143,18 +139,6 @@ impl Owner<'_> {
     }
 }
 
-pub(super) struct SelectedWindow {
-    pub selection: HistoryDisplaySelection,
-    pub total: u64,
-    pub observation: HistoryWindowObservation,
-    pub nodes: Vec<SelectedNode>,
-}
-
-pub(super) struct SelectedNode {
-    pub source: HistorySnippet,
-    pub display: DisplayExtent,
-}
-
 pub(super) struct DisplayExtent {
     pub kind: String,
     pub source_revision: i64,
@@ -178,6 +162,58 @@ impl DisplayExtent {
         );
         projection.output_limited = self.output_limited;
         projection
+    }
+
+    /// Client layout of one verified extent; only width and language are local.
+    pub(super) fn into_ui_node(
+        self,
+        node_id: String,
+        width: u16,
+        language: crate::config::UiLanguage,
+    ) -> crate::ui::UiNode {
+        use crate::protocol::HistoryDisplayNode as Node;
+        if matches!(self.outline.node, Node::HiddenAdmission) {
+            return crate::ui::UiNode {
+                node_id,
+                role: "context".into(),
+                ..Default::default()
+            };
+        }
+        let reasoning_ranges = self
+            .reasoning
+            .iter()
+            .map(|range| (range.start as usize, range.end as usize))
+            .collect();
+        let base_char_offset = self.range.start as usize;
+        let total_chars = self.total_chars as usize;
+        if matches!(self.outline.node, Node::Received) {
+            return super::received::project(
+                &self.kind,
+                crate::ui::UiNode {
+                    node_id,
+                    text: self.text,
+                    base_char_offset,
+                    total_chars,
+                    reasoning_ranges,
+                    ..Default::default()
+                },
+                width,
+                false,
+                self.received_recovery_wait,
+                language,
+            );
+        }
+        let mut presentation = self.project();
+        crate::presentation::render_markdown(&mut presentation, width.max(1));
+        crate::ui::UiNode {
+            presentation,
+            node_id,
+            role: super::node_role(&self.kind).into(),
+            text: self.text,
+            base_char_offset,
+            total_chars,
+            reasoning_ranges,
+        }
     }
 
     fn new(
@@ -245,6 +281,17 @@ impl DisplayExtent {
     }
 }
 
+/// Mutable selected-window facts from the same owner transaction as the window.
+pub(super) fn apply_observation(
+    nodes: &mut [crate::ui::UiNode],
+    observation: &HistoryWindowObservation,
+    language: crate::config::UiLanguage,
+) {
+    super::tools::apply_window(nodes, &observation.tools);
+    super::recovery::apply_window(nodes, &observation.recovery, language);
+    super::usage::apply_window(nodes, &observation.usage);
+}
+
 fn validate_outline(
     extent: &HistoryDisplayRange,
     outline: &HistoryDisplayOutline,
@@ -279,6 +326,59 @@ fn invalid_response() -> ApiError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::protocol::HistorySnippet;
+
+    struct SelectedWindow {
+        observation: HistoryWindowObservation,
+        nodes: Vec<SelectedNode>,
+    }
+
+    struct SelectedNode {
+        source: HistorySnippet,
+        display: DisplayExtent,
+    }
+
+    /// The planned window install: one fenced window, then each node's extent
+    /// at that selection revision, keeping the window's mutable facts.
+    async fn selected(
+        owner: &Owner<'_>,
+        args: HistoryWindowArgs,
+        expected_revision: Option<u64>,
+        position: impl Fn(&HistorySnippet) -> HistoryDisplayPosition,
+    ) -> Result<SelectedWindow, ApiError> {
+        let mut window = owner.window(args).await?;
+        if expected_revision.is_some_and(|revision| window.revision != revision) {
+            return Err(source_changed());
+        }
+        let selection = HistoryDisplaySelection {
+            thread_id: window.thread_id,
+            revision: window.revision,
+        };
+        let mut nodes = Vec::with_capacity(window.items.len());
+        for source in window.items {
+            if source.selection.thread_id != selection.thread_id
+                || source.selection.ordinal >= window.total
+                || nodes.last().is_some_and(|node: &SelectedNode| {
+                    node.source.selection.ordinal.checked_add(1) != Some(source.selection.ordinal)
+                })
+            {
+                return Err(invalid_response());
+            }
+            let display = owner
+                .display(&source.node_id, Some(selection.clone()), position(&source))
+                .await?;
+            if display.kind != source.kind
+                || display.source_revision != source.provenance.source_revision
+            {
+                return Err(source_changed());
+            }
+            nodes.push(SelectedNode { source, display });
+        }
+        Ok(SelectedWindow {
+            observation: window.observation.take().ok_or_else(invalid_response)?,
+            nodes,
+        })
+    }
 
     #[tokio::test]
     async fn native_display_hydrates_the_exact_window_until_selection_changes() {
@@ -308,19 +408,26 @@ mod tests {
             data_dir: &data_dir,
             instance: &control.store.instance_id,
         };
-        let window = owner
-            .selected(
-                serde_json::from_value(json!({"thread_id":"t"})).unwrap(),
-                None,
-                |_| HistoryDisplayPosition::Tail,
-            )
-            .await
-            .unwrap();
-        assert_eq!(window.total, 1);
+        let window = selected(
+            &owner,
+            serde_json::from_value(json!({"thread_id":"t"})).unwrap(),
+            None,
+            |_| HistoryDisplayPosition::Tail,
+        )
+        .await
+        .unwrap();
         assert_eq!(window.observation.pending.total, 0);
         assert_eq!(window.nodes.len(), 1);
         let node = &window.nodes[0].source.node_id;
-        let selected = window.selection;
+        let observed = owner
+            .window(serde_json::from_value(json!({"thread_id":"t"})).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(observed.total, 1);
+        let selected = HistoryDisplaySelection {
+            thread_id: observed.thread_id,
+            revision: observed.revision,
+        };
         let extent = &window.nodes[0].display;
         assert_eq!(extent.text, text);
         let projection = extent.project();
@@ -390,6 +497,484 @@ mod tests {
         dispatch.await.unwrap();
         drop(control);
         data.shutdown().await.unwrap();
+    }
+
+    /// Screen parity: every saved node kind the conversation shows projects to the
+    /// same UI node from the owner's positioned extent as from its saved payload.
+    #[tokio::test]
+    async fn native_display_projects_the_same_ui_nodes_as_saved_payloads() {
+        use crate::{app::DataOwner, control::Control, ipc::LocalServer};
+        use serde_json::json;
+
+        let root = tempfile::tempdir().unwrap();
+        let data_dir = root.path().join("data");
+        let data = DataOwner::start(None, Some(data_dir.clone()), root.path().into())
+            .await
+            .unwrap();
+        let envelope =
+            json!({"event_id":"ended","kind":"shell_ended","payload":{"execution_id":"exec"}});
+        let spill_args = json!({"command":"git status","description":"状態を確認"}).to_string();
+        let mut long = String::new();
+        for section in 0..400 {
+            long.push_str(&format!("## Section {section}\n\nParagraph with [link {section}](https://example.test/{section}) and *emphasis*.\n\n```rust\nfn section_{section}() {{}}\n```\n\n"));
+        }
+        let nodes = vec![
+            (
+                "user",
+                "user",
+                json!({"role":"user","content":[{"type":"input_text","text":"hello **world** [x](https://example.test/x)"}]}),
+            ),
+            (
+                "answer",
+                "assistant_response",
+                json!({"text":"# Title\n\nSome *markdown* with [link](https://example.test/a)\n\n```rust\nfn x() {}\n```\n"}),
+            ),
+            (
+                "call",
+                "assistant_response",
+                json!({"group_id":"g","output":[{"type":"function_call","name":"shell","call_id":"c1","arguments":json!({"command":"ls -la","description":"一覧"}).to_string()}]}),
+            ),
+            (
+                "result",
+                "tool_result",
+                json!({"group_id":"g","item":{"type":"function_call_output","call_id":"c1","output":json!({"status":"exited","exit_code":0,"output":"a\nb"}).to_string()}}),
+            ),
+            ("thought", "reasoning", json!({"text":"thinking about it"})),
+            (
+                "event",
+                "event",
+                json!({"event_id":"ended","role":"developer","content":[{"type":"input_text","text":format!("Shellboy event v1: {envelope}")}]}),
+            ),
+            (
+                "spill",
+                "spill",
+                json!({"output":[
+                {"type":"function_call","name":"shell","call_id":"c","arguments":spill_args},
+                {"type":"function_call_output","call_id":"c","output":json!({"omitted":true,"call_id":"c","status":"exited","exit_code":7,"execution_id":"e","original_node_id":"r"}).to_string()}
+            ],"spill_version":1,"source_node_ids":["a","r"]}),
+            ),
+            (
+                "trim",
+                "spill",
+                json!({"text":"same visible notice","context_trim":{"omitted_nodes":3,"first_node_id":"a","last_node_id":"b","reason":"limit"}}),
+            ),
+            (
+                "summary",
+                "summary",
+                json!({"text":"summary body","source_node_ids":["a","b"]}),
+            ),
+            (
+                "received",
+                "incomplete_response",
+                json!({"attempt_id":"x","partial_text":"partial answer","partial_reasoning":"partial thought"}),
+            ),
+            (
+                "interrupted",
+                "interruption_context",
+                json!({"text":"interrupted context"}),
+            ),
+            (
+                "reclaimed",
+                "assistant_response",
+                json!({"text":"will be reclaimed"}),
+            ),
+            ("long", "assistant_response", json!({"text":long})),
+        ];
+        let saved = nodes.clone();
+        data.db
+            .call(move |db| {
+                let tx = db.transaction()?;
+                tx.execute("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','test','/','','p','m','2026-01-01T00:00:00Z')", [])?;
+                for (id, kind, payload) in &saved {
+                    crate::history::append_node(&tx, "t", id, None, kind, payload, "2026-01-01T00:00:00Z")?;
+                }
+                tx.execute("UPDATE node SET payload_json=NULL,deleted_reason='gc' WHERE id='reclaimed'", [])?;
+                tx.commit()?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let control = Control::new(&data, root.path().into());
+        let (sender, receiver) = tokio::sync::mpsc::channel(16);
+        let server = LocalServer::bind(&data, sender).await.unwrap();
+        let dispatch = tokio::spawn(control.clone().serve(receiver));
+        control.start().await.unwrap();
+        let owner = Owner {
+            data_dir: &data_dir,
+            instance: &control.store.instance_id,
+        };
+        let language = crate::config::UiLanguage::En;
+        let saved_node = |id: &str| {
+            let id = id.to_owned();
+            data.db.call(move |db| {
+                Ok(db.query_row(
+                    "SELECT kind,payload_json,deleted_reason,output_limit_attempt_id IS NOT NULL FROM node WHERE id=?1",
+                    [&id],
+                    |row| {
+                        Ok(super::super::RawNode {
+                            id: id.clone(),
+                            kind: row.get(0)?,
+                            payload: row.get(1)?,
+                            reason: row.get(2)?,
+                            received_recovery_wait: false,
+                            output_limited: row.get(3)?,
+                        })
+                    },
+                )?)
+            })
+        };
+        let mut positions = nodes.iter().map(|(id, ..)| (*id, None)).collect::<Vec<_>>();
+        positions.extend([
+            ("long", Some(40_000)),
+            ("long", Some(3)),
+            ("answer", Some(4)),
+        ]);
+        let mut mismatches = Vec::new();
+        for (id, offset) in positions {
+            let mut expected = [saved_node(id).await.unwrap().into_ui_node(
+                offset.map(super::super::NodePosition::At),
+                80,
+                language,
+            )];
+            super::super::tools::apply(&mut expected, &Default::default());
+            let position = offset.map_or(HistoryDisplayPosition::Tail, |offset| {
+                HistoryDisplayPosition::Absolute {
+                    offset: offset as u64,
+                }
+            });
+            let mut native = [owner
+                .display(id, None, position)
+                .await
+                .unwrap()
+                .into_ui_node(id.into(), 80, language)];
+            super::super::tools::apply_window(&mut native, &no_tools());
+            let (native, expected) = (unlabeled(&native[0]), unlabeled(&expected[0]));
+            if native != expected {
+                mismatches.push(format!(
+                    "{id} at {offset:?}: {}",
+                    difference(&native, &expected)
+                ));
+            }
+        }
+        assert!(mismatches.is_empty(), "{mismatches:#?}");
+        server.shutdown().await.unwrap();
+        dispatch.await.unwrap();
+        drop(control);
+        data.shutdown().await.unwrap();
+    }
+
+    /// The selected window's owner facts annotate the same saved tool, notice,
+    /// recovery and usage rows as the frontend's former transaction readers.
+    #[tokio::test]
+    async fn native_window_facts_annotate_like_saved_source_readers() {
+        use crate::{app::DataOwner, control::Control, ipc::LocalServer};
+        use serde_json::json;
+
+        let root = tempfile::tempdir().unwrap();
+        let data_dir = root.path().join("data");
+        let data = DataOwner::start(None, Some(data_dir.clone()), root.path().into())
+            .await
+            .unwrap();
+        let ended =
+            json!({"event_id":"ended","kind":"shell_ended","payload":{"execution_id":"exec"}});
+        let resume = json!({"event_id":"resume","kind":"context_changed","payload":{"kind":"recovery_resumed","change":{"run_id":"r","turn_id":"u"}}});
+        let nodes = vec![
+            (
+                "call",
+                "assistant_response",
+                json!({"group_id":"g","output":[{"type":"function_call","name":"shell","call_id":"c1","arguments":json!({"command":"ls -la","description":"一覧"}).to_string()}]}),
+            ),
+            (
+                "result",
+                "tool_result",
+                json!({"group_id":"g","item":{"type":"function_call_output","call_id":"c1","output":json!({"status":"exited","exit_code":0,"output":"a\nb"}).to_string()}}),
+            ),
+            (
+                "ended-event",
+                "event",
+                json!({"event_id":"ended","role":"developer","content":[{"type":"input_text","text":format!("Shellboy event v1: {ended}")}]}),
+            ),
+            (
+                "resume-event",
+                "event",
+                json!({"event_id":"resume","role":"developer","content":[{"type":"input_text","text":format!("Shellboy event v1: {resume}")}]}),
+            ),
+            (
+                "answer",
+                "assistant_response",
+                json!({"text":"final answer"}),
+            ),
+        ];
+        let saved = nodes.clone();
+        data.db.call(move |db| {
+            let tx = db.transaction()?;
+            tx.execute_batch("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','test','/','','p','m','2026-01-01T00:00:00Z');
+                INSERT INTO run(id,thread_id,state,created_at,ended_at)VALUES('r','t','completed','2026-01-01T00:00:00Z','2026-01-01T00:00:09Z');
+                INSERT INTO turn(id,thread_id,run_id,state,created_at,ended_at)VALUES('u','t','r','completed','2026-01-01T00:00:00Z','2026-01-01T00:00:09Z');
+                INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at,ended_at)VALUES('conversation','t','00000000-0000-4000-8000-00000000000a','u',0,0,'p','m',0,'completed','{}','{\"input_tokens\":140,\"input_tokens_details\":{\"cached_tokens\":17}}','2026-01-01T00:00:00Z','2026-01-01T00:00:01Z');
+                INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES('g','00000000-0000-4000-8000-00000000000a','u','completed','2026-01-01T00:00:00Z');
+                INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,exit_code,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at)VALUES('exec','r','u','exec','exited',0,'/','{}','UTF-8','UTF-8','closed','2026-01-01T00:00:00Z');
+                INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state,operation_id)VALUES('g','c1',0,'shell','{\"command\":\"ls -la\",\"description\":\"一覧\",\"background\":true}','completed','exec');")?;
+            tx.execute("INSERT INTO event(id,kind,source_json,target_thread_id,payload_ref_json,created_at)VALUES('ended','shell_ended','{}','t',?1,'2026-01-01T00:00:02Z')", [json!({"execution_id":"exec"}).to_string()])?;
+            tx.execute("INSERT INTO event(id,kind,source_json,target_thread_id,payload_ref_json,created_at)VALUES('resume','context_changed','{}','t',?1,'2026-01-01T00:00:03Z')", [json!({"kind":"recovery_resumed","change":{"run_id":"r","turn_id":"u"}}).to_string()])?;
+            let failure = json!({"error":crate::model::ModelError::new("provider","saved failure")}).to_string();
+            tx.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,error_json,started_at,ended_at)VALUES('conversation','t','00000000-0000-4000-8000-0000000000ff','u',0,0,'p','m',0,'failed','{}',?1,'2026-01-01T00:00:00Z','2026-01-01T00:00:01Z')", [failure])?;
+            for (id, kind, payload) in &saved {
+                crate::history::append_node(&tx, "t", id, Some("u"), kind, payload, "2026-01-01T00:00:02Z")?;
+            }
+            tx.execute("INSERT INTO tool_result(group_id,call_id,node_id,status)VALUES('g','c1','result','exited')", [])?;
+            tx.execute("INSERT INTO output_item(attempt_id,ordinal,item_type,status,payload_json,node_id)VALUES('00000000-0000-4000-8000-00000000000a',0,'message','completed','{}','answer')", [])?;
+            tx.commit()?;
+            Ok(())
+        }).await.unwrap();
+        let control = Control::new(&data, root.path().into());
+        let (sender, receiver) = tokio::sync::mpsc::channel(16);
+        let server = LocalServer::bind(&data, sender).await.unwrap();
+        let dispatch = tokio::spawn(control.clone().serve(receiver));
+        control.start().await.unwrap();
+        let owner = Owner {
+            data_dir: &data_dir,
+            instance: &control.store.instance_id,
+        };
+        let language = crate::config::UiLanguage::En;
+        let window = selected(
+            &owner,
+            serde_json::from_value(json!({"thread_id":"t","excerpt_chars":0})).unwrap(),
+            None,
+            |_| HistoryDisplayPosition::Tail,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            window.observation.tools.notices.len(),
+            1,
+            "{:?}",
+            window.observation.tools.notices
+        );
+        let mut native = window
+            .nodes
+            .into_iter()
+            .map(|node| node.display.into_ui_node(node.source.node_id, 80, language))
+            .collect::<Vec<_>>();
+        apply_observation(&mut native, &window.observation, language);
+
+        let ids = nodes
+            .iter()
+            .map(|(id, ..)| id.to_string())
+            .collect::<Vec<_>>();
+        let expected = data
+            .db
+            .call(move |db| {
+                let mut rows = Vec::new();
+                for id in &ids {
+                    rows.push(db.query_row(
+                        "SELECT kind,payload_json FROM node WHERE id=?1",
+                        [id],
+                        |row| {
+                            Ok(super::super::RawNode {
+                                id: id.clone(),
+                                kind: row.get(0)?,
+                                payload: row.get(1)?,
+                                reason: None,
+                                received_recovery_wait: false,
+                                output_limited: false,
+                            })
+                        },
+                    )?);
+                }
+                let mut nodes = rows
+                    .into_iter()
+                    .map(|row| row.into_ui_node(None, 80, language))
+                    .collect::<Vec<_>>();
+                let tools = super::super::tools::read_nodes_tx(db, &ids)?;
+                super::super::tools::apply(&mut nodes, &tools);
+                let events = super::super::recovery::requests(&nodes);
+                let recovery = super::super::recovery::read_tx(db, &events)?;
+                super::super::recovery::apply(&mut nodes, recovery, language);
+                let assistants = super::super::usage::requests(&nodes);
+                let usage = super::super::usage::read_tx(db, &assistants)?;
+                super::super::usage::apply(&mut nodes, usage);
+                Ok(nodes)
+            })
+            .await
+            .unwrap();
+        assert_eq!(native.len(), expected.len());
+        for (native, expected) in native.iter().zip(&expected) {
+            let (native, expected) = (unlabeled(native), unlabeled(expected));
+            assert!(
+                native == expected,
+                "{}: {}",
+                expected.node_id,
+                difference(&native, &expected)
+            );
+        }
+        let notice = native
+            .iter()
+            .find(|node| node.node_id == "ended-event")
+            .unwrap();
+        assert!(notice.presentation.ui_messages.notice.is_some());
+        let resumed = native
+            .iter()
+            .find(|node| node.node_id == "resume-event")
+            .unwrap();
+        assert!(resumed.presentation.title.starts_with("Resume"));
+        server.shutdown().await.unwrap();
+        dispatch.await.unwrap();
+        drop(control);
+        data.shutdown().await.unwrap();
+    }
+
+    fn no_tools() -> crate::protocol::HistoryWindowTools {
+        crate::protocol::HistoryWindowTools {
+            calls: Vec::new(),
+            limited_node_ids: Vec::new(),
+            notices: Vec::new(),
+        }
+    }
+
+    /// Payload-path field labels need the saved payload's shape (collection
+    /// counts and item names), which the display outline does not carry yet
+    /// (open on #311). Every other projected fact, including the keys, values
+    /// and order of those fields, must match.
+    fn unlabeled(node: &crate::ui::UiNode) -> crate::ui::UiNode {
+        let mut node = node.clone();
+        for field in &mut node.presentation.fields {
+            if !field.key.starts_with("/ui_") && !field.key.starts_with("/saved_") {
+                field.label.clear();
+            }
+        }
+        // Wall-clock elapsed observations differ between two reads by design.
+        for tool in node
+            .presentation
+            .blocks
+            .iter_mut()
+            .filter_map(|block| block.tool.as_mut())
+        {
+            tool.elapsed_observation = None;
+        }
+        node
+    }
+
+    /// Name the differing parts so a parity failure reports every gap at once.
+    fn difference(native: &crate::ui::UiNode, expected: &crate::ui::UiNode) -> String {
+        let (n, e) = (&native.presentation, &expected.presentation);
+        let mut parts = Vec::new();
+        let mut check = |name: &str, same: bool| {
+            if !same {
+                parts.push(name.to_owned());
+            }
+        };
+        check("role", native.role == expected.role);
+        check("text", native.text == expected.text);
+        check(
+            "coordinates",
+            (native.base_char_offset, native.total_chars)
+                == (expected.base_char_offset, expected.total_chars),
+        );
+        check(
+            "reasoning",
+            native.reasoning_ranges == expected.reasoning_ranges,
+        );
+        check("kind/title", (&n.kind, &n.title) == (&e.kind, &e.title));
+        check("ui_messages", n.ui_messages == e.ui_messages);
+        check("blocks", n.blocks == e.blocks);
+        let keyed = |p: &crate::presentation::NodePresentation| {
+            p.fields
+                .iter()
+                .map(|f| {
+                    (
+                        f.key.clone(),
+                        f.value.clone(),
+                        f.value_omitted,
+                        f.display.clone(),
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        check("field values", keyed(n) == keyed(e));
+        let labels = |p: &crate::presentation::NodePresentation| {
+            p.fields.iter().map(|f| f.label.clone()).collect::<Vec<_>>()
+        };
+        check("field labels", labels(n) == labels(e));
+        check("links", n.links == e.links);
+        check(
+            "limits",
+            (
+                n.metadata_limited,
+                n.details_omitted,
+                n.body_omitted_chars,
+                n.body_extent_unknown,
+            ) == (
+                e.metadata_limited,
+                e.details_omitted,
+                e.body_omitted_chars,
+                e.body_extent_unknown,
+            ),
+        );
+        let rest = |p: &crate::presentation::NodePresentation| {
+            let mut p = p.clone();
+            p.blocks.clear();
+            p.fields.clear();
+            p.links.clear();
+            p.ui_messages = Default::default();
+            p.title.clear();
+            p
+        };
+        check("other", rest(n) == rest(e));
+        if parts.iter().any(|part| part == "blocks") {
+            parts.push(format!(
+                "native blocks {:?} expected {:?}",
+                n.blocks
+                    .iter()
+                    .map(|b| (
+                        b.kind.clone(),
+                        b.source_start,
+                        b.source_end,
+                        b.tool.is_some()
+                    ))
+                    .collect::<Vec<_>>(),
+                e.blocks
+                    .iter()
+                    .map(|b| (
+                        b.kind.clone(),
+                        b.source_start,
+                        b.source_end,
+                        b.tool.is_some()
+                    ))
+                    .collect::<Vec<_>>()
+            ));
+        }
+        if parts.iter().any(|part| part == "links") {
+            parts.push(format!("native links {:?} expected {:?}", n.links, e.links));
+        }
+        if parts.iter().any(|part| part == "blocks") {
+            for (a, b) in n.blocks.iter().zip(&e.blocks) {
+                if a != b {
+                    parts.push(format!("native block {a:?} expected {b:?}"));
+                }
+            }
+        }
+        if parts.iter().any(|part| part == "field values") {
+            let (a, b) = (keyed(n), keyed(e));
+            parts.push(format!(
+                "native-only {:?} expected-only {:?}",
+                a.iter()
+                    .filter(|f| !b.contains(f))
+                    .take(6)
+                    .collect::<Vec<_>>(),
+                b.iter()
+                    .filter(|f| !a.contains(f))
+                    .take(6)
+                    .collect::<Vec<_>>()
+            ));
+        }
+        if parts.iter().any(|part| part == "kind/title") {
+            parts.push(format!(
+                "native {:?} {:?} expected {:?} {:?}",
+                n.kind, n.title, e.kind, e.title
+            ));
+        }
+        parts.join("; ")
     }
 
     fn outline() -> HistoryDisplayOutline {

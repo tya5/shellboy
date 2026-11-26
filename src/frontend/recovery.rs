@@ -216,99 +216,168 @@ async fn enrich_language(
     Ok(())
 }
 
+/// Saved failure reason as shown: a sanitized 256-character excerpt plus the
+/// F6 value. The window observation carries only the bounded excerpt.
+struct Reason {
+    excerpt: String,
+    truncated: bool,
+    detail: String,
+}
+
+struct Saved {
+    count: u64,
+    attempt: String,
+    reason: Option<Reason>,
+    source: Option<String>,
+}
+
 pub(super) fn apply(
     nodes: &mut [UiNode],
     evidence: Vec<Evidence>,
     language: crate::config::UiLanguage,
 ) {
     for saved in evidence {
-        let error = saved.model_error();
-        let presentation = &mut nodes[saved.index].presentation;
-        let note = match language {
-            crate::config::UiLanguage::Ja => {
-                format!("再開前にこの応答処理で記録したモデル失敗{}件", saved.count)
-            }
-            crate::config::UiLanguage::En => {
-                format!("{} model failures recorded before resume", saved.count)
-            }
+        let reason = saved.model_error().map(|error| Reason {
+            excerpt: crate::presentation::sanitize_plain(
+                &error.message.chars().take(256).collect::<String>(),
+                0,
+            )
+            .0,
+            truncated: error.message.chars().count() > 256,
+            detail: error.to_string(),
+        });
+        present(
+            &mut nodes[saved.index].presentation,
+            Saved {
+                count: saved.count as u64,
+                attempt: saved.attempt,
+                reason,
+                source: saved.source,
+            },
+            language,
+        );
+    }
+}
+
+/// Apply the selected window's recovery facts to the nodes they name.
+pub(super) fn apply_window(
+    nodes: &mut [UiNode],
+    recovery: &[crate::protocol::HistoryWindowRecovery],
+    language: crate::config::UiLanguage,
+) {
+    for saved in recovery {
+        let Some(node) = nodes.iter_mut().find(|node| node.node_id == saved.node_id) else {
+            continue;
         };
-        presentation.title = match language {
-            crate::config::UiLanguage::Ja => format!("復旧再開 · {note}"),
-            crate::config::UiLanguage::En => format!("Resume · {note}"),
-        };
-        if let Some(block) = presentation
-            .blocks
-            .iter_mut()
-            .find(|block| block.kind == BlockKind::Event)
-        {
-            block.text = error
-                .as_ref()
-                .map(|error| {
-                    let message = &error.message;
-                    let excerpt = message.chars().take(256).collect::<String>();
-                    let suffix = if message.chars().count() > 256 {
-                        match language {
-                            crate::config::UiLanguage::Ja => "… · 完全な理由はF6 詳細",
-                            crate::config::UiLanguage::En => "… · Full reason in F6 Details",
-                        }
-                    } else {
-                        ""
-                    };
-                    let excerpt = crate::presentation::sanitize_plain(&excerpt, 0).0;
+        let reason = saved.reason.as_ref().map(|reason| Reason {
+            excerpt: reason.excerpt.clone(),
+            truncated: reason.truncated,
+            detail: format!(
+                "{}: {}{}",
+                reason.kind,
+                reason.excerpt,
+                if reason.truncated { "…" } else { "" }
+            ),
+        });
+        present(
+            &mut node.presentation,
+            Saved {
+                count: saved.failure_count,
+                attempt: saved.latest_attempt_id.clone(),
+                reason,
+                source: saved.source_node_id.clone(),
+            },
+            language,
+        );
+    }
+}
+
+fn present(
+    presentation: &mut crate::presentation::NodePresentation,
+    saved: Saved,
+    language: crate::config::UiLanguage,
+) {
+    let note = match language {
+        crate::config::UiLanguage::Ja => {
+            format!("再開前にこの応答処理で記録したモデル失敗{}件", saved.count)
+        }
+        crate::config::UiLanguage::En => {
+            format!("{} model failures recorded before resume", saved.count)
+        }
+    };
+    presentation.title = match language {
+        crate::config::UiLanguage::Ja => format!("復旧再開 · {note}"),
+        crate::config::UiLanguage::En => format!("Resume · {note}"),
+    };
+    if let Some(block) = presentation
+        .blocks
+        .iter_mut()
+        .find(|block| block.kind == BlockKind::Event)
+    {
+        block.text = saved
+            .reason
+            .as_ref()
+            .map(|reason| {
+                let excerpt = &reason.excerpt;
+                let suffix = if reason.truncated {
                     match language {
-                        crate::config::UiLanguage::Ja => {
-                            format!("直近の保存理由: {excerpt}{suffix}")
-                        }
-                        crate::config::UiLanguage::En => {
-                            format!("Most recent saved reason: {excerpt}{suffix}")
-                        }
+                        crate::config::UiLanguage::Ja => "… · 完全な理由はF6 詳細",
+                        crate::config::UiLanguage::En => "… · Full reason in F6 Details",
                     }
-                })
-                .unwrap_or_else(|| match language {
+                } else {
+                    ""
+                };
+                match language {
                     crate::config::UiLanguage::Ja => {
-                        "直近の理由は保存記録で確認してください".into()
+                        format!("直近の保存理由: {excerpt}{suffix}")
                     }
                     crate::config::UiLanguage::En => {
-                        "See the saved record for the most recent reason".into()
+                        format!("Most recent saved reason: {excerpt}{suffix}")
                     }
-                });
-            block.source_exact = false;
-        }
-        // These explicitly named projection fields are DB references, not JSON
-        // pointers into the immutable event's raw body. Copy preserves full values.
-        let mut field = |key: &str, label: &str, value: String| {
-            presentation.fields.push(PresentationField {
-                value_omitted: false,
-                key: format!("/saved_model_failures/{key}"),
-                label: label.into(),
-                value,
-                display: None,
+                }
             })
-        };
-        let (count_label, attempt_label, reason_label, source_label) = match language {
-            crate::config::UiLanguage::Ja => (
-                "再開前の保存済みモデル失敗",
-                "直近の失敗のAttempt ID",
-                "直近の保存理由",
-                "直近の失敗原文",
-            ),
-            crate::config::UiLanguage::En => (
-                "Saved model failures before resume",
-                "Latest failed attempt ID",
-                "Latest saved reason",
-                "Source node for latest failure",
-            ),
-        };
-        field("count", count_label, saved.count.to_string());
-        field("attempt_id", attempt_label, saved.attempt);
-        if let Some(error) = error {
-            field("error/message", reason_label, error.to_string());
-        }
-        if let Some(source) = saved.source {
-            field("source_node_id", source_label, source);
-        }
-        presentation.bound_metadata();
+            .unwrap_or_else(|| match language {
+                crate::config::UiLanguage::Ja => "直近の理由は保存記録で確認してください".into(),
+                crate::config::UiLanguage::En => {
+                    "See the saved record for the most recent reason".into()
+                }
+            });
+        block.source_exact = false;
     }
+    // These explicitly named projection fields are DB references, not JSON
+    // pointers into the immutable event's raw body. Copy preserves full values.
+    let mut field = |key: &str, label: &str, value: String| {
+        presentation.fields.push(PresentationField {
+            value_omitted: false,
+            key: format!("/saved_model_failures/{key}"),
+            label: label.into(),
+            value,
+            display: None,
+        })
+    };
+    let (count_label, attempt_label, reason_label, source_label) = match language {
+        crate::config::UiLanguage::Ja => (
+            "再開前の保存済みモデル失敗",
+            "直近の失敗のAttempt ID",
+            "直近の保存理由",
+            "直近の失敗原文",
+        ),
+        crate::config::UiLanguage::En => (
+            "Saved model failures before resume",
+            "Latest failed attempt ID",
+            "Latest saved reason",
+            "Source node for latest failure",
+        ),
+    };
+    field("count", count_label, saved.count.to_string());
+    field("attempt_id", attempt_label, saved.attempt);
+    if let Some(reason) = saved.reason {
+        field("error/message", reason_label, reason.detail);
+    }
+    if let Some(source) = saved.source {
+        field("source_node_id", source_label, source);
+    }
+    presentation.bound_metadata();
 }
 
 #[cfg(test)]
