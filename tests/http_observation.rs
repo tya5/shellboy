@@ -103,6 +103,8 @@ async fn header_deadline_records_source_consumption_without_claiming_peer_delive
     server.abort();
     let _ = server.await;
 }
+/// The header/body deadline boundary is witnessed on a controlled clock in
+/// `model::http::deadline` (`header_deadline_does_not_cut_post_header_silence`).
 #[tokio::test]
 async fn successful_response_records_header_latency() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
