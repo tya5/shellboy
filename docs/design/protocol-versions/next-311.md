@@ -69,3 +69,11 @@ budget fails with `InputLimit`; it is not returned as a complete observation.
 `owed_by_thread_id` using AND. `owed_by_thread_id` selects unnamed duties and
 still conflicts with a named `to`. Continuations bind to the whole filter;
 the typed response filter echo still omits the named recipient itself.
+
+## Saved hold kinds
+
+`held_by` (on `message.get` and window pending rows) also reports the saved,
+verified hold reasons `previous_instance_interrupted` and
+`terminal_before_path_admission` as their own kinds, like `run_completion`
+and `recovery_wait`; neither carries an execution ID. `unknown` remains only
+for unresolved live evidence.

@@ -718,7 +718,7 @@ condition or readback reports `applied`; neither means the model replied. On
 timeout, read `held_by`. If intervention is still needed and `kind` is
 `foreground_shell`, call `shellboy shell background --execution EXECUTION_ID`
 with only the ID in that fact. Never guess from a shell list or use a replacement
-ID. For `response_generation`, `run_completion`, `recovery_wait`, `stopping`, `unknown`, or no hold fact, do not background.
+ID. For `response_generation`, `run_completion`, `recovery_wait`, `stopping`, `interrupted`, `unknown`, or no hold fact, do not background.
 `requested: true` acknowledges the exact request; it does not prove the wait
 released or the message applied. Confirm application by exact-message wait or
 read, not by repeating Send or Background. The launched process keeps its Run
