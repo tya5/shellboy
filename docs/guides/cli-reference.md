@@ -746,8 +746,9 @@ state. In every mode, each owner wait is one wait for the rest of `--timeout-ms`
 (never sliced or re-armed), and a wait the owner reports `interrupted` (for
 example input for the calling Thread when exec runs in a model shell, or owner
 shutdown) ends exec's observation: it exits 5 `interrupted` with the owner's
-reason, naming the Run, Turn or reply duty that is still open, and stops
-nothing. Resume with `shellboy wait` on the reported IDs. `turn-end` sends an ordinary message and waits
+reason, naming the Run, Turn or reply duty that was still open, and stops
+nothing itself. Once the owner is available, inspect or resume on the reported
+IDs (for example with `shellboy wait`). `turn-end` sends an ordinary message and waits
 for the assigned Turn; `run-end` sends an ordinary message and waits for the
 assigned Run, reading its last Turn's end message. An existing Turn can handle
 other input; a Run can continue into later Turns and wait for owned work. Neither

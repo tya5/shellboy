@@ -1252,11 +1252,31 @@ async fn reply_state(fixture: &Fixture, duty: &str) -> String {
         .await
         .unwrap()
 }
-/// #441: input for the Thread whose shell runs exec interrupts the reply wait.
-/// exec exits 5 naming the state from the wait's own snapshot (the duty was
-/// reopened after exec read it) and leaves the duty open.
+/// The latest shell tool result in a model request: its exit code and exec's
+/// typed stderr diagnostic.
+fn exec_tool_result(body: &Value) -> (i64, Value) {
+    let result: Value = body["input"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .rev()
+        .find(|item| item["type"] == "function_call_output")
+        .and_then(|item| serde_json::from_str(item["output"].as_str()?).ok())
+        .unwrap_or_else(|| panic!("no tool result in {body}"));
+    let diagnostic = result["output"]
+        .as_str()
+        .unwrap()
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .find(|line| line["command"] == "exec")
+        .unwrap_or_else(|| panic!("no exec diagnostic in {result}"));
+    (result["exit_code"].as_i64().unwrap(), diagnostic)
+}
+/// #441: input for the Thread whose shell runs exec interrupts the reply wait
+/// after the duty was reopened; exec exits 5 `interrupted` for that message
+/// and the duty stays open.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn reply_mode_interruption_names_the_snapshot_state_and_leaves_the_duty_open() {
+async fn reply_mode_interruption_after_a_reopen_leaves_the_duty_open() {
     let mut fixture = Fixture::new().await;
     let created = fixture
         .control
@@ -1374,9 +1394,10 @@ async fn reply_mode_interruption_names_the_snapshot_state_and_leaves_the_duty_op
         .await;
     assert!(input.ok, "{:?}", input.error);
     let after = model_request(&mut fixture).await;
-    let body = after.body.to_string();
-    assert!(body.contains("interrupted"), "{body}");
-    assert!(body.contains("while the reply duty is pending"), "{body}");
+    let (exit, diagnostic) = exec_tool_result(&after.body);
+    assert_eq!(exit, 5, "{diagnostic}");
+    assert_eq!(diagnostic["status"], "interrupted", "{diagnostic}");
+    assert_eq!(diagnostic["message_id"], duty.as_str(), "{diagnostic}");
     assert_eq!(
         reply_state(&fixture, &duty).await,
         "pending",
@@ -1405,10 +1426,10 @@ async fn reply_mode_interruption_names_the_snapshot_state_and_leaves_the_duty_op
 /// #446: the Run-end and Turn-end waits follow the reply wait's rule. One
 /// wait is sent for the open target; the owner's `interrupted` (here, input for
 /// the Thread whose shell runs exec) ends exec's observation with exit 5, and
-/// the target keeps running.
+/// the target stays open.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn end_mode_interruption_sends_one_wait_and_leaves_the_target_running() {
-    for mode in ["turn-end", "run-end"] {
+    for (mode, field) in [("turn-end", "turn_id"), ("run-end", "run_id")] {
         let mut fixture = Fixture::new().await;
         let created = fixture
             .control
@@ -1463,46 +1484,18 @@ async fn end_mode_interruption_sends_one_wait_and_leaves_the_target_running() {
             .await;
         assert!(input.ok, "{:?}", input.error);
         let after = model_request(&mut fixture).await;
-        // The exec tool result: exit 5 and exec's typed stderr diagnostic.
-        let result: Value = after.body["input"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .rev()
-            .find(|item| item["type"] == "function_call_output")
-            .and_then(|item| serde_json::from_str(item["output"].as_str()?).ok())
-            .unwrap_or_else(|| panic!("{mode}: no tool result in {}", after.body));
-        assert_eq!(result["exit_code"], 5, "{mode}: {result}");
-        let diagnostic = result["output"]
-            .as_str()
-            .unwrap()
-            .lines()
-            .filter_map(|line| serde_json::from_str::<Value>(line).ok())
-            .find(|line| line["command"] == "exec")
-            .unwrap_or_else(|| panic!("{mode}: no exec diagnostic in {result}"));
+        let (exit, diagnostic) = exec_tool_result(&after.body);
+        assert_eq!(exit, 5, "{mode}: {diagnostic}");
         assert_eq!(diagnostic["status"], "interrupted", "{mode}: {diagnostic}");
-        // Exactly one wait went to the owner, for the exact open target.
-        let targets: Vec<(String, &str)> = fixture
-            .wait_conditions
-            .lock()
-            .unwrap()
-            .iter()
-            .filter_map(|condition| match condition {
-                WaitCondition::TurnCompleted { turn_id } => Some((turn_id.clone(), "turn")),
-                WaitCondition::RunEnded { run_id } => Some((run_id.clone(), "run")),
-                _ => None,
-            })
-            .collect();
-        let [(target, table)] = targets.as_slice() else {
-            panic!("{mode}: one Run-end or Turn-end wait expected, got {targets:?}");
-        };
-        let field = if *table == "turn" {
-            "turn_id"
-        } else {
-            "run_id"
+        // Exactly one wait went to the owner, of the kind the mode requires.
+        let sent = fixture.wait_conditions.lock().unwrap().clone();
+        let (target, kind) = match (mode, sent.as_slice()) {
+            ("turn-end", [WaitCondition::TurnCompleted { turn_id }]) => (turn_id.clone(), "turn"),
+            ("run-end", [WaitCondition::RunEnded { run_id }]) => (run_id.clone(), "run"),
+            _ => panic!("{mode}: one {field} wait expected, got {sent:?}"),
         };
         assert_eq!(diagnostic[field], target.as_str(), "{mode}: {diagnostic}");
-        let (id, kind) = (target.clone(), *table);
+        let id = target.clone();
         let (thread, state): (String, String) = fixture
             .owner
             .db
@@ -1517,7 +1510,7 @@ async fn end_mode_interruption_sends_one_wait_and_leaves_the_target_running() {
             .unwrap();
         assert_eq!(thread, recipient, "{mode}: the recipient's {kind}");
         let live = if kind == "turn" { "running" } else { "live" };
-        assert_eq!(state, live, "{mode}: the target keeps running");
+        assert_eq!(state, live, "{mode}: the target stays open");
         after.reply.send(answer("Handled.")).unwrap();
         held.reply.send(answer(r#"{"value":"done"}"#)).unwrap();
         fixture.close().await;
