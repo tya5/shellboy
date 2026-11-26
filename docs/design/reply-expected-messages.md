@@ -73,7 +73,9 @@ that owns them.
   held answer (stopping Thread) or an untargeted outcome therefore belongs to the
   later Run that admits it, never to the stopping Run.
 - **Outcome notice until admission.** A `reply_outcome` event stays untargeted
-  (`target_run_id` empty) until a Run admits it; adoption then records that Run.
+  (`target_run_id` empty) until a Run admits it; the one notification settlement
+  (`message_delivery::settle_notification_tx`, used by adoption and by Turn
+  interruption) then records that Run.
   Its delivery to the live or newly started Run is only the wake. If that Run
   stops first, Turn preparation of the Thread's next runnable Turn offers every
   unadmitted outcome (index `reply_outcome_unadmitted`), with no new wake or
