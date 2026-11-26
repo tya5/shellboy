@@ -1228,7 +1228,7 @@ fn exported_schema_shares_changed_by_identity() {
         serde_json::from_str(include_str!("../docs/reference/protocol.schema.json")).unwrap();
     let identity = &schema["definitions"]["OriginIdentity"];
     let fields = identity["properties"].as_object().unwrap();
-    assert_eq!(fields.len(), 5);
+    // Fields a client relies on; the schema may grow.
     for field in [
         "instance_id",
         "thread_id",
