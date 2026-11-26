@@ -529,8 +529,10 @@ that wait's snapshot of the message the same way. A wait that times out with the
 duty open is exec's deadline result (exit 5 `timeout`); an `interrupted` wait
 (input for the calling Thread) ends exec's observation with exit 5
 `interrupted`, leaving the target and its duty untouched. Both name the state
-from that snapshot. A wait result the owner never produces for this condition,
-including a missing snapshot, is `owner_error` (exit 6). Exec returns the reply
+from that snapshot. Exec dispatches on the wait's status first: only `satisfied` returns the
+ended duty from its snapshot; every other result (`unavailable`, `recovery_wait`,
+or a snapshot that is missing or contradicts the status) is `owner_error`
+(exit 6). Exec returns the reply
 node once `replied`; a terminal state without a reply (`ignored`, `cancelled`,
 `recipient_deleted`) exits 4 `reply_unavailable`, naming the state. No timer or
 owner behaviour is added.
