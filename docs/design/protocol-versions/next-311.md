@@ -180,10 +180,14 @@ raw retention generation, managed-file deletion) after the cursor. They have no
 Thread and ignore `thread_ids`.
 
 `include_output` (CLI `events wait --output`) adds `output`, at most 64
-`{thread_id, execution_id, seq}` entries per page: each execution's latest
-committed output batch after the cursor, filtered by `thread_ids`. Output bytes
+`{thread_id, execution_id, output_at, seq}` entries per page: each execution's
+latest committed output batch after the cursor, filtered by `thread_ids`.
+`output_at` is the batch's saved receive time (`shell.get` `last_output_at`). Output bytes
 stay on `shell.read` and `wait`. Evicting one of the 4096 retained executions
 raises the existing floor, so an older cursor gets `resync_required`.
 
 Owner notifications that concern one Thread are now ordinary `changes`
-entries for it. No operation, field or capability is added for owner state.
+entries for it. A runtime receipt's reservation and settlement are announced
+through the matching mark (`storage.collect`: retention; `config.set` and
+credentials: config; index operations: index) or through its target's Thread.
+No operation, field or capability is added for owner state.

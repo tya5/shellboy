@@ -840,11 +840,17 @@ deletion (availability of saved data). Neither carries a value, and both ignore 
 Thread filter; readers reread `index.status` or the affected saved reads. Change
 entries also cover owner work state: every owner notification that concerns one
 Thread (a pending receipt, a finished compaction queue, a running foreground shell)
-goes through `Control::changed`. Owner stop reaches clients as the typed disconnect.
+goes through `Control::changed`. A runtime receipt announces its reservation and its
+settlement the same way: `storage.collect` through `retention_changed`, `config.set` and
+the credential operations through `config_changed`, index operations through
+`index_changed`, and the rest through the Thread their saved target belongs to (a
+shell's or Turn's Thread, the deleted Threads, a schedule's Thread, a wait's caller).
+Owner stop reaches clients as the typed disconnect.
 
-`include_output` (CLI `--output`) adds `output`: up to 64 `{thread_id, execution_id, seq}`
-entries in seq order, each the latest committed output batch of one shell execution
-after the cursor, filtered by `thread_ids`. It is written after each output commit
+`include_output` (CLI `--output`) adds `output`: up to 64 `{thread_id, execution_id,
+output_at, seq}` entries in seq order, each the latest committed output batch of one shell
+execution after the cursor, filtered by `thread_ids`. `output_at` is that batch's saved
+receive time, the value `shell.get` reports as `last_output_at` (RFC 3339). It is written after each output commit
 (`driver/shell_output.rs`) and never carries output bytes; read them with `shell.read`
 or `wait` `shell_output`. Entries share the clock: at most 4096 executions are kept,
 evicting the oldest raises the same floor (`resync_required`), and a page that stops at

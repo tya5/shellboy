@@ -3674,6 +3674,9 @@ async fn run_client(
                             }
                         }
                         // A gap can hide a mark, so a reload rereads what the marks cover.
+                        if resync || page.config_changed || page.index_changed || page.retention_changed {
+                            management.inspection.owner_mark();
+                        }
                         if resync || page.index_changed {
                             management.inspection.index_changed();
                             draft_pause_dirty = true;
@@ -3693,7 +3696,7 @@ async fn run_client(
                         if let Some(output) = page.output.as_deref().filter(|output| !output.is_empty()) {
                             browser.output(output);
                             management.inspection.output(output);
-                            if let Some(value) = live_output.output(output, std::time::Instant::now()) {
+                            if let Some(value) = live_output.output(output, std::time::Instant::now(), chrono::Utc::now()) {
                                 update(&updates, value).await;
                             }
                         }

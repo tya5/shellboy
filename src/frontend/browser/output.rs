@@ -36,6 +36,7 @@ mod tests {
         crate::protocol::EventOutput {
             thread_id: "owner".into(),
             execution_id: execution.into(),
+            output_at: "2026-11-27T00:00:00Z".into(),
             seq: 1,
         }
     }

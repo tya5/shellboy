@@ -69,6 +69,10 @@ fn model_list_error(error: crate::model::ModelError) -> ApiError {
     }
     reported.details(details)
 }
+pub(super) enum Settlement {
+    Mark(super::ChangeMark),
+    Threads(Vec<String>),
+}
 #[derive(Clone)]
 pub(super) struct RuntimeOperation {
     pub(super) fingerprint: Value,
@@ -142,6 +146,7 @@ impl Control {
             tokio::spawn(async move {
                 let operation_id = request.operation_id.clone();
                 let mut owns_stop = false;
+                let mut settlement = None;
                 let result = match control
                     .store
                     .reserve_runtime(request.clone(), caller.clone())
@@ -155,7 +160,11 @@ impl Control {
                     Err(error) => Err(error),
                     Ok(db::RuntimeReservation::New(_)) => {
                         // The pending receipt is durable before external work.
-                        control.changed.notify_waiters();
+                        let target = control
+                            .settlement(&request.command, caller.as_ref())
+                            .await;
+                        control.announce(&target);
+                        settlement = Some(target);
                         // Saved results never create a new reply-grace effect.
                         // Publish ownership before the action can save stopping.
                         if let Some(execution) = &deferred_shell_stop {
@@ -237,7 +246,10 @@ impl Control {
                     control.live.stop_shell(&execution).await;
                 }
                 drop(operations);
-                control.changed.notify_waiters();
+                match &settlement {
+                    Some(target) => control.announce(target),
+                    None => control.changed.notify_waiters(),
+                }
             });
             receive
         };
@@ -253,6 +265,96 @@ impl Control {
                     "Runtime operation result is uncertain; inspect its saved intent",
                 )
             })?;
+        }
+    }
+
+    /// Where a runtime receipt's reservation and settlement are announced: an
+    /// owner-level operation through its existing mark, the rest through the
+    /// Thread its saved target belongs to.
+    async fn settlement(&self, command: &Command, caller: Option<&Origin>) -> Settlement {
+        use super::ChangeMark;
+        let lookup = |sql: String, id: String| async move {
+            use rusqlite::OptionalExtension;
+            self.store
+                .database
+                .call(move |db| {
+                    Ok(db
+                        .query_row(&sql, [id], |row| row.get::<_, Option<String>>(0))
+                        .optional()?
+                        .flatten())
+                })
+                .await
+                .map_err(storage_error)
+        };
+        let shell = |id: &str| {
+            lookup(
+                format!(
+                    "SELECT {} {} WHERE s.id=?1",
+                    output::SHELL_THREAD_ID,
+                    output::SHELL_THREAD_JOIN
+                ),
+                id.to_owned(),
+            )
+        };
+        let schedule = |id: &str| {
+            lookup(
+                "SELECT thread_id FROM schedule WHERE id=?1".into(),
+                id.to_owned(),
+            )
+        };
+        let thread = match command {
+            Command::StorageCollect(_) => return Settlement::Mark(ChangeMark::Retention),
+            Command::ConfigSet(_) | Command::CredentialsSet(_) | Command::CredentialsClear(_) => {
+                return Settlement::Mark(ChangeMark::Config);
+            }
+            Command::IndexBackfill(_)
+            | Command::IndexRetry(_)
+            | Command::IndexRebuild(_)
+            | Command::IndexProbe(_)
+            | Command::IndexShrink(_)
+            | Command::IndexRemove(_) => return Settlement::Mark(ChangeMark::Index),
+            Command::ThreadDelete(args) => return Settlement::Threads(vec![args.thread_id.clone()]),
+            Command::ThreadDeleteSet(args) => return Settlement::Threads(args.thread_ids.clone()),
+            Command::ShellWrite(args) => shell(&args.execution_id).await,
+            Command::ShellEof(args) | Command::ShellStop(args) | Command::ShellBackground(args) => {
+                shell(&args.execution_id).await
+            }
+            Command::TurnInterrupt(args) => {
+                lookup(
+                    "SELECT thread_id FROM turn WHERE id=?1".into(),
+                    args.turn_id.clone(),
+                )
+                .await
+            }
+            Command::ScheduleRemove(args) => schedule(&args.schedule_id).await,
+            Command::ServiceStop(args) | Command::ServiceRemove(args) => {
+                schedule(&args.service_id).await
+            }
+            // A wait belongs to its caller; other runtime receipts name no Thread.
+            _ => Ok(caller.map(|origin| origin.thread_id.clone())),
+        };
+        match thread {
+            Ok(thread) => Settlement::Threads(thread.into_iter().collect()),
+            Err(error) => {
+                if error.is_storage_failure() {
+                    self.fail_storage().await;
+                }
+                Settlement::Threads(Vec::new())
+            }
+        }
+    }
+    fn announce(&self, settlement: &Settlement) {
+        match settlement {
+            Settlement::Mark(mark) => {
+                self.change_clock.record_mark(*mark);
+                self.changed.notify_waiters();
+            }
+            Settlement::Threads(threads) if threads.is_empty() => self.changed.notify_waiters(),
+            Settlement::Threads(threads) => {
+                for thread in threads {
+                    self.changed(thread);
+                }
+            }
         }
     }
 

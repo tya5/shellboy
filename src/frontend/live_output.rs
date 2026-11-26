@@ -92,22 +92,33 @@ impl Observation {
         }
         Ok(())
     }
-    /// Committed output entries for the visible executions of this Thread. `at` is
-    /// when this client received them: the latest local output observation, which a
-    /// newer saved output time supersedes. The open execution's preview re-reads.
+    /// Committed output entries for the visible executions of this Thread. Each
+    /// entry's saved output time, read against the wall clock sampled with
+    /// `instant`, gives the output age; the open execution's preview re-reads.
     pub fn output(
         &mut self,
         output: &[crate::protocol::EventOutput],
-        at: std::time::Instant,
+        instant: std::time::Instant,
+        wall: chrono::DateTime<chrono::Utc>,
     ) -> Option<UiUpdate> {
         let scope = self.scope.as_ref()?;
         let mut observed = false;
         for entry in output.iter().filter(|entry| {
             entry.thread_id == scope.thread && scope.executions.contains(&entry.execution_id)
         }) {
-            self.seen.insert(entry.execution_id.clone(), at);
             self.dirty |= scope.open.as_ref() == Some(&entry.execution_id);
-            observed = true;
+            let Ok(saved) = chrono::DateTime::parse_from_rfc3339(&entry.output_at) else {
+                continue;
+            };
+            // A saved time at or after the sample is no older than the sample.
+            let age = wall.signed_duration_since(saved).to_std().unwrap_or_default();
+            let Some(at) = instant.checked_sub(age) else {
+                continue;
+            };
+            if self.seen.get(&entry.execution_id).is_none_or(|old| *old < at) {
+                self.seen.insert(entry.execution_id.clone(), at);
+                observed = true;
+            }
         }
         observed.then(|| UiUpdate::LiveWorkObserved {
             thread_id: scope.thread.clone(),
@@ -212,27 +223,52 @@ pub(super) async fn read(
 #[cfg(test)]
 mod tests {
     use super::*;
+    const WALL: &str = "2026-11-27T00:00:10Z";
+    fn wall() -> chrono::DateTime<chrono::Utc> {
+        WALL.parse().unwrap()
+    }
     fn entry(thread: &str, execution: &str) -> crate::protocol::EventOutput {
+        entry_at(thread, execution, "2026-11-27T00:00:07Z")
+    }
+    fn entry_at(thread: &str, execution: &str, at: &str) -> crate::protocol::EventOutput {
         crate::protocol::EventOutput {
             thread_id: thread.into(),
             execution_id: execution.into(),
+            output_at: at.into(),
             seq: 1,
         }
     }
     #[test]
-    fn output_snapshots_keep_previously_observed_other_executions() {
+    fn output_age_comes_from_the_saved_time_and_snapshots_keep_other_executions() {
         let mut view = Observation::default();
         view.observe("t".into(), 1, 1, vec!["a".into(), "b".into()], None)
             .unwrap();
-        let at = std::time::Instant::now();
-        view.output(&[entry("t", "a")], at).unwrap();
-        let Some(UiUpdate::LiveWorkObserved { markers, .. }) = view.output(&[entry("t", "b")], at)
-        else {
+        let sample = std::time::Instant::now();
+        view.output(&[entry("t", "a")], sample, wall()).unwrap();
+        let Some(UiUpdate::LiveWorkObserved { markers, .. }) = view.output(
+            &[entry_at("t", "b", "2026-11-27T00:00:09Z")],
+            sample,
+            wall(),
+        ) else {
             panic!()
         };
-        assert_eq!(markers, vec![("a".into(), at), ("b".into(), at)]);
-        assert!(view.output(&[entry("other", "a")], at).is_none());
-        assert!(view.output(&[], at).is_none());
+        let three = std::time::Duration::from_secs(3);
+        let one = std::time::Duration::from_secs(1);
+        assert_eq!(markers, vec![("a".into(), sample - three), ("b".into(), sample - one)]);
+        assert!(
+            view.output(&[entry("t", "a")], sample, wall()).is_none(),
+            "an output time already shown changes nothing"
+        );
+        assert!(view.output(&[entry("other", "a")], sample, wall()).is_none());
+        assert!(view.output(&[entry_at("t", "a", "not a time")], sample, wall()).is_none());
+        let Some(UiUpdate::LiveWorkObserved { markers, .. }) = view.output(
+            &[entry_at("t", "a", "2026-11-27T00:00:11Z")],
+            sample,
+            wall(),
+        ) else {
+            panic!()
+        };
+        assert_eq!(markers[0], ("a".into(), sample), "a later saved time is not older than now");
     }
     #[test]
     fn scope_rate_limit_markers_and_cancellation_do_not_leak_into_another_execution() {
@@ -242,7 +278,7 @@ mod tests {
             .unwrap();
         assert!(view.deadline().is_none());
         assert!(
-            view.output(&[entry("t", "foreign")], std::time::Instant::now())
+            view.output(&[entry("t", "foreign")], std::time::Instant::now(), wall())
                 .is_none()
         );
         view.observe("t".into(), 1, 2, vec!["e".into()], Some("e".into()))
@@ -255,12 +291,12 @@ mod tests {
         assert!(view.take(now + Duration::from_millis(499)).is_none());
         let next = view.take(now + Duration::from_millis(500)).unwrap();
         let at = std::time::Instant::now();
-        assert!(view.output(&[entry("t", "next")], at).is_some());
+        assert!(view.output(&[entry("t", "next")], at, wall()).is_some());
         assert!(view.complete(&next));
         assert!(view.take(now + Duration::from_millis(999)).is_none());
         assert!(view.take(now + Duration::from_millis(1000)).is_some());
         view.observe("t".into(), 1, 4, vec![], None).unwrap();
         assert!(view.deadline().is_none());
-        assert!(view.output(&[entry("t", "next")], at).is_none());
+        assert!(view.output(&[entry("t", "next")], at, wall()).is_none());
     }
 }

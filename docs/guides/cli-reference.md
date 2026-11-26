@@ -422,7 +422,7 @@ on a timer and read them only after a hint.
 | `config_changed` | A global config file write is newer than this caller's cursor; reread with `config get`. This mark has no Thread ID and does not depend on the Thread filter |
 | `index_changed` | Saved index state or the index pause changed after this cursor; reread with `index status`. Same kind of global mark as `config_changed` |
 | `retention_changed` | GC made saved data unavailable (history source, raw shell output or a managed file) after this cursor; reread what you display. Same kind of global mark |
-| `output` | Only with `--output`; up to 64 `{thread_id, execution_id, seq}`, one per shell execution whose output was committed after the cursor (latest only). IDs, never output; read it with `shell read` |
+| `output` | Only with `--output`; up to 64 `{thread_id, execution_id, output_at, seq}`, one per shell execution whose output was committed after the cursor (latest only). `output_at` is the saved time of that output (`last_output_at` in `shell get`). Never the output itself; read it with `shell read` |
 | `live_text` | Only with `--text`; non-reasoning answer deltas only, never reasoning content |
 | `reasoning_activity` | Only with `--reasoning-activity`; bounded attempt metadata, never reasoning content |
 
