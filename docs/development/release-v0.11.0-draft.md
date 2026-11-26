@@ -21,7 +21,7 @@ Protocol 5 requires an exact-version handshake: protocol-4 clients and owners ca
 - Compaction avoids repeated oversized-summary retries and repeated spill near the trigger (#251, #271); Thread inspection labels retained compaction facts as incomplete when an expired restore may be missing (#264).
 - Durable status attempts expose ordered `response_nodes` references for saved assistant responses (#279). Each ref has a node ID and nullable provider item ID and phase; `history.window` can read the saved node while it remains on the selected path. At most 256 candidates and 64 refs are examined/published. `response_nodes_truncated=true` means coverage is incomplete: an empty truncated list does not prove there was no saved response. There is no continuation cursor.
 - `usage get --group-by model` groups saved attempts by model; summary usage without a saved model is not attributed (#272). Capacity reporting shows configured thresholds (#268).
-- Global instructions can be configured for all Threads (#270). History exposes execution descriptions, and the core guides no longer point to Studio Apps. Other documentation and bounded-read fixes improve inspection.
+- Global instructions can be configured for all Threads (#270). History exposes execution descriptions. Other documentation and bounded-read fixes improve inspection.
 
 ## Release Scope
 

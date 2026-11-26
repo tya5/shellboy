@@ -22,7 +22,7 @@ default; `--resume-recovery` explicitly resumes the same Turn and records a dist
 `message reply` is marked as human input when delivered back to its model sender, so
 it resumes that sender's recovery Turn; model-origin replies remain non-human and held.
 Tests: `tests/reply.rs` covers human/model reply behavior; `tests/control_db.rs` checks
-external CLI actor provenance. Focused local tests passed. Final SHA `9a07276e5a5344037829b4670cbac32486cb6242` passed default CI `42397206194` and all-OS CI `42397208374`. W8 P1/P2 addressed; Studio/provider behavior not exercised.
+external CLI actor provenance. Focused local tests passed. Final SHA `9a07276e5a5344037829b4670cbac32486cb6242` passed default CI `42397206194` and all-OS CI `42397208374`. W8 P1/P2 addressed; IPC client/provider behavior not exercised.
 
 ## Secretary stack memo (docs only; on branch doc/secretary-stack)
 
@@ -5220,8 +5220,7 @@ Not claimed: a real terminal run (macOS Option-as-Meta for Alt+U is unverified).
 `src/config_edit.rs`, `src/control/config_ops.rs`, new dependency `toml_edit` (D-266). No field is hot-applied;
 every changed field reports that it needs a restart. There is no
 standalone edit path and no TUI form. Independent review fixes are on `issue-266/config-rw-2`. Resume point: exact-tip default and all-OS CI, then integration. The #265
-`config.get` item is covered by this. shellboy-studio has not been changed to use it.
-`config.get` item is covered by this. shellboy-web has not been changed to use it.
+`config.get` item is covered by this.
 
 ## #269 Connection setup, stages A and B
 
@@ -5232,9 +5231,9 @@ Implemented through the owner: `credentials.set`, `credentials.clear`, `connecti
 or dependency (D-269). A key stored now applies to the next request; a new or changed connection still needs an owner
 restart. Stage C (applying `connections` without a restart) is investigated and planned in D-269, not implemented.
 Branch `issue-269/connection-setup-4` (rebased on origin/main after #243 E3; `api_key_header` no longer needs `api_key_env`; review fixes applied); not pushed to main, no PR. Resume point: exact-tip default and all-OS CI, then
-integration, then the Studio screen against the shapes in the protocol design.
+integration.
 Not claimed: Windows behaviour (permissions, `ReplaceFileW` on `credentials.toml`), a real terminal refusing a typed
-key, a real provider, shellboy-web/Studio use.
+key, a real provider, IPC client use.
 
 ## History execution descriptions
 
@@ -5247,7 +5246,7 @@ Adds atomic generations to the existing shared HTTP registry, retains in-flight 
 identity, and adopts ordinary connections/defaults under `config_write` after durable file replacement. TUI uses
 registry snapshots; missing Run connections use `config_invalid` recovery. No worker/table/queue additions.
 Tests and final-tip CI are pending; this entry supersedes the historical A+B-only stage-C-not-implemented status
-only after validation reported in acceptance. Studio response changes are specified in the protocol design.
+only after validation reported in acceptance. Client-visible response changes are specified in the protocol design.
 
 ### #269 stage C focused checks (2026-11-07)
 
@@ -5280,8 +5279,7 @@ scan. Focused integration regression passed. The read-only language inventory
 scanned 416 files; it reports 16 pre-existing pending literals in unrelated
 files (the fail-on-pending gate remains red). Full test type-check and default/all-OS
 CI are pending. Per-Thread storage and usage-by-model remain outside this bounded
-change. Studio's pinned v0.10.0 copy still labels config reads unsupported;
-current Shellboy main has `config.get`.
+change.
 ### #267 bounded index reclamation takeover
 
 W2's uncommitted reclaim work was inspected and selectively reused in a new owned task worktree. The revised design
@@ -10502,8 +10500,7 @@ Not claimed: a real terminal run (macOS Option-as-Meta for Alt+U is unverified).
 `src/config_edit.rs`, `src/control/config_ops.rs`, new dependency `toml_edit` (D-266). No field is hot-applied;
 every changed field reports that it needs a restart. There is no
 standalone edit path and no TUI form. Independent review fixes are on `issue-266/config-rw-2`. Resume point: exact-tip default and all-OS CI, then integration. The #265
-`config.get` item is covered by this. shellboy-studio has not been changed to use it.
-`config.get` item is covered by this. shellboy-web has not been changed to use it.
+`config.get` item is covered by this.
 
 ## #269 Connection setup, stages A and B
 
@@ -10514,9 +10511,9 @@ Implemented through the owner: `credentials.set`, `credentials.clear`, `connecti
 or dependency (D-269). A key stored now applies to the next request; a new or changed connection still needs an owner
 restart. Stage C (applying `connections` without a restart) is investigated and planned in D-269, not implemented.
 Branch `issue-269/connection-setup-4` (rebased on origin/main after #243 E3; `api_key_header` no longer needs `api_key_env`; review fixes applied); not pushed to main, no PR. Resume point: exact-tip default and all-OS CI, then
-integration, then the Studio screen against the shapes in the protocol design.
+integration.
 Not claimed: Windows behaviour (permissions, `ReplaceFileW` on `credentials.toml`), a real terminal refusing a typed
-key, a real provider, shellboy-web/Studio use.
+key, a real provider, IPC client use.
 
 ## History execution descriptions
 
@@ -10529,7 +10526,7 @@ Adds atomic generations to the existing shared HTTP registry, retains in-flight 
 identity, and adopts ordinary connections/defaults under `config_write` after durable file replacement. TUI uses
 registry snapshots; missing Run connections use `config_invalid` recovery. No worker/table/queue additions.
 Tests and final-tip CI are pending; this entry supersedes the historical A+B-only stage-C-not-implemented status
-only after validation reported in acceptance. Studio response changes are specified in the protocol design.
+only after validation reported in acceptance. Client-visible response changes are specified in the protocol design.
 
 ### #269 stage C focused checks (2026-11-07)
 
@@ -10562,8 +10559,7 @@ scan. Focused integration regression passed. The read-only language inventory
 scanned 416 files; it reports 16 pre-existing pending literals in unrelated
 files (the fail-on-pending gate remains red). Full test type-check and default/all-OS
 CI are pending. Per-Thread storage and usage-by-model remain outside this bounded
-change. Studio's pinned v0.10.0 copy still labels config reads unsupported;
-current Shellboy main has `config.get`.
+change.
 ### #267 bounded index reclamation takeover
 
 W2's uncommitted reclaim work was inspected and selectively reused in a new owned task worktree. The revised design

@@ -2,7 +2,7 @@
 
 Status: SOURCE/DESIGN proposal for independent S6 review. Not adopted for payload,
 protocol, schema or runtime implementation. One implementation author may be
-assigned only after leader adoption. Does not reopen Studio #24/v0.2.4 or block
+assigned only after leader adoption. Does not block
 Core #301/P1 closure. No compatibility aliases before 1.0.
 
 ## Source baseline and existing implementation
@@ -10,9 +10,7 @@ Core #301/P1 closure. No compatibility aliases before 1.0.
 Core fetched origin/main and design parent:
 `05e358703c7c407c26ef9c7dafeb8714d71e95ef` (#301 baseline).
 Branch `docs/297-sender-design`, isolated worktree `core-297-sender-design`.
-No existing *297* branch existed before creation. Studio source inspected at
-local origin/main `57bcc77d6255036368b52b01fbbb8bfc24dce43a`; no assumption that
-an older Studio checkout contains these files.
+No existing *297* branch existed before creation.
 
 | Existing contract | Source | Consequence |
 | --- | --- | --- |
@@ -23,12 +21,11 @@ an older Studio checkout contains these files.
 | Request/reply durable links | src/control/reply.rs: reply; src/control/db.rs: message_details; protocol.rs MessageDetails | Original request receipt stores expect_reply, reply.state/node_id/by; delivered reply receipt stores reply_to=original message ID. message.get already exposes these; history provenance does not expose request/reply metadata yet. |
 | Reply without delivery receipt | src/control/reply.rs: target=None branch | A reply to a human/external/unknown sender is a separate user node attached to original receipt.reply.node_id/by, not necessarily a new send receipt or selected-path entry. Existing provenance has a reverse fallback for its sender. Do not invent selection membership. |
 | Admission notices and replay (pre-#297) | src/control/reply.rs: admission_notice_tx/notice_tx; src/control/message_delivery.rs; control/receipt.rs | Model-facing notices retain existing message IDs/command/reply context. Stored developer text is not a UI join contract. Operation replay returns saved outcome or operation_expired, never reruns mutation; path_admission prevents duplicate notices. |
-| Studio attribution already exists | web/data/src/sender.ts, protocol.ts HistoryItem.provenance; web/ui-core/src/sender-titles.ts | Reuse senderFact; bounded title resolver is currently16 candidates/attempts and one flight. #25 first8 is display fallback length, NOT an8-request resolver budget. |
 
 Existing sender persistence/history projection is substantially implemented by #59.
 The remaining Core #297 work is ONE exact structured request/reply projection and
 its tests/documentation; sender DTO fields and notice production must not be
-reimplemented. Studio title/header/styling is #25, not a Core prerequisite.
+reimplemented.
 
 ## Two concrete designs
 
@@ -143,24 +140,14 @@ control; register any new integration module in tests/integration/main.rs. A fut
 author runs only focused Rust checks through rust-slot; full CI on exact adopted
 SHA is separate. This design task runs NO tests/build or installed-owner reads.
 
-## Studio #25 partition and independent gates
-
-Studio owns first8-character ID fallback when no current title, distinct restrained
-received-message styling, and request/reply labels from the new exact metadata.
-Existing senderFact/owner-scoped title cache/formatRoute are reused, not duplicated.
-Current-title header design remains current observed sender title, never recipient
-or send-time title. Append claimed label separately; unknown identity gets no
-source link. Do not enlarge the current16/oneflight resolver or add per-row RPC.
-New message metadata decoding belongs in existing strict Operations/protocol seam.
-CASE selection supplies role/labels/relationships; JSX does not parse notice text.
+## Independent gates
 
 Core author: exact metadata projection/types and bounded relation lookup, durable
-replay/window tests after adoption. Studio author: decoder + existing classifier/
-header/labels after Core contract reviewed. S6: independent SOURCE/DESIGN first,
+replay/window tests after adoption. S6: independent SOURCE/DESIGN first,
 then exact source/tests review. Leader: explicit adoption and one implementation
 author; actual existing owner Thread with interleaved received messages is a
-SEPARATE permissioned UI acceptance gate. Unit/schema/title-cache success, release
-of #24 or this document cannot satisfy it. No migration, payload implementation,
+SEPARATE permissioned UI acceptance gate. Unit/schema success or this document
+cannot satisfy it. No migration, payload implementation,
 heavy job, private DB/RPC/browser/installed owner change is authorized here.
 
 ## Adopted design detail: S6 three-condition closure
@@ -271,8 +258,6 @@ plan/byte/legacy validity controls using the actual build after adoption.
 | Public Core protocol/schema | Existing NodeProvenance + ONE MessageProvenance type, enum states and documented byte/absence contract; negotiated version/schema/generated artifacts together | Core implementation author (candidate O203522), leader protocol adoption first; no aliases |
 | Durable storage/query | Existing receipt facts only, safe expression index in new approved migration + current schema; migration40 unchanged | Same Core author, source/index/EXPLAIN/schema review before runtime |
 | Response construction | Shared exact projection and same-result serialized byte ledger; keep existing sender/typed text semantics | Same Core author; state/conflict/limit controls above |
-| Studio strict decoding | Extend existing Operations/protocol types; validate optional whole relation, reuse senderFact | Separate explicit Studio owner after Core contract fixed; no arbitrary extras as authority |
-| Studio title/style/reply labels (#25) | Existing16/oneflight title cache; first8 fallback display, claimed labels separate, exact relation labels | Studio UI author; actual owner Thread gate separate |
 | Independent review/adoption | S6 final design then exact implementation source/evidence; leader selects one runtime author | Architect remains docs owner, no foreign edits/payload/schema authority now |
 
 No payload/code/migration/test/build/installed-owner operation is performed by this

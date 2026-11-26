@@ -49,6 +49,5 @@ step. Do not call these pending steps complete from a source test.
 
 Agent shells must not install, signal, stop, restart or roll back the running owner.
 Only Claude outside the owner performs any coordinated postpublication owner
-update. Current Studio stays installed until its own release gates; Core publication
-alone is not Studio 0.2.2 rollout approval. No real provider, private user DB or
+update. No real provider, private user DB or
 installed owner was used for the author fixtures.

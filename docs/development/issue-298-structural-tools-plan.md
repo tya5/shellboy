@@ -149,7 +149,7 @@ spill legacy-only gap. Original /tmp/core298-first-*.log retained. Corrected sou
 1407616f: check PASS / unit14 PASS / window17 PASS / relations5 PASS / schema golden1
 PASS (b7461c3e). Its compaction filter matched ZERO tests, so no compaction runtime
 claim is made from that invocation; exact named producer test is run separately.
-No suite-wide, paid-provider, private DB, installed or Studio claim is implied.
+No suite-wide, paid-provider, private DB, installed or IPC client claim is implied.
 
 
 Exact producer follow-up: actual compaction named control passed 1 test in

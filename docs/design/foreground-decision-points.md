@@ -13,7 +13,7 @@ Send or ask with default delivery and keep the **message ID** returned by accept
 
 ### Typed hold fact
 
-Add optional `held_by` to `message get` and existing read projections that expose the same message's current delivery (including Studio's pending rows). Keep existing status, saved context, and hints; `held_by` is structured current evidence, not a renamed historical reason or a parse of hint text. Do not expand list scope or attach this live field to historical send/ask receipts and exports.
+Add optional `held_by` to `message get` and existing read projections that expose the same message's current delivery (including the pending-message rows that clients read). Keep existing status, saved context, and hints; `held_by` is structured current evidence, not a renamed historical reason or a parse of hint text. Do not expand list scope or attach this live field to historical send/ask receipts and exports.
 
 ```json
 {"held_by":{"kind":"foreground_shell","execution_id":"EXACT_EXECUTION_ID"}}
@@ -59,7 +59,7 @@ Reuse the existing release envelope. Use the neutral `shell_backgrounded` for ev
 
 ## Retire immediate delivery
 
-Remove `now` from new send/ask wire input, CLI options/help, and the TUI immediate-send gesture. No alias to `next`, hidden fallback, or implicit wake from ordinary input. Studio should use the message's typed fact for its pending row (#159), and offer ordinary Send and a separate explicit Background against the named execution; never auto-release on a timeout. Preserve default `next` and Revisit `complete` unchanged.
+Remove `now` from new send/ask wire input, CLI options/help, and the TUI immediate-send gesture. No alias to `next`, hidden fallback, or implicit wake from ordinary input. A client should use the message's typed fact for a pending row and offer ordinary Send and a separate explicit Background against the named execution; never auto-release on a timeout. Preserve default `next` and Revisit `complete` unchanged.
 
 Historical `now` inputs, delivery metadata, receipts and `additional_input` results stay readable and exportable. Before removing the runtime path, prove that already accepted outstanding input reaches its existing legitimate boundary and that persisted operation replay and argument identity remain lossless. Historical decode/replay is not permission to admit a fresh `now`. Do not rewrite receipts or silently convert accepted requests. Hold removal if these checks cannot be met.
 
@@ -109,7 +109,7 @@ Choose the wait interval for when it is useful to reconsider, not to impose a pr
 
 ## Independently landable units
 
-1. **Typed message readback.** Add `held_by` to the relevant live message reads without changing delivery or wake behavior. Witness exact foreground attribution, another running shell on the same Thread, generation, Revisit/recovery, application and cancellation, and stale or ambiguous live state. Studio #159 can adopt the typed pending-row line independently. Guide: interpret each variant and do not guess a target.
+1. **Typed message readback.** Add `held_by` to the relevant live message reads without changing delivery or wake behavior. Witness exact foreground attribution, another running shell on the same Thread, generation, Revisit/recovery, application and cancellation, and stale or ambiguous live state. Guide: interpret each variant and do not guess a target.
 2. **Delivery observation.** Add `message_delivered` through existing wait admission. Witness already-applied and pending input, application across registration/commit races, unrelated input, timeout, cancellation and target loss, and no delivery side effects. Include a mixed wait where another condition matches while the cancelled message does not: the result is `satisfied`, but `matched` excludes the exact message condition. Guide: retain the message ID and use bounded wait without confusing application with replies.
 3. **Explicit exact-ID intervention.** Verify cross-Thread Background, remove a caller-based refusal only if found, and use the neutral reason for all explicit Background actions. Witness only the named wait released, its process still running, later calls cancelled, stale IDs refused and normal input application. Keep `now` available in this unit. Guide: send, wait, read the held reason, Background only its ID, and inspect before deciding. Include the worked background-and-wait examples.
-4. **Remove `now`.** Once the replacement is available, remove new `now` sends/asks from CLI/wire/TUI and remove the legacy wake path once outstanding delivery and replay witnesses pass. Preserve history and `complete`; no alias. Observe ordinary send not waking. Guide: remove old advice and retain the separate explicit steps. TUI and Studio retain exact-ID person Background; Studio adopts removal with the landed contract. Number public wire changes at landing; this design does not authorize a pin.
+4. **Remove `now`.** Once the replacement is available, remove new `now` sends/asks from CLI/wire/TUI and remove the legacy wake path once outstanding delivery and replay witnesses pass. Preserve history and `complete`; no alias. Observe ordinary send not waking. Guide: remove old advice and retain the separate explicit steps. The TUI and IPC clients retain exact-ID person Background. Number public wire changes at landing; this design does not authorize a pin.

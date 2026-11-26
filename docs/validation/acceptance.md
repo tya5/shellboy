@@ -2,7 +2,7 @@
 
 ## Core #421 Unit 2: operation evidence
 
-Witnesses cover synthetic pending/current/old/expired/missing receipts, lost read and mutation responses, non-receipted writes, parse/prewrite and admission refusals, and structured exec channels. No Studio adoption or real provider behavior is covered.
+Witnesses cover synthetic pending/current/old/expired/missing receipts, lost read and mutation responses, non-receipted writes, parse/prewrite and admission refusals, and structured exec channels. No IPC client or real provider behavior is covered.
 
 ## Core #311 native recurring-work lists
 
@@ -43,11 +43,11 @@ retry test passed. Consecutive loopback requests preserve earlier serialized
 input items across first adoption, a changed-file retry, loss of binary, and
 detached exclusion adoption. No installed-owner or provider cache measurement.
 
-## Core #381 Studio read bounds
+## Core #381 list read bounds
 
 Local `cargo check --tests --locked`, test layout, and classified language
 audit passed. Synthetic witnesses check sparse state continuation, receipt
-category work, and page-scoped status. Hosted checks and a matched Studio
+category work, and page-scoped status. Hosted checks and a matched IPC client
 pair are not established by the local gates.
 The default `status` view is checked with a SQLite VM-step witness as terminal
 history and unrelated Threads grow. `--all` and terminal `--state` still scan
@@ -188,8 +188,8 @@ no relevant hits, and no re-indexing was attempted.
 - Read-only basis: `.local/private-reports/studio-current-20261113/
 core306-saved-attempt-provenance-design-20261115.md`, SHA-256
 `e4e941a4d459c492706c588e27a9a426d9d57ed84d528b7f76aa5d2509649c5e`. It maps
-existing output_item attempt association and the separate Studio canonical source
-identity. Consumer contract was sent without requiring ACK; no Studio source edits.
+existing output_item attempt association and the separate client canonical source
+identity.
 - Guarded `cargo check --locked --tests` passed on the current uncommitted delta:
 execution `55c7f0c3-4a2b-4238-82e5-09cb554c6142`, exit 0, cleanup confirmed.
 - Five fully-qualified `-- --exact` controls each passed 1/1: unique/ambiguous/missing
@@ -10802,7 +10802,7 @@ Not verified: Windows (the permissions statement and `ReplaceFileW` on `credenti
 and the existing `config.toml` replace tests, not on a run); Linux beyond CI; that a real terminal refuses a typed key
 (the check is `IsTerminal` on stdin, tests pipe); the stored-key read hanging on a FIFO is handled by running it inside
 the header wait and has no test of its own; a real provider, real keys or a real user configuration; a timed-out
-file worker; the Studio screen; a key that a provider rejects for reasons other than the header (only the mock's 401 is
+file worker; an IPC client's setup screen; a key that a provider rejects for reasons other than the header (only the mock's 401 is
 exercised); TLS failures (`ssl_verify`, certificate errors) have no test and classify as `unreachable`. Stage C is
 planned in D-269 and was not built or tested.
 ## History execution descriptions
@@ -10911,7 +10911,7 @@ send transaction.
 
 - Caller-less human `message reply` routed back to its model sender is marked `human: true` and resumes that sender's live recovery-wait Turn. An authenticated model-origin reply stays non-human and is held. Covered end to end in `tests/reply.rs`.
 - A caller-less explicit `message send --resume-recovery` records actor kind `external_cli`, not `human`; shell-origin resumes retain their authenticated shell actor. Covered by `tests/control_db.rs`.
-- Verified locally with `cargo test --locked --test integration reply::human_reply_resumes_recovery_but_model_reply_does_not` and `cargo test --locked --test integration control_db::external_cli_explicit_recovery_resume_is_not_recorded_as_human`; CI pending on branch tip. Studio and real-provider behavior not exercised.
+- Verified locally with `cargo test --locked --test integration reply::human_reply_resumes_recovery_but_model_reply_does_not` and `cargo test --locked --test integration control_db::external_cli_explicit_recovery_resume_is_not_recorded_as_human`; CI pending on branch tip. IPC client and real-provider behavior not exercised.
 ## #259 small non-boundary restrictions (historical validation plan)
 
 Planned synthetic coverage: any model can cancel another sender's queued input; any model can reply to any applied pending request; self-asks were accepted at the time (superseded by #370); a moved child accepts a new-parent send while its existing Run retains its original `owner_run_id`; rewind proceeds with known-unadmitted queued input but refuses when admission is unknown or the target has a live Run; unknown shell keys warn-and-ignore without a strict policy setting; exec shares the 8 MiB CLI stdin bound. No real API or user data. Commands/results and CI run IDs to be appended after validation.
@@ -10919,13 +10919,13 @@ Planned synthetic coverage: any model can cancel another sender's queued input; 
 ## #370 separate human questions from Thread asks
 
 - Focused coverage: model-shell CLI rejects a same-Thread ask with `invalid_argument` and guidance to omit `--thread`, without creating a duty. The reply integration tests cover named human questions and cross-Thread ask, list, reply, and cancellation.
-- Full verification pending: the unfiltered `cargo test --locked --test integration` suite and automatic CI are unverified on the repaired branch. No installed-owner, Studio, or TUI check was performed.
+- Full verification pending: the unfiltered `cargo test --locked --test integration` suite and automatic CI are unverified on the repaired branch. No installed-owner, IPC client, or TUI check was performed.
 
 
 ### #265 storage threshold read
 
 - Verified configured `limits.data_warning_bytes` and `limits.data_max_bytes` are serialized by `storage.status` as `warning_bytes` and `limit_bytes`; existing measured totals, booleans and disk-free fields remain distinct. `tests/gc.rs::logical_capacity_and_physical_database_space_are_reported_separately` asserts threshold values and serialized response.
-- Focused integration test `gc::logical_capacity_and_physical_database_space_are_reported_separately` passed on macOS. The read-only language inventory scanned 416 files; its fail-on-pending mode reports 16 pre-existing pending literals in unrelated files. Full test type-check and both CI variants are pending on the final branch tip. Studio UI meter rendering, external consumers and non-macOS platforms remain unverified.
+- Focused integration test `gc::logical_capacity_and_physical_database_space_are_reported_separately` passed on macOS. The read-only language inventory scanned 416 files; its fail-on-pending mode reports 16 pre-existing pending literals in unrelated files. Full test type-check and both CI variants are pending on the final branch tip. Client UI meter rendering, external consumers and non-macOS platforms remain unverified.
 ### #267 bounded index reclamation (validation pending)
 
 The takeover reuses W2's bounded reclamation idea while reducing synchronization to a durable non-selectable
@@ -11286,7 +11286,7 @@ focused results precede the new final-SHA CI; the older 6cad05f0 CI is not evide
 - `count_saturated` is removed from implementation, schema and guidance. Protocol
   schema, error catalog, Agent Guide and CLI guidance describe the same 16 limit
   and recovery action.
-- Synthetic fixtures only; no real database, provider or paid API is used. Studio
+- Synthetic fixtures only; no real database, provider or paid API is used. IPC client
   behavior and non-host OS local execution are not dynamically tested; exact-tip
   normal and all-OS CI remain the cross-platform gate.
 
@@ -11452,10 +11452,7 @@ Local macOS validation: `cargo check --tests --locked`, shell integration suite
 and shell lifecycle unit tests 9 passed. These are synthetic subprocess/mock
 provider fixtures, not user stores or real-provider tests. Windows-specific
 initial-input/default-EOF and repeated-EOF rejection tests were added but not
-executed locally. Studio source `ba265c4771c824bb2b65c5f76dca912320cf4f10`
-was searched for shell EOF/write and `Closed` success dependencies; none were
-found in its tracked source/tests/scripts. Local `rg` was unavailable, so this
-search used `git grep`. Cross-OS CI remains an integration gate.
+executed locally. Cross-OS CI remains an integration gate.
 ## #284 selected request-history diagnostics (WIP)
 
 Synthetic-only implementation; no private owner, history, or database was read.
@@ -11690,7 +11687,7 @@ public schema document's definitions field; all runtime/order/UTF-8/privacy and
 response/source-budget assertions preceding it passed. The assertion is corrected
 without weakening variant/text_complete requirements. Original logs are preserved:
 /tmp/core299-fixed-{check,unit,window}.log. Renewed validation and CI follow on the
-next exact commit; this is not a full-suite, live provider, installed or Studio claim.
+next exact commit; this is not a full-suite, live provider, installed or IPC client claim.
 
 Earlier ab3/c39 editor scripts failed their exact-pattern assertion before items
 write; their shell continued because set-e was absent. Original stderr/logs are
@@ -11720,7 +11717,7 @@ control references are corrected in the plan. All original failed/zero logs rema
 
 Source/privacy/budget review of 831d0907 accepted by S6; subsequent change only fixes
 documentation control names. Exact final CI/review/main adoption is still pending.
-No Studio consumption, installed Core, paid provider, private DB or UI success is
+No IPC client consumption, installed Core, paid provider, private DB or UI success is
 implied by these producer tests. Schema40 and installed owner remain unchanged.
 
 ## Outbound epoch metadata boundary (2026-11-13)
@@ -12268,7 +12265,7 @@ Local verification on the #325 worktree: pinned `cargo fmt`, `cargo check --test
 The first exact-SHA CI (`44905626185`, SHA `c67c646ac0f0e25533a6b6de75ad3b22dca47141`) exposed test-ratchet updates required for the additional read-only operation and capability, the new `not_found` CLI lookup result, and a legacy tool-repair test using short IDs at CLI boundaries. These tests were updated and pass focused local reruns. The compact-list count selector failed in that full CI run but passed four focused local repetitions; its cause remains unestablished. Do not treat the c67 RED as evidence for a later SHA.
 ## Core #326 IPC final frames
 
-Purpose checks cover typed replies for owner-side failures, clean EOF without a reply, typed failure on extra peer input or a peer read error, final-frame lifetime, and accepted replies surviving fatal listener failure. Core checks do not establish Windows named-pipe delivery to Studio; the three exact-pair Windows cases must be verified against the same Core SHA.
+Purpose checks cover typed replies for owner-side failures, clean EOF without a reply, typed failure on extra peer input or a peer read error, final-frame lifetime, and accepted replies surviving fatal listener failure. Core checks do not establish Windows named-pipe delivery to an IPC client.
 
 ## Core #327 attachment list pages (verification pending)
 

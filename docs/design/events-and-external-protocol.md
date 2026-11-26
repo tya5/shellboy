@@ -5,9 +5,9 @@ User decisions on stage B (#243): models may use `events.wait` (Q3), no change r
 Live text deltas (E3) move ahead of stage B's successors: plan A (same long-poll, unsaved),
 implemented in 2.5. Plan B (a persistent streaming response) is built only if A proves not smooth enough.
 
-Context (user decision 2026-11-06): the Web UI is a separate project
-(`shellboy-studio`, a Rust bridge on the same machine that speaks the existing
-local IPC to the owner and serves HTTP/WebSocket to a browser). Core adds only
+Context (user decision 2026-11-06): Core contains no Web UI. A browser client is
+a separate bridge on the same machine that speaks the existing local IPC to the
+owner and serves HTTP/WebSocket to a browser. Core adds only
 stable external surfaces: change notification without polling (#243) and the
 RPC as a documented external contract (#244).
 
@@ -55,7 +55,7 @@ pass writes a `wait.pending.<id>` row to `app_meta` (`wait.rs:212-217`).
   (`src/ipc.rs:72-145`, client `call_stream` `ipc.rs:313-381`). The reply is a
   `oneshot`; while waiting, the server reads one byte to detect peer
   disconnect and cancels `Invocation.disconnected`.
-- Studio #21 and desktop readers should forward only the optional
+- Bridge and desktop clients should forward only the optional
   `Welcome.owner_version` associated with the verified `Welcome.instance_id`.
   Clear it when that owner disconnects or is replaced; absence/malformed data
   is unknown. A package version without a SHA carries no revision information.
@@ -469,7 +469,7 @@ Command → result mapping: one exhaustive `match` in `protocol` that returns
 the result schema per `Command` variant (consistent with R3-3: exhaustive
 matches, no metadata registry). Operations whose results are still `json!`
 values are marked opaque in the schema; typing them is follow-up work, one
-issue per family, ordered by what `shellboy-studio` actually reads.
+issue per family, ordered by what external clients actually read.
 
 Export and drift: `shellboy protocol schema` prints one JSON document
 (envelope, handshake, per-operation args and result, capabilities, version).
@@ -528,7 +528,7 @@ are recorded in D-243-1, D-244-2 and D-275-1 and the adopted behavior in [protoc
 3. May models use `events.wait` (Agent Guide), or is it for humans and
    external clients only?
 4. Is live token streaming required in the first Web milestone? Yes (user, 2026-11-06); see 2.5.
-5. How should `shellboy-studio` obtain types: generate from the JSON Schema,
+5. How should an external client obtain types: generate from the JSON Schema,
    depend on this crate by git (pulls the TUI stack), or split a small
    protocol crate?
 6. Long-poll admission (answered by #352): `events.wait` and `wait` use a dedicated class, not the ordinary permit pool.
@@ -546,7 +546,6 @@ Remove `RunDetails.owner_run_id`, `RunDetails.owned_run_ids`, `ParentChange.live
 fields and `owned_execution_ids` remain. The old `wait_cycle` error is removed; direct self-resource observation
 returns typed `self_wait` without a dependency graph. Welcome/Endpoint/envelopes advertise exact version 5, and
 version 4 peers fail closed rather than negotiate a downgrade. No aliases, payload rewrites or compatibility shim.
-Studio follows separately in #280; the final wire inventory and version are recorded there before handoff.
 
 Main already uses protocol 4 for #275 reasoning activity; #276 therefore advances to 5 and retains the
 `events.reasoning_activity` capability. The initial branch-only version-4 proposal is superseded.

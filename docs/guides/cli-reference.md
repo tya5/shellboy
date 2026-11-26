@@ -1254,7 +1254,7 @@ Use `shellboy message ask --thread CHILD_THREAD_ID --text 'Report what you verif
 
 `message reply` returns `MessageReplied`: `message_id` is the saved answer node and `reply_to` is the original Ask message ID. When the owner routes the answer to a live asking Thread, `delivery` records acceptance for routing, not completed delivery. Check `delivery.delivery_status` for the initial status, which may be `held`. For current status, run `shellboy message get --message MESSAGE_ID` with the answer's `message_id`, not `reply_to`. A standalone answer omits `delivery`.
 
-A person answers in Studio or the TUI; the answer
+A person answers in the TUI or another client; the answer
 arrives in this Thread with `reply_to` and starts a Run if needed. Your questions
 are listed by `message list --awaiting --to human` and counted in
 `thread get` under `pending_replies.asked_by`. `--deliver` is only for Thread

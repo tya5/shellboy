@@ -10,8 +10,8 @@ not a current acceptance report and is not copied into the new status page.
 
 Remaining source-audit gaps were a stale Messages-only design paragraph,
 README's API list, bilingual User Guide guidance, and explicit JSON negative /
-serialized error-kind coverage. These are repaired here. The independent
-Shellboy Studio README link is preserved. No provider query or credentials
+serialized error-kind coverage. These are repaired here. README's optional
+browser UI link is preserved. No provider query or credentials
 were used. No protocol shape, schema version, DB, installed binary, or foreign
 worktree changes are needed: `ModelError.kind` is already an open string.
 

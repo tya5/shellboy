@@ -44,7 +44,7 @@ Before configuration is available, terminal-adapter failures also use English.
 
 For startup diagnostics without connecting to the owner, see [recorded startup timings](cli-reference.md#standalone-commands).
 
-For support, share relevant entries from the structured owner log (`logs/shellboy.log`); raw local crash stderr, including Studio's `owner.log`, is not safe to share as is.
+For support, share relevant entries from the structured owner log (`logs/shellboy.log`); raw local crash stderr, such as an `owner.log` captured by a client, is not safe to share as is.
 
 Language changes UI captions, explanations, command diagnostics, and generated
 status notices. It does not translate or rewrite conversation text, model/tool
@@ -393,7 +393,7 @@ base_url = "https://proxy.example/v1"
 models.include = ["claude-*"]
 ```
 
-The CLI, TUI, and Studio receive the same filtered list. An unlisted model can still be named directly on its connection. The configuration response reports whether an owner restart is required. See [configuration](configuration.md) for pattern limits and syntax.
+The CLI, TUI, and IPC clients receive the same filtered list. An unlisted model can still be named directly on its connection. The configuration response reports whether an owner restart is required. See [configuration](configuration.md) for pattern limits and syntax.
 
 ### Output limits
 
