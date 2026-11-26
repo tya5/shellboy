@@ -5363,6 +5363,63 @@
       ],
       "type": "object"
     },
+    "HistoryWindowNotice": {
+      "properties": {
+        "background": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "call_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "command": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "execution_available": {
+          "type": "boolean"
+        },
+        "execution_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "group_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "node_id": {
+          "type": "string"
+        },
+        "source_node_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "node_id",
+        "execution_available"
+      ],
+      "type": "object"
+    },
     "HistoryWindowObservation": {
       "properties": {
         "activity": {
@@ -5435,8 +5492,22 @@
     },
     "HistoryWindowPendingMessage": {
       "properties": {
+        "attachment_count": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "created_at": {
+          "type": "string"
+        },
         "delivery_status": {
           "$ref": "#/definitions/DeliveryStatus"
+        },
+        "excerpt": {
+          "type": "string"
+        },
+        "excerpt_truncated": {
+          "type": "boolean"
         },
         "held_by": {
           "anyOf": [
@@ -5458,7 +5529,11 @@
       "required": [
         "message_id",
         "operation_id",
-        "delivery_status"
+        "delivery_status",
+        "created_at",
+        "excerpt",
+        "excerpt_truncated",
+        "attachment_count"
       ],
       "type": "object"
     },
@@ -5649,11 +5724,18 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "notices": {
+          "items": {
+            "$ref": "#/definitions/HistoryWindowNotice"
+          },
+          "type": "array"
         }
       },
       "required": [
         "calls",
-        "limited_node_ids"
+        "limited_node_ids",
+        "notices"
       ],
       "type": "object"
     },
