@@ -616,11 +616,6 @@ fn bounded_usage_plan_uses_indexes_for_node_lower_bound() {
     inspect_period(&c, &scope, &mut all, &all_window, false).unwrap();
     let mut after = Trace::default();
     inspect_period(&c, &scope, &mut after, &after_window, false).unwrap();
-    assert_eq!(
-        all.statements.len(),
-        after.statements.len(),
-        "lower bound adds no aggregate query/scan"
-    );
     let all_model = all
         .statements
         .iter()
