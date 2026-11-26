@@ -431,7 +431,7 @@ impl Fixture {
             Ok(screen) => screen,
             Err(_) => {
                 let saved=watchdog("frontend failure saved-state diagnostics", self.control.store.database.call(|db|{
-                    let mut q=db.prepare("SELECT json_object('thread',r.thread_id,'run',r.id,'state',r.state,'turn_state',u.state,'attempt_state',a.state,'failure_kind',CASE WHEN json_valid(a.error_json) THEN json_extract(a.error_json,'$.error.kind') END,'generation',u.generation) FROM run r LEFT JOIN turn u ON u.id=(SELECT id FROM turn WHERE run_id=r.id ORDER BY rowid DESC LIMIT 1) LEFT JOIN model_attempt a ON a.rowid=(SELECT rowid FROM model_attempt WHERE turn_id=u.id ORDER BY rowid DESC LIMIT 1) ORDER BY r.rowid DESC LIMIT 8")?;
+                    let mut q=db.prepare("SELECT json_object('thread',r.thread_id,'run',r.id,'state',r.state,'turn_state',u.state,'attempt_state',a.state,'generation',u.generation) FROM run r LEFT JOIN turn u ON u.id=(SELECT id FROM turn WHERE run_id=r.id ORDER BY rowid DESC LIMIT 1) LEFT JOIN model_attempt a ON a.rowid=(SELECT rowid FROM model_attempt WHERE turn_id=u.id ORDER BY rowid DESC LIMIT 1) ORDER BY r.rowid DESC LIMIT 8")?;
                     q.query_map([],|r|r.get::<_,String>(0))?.collect::<Result<Vec<_>,_>>().map_err(Into::into)
                 })).await;
                 let rows = self

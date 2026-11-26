@@ -51,20 +51,19 @@ async fn wait_for_run_b_provider_request(wait: &mut RunBWaitContext<'_>) -> Inco
                         db.query_row(
                             concat!(
                                 "SELECT r.state,t.state,",
-                                "(SELECT state FROM model_attempt WHERE turn_id=t.id ORDER BY started_at DESC,rowid DESC LIMIT 1),",
-                                "(SELECT json_extract(error_json,'$.kind') FROM model_attempt WHERE turn_id=t.id ORDER BY started_at DESC,rowid DESC LIMIT 1) ",
+                                "(SELECT state FROM model_attempt WHERE turn_id=t.id ORDER BY started_at DESC,rowid DESC LIMIT 1) ",
                                 "FROM run r JOIN turn t ON t.run_id=r.id AND t.thread_id=r.thread_id ",
                                 "WHERE r.id=?1 AND r.thread_id=?2 AND t.id=?3",
                             ),
                             rusqlite::params![run_id,target,turn_id],
-                            |row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,Option<String>>(2)?,row.get::<_,Option<String>>(3)?)),
+                            |row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,Option<String>>(2)?)),
                         ).map_err(Into::into)
                     }).await.unwrap();
                     if state.0!="live" || !matches!(state.1.as_str(),"preparing"|"running"|"waiting") {
-                        panic!("Run B driver ended before provider body: Thread={thread} Run={run} Turn={turn} run_state={} turn_state={} attempt_state={:?} failure_kind={:?}",state.0,state.1,state.2,state.3);
+                        panic!("Run B driver ended before provider body: Thread={thread} Run={run} Turn={turn} run_state={} turn_state={} attempt_state={:?}",state.0,state.1,state.2);
                     }
                     if matches!(state.2.as_deref(),Some("failed"|"incomplete"|"cancelled")) {
-                        panic!("Run B model attempt failed before provider body: Thread={thread} Run={run} Turn={turn} attempt_state={:?} failure_kind={:?}",state.2,state.3);
+                        panic!("Run B model attempt failed before provider body: Thread={thread} Run={run} Turn={turn} attempt_state={:?}",state.2);
                     }
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_))=>{},

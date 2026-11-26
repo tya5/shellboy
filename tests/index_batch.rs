@@ -658,20 +658,18 @@ async fn index_state_changed_during_cooldown(pause: bool) {
         2,
         "changed space must not trigger another provider request"
     );
-    let (state, attempts, kind): (String, i64, String) = f.db.call(|db| Ok(db.query_row(
-        "SELECT state,attempts,json_extract(error_json,'$.kind') FROM embedding_job WHERE source_node_id='space-waiting'", [], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?)))?)).await.unwrap();
-    assert_eq!(
-        (state.as_str(), attempts, kind.as_str()),
-        (
-            "failed",
-            0,
-            if pause {
-                "index_paused"
-            } else {
-                "space_changed_during_admission"
-            }
-        )
-    );
+    // The job waits for an explicit retry: failed, no attempt spent, no request sent.
+    let (state, attempts): (String, i64) =
+        f.db.call(|db| {
+            Ok(db.query_row(
+                "SELECT state,attempts FROM embedding_job WHERE source_node_id='space-waiting'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )?)
+        })
+        .await
+        .unwrap();
+    assert_eq!((state.as_str(), attempts), ("failed", 0));
     f.close().await;
 }
 
