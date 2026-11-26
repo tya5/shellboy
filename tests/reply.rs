@@ -994,9 +994,11 @@ async fn deletion_terminalizes_replies_before_gc_and_recipient_wins() {
                 assert_eq!(db.query_row("SELECT count(*) FROM event WHERE json_extract(payload_ref_json,'$.kind')='reply_cancelled'",[],|r|r.get::<_,i64>(0))?,0,"sender cleanup is deferred");
             }
             if deleted=="recipient" {
-                let event:(String,Option<String>)=db.query_row("SELECT kind,target_run_id FROM event WHERE json_extract(payload_ref_json,'$.kind')='reply_outcome'",[],|r|Ok((r.get(0)?,r.get(1)?)))?;
+                // Untargeted until admitted; the pending delivery wakes the sender Run.
+                let event:(String,Option<String>,String)=db.query_row("SELECT e.kind,e.target_run_id,d.recipient_id FROM event e JOIN delivery d ON d.event_id=e.id AND d.state='pending' WHERE json_extract(e.payload_ref_json,'$.kind')='reply_outcome'",[],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?)))?;
                 assert_eq!(event.0,"reply_outcome");
-                assert!(event.1.is_some());
+                assert!(event.1.is_none());
+                assert_eq!(db.query_row("SELECT thread_id FROM run WHERE id=?1",[&event.2],|r|r.get::<_,String>(0))?,"sender");
                 assert_eq!(db.query_row("SELECT count(*) FROM run WHERE thread_id='sender' AND state='live'",[],|r|r.get::<_,i64>(0))?,1,"ordinary outcome delivery activates an idle sender");
             }
             assert_eq!(db.query_row("SELECT count(*) FROM gc_job WHERE state='pending'",[],|r|r.get::<_,i64>(0))?,1);

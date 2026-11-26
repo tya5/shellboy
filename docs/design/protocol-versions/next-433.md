@@ -14,7 +14,9 @@ terminal state. `MessageReplyState` in history provenance gains
 When the blocking ask ends, the duty returns to `pending` with
 `reply.reopened_after` naming that ask. The Run that admits the answer or
 outcome is saved as `reply.owner_run_id`; the delivery `run_id` and `turn_id`
-are unchanged. A pending duty also saves
+are unchanged. A `reply_outcome` event keeps `target_run_id` empty until a Run
+admits it, so a notice whose woken Run stops first reaches the Thread's next
+runnable Turn. A pending duty also saves
 `reply.admitted_at` when it enters the Thread's history.
 
 ## Read surfaces
