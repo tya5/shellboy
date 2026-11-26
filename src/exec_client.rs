@@ -57,6 +57,9 @@ struct Progress {
     run_id: Option<String>,
     turn_id: Option<String>,
     end_message_node_id: Option<String>,
+    /// `--result reply`: the duty state exec last observed, from the saved
+    /// receipt and then from the owner's snapshot of the message.
+    reply_state: Option<String>,
     operation_id: Option<String>,
     send_operation_id: Option<String>,
     create_operation_id: Option<String>,
@@ -306,6 +309,7 @@ impl Session {
     ) -> Result<Option<String>, Failure> {
         let saved = saved
             .ok_or_else(|| Failure::new(4, "reply_unavailable", "No reply outcome was saved"))?;
+        self.progress.reply_state = saved["state"].as_str().map(str::to_owned);
         let Some(state) = open_state(saved) else {
             return ended_reply(saved["state"].as_str(), saved["node_id"].as_str());
         };
@@ -320,6 +324,9 @@ impl Session {
         // The owner's status decides; its snapshot of this exact message
         // carries the reply state and node.
         let reply = reply_snapshot(&wait.snapshot, message).unwrap_or(Value::Null);
+        if let Some(observed) = reply["state"].as_str() {
+            self.progress.reply_state = Some(observed.to_owned());
+        }
         match (wait.status, open_state(&reply)) {
             (WaitStatus::Satisfied, None) if reply["state"].is_string() => {
                 ended_reply(reply["state"].as_str(), reply["node_id"].as_str())

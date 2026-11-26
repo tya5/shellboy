@@ -768,7 +768,7 @@ these conflict with --thread. Existing Thread settings/AGENTS are not changed.
 --operation-id is rejected; the stderr diagnostic reports known per-step IDs.
 
 stdout is the validated raw JSON value (outer whitespace trimmed) plus newline, or an empty line for an empty end message; stderr is a JSON
-metadata/error object with Thread, message, Run, Turn, result mode, reply or end-message node, operation IDs and repair count. Turn-end reports Turn usage; reply and run-end report assigned Run usage (reply mode may be a live snapshot; unknown stays null). These are
+metadata/error object with Thread, message, Run, Turn, result mode, reply or end-message node, `reply_state` (reply mode: the duty state last observed, from the owner's wait snapshot when exec waited), operation IDs and repair count. Turn-end reports Turn usage; reply and run-end report assigned Run usage (reply mode may be a live snapshot; unknown stays null). These are
 owner facts, not a per-exec bill; an existing active Turn can include other input.
 Exit codes are0 success,2 invalid input/unsupported Schema,
 3 JSON/Schema mismatch after repairs,4 recovery/held/stopped/failed/unavailable

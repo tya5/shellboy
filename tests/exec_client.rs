@@ -1398,6 +1398,9 @@ async fn reply_mode_interruption_after_a_reopen_leaves_the_duty_open() {
     assert_eq!(exit, 5, "{diagnostic}");
     assert_eq!(diagnostic["status"], "interrupted", "{diagnostic}");
     assert_eq!(diagnostic["message_id"], duty.as_str(), "{diagnostic}");
+    // The state comes from the owner's snapshot at the interruption, not the
+    // saved awaiting_own_ask exec read before its wait.
+    assert_eq!(diagnostic["reply_state"], "pending", "{diagnostic}");
     assert_eq!(
         reply_state(&fixture, &duty).await,
         "pending",

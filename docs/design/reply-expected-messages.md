@@ -530,7 +530,7 @@ duty open is exec's deadline result (exit 5 `timeout`); an `interrupted` wait
 (input for the calling Thread) ends exec's observation with exit 5
 `interrupted`, leaving the target and its duty untouched; exec's Run-end and
 Turn-end waits follow the same rule (#446). Both name the state
-from that snapshot. Exec dispatches on the wait's status first: only `satisfied` returns the
+from that snapshot, also as the diagnostic's typed `reply_state`. Exec dispatches on the wait's status first: only `satisfied` returns the
 ended duty from its snapshot; every other result (`unavailable`, `recovery_wait`,
 or a snapshot that is missing or contradicts the status) is `owner_error`
 (exit 6). Exec returns the reply
