@@ -72,7 +72,8 @@ struct Inner {
     by_seq: BTreeMap<u64, String>,
     /// Latest committed-output sequence per execution, with its Thread.
     output_by_execution: HashMap<String, u64>,
-    output_by_seq: BTreeMap<u64, (String, String)>,
+    /// Seq -> (Thread, execution, saved output time).
+    output_by_seq: BTreeMap<u64, (String, String, String)>,
     recovery: VecDeque<EventRecoveryTransition>,
     /// Keyed by Thread: a Thread streams one attempt at a time, and a later attempt replaces it.
     text: HashMap<String, AttemptText>,
@@ -211,7 +212,7 @@ impl ChangeClock {
         self.wakes.publish([Key::Marks]);
     }
     /// A committed output batch. Eviction raises the shared floor, like Thread entries.
-    pub(crate) fn record_output(&self, thread_id: &str, execution_id: &str) {
+    pub(crate) fn record_output(&self, thread_id: &str, execution_id: &str, output_at: &str) {
         let mut inner = self.lock();
         inner.seq += 1;
         let seq = inner.seq;
@@ -221,12 +222,17 @@ impl ChangeClock {
         {
             inner.output_by_seq.remove(&old);
         }
-        inner
-            .output_by_seq
-            .insert(seq, (thread_id.to_owned(), execution_id.to_owned()));
+        inner.output_by_seq.insert(
+            seq,
+            (
+                thread_id.to_owned(),
+                execution_id.to_owned(),
+                output_at.to_owned(),
+            ),
+        );
         let old_floor = inner.floor;
         while inner.output_by_execution.len() > self.cap {
-            let Some((evicted, (_, execution))) = inner.output_by_seq.pop_first() else {
+            let Some((evicted, (_, execution, _))) = inner.output_by_seq.pop_first() else {
                 break;
             };
             inner.output_by_execution.remove(&execution);
@@ -626,7 +632,9 @@ impl ChangeClock {
         }
         let mut output = Vec::new();
         if include_output {
-            for (seq, (thread, execution)) in inner.output_by_seq.range(after + 1..=cursor) {
+            for (seq, (thread, execution, output_at)) in
+                inner.output_by_seq.range(after + 1..=cursor)
+            {
                 if !filter.is_empty() && !filter.contains(thread) {
                     continue;
                 }
@@ -640,6 +648,7 @@ impl ChangeClock {
                 output.push(EventOutput {
                     thread_id: thread.clone(),
                     execution_id: execution.clone(),
+                    output_at: output_at.clone(),
                     seq: *seq,
                 });
             }
@@ -914,9 +923,9 @@ mod tests {
     #[test]
     fn output_entries_coalesce_per_execution_page_with_changes_and_honour_the_filter() {
         let clock = ChangeClock::new(Wakes::default());
-        clock.record_output("t", "x");
-        clock.record_output("u", "y");
-        clock.record_output("t", "x");
+        clock.record_output("t", "x", "2026-11-27T00:00:00Z");
+        clock.record_output("u", "y", "2026-11-27T00:00:00Z");
+        clock.record_output("t", "x", "2026-11-27T00:00:01Z");
         let Some(Poll::Ready { output, .. }) = clock.poll(0, &[], false, false, false) else {
             panic!("expected ready");
         };
@@ -928,6 +937,7 @@ mod tests {
         let ids: Vec<_> = output.iter().map(|o| o.execution_id.as_str()).collect();
         assert_eq!(ids, ["y", "x"]);
         assert!(output[0].seq < output[1].seq);
+        assert_eq!(output[1].output_at, "2026-11-27T00:00:01Z", "the latest batch's saved time");
         let Some(Poll::Ready { output, .. }) = clock.poll(0, &["t".into()], false, false, true)
         else {
             panic!("expected ready");
@@ -941,7 +951,7 @@ mod tests {
             ("t", "x")
         );
         for n in 0..=MAX_EVENT_CHANGES {
-            clock.record_output("t", &format!("e{n}"));
+            clock.record_output("t", &format!("e{n}"), "2026-11-27T00:00:00Z");
         }
         clock.record("after-output");
         let Some(Poll::Ready {
@@ -973,10 +983,10 @@ mod tests {
     #[test]
     fn output_eviction_raises_the_shared_floor() {
         let clock = ChangeClock::with_capacity(2);
-        clock.record_output("t", "a");
+        clock.record_output("t", "a", "2026-11-27T00:00:00Z");
         let cursor = 1;
-        clock.record_output("t", "b");
-        clock.record_output("t", "c");
+        clock.record_output("t", "b", "2026-11-27T00:00:00Z");
+        clock.record_output("t", "c", "2026-11-27T00:00:00Z");
         assert!(matches!(
             clock.poll(0, &[], false, false, true),
             Some(Poll::Resync { .. })

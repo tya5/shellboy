@@ -4734,16 +4734,3 @@ Hash-checked `config set` reconciles live fields against the running owner's ado
 already holds a desired live value but the owner does not, it reports `written: false` and
 `applied_to_running_owner: true`. Restart-only settings remain restart-only. There is no automatic removal,
 path guessing, retry timer, or file watching.
-
-### TUI output-age observation from `events.wait` output entries (#311 4d slice 3)
-
-Decided 2026-11-26. The live-work output age previously used the owner's
-in-process commit Instant. An output entry carries only IDs and a sequence
-(Claude's 4d owner table), and an owner Instant has no meaning in another
-process, so the client records the Instant at which it received the entry. It
-is a lower bound on the real age (the commit came first); a newer saved
-`last_output_at` on the next snapshot supersedes it, as before. The selected
-Thread is not refreshed per output batch. Revisit if a witness shows the
-delivery delay of the owner-wide wait (for example while its `more` pages
-drain) visibly understates the age, or if live work moves to a read that
-carries `last_output_at` per execution.

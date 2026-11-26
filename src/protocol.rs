@@ -1722,10 +1722,12 @@ record!(EventChange {
     seq: u64
 });
 // Committed shell output after the cursor: the execution's latest output position only.
+// `output_at` is that batch's saved receipt time (`shell.get` `last_output_at`, RFC 3339).
 // Read the output itself with `shell.read` or `wait`.
 record!(EventOutput {
     thread_id: String,
     execution_id: String,
+    output_at: String,
     seq: u64
 });
 record!(EventRecoveryTransition {
