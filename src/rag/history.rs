@@ -16,16 +16,6 @@ fn open_connection(path: &Path) -> Result<Connection> {
         .map_err(|_| err("history_unavailable", "Cannot initialize sqlite-vec"))?;
     let db = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
     db.busy_timeout(Duration::from_secs(2))?;
-    #[cfg(test)]
-    if BENCH_STEPS_ENABLED.load(std::sync::atomic::Ordering::Relaxed) {
-        db.progress_handler(
-            1000,
-            Some(|| {
-                BENCH_STEPS.fetch_add(1000, std::sync::atomic::Ordering::Relaxed);
-                false
-            }),
-        )?;
-    }
     db.execute_batch("PRAGMA query_only=ON;BEGIN;")?;
     let version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     if version != crate::storage::SCHEMA_VERSION {
@@ -674,80 +664,4 @@ pub(super) fn get(path: &Path, reference: &Reference) -> Result<(String, Value)>
         return Err(err("revision_unavailable", "History text content changed"));
     }
     Ok((text, provenance(db, &reference.id)?))
-}
-
-#[cfg(test)]
-static BENCH_STEPS_ENABLED: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
-#[cfg(test)]
-static BENCH_STEPS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-
-#[cfg(test)]
-mod measurement {
-    use super::*;
-    use std::sync::atomic::Ordering;
-    #[tokio::test]
-    #[ignore = "Synthetic per-call history keyword VM steps and timing"]
-    async fn history_keyword_work_budget() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("shellboy.db");
-        let db = crate::storage::DbWorker::open(path.clone()).await.unwrap();
-        db.call(|c| {
-            c.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('bench','/','/agents','p','m','now')", [])?;
-            Ok(())
-        }).await.unwrap();
-        for total in [250_i64, 500, 1000, 2000, 5000, 10000] {
-            db.call(move |c| {
-                c.execute_batch("DELETE FROM thread_path; DELETE FROM node;")?;
-                let tx = c.transaction()?;
-                {
-                    let mut q = tx.prepare("INSERT INTO node(id,kind,created_at,payload_json,payload_bytes) VALUES(?1,'user','now',?2,100)")?;
-                    let mut path = tx.prepare("INSERT INTO thread_path(thread_id,ordinal,node_id) VALUES('bench',?1,?2)")?;
-                    for n in 0..total {
-                        let id = format!("synthetic-{n}");
-                        q.execute(params![id, r#"{"role":"user","content":[{"type":"input_text","text":"ordinary synthetic Japanese 文書"}]}"#])?;
-                        path.execute(params![n, id])?;
-                    }
-                }
-                tx.commit()?;
-                Ok(())
-            }).await.unwrap();
-            for thread in [None, Some("bench")] {
-                BENCH_STEPS.store(0, Ordering::SeqCst);
-                BENCH_STEPS_ENABLED.store(true, Ordering::SeqCst);
-                let start = std::time::Instant::now();
-                let mut budget = total as usize;
-                let result = keyword(&path, "absent", thread, 100, None, &mut budget).unwrap();
-                let elapsed = start.elapsed();
-                BENCH_STEPS_ENABLED.store(false, Ordering::SeqCst);
-                assert!(result.hits.is_empty());
-                println!(
-                    "RAG_BUDGET rows={total} scope={} vm_steps_approx={} elapsed_ms={:.2}",
-                    if thread.is_some() { "thread" } else { "global" },
-                    BENCH_STEPS.load(Ordering::SeqCst),
-                    elapsed.as_secs_f64() * 1000.0
-                );
-            }
-            db.call(|c| {
-                c.execute("DELETE FROM thread_path", [])?;
-                Ok(())
-            })
-            .await
-            .unwrap();
-            BENCH_STEPS.store(0, Ordering::SeqCst);
-            BENCH_STEPS_ENABLED.store(true, Ordering::SeqCst);
-            let start = std::time::Instant::now();
-            let mut budget = total as usize;
-            let result = keyword(&path, "absent", None, 100, None, &mut budget).unwrap();
-            let elapsed = start.elapsed();
-            BENCH_STEPS_ENABLED.store(false, Ordering::SeqCst);
-            assert!(result.hits.is_empty());
-            println!(
-                "RAG_BUDGET rows={total} scope=unlinked vm_steps_approx={} elapsed_ms={:.2}",
-                BENCH_STEPS.load(Ordering::SeqCst),
-                elapsed.as_secs_f64() * 1000.0
-            );
-        }
-        db.shutdown().await.unwrap();
-    }
 }

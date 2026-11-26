@@ -277,10 +277,8 @@ also stop earlier at the caller's result limit or the 128 KiB hit-output budget;
 the latter reserves space within the existing 512 KiB response cap. All these
 boundaries return a continuation cursor rather than silently dropping later hits.
 
-Reproduce the unlinked, linked global and Thread samples with:
-`cargo test --lib rag::history::measurement::history_keyword_work_budget -- --ignored --nocapture`.
-The test generates a disposable on-disk database and uses a test-only SQLite
-progress handler; it does not inspect the real owner or database.
+These samples are recorded facts from a one-off measurement harness, removed in
+#442 because a measurement cannot settle a pass/fail decision.
 
 ### Source ownership for retained RAG vectors (schema 5)
 

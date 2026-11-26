@@ -73,14 +73,6 @@
   },
   {
     "file": "src/control/driver/shell_output.rs",
-    "rule": "elapsed-comparison",
-    "fingerprint": "8fc8615e2fb218cdd494fbc40f70a5a1e092a8694b219cf050056e65de65414a",
-    "function": "sparse_live_output_flushes_at_the_configured_time_bound",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing sparse_live_output_flushes_at_the_configured_time_bound test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "src/control/driver/shell_output.rs",
     "rule": "raw-timeout",
     "fingerprint": "02ac082aeadd8dff084bad225b35af5efa1e2aa00b52e3db532166ddbec44a2b",
     "function": "sparse_live_output_flushes_at_the_configured_time_bound",
@@ -134,14 +126,6 @@
     "function": "marker_case",
     "count": 1,
     "reason": "Deferred #41 D2 integrated from main4a6b839: exact existing marker_case occurrence; migrate with shared-read integration, no whole-file exemption."
-  },
-  {
-    "file": "src/control/driver/shell_output/performance_tests.rs",
-    "rule": "elapsed-comparison",
-    "fingerprint": "bd13f79cbfc6c4df50fb13cbc63aec52970cac313684e12228717761b994cd22",
-    "function": "performance_ten_shells_ten_lifecycle_waits",
-    "count": 1,
-    "reason": "Opt-in non-gating performance workload sampling/pacing window, not an upper/lower response-latency assertion; readiness/completion guards use shared WATCHDOG."
   },
   {
     "file": "src/control/wait.rs",
@@ -360,22 +344,6 @@
     "reason": "Deferred #41 D2 integrated from main4a6b839: exact existing external_settings_notify_after_commit_and_refresh_metadata_without_resuming_recovery occurrence; migrate with shared-read integration, no whole-file exemption."
   },
   {
-    "file": "src/frontend/delivery_performance.rs",
-    "rule": "wall-deadline",
-    "fingerprint": "bee1420ae697e7a36a03f217375ba6428e38446e0e6d9d80aa45ed16c7212ed1",
-    "function": "performance_slow_ui_bridge_action_and_event_progress",
-    "count": 1,
-    "reason": "Opt-in non-gating performance workload sampling/pacing window, not an upper/lower response-latency assertion; readiness/completion guards use shared WATCHDOG."
-  },
-  {
-    "file": "src/frontend/delivery_performance.rs",
-    "rule": "wall-deadline",
-    "fingerprint": "c9ac0696eedbd0d0d52552fe8bb0cdbff6ca357d28dbe25655e441bef3da715e",
-    "function": "performance_slow_ui_bridge_action_and_event_progress",
-    "count": 1,
-    "reason": "Opt-in non-gating performance workload sampling/pacing window, not an upper/lower response-latency assertion; readiness/completion guards use shared WATCHDOG."
-  },
-  {
     "file": "src/frontend/streams.rs",
     "rule": "raw-timeout",
     "fingerprint": "80f636bb208cba544ed1a6966b94bcd799e4b8c3cf33377a19072f910d5e17d5",
@@ -494,62 +462,6 @@
     "function": "wait_idle_retains_detached_blocking_parser_permit_until_actual_completion",
     "count": 1,
     "reason": "Deferred #41/shared-read: existing wait_idle_retains_detached_blocking_parser_permit_until_actual_completion test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "src/index/search/performance_tests.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "2a89c178a1ee5a684734eb35c7eb61c6103916546abe6c628352bc96780b2a84",
-    "function": "performance_semantic_ranking_writer_contention",
-    "count": 2,
-    "reason": "Deferred #41/shared-read: existing performance_semantic_ranking_writer_contention test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "src/index/search/performance_tests.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "343b62b73f21ce8488e6a88b3246493ce8678fc1c73e203a92ced3165adc508b",
-    "function": "performance_semantic_ranking_writer_contention",
-    "count": 3,
-    "reason": "Deferred #41/shared-read: existing performance_semantic_ranking_writer_contention test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "src/index/search/performance_tests.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "40af3ad31e38790c3d4ae9e291ca91b81c8717b54b3dfbe84860117118aa65c8",
-    "function": "performance_semantic_ranking_writer_contention",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing performance_semantic_ranking_writer_contention test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "src/ui/performance_stream.rs",
-    "rule": "wall-deadline",
-    "fingerprint": "287020d6c3c8322d859060dae95538c34b85e79c3b7de91543467eeb2b92ea42",
-    "function": "stream_input_layout_and_db_fairness",
-    "count": 1,
-    "reason": "Opt-in non-gating performance workload sampling/pacing window, not an upper/lower response-latency assertion; readiness/completion guards use shared WATCHDOG."
-  },
-  {
-    "file": "src/ui/performance_stream.rs",
-    "rule": "wall-deadline",
-    "fingerprint": "39e85fef493e1ae397bd0c633da0479a1e75ca985f46c0ad7b0c627e1bda86f2",
-    "function": "stream_input_layout_and_db_fairness",
-    "count": 1,
-    "reason": "Opt-in non-gating performance workload sampling/pacing window, not an upper/lower response-latency assertion; readiness/completion guards use shared WATCHDOG."
-  },
-  {
-    "file": "src/ui/performance_stream.rs",
-    "rule": "wall-deadline",
-    "fingerprint": "cbf83badf0851e75ff37a1b7ad4a91e880b894c66e1ee8850eaacf104e3f1a1e",
-    "function": "stream_input_layout_and_db_fairness",
-    "count": 1,
-    "reason": "Opt-in non-gating performance workload sampling/pacing window, not an upper/lower response-latency assertion; readiness/completion guards use shared WATCHDOG."
-  },
-  {
-    "file": "src/ui/performance_stream.rs",
-    "rule": "wall-deadline",
-    "fingerprint": "fe15f12f6688cf4a5584469f49ac752d377c56162a5bd97ac8e47c044c93a5b0",
-    "function": "stream_input_layout_and_db_fairness",
-    "count": 1,
-    "reason": "Opt-in non-gating performance workload sampling/pacing window, not an upper/lower response-latency assertion; readiness/completion guards use shared WATCHDOG."
   },
   {
     "file": "src/ui/send_tests.rs",
@@ -758,14 +670,6 @@
     "function": "bounded",
     "count": 1,
     "reason": "Deferred #41/shared-read: existing bounded test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "tests/performance_load.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "aba5310ba2227d5faaa5ed608f57e41ec046a36c0530afb5fa55ae9ba420fc61",
-    "function": "start",
-    "count": 1,
-    "reason": "Synchronous native proxy read uses the shared WATCHDOG as OS read timeout; not a response latency requirement."
   },
   {
     "file": "tests/storage.rs",

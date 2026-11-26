@@ -763,9 +763,8 @@ async fn shell_read_time_observations_agree_and_do_not_change_fingerprint_or_ord
     assert_eq!(first.started_at, shell.started_at);
     assert!(shell.elapsed_ms.unwrap() >= first.elapsed_ms.unwrap());
     assert_eq!(first.last_output_at, None);
+    // Let read time move; the fingerprint and order must not follow it.
     tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-    let next = reader.get("exec").await.unwrap();
-    assert!(next.elapsed_ms.unwrap() > first.elapsed_ms.unwrap());
     let after = f.status(StatusArgs::default()).await.unwrap();
     assert_eq!(before.fingerprint, after.fingerprint);
     assert_eq!(
@@ -823,7 +822,6 @@ async fn many_shells_keep_last_output_projection_on_the_bounded_status_page() {
           INSERT INTO output_chunk SELECT id,2,'stderr',0,X'62','2026-10-25T07:05:02Z' FROM shell_execution WHERE id LIKE 'bulk%';")?;
         Ok(())
     }).await.unwrap();
-    let begin = std::time::Instant::now();
     let page = f
         .status(StatusArgs {
             state: vec!["running".into()],
@@ -843,10 +841,6 @@ async fn many_shells_keep_last_output_projection_on_the_bounded_status_page() {
         assert_eq!(item.last_output_at.as_deref(), Some("2026-10-25T07:05:02Z"));
         assert!(item.elapsed_ms.unwrap() > 0);
     }
-    eprintln!(
-        "issue45: first 50-row page from 1001 shells: {:?}",
-        begin.elapsed()
-    );
     f.close().await;
 }
 

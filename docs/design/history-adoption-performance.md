@@ -24,7 +24,7 @@ Driver の受理済み receipt 採用は全 thread_path の読取り・contains�
 
 ## 測定の境界
 
-`tests/performance.rs::performance_history_receipt_adoption` は既存 1000 / 3000 node の線形 DAG と未選択 user node 一個を使う。各試行後 rollback して同一 fixture を五回使用し、prefix、cursor、revision、root、edge 数を検査する。測定は DB worker 内の採用部分だけで、receipt query、replay、HTTP、commit/fsync、TUI は含めない。
+以下は #442 で削除した測定用試験 `performance_history_receipt_adoption` の記録である。その試験は既存 1000 / 3000 node の線形 DAG と未選択 user node 一個を使う。各試行後 rollback して同一 fixture を五回使用し、prefix、cursor、revision、root、edge 数を検査する。測定は DB worker 内の採用部分だけで、receipt query、replay、HTTP、commit/fsync、TUI は含めない。
 
 変更前 macOS / bundled SQLite 3.53.2 の実測は `.local/baseline25.log`。P1000 p50 956226.041µs / p95 995540.667µs、P3000 p50 8598209.625µs / p95 8982066.958µs。変更後の実測は root の検証完了後に acceptance へ記録する。
 

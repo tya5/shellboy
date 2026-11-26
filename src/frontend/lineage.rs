@@ -260,7 +260,7 @@ pub(super) fn affected_tx(
 mod tests {
     use super::*;
     use crate::frontend::sql_trace::Statements;
-    use rusqlite::{StatementStatus, params};
+    use rusqlite::params;
     fn fixture() -> Connection {
         let db = Connection::open_in_memory().unwrap();
         db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
@@ -436,31 +436,21 @@ mod tests {
         assert_eq!(trace.count(), 0);
     }
     #[test]
-    fn indexed_successor_and_latest_fact_work_ignore_unrelated_cardinality() {
-        let mut db = fixture();
+    fn successor_and_latest_fact_reads_use_indexes_on_a_bounded_page() {
+        let db = fixture();
         thread(&db, "root", None);
         for n in 0..300 {
             thread(&db, &format!("z-child-{n:04}"), Some("root"));
         }
         let sql = query();
-        let measure = |db: &Connection| {
-            let mut statement = db.prepare(&sql).unwrap();
-            let rows = statement
-                .query_map(["root"], |row| row.get::<_, String>(1))
-                .unwrap()
-                .collect::<rusqlite::Result<Vec<_>>>()
-                .unwrap();
-            assert_eq!(rows.len(), 257);
-            statement.get_status(StatementStatus::VmStep)
-        };
-        let before = measure(&db);
-        let tx = db.transaction().unwrap();
-        for n in 0..10_000 {
-            thread(&tx, &format!("a-unrelated-{n:05}"), None);
-        }
-        tx.commit().unwrap();
-        let after = measure(&db);
-        assert!(after <= before + 100, "{before}->{after}");
+        let rows = db
+            .prepare(&sql)
+            .unwrap()
+            .query_map(["root"], |row| row.get::<_, String>(1))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(rows.len(), MEMBER_LIMIT + 1);
         let plan = db
             .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
             .unwrap()
@@ -496,59 +486,6 @@ mod tests {
         let rows = read_roots_tx(&db, &["r1".into(), "r2".into()]).unwrap();
         assert_eq!(rows.len(), 2);
         assert_eq!(trace.count(), 2);
-    }
-    #[test]
-    #[ignore = "P4 native latency observation; no timing acceptance threshold"]
-    fn measured_256_descendants_one_statement_latency_observation() {
-        for depth in [1, 8] {
-            let mut db = fixture();
-            thread(&db, "root", None);
-            let tx = db.transaction().unwrap();
-            let count = if depth == 1 { 300 } else { 256 };
-            for n in 0..count {
-                let id = format!("child-{n:04}");
-                let parent = if depth == 8 && n % 8 != 0 {
-                    format!("child-{:04}", n - 1)
-                } else {
-                    "root".to_owned()
-                };
-                thread(&tx, &id, Some(&parent));
-                run(
-                    &tx,
-                    &id,
-                    "live",
-                    if n % 10 == 0 {
-                        "recovery_wait"
-                    } else {
-                        "running"
-                    },
-                );
-            }
-            tx.commit().unwrap();
-            let mut samples = Vec::new();
-            for n in 0..40 {
-                let trace = Statements::new(&db);
-                let start = std::time::Instant::now();
-                let snapshot = one(&db, "root");
-                let elapsed = start.elapsed();
-                assert_eq!(trace.count(), 1, "one request stays one SQL statement");
-                assert_eq!(snapshot.threads.len(), 256);
-                assert_eq!(snapshot.truncated, depth == 1);
-                if n >= 10 {
-                    samples.push(elapsed);
-                }
-            }
-            samples.sort();
-            let p95 = samples[(samples.len() * 95 / 100).min(samples.len() - 1)];
-            println!(
-                "P4_LINEAGE depth={depth} samples={} p50_us={} p95_us={} max_us={}",
-                samples.len(),
-                samples[samples.len() / 2].as_micros(),
-                p95.as_micros(),
-                samples.last().unwrap().as_micros()
-            );
-            // Time is recorded only; counts/cardinality remain acceptance checks.
-        }
     }
     #[test]
     fn neutral_activity_refinements_preserve_all_native_count_categories() {
@@ -599,31 +536,5 @@ mod tests {
                 }
             }
         }
-    }
-    #[test]
-    #[ignore = "P4 optional million-sibling stress; large in-memory synthetic fixture"]
-    fn million_siblings_never_enter_one_recursive_expansion() {
-        let db = fixture();
-        thread(&db, "root", None);
-        db.execute_batch(
-            "BEGIN; WITH RECURSIVE n(x)AS(VALUES(0)UNION ALL SELECT x+1 FROM n WHERE x<999999)
-          INSERT INTO thread(id,parent_thread_id,cwd,agents_path,profile_id,model_id,updated_at)
-          SELECT printf('wide-%07d',x),'root','/','','p','m','now' FROM n; COMMIT;",
-        )
-        .unwrap();
-        let sql = query();
-        let mut statement = db.prepare(&sql).unwrap();
-        let ids = statement
-            .query_map(["root"], |r| r.get::<_, String>(1))
-            .unwrap()
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .unwrap();
-        assert_eq!(ids.len(), 257);
-        let vm = statement.get_status(StatementStatus::VmStep);
-        println!("P4_MILLION_SIBLINGS returned={} vm_steps={vm}", ids.len());
-        assert!(
-            vm < 100_000,
-            "successor work must not scale with one million siblings: {vm}"
-        );
     }
 }

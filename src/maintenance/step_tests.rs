@@ -225,7 +225,6 @@ async fn every_background_kind_fits_the_step_budget_on_a_large_database() {
     let gc = GcService::new(db.clone(), config.clone(), root.path().into(), attachments);
     let index = IndexService::new(db.clone(), config.clone());
 
-    let started = std::time::Instant::now();
     let receipts = store.collect_receipts().await.unwrap();
     assert!(!receipts.deferred);
     let report = gc
@@ -243,7 +242,6 @@ async fn every_background_kind_fits_the_step_budget_on_a_large_database() {
     ended.insert(crate::maintenance::Work::EndedRuns);
     let report = gc.collect_kinds(ended, chrono::Utc::now()).await.unwrap();
     assert!(report.deferred_kinds.is_empty(), "{report:?}");
-    let elapsed = started.elapsed();
 
     // The worker records each unit after replying; shutdown orders the read.
     db.shutdown().await.unwrap();
@@ -258,10 +256,7 @@ async fn every_background_kind_fits_the_step_budget_on_a_large_database() {
         entry.1 += 1;
     }
     let units: usize = per_kind.values().map(|v| v.1).sum();
-    println!(
-        "BACKGROUND_STEPS total_units={units} elapsed_ms={} (fact, not a bound)",
-        elapsed.as_millis()
-    );
+    println!("BACKGROUND_STEPS total_units={units}");
     for (kind, (max, units)) in &per_kind {
         println!("BACKGROUND_STEPS kind={kind} max_steps={max} units={units}");
     }

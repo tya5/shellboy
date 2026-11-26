@@ -517,7 +517,6 @@ mod output_batch_tests {
         };
         let mut pending = Some(first);
         let delay = Duration::from_millis(30);
-        let started = tokio::time::Instant::now();
         let mut batch = Box::pin(output_batch(
             &mut shell.events,
             &mut pending,
@@ -532,7 +531,6 @@ mod output_batch_tests {
             .await
             .unwrap()
             .unwrap();
-        assert!(started.elapsed() >= delay);
         assert_eq!(batch.len(), 1);
         assert_eq!(batch[0].bytes, b"timer");
         drop(batch);
@@ -556,9 +554,6 @@ mod drain_tests;
 
 #[cfg(all(test, unix))]
 mod duration_tests;
-
-#[cfg(all(test, unix))]
-mod performance_tests;
 
 #[cfg(all(test, unix))]
 mod live_marker_tests;

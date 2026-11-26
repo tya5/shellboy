@@ -1444,7 +1444,6 @@ fn sql_error(error: rusqlite::Error) -> ApiError {
 mod tests {
     use super::INDEX_SOURCES_PAGE;
     use rusqlite::{Connection, params};
-    use std::time::Instant;
 
     #[test]
     fn history_batch_halves_regrows_and_backs_off_failed_growth() {
@@ -1919,27 +1918,5 @@ mod tests {
             "{plan:?}"
         );
         assert!(!plan.iter().any(|d| d.contains("TEMP B-TREE")), "{plan:?}");
-    }
-
-    /// Synthetic size of the measured stall (#164). Prints timings only.
-    /// `cargo test --lib gc::tests::index_source_scan_measure -- --ignored --nocapture`
-    #[test]
-    #[ignore]
-    fn index_source_scan_measure() {
-        let db = fixture(58_902, 5_098, 130_000, 44_000);
-        let time = |label: &str| {
-            let started = Instant::now();
-            let rows = sources(&db).len();
-            println!(
-                "{label}: {rows} rows in {:?}; plan {:?}",
-                started.elapsed(),
-                plan(&db)
-            );
-        };
-        time("after (jobs_source + nodes_index_gc)");
-        db.execute_batch("DROP INDEX nodes_index_gc").unwrap();
-        time("jobs_source only");
-        db.execute_batch("DROP INDEX jobs_source").unwrap();
-        time("before (no new indexes)");
     }
 }

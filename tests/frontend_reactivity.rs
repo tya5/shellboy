@@ -502,24 +502,24 @@ impl Fixture {
             }
         }
     }
-    async fn cli_thread(&self, thread: &str, args: &[&str]) -> (Value, Instant) {
+    async fn cli_thread(&self, thread: &str, args: &[&str]) -> Value {
         let mut events = self.control.subscribe();
         let thread = thread.to_owned();
         let observed =
             tokio::spawn(async move { changed_thread_at(&mut events, &thread, false).await });
-        let (value, _) = self.cli_only(args).await;
-        (value, observed.await.unwrap())
+        let value = self.cli_only(args).await;
+        observed.await.unwrap();
+        value
     }
-    async fn cli(&self, args: &[&str]) -> (Value, Instant) {
+    async fn cli(&self, args: &[&str]) -> Value {
         let mut changed = self.control.subscribe();
         let observed = tokio::spawn(async move { changed_at(&mut changed, false).await });
-        let (value, _) = self.cli_only(args).await;
-        (value, observed.await.unwrap())
+        let value = self.cli_only(args).await;
+        observed.await.unwrap();
+        value
     }
     // GC uses its existing private Notify rather than a Core Changed event.
-    // Return invocation start as a conservative bound including process/IPC.
-    async fn cli_only(&self, args: &[&str]) -> (Value, Instant) {
-        let started = Instant::now();
+    async fn cli_only(&self, args: &[&str]) -> Value {
         let binary = std::env::var_os("SHELLBOY_TEST_BINARY")
             .unwrap_or_else(|| env!("CARGO_BIN_EXE_shellboy").into());
         let mut command = tokio::process::Command::new(binary);
@@ -547,7 +547,7 @@ impl Fixture {
         );
         let value: Value = serde_json::from_slice(&output.stdout).unwrap();
         assert_eq!(value["ok"], true, "{value}");
-        (value, started)
+        value
     }
     async fn finish(mut self) {
         self.actions.send(UiAction::Quit).await.unwrap();
@@ -567,14 +567,14 @@ impl Fixture {
             .unwrap();
     }
 }
-async fn changed_at(events: &mut broadcast::Receiver<EngineEvent>, recovery: bool) -> Instant {
+async fn changed_at(events: &mut broadcast::Receiver<EngineEvent>, recovery: bool) {
     changed_thread_at(events, "reactive", recovery).await
 }
 async fn changed_thread_at(
     events: &mut broadcast::Receiver<EngineEvent>,
     expected: &str,
     recovery: bool,
-) -> Instant {
+) {
     watchdog("frontend completion", async {
         loop {
             if let EngineEvent::Changed {
@@ -584,19 +584,12 @@ async fn changed_thread_at(
                 && thread_id == expected
                 && (!recovery || entered)
             {
-                return Instant::now();
+                return;
             }
         }
     })
     .await
     .unwrap()
-}
-fn latency(route: &str, committed: Instant) {
-    let elapsed = committed.elapsed();
-    println!(
-        "BC_REACTIVITY {route} commit_event_to_paint_us={} target_us=1000000",
-        elapsed.as_micros()
-    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -604,7 +597,7 @@ async fn foreign_cli_thread_settings_repaint_selected_header_without_input() {
     let mut fixture = Fixture::new("http://127.0.0.1:9/v1").await;
     let cwd = fixture.root.path().join("changed-cwd");
     std::fs::create_dir(&cwd).unwrap();
-    let (_, commit) = fixture
+    fixture
         .cli(&[
             "thread",
             "set",
@@ -638,7 +631,6 @@ async fn foreign_cli_thread_settings_repaint_selected_header_without_input() {
             },
         )
         .await;
-    latency("thread_settings_header", commit);
     fixture.finish().await;
 }
 
@@ -701,7 +693,7 @@ async fn failing_proxy() -> (
 async fn foreign_cli_queue_cancel_recovery_and_run_stop_repaint_without_input() {
     let (url, mut requests, proxy) = failing_proxy().await;
     let mut fixture = Fixture::build_in(&url, false, false, shellboy::config::UiLanguage::Ja).await;
-    let (_, started) = fixture
+    fixture
         .cli(&[
             "message",
             "send",
@@ -720,8 +712,7 @@ async fn foreign_cli_queue_cancel_recovery_and_run_stop_repaint_without_input() 
             ui.view().run_id.is_some() && screen.contains("モデル応答待ち")
         })
         .await;
-    latency("foreign_first_send_footer", started);
-    let (queued, commit) = fixture
+    let queued = fixture
         .cli(&[
             "message",
             "send",
@@ -745,8 +736,7 @@ async fn foreign_cli_queue_cancel_recovery_and_run_stop_repaint_without_input() 
                 && screen.contains("待ち 1")
         })
         .await;
-    latency("foreign_queued_input", commit);
-    let (_, commit) = fixture
+    fixture
         .cli(&["message", "cancel", "--message", &message])
         .await;
     fixture
@@ -757,11 +747,10 @@ async fn foreign_cli_queue_cancel_recovery_and_run_stop_repaint_without_input() 
                 && screen.contains("PAID_R6_HISTORY")
         })
         .await;
-    latency("foreign_pending_cancel", commit);
     let mut events = fixture.control.subscribe();
     let entered = tokio::spawn(async move { changed_at(&mut events, true).await });
     first.reply.send(()).unwrap();
-    let commit = entered.await.unwrap();
+    entered.await.unwrap();
     fixture
         .until("saved recovery state/footer", |ui, screen| {
             ui.view().state == "復旧待ち"
@@ -769,9 +758,8 @@ async fn foreign_cli_queue_cancel_recovery_and_run_stop_repaint_without_input() 
                 && screen.contains("PAID_R6_HISTORY")
         })
         .await;
-    latency("recovery_footer", commit);
     let run = fixture.ui.view().run_id.clone().unwrap();
-    let (_, commit) = fixture.cli(&["run", "stop", "--run", &run]).await;
+    fixture.cli(&["run", "stop", "--run", &run]).await;
     fixture
         .until("foreign run stop clears recovery", |ui, screen| {
             ui.view().run_id.is_none()
@@ -785,7 +773,6 @@ async fn foreign_cli_queue_cancel_recovery_and_run_stop_repaint_without_input() 
                 && screen.contains("PAID_R6_HISTORY")
         })
         .await;
-    latency("foreign_run_stop_footer", commit);
     fixture.finish().await;
     proxy.abort();
 }
@@ -879,7 +866,7 @@ async fn real_cli_raw_gc_updates_open_f6_without_input_or_source_rewrite() {
     fixture.control.store.database.call(|db| {
         db.execute("UPDATE shell_execution SET started_at='2000-01-01T00:00:00Z',ended_at='2000-01-01T00:00:01Z' WHERE id='gc-shell'",[])?;Ok(())
     }).await.unwrap();
-    let (collected, started) = fixture
+    let collected = fixture
         .cli_only(&["storage", "collect", "--category", "raw"])
         .await;
     assert_eq!(collected["result"]["raw_bytes_collected"], 2048);
@@ -898,11 +885,6 @@ async fn real_cli_raw_gc_updates_open_f6_without_input_or_source_rewrite() {
                     .any(|line| line.contains("出力保持世代") && line.contains('1'))
         })
         .await;
-    let elapsed = started.elapsed();
-    println!(
-        "BC_REACTIVITY raw_gc_open_f6 cli_start_to_paint_us={} target_us=1000000",
-        elapsed.as_micros()
-    );
 
     let snapshot = fixture.source_snapshots.last().unwrap();
     assert!(snapshot.read_revision > read_before);
@@ -1250,7 +1232,7 @@ async fn history_gc_f7_ordering(hint_first: bool) {
     // Use the real fork command, through the completed result boundary. A
     // call-only prefix would be rejected by validate_group_boundary and would
     // make an invalid synthetic test rather than exercise a supported route.
-    let (forked, _) = fixture
+    let forked = fixture
         .cli_only(&["thread", "fork", "--thread", "f7-parent", "--node", RESULT])
         .await;
     let child = forked["result"]["thread_id"].as_str().unwrap().to_owned();
@@ -1397,7 +1379,7 @@ async fn history_gc_f7_ordering(hint_first: bool) {
             // This arm proves the normal delete wake -> maintenance -> commit path.
             drop(gc_hold.take());
         }
-        let (_, started) = fixture
+        fixture
             .cli_only(&["thread", "delete", "--thread", &child])
             .await;
         if hint_first {
@@ -1510,7 +1492,6 @@ async fn history_gc_f7_ordering(hint_first: bool) {
                 },
             )
             .await;
-        started
     })
     .await;
     if run.is_err() {
@@ -1524,15 +1505,10 @@ async fn history_gc_f7_ordering(hint_first: bool) {
             final_sources_tombstoned,
         );
     }
-    let started = run.unwrap();
+    run.unwrap();
     println!(
         "F7_ORDERING_TRACE hint_first={hint_first} {}",
         serde_json::to_string(&fixture.detail_trace).unwrap()
-    );
-    let elapsed = started.elapsed();
-    println!(
-        "BC_REACTIVITY history_gc_open_f7 cli_start_to_paint_us={} target_us=1000000",
-        elapsed.as_micros()
     );
 
     let last = fixture.source_snapshots.last().unwrap();
@@ -1702,7 +1678,7 @@ async fn selected_header_and_open_browser_share_one_changed_snapshot_without_rel
             let title = format!("E1_PAIRED_TITLE_{step}");
             fixture.view_sequences.clear();
             fixture.browser_sequences.clear();
-            let (_, commit) = fixture
+            fixture
                 .cli(&["thread", "set", "--thread", "reactive", "--title", &title])
                 .await;
             fixture
@@ -1714,7 +1690,6 @@ async fn selected_header_and_open_browser_share_one_changed_snapshot_without_rel
                             .any(|row| row.thread_id == "reactive" && row.title == title)
                 })
                 .await;
-            latency("browser_paired_header", commit);
             assert_eq!(fixture.ui.list_generation(), generation);
             assert_eq!(
                 fixture.browser_pages, pages,
@@ -1750,7 +1725,7 @@ async fn foreign_cli_creates_and_deletes_unloaded_browser_rows_without_input_or_
         .await;
     let generation = fixture.ui.list_generation();
     let pages = fixture.browser_pages;
-    let (created, _) = fixture.cli_only(&["thread", "create"]).await;
+    let created = fixture.cli_only(&["thread", "create"]).await;
     let id = created["result"]["thread_id"].as_str().unwrap().to_owned();
     let mut events = fixture.control.subscribe();
     let expected = id.clone();
@@ -1766,7 +1741,7 @@ async fn foreign_cli_creates_and_deletes_unloaded_browser_rows_without_input_or_
             "E1_FOREIGN_NEW_ROW",
         ])
         .await;
-    let commit = changed.await.unwrap();
+    changed.await.unwrap();
     fixture
         .until("new row not present in original page", |ui, screen| {
             ui.threads()
@@ -1775,7 +1750,6 @@ async fn foreign_cli_creates_and_deletes_unloaded_browser_rows_without_input_or_
                 && screen.contains("E1_FOREIGN_NEW_ROW")
         })
         .await;
-    latency("browser_external_add", commit);
     let mut events = fixture.control.subscribe();
     let expected = id.clone();
     let changed =
@@ -1783,14 +1757,13 @@ async fn foreign_cli_creates_and_deletes_unloaded_browser_rows_without_input_or_
     fixture
         .cli_only(&["thread", "delete", "--thread", &id])
         .await;
-    let commit = changed.await.unwrap();
+    changed.await.unwrap();
     fixture
         .until("external deleted row removed", |ui, screen| {
             ui.threads().iter().all(|row| row.thread_id != id)
                 && !screen.contains("E1_FOREIGN_NEW_ROW")
         })
         .await;
-    latency("browser_external_delete", commit);
     assert_eq!(fixture.ui.list_generation(), generation);
     assert_eq!(fixture.browser_pages, pages);
     fixture.finish().await;
@@ -1804,7 +1777,7 @@ async fn scoped_watch_foreign_cli_updates_parent_counts_and_rejects_delayed_retr
     use shellboy::activity::ActivityPhase;
     let (url, mut requests, proxy) = failing_proxy().await;
     let mut fixture = Fixture::new(&url).await;
-    let (forked, _) = fixture
+    let forked = fixture
         .cli_only(&[
             "thread",
             "fork",
@@ -1834,7 +1807,7 @@ async fn scoped_watch_foreign_cli_updates_parent_counts_and_rejects_delayed_retr
         .await;
     let generation = fixture.ui.list_generation();
     let pages = fixture.browser_pages;
-    let (sent, commit) = fixture
+    let sent = fixture
         .cli_thread(
             &child,
             &[
@@ -1865,7 +1838,6 @@ async fn scoped_watch_foreign_cli_updates_parent_counts_and_rejects_delayed_retr
             },
         )
         .await;
-    latency("watch_new_unowned_descendant", commit);
     fixture
         .observed_until("painted child gets bounded real details", |f, _| {
             f.watch_details.iter().rev().any(|(_, detail)| {
@@ -1874,7 +1846,7 @@ async fn scoped_watch_foreign_cli_updates_parent_counts_and_rejects_delayed_retr
             })
         })
         .await;
-    let (_, commit) = fixture
+    fixture
         .cli(&[
             "thread",
             "set",
@@ -1896,7 +1868,6 @@ async fn scoped_watch_foreign_cli_updates_parent_counts_and_rejects_delayed_retr
                     })
         })
         .await;
-    latency("watch_parent_title_dependency", commit);
     fixture.view_sequences.clear();
     fixture.browser_sequences.clear();
     fixture.watch_details.clear();
@@ -1905,7 +1876,7 @@ async fn scoped_watch_foreign_cli_updates_parent_counts_and_rejects_delayed_retr
     let target = child.clone();
     let recovery = tokio::spawn(async move { changed_thread_at(&mut events, &target, true).await });
     first.reply.send(()).unwrap();
-    let commit = recovery.await.unwrap();
+    recovery.await.unwrap();
     fixture
         .observed_until(
             "same read updates Watch recovery and parent counts",
@@ -1923,7 +1894,6 @@ async fn scoped_watch_foreign_cli_updates_parent_counts_and_rejects_delayed_retr
             },
         )
         .await;
-    latency("watch_recovery_and_parent_counts", commit);
     let count_sequence = fixture.descendant_snapshots.last().unwrap().0;
     assert!(
         fixture.browser_sequences.contains(&count_sequence),
@@ -2043,9 +2013,9 @@ async fn open_list_keeps_running_foreign_row_through_repeated_cli_reordering() {
     watchdog("running row remains in open List", async {
         let (url, mut requests, proxy) = failing_proxy().await;
         let mut fixture = Fixture::new(&url).await;
-        let (worker, _) = fixture.cli_only(&["thread", "create"]).await;
+        let worker = fixture.cli_only(&["thread", "create"]).await;
         let worker = worker["result"]["thread_id"].as_str().unwrap().to_owned();
-        let (other, _) = fixture.cli_only(&["thread", "create"]).await;
+        let other = fixture.cli_only(&["thread", "create"]).await;
         let other = other["result"]["thread_id"].as_str().unwrap().to_owned();
         fixture.command("/threads").await;
         fixture
@@ -2132,7 +2102,7 @@ async fn open_list_keeps_running_foreign_row_through_repeated_cli_reordering() {
 async fn open_browser_keeps_reordered_running_rows_visible_without_reopen() {
     let (url, mut requests, proxy) = failing_proxy().await;
     let mut fixture = Fixture::new(&url).await;
-    let (created, _) = fixture.cli_only(&["thread", "create"]).await;
+    let created = fixture.cli_only(&["thread", "create"]).await;
     let worker = created["result"]["thread_id"].as_str().unwrap().to_owned();
     fixture
         .cli_only(&[
@@ -2144,7 +2114,7 @@ async fn open_browser_keeps_reordered_running_rows_visible_without_reopen() {
             "WORKER_ONE",
         ])
         .await;
-    let (other, _) = fixture.cli_only(&["thread", "create"]).await;
+    let other = fixture.cli_only(&["thread", "create"]).await;
     let other = other["result"]["thread_id"].as_str().unwrap().to_owned();
     fixture
         .cli_only(&[
@@ -2196,7 +2166,7 @@ async fn open_browser_keeps_reordered_running_rows_visible_without_reopen() {
     std::fs::write(&witness, "").unwrap();
     for cycle in 0..4 {
         let worker = if cycle % 2 == 0 { &worker } else { &other };
-        let (accepted, _) = fixture
+        let accepted = fixture
             .cli_only(&[
                 "message",
                 "send",
@@ -2221,7 +2191,7 @@ async fn open_browser_keeps_reordered_running_rows_visible_without_reopen() {
                 },
             )
             .await;
-        let (canonical, _) = fixture.cli_only(&["thread", "list"]).await;
+        let canonical = fixture.cli_only(&["thread", "list"]).await;
         assert!(
             canonical["result"]["items"]
                 .as_array()
@@ -2472,7 +2442,7 @@ async fn unrelated_owner_changed_keeps_index_confirmation_and_preview_usable() {
     let before = fixture.pump().await;
     assert_eq!(before.matches("索引処理の実行確認").count(), 1, "{before}");
     assert!(before.contains("資料数: 1"), "{before}");
-    let (result, _) = fixture
+    let result = fixture
         .cli_thread(
             "unrelated",
             &["thread", "set", "--thread", "unrelated", "--title", "after"],
@@ -2548,7 +2518,7 @@ async fn unrelated_owner_changed_does_not_block_a_reviewed_deletion() {
         db.execute("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at) VALUES('unrelated-delete','before',?1,'','fixture','fixture0','now')", [cwd])?;
         Ok(())
     }).await.unwrap();
-    let (result, _) = fixture
+    let result = fixture
         .cli_thread(
             "unrelated-delete",
             &[

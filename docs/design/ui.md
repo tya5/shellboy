@@ -79,7 +79,7 @@ UiNodeはcanonical textと、同じtextに対するUnicode文字位置の半開�
 
 live streamも同じ元文字位置のrangeを使う。追従停止中に新tailが旧windowを外れた場合、旧windowと対応するreasoning metadataを一緒に保持する。新tail側の短いrange一覧で旧windowの推論分類を消すと、意図せず推論が展開されるためである。本文cache予算にはtext capacityだけでなくreasoning_rangesのcapacityも含め、非表示nodeの展開状態もcache回収とともに破棄する。node本文window外のmetadataはfrontendが間引き、再取得時にcanonical原文から再構築する。
 
-2026-10-24 macOSで `cargo test --test ui` 29件と `cargo clippy --lib --test ui --test performance -- -D warnings` 成功。追加試験は永続添付操作のrouting、推論の既定折りたたみ・開閉、copyの元node ID維持、CJKを含む元windowの文字位置、追従停止中stream更新での折りたたみ保持、metadata容量のcache回収を含む。tests/performance.rsは追加fieldの空metadata追従のみ行い、前記baseline性能値をP6変更後の再測定とは扱わない。
+2026-10-24 macOSで `cargo test --test ui` 29件と `cargo clippy --lib --test ui --test performance -- -D warnings` 成功。追加試験は永続添付操作のrouting、推論の既定折りたたみ・開閉、copyの元node ID維持、CJKを含む元windowの文字位置、追従停止中stream更新での折りたたみ保持、metadata容量のcache回収を含む。tests/performance.rs（#442で削除）は追加fieldの空metadata追従のみ行い、前記baseline性能値をP6変更後の再測定とは扱わない。
 
 ## A17/A18: キャッシュ回収と橋渡しの非待機化
 

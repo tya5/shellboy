@@ -2103,29 +2103,6 @@ impl UiState {
             .expect("active view exists")
             .live_work
     }
-    #[cfg(test)]
-    fn prepare_render_width(&mut self, width: u16) {
-        let view = self.view();
-        let preflight = RenderPreflight::new(view);
-        let visible = self
-            .layout_cache
-            .entries
-            .iter()
-            .filter(|(key, _)| {
-                key.view == self.active && key.history_revision == view.history_revision()
-            })
-            .max_by_key(|(_, entry)| entry.touched)
-            .map(|(_, entry)| {
-                visible_render_nodes(
-                    &entry.value,
-                    view.navigation.scroll.row(),
-                    view.navigation.scroll.height,
-                    view.nodes().len(),
-                )
-            })
-            .unwrap_or_default();
-        self.prepare_visible_render_width(width, &visible, preflight);
-    }
     fn prepare_visible_render_width(
         &mut self,
         width: u16,
@@ -9471,12 +9448,6 @@ mod thread_view_boundary_tests {
 }
 
 #[cfg(test)]
-mod performance_stream;
-
-#[cfg(test)]
-mod stream_performance;
-
-#[cfg(test)]
 mod stale_rebase_retry_tests {
     use super::*;
 
@@ -9619,122 +9590,6 @@ mod stale_rebase_retry_tests {
             assert_eq!(ui.view().navigation.pending(), 7);
             assert!(ui.take_deferred_actions().is_empty());
         }
-    }
-}
-
-#[cfg(test)]
-mod conversation_perf_observation {
-    use super::*;
-    use ratatui::{Terminal, backend::TestBackend};
-    #[test]
-    #[ignore = "manual native latency observation; no provider or user data"]
-    fn conversation_128_nodes_50_tools_latency() {
-        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
-        let nodes = (0..128)
-            .map(|n| {
-                let text = format!("Synthetic message {n}: bounded fixture body.");
-                let tool = n >= 78;
-                UiNode {
-                    node_id: format!("perf-{n}"),
-                    role: if tool { "tool" } else { "assistant" }.into(),
-                    total_chars: text.chars().count(),
-                    text: text.clone(),
-                    presentation: crate::presentation::NodePresentation {
-                        projection_stamp: Some([n as u8; 32]),
-                        kind: if tool {
-                            crate::presentation::PresentationKind::ToolResult
-                        } else {
-                            crate::presentation::PresentationKind::Assistant
-                        },
-                        blocks: vec![crate::presentation::PresentationBlock {
-                            kind: if tool {
-                                crate::presentation::BlockKind::ToolResult
-                            } else {
-                                crate::presentation::BlockKind::Prose
-                            },
-                            text,
-                            tool: tool.then(|| crate::presentation::ToolPresentation {
-                                call_id: format!("call-{n}"),
-                                command: format!("fixture-{n}"),
-                                status: "completed".into(),
-                                exit_code: Some(0),
-                                ..Default::default()
-                            }),
-                            ..Default::default()
-                        }],
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                }
-            })
-            .collect();
-        ui.view_mut().thread_id = Some("fixture".into());
-        ui.apply(UiUpdate::History {
-            thread_id: "fixture".into(),
-            generation: 0,
-            nodes,
-            pending: Default::default(),
-            read_revision: 1,
-            before_cursor: None,
-            append: false,
-            first_ordinal: 0,
-            selection_revision: 1,
-            total_nodes: 128,
-        });
-        let mut terminal = Terminal::new(TestBackend::new(140, 40)).unwrap();
-        terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
-        let interact = std::env::var("SHELLBOY_PERF_MODE").as_deref() == Ok("interaction");
-        if interact {
-            ui.event(Event::Key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)));
-        }
-        let mut samples = Vec::new();
-        for i in 0..520 {
-            let start = Instant::now();
-            let builds_before = ui.layout_cache.builds;
-            let units_before = ui.layout_cache.unit_builds;
-            if interact {
-                ui.event(Event::Key(KeyEvent::new(
-                    if i % 2 == 0 {
-                        KeyCode::Up
-                    } else {
-                        KeyCode::Down
-                    },
-                    KeyModifiers::NONE,
-                )));
-                if i % 4 == 0 {
-                    ui.event(Event::Key(KeyEvent::new(
-                        KeyCode::Char(' '),
-                        KeyModifiers::NONE,
-                    )));
-                }
-            }
-            terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
-            if i >= 20 {
-                samples.push(start.elapsed().as_micros());
-            }
-            if interact && i % 4 != 0 {
-                assert_eq!(
-                    ui.layout_cache.builds, builds_before,
-                    "focus alone must reuse the whole layout"
-                );
-                assert_eq!(
-                    ui.layout_cache.unit_builds, units_before,
-                    "focus alone must not measure item bodies"
-                );
-            }
-        }
-        samples.sort_unstable();
-        println!(
-            "PERF128 mode={} samples={} p50_us={} p95_us={} max_us={} layout_builds={} unit_builds={} unit_hits={}",
-            if interact { "interaction" } else { "redraw" },
-            samples.len(),
-            samples[samples.len() / 2],
-            samples[samples.len() * 95 / 100],
-            samples.last().unwrap(),
-            ui.layout_cache.builds,
-            ui.layout_cache.unit_builds,
-            ui.layout_cache.unit_hits
-        );
     }
 }
 

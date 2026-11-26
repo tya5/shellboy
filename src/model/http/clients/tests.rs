@@ -422,53 +422,6 @@ async fn control_catalog_requests_reuse_the_owner_client_pool() {
 }
 
 #[tokio::test]
-#[ignore = "opt-in: exactly four synthetic requests to local LiteLLM; may incur API charges"]
-async fn local_proxy_four_request_pool_timing_probe() {
-    let model =
-        std::env::var("SHELLBOY_TEST_PROXY_MODEL").expect("explicit synthetic model required");
-    let connection = Connection {
-        base_url: "http://127.0.0.1:4000/v1".into(),
-        request_timeout_ms: 45_000,
-        stream_idle_timeout_ms: 45_000,
-        api_key_env: std::env::var_os("SHELLBOY_TEST_PROXY_API_KEY")
-            .map(|_| "SHELLBOY_TEST_PROXY_API_KEY".into()),
-        ..Default::default()
-    };
-    let clients = HttpClients::new(&Config {
-        connections: BTreeMap::from([("probe".into(), connection.clone())]),
-        ..Default::default()
-    });
-    for shared in [false, true] {
-        for sample in 0..2 {
-            let client = if shared {
-                clients.get("probe").unwrap()
-            } else {
-                HttpModelClient::for_connection("probe", connection.clone()).unwrap()
-            };
-            let mut request = response_request(
-                &model,
-                vec![json!({"role":"user","content":"Synthetic connection test. Reply only OK."})],
-                None,
-                false,
-            );
-            request["max_output_tokens"] = json!(512);
-            let started = std::time::Instant::now();
-            crate::test_watchdog::watchdog(
-                "src/model/http/clients/tests.rs: local_proxy_four_request_pool_timing_probe",
-                client.response(request, CancellationToken::new(), None),
-            )
-            .await
-            .expect("probe deadline")
-            .expect("probe response");
-            eprintln!(
-                "pool_probe shared={shared} sample={sample} elapsed_ms={}",
-                started.elapsed().as_millis()
-            );
-        }
-    }
-}
-
-#[tokio::test]
 async fn sse_terminal_drain_reuses_one_tcp_without_parsing_trailing_content() {
     let fixture = server_wire("sse", false, Some(SseTail::Complete)).await;
     let client = HttpModelClient::new(fixture.connection.clone()).unwrap();
@@ -599,57 +552,6 @@ async fn control_conversations_reuse_owner_client_for_chunked_sse() {
     control.shutdown().await.unwrap();
     drop(control);
     owner.shutdown().await.unwrap();
-}
-
-#[tokio::test]
-#[ignore = "opt-in: four synthetic prompt-cache requests to local LiteLLM; may incur API charges"]
-async fn local_proxy_thread_session_cache_probe() {
-    let model =
-        std::env::var("SHELLBOY_TEST_PROXY_MODEL").expect("explicit synthetic model required");
-    let marker = uuid::Uuid::new_v4().to_string();
-    let prefix = (0..1800)
-        .map(|n| format!("Synthetic record {n:04}: amber cedar river meadow stone.\n"))
-        .collect::<String>();
-    let input = format!(
-        "Synthetic cache probe {marker}. Read the following synthetic records and reply only OK.\n{prefix}"
-    );
-    let session = uuid::Uuid::new_v4().to_string();
-    for enabled in [false, true] {
-        let connection = Connection {
-            base_url: "http://127.0.0.1:4000/v1".into(),
-            stream_idle_timeout_ms: 90_000,
-            session_header: enabled,
-            api_key_env: std::env::var_os("SHELLBOY_TEST_PROXY_API_KEY")
-                .map(|_| "SHELLBOY_TEST_PROXY_API_KEY".into()),
-            ..Default::default()
-        };
-        let client = HttpModelClient::new(connection).unwrap();
-        for sample in 0..2 {
-            let mut request = response_request(
-                &model,
-                vec![json!({"role":"user","content":input})],
-                Some("low"),
-                false,
-            );
-            request["max_output_tokens"] = json!(512);
-            let started = std::time::Instant::now();
-            let response = crate::test_watchdog::watchdog(
-                "src/model/http/clients/tests.rs: local_proxy_thread_session_cache_probe",
-                client.response_for_thread(&session, request, CancellationToken::new(), None),
-            )
-            .await
-            .expect("probe deadline")
-            .expect("probe response");
-            eprintln!(
-                "session_cache_probe header={enabled} sample={sample} elapsed_ms={} usage={}",
-                started.elapsed().as_millis(),
-                response
-                    .raw
-                    .get("usage")
-                    .unwrap_or(&serde_json::Value::Null)
-            );
-        }
-    }
 }
 
 #[tokio::test]
