@@ -6647,6 +6647,17 @@
             "null"
           ]
         },
+        "pause_kind": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PauseReason"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Owner classification of the saved index pause; absent when no pause is saved."
+        },
         "paused": {
           "type": "boolean"
         },
@@ -8542,6 +8553,18 @@
         "expanded"
       ],
       "type": "object"
+    },
+    "PauseReason": {
+      "description": "A fixed classification of the persisted pause, never provider prose.",
+      "enum": [
+        "transport",
+        "authentication",
+        "configuration",
+        "dimension",
+        "capacity",
+        "other"
+      ],
+      "type": "string"
     },
     "PendingReplyCount": {
       "properties": {
@@ -17347,6 +17370,17 @@
             "string",
             "null"
           ]
+        },
+        "pause_kind": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PauseReason"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Owner classification of the saved index pause; absent when no pause is saved."
         },
         "paused": {
           "type": "boolean"

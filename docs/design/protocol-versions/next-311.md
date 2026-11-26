@@ -124,7 +124,15 @@ read is bounded; it runs on the read-only inspection lane.
 
 `thread.get` with `display` now also returns `context_usage`, read in the same
 read-only transaction as the header, and `context_usage.last_successful_attempt`
-adds the attempt's provider-reported `output_tokens`. `index.status` reads its
-saved state in one read-only transaction and no longer waits behind index
-writes; its result is unchanged. No operation, event fact or CLI option is
-added.
+adds the attempt's provider-reported `output_tokens`. `index.status` adds
+`pause_kind` (`transport`, `authentication`, `configuration`, `dimension`,
+`capacity` or `other`): the owner's classification of the saved pause it
+reports, endpoint family before profile. It is absent when no pause is saved,
+including a pause caused only by an owner storage stop, and text appended to
+`reason` does not change it.
+
+These owner reads, the shell wait proof, and `index.status` run on the
+read-only inspection lane (`control::db::read_only`, the existing bounded
+inspection workers), so a reader never queues behind the writer; `index.status`
+reads its saved state in one transaction. No operation, event fact or CLI
+option is added.

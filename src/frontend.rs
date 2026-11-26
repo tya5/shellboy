@@ -1119,7 +1119,7 @@ async fn run_client(
                 let result = owner
                     .call(Command::IndexStatus(IndexArgs::default()))
                     .await
-                    .map(|status| crate::index::display_pause(&status));
+                    .map(|status: IndexStatus| status.pause_kind);
                 let _ = sender.send(BackgroundResult::DraftIndexPause(result)).await;
             }) {
                 draft_pause_dirty = false;
