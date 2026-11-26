@@ -44,7 +44,7 @@ MIGRATION_FILES = {int(version): MIGRATIONS / f'{name}.sql'
                    for version, name in re.findall(r'^\s*\((\d+),\s*"([^"]+)"', _migration_names, re.MULTILINE)}
 # #433 widens the open-reply indexes and replaces receipt_reply_run_pending.
 OPEN_REPLY_DUTIES = next(version for version, path in MIGRATION_FILES.items()
-                         if path.stem == 'next_open_reply_duties')
+                         if path.stem == '0067_open_reply_duties')
 # A table-rebuild migration says so on its first line; src/storage/migrate.rs reads the same marker.
 REBUILD_MARKER = '-- rebuild: foreign keys off'
 RETIRE_SUMMARY_LEDGER_SQL = ROOT / 'src/storage/migrate/retire_summary_ledger.sql'
@@ -139,7 +139,7 @@ def check_migration(db, before, start, target):
 
     if target >= 26:
         # The newest definition at or below the target: migration 26, widened to
-        # both open reply states by `next_open_reply_duties` (#433).
+        # both open reply states by `0067_open_reply_duties` (#433).
         expected_index = next(
             sql[sql.index('CREATE INDEX receipt_reply_pending '):].split(';')[0]
             for sql in (MIGRATION_FILES[version].read_text(encoding='utf-8')
@@ -245,7 +245,7 @@ def check_migration(db, before, start, target):
             assert db.execute("SELECT count(*) FROM sqlite_master WHERE type='index' AND name=?", (name,)).fetchone()[0] == 1, f'migration 39 missing {name}'
     if target >= OPEN_REPLY_DUTIES:
         assert db.execute("SELECT count(*) FROM sqlite_master WHERE type='index' AND name='receipt_reply_run_pending'").fetchone()[0] == 0, \
-            'receipt_reply_run_pending remains after next_open_reply_duties'
+            'receipt_reply_run_pending remains after 0067_open_reply_duties'
         for statement in MIGRATION_FILES[OPEN_REPLY_DUTIES].read_text(encoding='utf-8').split(';'):
             lines = [line for line in statement.splitlines() if not line.startswith('--')]
             create = ' '.join(' '.join(lines).split())
@@ -253,7 +253,7 @@ def check_migration(db, before, start, target):
                 continue
             name = create.split()[2]
             actual = db.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name=?", (name,)).fetchone()
-            assert actual and ' '.join(actual[0].split()) == create, f'{name} differs from next_open_reply_duties'
+            assert actual and ' '.join(actual[0].split()) == create, f'{name} differs from 0067_open_reply_duties'
 
     if target >= 41:
         assert db.execute("SELECT count(*) FROM sqlite_master WHERE type='index' AND name='receipt_reply_node_lookup'").fetchone()[0] == 1, 'migration 41 reply lookup index missing'

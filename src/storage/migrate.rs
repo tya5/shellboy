@@ -354,7 +354,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     },
     Migration {
         version: 67,
-        sql: include_str!("../../migrations/next_open_reply_duties.sql"),
+        sql: include_str!("../../migrations/0067_open_reply_duties.sql"),
         foreign_keys: Some(Impact::IndexOnly),
     },
 ];

@@ -12,7 +12,7 @@ use serde_json::{Value, json};
 /// (`replied`, `ignored`, `cancelled`, `recipient_deleted`) is terminal and never
 /// reopens. Blocking, reply, cancel, deletion and Run-end settlement all use this
 /// rule. The SQL form is textually identical to the partial-index predicates of
-/// migration `next_open_reply_duties`, so SQLite can prove index use.
+/// migration `0067_open_reply_duties`, so SQLite can prove index use.
 macro_rules! open_reply {
     ($alias:literal) => {
         concat!(

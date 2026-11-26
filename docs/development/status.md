@@ -6,7 +6,7 @@ Branch `task/core433-awaiting-own-ask`: a reply duty whose Thread asks back and
 ends its Run becomes `awaiting_own_ask`; the asker's Run that receives the
 answer or outcome owes it again, and ignores it if that Run ends unanswered. One
 open/terminal state rule in `control::reply` drives blocking, reply, cancel,
-deletion and settlement; migration `next_open_reply_duties` widens the
+deletion and settlement; migration `0067_open_reply_duties` widens the
 open-duty indexes and adds the owner-Run index. Not landed. Open question for the
 owner: `exec --result reply` still ends with exit 4 when the recipient Run
 completes while the duty awaits its own ask.

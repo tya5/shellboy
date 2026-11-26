@@ -91,7 +91,7 @@ that owns them.
 - **Reads.** `message list --awaiting` items and `message get` carry the saved
   `reply` object; `thread get.pending_replies.awaiting_own_ask` lists up to 16
   `{message_id, blocking_message_id}` pairs. Open-duty reads use partial indexes
-  over both open states (migration `next_open_reply_duties`); the bound is the
+  over both open states (migration `0067_open_reply_duties`); the bound is the
   existing 16-duty cap per Thread, which counts both open states.
 
 Not built: a timer, a per-Thread setting, a nesting limit, a new event fact, or
