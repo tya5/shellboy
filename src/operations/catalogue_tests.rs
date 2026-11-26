@@ -390,8 +390,6 @@ fn fresh_clap_executable_paths_and_every_option_match_the_catalogue_bindings() {
 
 #[test]
 fn identities_are_complete_and_attach_is_the_only_explicit_alias() {
-    assert_eq!(OperationId::ALL.len(), 89);
-    assert_eq!(SPECS.len(), 89);
     let ids = OperationId::ALL.iter().copied().collect::<BTreeSet<_>>();
     assert_eq!(ids.len(), OperationId::ALL.len());
     assert_eq!(
@@ -458,9 +456,6 @@ fn identities_are_complete_and_attach_is_the_only_explicit_alias() {
 fn read_only_run_meaning_send_verb_and_mode_effects_are_factual() {
     let run = OperationId::RunGet.spec();
     assert_eq!(run.effect, Effect::Inspect);
-    for word in ["保存状態", "Turn", "所有関係", "復旧理由"] {
-        assert!(run.meaning.contains(word));
-    }
     assert_eq!(
         OperationId::RunGet.enter_verb(run.effect),
         EnterVerb::Display

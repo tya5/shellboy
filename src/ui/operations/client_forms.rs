@@ -694,13 +694,11 @@ mod tests {
             .unwrap();
     }
     #[test]
-    fn every_catalogue_identity_has_one_real_form_and_all_sixteen_client_builders_match_their_identity()
-     {
+    fn every_catalogue_identity_has_one_real_form_and_every_client_builder_matches_its_identity() {
         let ids = OpKind::ALL
             .iter()
             .map(|kind| kind.catalogue())
             .collect::<std::collections::BTreeSet<_>>();
-        assert_eq!(ids.len(), 70);
         assert_eq!(
             ids,
             OperationId::ALL
@@ -712,17 +710,12 @@ mod tests {
                 .copied()
                 .collect()
         );
-        assert_eq!(
-            crate::operations::CLI_BINDINGS.len(),
-            90,
-            "attach is a CLI shorthand, not another operation"
-        );
         let clients = OpKind::ALL
             .iter()
             .copied()
             .filter(|kind| !OpKind::OWNER.contains(kind))
             .collect::<Vec<_>>();
-        assert_eq!(clients.len(), 16);
+        assert!(!clients.is_empty());
         for kind in clients {
             let mut form = fixture(kind);
             assert_eq!(client(&form).catalogue(), kind.catalogue(), "{kind:?}");

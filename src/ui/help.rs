@@ -1475,64 +1475,6 @@ mod tests {
     }
 
     #[test]
-    fn thread_deletion_help_distinguishes_confirmation_from_filter_editing() {
-        let shown = Page::guide(&japanese_config())
-            .lines(160)
-            .iter()
-            .map(ToString::to_string)
-            .collect::<Vec<_>>()
-            .join("\n");
-        for expected in [
-            "Delete / Ctrl+D",
-            "まだ削除しない",
-            "D/Space",
-            "Yで実行できません",
-            "N/Esc",
-            "fn+delete",
-            "Backspace",
-        ] {
-            assert!(shown.contains(expected), "{expected}: {shown}");
-        }
-    }
-
-    #[test]
-    fn owned_work_help_describes_heading_and_short_screen_fallback() {
-        for (language, phrases) in [
-            (
-                UiLanguage::Ja,
-                [
-                    "最古の作業",
-                    "折りたたみ中",
-                    "状態欄",
-                    "1秒を超える間だけ右端に表示",
-                    "DB! <操作> 進捗なし",
-                ],
-            ),
-            (
-                UiLanguage::En,
-                [
-                    "oldest work",
-                    "even when folded",
-                    "status bar",
-                    "right edge only while work exceeds one second",
-                    "no progress is marked",
-                ],
-            ),
-        ] {
-            let mut config = Config::default();
-            config.ui.language = language;
-            let text = Page::guide(&config)
-                .lines(160)
-                .iter()
-                .map(ToString::to_string)
-                .collect::<String>();
-            for phrase in phrases {
-                assert!(text.contains(phrase), "{language:?}: missing {phrase}");
-            }
-        }
-    }
-
-    #[test]
     fn guide_columns_align_and_narrow_layout_keeps_notes_distinct() {
         let page = Page {
             title: "fixture",

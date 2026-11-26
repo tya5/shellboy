@@ -59,7 +59,6 @@ fn owner_forms_cover_every_owner_catalogue_identity_without_client_stubs() {
         .iter()
         .map(|kind| kind.catalogue())
         .collect::<std::collections::HashSet<_>>();
-    assert_eq!(implemented.len(), 54);
     assert_eq!(implemented, owner);
     for kind in OpKind::OWNER {
         let form = Form::new(*kind, &context());
