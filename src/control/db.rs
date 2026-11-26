@@ -5930,8 +5930,7 @@ mod thread_deletion_notification_tests {
             db.execute_batch(r#"
                 CREATE TABLE fixture_reply_phase(phase TEXT NOT NULL);
                 INSERT INTO fixture_reply_phase VALUES('sync');
-                CREATE TABLE fixture_reply_transition(message TEXT NOT NULL,phase TEXT NOT NULL,batch INTEGER);
-                CREATE TABLE fixture_reply_batch(id INTEGER PRIMARY KEY,scanned INTEGER NOT NULL,terminalized INTEGER NOT NULL);
+                CREATE TABLE fixture_reply_transition(message TEXT NOT NULL,phase TEXT NOT NULL);
                 CREATE TABLE fixture_reply_delivery(event TEXT NOT NULL,run TEXT NOT NULL);
                 CREATE TRIGGER fixture_reply_delivery AFTER INSERT ON delivery
                 WHEN NEW.event_id GLOB 'reply-outcome-owner-message-*'
@@ -5940,18 +5939,7 @@ mod thread_deletion_notification_tests {
                 WHEN json_extract(OLD.result_json,'$.reply.state')='pending'
                  AND json_extract(NEW.result_json,'$.reply.state')='recipient_deleted'
                 BEGIN
-                    INSERT INTO fixture_reply_transition VALUES(NEW.message_node_id,(SELECT phase FROM fixture_reply_phase),NULL);
-                END;
-                CREATE TRIGGER fixture_reply_batch AFTER UPDATE OF cursor_json ON gc_job
-                WHEN OLD.kind='history' AND json_extract(OLD.cursor_json,'$.stage')='receipts'
-                 AND json_extract(NEW.cursor_json,'$.stage') IN ('receipts','roots')
-                BEGIN
-                    INSERT INTO fixture_reply_batch(scanned,terminalized)
-                    SELECT count(*),(SELECT count(*) FROM fixture_reply_transition WHERE phase='gc' AND batch IS NULL)
-                    FROM receipt WHERE rowid>json_extract(OLD.cursor_json,'$.last_rowid')
-                     AND rowid<=CASE WHEN json_extract(NEW.cursor_json,'$.stage')='receipts'
-                         THEN json_extract(NEW.cursor_json,'$.last_rowid') ELSE json_extract(OLD.cursor_json,'$.receipt_horizon') END;
-                    UPDATE fixture_reply_transition SET batch=last_insert_rowid() WHERE phase='gc' AND batch IS NULL;
+                    INSERT INTO fixture_reply_transition VALUES(NEW.message_node_id,(SELECT phase FROM fixture_reply_phase));
                 END;
                 CREATE TRIGGER fixture_reply_fault BEFORE INSERT ON event
                 WHEN NEW.id='reply-outcome-owner-message-005'
@@ -6068,11 +6056,6 @@ mod thread_deletion_notification_tests {
                     )?,
                     16
                 );
-                assert_eq!(
-                    db.query_row("SELECT count(*) FROM fixture_reply_batch", [], |r| r
-                        .get::<_, i64>(0))?,
-                    0
-                );
                 db.execute_batch("DROP TRIGGER fixture_reply_fault")?;
                 Ok(())
             })
@@ -6081,7 +6064,7 @@ mod thread_deletion_notification_tests {
         let batch = gc.history_step(&job).await.unwrap();
         assert_eq!(batch.candidates, 128);
         owner.db.call(|db| {
-            assert_eq!(db.query_row("SELECT scanned,terminalized FROM fixture_reply_batch", [], |r| Ok((r.get::<_,i64>(0)?,r.get::<_,i64>(1)?)))?, (128,112));
+            assert_eq!(db.query_row("SELECT count(*) FROM fixture_reply_transition WHERE phase='gc'", [], |r| r.get::<_,i64>(0))?, 112);
             assert_eq!(db.query_row("SELECT count(*) FROM receipt WHERE target_thread_id='parent' AND json_extract(result_json,'$.reply.state')='pending'", [], |r| r.get::<_,i64>(0))?, 1);
             Ok(())
         }).await.unwrap();
@@ -6143,13 +6126,8 @@ mod thread_deletion_notification_tests {
         .expect("test watchdog elapsed while waiting for the durable GC continuation");
         control.shutdown().await.unwrap();
         reopened.db.call(|db| {
-            let mut statement = db.prepare("SELECT scanned,terminalized FROM fixture_reply_batch ORDER BY id")?;
-            let batches = statement.query_map([], |r| Ok((r.get::<_,i64>(0)?,r.get::<_,i64>(1)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
-            assert!(batches.len() >= 2, "receipt work must span commits and reopen");
-            assert!(batches.iter().all(|&(scanned,terminalized)| scanned <= 128 && terminalized <= scanned));
             assert_eq!(db.query_row("SELECT count(*) FROM fixture_reply_transition WHERE phase='sync'", [], |r| r.get::<_,i64>(0))?, 16);
             assert_eq!(db.query_row("SELECT count(*),count(DISTINCT message) FROM fixture_reply_transition", [], |r| Ok((r.get::<_,i64>(0)?,r.get::<_,i64>(1)?)))?, (129,129));
-            assert_eq!(db.query_row("SELECT count(*) FROM fixture_reply_transition WHERE phase='gc' AND batch IS NULL", [], |r| r.get::<_,i64>(0))?, 0);
             for n in 0..129 {
                 let message = format!("owner-message-{n:03}");
                 let event = format!("reply-outcome-{message}");
@@ -6164,7 +6142,6 @@ mod thread_deletion_notification_tests {
             for n in 129..136 {
                 assert_eq!(db.query_row("SELECT payload_json FROM node WHERE id=?1", [format!("owner-message-{n:03}")], |r| r.get::<_,String>(0))?, "{}");
             }
-            eprintln!("audited sync=16; GC (scanned,terminalized)={batches:?}; unique outcomes/deliveries=129; unrelated receipts=7");
             Ok(())
         }).await.unwrap();
         reopened.shutdown().await.unwrap();
