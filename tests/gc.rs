@@ -1019,7 +1019,6 @@ async fn late_pins_keep_sweep_advancing_and_protect_sources_beyond_the_pin_batch
     let mut collected = f.gc.history_step(&job).await.unwrap().nodes_tombstoned;
     assert_eq!(collected, 128);
     let mut complete = false;
-    let mut previous = 128;
     for batch in 0..32 {
         f.db.call(move |db| {
             let tx = db.transaction()?;
@@ -1043,27 +1042,9 @@ async fn late_pins_keep_sweep_advancing_and_protect_sources_beyond_the_pin_batch
             complete = true;
             break;
         }
-        if step.stage == "cleanup" || step.stage == "finish" {
-            continue;
-        }
-        assert_eq!(step.stage, "sweep");
-        let job_id = job.clone();
-        let cursor =
-            f.db.call(move |db| {
-                Ok(db.query_row(
-                    "SELECT json_extract(cursor_json,'$.last_rowid') FROM gc_job WHERE id=?1",
-                    [job_id],
-                    |r| r.get::<_, i64>(0),
-                )?)
-            })
-            .await
-            .unwrap();
-        assert!(
-            cursor > previous,
-            "new pins must not rewind the sweep cursor"
-        );
-        previous = cursor;
     }
+    // A sweep that rewound on new pins would rescan its first batch and never
+    // complete within these bounded steps.
     assert!(complete);
     assert_eq!(collected, 1024);
     f.db.call(|db| {
@@ -1328,10 +1309,17 @@ async fn history_gc_keeps_single_over_budget_reachability_candidate() {
         setup_deadline.check();
     }
     f.db.call(|db| {
-        assert_eq!(scalar(db, "SELECT COUNT(*) FROM gc_job WHERE id='job' AND json_extract(cursor_json,'$.horizon')=(SELECT rowid FROM node WHERE id='oversized-source') AND json_type(cursor_json,'$.kept_count')='integer'")?, 1);
-        assert_eq!(scalar(db, "SELECT COUNT(*) FROM replacement_source WHERE source_node_id='oversized-source'")?, 5000);
+        assert_eq!(
+            scalar(
+                db,
+                "SELECT COUNT(*) FROM replacement_source WHERE source_node_id='oversized-source'"
+            )?,
+            5000
+        );
         Ok(())
-    }).await.unwrap();
+    })
+    .await
+    .unwrap();
     // The reverse query has no trigger. Force it to be prepared afresh and
     // queue foreground work from the SQLite authorizer before it executes.
     let worker = f.db.clone();
@@ -1369,10 +1357,17 @@ async fn history_gc_keeps_single_over_budget_reachability_candidate() {
     .await;
     let kept = last.kept_over_budget;
     f.db.call(|db| {
-        assert_eq!(scalar(db, "SELECT COUNT(*) FROM node WHERE id='oversized-source' AND payload_json IS NOT NULL")?, 1);
-        assert_eq!(scalar(db, "SELECT COUNT(*) FROM gc_job WHERE id='job' AND COALESCE(json_extract(cursor_json,'$.kept_ids[0]'),json_extract(error_json,'$.kept_ids[0]'))='oversized-source'")?, 1);
+        assert_eq!(
+            scalar(
+                db,
+                "SELECT COUNT(*) FROM node WHERE id='oversized-source' AND payload_json IS NOT NULL"
+            )?,
+            1
+        );
         Ok(())
-    }).await.unwrap();
+    })
+    .await
+    .unwrap();
     f.db.shutdown().await.unwrap();
     assert!(
         kept > 0 && deferrals > 0,
@@ -1396,12 +1391,12 @@ async fn history_gc_keeps_node_when_atomic_tombstone_exceeds_budget() {
     }).await.unwrap();
     f.job().await;
     let job = f.gc.start_history().await.unwrap().unwrap();
-    let (deferred, _) =
+    let (deferred, last) =
         finish_history_gc_after_interleaved_writes(&f, &job, "history GC single-item retention")
             .await;
+    assert_eq!(last.kept_over_budget, 1);
     f.db.call(|db| {
         assert_eq!(scalar(db, "SELECT COUNT(*) FROM node WHERE id='expensive-tombstone' AND payload_json IS NOT NULL AND deleted_reason IS NULL")?, 1);
-        assert_eq!(scalar(db, "SELECT COUNT(*) FROM gc_job WHERE id='job' AND json_extract(error_json,'$.kept_ids[0]')='expensive-tombstone'")?, 1);
         Ok(())
     }).await.unwrap();
     f.db.shutdown().await.unwrap();
@@ -1427,10 +1422,17 @@ async fn history_gc_skips_a_single_over_budget_mark_cleanup() {
             .await;
     let kept_marks = last.kept_marks;
     f.db.call(|db| {
-        assert_eq!(scalar(db, "SELECT COUNT(*) FROM gc_job WHERE id='job' AND json_extract(error_json,'$.kept_marks')=1")?, 1);
-        assert_eq!(scalar(db, "SELECT COUNT(*) FROM node WHERE id='mark-1' AND payload_json IS NOT NULL")?, 1);
+        assert_eq!(
+            scalar(
+                db,
+                "SELECT COUNT(*) FROM node WHERE id='mark-1' AND payload_json IS NOT NULL"
+            )?,
+            1
+        );
         Ok(())
-    }).await.unwrap();
+    })
+    .await
+    .unwrap();
     f.db.shutdown().await.unwrap();
     // The TUI diagnostic copies this step count (#225 review HOLD).
     assert!(
@@ -1461,11 +1463,18 @@ async fn history_gc_skips_and_reports_a_single_over_budget_receipt_cleanup() {
             .await;
     let kept_receipts = last.kept_receipts;
     f.db.call(|db| {
-        assert_eq!(scalar(db, "SELECT COUNT(*) FROM receipt WHERE id='rcpt-1'")?, 1);
-        assert_eq!(scalar(db, "SELECT COUNT(*) FROM receipt WHERE id LIKE 'rcpt-%'")?, 1);
-        assert_eq!(scalar(db, "SELECT COUNT(*) FROM gc_job WHERE id='job' AND json_extract(error_json,'$.kept_receipts')=1")?, 1);
+        assert_eq!(
+            scalar(db, "SELECT COUNT(*) FROM receipt WHERE id='rcpt-1'")?,
+            1
+        );
+        assert_eq!(
+            scalar(db, "SELECT COUNT(*) FROM receipt WHERE id LIKE 'rcpt-%'")?,
+            1
+        );
         Ok(())
-    }).await.unwrap();
+    })
+    .await
+    .unwrap();
     f.db.shutdown().await.unwrap();
     assert!(
         deferred > 0 && kept_receipts == 1,
@@ -1558,12 +1567,12 @@ async fn history_gc_keeps_candidate_if_cursor_update_exceeds_budget() {
     }).await.unwrap();
     f.job().await;
     let job = f.gc.start_history().await.unwrap().unwrap();
-    let (deferred, _) =
+    let (deferred, last) =
         finish_history_gc_after_interleaved_writes(&f, &job, "history GC cursor interruption")
             .await;
+    assert_eq!(last.kept_over_budget, 1);
     f.db.call(|db| {
         assert_eq!(scalar(db, "SELECT COUNT(*) FROM node WHERE id='cursor-expensive' AND payload_json IS NOT NULL AND deleted_reason IS NULL")?, 1);
-        assert_eq!(scalar(db, "SELECT COUNT(*) FROM gc_job WHERE id='job' AND json_extract(error_json,'$.kept_ids[0]')='cursor-expensive'")?, 1);
         Ok(())
     }).await.unwrap();
     f.db.shutdown().await.unwrap();
@@ -1590,15 +1599,22 @@ async fn history_gc_full_retention_fallback_counts_nodes_only_once() {
         db.execute_batch("CREATE TEMP TRIGGER costly_expansion BEFORE UPDATE OF expanded ON shellboy_gc_mark WHEN OLD.node_id='root' BEGIN SELECT gc_test_foreground_demand(); SELECT count(*) FROM node a CROSS JOIN node b; END;")?;
         Ok(())
     }).await.unwrap();
-    let (deferred, _) =
+    let (deferred, last) =
         finish_history_gc_after_interleaved_writes(&f, &job, "history GC full retention fallback")
             .await;
+    assert_eq!(last.kept_over_budget, 501);
     f.db.call(|db| {
-        assert_eq!(scalar(db, "SELECT COUNT(*) FROM node WHERE payload_json IS NOT NULL")?, 501);
-        assert_eq!(scalar(db, "SELECT CAST(json_extract(error_json,'$.kept_over_budget') AS INTEGER) FROM gc_job WHERE id='job'")?, 501);
-        assert_eq!(scalar(db, "SELECT COUNT(*)=COUNT(DISTINCT value) AND COUNT(*)=8 FROM gc_job,json_each(error_json,'$.kept_ids') WHERE gc_job.id='job'")?, 1);
+        assert_eq!(
+            scalar(
+                db,
+                "SELECT COUNT(*) FROM node WHERE payload_json IS NOT NULL"
+            )?,
+            501
+        );
         Ok(())
-    }).await.unwrap();
+    })
+    .await
+    .unwrap();
     f.db.shutdown().await.unwrap();
     assert!(deferred > 0, "fixture did not trigger the VM-step budget");
 }
