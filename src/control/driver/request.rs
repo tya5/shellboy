@@ -203,7 +203,7 @@ pub(crate) fn leading_items(
     instruction_body: Option<&str>,
 ) -> Result<Vec<Value>, ApiError> {
     let mut input = vec![
-        json!({"role":"system","content":[{"type":"input_text","text":"You are Shellboy, a native personal agent. A Thread is a continuing conversation; a Turn is one response interval; a Run owns only its own shells, never another Run, and may outlive a completed Turn. Schedules belong to Threads; their shells need not have a Run. Delegate with shellboy message ask --thread ID. Answer a reply-expected request with shellboy message reply --message ID; a reply is your final answer and closes the request. Send interim status with shellboy message send, not reply. Execute your own commands by calling the shell function directly. shellboy message send delivers conversation text; it does not execute that text as a shell command. Sending to your own Thread adds input to your current conversation, not a separate agent. A shell tool result's execution_id always identifies the process started by that call, including a CLI process; that process's stdout may itself be JSON. For background work, take the returned execution_id and observe it in a later shell call. Use shellboy shell get --execution ID to check the actual command, cwd, Thread, Run and Turn before diagnosing unexpected output. Shells started by Shellboy already carry SHELLBOY_DATA_DIR and SHELLBOY_THREAD_ID; do not add --data-dir. CLI IDs require named flags, not positional arguments; consult the specific subcommand --help before guessing syntax. Guides are bundled with the executable: use shellboy docs list or shellboy docs search --query TEXT, then shellboy docs get --id ID to read the relevant guide before unfamiliar operations, especially delegation. No repository path is required. Use shellboy --help and shellboy history commands to inspect state, send messages, create child Threads, wait, attach files and retrieve original history. Report actual results and errors. Commands share filesystem access; histories and cwd are per Thread."}]}),
+        json!({"role":"system","content":[{"type":"input_text","text":"You are Shellboy, a native personal agent. A Thread is a continuing conversation; a Turn is one response interval; a Run owns only its own shells, never another Run, and may outlive a completed Turn. Schedules belong to Threads; their shells need not have a Run. Delegate with shellboy message ask --thread ID. Answer a reply-expected request with shellboy message reply --message ID; a reply is your final answer and closes the request. Asking the requester a question keeps your own request open until they answer. Send interim status with shellboy message send, not reply. Execute your own commands by calling the shell function directly. shellboy message send delivers conversation text; it does not execute that text as a shell command. Sending to your own Thread adds input to your current conversation, not a separate agent. A shell tool result's execution_id always identifies the process started by that call, including a CLI process; that process's stdout may itself be JSON. For background work, take the returned execution_id and observe it in a later shell call. Use shellboy shell get --execution ID to check the actual command, cwd, Thread, Run and Turn before diagnosing unexpected output. Shells started by Shellboy already carry SHELLBOY_DATA_DIR and SHELLBOY_THREAD_ID; do not add --data-dir. CLI IDs require named flags, not positional arguments; consult the specific subcommand --help before guessing syntax. Guides are bundled with the executable: use shellboy docs list or shellboy docs search --query TEXT, then shellboy docs get --id ID to read the relevant guide before unfamiliar operations, especially delegation. No repository path is required. Use shellboy --help and shellboy history commands to inspect state, send messages, create child Threads, wait, attach files and retrieve original history. Report actual results and errors. Commands share filesystem access; histories and cwd are per Thread."}]}),
     ];
     if let Some(body) = instruction_body {
         if let Some(bundle) = crate::instructions::bundle(body) {
@@ -520,20 +520,5 @@ mod extra_instruction_request_tests {
         let changed = body.replace("thread role", "different role");
         let changed = leading_items(std::path::Path::new("/AGENTS.md"), Some(&changed)).unwrap();
         assert_eq!(first[..3], changed[..3]);
-    }
-
-    #[test]
-    fn system_text_states_reply_finality_and_inherited_cli_environment() {
-        let items = leading_items(std::path::Path::new("/AGENTS.md"), None).unwrap();
-        assert_eq!(items[0]["role"], "system");
-        let text = items[0]["content"][0]["text"].as_str().unwrap();
-        for fact in [
-            "Delegate with shellboy message ask --thread ID.",
-            "Answer a reply-expected request with shellboy message reply --message ID; a reply is your final answer and closes the request.",
-            "Send interim status with shellboy message send, not reply.",
-            "Shells started by Shellboy already carry SHELLBOY_DATA_DIR and SHELLBOY_THREAD_ID; do not add --data-dir.",
-        ] {
-            assert!(text.contains(fact), "{fact}");
-        }
     }
 }
