@@ -114,6 +114,11 @@ fn remote_relative_and_unknown_uris_are_refused_without_access() {
         "file://remote-host/share/file.txt",
         "FILE://Remote-Host/C:/share/file.txt",
         "file:\\\\remote-host\\share\\file.txt",
+        // Parsers strip tabs and newlines, which could join or hide a host.
+        "file://remote\thost/share/file.txt",
+        "file:/\n/remote-host/share/file.txt",
+        "file://localhost\r/tmp/file.txt",
+        "file:///tmp/fi\nle.txt",
     ] {
         let error = source(uri).unwrap_err();
         assert_eq!(error.code, ErrorCode::InvalidArgument, "{uri}");
@@ -222,4 +227,22 @@ fn a_named_pipe_is_refused_from_its_handle_without_blocking() {
         assert_eq!(error.code, ErrorCode::TargetUnavailable, "{uri}");
         assert_eq!(reason(&error), "not_a_file", "{uri}");
     }
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_device_names_and_namespaces_are_refused_before_any_open() {
+    let (_root, folder) = web_app();
+    let uri = app(&folder);
+    for path in ["NUL", "assets/con.txt", "COM1", "lpt9.js"] {
+        let error = read(&uri, Some(path), LIMIT).unwrap_err();
+        assert_eq!(reason(&error), "not_a_file", "{path}");
+    }
+    for uri in [r"\\.\NUL", r"\\?\C:\Windows\win.ini", r"C:\work\CON"] {
+        let error = read(uri, None, LIMIT).unwrap_err();
+        assert_eq!(reason(&error), "not_a_file", "{uri}");
+    }
+    let device_folder = format!("{APP_SCHEME}:{}", folder.join("aux").display());
+    let error = read(&device_folder, Some("index.html"), LIMIT).unwrap_err();
+    assert_eq!(reason(&error), "not_a_file");
 }

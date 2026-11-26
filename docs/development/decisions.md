@@ -33,6 +33,12 @@ larger than one frame or a folder entry without naming it.
   the same local user (or the model's shell, which can read those files
   anyway) can swap links inside the folder, so it grants nothing the path rule
   withholds from a page or client.
+  Approved as an exception on #445 (2026-11-26), which also covers the Windows
+  type check before opening: the opened handle is still the one checked.
+- Special targets: Unix opens with `O_NONBLOCK`; Windows refuses `\\.\`/`\\?\`
+  paths and reserved device names in any component, and checks the type before
+  opening. A `file:` URI with a tab, newline or CR is refused outright, and a
+  non-local authority is refused both on the raw text and after parsing.
 - Lookup on the database worker, file open and encoding on the attachment
   blocking-file pool (`workers.attachment`), as a receipt-free runtime
   observation; no new worker, queue or table.
