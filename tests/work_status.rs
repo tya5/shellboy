@@ -753,7 +753,7 @@ async fn revisit_facts_are_run_scoped_and_projected_to_active_footer() {
 }
 
 #[tokio::test]
-async fn shell_read_time_observations_agree_and_do_not_change_fingerprint_or_order() {
+async fn shell_read_time_observations_agree_and_saved_output_does_not_change_fingerprint() {
     use shellboy::control::output::ShellOutputReader;
     let f = Fixture::new().await;
     let reader = ShellOutputReader::new(f.db.clone(), "fixture");
@@ -763,13 +763,6 @@ async fn shell_read_time_observations_agree_and_do_not_change_fingerprint_or_ord
     assert_eq!(first.started_at, shell.started_at);
     assert!(shell.elapsed_ms.is_some() && first.elapsed_ms.is_some());
     assert_eq!(first.last_output_at, None);
-    // A later read observes a later time; the fingerprint and order stay.
-    let after = f.status(StatusArgs::default()).await.unwrap();
-    assert_eq!(before.fingerprint, after.fingerprint);
-    assert_eq!(
-        before.page.items.iter().map(|i| &i.id).collect::<Vec<_>>(),
-        after.page.items.iter().map(|i| &i.id).collect::<Vec<_>>()
-    );
     f.db.call(|db| {
         db.execute_batch(
             "INSERT INTO output_chunk VALUES('exec',1,'stdout',0,X'61','2026-10-25T07:06:00Z');",

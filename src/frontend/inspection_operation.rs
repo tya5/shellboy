@@ -35,8 +35,6 @@ pub(super) struct RawOperation {
     downstream: Downstream,
     identity_limited: bool,
     observed_at: String,
-    #[cfg(test)]
-    statements: usize,
 }
 #[derive(Debug)]
 enum Downstream {
@@ -69,25 +67,7 @@ fn scalar(value: Option<String>) -> Result<String, StorageError> {
         )
     })
 }
-#[derive(Default)]
-struct Trace {
-    #[cfg(test)]
-    statements: usize,
-}
-impl Trace {
-    fn record(&mut self, _statement: &rusqlite::Statement<'_>) {
-        #[cfg(test)]
-        {
-            self.statements += 1;
-        }
-    }
-}
-fn metadata(
-    db: &Connection,
-    key: &str,
-    budget: &mut usize,
-    trace: &mut Trace,
-) -> Result<Witness, StorageError> {
+fn metadata(db: &Connection, key: &str, budget: &mut usize) -> Result<Witness, StorageError> {
     let mut stmt=db.prepare("SELECT CASE WHEN octet_length(value)<=?2 THEN value END,octet_length(value) FROM app_meta WHERE key=?1")?;
     let row = stmt
         .query_row(params![key, *budget as i64], |r| {
@@ -97,7 +77,6 @@ fn metadata(
             Ok((r.get::<_, Option<String>>(0)?, bytes))
         })
         .optional()?;
-    trace.record(&stmt);
     Ok(match row {
         None => Witness::default(),
         Some((body, bytes)) => {
@@ -143,8 +122,6 @@ pub(super) fn read_tx(
             ))
         })
         .optional()?;
-    let mut trace = Trace::default();
-    trace.record(&stmt);
     let Some((
         instance,
         created,
@@ -170,7 +147,6 @@ pub(super) fn read_tx(
             .query_row([id], |r| r.get::<_, Option<String>>(0))
             .optional()?
             .flatten();
-        trace.record(&stmt);
     }
     let mut budget =
         JSON_BYTES.saturating_sub(body_bytes.unwrap_or(0).min(JSON_BYTES as u64) as usize);
@@ -179,7 +155,6 @@ pub(super) fn read_tx(
             db,
             &crate::compaction::CompactionKeys::result(id),
             &mut budget,
-            &mut trace,
         )?;
         let (pending, inflight) = if !saved.present {
             if let Some(thread) = &thread {
@@ -188,13 +163,11 @@ pub(super) fn read_tx(
                         db,
                         &crate::compaction::CompactionKeys::new(thread).pending(),
                         &mut budget,
-                        &mut trace,
                     )?,
                     metadata(
                         db,
                         &crate::compaction::CompactionKeys::new(thread).inflight(),
                         &mut budget,
-                        &mut trace,
                     )?,
                 )
             } else {
@@ -224,7 +197,6 @@ pub(super) fn read_tx(
                 ))
             })
             .optional()?;
-        trace.record(&stmt);
         if let Some((state, reason, limited, actual_thread)) = row {
             if thread.is_none() {
                 thread = actual_thread;
@@ -254,8 +226,6 @@ pub(super) fn read_tx(
         downstream,
         identity_limited,
         observed_at: chrono::Utc::now().to_rfc3339(),
-        #[cfg(test)]
-        statements: trace.statements,
     })
 }
 pub(super) fn prepare(
@@ -381,7 +351,6 @@ pub(super) async fn request(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::frontend::sql_trace::Statements;
     fn fixture() -> Connection {
         let db = Connection::open_in_memory().unwrap();
         db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
@@ -545,22 +514,27 @@ mod tests {
         assert!(read_tx(&db, "missing", "current").is_err());
     }
     #[test]
-    fn exact_pk_statement_count_does_not_scale_with_unrelated_receipts() {
+    fn exact_pk_read_selects_the_receipt_by_index_among_unrelated_receipts() {
         let db = fixture();
         insert(&db, "selected", "pending", None);
-        let baseline = {
-            let trace = Statements::new(&db);
-            let raw = read_tx(&db, "selected", "current").unwrap();
-            assert_eq!(trace.count(), raw.statements);
-            raw.statements
-        };
-        for size in [1000, 10000] {
-            db.execute("WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<?1) INSERT OR IGNORE INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,result_ref_json,created_at)SELECT 'unrelated:'||i,'old','null','hash','completed','{\"result\":{}}','now' FROM n",[size]).unwrap();
-            let trace = Statements::new(&db);
-            let raw = read_tx(&db, "selected", "current").unwrap();
-            assert_eq!(raw.statements, baseline);
-            assert_eq!(trace.count(), raw.statements);
-            assert!(raw.statements <= 2);
-        }
+        db.execute("WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<?1) INSERT OR IGNORE INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,result_ref_json,created_at)SELECT 'unrelated:'||i,'old','null','hash','completed','{\"result\":{}}','now' FROM n",[10000]).unwrap();
+        let raw = read_tx(&db, "selected", "current").unwrap();
+        assert_eq!(raw.state, "pending");
+        let plan = db
+            .prepare(&format!("EXPLAIN QUERY PLAN {OP_SQL}"))
+            .unwrap()
+            .query_map(["selected"], |r| r.get::<_, String>(3))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert!(
+            plan.iter()
+                .any(|step| step.starts_with("SEARCH") && step.contains("operation_id=?")),
+            "{plan:?}"
+        );
+        assert!(
+            !plan.iter().any(|step| step.starts_with("SCAN")),
+            "{plan:?}"
+        );
     }
 }

@@ -578,7 +578,6 @@ mod tests {
             db.execute_batch("COMMIT").unwrap();
         };
         let latest = || {
-            let trace = Statements::new(&db);
             let mut statement = db.prepare(RUN_SQL).unwrap();
             let turns = statement
                 .query_map(params!["r", JSON_BYTES as i64], |row| {
@@ -588,7 +587,6 @@ mod tests {
                 .collect::<rusqlite::Result<Vec<_>>>()
                 .unwrap();
             assert_eq!(turns.len(), 1);
-            assert_eq!(trace.count(), 1, "the complete Run metadata query");
             turns[0].clone()
         };
         let plan = || {

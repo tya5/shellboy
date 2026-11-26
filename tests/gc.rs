@@ -85,9 +85,9 @@ const INTERLEAVED_STEPS: usize = 64;
 
 /// Alternates one committed root-revision write with one history-GC step, then
 /// stops writing and lets the pass finish. Every step stays within one unit of
-/// rows and none restarts the pass; while writes continue the pass must move to
-/// a later stage or a later row at least once, or complete. Recording that roots
-/// need revalidation is not progress. Completion is awaited
+/// rows and none restarts the pass; while writes continue, some committed
+/// (non-deferred) step must report scanned rows or a stage change, or the pass
+/// completes. Recording that roots need revalidation is not progress. Completion is awaited
 /// only after writing stops, under the hang watchdog. Returns the deferral
 /// count and the completing step.
 async fn finish_history_gc_after_interleaved_writes(
@@ -98,7 +98,7 @@ async fn finish_history_gc_after_interleaved_writes(
     let mut deferred = 0;
     let mut advanced = false;
     let mut last = None;
-    let mut cursor = gc_cursor(f, job).await;
+    let mut stage: Option<String> = None;
     for _ in 0..INTERLEAVED_STEPS {
         let before = root_revision(f).await;
         f.db.call(|db| {
@@ -123,13 +123,14 @@ async fn finish_history_gc_after_interleaved_writes(
             last = Some(step);
             break;
         }
-        let next = gc_cursor(f, job).await;
-        advanced |= next > cursor;
-        cursor = next;
+        if !step.deferred {
+            advanced |= step.scanned > 0 || stage.as_ref().is_some_and(|s| *s != step.stage);
+            stage = Some(step.stage.clone());
+        }
     }
     assert!(
         advanced,
-        "no stage or row progress across {INTERLEAVED_STEPS} interleaved writes"
+        "no scanned rows or stage change across {INTERLEAVED_STEPS} interleaved writes"
     );
     let deadline = crate::test_watchdog::Deadline::new(waiting_for);
     let last = loop {
@@ -156,40 +157,6 @@ async fn root_revision(f: &Fixture) -> i64 {
     })
     .await
     .unwrap()
-}
-
-/// GC stages in pass order (`gc::Stage`).
-const GC_STAGES: [&str; 7] = [
-    "reset",
-    "receipts",
-    "roots",
-    "provenance",
-    "sweep",
-    "cleanup",
-    "finish",
-];
-
-/// The persisted pass position as (stage order, row cursor); later is greater.
-async fn gc_cursor(f: &Fixture, job: &str) -> (usize, i64) {
-    let job = job.to_owned();
-    let (stage, row): (Option<String>, Option<i64>) = f
-        .db
-        .call(move |db| {
-            Ok(db.query_row(
-                "SELECT json_extract(cursor_json,'$.stage'),json_extract(cursor_json,'$.last_rowid') FROM gc_job WHERE id=?1",
-                [job],
-                |r| Ok((r.get(0)?, r.get(1)?)),
-            )?)
-        })
-        .await
-        .unwrap();
-    let stage = stage.map_or(0, |stage| {
-        GC_STAGES
-            .iter()
-            .position(|known| *known == stage)
-            .unwrap_or_else(|| panic!("unknown GC stage {stage}"))
-    });
-    (stage, row.unwrap_or(0))
 }
 
 /// One bounded step. Statements are re-prepared afterwards so a fixture
@@ -1394,13 +1361,13 @@ async fn history_gc_keeps_single_over_budget_reachability_candidate() {
     })
     .await
     .unwrap();
-    let (deferrals, _) = finish_history_gc_after_interleaved_writes(
+    let (deferrals, last) = finish_history_gc_after_interleaved_writes(
         &f,
         &job,
         "history GC oversized reachability candidate",
     )
     .await;
-    let kept = f.db.call(|db| Ok(scalar(db, "SELECT COALESCE(json_extract(cursor_json,'$.kept_count'),json_extract(error_json,'$.kept_over_budget'),0) FROM gc_job WHERE id='job'")?)).await.unwrap();
+    let kept = last.kept_over_budget;
     f.db.call(|db| {
         assert_eq!(scalar(db, "SELECT COUNT(*) FROM node WHERE id='oversized-source' AND payload_json IS NOT NULL")?, 1);
         assert_eq!(scalar(db, "SELECT COUNT(*) FROM gc_job WHERE id='job' AND COALESCE(json_extract(cursor_json,'$.kept_ids[0]'),json_extract(error_json,'$.kept_ids[0]'))='oversized-source'")?, 1);
