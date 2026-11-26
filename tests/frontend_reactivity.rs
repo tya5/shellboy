@@ -1620,7 +1620,7 @@ async fn initial_browser_excerpt_does_not_complete_a_delayed_selected_view() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn selected_header_and_open_browser_share_one_changed_snapshot_without_reload() {
+async fn selected_header_and_open_browser_observe_one_change_independently_without_reload() {
     let mut fixture = Fixture::new("http://127.0.0.1:9/v1").await;
     for action in fixture.ui.event(crossterm::event::Event::Key(
         crossterm::event::KeyEvent::new(
@@ -1680,9 +1680,11 @@ async fn selected_header_and_open_browser_share_one_changed_snapshot_without_rel
                 "normal Changed must not reload the list"
             );
             assert_eq!(fixture.view_sequences.len(), 1, "one selected observation");
-            assert_eq!(
-                fixture.browser_sequences, fixture.view_sequences,
-                "step {step}: both facts share the DB transaction's read sequence"
+            // #311 decision: the header and sidebar read independently; each
+            // observed this change on its own read, without a shared snapshot.
+            assert!(
+                !fixture.browser_sequences.is_empty(),
+                "step {step}: the sidebar observed the change with its own read"
             );
         }
     })
