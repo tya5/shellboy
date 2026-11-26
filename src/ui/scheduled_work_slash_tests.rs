@@ -59,3 +59,15 @@ fn schedule_add_refuses_the_retired_positional_form() {
     assert!(error.contains(r#"["sh", "-c", "echo hello"]"#), "{error}");
     assert!(error.contains("--command '...'"), "{error}");
 }
+
+#[test]
+fn schedule_add_leaves_misspelled_options_to_clap() {
+    let error =
+        crate::cli::scheduled_work_slash("schedule add --in 10m --command 'echo ready' --commnad")
+            .unwrap_err();
+    assert!(error.contains("--commnad"), "{error}");
+    assert!(
+        !error.contains("Unexpected positional arguments"),
+        "{error}"
+    );
+}
