@@ -647,6 +647,39 @@ mod tests {
         );
     }
     #[test]
+    fn bundled_schedule_queries_reach_the_schedule_command_section() {
+        let guide = documents()
+            .into_iter()
+            .find(|d| d.id == "shellboy/user-guide")
+            .unwrap();
+        // The section that documents the `schedule add` command, wherever it lives.
+        let command = guide.text.find("schedule add").expect("documented command");
+        let section = sections(&guide.text)
+            .into_iter()
+            .filter(|s| s.start <= command && command < s.end)
+            .min_by_key(|s| s.end - s.start)
+            .expect("command inside a section");
+        for query in ["scheduler", "cron", "スケジュール"] {
+            let page = execute(DocsCommand::Search {
+                query: query.into(),
+                parent: None,
+                limit: 20,
+                cursor: None,
+            })
+            .unwrap();
+            assert!(
+                page["items"].as_array().unwrap().iter().any(|hit| {
+                    hit["id"] == "shellboy/user-guide"
+                        && hit["spans"][0]["start"]
+                            .as_u64()
+                            .is_some_and(|at| (section.start..section.end).contains(&(at as usize)))
+                }),
+                "query {query:?} did not reach the schedule section: {page}"
+            );
+        }
+    }
+
+    #[test]
     fn heading_parser_ignores_code_and_disambiguates() {
         let s = sections("# Same\n\n```\n# Hidden\n```\n## Same\n\n## 子\n");
         assert_eq!(

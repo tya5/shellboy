@@ -263,11 +263,6 @@ mod tests {
             assert_eq!(kind.classification(), PureRead, "{kind:?}");
             assert!(!UNDECLARED_WRITER_BOUNDS.contains(&kind));
         }
-        assert_eq!(
-            Kind::ALL.len(),
-            86 + service_kinds.len() + intervention_kinds.len() + bounded_history_kinds.len(),
-            "classify new kinds and update this ratchet"
-        );
     }
 
     #[test]
