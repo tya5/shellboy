@@ -266,8 +266,9 @@ or turn a partial/refused read into an empty successful page.
 
 Submission identity belongs to a submitted draft record in `draft.get` and
 `draft.list`: source draft ID, source revision, operation ID and message ID.
-Use the owner-verified submitted copy or its retained receipt marker when the
-copy is already collected. They describe the same record, not two submissions.
+The owner reads it from the one binding that acceptance writes into the
+operation's receipt, in the same transaction as the submitted copy; the receipt
+keeps it after the copy is collected, so no copy evidence is merged or rechecked.
 A collected copy has no draft body; do not reconstruct it from message history
 or restore it as editable input. For lost acknowledgements, look up the local pending operation exactly and
 apply it only to its matching source revision and view generation. Ordinary

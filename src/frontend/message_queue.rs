@@ -759,10 +759,12 @@ mod retention_tests {
             tx.execute("INSERT INTO node(id,kind,created_at,payload_json) VALUES('old-message','user','0','{}')", [])?;
             let retained = json!({"draft_submission":{"operation_id":operation_id,"source_draft_id":source,"source_revision":rev,"message_id":"old-message"}}).to_string();
             tx.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,path_admission,created_at,result_json) VALUES('old-message',?1,'null','thread','old-message','applied','admitted','0',?2)", params![operation_id,retained])?;
+            // Acceptance binds each newer submission in its receipt.
             for n in 0..128 {
                 let id = format!("new-{n}");
-                let body = json!({"_submission":{"operation_id":id,"source_draft_id":id,"source_revision":1,"message_id":id}}).to_string();
-                tx.execute("INSERT INTO draft VALUES(?1,'thread',1,?2,'submitted','1')", params![crate::control::db::DraftSubmission::id_for_operation(&id),body])?;
+                let binding = json!({"draft_submission":{"operation_id":id,"source_draft_id":id,"source_revision":1,"message_id":id}}).to_string();
+                tx.execute("INSERT INTO node(id,kind,created_at,payload_json) VALUES(?1,'user','1','{}')", [&id])?;
+                tx.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,path_admission,created_at,result_json) VALUES(?1,?1,'null','thread',?1,'applied','admitted','1',?2)", params![id,binding])?;
             }
             tx.commit()?;
             Ok(())
