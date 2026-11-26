@@ -29,8 +29,10 @@ larger than one frame or a folder entry without naming it.
   is the cap; no ranged read is built.
 - A folder read requires `path` (no implied `index.html`), and any `..`
   component is refused even when it would stay inside; links are checked after
-  resolution. A same-user process swapping files during the read is outside
-  this check, as for every same-user boundary.
+  resolution. The check-then-open race is not closed by a new mechanism: only
+  the same local user (or the model's shell, which can read those files
+  anyway) can swap links inside the folder, so it grants nothing the path rule
+  withholds from a page or client.
 - Lookup on the database worker, file open and encoding on the attachment
   blocking-file pool (`workers.attachment`), as a receipt-free runtime
   observation; no new worker, queue or table.

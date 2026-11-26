@@ -92,7 +92,8 @@ fn file_uris_and_absolute_paths_name_one_file_only() {
     let (root, folder) = web_app();
     let file = folder.join("index.html");
     let url = url::Url::from_file_path(&file).unwrap().to_string();
-    for uri in [file.to_str().unwrap(), url.as_str()] {
+    let localhost = url.replacen("file:///", "file://localhost/", 1);
+    for uri in [file.to_str().unwrap(), url.as_str(), localhost.as_str()] {
         assert_eq!(read(uri, None, LIMIT).unwrap(), b"<script src=app.js>");
         let error = read(uri, Some("assets/app.js"), LIMIT).unwrap_err();
         assert_eq!(reason(&error), "path_not_allowed", "{uri}");
@@ -104,18 +105,16 @@ fn file_uris_and_absolute_paths_name_one_file_only() {
 
 #[test]
 fn remote_relative_and_unknown_uris_are_refused_without_access() {
-    let mut uris = vec![
+    for uri in [
         "http://127.0.0.1:1/index.html",
         "https://example.test/app",
         "relative/index.html",
         "shellboy-app:relative/folder",
         "new+client:opaque",
-    ];
-    // Windows maps a file: host to a UNC path, the same as a schemeless one.
-    if cfg!(unix) {
-        uris.push("file://remote-host/share/file.txt");
-    }
-    for uri in uris {
+        "file://remote-host/share/file.txt",
+        "FILE://Remote-Host/C:/share/file.txt",
+        "file:\\\\remote-host\\share\\file.txt",
+    ] {
         let error = source(uri).unwrap_err();
         assert_eq!(error.code, ErrorCode::InvalidArgument, "{uri}");
         assert_eq!(reason(&error), "uri_not_readable", "{uri}");
@@ -206,4 +205,21 @@ fn files_beyond_one_reply_frame_are_refused_before_reading_with_the_effective_li
     };
     let reply = Response::success(operation, serde_json::to_value(content).unwrap());
     assert!(crate::protocol::encode_frame(&reply).is_ok());
+}
+
+#[cfg(unix)]
+#[test]
+fn a_named_pipe_is_refused_from_its_handle_without_blocking() {
+    let (_root, folder) = web_app();
+    let pipe = folder.join("pipe");
+    let name = std::ffi::CString::new(pipe.to_str().unwrap()).unwrap();
+    // SAFETY: `name` is a valid NUL-terminated path for the duration of the call.
+    assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
+    // No writer ever opens the pipe: a blocking open would never return here.
+    for uri in [app(&folder), pipe.to_str().unwrap().to_owned()] {
+        let path = uri.starts_with(APP_SCHEME).then_some("pipe");
+        let error = read(&uri, path, LIMIT).unwrap_err();
+        assert_eq!(error.code, ErrorCode::TargetUnavailable, "{uri}");
+        assert_eq!(reason(&error), "not_a_file", "{uri}");
+    }
 }

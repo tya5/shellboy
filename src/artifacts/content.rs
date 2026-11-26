@@ -51,6 +51,21 @@ fn outside() -> ApiError {
     )
 }
 
+/// A `file:` authority (after `//`, either slash kind) must be empty or `localhost`.
+fn local_authority(rest: &str) -> bool {
+    let slash = |c: char| c == '/' || c == '\\';
+    let mut chars = rest.chars();
+    if !(chars.next().is_some_and(slash) && chars.next().is_some_and(slash)) {
+        return true;
+    }
+    let authority = chars
+        .as_str()
+        .split(|c: char| slash(c) || c == '?' || c == '#')
+        .next()
+        .unwrap_or_default();
+    authority.is_empty() || authority.eq_ignore_ascii_case("localhost")
+}
+
 fn source(uri: &str) -> Result<Source> {
     let scheme = uri_scheme(uri);
     if let Some(name) = scheme
@@ -68,17 +83,25 @@ fn source(uri: &str) -> Result<Source> {
     if Path::new(uri).is_absolute() {
         return Ok(Source::File(uri.into()));
     }
-    if scheme.is_some_and(|name| name.eq_ignore_ascii_case("file")) {
+    if let Some(name) = scheme
+        && name.eq_ignore_ascii_case("file")
+    {
+        let not_local = || {
+            refused(
+                "uri_not_readable",
+                "A file: URI must name a local absolute path",
+            )
+        };
+        // Read the raw authority before parsing: URL parsing drops a host in
+        // front of a drive letter, and Windows turns a kept host into a network path.
+        if !local_authority(&uri[name.len() + 1..]) {
+            return Err(not_local());
+        }
         return url::Url::parse(uri)
             .ok()
             .and_then(|url| url.to_file_path().ok())
             .map(Source::File)
-            .ok_or_else(|| {
-                refused(
-                    "uri_not_readable",
-                    "A file: URI must name a local absolute path",
-                )
-            });
+            .ok_or_else(not_local);
     }
     Err(refused(
         "uri_not_readable",
@@ -135,7 +158,16 @@ fn resolve(target: Target) -> Result<PathBuf> {
 
 fn read_file(target: Target, limit: u64) -> Result<(u64, String)> {
     let path = resolve(target)?;
-    let file = std::fs::File::open(&path).map_err(unavailable)?;
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    // A FIFO or device must not block the worker before its type is checked.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NONBLOCK);
+    }
+    let file = options.open(&path).map_err(unavailable)?;
+    // The type comes from the opened handle, which is also the one read below.
     let meta = file.metadata().map_err(unavailable)?;
     if !meta.is_file() {
         return Err(ApiError::new(
