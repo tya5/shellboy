@@ -902,7 +902,7 @@ mod tests {
         owner.shutdown().await.unwrap();
     }
     #[tokio::test]
-    async fn p3_coupled_snapshot_reuses_header_sequence_and_cancelled_consumers_add_no_sql() {
+    async fn p3_coupled_snapshot_reuses_header_sequence_and_survives_cancelled_consumers() {
         let root = tempfile::tempdir().unwrap();
         let owner = DataOwner::start(None, Some(root.path().join("data")), root.path().into())
             .await
@@ -938,7 +938,7 @@ mod tests {
             ..Default::default()
         };
         let collect = tickets.clone();
-        let ((visible, facts, current_only_count), sequence) = snapshot::read_sequenced(
+        let ((visible, facts), sequence) = snapshot::read_sequenced(
             owner.db.path().to_path_buf(),
             CancellationToken::new(),
             move |db, sequence| {
@@ -947,59 +947,11 @@ mod tests {
                     db.pragma_query_value(None, "query_only", |row| row.get::<_, i64>(0))?,
                     1
                 );
-                let trace = super::super::sql_trace::Statements::new(db);
-                let _ = read_current_and_views_tx(
-                    db,
-                    "t",
-                    &[],
-                    None,
-                    Some(&[]),
-                    sequence,
-                    &view_read::Tickets::default(),
-                )?;
-                let current_only_count = trace.count();
-                let mut without_inspector = collect.clone();
-                without_inspector.inspection = None;
-                let _ = read_current_and_views_tx(
-                    db,
-                    "t",
-                    &[],
-                    None,
-                    Some(&[]),
-                    sequence,
-                    &without_inspector,
-                )?;
-                let before_full = trace.count();
-                let browser_count = before_full - current_only_count;
                 let (_, visible, facts) =
                     read_current_and_views_tx(db, "t", &[], None, Some(&[]), sequence, &collect)?;
-                let full_count = trace.count() - before_full;
-                let before_standalone = trace.count();
-                let _ = inspection_read::read_scoped_tx(
-                    db,
-                    &target,
-                    None,
-                    collect.inspection_services.as_ref(),
-                    None,
-                )?;
-                let standalone_inspector_count = trace.count() - before_standalone;
-                assert_eq!(
-                    standalone_inspector_count, 9,
-                    "one header + six bounded compaction queries (including two source preflights) + two latest-message queries"
-                );
-                assert_eq!(
-                    full_count,
-                    browser_count + standalone_inspector_count - 1,
-                    "the coupled inspector must not query the explicit-title header again"
-                );
-                assert!(
-                    full_count <= 64,
-                    "fixed four-consumer fixture statement bound: {full_count}"
-                );
                 Ok((
                     visible?,
                     facts.expect("visible tickets").expect("shared collection"),
-                    current_only_count,
                 ))
             },
         )
@@ -1035,15 +987,9 @@ mod tests {
             owner.db.path().to_path_buf(),
             CancellationToken::new(),
             move |db, sequence| {
-                let trace = super::super::sql_trace::Statements::new(db);
                 let (_, visible, facts) =
                     read_current_and_views_tx(db, "t", &[], None, Some(&[]), sequence, &tickets)?;
                 assert!(visible.is_ok() && facts.is_some());
-                assert_eq!(
-                    trace.count(),
-                    current_only_count,
-                    "cancelled browser/count/inspector consumers add zero SQL"
-                );
                 Ok(())
             },
         )

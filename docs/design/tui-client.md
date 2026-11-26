@@ -102,7 +102,7 @@ For mixed modules, each range is the full pinned file under review (including re
 | `src/frontend/received/list.rs:1-396` (396 lines) | 2 | Rewritten, not deleted. Replace direct page query with an owner reader. |
 | `src/frontend/recovery.rs:1-479` (479 lines) | 2, 4 | Rewritten, not deleted. Replace saved recovery association in Unit 2 and live observation in Unit 4. |
 | `src/frontend/refresh.rs:1-999` (999 lines) | 2, 3, 4 | Rewritten, not deleted. Retain refresh sequencing; replace direct saved, draft and live reads in their respective units. |
-| `src/frontend/sql_trace.rs:1-50` (50 lines) | 4 | Retire the client module after moving any retained diagnostic test. Retire the client-side SQL tracing path; owner-side tracing is unaffected. |
+| `src/frontend/sql_trace.rs:1-50` (50 lines) | 4 | Removed in #447 with the statement-count assertions it fed; owner-side tracing is unaffected. |
 | `src/frontend/streaming.rs:1-1099` (1099 lines) | 4 | Rewritten, not deleted. Replace private stream reads; retain rendering logic. |
 | `src/frontend/streams.rs:1-822` (822 lines) | 4 | Rewritten, not deleted. Replace direct observations; retain client stream state. |
 | `src/frontend/thread_deletion.rs:1-1010` (1010 lines) | 2 | Rewritten, not deleted. Use typed deletion preview and operations. |

@@ -259,7 +259,6 @@ pub(super) fn affected_tx(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::frontend::sql_trace::Statements;
     use rusqlite::params;
     fn fixture() -> Connection {
         let db = Connection::open_in_memory().unwrap();
@@ -301,15 +300,13 @@ mod tests {
         let reader =
             Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
         assert!(reader.execute("DELETE FROM thread", []).is_err());
-        let trace = Statements::new(&reader);
         let snapshot = one(&reader, "root");
-        assert_eq!(trace.count(), 1);
         assert_eq!(snapshot.threads, ["child"]);
         assert_eq!((snapshot.active, snapshot.recovery), (1, 0));
         assert!(!snapshot.truncated);
     }
     #[test]
-    fn one_statement_classifies_unowned_runs_and_traverses_deleted_bridges() {
+    fn classifies_unowned_runs_and_traverses_deleted_bridges() {
         let db = fixture();
         thread(&db, "root", None);
         for (id, parent, state, turn) in [
@@ -327,10 +324,7 @@ mod tests {
         }
         db.execute("UPDATE thread SET deleted_at='now' WHERE id='bridge'", [])
             .unwrap();
-        let trace = Statements::new(&db);
         let raw = read_roots_tx(&db, &["root".into()]).unwrap().pop().unwrap();
-        assert_eq!(trace.count(), 1);
-        drop(trace);
         // Facts stay owned after later writes and connection release.
         db.execute("UPDATE run SET state='completed'", []).unwrap();
         drop(db);
@@ -404,16 +398,12 @@ mod tests {
             root: "root".into(),
             members: old.members,
         };
-        let trace = Statements::new(&db);
         assert_eq!(
             affected_tx(&db, &["d1".into()], std::slice::from_ref(&scope)).unwrap(),
             vec!["root"]
         );
-        assert_eq!(trace.count(), 0);
-        drop(trace);
         thread(&db, "new-child", Some("d8"));
         thread(&db, "unrelated", None);
-        let trace = Statements::new(&db);
         assert_eq!(
             affected_tx(
                 &db,
@@ -423,17 +413,13 @@ mod tests {
             .unwrap(),
             vec!["root"]
         );
-        assert_eq!(trace.count(), 1);
-        drop(trace);
         assert!(
             affected_tx(&db, &["unrelated".into()], std::slice::from_ref(&scope))
                 .unwrap()
                 .is_empty()
         );
-        let trace = Statements::new(&db);
         assert!(affected_tx(&db, &vec!["x".into(); 129], &[scope]).is_err());
         assert!(read_roots_tx(&db, &vec!["root".into(); 3]).is_err());
-        assert_eq!(trace.count(), 0);
     }
     #[test]
     fn successor_and_latest_fact_reads_use_indexes_on_a_bounded_page() {
@@ -482,10 +468,8 @@ mod tests {
         thread(&db, "r1", None);
         thread(&db, "r2", None);
         thread(&db, "c", Some("r1"));
-        let trace = Statements::new(&db);
         let rows = read_roots_tx(&db, &["r1".into(), "r2".into()]).unwrap();
         assert_eq!(rows.len(), 2);
-        assert_eq!(trace.count(), 2);
     }
     #[test]
     fn neutral_activity_refinements_preserve_all_native_count_categories() {

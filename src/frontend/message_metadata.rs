@@ -422,7 +422,7 @@ mod tests {
         );
     }
     #[test]
-    fn common_tool_metadata_uses_fixed_batch_queries_and_deduplicates_ids() {
+    fn common_tool_metadata_deduplicates_ids() {
         let db = fixture();
         let mut ids = Vec::new();
         for ordinal in 0..50 {
@@ -431,13 +431,7 @@ mod tests {
             ids.push(id);
         }
         ids.extend(["tool-0".into(), "tool-49".into()]);
-        let statements = crate::frontend::sql_trace::Statements::new(&db);
         let facts = read_tx(&db, Some("child"), &ids).unwrap();
-        assert_eq!(
-            statements.count(),
-            2,
-            "one scope query and one node/turn/event batch; no receipt reads for tools"
-        );
         assert_eq!(facts.rows.len(), 50);
         assert!(
             facts
@@ -509,13 +503,7 @@ mod tests {
             "human",
         ]
         .map(str::to_owned);
-        let statements = crate::frontend::sql_trace::Statements::new(&db);
         let facts = read_tx(&db, Some("child"), &ids).unwrap();
-        assert_eq!(
-            statements.count(),
-            4,
-            "scope+common+one bounded receipt batch+one unique-sender batch"
-        );
         assert_eq!(facts.rows.len(), 10);
         for (id, expected) in [
             ("human", InputSource::Human),
@@ -572,7 +560,7 @@ mod tests {
     }
 
     #[test]
-    fn distinct_user_timestamps_still_execute_only_four_sql_statements() {
+    fn distinct_user_timestamps_keep_sender_facts() {
         let db = fixture();
         let ids = (0..50)
             .map(|index| format!("input-{index}"))
@@ -585,13 +573,7 @@ mod tests {
                 ["accepted", "held", "applied", "cancelled"][index % 4],
             );
         }
-        let statements = crate::frontend::sql_trace::Statements::new(&db);
         let facts = read_tx(&db, Some("child"), &ids).unwrap();
-        assert_eq!(
-            statements.count(),
-            4,
-            "distinct timestamp buckets remain one receipt batch"
-        );
         assert_eq!(facts.rows.len(), 50);
         assert!(
             facts
@@ -621,19 +603,14 @@ mod tests {
                 db.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at)VALUES(?1,?1,'null',?2,?1,?3,?4)",params![id,target,state,stamp]).unwrap();
             }
         }
-        let statements = crate::frontend::sql_trace::Statements::new(&db);
         let facts = read_tx(&db, Some("child"), &["wanted".into()]).unwrap();
-        assert_eq!(statements.count(), 4);
         assert_eq!(
             facts.rows[0].sender.as_deref(),
             Some("null"),
             "129 across two states is valid; unrelated overflowing ranges cannot poison this source"
         );
-        drop(statements);
         db.execute_batch("INSERT INTO node(id,kind,created_at,payload_json)VALUES('overflow','user','same','{}'); INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at)VALUES('overflow','overflow','null','child','overflow','held','same');").unwrap();
-        let statements = crate::frontend::sql_trace::Statements::new(&db);
         let facts = read_tx(&db, Some("child"), &["wanted".into()]).unwrap();
-        assert_eq!(statements.count(), 3);
         assert!(
             facts.rows[0].sender.is_none(),
             "129th held witness invalidates the whole target/stamp bucket even when the requested accepted receipt matched"
@@ -660,13 +637,7 @@ mod tests {
         );
         input(&db, "extra", Some("null"), "applied");
         db.execute_batch("UPDATE node SET created_at='same' WHERE id='extra'; UPDATE receipt SET created_at='same' WHERE id='extra';").unwrap();
-        let statements = crate::frontend::sql_trace::Statements::new(&db);
         let facts = read_tx(&db, Some("child"), &ids).unwrap();
-        assert_eq!(
-            statements.count(),
-            3,
-            "scope+common+one overflow receipt batch, no sender copy"
-        );
         assert!(facts.rows.iter().all(|row| row.sender.is_none()));
         assert!(
             facts

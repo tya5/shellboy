@@ -416,7 +416,6 @@ pub(super) async fn request(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::frontend::sql_trace::Statements;
     use rusqlite::params;
     use serde_json::json;
     fn seed(db: &Connection) {
@@ -473,10 +472,7 @@ mod tests {
           INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,result_ref_json,created_at)VALUES('boundary','fixture','{}','hash','completed','{\"result\":{\"context_edit\":{\"action\":\"summary\"}}}','2026-10-31T12:38:20Z');
           INSERT INTO app_meta(key,value)VALUES('compact.inflight.foreign','[\"boundary\"]');").unwrap();
         let expected = canonical(&db, &run());
-        let trace = Statements::new(&db);
         let raw = read_tx(&db, &run()).unwrap();
-        assert_eq!(trace.count(), 5);
-        drop(trace);
         let prepared = prepare(raw).unwrap();
         assert_eq!(prepared.value, expected);
         assert_eq!(prepared.value["waiting_reason"]["operation_id"], "boundary");
@@ -491,7 +487,7 @@ mod tests {
         assert!(cleared.value.get("waiting_reason").is_none());
     }
     #[test]
-    fn exact_saved_metadata_matches_canonical_and_uses_bounded_query_count() {
+    fn exact_saved_metadata_matches_canonical() {
         let db = fixture();
         seed_owned(&db, 0, 8);
         for terminal in [false, true] {
@@ -500,17 +496,7 @@ mod tests {
             }
             for command in [run(), turn()] {
                 let expected = canonical(&db, &command);
-                let trace = Statements::new(&db);
                 let raw = read_tx(&db, &command).unwrap();
-                assert_eq!(
-                    trace.count(),
-                    if matches!(command, Command::RunGet(_)) {
-                        4
-                    } else {
-                        1
-                    }
-                );
-                drop(trace);
                 let prepared = prepare(raw).unwrap();
                 assert_eq!(prepared.value, expected);
                 assert_eq!(prepared.thread.as_deref(), Some("foreign"));
@@ -640,9 +626,8 @@ mod tests {
     }
 
     #[test]
-    fn closed_targets_do_no_sql_and_raw_facts_outlive_connection() {
+    fn closed_targets_are_rejected_and_raw_facts_outlive_connection() {
         let db = fixture();
-        let trace = Statements::new(&db);
         for command in [
             Command::RunGet(crate::protocol::RunTarget {
                 run_id: String::new(),
@@ -656,8 +641,6 @@ mod tests {
         ] {
             assert!(read_tx(&db, &command).is_err());
         }
-        assert_eq!(trace.count(), 0);
-        drop(trace);
         let raw = read_tx(&db, &turn()).unwrap();
         drop(db);
         assert_eq!(prepare(raw).unwrap().value["turn_id"], "u");

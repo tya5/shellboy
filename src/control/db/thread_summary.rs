@@ -315,7 +315,6 @@ pub(crate) fn matches_filter(thread_id: &str, title: &str, cwd: &str, query: &st
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::frontend::sql_trace::Statements;
     fn fixture() -> Connection {
         let db = Connection::open_in_memory().unwrap();
         db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
@@ -351,10 +350,7 @@ mod tests {
             ('a','a','null','t','m1','r','u','applied','now',NULL,'{\"deliver\":\"complete\",\"delivery_context\":{\"reason\":\"run_completion\"}}'),
             ('b','b','null','t','m2','r','u','applied','now',NULL,'{\"deliver\":\"complete\"}'),
             ('c','c','null','t','m3',NULL,NULL,'held','now','run_completion','{\"deliver\":\"complete\"}');").unwrap();
-        let trace = Statements::new(&db);
         let rows = read_ids_tx(&db, &["t".into(), "missing".into(), "t".into()]).unwrap();
-        assert_eq!(trace.count(), 1);
-        drop(trace);
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].identity.run_id.as_deref(), Some("r"));
         assert_eq!(rows[0].identity.turn_id.as_deref(), Some("u"));
@@ -511,7 +507,6 @@ mod tests {
         }
         tx.commit().unwrap();
         measure(&db);
-        let trace = Statements::new(&db);
         assert!(read_ids_tx(&db, &[]).unwrap().is_empty());
         assert!(
             read_ids_tx(
@@ -520,7 +515,6 @@ mod tests {
             )
             .is_err()
         );
-        assert_eq!(trace.count(), 0);
     }
     #[test]
     fn pure_filter_matches_existing_normalization() {

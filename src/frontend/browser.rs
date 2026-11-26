@@ -1106,10 +1106,7 @@ mod watch_tests {
             .unwrap();
         browser.changed("failed");
         let ticket = browser.take(tokio::time::Instant::now()).unwrap();
-        let trace = crate::frontend::sql_trace::Statements::new(&db);
         let raw = read_tx(&db, &ticket, None).unwrap();
-        assert_eq!(trace.count(), 1, "Only the selected excerpt stays local");
-        drop(trace);
         let observation = prepare(raw, 1, 1);
         assert!(observation.details.is_none());
         let patch = observation.patch.unwrap();
@@ -1201,14 +1198,7 @@ mod watch_tests {
             .unwrap();
         let now = tokio::time::Instant::now();
         let ticket = browser.take(now).unwrap();
-        let trace = crate::frontend::sql_trace::Statements::new(&db);
         let raw = read_tx(&db, &ticket, None).unwrap();
-        assert_eq!(
-            trace.count(),
-            2,
-            "one shared summary and one visible detail batch, no selected history read"
-        );
-        drop(trace);
         let observation = prepare(raw, 1, 1);
         assert!(observation.patch.unwrap().excerpt.is_none());
         assert_eq!(observation.details.unwrap().details.len(), 1);
@@ -1318,22 +1308,16 @@ mod watch_tests {
         );
     }
     #[test]
-    fn oversized_tickets_fail_before_database_reads_and_empty_watch_has_no_queries() {
+    fn oversized_tickets_fail_and_empty_watch_has_no_result() {
         let db = fixture();
         let mut browser = Browser::default();
         observe(&mut browser, &[], &[]);
         browser.changed("child");
         let mut ticket = browser.take(tokio::time::Instant::now()).unwrap();
         ticket.ids = vec!["child".into(); 129];
-        let trace = crate::frontend::sql_trace::Statements::new(&db);
         assert!(read_tx(&db, &ticket, None).is_err());
-        assert_eq!(trace.count(), 0);
-        drop(trace);
         ticket.ids.clear();
-        let trace = crate::frontend::sql_trace::Statements::new(&db);
         let raw = read_tx(&db, &ticket, None).unwrap();
-        assert_eq!(trace.count(), 0);
-        drop(trace);
         let result = prepare(raw, 1, 1);
         assert!(result.patch.is_none() && result.details.is_none());
     }

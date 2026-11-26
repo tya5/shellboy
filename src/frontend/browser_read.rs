@@ -220,7 +220,6 @@ pub(super) fn prepare_with_watch(raw: RawPatch, include_watch: bool) -> Prepared
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::frontend::sql_trace::Statements;
     use serde_json::json;
     fn fixture() -> Connection {
         let db = Connection::open_in_memory().unwrap();
@@ -244,7 +243,7 @@ mod tests {
         .unwrap();
     }
     #[test]
-    fn metadata_patch_has_fixed_sql_and_no_excerpt_copy_until_selected() {
+    fn metadata_patch_has_no_excerpt_copy_until_selected() {
         let db = fixture();
         thread(&db, "stored", "Explicit");
         thread(&db, "derived", "");
@@ -254,15 +253,12 @@ mod tests {
             0,
             Some(json!({"role":"user","content":"Derived first question"}).to_string()),
         );
-        let trace = Statements::new(&db);
         let raw = read_tx(
             &db,
             &["stored".into(), "derived".into(), "gone".into()],
             None,
         )
         .unwrap();
-        assert_eq!(trace.count(), 2, "one summary and one set title statement");
-        drop(trace);
         let patch = prepare(raw);
         assert_eq!(patch.missing_ids, vec!["gone"]);
         assert!(patch.selected_excerpt.is_none());
@@ -366,8 +362,6 @@ mod tests {
                 .1
                 .is_err()
         );
-        let trace = Statements::new(&db);
         assert!(read_tx(&db, &vec!["x".into(); 129], None).is_err());
-        assert_eq!(trace.count(), 0);
     }
 }

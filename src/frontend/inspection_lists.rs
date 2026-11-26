@@ -586,8 +586,6 @@ mod tests {
         db.close().unwrap();
         let value = super::super::inspection_read::prepare(raw).unwrap().value;
         assert_eq!(value["current"]["missing_ids"][0]["id"], "gone");
-        assert_eq!(value["current"]["sql_statements"], 1);
-        assert_eq!(value["status_membership"]["sql_statements"], 12);
         assert_eq!(value["status_membership"]["unconfirmed"], true);
     }
     #[test]

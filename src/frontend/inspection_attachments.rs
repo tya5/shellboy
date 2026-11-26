@@ -415,10 +415,7 @@ mod tests {
                 .iter()
                 .any(|row| row["attachment_id"] == "a")
         );
-        let trace = crate::frontend::sql_trace::Statements::new(&db);
         let raw = read_selected_tx(&db, "target", "a").unwrap();
-        assert_eq!(trace.count(), 2);
-        drop(trace);
         let (value, limited) = prepare(raw);
         assert!(!limited);
         assert_eq!(
@@ -441,14 +438,11 @@ mod tests {
         assert!(missing["attachments"].as_array().unwrap().is_empty());
     }
     #[test]
-    fn invalid_scope_does_no_sql_and_limited_managed_reason_is_not_defaulted() {
+    fn invalid_scope_is_rejected_and_limited_managed_reason_is_not_defaulted() {
         let db = fixture();
-        let trace = crate::frontend::sql_trace::Statements::new(&db);
         for (thread, id) in [("", "a"), ("target", ""), ("target", &"x".repeat(4097))] {
             assert!(read_selected_tx(&db, thread, id).is_err());
         }
-        assert_eq!(trace.count(), 0);
-        drop(trace);
         db.execute(
             "UPDATE managed_file SET deleted_reason=?1",
             ["x".repeat(1000)],

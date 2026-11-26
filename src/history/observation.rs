@@ -162,7 +162,6 @@ pub(crate) fn prepare(raw: Raw) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::frontend::sql_trace::Statements;
     fn fixture() -> Connection {
         let db = Connection::open_in_memory().unwrap();
         db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
@@ -200,9 +199,8 @@ mod tests {
         assert_eq!(original, r#"{"content":"retained original"}"#);
     }
     #[test]
-    fn invalid_or_escaped_oversized_scope_does_no_sql_and_empty_scope_does_not_scan() {
+    fn invalid_or_escaped_oversized_scope_is_rejected_and_empty_scope_is_empty() {
         let db = fixture();
-        let trace = Statements::new(&db);
         for ids in [
             vec!["n".into(); 201],
             vec!["".into()],
@@ -214,14 +212,12 @@ mod tests {
             );
         }
         assert!(read_tx(&db, &[], Some("")).is_err());
-        assert_eq!(trace.count(), 0);
         assert!(
             prepare(read_tx(&db, &[], None).unwrap())["nodes"]
                 .as_array()
                 .unwrap()
                 .is_empty()
         );
-        assert_eq!(trace.count(), 0);
     }
     #[test]
     fn scalar_and_aggregate_guards_keep_metadata_finite_without_hiding_availability() {
@@ -249,10 +245,7 @@ mod tests {
             ids.push(id);
         }
         tx.commit().unwrap();
-        let trace = Statements::new(&db);
         let raw = read_tx(&db, &ids, Some("t")).unwrap();
-        assert_eq!(trace.count(), 2);
-        drop(trace);
         let value = prepare(raw);
         assert!(serde_json::to_vec(&value).unwrap().len() <= CHANNEL);
         assert!(

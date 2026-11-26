@@ -492,7 +492,6 @@ pub(super) fn prepare(raw: RawSaved) -> Result<PreparedSaved, ApiError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::frontend::sql_trace::Statements;
     use crate::protocol::{ExecutionTarget, MessageTarget, RunTarget};
     use rusqlite::params;
     fn seed(db: &Connection) -> rusqlite::Result<()> {
@@ -527,9 +526,8 @@ mod tests {
         })
     }
     #[test]
-    fn closed_allowlist_and_absent_human_run_reject_before_sql() {
+    fn closed_allowlist_and_absent_human_run_are_rejected() {
         let db = fixture();
-        let trace = Statements::new(&db);
         let bad = Command::RunGet(RunTarget {
             run_id: "run".into(),
         });
@@ -540,7 +538,6 @@ mod tests {
                 .code,
             ErrorCode::InvalidArgument
         );
-        assert_eq!(trace.count(), 0);
     }
     #[test]
     fn message_current_assignment_answer_sender_and_context_match_canonical_even_after_tombstone() {
@@ -549,10 +546,7 @@ mod tests {
             if deleted {
                 db.execute_batch("UPDATE run SET state='completed',ended_at='2026-01-01T00:00:01Z';UPDATE thread SET deleted_at='2026-01-01T00:00:02Z' WHERE id='target';UPDATE node SET payload_json=NULL,deleted_reason='explicit GC' WHERE id='message';").unwrap();
             }
-            let trace = Statements::new(&db);
             let raw = read_tx(&db, &message(), Some("issuing")).unwrap();
-            assert_eq!(trace.count(), 1);
-            drop(trace);
             let expected =
                 encode(crate::control::db::message_details(&db, "message").unwrap()).unwrap();
             let prepared = prepare(raw).unwrap();
@@ -660,13 +654,10 @@ mod tests {
             }
             tx.commit().unwrap();
             previous = total;
-            let trace = Statements::new(&db);
             assert!(matches!(
                 read_tx(&db, &shell(), None).unwrap(),
                 RawSaved::Shell(_)
             ));
-            assert_eq!(trace.count(), 1);
-            drop(trace);
             let mut q = db.prepare(SHELL_SQL).unwrap();
             {
                 let mut rows = q.query(["shell"]).unwrap();
