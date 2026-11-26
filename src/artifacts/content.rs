@@ -51,9 +51,8 @@ fn not_a_file() -> ApiError {
     )
     .details(json!({"reason": "not_a_file"}))
 }
-/// Windows reserved device names never name a regular file, and opening one
-/// can block; they are refused before any file access. Device namespaces are
-/// refused earlier with network shares (see `unc`).
+/// Windows reserved device names (also the superscript `COM¹-³`/`LPT¹-³`
+/// aliases) never name a regular file, and opening one can block.
 #[cfg(windows)]
 fn is_device(path: &Path) -> bool {
     path.components().any(|part| {
@@ -72,7 +71,6 @@ fn is_device(path: &Path) -> bool {
             "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
         ) || ["COM", "LPT"].iter().any(|port| {
             let mut digit = upper.strip_prefix(port).unwrap_or_default().chars();
-            // Windows also reserves the superscript aliases COM¹-³ and LPT¹-³.
             digit
                 .next()
                 .is_some_and(|c| matches!(c, '1'..='9' | '¹' | '²' | '³'))
@@ -84,9 +82,20 @@ fn is_device(path: &Path) -> bool {
 fn is_device(_: &Path) -> bool {
     false
 }
-fn refuse_device(path: &Path) -> Result<()> {
-    if is_device(path) {
-        return Err(not_a_file());
+/// The one local-path rule, applied to every input after it is resolved to a
+/// filesystem path and before any filesystem access: no leading double
+/// separator (network shares, `\\.\` and `\\?\` namespaces), no control
+/// characters, and no Windows device names.
+fn local_path(path: &Path) -> Result<()> {
+    let text = path.to_string_lossy();
+    let separator = |c: char| c == '/' || c == '\\';
+    let mut chars = text.chars();
+    let shared = chars.next().is_some_and(separator) && chars.next().is_some_and(separator);
+    if shared || text.chars().any(char::is_control) || is_device(path) {
+        return Err(refused(
+            "path_not_local",
+            "The owner reads only local paths: no network shares, device names or control characters",
+        ));
     }
     Ok(())
 }
@@ -112,31 +121,12 @@ fn local_authority(rest: &str) -> bool {
     authority.is_empty() || authority.eq_ignore_ascii_case("localhost")
 }
 
-/// Two leading slashes of either kind name a network share (`\\server\share`,
-/// `//server/share`) or a Windows device namespace (`\\.\`, `\\?\`), never a
-/// local path.
-fn unc(path: &str) -> bool {
-    let slash = |c: char| c == '/' || c == '\\';
-    let mut chars = path.chars();
-    chars.next().is_some_and(slash) && chars.next().is_some_and(slash)
-}
-fn not_local_path() -> ApiError {
-    refused(
-        "uri_not_readable",
-        "The owner reads only local paths, not network shares",
-    )
-}
-
 fn source(uri: &str) -> Result<Source> {
     let scheme = uri_scheme(uri);
     if let Some(name) = scheme
         && name.eq_ignore_ascii_case(APP_SCHEME)
     {
-        let text = &uri[name.len() + 1..];
-        if unc(text) {
-            return Err(not_local_path());
-        }
-        let folder = Path::new(text);
+        let folder = Path::new(&uri[name.len() + 1..]);
         if !folder.is_absolute() {
             return Err(refused(
                 "uri_not_readable",
@@ -144,9 +134,6 @@ fn source(uri: &str) -> Result<Source> {
             ));
         }
         return Ok(Source::Folder(folder.into()));
-    }
-    if unc(uri) {
-        return Err(not_local_path());
     }
     if Path::new(uri).is_absolute() {
         return Ok(Source::File(uri.into()));
@@ -160,9 +147,9 @@ fn source(uri: &str) -> Result<Source> {
                 "A file: URI must name a local absolute path",
             )
         };
-        // Checked on the raw text, because URL parsing drops a host in front
-        // of a drive letter and strips tabs and newlines, and again after
-        // parsing; Windows would turn any kept host into a network path.
+        // Authority validation only (the resulting path meets `local_path`):
+        // on the raw text, because URL parsing drops a host in front of a
+        // drive letter and strips tabs and newlines, and again after parsing.
         if uri.contains(['\t', '\n', '\r']) || !local_authority(&uri[name.len() + 1..]) {
             return Err(not_local());
         }
@@ -194,7 +181,7 @@ enum Target {
 fn target(source: Source, path: Option<&str>) -> Result<Target> {
     match (source, path) {
         (Source::File(file), None) => {
-            refuse_device(&file)?;
+            local_path(&file)?;
             Ok(Target::File(file))
         }
         (Source::File(_), Some(_)) => Err(refused(
@@ -213,8 +200,8 @@ fn target(source: Source, path: Option<&str>) -> Result<Target> {
             {
                 return Err(outside());
             }
-            refuse_device(&folder)?;
-            refuse_device(relative)?;
+            local_path(&folder)?;
+            local_path(&folder.join(relative))?;
             Ok(Target::InFolder(folder, relative.into()))
         }
     }

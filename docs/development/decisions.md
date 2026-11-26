@@ -35,12 +35,15 @@ larger than one frame or a folder entry without naming it.
   withholds from a page or client.
   Approved as an exception on #445 (2026-11-26), which also covers the Windows
   type check before opening: the opened handle is still the one checked.
-- Special targets: Unix opens with `O_NONBLOCK`; Windows refuses reserved
-  device names (including the `COM¹-³`/`LPT¹-³` aliases) in any component and
-  checks the type before opening. Paths and app folders starting with two
-  slashes of either kind (network shares, `\\.\`, `\\?\`) are refused as not
-  local on every platform. A `file:` URI with a tab, newline or CR is refused outright, and a
-  non-local authority is refused both on the raw text and after parsing.
+- One local-path rule (`artifacts::content::local_path`, decided on #445):
+  every form is resolved to a path first (schemeless, `file:` after
+  conversion, `shellboy-app:` root, root joined with the relative path), then
+  leading double separators, control characters and Windows device names
+  (with the `COM¹-³`/`LPT¹-³` aliases) are refused as `path_not_local` before
+  any filesystem access. `file:` authority checks (raw text, where tab/newline/
+  CR refuse the URI, and after parsing) validate the authority only.
+- Special targets: Unix opens with `O_NONBLOCK`; Windows checks the type
+  before opening.
 - Lookup on the database worker, file open and encoding on the attachment
   blocking-file pool (`workers.attachment`), as a receipt-free runtime
   observation; no new worker, queue or table.
