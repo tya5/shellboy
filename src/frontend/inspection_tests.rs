@@ -991,6 +991,72 @@ async fn f8_index_pages_saved_sources_preserves_window_on_enqueue_and_only_posts
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn f8_operation_view_of_a_runtime_receipt_follows_its_reservation_and_settlement() {
+    let mock = HeldEmbedding::new().await;
+    let (root, owner, control, server) = index_fixture(&mock.url).await;
+    let mut ui = UiState::new(&owner.loaded.config, root.path().into());
+    let (sender, receiver) = actions::channel(64);
+    let (updates, incoming) = std::sync::mpsc::sync_channel(128);
+    let bridge = tokio::spawn(super::run_with_clipboard(
+        control.clone(),
+        receiver,
+        updates,
+        root.path().into(),
+        owner,
+        server,
+        Arc::new(NoClipboard),
+    ));
+    dispatch(&sender, ui.select_thread("thread".into()));
+    let mut proofs = Vec::new();
+    pump_until(&mut ui, &sender, &incoming, &mut proofs, |ui, _| {
+        ui.view().thread_id.as_deref() == Some("thread") && !ui.view().navigation.is_loading()
+    })
+    .await;
+    // An index probe's receipt names no Thread: its owner-level mark is the only wake.
+    let request = super::operation(&control, Command::IndexProbe(IndexProbeArgs::default()));
+    let operation = request.operation_id.clone();
+    key(&mut ui, &sender, KeyCode::F(8), KeyModifiers::NONE);
+    dispatch(&sender, ui.event(Event::Paste("operation get".into())));
+    assert!(draw(&mut ui).contains("1/1件"));
+    key(&mut ui, &sender, KeyCode::Enter, KeyModifiers::NONE);
+    key(&mut ui, &sender, KeyCode::Char('u'), KeyModifiers::CONTROL);
+    dispatch(&sender, ui.event(Event::Paste(operation.clone())));
+    key(&mut ui, &sender, KeyCode::Enter, KeyModifiers::NONE);
+    let requester = control.clone();
+    let execution = tokio::spawn(async move { external_request(&requester, request).await });
+    pump_until(&mut ui, &sender, &incoming, &mut proofs, |_, p| {
+        mock.count() == 1
+            && p.last().is_some_and(|p| {
+                p.snapshot.target == InspectionTarget::Operation(operation.clone())
+                    && field(&p.snapshot, "/state") == Some("pending")
+            })
+    })
+    .await;
+    let pending = proofs.last().unwrap().snapshot.clone();
+    assert!(
+        !execution.is_finished(),
+        "the pending view precedes completion"
+    );
+    mock.release.add_permits(1);
+    let result = crate::test_watchdog::watchdog("held index probe", execution)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(result.ok, "synthetic probe failed: {:?}", result.error);
+    pump_until(&mut ui, &sender, &incoming, &mut proofs, |_, p| {
+        p.last().is_some_and(|p| {
+            p.snapshot.metadata_sequence > pending.metadata_sequence
+                && field(&p.snapshot, "/state") == Some("completed")
+        })
+    })
+    .await;
+    assert_eq!(mock.count(), 1, "observations authorize no model request");
+    assert_eq!(mock.unexpected.load(std::sync::atomic::Ordering::SeqCst), 0);
+    sender.try_send(UiAction::Quit).unwrap();
+    super::control_tests::finish_bridge(bridge, &incoming).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn f8_standalone_usage_reads_foreign_run_root_and_follows_real_saved_stop() {
     let (root, owner, control, server) = super::control_tests::fixture_with_language("ja").await;
     let mut ui = UiState::new(&owner.loaded.config, root.path().into());

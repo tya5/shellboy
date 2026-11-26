@@ -157,12 +157,14 @@ This one wait is the client's only owner wake (4d slice 3):
 - `retention_changed` rereads a visible inspection and the selected detail
   sources.
 - `output` re-reads the shown execution: the shell inspection, a Watch row's
-  detail, or the open live preview. The live work output age counts from when
-  the client received the entry; a newer saved output time supersedes it, as
-  before. An owner Instant is not meaningful in another process.
+  detail, or the open live preview. The live work output age is computed from
+  the entry's saved `output_at` (the same time `shell.get` reports as
+  `last_output_at`).
 - An owner notification for one Thread arrives as an ordinary change for it.
-  The operation inspection therefore refreshes through its receipt's Thread;
-  a receipt with no Thread gets no wake (gap below).
+  An operation inspection rereads on its receipt's Thread; one whose saved
+  facts name no Thread rereads on any change and on any owner mark, since an
+  owner-level receipt settles through its mark and a shell receipt through the
+  shell's Thread.
 - A baseline or gap rereads everything the marks and output entries cover.
 
 No worker or queued event buffer is added; dropping the pending wait drops its
@@ -265,9 +267,6 @@ No protocol read or wake fact exists for these:
   and `message.get` carry sender and reply state but not the delivery reason.
 - Branch markers for the visible nodes. `thread.branches` pages the family at
   most 200 Threads per page, so a marker for one visible node can need every page.
-- A wake for a runtime receipt that has no Thread (`storage.collect`,
-  `config.set`, index operations, shell writes): an open operation inspection
-  of one does not refresh when it settles.
 - Management inspections answered in process with client-only payloads
   (index coverage window, storage physical sample, lifecycle, saved, operation,
   attachment and deletion inspections). The protocol records lack, for

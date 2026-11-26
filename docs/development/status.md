@@ -58,8 +58,8 @@ TUI live-work SQL are deleted.
 Slice 3 (wakes): the TUI's only owner wake is its owner-wide `events.wait`,
 now with `index_changed`, `retention_changed` and opt-in `output` entries.
 The private index, GC availability, owner-state and display-output wakes and
-the in-process output markers are deleted. Gap: an operation inspection of a
-receipt with no Thread no longer refreshes when it settles.
+the in-process output markers are deleted. Runtime receipts settle through the
+matching mark or their target's Thread.
 
 ## Core #311 selected history client (4e/4f)
 

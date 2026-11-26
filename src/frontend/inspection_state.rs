@@ -335,6 +335,17 @@ impl Observation {
             }
             return;
         }
+        if matches!(scope.target, InspectionTarget::Operation(_))
+            && scope
+                .dependencies
+                .as_ref()
+                .is_none_or(|dependencies| dependencies.thread.is_empty())
+        {
+            // A receipt whose saved facts name no Thread can belong to any Thread
+            // (a shell write); its settlement arrives as that Thread's change.
+            scope.metadata_dirty = true;
+            return;
+        }
         if global_saved(&scope.target) {
             scope.metadata_dirty = true;
             if matches!(scope.target, InspectionTarget::Storage) {
@@ -405,6 +416,20 @@ impl Observation {
                 scope.metadata_dirty = true;
             }
             _ => {}
+        }
+    }
+    /// An owner-level mark (config, index or retention): owner operations
+    /// settle their receipts through one, so an operation view with no Thread rereads.
+    pub fn owner_mark(&mut self) {
+        if let Some(scope) = self.scope.as_mut().filter(|scope| {
+            scope.visible
+                && matches!(scope.target, InspectionTarget::Operation(_))
+                && scope
+                    .dependencies
+                    .as_ref()
+                    .is_none_or(|dependencies| dependencies.thread.is_empty())
+        }) {
+            scope.metadata_dirty = true;
         }
     }
     pub fn index_changed(&mut self) {
@@ -1224,6 +1249,7 @@ mod tests {
         crate::protocol::EventOutput {
             thread_id: "owner".into(),
             execution_id: execution.into(),
+            output_at: "2026-11-27T00:00:00Z".into(),
             seq: 1,
         }
     }

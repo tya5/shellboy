@@ -281,13 +281,14 @@ pub(in crate::control) async fn collect_shell(
             let mut chunks=Vec::new();
             let mut acknowledgements=Vec::new();
             let mut saved_sequence=None;
-            let mut had_output=false;
+            let mut output_at=None;
             for event in batch {
                 match event {
                     ShellEvent::Output(chunk)=>{
-                        had_output=true;
                         let (stream,offset)=match chunk.stream {OutputStream::Stdout=>("stdout",&mut next_stdout),OutputStream::Stderr=>("stderr",&mut next_stderr)};
-                        tx.execute("INSERT INTO output_chunk(execution_id,sequence,stream,stream_offset,bytes,received_at)VALUES(?1,?2,?3,?4,?5,?6)",params![execution,chunk.sequence as i64,stream,*offset,&chunk.bytes,now()])?;
+                        let received_at=now();
+                        tx.execute("INSERT INTO output_chunk(execution_id,sequence,stream,stream_offset,bytes,received_at)VALUES(?1,?2,?3,?4,?5,?6)",params![execution,chunk.sequence as i64,stream,*offset,&chunk.bytes,&received_at])?;
+                        output_at=Some(received_at);
                         *offset+=chunk.bytes.len() as i64;
                         if rotation_limit.is_some() { next_retained += chunk.bytes.len() as u64; }
                         saved_sequence=Some(chunk.sequence as i64+1);
@@ -308,13 +309,13 @@ pub(in crate::control) async fn collect_shell(
             }
             if let Some(sequence)=saved_sequence {tx.execute("UPDATE shell_execution SET saved_sequence=?2 WHERE id=?1",params![execution,sequence])?;}
             tx.commit()?;
-            if had_output { wakes.publish([Key::ShellOutput(execution)]); }
+            if output_at.is_some() { wakes.publish([Key::ShellOutput(execution)]); }
             for saved in acknowledgements {let _=saved.send(Ok(()));}
             drop(chunks);
-            Ok((next_stdout, next_stderr,next_retained,had_output))
+            Ok((next_stdout, next_stderr,next_retained,output_at))
         }).await;
         match saved {
-            Ok((out, err, bytes, had_output)) => {
+            Ok((out, err, bytes, output_at)) => {
                 retained = bytes;
                 (stdout, stderr) = (out, err);
                 #[cfg(test)]
@@ -328,10 +329,11 @@ pub(in crate::control) async fn collect_shell(
                         samples.push(save_started.elapsed().as_micros());
                     }
                 }
-                if had_output {
+                if let Some(output_at) = output_at {
+                    // The last saved chunk's time: what `shell.get` reports as last_output_at.
                     control
                         .change_clock
-                        .record_output(owner.thread(), &marker_execution);
+                        .record_output(owner.thread(), &marker_execution, &output_at);
                 }
             }
             Err(error) => {
