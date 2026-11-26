@@ -297,7 +297,7 @@ impl ShellOutputReader {
         execution_id: &str,
         streams: StreamSelection,
     ) -> Result<OutputStreamReader> {
-        let pin = ReadPin::new(self.database.clone(), self.instance.to_string());
+        let pin = ReadPin::acquire(&self.database, self.instance.to_string()).await?;
         let execution = execution_id.to_owned();
         let pin_id = pin.id();
         let insert = pin.insert_token();
@@ -396,7 +396,7 @@ impl ShellOutputReader {
             .as_deref()
             .map(OutputCursor::decode)
             .transpose()?;
-        let pin = ReadPin::new(self.database.clone(), self.instance.to_string());
+        let pin = ReadPin::acquire(&self.database, self.instance.to_string()).await?;
         let execution = args.execution_id.clone();
         let pin_id = pin.id();
         let insert = pin.insert_token();
@@ -572,7 +572,7 @@ impl ShellOutputReader {
         if limit_bytes == 0 {
             return Ok(String::new());
         }
-        let pin = ReadPin::new(self.database.clone(), self.instance.to_string());
+        let pin = ReadPin::acquire(&self.database, self.instance.to_string()).await?;
         let execution = execution_id.to_owned();
         let pin_id = pin.id();
         let insert = pin.insert_token();
@@ -864,11 +864,13 @@ impl ReadPin {
     ) -> Result<usize> {
         tx.execute("INSERT INTO runtime_pin(id,instance_id,resource_kind,resource_id,generation,created_at)VALUES(?1,?2,'shell_output',?3,?4,?5)",params![id,instance,execution,generation as i64,chrono::Utc::now().to_rfc3339()]).map_err(sql_error)
     }
-    fn new(database: DbWorker, instance: String) -> Self {
-        Self {
-            lease: crate::runtime_pin::PinLease::new(database),
+    async fn acquire(database: &DbWorker, instance: String) -> Result<Self> {
+        Ok(Self {
+            lease: crate::runtime_pin::PinLease::acquire(database)
+                .await
+                .map_err(StorageError::into_api_error)?,
             instance,
-        }
+        })
     }
     fn id(&self) -> String {
         crate::runtime_pin::pin_id(&self.lease.prefix(), 0)

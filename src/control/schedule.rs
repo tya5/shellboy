@@ -56,8 +56,9 @@ struct Advanced {
     shell: Option<DueShell>,
     notice: Option<super::MutationResult>,
     /// The reservation made an execution whose raw output was already
-    /// collected no longer its definition's latest; the caller marks
-    /// raw-marker settlement after commit (#450).
+    /// collected no longer its definition's latest; that definition's
+    /// raw-marker settlement is recorded in the same transaction and the
+    /// caller marks the marker owner after commit (#450).
     superseded: bool,
 }
 
@@ -98,6 +99,9 @@ fn advance_due(
         [&schedule],
         |r| r.get(0),
     )?;
+    if superseded {
+        crate::gc::request_definition_settlement_tx(tx, &schedule)?;
+    }
     let id = uuid::Uuid::new_v4().to_string();
     let shell = serde_json::json!({"command": command,"kind":shell_kind});
     let at = now.to_rfc3339();
@@ -802,6 +806,11 @@ pub(super) async fn delete(
         .store
         .finalize_deletion(request.operation_id, move |tx| {
             let (targets, executions) = prepared?;
+            if removes {
+                crate::gc::request_marker_sweep_tx(tx)
+                    .map_err(StorageError::from)
+                    .map_err(super::storage_error)?;
+            }
             match command {
                 Command::ThreadDelete(args) => {
                     let mut current = super::db::delete_targets(tx, &args)?;
@@ -1432,11 +1441,11 @@ mod tests {
         owner.shutdown().await.unwrap();
     }
 
-    /// #450: removing a definition and superseding a collected run both mark
-    /// raw-marker settlement, and the signalled maintenance pass (no explicit
-    /// collect) settles the markers and rows they left.
+    /// #450: a definition removal and a real reservation that supersedes a
+    /// collected run emit raw-marker work, and the maintenance pass for exactly
+    /// the work they emitted (no explicit collect) settles what they left.
     #[tokio::test]
-    async fn removal_and_supersession_mark_raw_marker_settlement_for_maintenance() {
+    async fn removal_and_supersession_emit_raw_marker_work_that_maintenance_settles() {
         let root = tempfile::tempdir().unwrap();
         let owner =
             crate::app::DataOwner::start(None, Some(root.path().join("data")), root.path().into())
@@ -1458,7 +1467,23 @@ mod tests {
             Ok(())
         }).await.unwrap();
         let signals = owner.db.signals().clone();
-        signals.take_seen();
+        // A maintenance pass for exactly the kind a producer emitted; the
+        // owner's running loop may take the mark first, so it is read from
+        // the producer record and the pending work from the database.
+        let maintain = || {
+            assert!(
+                signals
+                    .take_seen()
+                    .contains(crate::maintenance::Work::RawMarkers)
+            );
+            let mut set = crate::maintenance::WorkSet::default();
+            set.insert(crate::maintenance::Work::RawMarkers);
+            control.gc.collect_kinds(set, Utc::now())
+        };
+        // The owner's first marker pass (its startup sweep) settles nothing
+        // here: both runs are still their definition's latest.
+        signals.mark(crate::maintenance::Work::RawMarkers);
+        maintain().await.unwrap();
         let removed = control
             .request(Request::new(
                 format!("{}:{}", owner.instance_id, uuid::Uuid::new_v4()),
@@ -1468,31 +1493,11 @@ mod tests {
             ))
             .await;
         assert!(removed.ok, "{:?}", removed.error);
-        assert!(
-            signals
-                .take_seen()
-                .contains(crate::maintenance::Work::RawMarkers)
-        );
-        // The weekly run is still its definition's latest; a new reservation
+        maintain().await.unwrap();
+        // The weekly run is still its definition's latest; the real reservation
         // supersedes it after its output was already collected.
-        let superseded = owner
-            .db
-            .call(|db| {
-                let tx = db.transaction()?;
-                let mut superseded = false;
-                advance_due(&tx, Utc::now(), "native", &mut superseded)?.unwrap();
-                tx.commit()?;
-                Ok(superseded)
-            })
-            .await
-            .unwrap();
-        assert!(
-            superseded,
-            "the reservation reports the collected run it supersedes"
-        );
-        let mut set = crate::maintenance::WorkSet::default();
-        set.insert(crate::maintenance::Work::RawMarkers);
-        control.gc.collect_kinds(set, Utc::now()).await.unwrap();
+        dispatch(&control).await.unwrap();
+        maintain().await.unwrap();
         owner.db.call(|db| {
             let markers: Vec<String> = db.prepare("SELECT key FROM app_meta WHERE key>='raw_tombstone.' AND key<'raw_tombstone/'")?.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
             assert!(markers.is_empty(), "orphan and superseded markers are settled: {markers:?}");

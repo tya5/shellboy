@@ -16,28 +16,33 @@ managed画像のdeleting→unlink→deletedとpin/active検査は共有Attachmen
 
 ## Raw markers and Thread-owned executions (#450)
 
-Raw retention owns every `app_meta.raw_tombstone.<execution>` marker and the
-settlement of the rows they describe. A settled execution is a terminal
-schedule/service execution whose marker says `deleted`, with no chunk left, no
-read pin, and a newer execution of the same definition by rowid; it is deleted
-together with its marker, so `schedule list` and `service list` keep the same
-latest execution. One SQL rule (`SETTLED` in `src/gc.rs`) decides it for both
-paths below, and every unit is at most 128 rows under the GC step budget.
+Raw retention owns every `app_meta.raw_tombstone.<execution>` marker; one
+marker owner (`Work::RawMarkers`) settles the rows they describe. A settled
+execution is a terminal schedule/service execution whose marker says
+`deleted`, with no chunk left, no read pin, and a newer execution of the same
+definition by rowid; it is deleted together with its marker, so `schedule list`
+and `service list` keep the same latest execution. One SQL rule (`SETTLED` in
+`src/gc.rs`) decides it.
 
-- **Collection.** When raw retention finishes collecting a schedule/service
-  execution, the same pass settles that definition's collected, superseded
-  executions. This is the common case: an hourly run is collected seven days
-  later, long after newer runs exist.
-- **Changes that collect nothing.** `Work::RawMarkers` is a full marker sweep:
-  markers whose execution row is gone are deleted and settled executions are
-  deleted with their markers. It is marked after commit by removing a schedule
-  or service and by deleting Threads (both drop executions whose markers stay),
-  by a reservation that supersedes an execution whose output was already
-  collected (the definition's latest was older than the retention), at startup
-  (every kind), and by `storage collect --category raw`/`all`. It does not
-  depend on the raw byte total or the age deadline. A deferred unit keeps the
-  sweep position and restores the kind, so the next pass continues; a finished
-  sweep starts over on its next mark. No timer is added.
+The owner's pending work is persisted in `app_meta` by the transaction that
+creates it, so nothing is lost between a commit and the owner's pass:
+
+- `raw_settle.def.<definition>`: written by the raw-retention step that
+  finishes collecting a schedule/service execution, and by a reservation that
+  supersedes an execution whose output was already collected (the
+  definition's latest was older than the retention).
+- `raw_settle.all` (value: the marker key reached): a full sweep, written by a
+  schedule/service removal or Thread deletion (their executions go, their
+  markers stay), by the owner's first pass after startup, and by an explicit
+  `storage collect --category raw`/`all`.
+
+Each producer marks `RawMarkers` after its commit. A unit settles at most 128
+rows: the first pending definition, else one page of the full sweep, saving
+its progress (request removed, or sweep key advanced) in the same
+transaction. A deferred unit restores the kind and the next pass continues
+from the saved state; an interrupted pass leaves the state for the next mark
+or startup. The raw byte total and the age deadline never gate the owner. No
+timer is added.
 
 A Thread-owned execution without output is a raw candidate by the same age and
 capacity rule, so a schedule that prints nothing does not keep one row per run.
@@ -282,28 +287,34 @@ with no deadline.
 ## Runtime pin release and crash temporaries (#450)
 
 Every `runtime_pin` row belongs to one `PinLease` (`src/runtime_pin.rs`): its
-id is the lease's prefix plus an ordinal, and the lease exists before the job
-that inserts the rows. That job holds the lease's insert token until it has run
-or been dropped unrun. Dropping the lease, after success, an error, or a caller
-cancelled after the DB worker admitted the insert, queues one release on the DB
-worker; no task is spawned and `Drop` never retries. The DB worker thread drains
-the queue at every job boundary in its own transaction, at most 128 releases at
-a time: a release waits while its insert job can still run, a failed
-transaction keeps its releases queued for the next boundary, and any job that
-runs after the drop observes the pins released. The queue holds at most one
-entry per lease dropped and not yet released. A clipboard save's lease also
-carries its managed row: if that row is still `creating` when the lease is
-released (the save future was dropped, and the file worker, which holds the
-lease, has finished), the same transaction marks it `failed`, so managed
-collection reclaims it and its files. Releasing managed pins or failing a save
-marks managed and raw maintenance; releasing read pins marks nothing. Only rows
-of an earlier owner instance are left to startup cleanup, which deletes pins of
-other instances.
+id is the lease's prefix plus an ordinal. A lease is admitted only with one of
+`LEASE_SLOTS` (1024) finalization slots, so its release always has capacity;
+acquiring a lease waits for a slot. It is created before the job that inserts
+its rows, and that job holds the lease's insert token until it has run or been
+dropped unrun. Dropping the lease, after success, an error, or a caller
+cancelled after the DB worker admitted the insert, sends the release with its
+slot to the DB worker, which wakes for it like for a job; no task is spawned
+and `Drop` never retries. The worker releases a lease once its insert job is
+done, at most 128 per transaction, and the slot is freed when that commits. A
+failed release keeps its rows and slot, is recorded as a `database_failure` in
+diagnostics, and is retried by the worker at its idle maintenance point (the
+lanes are empty), at most once per second, never at every job. Releasing
+managed pins marks managed and raw maintenance; releasing read pins marks
+nothing. Only rows of an earlier owner instance are left to startup cleanup,
+which deletes pins of other instances.
 
-That startup cleanup, run by the owner while it holds the owner lock, also
-removes `tmp/<id>.png.tmp` files that a crashed or abandoned clipboard save
-left, in batches of at most 128 names: a bounded directory scan on the control
-file worker, one bounded row lookup, then the unlinks. A file whose managed row
-is still `creating` stays (its row is inserted before its file, so a save of
-this instance cannot be missed) and later batches skip it. Other files in `tmp`
-are not touched.
+A clipboard save has exactly one owner of its outcome: the writer closure on
+the attachment file worker. It inserts the `creating` row and its pin, writes
+and renames the file, then settles: `ready` only while its caller still waits;
+otherwise (an error, cancellation, a timed-out or dropped caller) it marks the
+row `failed` and deletes the pin in one transaction after the writer is done,
+so managed collection reclaims the row and its files. The pin finalizer never
+touches managed rows.
+
+Startup cleanup, run by the owner while it holds the owner lock, also removes
+`tmp/<uuid>.png.tmp` files that a crashed save left (only the writer's
+hyphenated UUID name format). One forward directory scan is carried across
+units; each unit visits at most 128 entries on the control file worker, one
+bounded row lookup keeps files whose managed row is still `creating` (its row is
+inserted before its file, so a save of this instance cannot be missed), and the
+next unit unlinks the rest. Other files in `tmp` are not touched.

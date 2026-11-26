@@ -815,37 +815,49 @@ async fn startup_removes_crash_left_temporary_images_but_not_a_live_save() {
     let f = Fixture::new(Config::default()).await;
     let tmp = f.path.join("tmp");
     std::fs::create_dir_all(&tmp).unwrap();
-    for name in ["live.png.tmp", "unrelated.tmp"] {
+    let live = uuid::Uuid::new_v4().to_string();
+    // Same suffix, not the writer's name format; and an unrelated file.
+    let foreign = ["notes.png.tmp", "unrelated.tmp"];
+    for name in foreign
+        .iter()
+        .map(|name| name.to_string())
+        .chain([format!("{live}.png.tmp")])
+    {
         std::fs::write(tmp.join(name), b"partial").unwrap();
     }
-    // More crash leftovers than one sweep batch, so discovery takes several.
-    for i in 0..300 {
-        std::fs::write(tmp.join(format!("crashed-{i}.png.tmp")), b"partial").unwrap();
+    // More crash leftovers than one sweep unit visits.
+    let crashed: Vec<String> = (0..300)
+        .map(|_| format!("{}.png.tmp", uuid::Uuid::new_v4()))
+        .collect();
+    for name in &crashed {
+        std::fs::write(tmp.join(name), b"partial").unwrap();
     }
-    let live = f
+    let path = f
         .path
-        .join("managed/clipboard/live.png")
+        .join(format!("managed/clipboard/{live}.png"))
         .to_string_lossy()
         .into_owned();
+    let row = live.clone();
     f.db.call(move |db| {
-        db.execute("INSERT INTO managed_file(id,absolute_path,state,created_at)VALUES('live',?1,'creating','now')", [live])?;
-        db.execute("INSERT INTO runtime_pin(id,instance_id,resource_kind,resource_id,generation,created_at)VALUES('live-pin','instance-test','managed_file','live',0,'now')", [])?;
+        db.execute("INSERT INTO managed_file(id,absolute_path,state,created_at)VALUES(?1,?2,'creating','now')", params![row, path])?;
+        db.execute("INSERT INTO runtime_pin(id,instance_id,resource_kind,resource_id,generation,created_at)VALUES('live-pin','instance-test','managed_file',?1,0,'now')", [row])?;
         Ok(())
     })
     .await
     .unwrap();
     f.service.restart_cleanup().await.unwrap();
-    let left: Vec<_> = std::fs::read_dir(&tmp)
-        .unwrap()
-        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
-        .filter(|name| name.starts_with("crashed-"))
+    let left: Vec<_> = crashed
+        .iter()
+        .filter(|name| tmp.join(name).exists())
         .collect();
     assert!(left.is_empty(), "crash leftovers remain: {left:?}");
     assert!(
-        tmp.join("live.png.tmp").exists(),
+        tmp.join(format!("{live}.png.tmp")).exists(),
         "a save of this instance keeps its file"
     );
-    assert!(tmp.join("unrelated.tmp").exists());
+    for name in foreign {
+        assert!(tmp.join(name).exists(), "{name} is not the writer's file");
+    }
     f.db.shutdown().await.unwrap();
 }
 
