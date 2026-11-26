@@ -682,11 +682,9 @@ mod visibility_cost_tests {
                     if !live {
                         db.execute("UPDATE thread SET deleted_at='now' WHERE id='live'", [])?;
                     }
-                    let started = std::time::Instant::now();
                     for i in 0..256 {
                         assert_eq!(history::reachability::searchable(db, &format!("source-{i}"))?, live);
                     }
-                    eprintln!("visibility sources=256 shared_depth={depth} live={live} elapsed_us={}",started.elapsed().as_micros());
                 }
                 Ok(())
             }).await.unwrap();

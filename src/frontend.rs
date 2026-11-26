@@ -4952,21 +4952,17 @@ mod stream_tests {
                 payload: Some(payload.clone()),
                 reason: None,
             };
-            let full_started = std::time::Instant::now();
             let full = make().into_ui_node(None, 76, crate::config::UiLanguage::En);
-            let full_elapsed = full_started.elapsed();
-            let anchored_started = std::time::Instant::now();
             let anchored = make().into_ui_node(
                 Some(NodePosition::At(anchor)),
                 76,
                 crate::config::UiLanguage::En,
             );
-            let anchored_elapsed = anchored_started.elapsed();
-            (full, anchored, full_elapsed, anchored_elapsed)
+            (full, anchored)
         })
         .await
         .unwrap();
-        let (full, anchored, full_elapsed, anchored_elapsed) = worker;
+        let (full, anchored) = worker;
         assert!(full.presentation.metadata_limited);
         assert!(anchored.text.len() <= MAX_ANCHORED_BODY_BYTES);
         assert!(anchored.presentation.metadata_limited);
@@ -4982,13 +4978,6 @@ mod stream_tests {
                 .links
                 .iter()
                 .any(|link| link.url == "https://example.com")
-        );
-        eprintln!(
-            "Markdown presentation worker: full-window={} ms, anchored-window={} ms, bytes={}/{}",
-            full_elapsed.as_millis(),
-            anchored_elapsed.as_millis(),
-            full.text.len(),
-            anchored.text.len(),
         );
     }
 

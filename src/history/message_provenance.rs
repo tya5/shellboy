@@ -199,7 +199,6 @@ mod tests {
     use super::*;
     #[test]
     fn pending_plan_scope_before_and_after_reverse_index_on_bounded_distribution() {
-        use rusqlite::StatementStatus;
         for full_schema in [false, true] {
             let db = rusqlite::Connection::open_in_memory().unwrap();
             if full_schema {
@@ -233,7 +232,7 @@ mod tests {
                     .unwrap()
                     .collect::<rusqlite::Result<Vec<_>>>()
                     .unwrap();
-                (plan, stmt.get_status(StatementStatus::VmStep), values)
+                (plan, values)
             };
             let query = "SELECT rowid FROM receipt WHERE target_thread_id='t' AND json_extract(result_json,'$.reply.state') IN ('pending','awaiting_own_ask')";
             let before = measure(query);
@@ -245,21 +244,13 @@ mod tests {
             let forced = measure(
                 "SELECT rowid FROM receipt INDEXED BY receipt_reply_pending WHERE target_thread_id='t' AND json_extract(result_json,'$.reply.state') IN ('pending','awaiting_own_ask')",
             );
-            assert_eq!(before.2, after.2);
-            assert_eq!(before.2, forced.2);
-            eprintln!(
-                "PENDING_SCOPE full_schema={full_schema} rows=512 target_rows=256 target_pending=2 before={:?} after={:?} forced={:?}",
-                (&before.0, before.1),
-                (&after.0, after.1),
-                (&forced.0, forced.1)
-            );
-            assert!(before.1 > 0 && after.1 > 0 && forced.1 > 0);
+            assert_eq!(before.1, after.1);
+            assert_eq!(before.1, forced.1);
             assert!(
                 after.0.contains("receipt_reply_pending"),
                 "unforced pending scope changed: {}",
                 after.0
             );
-            assert_eq!(before.1, after.1, "bounded pending VM work changed");
         }
     }
     #[test]

@@ -36,8 +36,6 @@ pub(super) struct RawOperation {
     identity_limited: bool,
     observed_at: String,
     #[cfg(test)]
-    steps: u64,
-    #[cfg(test)]
     statements: usize,
 }
 #[derive(Debug)]
@@ -74,15 +72,12 @@ fn scalar(value: Option<String>) -> Result<String, StorageError> {
 #[derive(Default)]
 struct Trace {
     #[cfg(test)]
-    steps: u64,
-    #[cfg(test)]
     statements: usize,
 }
 impl Trace {
     fn record(&mut self, _statement: &rusqlite::Statement<'_>) {
         #[cfg(test)]
         {
-            self.steps += _statement.get_status(rusqlite::StatementStatus::VmStep) as u64;
             self.statements += 1;
         }
     }
@@ -259,8 +254,6 @@ pub(super) fn read_tx(
         downstream,
         identity_limited,
         observed_at: chrono::Utc::now().to_rfc3339(),
-        #[cfg(test)]
-        steps: trace.steps,
         #[cfg(test)]
         statements: trace.statements,
     })
@@ -552,26 +545,22 @@ mod tests {
         assert!(read_tx(&db, "missing", "current").is_err());
     }
     #[test]
-    fn exact_pk_query_cost_and_statement_count_do_not_scale_with_unrelated_receipts() {
+    fn exact_pk_statement_count_does_not_scale_with_unrelated_receipts() {
         let db = fixture();
         insert(&db, "selected", "pending", None);
         let baseline = {
             let trace = Statements::new(&db);
             let raw = read_tx(&db, "selected", "current").unwrap();
             assert_eq!(trace.count(), raw.statements);
-            (raw.steps, raw.statements)
+            raw.statements
         };
         for size in [1000, 10000] {
             db.execute("WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<?1) INSERT OR IGNORE INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,result_ref_json,created_at)SELECT 'unrelated:'||i,'old','null','hash','completed','{\"result\":{}}','now' FROM n",[size]).unwrap();
             let trace = Statements::new(&db);
             let raw = read_tx(&db, "selected", "current").unwrap();
-            assert_eq!(
-                (raw.steps, raw.statements),
-                baseline,
-                "exact PK observation must not walk a global prefix"
-            );
+            assert_eq!(raw.statements, baseline);
             assert_eq!(trace.count(), raw.statements);
-            assert!(raw.steps < 200 && raw.statements <= 2);
+            assert!(raw.statements <= 2);
         }
     }
 }

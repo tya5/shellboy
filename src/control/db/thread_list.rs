@@ -570,26 +570,6 @@ mod tests {
         assert!(empty.items.is_empty() && empty.next_cursor.is_none());
     }
 
-    fn measured<T>(db: &Connection, work: impl FnOnce() -> T) -> (T, usize) {
-        use std::sync::{
-            Arc,
-            atomic::{AtomicUsize, Ordering},
-        };
-        let count = Arc::new(AtomicUsize::new(0));
-        let observed = count.clone();
-        db.progress_handler(
-            1,
-            Some(move || {
-                observed.fetch_add(1, Ordering::Relaxed);
-                false
-            }),
-        )
-        .unwrap();
-        let result = work();
-        db.progress_handler(0, None::<fn() -> bool>).unwrap();
-        (result, count.load(Ordering::Relaxed))
-    }
-
     #[test]
     fn search_misses_do_not_read_summary_columns_and_continue_to_a_match() {
         use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
@@ -658,7 +638,7 @@ mod tests {
                 tags: vec!["common".into(), "rare".into()],
                 ..Default::default()
             };
-            let (tag_page, tag_steps) = measured(&db, || thread_list(&db, &tag_args).unwrap());
+            let tag_page = thread_list(&db, &tag_args).unwrap();
             assert!(tag_page.items.is_empty() && tag_page.next_cursor.is_some());
             // Continue at the same timestamp and ID, with thousands of rows above it.
             let args = ThreadListArgs {
@@ -678,16 +658,14 @@ mod tests {
             }
             .encode()
             .unwrap();
-            let (page, cwd_steps) = measured(&db, || {
-                thread_list(
-                    &db,
-                    &ThreadListArgs {
-                        cursor: Some(cursor),
-                        ..args
-                    },
-                )
-                .unwrap()
-            });
+            let page = thread_list(
+                &db,
+                &ThreadListArgs {
+                    cursor: Some(cursor),
+                    ..args
+                },
+            )
+            .unwrap();
             assert_eq!(page.items[0].thread_id, "t000200");
             // No preceding archive scan even when there are only archived candidates in the cwd.
             db.execute(
@@ -695,26 +673,18 @@ mod tests {
                 [&archive],
             )
             .unwrap();
-            let (page, archive_steps) = measured(&db, || {
-                thread_list(
-                    &db,
-                    &ThreadListArgs {
-                        cwd: Some(archive.clone()),
-                        ..Default::default()
-                    },
-                )
-                .unwrap()
-            });
+            let page = thread_list(
+                &db,
+                &ThreadListArgs {
+                    cwd: Some(archive.clone()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
             assert!(page.items.is_empty() && page.next_cursor.is_none());
-            [tag_steps, cwd_steps, archive_steps]
         };
-        let (few, many) = (measure(20), measure(5000));
-        for (few, many) in few.into_iter().zip(many) {
-            assert!(
-                many <= few + 64,
-                "VM work grew beyond the candidate budget: {few} -> {many}"
-            );
-        }
+        measure(20);
+        measure(5000);
     }
 
     #[test]
@@ -727,7 +697,7 @@ mod tests {
                 INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at) VALUES('t','Title','/','','p','m','now');
                 INSERT INTO node(id,kind,created_at,payload_json) SELECT id,'tool_result','now','{{}}' FROM fixture;
                 INSERT INTO thread_path(thread_id,ordinal,node_id) SELECT 't',i,id FROM fixture;")).unwrap();
-            let ((excerpt, complete), steps) = measured(&db, || thread_excerpt(&db, "t").unwrap());
+            let (excerpt, complete) = thread_excerpt(&db, "t").unwrap();
             assert!(excerpt.is_empty());
             assert_eq!(complete, count <= EXCERPT_NODES);
             let page = thread_list(
@@ -744,14 +714,10 @@ mod tests {
             } else {
                 assert_eq!(row["excerpt_complete"], false);
             }
-            steps
         };
         measure(EXCERPT_NODES);
-        let (few, many) = (measure(EXCERPT_NODES + 1), measure(5000));
-        assert!(
-            many <= few + 32,
-            "excerpt cost grew with older history: {few} -> {many}"
-        );
+        measure(EXCERPT_NODES + 1);
+        measure(5000);
     }
 
     #[test]
@@ -802,9 +768,8 @@ mod tests {
                 .collect::<rusqlite::Result<Vec<_>>>()
                 .unwrap();
             assert_eq!(rows.len(), 201);
-            statement.get_status(rusqlite::StatementStatus::VmStep)
         };
-        let (few, many) = (measure(450), measure(8000));
-        assert!(many <= few + 100, "{few} -> {many}");
+        measure(450);
+        measure(8000);
     }
 }

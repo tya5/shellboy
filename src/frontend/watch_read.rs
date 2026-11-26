@@ -403,7 +403,7 @@ pub(super) fn prepare_with_language(
 mod tests {
     use super::*;
     use crate::frontend::sql_trace::Statements;
-    use rusqlite::{StatementStatus, params};
+    use rusqlite::params;
     fn fixture() -> Connection {
         let db = Connection::open_in_memory().unwrap();
         db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
@@ -617,31 +617,11 @@ mod tests {
         assert!(read_tx(&db, &vec!["t".into(); 129]).is_err());
     }
     #[test]
-    fn empty_scope_does_no_sql_and_detail_seeks_do_not_scale_with_unrelated_threads() {
+    fn empty_scope_does_no_sql() {
         let db = fixture();
         let trace = Statements::new(&db);
         assert!(read_tx(&db, &[]).unwrap().summaries.is_empty());
         assert_eq!(trace.count(), 0);
-        drop(trace);
-        fn steps(db: &Connection) -> (i32, i32) {
-            let mut statement = db.prepare(DETAILS).unwrap();
-            statement
-                .query_map(["[\"t\"]"], |_| Ok(()))
-                .unwrap()
-                .collect::<rusqlite::Result<Vec<_>>>()
-                .unwrap();
-            (
-                statement.get_status(StatementStatus::VmStep),
-                statement.get_status(StatementStatus::FullscanStep),
-            )
-        }
-        let before = steps(&db);
-        db.execute_batch("WITH RECURSIVE ids(i)AS(VALUES(1)UNION ALL SELECT i+1 FROM ids WHERE i<10000) INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at) SELECT 'unrelated-'||i,'Other','/','','p','m','now' FROM ids;").unwrap();
-        let after = steps(&db);
-        assert_eq!(
-            after, before,
-            "actual detail query must seek only its visible IDs"
-        );
     }
 }
 

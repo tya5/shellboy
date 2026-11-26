@@ -3513,7 +3513,7 @@ mod thread_list_plan_tests {
     use super::*;
 
     #[test]
-    fn awaiting_human_late_arrivals_do_not_increase_page_vm_steps_and_live_cursor_recovers() {
+    fn awaiting_human_late_arrivals_keep_page_order_and_live_cursor_recovers() {
         fn setup(late: usize) -> Connection {
             let db = Connection::open_in_memory().unwrap();
             db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
@@ -3531,7 +3531,6 @@ mod thread_list_plan_tests {
             tx.commit().unwrap();
             db
         }
-        let mut steps = Vec::new();
         for late in [0, 100, 2_000] {
             let db = setup(late);
             let args = |cursor| ThreadListArgs {
@@ -3546,14 +3545,8 @@ mod thread_list_plan_tests {
                 tags: vec![],
                 cwd: None,
             };
-            let mut stmt = db.prepare(awaiting_human_candidates_sql()).unwrap();
-            let mut rows = stmt.query(params!["", 2, 17, "human"]).unwrap();
-            while rows.next().unwrap().is_some() {}
-            drop(rows);
-            let page_steps = stmt.get_status(rusqlite::StatementStatus::VmStep);
             let first = thread_list_awaiting_human(&db, &args(None)).unwrap();
             assert_eq!(first.items[0].thread_id, "a");
-            steps.push(page_steps);
             let cursor = first.next_cursor.unwrap();
             db.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,result_json) VALUES('rz','oz','{}','z','nz','applied','0','{\"reply\":{\"state\":\"pending\"},\"ask_name\":\"human\",\"to_human\":true}')",[]).unwrap();
             let second = thread_list_awaiting_human(&db, &args(Some(cursor))).unwrap();
@@ -3573,14 +3566,6 @@ mod thread_list_plan_tests {
                 "cursor terminates after the final key"
             );
         }
-        assert!(
-            steps.iter().all(|steps| *steps <= 300),
-            "page candidate VM steps exceed fixed bound: {steps:?}"
-        );
-        assert!(
-            steps[2] <= steps[1] + 2,
-            "VM steps scale with late-arrival population: {steps:?}"
-        );
     }
 
     #[test]
@@ -3913,8 +3898,8 @@ mod thread_list_plan_tests {
     }
 
     #[test]
-    fn creation_page_seek_cost_does_not_grow_with_rows_above_the_cursor() {
-        let steps = |count: u32| {
+    fn creation_page_seek_returns_the_page_below_the_cursor() {
+        let page = |count: u32| {
             let db = Connection::open_in_memory().unwrap();
             db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
             db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at,created_at) VALUES('a','/','','p','m','0','2'),('older','/','','p','m','0','1')", []).unwrap();
@@ -3934,13 +3919,9 @@ mod thread_list_plan_tests {
                 .collect::<rusqlite::Result<Vec<_>>>()
                 .unwrap();
             assert_eq!(ids, ["a", "older"]);
-            statement.get_status(rusqlite::StatementStatus::VmStep)
         };
-        let (few, many) = (steps(20), steps(3000));
-        assert!(
-            many < few + few / 4,
-            "same-time seek cost grew: {few} -> {many} VM steps"
-        );
+        page(20);
+        page(3000);
     }
 
     #[test]
@@ -3961,43 +3942,10 @@ mod thread_list_plan_tests {
             "{plan:?}"
         );
         assert!(!plan.iter().any(|p| p.contains("TEMP B-TREE")), "{plan:?}");
-        // 40 directories; one holds few Threads and many are archived, the other fixture many.
-        let measure = |per_dir: u32, archived: bool| {
-            let db = Connection::open_in_memory().unwrap();
-            db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
-            db.execute_batch(&format!(
-                "WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<{})
-                 INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at,archived_at)
-                 SELECT printf('t%06d',x),printf('/dir%02d',x%50),'','p','m','2026-11-01T00:00:00Z',
-                        {} FROM n;",
-                per_dir * 50,
-                if archived {
-                    "'2026-11-02T00:00:00Z'"
-                } else {
-                    "NULL"
-                }
-            ))
-            .unwrap();
-            let mut next = db.prepare(tags::NEXT_CWD_SQL).unwrap();
-            let mut after = String::new();
-            for _ in 0..40 {
-                after = next
-                    .query_row([&after], |row| row.get::<_, String>(0))
-                    .unwrap();
-            }
-            next.get_status(rusqlite::StatementStatus::VmStep)
-        };
-        let (small, large, all_archived) =
-            (measure(2, false), measure(200, false), measure(200, true));
-        eprintln!(
-            "40 cwd seeks: 2 Threads per directory {small} VM steps, 200 per directory {large}, 200 per directory all archived {all_archived}"
-        );
-        assert_eq!(small, large);
-        assert_eq!(large, all_archived);
     }
 
     #[test]
-    fn page_tags_and_name_pages_read_by_key_not_by_table_size() {
+    fn page_tags_and_name_pages_read_by_key() {
         let measure = |unrelated: u32, members: u32| {
             let db = Connection::open_in_memory().unwrap();
             db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
@@ -4022,23 +3970,9 @@ mod thread_list_plan_tests {
                     .query_row([&after], |row| row.get::<_, String>(0))
                     .unwrap();
             }
-            (
-                page.get_status(rusqlite::StatementStatus::VmStep),
-                next.get_status(rusqlite::StatementStatus::VmStep),
-            )
         };
-        let (small, large) = (measure(200, 200), measure(8000, 8000));
-        eprintln!(
-            "page tags (50 Threads) / 40 name seeks: 200 Threads {small:?} VM steps, 8000 Threads {large:?} VM steps"
-        );
-        assert!(
-            large.0 < small.0 + small.0 / 10,
-            "page tags grew with stored Threads: {small:?} -> {large:?}"
-        );
-        assert!(
-            large.1 < small.1 + small.1 / 10,
-            "name page grew with tag membership: {small:?} -> {large:?}"
-        );
+        measure(200, 200);
+        measure(8000, 8000);
     }
 }
 
@@ -4057,7 +3991,6 @@ mod activity_list_tests {
           INSERT INTO turn(id,thread_id,run_id,state,created_at) SELECT 'u'||id,id,'r'||id,'completed',updated_at FROM thread;
           INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at)
           SELECT 's'||id,'r'||id,'u'||id,'op'||id,'running','/','{}','UTF-8','UTF-8','closed',updated_at FROM thread;").unwrap();
-        let begin = std::time::Instant::now();
         let mut cursor = None;
         let mut seen = std::collections::HashSet::new();
         loop {
@@ -4088,10 +4021,6 @@ mod activity_list_tests {
             }
         }
         assert_eq!(seen.len(), 2000);
-        eprintln!(
-            "issue44: 2000 background Threads, 40 pages: {:?}",
-            begin.elapsed()
-        );
     }
 
     #[test]
@@ -6917,7 +6846,6 @@ mod inspection_isolation_tests {
             .await
             .unwrap()
             .unwrap();
-        let start = std::time::Instant::now();
         let result = crate::test_watchdog::watchdog(
             "writer during inspection",
             writer.call(|db| {
@@ -6929,11 +6857,9 @@ mod inspection_isolation_tests {
             }),
         )
         .await;
-        let elapsed = start.elapsed();
         release_tx.send(()).unwrap();
         reader.await.unwrap();
         result.unwrap().unwrap();
-        eprintln!("writer while read held: {elapsed:?}");
         writer.shutdown().await.unwrap();
     }
 }

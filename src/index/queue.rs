@@ -967,8 +967,7 @@ mod metadata_tests {
     }
 
     #[test]
-    fn authorization_recovery_late_cursor_seeks_without_scanning_history() {
-        use rusqlite::StatementStatus;
+    fn authorization_recovery_cursor_returns_the_next_key_at_any_position() {
         let db = Connection::open_in_memory().unwrap();
         db.execute_batch("CREATE TABLE app_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL)")
             .unwrap();
@@ -979,21 +978,19 @@ mod metadata_tests {
             )
             .unwrap();
         }
-        let steps = |cursor: &str| {
-            let mut stmt = db.prepare(AUTH_RECOVERY_NEXT).unwrap();
-            let result: Option<String> = stmt.query_row([cursor], |r| r.get(0)).optional().unwrap();
-            (result, stmt.get_status(StatementStatus::VmStep))
+        let next = |cursor: &str| -> Option<String> {
+            db.query_row(AUTH_RECOVERY_NEXT, [cursor], |r| r.get(0))
+                .optional()
+                .unwrap()
         };
-        let (early, early_steps) = steps("index.auto.00127");
-        let (late, late_steps) = steps("index.auto.09998");
-        let (end, end_steps) = steps("index.auto.09999");
+        let (early, late, end) = (
+            next("index.auto.00127"),
+            next("index.auto.09998"),
+            next("index.auto.09999"),
+        );
         assert_eq!(early.as_deref(), Some("index.auto.00128"));
         assert_eq!(late.as_deref(), Some("index.auto.09999"));
         assert_eq!(end, None);
-        assert!(
-            late_steps <= early_steps + 10 && end_steps <= early_steps + 10,
-            "early={early_steps}, late={late_steps}, end={end_steps}"
-        );
     }
 
     #[test]

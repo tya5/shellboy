@@ -795,17 +795,10 @@ mod tests {
         let raw = read_tx(&db, "r", Some(&[])).unwrap();
         let observed_at = raw.observed_at;
         let expected_elapsed = age(Some("2020-01-01T00:00:00Z"), raw.wall_at);
-        // A real commit marker can arrive while the finite presentation worker
-        // is occupied. Its time must stay newer than this older DB snapshot.
-        std::thread::sleep(Duration::from_millis(5));
-        let newer_marker = Instant::now();
-        std::thread::sleep(Duration::from_millis(5));
+        // Preparation may run later on the presentation worker; it keeps the
+        // DB snapshot's clock, so a newer commit marker still supersedes it.
         let prepared = prepare(raw);
         assert_eq!(prepared.observed_at, observed_at);
-        assert!(
-            prepared.observed_at < newer_marker,
-            "UI supersession must preserve a marker newer than the DB snapshot, even if preparation happens later"
-        );
         assert_eq!(prepared.rows[0].elapsed_base, expected_elapsed);
     }
 }

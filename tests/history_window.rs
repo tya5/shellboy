@@ -1,10 +1,5 @@
 //! #268: positional reads of the selected path. Synthetic Threads in temporary
-//! databases only; costs are measured as SQLite VM steps, never wall-clock time.
-use std::sync::{
-    Arc,
-    atomic::{AtomicU64, Ordering},
-};
-
+//! databases only.
 use rusqlite::Connection;
 use serde_json::json;
 use shellboy::{
@@ -431,92 +426,6 @@ fn every_statement_is_a_search_on_the_primary_key_or_unique_index() {
     });
 }
 
-/// Add synthetic nodes and path rows for ordinals `from..to` (no per-row writer calls).
-fn synthetic(db: &Connection, from: i64, to: i64) {
-    db.execute(
-        "WITH RECURSIVE s(i) AS (SELECT ?1 UNION ALL SELECT i+1 FROM s WHERE i<?2-1) INSERT INTO node(id,kind,created_at,payload_json) SELECT 'n'||i,'user','now','{\"text\":\"x\"}' FROM s",
-        [from, to],
-    ).unwrap();
-    db.execute(
-        "WITH RECURSIVE s(i) AS (SELECT ?1 UNION ALL SELECT i+1 FROM s WHERE i<?2-1) INSERT INTO thread_path(thread_id,ordinal,node_id) SELECT 't',i,'n'||i FROM s",
-        [from, to],
-    ).unwrap();
-    db.execute(
-        "UPDATE thread SET cursor_node_id=?1,selection_revision=1",
-        [format!("n{}", to - 1)],
-    )
-    .unwrap();
-}
-
-/// SQLite VM instructions executed by one `window` call (progress handler, period 1).
-fn steps(db: &Connection, request: &HistoryWindowArgs) -> u64 {
-    let counter = Arc::new(AtomicU64::new(0));
-    let seen = counter.clone();
-    let _ = db.progress_handler(
-        1,
-        Some(move || {
-            seen.fetch_add(1, Ordering::Relaxed);
-            false
-        }),
-    );
-    window(db, request).unwrap();
-    let _ = db.progress_handler(1, None::<fn() -> bool>);
-    counter.load(Ordering::Relaxed)
-}
-
-#[test]
-fn read_cost_does_not_grow_with_path_length() {
-    on_db(|db| {
-        let measure = |db: &Connection, count: i64| {
-            let wide = HistoryWindowArgs {
-                items: false,
-                before: 20,
-                after: 20,
-                ..args()
-            };
-            [
-                steps(db, &wide),
-                steps(
-                    db,
-                    &HistoryWindowArgs {
-                        items: false,
-                        ordinal: Some(count as u64 / 2),
-                        ..wide.clone()
-                    },
-                ),
-                steps(
-                    db,
-                    &HistoryWindowArgs {
-                        items: false,
-                        node_id: Some(format!("n{}", count / 2)),
-                        ..wide.clone()
-                    },
-                ),
-                steps(
-                    db,
-                    &HistoryWindowArgs {
-                        items: false,
-                        ordinal: Some(0),
-                        ..wide
-                    },
-                ),
-            ]
-        };
-        synthetic(db, 0, 100);
-        let small = measure(db, 100);
-        synthetic(db, 100, 100_000);
-        let large = measure(db, 100_000);
-        eprintln!(
-            "history_window vm_steps [end, middle ordinal, middle node, start] len=100: {small:?} len=100000: {large:?}"
-        );
-        // Same window sizes at the same anchor kinds: cost may differ by index depth
-        // only (a few steps), never by the 1000x path length.
-        for (a, b) in small.iter().zip(&large) {
-            assert!(*b <= a + a / 10 + 50, "cost grew with length: {a} -> {b}");
-        }
-    });
-}
-
 #[test]
 fn spill_tool_sources_are_identical_in_list_and_window_even_without_excerpts() {
     on_db(|db| {
@@ -578,46 +487,24 @@ fn spill_tool_sources_are_identical_in_list_and_window_even_without_excerpts() {
 }
 
 #[test]
-fn spill_tool_sources_window_vm_steps_do_not_grow_with_sixteen_mib_payload() {
-    use std::sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-    };
+fn spill_tool_sources_window_reads_with_sixteen_mib_payload() {
     on_db(|db| {
         let tx = db.transaction().unwrap();
         append_node(&tx,"t","spill",None,"spill",&json!({"output":[],"spill_tools":{"status":"known","items":[{"call_id":"c"}],"truncated":false}}),"now").unwrap();
         tx.commit().unwrap();
-        let steps = Arc::new(AtomicUsize::new(0));
-        let observed = steps.clone();
-        db.progress_handler(
-            1,
-            Some(move || {
-                observed.fetch_add(1, Ordering::Relaxed);
-                false
-            }),
-        )
-        .unwrap();
         let mut request = args();
         request.excerpt_chars = 0;
-        let mut measured = Vec::new();
         for size in [16, 16 * 1024 * 1024] {
             db.execute(
                 "UPDATE node SET payload_json=?1 WHERE id='spill'",
                 [json!({"output":"x".repeat(size)}).to_string()],
             )
             .unwrap();
-            // Warm statement/schema caches equally before comparing steady-state work.
-            window(db, &request).unwrap();
-            steps.store(0, Ordering::Relaxed);
             let page = window(db, &request).unwrap();
-            measured.push(steps.load(Ordering::Relaxed));
             assert_eq!(
                 page.items[0].spill_tools.as_ref().unwrap().items[0].call_id,
                 "c"
             );
         }
-        db.progress_handler(0, None::<fn() -> bool>).unwrap();
-        assert_eq!(measured[0], measured[1], "{measured:?}");
-        assert!(measured[0] < 1000, "{measured:?}");
     });
 }

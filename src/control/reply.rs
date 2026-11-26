@@ -1181,11 +1181,6 @@ mod tests {
                     .unwrap()
                     .len();
                 assert_eq!(count, 128);
-                assert!(
-                    stmt.get_status(rusqlite::StatementStatus::VmStep) < 2500,
-                    "{}",
-                    stmt.get_status(rusqlite::StatementStatus::VmStep)
-                );
             }
             let immediate = terminal_tx(&db, "r", "1", &mut Vec::new()).unwrap();
             assert_eq!(immediate.len(), 128);

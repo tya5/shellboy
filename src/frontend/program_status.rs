@@ -241,7 +241,6 @@ mod tests {
 
     #[tokio::test]
     async fn ten_thousand_threads_read_while_writer_is_occupied() {
-        use std::time::{Duration, Instant};
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("db");
         let worker = DbWorker::open(&path).await.unwrap();
@@ -317,11 +316,8 @@ mod tests {
         let reads = crate::test_watchdog::watchdog(
             "src/frontend/program_status.rs: ten_thousand_threads_read_while_writer_is_occupied",
             async {
-                let mut timings = Vec::new();
                 for _ in 0..10 {
-                    let began = Instant::now();
                     let projected = read(path.clone(), None, start, seen.clone()).await.unwrap();
-                    timings.push(began.elapsed());
                     let counts = &projected.snapshot.counts;
                     assert_eq!(
                         (
@@ -336,18 +332,12 @@ mod tests {
                     assert_eq!(projected.snapshot.children.len(), 5);
                     assert_eq!(projected.seen, seen);
                 }
-                timings
             },
         )
         .await;
         release.send(()).unwrap();
         writing.receive().await.unwrap();
-        let timings = reads.expect("read-only projection must not queue behind writer");
-        let micros: Vec<_> = timings.iter().map(Duration::as_micros).collect();
-        eprintln!(
-            "OSC7501 10000 threads / 10 read-only projections, open+transaction+SQL+close us: {micros:?}; mean={} us",
-            micros.iter().sum::<u128>() / micros.len() as u128
-        );
+        reads.expect("read-only projection must not queue behind writer");
         let after = read(path.clone(), None, start, seen).await.unwrap();
         assert_eq!(after.snapshot.counts.working, 1);
         assert_eq!(after.snapshot.counts.error, 2);
