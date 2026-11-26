@@ -171,7 +171,6 @@ pub(in crate::control) async fn install_shell(
             LiveShell {
                 run_id: owner.run().map(str::to_owned),
                 handle: handle.clone(),
-                last_committed_output: None,
             },
         )
         .await;
@@ -331,10 +330,8 @@ pub(in crate::control) async fn collect_shell(
                 }
                 if had_output {
                     control
-                        .live
-                        .record_output_commit(&marker_execution, std::time::Instant::now())
-                        .await;
-                    control.waits.keyed.publish([Key::DisplayOutput]);
+                        .change_clock
+                        .record_output(owner.thread(), &marker_execution);
                 }
             }
             Err(error) => {

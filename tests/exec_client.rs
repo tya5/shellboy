@@ -171,8 +171,11 @@ impl Fixture {
                         changes: vec![],
                         more: false,
                         config_changed: false,
+                        index_changed: false,
+                        retention_changed: false,
                         live_text: None,
                         attempt_ends: None,
+                        output: None,
                         recovery_transitions: vec![],
                         reasoning_activity: vec![],
                     };
@@ -199,8 +202,11 @@ impl Fixture {
                         changes: vec![],
                         more: false,
                         config_changed: false,
+                        index_changed: false,
+                        retention_changed: false,
                         live_text: None,
                         attempt_ends: None,
+                        output: None,
                         recovery_transitions: vec![],
                         reasoning_activity: vec![],
                     };

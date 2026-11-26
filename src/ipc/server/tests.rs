@@ -222,6 +222,7 @@ async fn parked_waits_leave_ordinary_and_stop_admission_available() {
                 timeout_ms: 60000,
                 include_text: false,
                 include_reasoning_activity: false,
+                include_output: false,
             })
         };
         clients.push(fixture.connect_command(number, command).await);
@@ -304,6 +305,7 @@ async fn refused_wait_frame_survives_native_pipe_close() {
         timeout_ms: 60000,
         include_text: false,
         include_reasoning_activity: false,
+        include_output: false,
     });
     let work = WorkAdmission::new();
     let refusals = work.refused.clone();

@@ -790,11 +790,7 @@ async fn next_with_clients(
         }
         // The commit may have created a Turn and applied queued input: announce it now,
         // not at the later admit_attempt (compaction and the rate gate can delay that).
-        if matches!(&result, Ok(Next::Ready(_))) {
-            control.changed(&thread_id);
-        } else {
-            control.changed.notify_waiters();
-        }
+        control.changed(&thread_id);
     }
     if let Err(error) = &result
         && !error.is_storage_failure()
@@ -1371,7 +1367,7 @@ async fn run_shell(
         ));
     }
     let mut release = release.expect("foreground call registered before running publication");
-    control.changed.notify_waiters();
+    control.changed(&snapshot.thread);
     let released = |reason| {
         Ok((
             json!({"status":"running","execution_id":execution,"reason":reason,"cancel_remaining_calls":true}),

@@ -97,7 +97,6 @@ pub(super) struct Presentation {
     version: u64,
 }
 struct Scope {
-    output_marker: Option<std::time::Instant>,
     cursor: Option<String>,
     metadata_cursor: Option<Option<String>>,
     awaiting_window: bool,
@@ -185,7 +184,6 @@ impl Observation {
             .and_then(|v| v.desired.as_ref())
             .is_some_and(|v| v.context == context && v.target == target);
         self.scope = Some(Scope {
-            output_marker: None,
             cursor: None,
             metadata_cursor: None,
             awaiting_window: false,
@@ -388,80 +386,25 @@ impl Observation {
             }
         }
     }
-    pub fn watches_index(&self) -> bool {
-        self.scope.as_ref().is_some_and(|scope| {
-            scope.visible
-                && matches!(
-                    scope.target,
-                    InspectionTarget::Index(_)
-                        | InspectionTarget::Storage
-                        | InspectionTarget::RetainedSources(_)
-                )
-        })
-    }
-    pub fn watches_owner_state(&self) -> bool {
-        self.scope.as_ref().is_some_and(|scope| {
-            scope.visible
-                && matches!(
-                    scope.target,
-                    InspectionTarget::Storage
-                        | InspectionTarget::Operation(_)
-                        | InspectionTarget::RetainedSources(_)
-                )
-        })
-    }
-    pub fn owner_state_hint(&mut self) {
-        if let Some(scope) = self.scope.as_mut().filter(|scope| {
-            scope.visible
-                && matches!(
-                    scope.target,
-                    InspectionTarget::Storage
-                        | InspectionTarget::Operation(_)
-                        | InspectionTarget::RetainedSources(_)
-                )
-        }) {
-            scope.metadata_dirty = true;
-        }
-    }
-    pub fn output_notified(&mut self) {
-        if let Some(scope) = self.scope.as_mut().filter(|scope| {
-            scope.visible
-                && matches!(
-                    scope.target,
-                    InspectionTarget::Storage
-                        | InspectionTarget::Index(_)
-                        | InspectionTarget::RetainedSources(_)
-                )
-        }) {
-            scope.metadata_dirty = true;
-            if matches!(scope.target, InspectionTarget::Storage) {
-                self.physical.dirty();
-            }
-        }
-    }
-    pub fn output_execution(&self) -> Option<String> {
-        let scope = self.scope.as_ref().filter(|scope| scope.visible)?;
-        match &scope.target {
-            InspectionTarget::Shell(id) => Some(id.clone()),
-            _ => None,
-        }
-    }
-    pub fn output_markers(&mut self, markers: &[(String, std::time::Instant)], prime: bool) {
+    /// Committed shell output: the shown execution, or stored bytes in a global view.
+    pub fn output(&mut self, output: &[crate::protocol::EventOutput]) {
         let Some(scope) = self.scope.as_mut().filter(|scope| scope.visible) else {
             return;
         };
-        let InspectionTarget::Shell(id) = &scope.target else {
-            return;
-        };
-        let next = markers
-            .iter()
-            .find(|(execution, _)| execution == id)
-            .map(|(_, at)| *at);
-        if let Some(next) = next {
-            if !prime && Some(next) != scope.output_marker {
+        match &scope.target {
+            InspectionTarget::Shell(id) => {
+                if output.iter().any(|entry| &entry.execution_id == id) {
+                    scope.metadata_dirty = true;
+                }
+            }
+            InspectionTarget::Storage => {
+                scope.metadata_dirty = true;
+                self.physical.dirty();
+            }
+            InspectionTarget::Index(_) | InspectionTarget::RetainedSources(_) => {
                 scope.metadata_dirty = true;
             }
-            scope.output_marker = Some(next);
+            _ => {}
         }
     }
     pub fn index_changed(&mut self) {
@@ -1277,13 +1220,20 @@ mod tests {
         assert!(value.take_usage(at + USAGE_PERIOD, diagnostics).is_none());
     }
 
+    fn output(execution: &str) -> crate::protocol::EventOutput {
+        crate::protocol::EventOutput {
+            thread_id: "owner".into(),
+            execution_id: execution.into(),
+            seq: 1,
+        }
+    }
+
     #[test]
-    fn unrelated_output_markers_do_not_admit_a_shell_read() {
+    fn unrelated_output_does_not_admit_a_shell_read() {
         let mut value = Observation::default();
         let target = InspectionTarget::Shell("selected-execution".into());
         value.install(1, context(1), target.clone(), None);
         value.observe(&context(1), &target, true);
-        value.output_markers(&[], true);
         let at = Instant::now();
         let first = value.take_metadata(at).unwrap();
         value.complete_metadata(
@@ -1301,22 +1251,18 @@ mod tests {
             }),
         );
         for _ in 0..100 {
-            value.output_markers(
-                &[("hidden-execution".into(), std::time::Instant::now())],
-                false,
-            );
+            value.output(&[output("hidden-execution")]);
+            value.output(&[]);
         }
         assert!(
             value.take_metadata(at + METADATA_PERIOD).is_none(),
-            "unrelated output must not cause a DB read"
+            "unrelated output must not cause a read"
         );
-        value.output_markers(
-            &[("selected-execution".into(), std::time::Instant::now())],
-            false,
-        );
+        value.output(&[output("hidden-execution"), output("selected-execution")]);
         assert!(value.take_metadata(at + METADATA_PERIOD).is_some());
         value.observe(&context(1), &target, false);
-        assert!(value.output_execution().is_none());
+        value.output(&[output("selected-execution")]);
+        assert!(value.deadline().is_none(), "a hidden view admits nothing");
         assert!(value.physical_deadline().is_none());
     }
 
@@ -1712,43 +1658,6 @@ mod tests {
         assert_eq!(value.physical.sequence(), 2);
     }
     #[test]
-    fn absent_shell_marker_after_known_output_never_becomes_unrelated_read() {
-        let mut value = Observation::default();
-        let target = InspectionTarget::Shell("selected".into());
-        value.install(1, context(1), target.clone(), None);
-        value.observe(&context(1), &target, true);
-        let mark = std::time::Instant::now();
-        value.output_markers(&[("selected".into(), mark)], true);
-        let at = Instant::now();
-        let first = value.take_metadata(at).unwrap();
-        value.complete_metadata(
-            &first,
-            1,
-            Ok(PreparedInspection {
-                target: target.clone(),
-                dependencies: Dependencies {
-                    thread: "owner".into(),
-                    parent_thread: None,
-                },
-                value: serde_json::json!({"state":"exited"}),
-                observed_at: "read".into(),
-                limited_fields: vec![],
-            }),
-        );
-        for _ in 0..100 {
-            value.output_markers(&[("other".into(), mark)], false);
-            value.output_markers(&[], false);
-        }
-        assert!(value.take_metadata(at + METADATA_PERIOD).is_none());
-        value.output_markers(&[("selected".into(), mark)], false);
-        assert!(value.take_metadata(at + METADATA_PERIOD).is_none());
-        value.output_markers(
-            &[("selected".into(), mark + Duration::from_millis(1))],
-            false,
-        );
-        assert!(value.take_metadata(at + METADATA_PERIOD).is_some());
-    }
-    #[test]
     fn failed_coverage_keeps_one_shared_success_while_fresh_saved_status_advances() {
         let mut value = Observation::default();
         let target = InspectionTarget::Index(crate::protocol::IndexArgs::default());
@@ -2081,10 +1990,8 @@ mod operation_observation_tests {
         let target = InspectionTarget::Operation("prior-instance:exact-id".into());
         let mut value = Observation::default();
         value.install(1, context.clone(), target.clone(), None);
-        assert!(!value.watches_owner_state());
         assert!(value.take_metadata(Instant::now()).is_none());
         value.observe(&context, &target, true);
-        assert!(value.watches_owner_state());
         let ticket = value.take_metadata(Instant::now()).unwrap();
         let facts = PreparedInspection {
             target: target.clone(),
@@ -2104,7 +2011,7 @@ mod operation_observation_tests {
         value.changed("viewer");
         assert!(value.deadline().is_none());
         for _ in 0..40 {
-            value.owner_state_hint();
+            value.changed("actual");
         }
         assert!(value.take_metadata(due - Duration::from_nanos(1)).is_none());
         let ticket = value.take_metadata(due).unwrap();
@@ -2114,9 +2021,7 @@ mod operation_observation_tests {
         assert!(value.take_usage(due, diagnostics).is_none());
         assert!(value.take_physical(due).is_none());
         value.observe(&context, &target, false);
-        value.owner_state_hint();
         value.changed("actual");
-        assert!(!value.watches_owner_state());
         assert!(value.deadline().is_none());
         assert!(matches!(
             value.complete_metadata(

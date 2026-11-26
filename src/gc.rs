@@ -12,7 +12,7 @@ use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{num::NonZeroU32, path::PathBuf, sync::Arc, time::Duration};
-use tokio::sync::{Mutex, Notify, watch};
+use tokio::sync::{Mutex, watch};
 use tokio_util::sync::CancellationToken;
 
 mod disk;
@@ -119,7 +119,8 @@ pub struct GcService {
     /// Round-robin position of dead-delivery/shell-event retention (#170).
     event_cursor: Arc<std::sync::Mutex<event_retention::Cursor>>,
     // One coalesced permit for the existing frontend; never raw data or a task.
-    availability_changed: Arc<Notify>,
+    /// The owner's change clock; receives a retention mark per availability commit.
+    change_clock: std::sync::OnceLock<Arc<crate::control::ChangeClock>>,
 }
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct CollectionReport {
@@ -385,11 +386,17 @@ impl GcService {
             config,
             data_dir,
             attachments,
-            availability_changed: Arc::new(Notify::new()),
+            change_clock: std::sync::OnceLock::new(),
         }
     }
-    pub(crate) async fn availability_changed(&self) {
-        self.availability_changed.notified().await;
+    pub(crate) fn set_change_clock(&self, clock: Arc<crate::control::ChangeClock>) {
+        let _ = self.change_clock.set(clock);
+    }
+    /// A committed change made a saved source, raw output or managed file unavailable.
+    fn availability_changed(&self) {
+        if let Some(clock) = self.change_clock.get() {
+            clock.record_mark(crate::control::ChangeMark::Retention);
+        }
     }
     pub async fn wait_idle(&self) -> Result<()> {
         self.files.wait_idle().await
@@ -699,7 +706,7 @@ impl GcService {
         if has(Work::Managed) {
             let managed = self
                 .attachments
-                .collect_managed_observed(at, Some(self.availability_changed.clone()))
+                .collect_managed_observed(at, self.change_clock.get().cloned())
                 .await?;
             if managed.deferred {
                 report.defer(Work::Managed);
@@ -929,7 +936,7 @@ impl GcService {
                 }
                 if !candidate.marked {
                     // begin_raw has committed its new retention generation.
-                    self.availability_changed.notify_one();
+                    self.availability_changed();
                 }
                 loop {
                     let execution = candidate.id.clone();
@@ -946,7 +953,7 @@ impl GcService {
                         }
                     };
                     if step.0 > 0 || (step.1 && !step.2) {
-                        self.availability_changed.notify_one();
+                        self.availability_changed();
                     }
                     report.raw_bytes_collected += step.0;
                     total = total.saturating_sub(step.0);
@@ -1268,7 +1275,7 @@ impl GcService {
         drop(diagnostic_job);
         // Tombstoned payloads, receipts and instruction snapshots all lower logical usage.
         if step.nodes_tombstoned > 0 || step.bytes_collected > 0 {
-            self.availability_changed.notify_one();
+            self.availability_changed();
         }
         Ok(step)
     }
@@ -1776,98 +1783,64 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn committed_gc_notify_survives_select_registration_and_ready_branch_competition() {
-        use std::{future::Future, task::Poll};
-        for registered_before_commit in [false, true] {
-            for competing_branch_first in [false, true] {
-                let temp = tempfile::tempdir().unwrap();
-                let db = crate::storage::DbWorker::open(temp.path().join("notify.db"))
-                    .await
-                    .unwrap();
-                let config = crate::config::Config::default();
-                let attachments = std::sync::Arc::new(crate::attachments::AttachmentService::new(
-                    db.clone(),
-                    &config,
-                    temp.path().to_owned(),
-                    "fixture".into(),
-                ));
-                let gc = super::GcService::new(
-                    db.clone(),
-                    std::sync::Arc::new(config),
-                    temp.path().to_owned(),
-                    attachments,
-                );
-                db.call(|db| {
-                    db.execute("INSERT INTO node(id,kind,created_at,payload_json,payload_bytes) VALUES('source','text','now','{}',2)", [])?;
-                    db.execute("INSERT INTO gc_job VALUES('job','history',0,NULL,'pending',NULL)", [])?;
-                    Ok(())
-                }).await.unwrap();
-                let job = gc.start_history().await.unwrap().unwrap();
-                let mut waiting = Box::pin(gc.availability_changed());
-                if registered_before_commit {
-                    std::future::poll_fn(|cx| {
-                        assert!(waiting.as_mut().poll(cx).is_pending());
-                        Poll::Ready(())
-                    })
-                    .await;
-                }
-                let mut committed = false;
-                for _ in 0..64 {
-                    let step = gc.history_step(&job).await.unwrap();
-                    if step.nodes_tombstoned > 0 {
-                        committed = true;
-                        break;
-                    }
-                    assert!(!step.complete, "fixture source must actually be collected");
-                }
-                assert!(
-                    committed,
-                    "bounded fixture must reach actual tombstone commit"
-                );
-                let tombstoned = db
-                    .call(|db| {
-                        Ok(db.query_row(
-                            "SELECT payload_json IS NULL FROM node WHERE id='source'",
-                            [],
-                            |row| row.get::<_, bool>(0),
-                        )?)
-                    })
-                    .await
-                    .unwrap();
-                assert!(tombstoned);
-                if competing_branch_first {
-                    // Match cancellation of the GC select future when another
-                    // ready bridge branch wins; do not inject or remove hints.
-                    tokio::select! {
-                        biased;
-                        () = std::future::ready(()) => {},
-                        () = waiting.as_mut() => panic!("ready competitor must win"),
-                    }
-                    drop(waiting);
-                    waiting = Box::pin(gc.availability_changed());
-                }
-                let consumed =
-                    std::future::poll_fn(|cx| Poll::Ready(waiting.as_mut().poll(cx).is_ready()))
-                        .await;
-                assert!(
-                    consumed,
-                    "real committed hint retained: registered={registered_before_commit}, competing={competing_branch_first}"
-                );
-                drop(waiting);
-                let mut next = Box::pin(gc.availability_changed());
-                let duplicate =
-                    std::future::poll_fn(|cx| Poll::Ready(next.as_mut().poll(cx).is_ready())).await;
-                assert!(
-                    !duplicate,
-                    "a single actual commit does not manufacture a second hint"
-                );
-                drop(next);
-                println!(
-                    "GC_NOTIFY_BOUNDARY registered_before_commit={registered_before_commit} competing_first={competing_branch_first} committed=true consumed=true duplicate=false"
-                );
-                db.shutdown().await.unwrap();
+    async fn committed_tombstone_records_one_retention_mark_for_earlier_cursors_only() {
+        let temp = tempfile::tempdir().unwrap();
+        let db = crate::storage::DbWorker::open(temp.path().join("notify.db"))
+            .await
+            .unwrap();
+        let config = crate::config::Config::default();
+        let attachments = std::sync::Arc::new(crate::attachments::AttachmentService::new(
+            db.clone(),
+            &config,
+            temp.path().to_owned(),
+            "fixture".into(),
+        ));
+        let gc = super::GcService::new(
+            db.clone(),
+            std::sync::Arc::new(config),
+            temp.path().to_owned(),
+            attachments,
+        );
+        let clock = crate::control::ChangeClock::standalone();
+        gc.set_change_clock(clock.clone());
+        db.call(|db| {
+            db.execute("INSERT INTO node(id,kind,created_at,payload_json,payload_bytes) VALUES('source','text','now','{}',2)", [])?;
+            db.execute("INSERT INTO gc_job VALUES('job','history',0,NULL,'pending',NULL)", [])?;
+            Ok(())
+        }).await.unwrap();
+        let job = gc.start_history().await.unwrap().unwrap();
+        let mut before = 0;
+        assert!(!clock.take_mark(crate::control::ChangeMark::Retention, &mut before));
+        let mut committed = false;
+        for _ in 0..64 {
+            let step = gc.history_step(&job).await.unwrap();
+            if step.nodes_tombstoned > 0 {
+                committed = true;
+                break;
             }
+            assert!(!step.complete, "fixture source must actually be collected");
         }
+        assert!(
+            committed,
+            "bounded fixture must reach actual tombstone commit"
+        );
+        let tombstoned = db
+            .call(|db| {
+                Ok(db.query_row(
+                    "SELECT payload_json IS NULL FROM node WHERE id='source'",
+                    [],
+                    |row| row.get::<_, bool>(0),
+                )?)
+            })
+            .await
+            .unwrap();
+        assert!(tombstoned);
+        assert!(clock.take_mark(crate::control::ChangeMark::Retention, &mut before));
+        assert!(
+            !clock.take_mark(crate::control::ChangeMark::Retention, &mut before),
+            "a cursor after the commit does not see it again"
+        );
+        db.shutdown().await.unwrap();
     }
 
     #[tokio::test]

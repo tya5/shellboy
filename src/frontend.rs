@@ -1018,12 +1018,6 @@ async fn run_client(
     actions.close_tool_starts_on_quit(&control);
     let mut selection = selection::Selection::default();
     let mut live_output = live_output::Observation::default();
-    let observed_control = control.clone();
-    let output_subscription = observed_control.display_output_subscription();
-    let mut output_signal = Box::pin(output_subscription.notify.notified());
-    output_signal.as_mut().enable();
-    let mut owner_signal = Box::pin(observed_control.saved_observation_hint().notified());
-    owner_signal.as_mut().enable();
     let mut watch_ipc_failure = true;
     let mut control_tasks = JoinSet::new();
     let mut streams = streaming::Display::default();
@@ -1297,7 +1291,6 @@ async fn run_client(
         let refresh_deadline = selection.refresh_deadline(&dirty_threads, &refreshing);
         let live_deadline = live_output.deadline();
         let physical_deadline = management.inspection.physical_deadline();
-        let watch_output_deadline = browser.output_deadline();
         let browser_deadline = browser
             .deadline()
             .into_iter()
@@ -1335,38 +1328,6 @@ async fn run_client(
                     });
                 }
             },
-            _=owner_signal.as_mut(),if management.inspection.watches_owner_state()=>{
-                owner_signal.set(observed_control.saved_observation_hint().notified());
-                owner_signal.as_mut().enable();
-                management.inspection.owner_state_hint();
-            },
-            _=control.index.saved_changed(),if management.inspection.watches_index()=>{
-                management.inspection.index_changed();
-            },
-            _=control.index.pause_changed()=>{
-                draft_pause_dirty = true;
-                selection.note_pause_notification();
-                if let Some(thread) = selection.active_thread.clone() {
-                    dirty_threads.insert(thread);
-                }
-            },
-            _=output_signal.as_mut()=>{
-                output_signal.set(output_subscription.notify.notified());
-                output_signal.as_mut().enable();
-                browser.output_notified();
-                management.inspection.output_notified();
-                if let Some(execution)=management.inspection.output_execution() {
-                    let markers=control.committed_output_markers(&[execution]).await?;
-                    management.inspection.output_markers(&markers,false);
-                }
-                if let Some(ids)=live_output.executions() {
-                    let markers=control.committed_output_markers(&ids).await?;
-                    if let Some(value)=live_output.markers(markers) {update(&updates,value).await;}
-                }
-            },
-            _=tokio::time::sleep_until(watch_output_deadline.unwrap_or_else(||tokio::time::Instant::now()+Duration::from_secs(86400))), if watch_output_deadline.is_some()=>{
-                if let Some(ids)=browser.take_output_ids(tokio::time::Instant::now()) {let markers=control.committed_watch_output_markers(&ids).await?;browser.output_markers(markers);}
-            },
             _=tokio::time::sleep_until(live_deadline.unwrap_or_else(||tokio::time::Instant::now()+Duration::from_secs(86400))),
                 if live_deadline.is_some() && !updates.backpressured() && read_slots.available_permits()>0=>{
                 if let Ok(permit)=read_slots.clone().try_acquire_owned()
@@ -1384,14 +1345,6 @@ async fn run_client(
                 if refresh_deadline.is_some() && !updates.backpressured() && read_slots.available_permits()>0=>{},
             // Fatal Control persistence stops enter the same draft/worker drain as Quit.
             _ = control.stopping() => break,
-            _=control.gc.availability_changed()=> {
-                management.inspection.availability_changed();
-                if let Some(thread)=selection.active_thread.as_ref()
-                    && let Some(generation)=selection.generations.get(thread).copied()
-                {
-                    update(&updates,UiUpdate::DetailSourcesChanged {thread_id:thread.clone(),generation}).await;
-                }
-            },
             _=tokio::task::yield_now(),if receipt_batch.active() && updates.main_slot()=> {},
             changed=ipc_failure.changed(),if watch_ipc_failure=> {
                 watch_ipc_failure = false;
@@ -1515,10 +1468,6 @@ async fn run_client(
                     UiAction::HideInspection {revision} => management.inspection.hide_at(revision),
                     UiAction::ObserveInspection {context,target,visible,revision} => {
                         management.inspection.observe_at(&context,&target,visible,revision);
-                        if visible && let Some(execution)=management.inspection.output_execution() {
-                            let markers=control.committed_output_markers(&[execution]).await?;
-                            management.inspection.output_markers(&markers,true);
-                        }
                     }
                     UiAction::NextInspectionWindow {context,request_id,target} => {
                         let result=if request_id==management.request_id {
@@ -2553,16 +2502,9 @@ async fn run_client(
                         }
                     }
                     UiAction::ObserveLiveWork {thread_id,generation,revision,executions,open} => {
-                        if selection.active_thread.as_deref()==Some(&thread_id) && selection.generations.get(&thread_id)==Some(&generation) {
-                            match live_output.observe(thread_id.clone(),generation,revision,executions,open) {
-                                Ok(())=>{
-                                    if let Some(ids)=live_output.executions() {
-                                        let markers=control.committed_output_markers(&ids).await?;
-                                        if let Some(value)=live_output.markers(markers) {update(&updates,value).await;}
-                                    }
-                                },
-                                Err(error)=>status(&updates,Some(thread_id),error).await,
-                            }
+                        if selection.active_thread.as_deref()==Some(&thread_id) && selection.generations.get(&thread_id)==Some(&generation)
+                            && let Err(error)=live_output.observe(thread_id.clone(),generation,revision,executions,open) {
+                            status(&updates,Some(thread_id),error).await;
                         }
                     }
                     UiAction::RefreshTools {
@@ -3736,14 +3678,40 @@ async fn run_client(
                         if page.status == crate::protocol::EventsWaitStatus::Baseline {
                             saved_events::tests::observe(saved_events::tests::Observed::Baseline);
                         }
-                        if saved_events::schedule_reload(&page, &mut browser) {
+                        let resync = saved_events::schedule_reload(&page, &mut browser);
+                        if resync {
                             status_dirty |= status_enabled;
                             management.inspection.resync();
                             descendants.resync();
+                            live_output.resync();
                             for receipt in pending.values_mut() { receipt.repeat = true; }
                             dirty_threads.extend(pending.values().map(|value| value.thread.clone()));
                             if let Some(thread) = &selection.active_thread {
                                 dirty_threads.insert(thread.clone());
+                            }
+                        }
+                        // A gap can hide a mark, so a reload rereads what the marks cover.
+                        if resync || page.index_changed {
+                            management.inspection.index_changed();
+                            draft_pause_dirty = true;
+                            selection.note_pause_notification();
+                            if let Some(thread) = selection.active_thread.clone() {
+                                dirty_threads.insert(thread);
+                            }
+                        }
+                        if resync || page.retention_changed {
+                            management.inspection.availability_changed();
+                            if let Some(thread)=selection.active_thread.as_ref()
+                                && let Some(generation)=selection.generations.get(thread).copied()
+                            {
+                                update(&updates,UiUpdate::DetailSourcesChanged {thread_id:thread.clone(),generation}).await;
+                            }
+                        }
+                        if let Some(output) = page.output.as_deref().filter(|output| !output.is_empty()) {
+                            browser.output(output);
+                            management.inspection.output(output);
+                            if let Some(value) = live_output.output(output, std::time::Instant::now()) {
+                                update(&updates, value).await;
                             }
                         }
                         if control.store.config.ui.bell {

@@ -154,8 +154,8 @@ pub struct IndexService {
     database: DbWorker,
     config: Arc<Config>,
     notify: Arc<Notify>,
-    saved_changed: Arc<Notify>,
-    pause_changed: Arc<Notify>,
+    /// The owner's change clock; an index mark covers saved state and the pause.
+    change_clock: OnceLock<Arc<crate::control::ChangeClock>>,
     profile_key: Option<String>,
     endpoint_family_key: Option<String>,
     started: AtomicBool,
@@ -335,8 +335,7 @@ impl IndexService {
             config,
             notify: Arc::new(Notify::new()),
             disk_held: AtomicBool::new(false),
-            saved_changed: Arc::new(Notify::new()),
-            pause_changed: Arc::new(Notify::new()),
+            change_clock: OnceLock::new(),
             profile_key,
             endpoint_family_key,
             started: AtomicBool::new(false),
@@ -498,21 +497,14 @@ impl IndexService {
             None => Ok(()),
         }
     }
-    /// Saved index changes only; never consume the worker wake permit.
-    pub(crate) async fn saved_changed(&self) {
-        self.saved_changed.notified().await;
+    /// The owning Control's clock receives saved-index and pause marks.
+    pub(crate) fn set_change_clock(&self, clock: Arc<crate::control::ChangeClock>) {
+        let _ = self.change_clock.set(clock);
     }
-    pub(crate) async fn pause_changed(&self) {
-        self.pause_changed.notified().await;
-    }
-    fn publish_pause(&self, changed: bool) {
-        if changed {
-            self.pause_changed.notify_one();
-        }
-    }
+    /// Saved index state, including the pause, changed; never the worker wake permit.
     fn publish_saved(&self, changed: bool) {
-        if changed {
-            self.saved_changed.notify_one();
+        if changed && let Some(clock) = self.change_clock.get() {
+            clock.record_mark(crate::control::ChangeMark::Index);
         }
     }
     pub fn wake(&self) {
@@ -1242,7 +1234,6 @@ impl IndexService {
         self.disk_held
             .store(gate == Gate::DiskLow, Ordering::Relaxed);
         self.publish_saved(changed);
-        self.publish_pause(changed);
         Ok(gate)
     }
     /// Worker scheduling check on the background lane; `None` when deferred.
@@ -1314,7 +1305,6 @@ impl IndexService {
                 .await;
             if let Ok(changed) = &paused {
                 self.publish_saved(*changed);
-                self.publish_pause(*changed);
             }
             if let Err(pause_error) = paused {
                 // Storage cannot preserve even the diagnostic. Stop spending;
@@ -1806,6 +1796,9 @@ mod display_pause_tests {
         assert!(disabled.endpoint_family_key.is_some());
         assert_eq!(shown(&disabled).await, None);
         let service = IndexService::new(db.clone(), Arc::new(configured(true)));
+        let clock = crate::control::ChangeClock::standalone();
+        service.set_change_clock(clock.clone());
+        let mut seen = 0;
         let family = service.endpoint_family_key.clone().unwrap();
         let profile = service.profile_key.clone().unwrap();
         for key in [family, profile] {
@@ -1815,9 +1808,7 @@ mod display_pause_tests {
             assert_eq!(shown(index).await, Some(PauseReason::Transport));
         }
         service.retry(IndexArgs::default()).await.unwrap();
-        crate::test_watchdog::watchdog("saved pause retry notification", service.pause_changed())
-            .await
-            .unwrap();
+        assert!(clock.take_mark(crate::control::ChangeMark::Index, &mut seen));
         for index in [&service, &disabled] {
             assert_eq!(shown(index).await, None);
         }

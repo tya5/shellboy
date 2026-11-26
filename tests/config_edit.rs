@@ -1071,6 +1071,7 @@ async fn restart_required_config_write_publishes_events_wait_mark() {
                 timeout_ms: 0,
                 include_text: false,
                 include_reasoning_activity: false,
+                include_output: false,
             }),
         )
         .await;
@@ -1096,6 +1097,7 @@ async fn restart_required_config_write_publishes_events_wait_mark() {
                 timeout_ms: 0,
                 include_text: false,
                 include_reasoning_activity: false,
+                include_output: false,
             }),
         )
         .await;
@@ -1122,6 +1124,7 @@ async fn restart_required_config_write_publishes_events_wait_mark() {
                 timeout_ms: 0,
                 include_text: false,
                 include_reasoning_activity: false,
+                include_output: false,
             }),
         )
         .await;
@@ -1145,6 +1148,7 @@ async fn restart_required_config_write_publishes_events_wait_mark() {
                 timeout_ms: 0,
                 include_text: false,
                 include_reasoning_activity: false,
+                include_output: false,
             }),
         )
         .await;

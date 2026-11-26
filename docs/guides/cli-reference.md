@@ -409,7 +409,7 @@ Logical usage, reclaimable bytes, DB/WAL physical size, and SQLite reusable page
 ## Change hints: `events wait` (#243)
 
 `shellboy events wait [--after CURSOR] [--thread THREAD ...] [--timeout-ms N] [--text]
-[--reasoning-activity]` is a receipt-free long-poll. It answers "which Threads changed after this cursor?" without
+[--reasoning-activity] [--output]` is a receipt-free long-poll. It answers "which Threads changed after this cursor?" without
 reading saved data, so a client can stop polling `run get` / `turn get` / `shell list`
 on a timer and read them only after a hint.
 
@@ -420,6 +420,9 @@ on a timer and read them only after a hint.
 | `changes` | Up to 64 `{thread_id, seq}`, ordered by `seq` ascending. One entry per Thread: repeated changes merge into the latest |
 | `more` | `true` means further matching changes exist already; call again at once with `cursor` |
 | `config_changed` | A global config file write is newer than this caller's cursor; reread with `config get`. This mark has no Thread ID and does not depend on the Thread filter |
+| `index_changed` | Saved index state or the index pause changed after this cursor; reread with `index status`. Same kind of global mark as `config_changed` |
+| `retention_changed` | GC made saved data unavailable (history source, raw shell output or a managed file) after this cursor; reread what you display. Same kind of global mark |
+| `output` | Only with `--output`; up to 64 `{thread_id, execution_id, seq}`, one per shell execution whose output was committed after the cursor (latest only). IDs, never output; read it with `shell read` |
 | `live_text` | Only with `--text`; non-reasoning answer deltas only, never reasoning content |
 | `reasoning_activity` | Only with `--reasoning-activity`; bounded attempt metadata, never reasoning content |
 
@@ -442,8 +445,9 @@ Rules:
 - No receipt is kept; after a lost reply simply ask again with the same cursor.
   The owner keeps no per-client buffer. The call holds one [wait permit](../design/protocol.md#ipc-admission) while it
   waits; a bridge serving several clients should share one long-poll.
-- Shell output bytes and model text deltas are not Thread hints. Use `shell read` or
-  `wait` with `shell_output` for live output, and `--text` for model text.
+- Shell output bytes and model text deltas are not Thread hints. Use `--output` to learn
+  which executions have new output, then `shell read` (or `wait` with `shell_output` for
+  one execution); use `--text` for model text.
 
 ### Unsaved model text: `--text`
 

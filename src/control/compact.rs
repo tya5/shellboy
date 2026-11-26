@@ -118,7 +118,7 @@ impl Control {
             tokio::spawn(async move {
                 control.clone().run_compact_queue(&thread, token).await;
                 control.compact_tasks.lock().await.remove(&thread);
-                control.changed.notify_waiters();
+                control.changed(&thread);
                 if !control.stop.is_cancelled() {
                     let key = CompactionKeys::new(&thread).pending();
                     if matches!(

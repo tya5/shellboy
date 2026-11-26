@@ -92,36 +92,42 @@ impl Observation {
         }
         Ok(())
     }
-    pub fn executions(&self) -> Option<Vec<String>> {
-        self.scope.as_ref().map(|s| s.executions.clone())
-    }
-    pub fn markers(&mut self, markers: Vec<(String, std::time::Instant)>) -> Option<UiUpdate> {
+    /// Committed output entries for the visible executions of this Thread. `at` is
+    /// when this client received them: the latest local output observation, which a
+    /// newer saved output time supersedes. The open execution's preview re-reads.
+    pub fn output(
+        &mut self,
+        output: &[crate::protocol::EventOutput],
+        at: std::time::Instant,
+    ) -> Option<UiUpdate> {
         let scope = self.scope.as_ref()?;
-        let markers = markers
-            .into_iter()
-            .filter(|(id, at)| {
-                scope.executions.contains(id) && self.seen.get(id).is_none_or(|old| old < at)
-            })
-            .collect::<Vec<_>>();
-        if markers.is_empty() {
-            return None;
+        let mut observed = false;
+        for entry in output.iter().filter(|entry| {
+            entry.thread_id == scope.thread && scope.executions.contains(&entry.execution_id)
+        }) {
+            self.seen.insert(entry.execution_id.clone(), at);
+            self.dirty |= scope.open.as_ref() == Some(&entry.execution_id);
+            observed = true;
         }
-        for (id, at) in &markers {
-            self.seen.insert(id.clone(), *at);
-            self.dirty |= scope.open.as_ref() == Some(id);
-        }
-        Some(UiUpdate::LiveWorkObserved {
+        observed.then(|| UiUpdate::LiveWorkObserved {
             thread_id: scope.thread.clone(),
             generation: scope.generation,
             revision: scope.revision,
             // A complete bounded snapshot permits latest-value delivery without
-            // losing an earlier marker for another visible execution.
+            // losing an earlier observation for another visible execution.
             markers: scope
                 .executions
                 .iter()
                 .filter_map(|id| self.seen.get(id).map(|at| (id.clone(), *at)))
                 .collect(),
         })
+    }
+    /// Missed output entries: the open preview re-reads from its cursor.
+    pub fn resync(&mut self) {
+        self.dirty |= self
+            .scope
+            .as_ref()
+            .is_some_and(|scope| scope.open.is_some());
     }
     pub fn deadline(&self) -> Option<tokio::time::Instant> {
         (self.dirty
@@ -206,19 +212,27 @@ pub(super) async fn read(
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn entry(thread: &str, execution: &str) -> crate::protocol::EventOutput {
+        crate::protocol::EventOutput {
+            thread_id: thread.into(),
+            execution_id: execution.into(),
+            seq: 1,
+        }
+    }
     #[test]
-    fn replaceable_marker_snapshots_keep_previously_observed_other_executions() {
+    fn output_snapshots_keep_previously_observed_other_executions() {
         let mut view = Observation::default();
         view.observe("t".into(), 1, 1, vec!["a".into(), "b".into()], None)
             .unwrap();
         let at = std::time::Instant::now();
-        view.markers(vec![("a".into(), at)]).unwrap();
-        let Some(UiUpdate::LiveWorkObserved { markers, .. }) = view.markers(vec![("b".into(), at)])
+        view.output(&[entry("t", "a")], at).unwrap();
+        let Some(UiUpdate::LiveWorkObserved { markers, .. }) = view.output(&[entry("t", "b")], at)
         else {
             panic!()
         };
         assert_eq!(markers, vec![("a".into(), at), ("b".into(), at)]);
-        assert!(view.markers(vec![("a".into(), at)]).is_none());
+        assert!(view.output(&[entry("other", "a")], at).is_none());
+        assert!(view.output(&[], at).is_none());
     }
     #[test]
     fn scope_rate_limit_markers_and_cancellation_do_not_leak_into_another_execution() {
@@ -228,7 +242,7 @@ mod tests {
             .unwrap();
         assert!(view.deadline().is_none());
         assert!(
-            view.markers(vec![("foreign".into(), std::time::Instant::now())])
+            view.output(&[entry("t", "foreign")], std::time::Instant::now())
                 .is_none()
         );
         view.observe("t".into(), 1, 2, vec!["e".into()], Some("e".into()))
@@ -241,12 +255,12 @@ mod tests {
         assert!(view.take(now + Duration::from_millis(499)).is_none());
         let next = view.take(now + Duration::from_millis(500)).unwrap();
         let at = std::time::Instant::now();
-        assert!(view.markers(vec![("next".into(), at)]).is_some());
-        assert!(view.markers(vec![("next".into(), at)]).is_none());
+        assert!(view.output(&[entry("t", "next")], at).is_some());
         assert!(view.complete(&next));
         assert!(view.take(now + Duration::from_millis(999)).is_none());
         assert!(view.take(now + Duration::from_millis(1000)).is_some());
         view.observe("t".into(), 1, 4, vec![], None).unwrap();
-        assert!(view.deadline().is_none() && view.executions().is_none());
+        assert!(view.deadline().is_none());
+        assert!(view.output(&[entry("t", "next")], at).is_none());
     }
 }
