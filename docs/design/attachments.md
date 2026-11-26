@@ -6,7 +6,7 @@
 
 `plan_add` はThread cwdに対して相対パスを解決し、現在の保護対象と追加分の送信可能rawサイズをworkerで確認する。同一パスを複数追加した場合も別要素として合計する。単一上限超過や読取り不能は後の準備で通知して会話継続するため、その実体を合計要求へ含めない。追加保護分だけで要求上限を超える場合は不採用。Controlは `add_tx` をoperation receiptのtransaction内で使い、planのselection revisionを再検査する。`list_tx` と `remove_tx` も同じ共通操作へ接続する。removeは選択をexcludedへ変えるだけで外部ファイルを削除しない。`AttachmentService::add` は最終source payloadに宣言済みのIDを登録する補助APIで、本文へ後付けしない。単体transactionを行い、CLI重複受付保証はControlのreceipt層が担う。最終本文のINSERTと登録の順序は[添付provenanceのM12境界](attachment-provenance.md)に従う。
 
-`prepare(thread, cancel, force_reload)` は選択とrevisionをDBでsnapshot化する。managed画像には同じtransactionでruntime pinを張り、ready以外へpinを追加しない。pinはsnapshot前に作る `PinLease` のID接頭辞を持つ（clipboard保存の作成中pinも同じ）。失敗や、DB jobの受付後に呼出し側が取り消された場合も、そのleaseのDropが同じDB laneでINSERTの後に削除を積むので、restartまで残らない（#450）。読取りは有限workerの枠を得てから開始し、timeoutは枠待ちを含む。開始済みOS I/Oがtimeout/取消し後も残る場合、実closureがpermitとpinを持ち続ける。timeoutで見かけ上worker数を増やしたり、late結果を送信へ採用したりしない。
+`prepare(thread, cancel, force_reload)` は選択とrevisionをDBでsnapshot化する。managed画像には同じtransactionでruntime pinを張り、ready以外へpinを追加しない。pinはsnapshot前に作る `PinLease` のID接頭辞を持つ（clipboard保存の作成中pinも同じ）。INSERTを含むDB jobがleaseのinsert tokenを持ち、leaseのDropはDB workerの解放queueへ1件積むだけで、DB workerがjob境界でINSERT完了後に削除する。失敗やjob受付後の取消しでもrestartまで残らず、取り消されたclipboard保存の `creating` 行は同じtransactionで `failed` になり回収される（#450、[GC](gc.md#runtime-pin-release-and-crash-temporaries-450)）。読取りは有限workerの枠を得てから開始し、timeoutは枠待ちを含む。開始済みOS I/Oがtimeout/取消し後も残る場合、実closureがpermitとpinを持ち続ける。timeoutで見かけ上worker数を増やしたり、late結果を送信へ採用したりしない。
 
 準備はまず有効選択のファイルを開き、本文を読まずに raw サイズを確認する。保護対象と古い順の除外をこの時点で決め、採用した参照の合計だけを予約する。読込み時に再度開き、予約を超えて成長したファイルは unavailable とする。形式不一致など本文でしか判定できない結果では、同じ要求内で除外を取り消さない。raw 予算とは別に Base64 と JSON の表現分が必要になる。
 

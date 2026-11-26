@@ -108,7 +108,8 @@ pub struct GcService {
     /// The GC background requester: one outstanding unit (storage design #171).
     requester: Arc<Mutex<BackgroundRequester>>,
     raw_cursor: Arc<std::sync::Mutex<RawCursor>>,
-    /// Round-robin position of the raw-marker sweep (#450); restart repeats.
+    /// Position of the full raw-marker sweep (#450); a deferred sweep resumes
+    /// here, a completed one starts over. Restart repeats.
     raw_marker_cursor: Arc<std::sync::Mutex<String>>,
     history_batch: Arc<std::sync::Mutex<HistoryBatch>>,
     history_discovery: Arc<std::sync::Mutex<i64>>,
@@ -351,6 +352,7 @@ struct RawExecution {
     /// A schedule/service execution that raw retention has not marked yet:
     /// a candidate even without output, so its row can be settled (#450).
     unsettled_thread_owned: bool,
+    schedule: Option<String>,
 }
 
 impl GcService {
@@ -480,7 +482,7 @@ impl GcService {
     ) -> Result<CollectionReport> {
         let works: &[Work] = match category {
             StorageCategory::All => &GC_WORK,
-            StorageCategory::Raw => &[Work::Raw],
+            StorageCategory::Raw => &[Work::Raw, Work::RawMarkers],
             StorageCategory::History => &[
                 Work::EndedRuns,
                 Work::EventBacklog,
@@ -492,6 +494,10 @@ impl GcService {
             StorageCategory::ManagedImages => &[Work::Managed],
         };
         self.raw_cursor.lock().expect("raw cursor").rescan = true;
+        self.raw_marker_cursor
+            .lock()
+            .expect("raw marker cursor")
+            .clear();
         let mut hold = self.hold().await;
         self.collect_held(&mut hold, works, at).await
     }
@@ -516,6 +522,9 @@ impl GcService {
         let has = |work| works.contains(&work);
         if has(Work::Raw) {
             self.collect_raw(requester, at, &mut report).await?;
+        }
+        if has(Work::RawMarkers) {
+            self.collect_raw_markers(requester, &mut report).await?;
         }
         if has(Work::Drafts) {
             loop {
@@ -821,7 +830,6 @@ impl GcService {
         let mut eligible_bytes = 0u64;
         let mut next_due: Option<DateTime<Utc>> = None;
         let mut resume: Option<(String, i64)> = None;
-        let mut created = 0u64;
         loop {
             let cursor = after.clone();
             let unit = requester
@@ -839,6 +847,7 @@ impl GcService {
                                 pinned: row.get(7)?,
                                 bytes: row.get::<_, i64>(8)? as u64,
                                 unsettled_thread_owned: row.get(9)?,
+                                schedule: row.get(10)?,
                             })
                         })?
                         .collect::<rusqlite::Result<Vec<_>>>()?)
@@ -908,7 +917,6 @@ impl GcService {
                 if !candidate.marked {
                     // begin_raw has committed its new retention generation.
                     self.availability_changed.notify_one();
-                    created += 1;
                 }
                 loop {
                     let execution = candidate.id.clone();
@@ -930,6 +938,13 @@ impl GcService {
                     report.raw_bytes_collected += step.0;
                     total = total.saturating_sub(step.0);
                     if step.1 {
+                        // Collection is the eligibility change: settle this
+                        // definition's superseded collected runs now.
+                        if let Some(schedule) = &candidate.schedule
+                            && !self.settle_schedule(requester, schedule, report).await?
+                        {
+                            return Ok(());
+                        }
                         break;
                     }
                     if step.2 {
@@ -941,10 +956,6 @@ impl GcService {
             if !more {
                 break;
             }
-        }
-        if !report.deferred_kinds.contains(Work::Raw) {
-            self.settle_raw_markers(requester, rescan, created, report)
-                .await?;
         }
         if full && !report.deferred_kinds.contains(Work::Raw) {
             // Only a complete pass from the start sees every eligible byte.
@@ -961,26 +972,46 @@ impl GcService {
         report.raw_due = next_due;
         Ok(())
     }
-    /// Settles raw-retention markers (#450) from a round-robin key cursor: a
-    /// marker whose execution row is gone is deleted, and a collected
-    /// schedule/service execution that is no longer its definition's latest is
-    /// deleted with its marker. A pass examines one batch plus one batch per
-    /// batch of markers it created, so the sweep outpaces marker creation; an
-    /// explicit or pending-marker pass (`rescan`) examines every marker from the start.
-    async fn settle_raw_markers(
+    /// Deletes one definition's collected, superseded executions with their
+    /// markers (#450), one bounded unit at a time. Returns false when a unit
+    /// was deferred; the kind is then restored for the next pass.
+    async fn settle_schedule(
         &self,
         requester: &mut BackgroundRequester,
-        rescan: bool,
-        created: u64,
+        schedule: &str,
+        report: &mut CollectionReport,
+    ) -> Result<bool> {
+        loop {
+            let schedule = schedule.to_owned();
+            let unit = requester
+                .unit(UNIT, move |db, limit| {
+                    settle_schedule_tx(db, &schedule, limit.rows())
+                })
+                .await
+                .map_err(crate::app::storage_error)?;
+            let Background::Done((executions, more)) = unit else {
+                report.defer(Work::Raw);
+                return Ok(false);
+            };
+            self.publish_settled(executions);
+            if !more {
+                return Ok(true);
+            }
+        }
+    }
+    /// The full raw-marker sweep (#450): a marker whose execution row is gone
+    /// is deleted, and a collected execution that is no longer its
+    /// definition's latest is deleted with its marker. `RawMarkers` is marked
+    /// by the changes that make such markers without collecting anything:
+    /// startup, a definition or Thread removal, and a reservation that
+    /// supersedes an already collected execution. One unit is at most 128
+    /// markers; a deferred unit keeps the position and restores the kind, so
+    /// the next pass continues; a completed sweep starts over next time.
+    async fn collect_raw_markers(
+        &self,
+        requester: &mut BackgroundRequester,
         report: &mut CollectionReport,
     ) -> Result<()> {
-        let mut allowance = created.saturating_add(BATCH as u64);
-        if rescan {
-            self.raw_marker_cursor
-                .lock()
-                .expect("raw marker cursor")
-                .clear();
-        }
         loop {
             let after = self
                 .raw_marker_cursor
@@ -993,22 +1024,24 @@ impl GcService {
                 })
                 .await
                 .map_err(crate::app::storage_error)?;
-            let Background::Done((examined, executions, next)) = unit else {
-                report.defer(Work::Raw);
+            let Background::Done((executions, next)) = unit else {
+                report.defer(Work::RawMarkers);
                 return Ok(());
             };
-            self.database.wait_wakes().publish(
-                executions
-                    .into_iter()
-                    .map(crate::control::wait::wakes::Key::ShellOutput),
-            );
+            self.publish_settled(executions);
             let wrapped = next.is_none();
             *self.raw_marker_cursor.lock().expect("raw marker cursor") = next.unwrap_or_default();
-            allowance = allowance.saturating_sub(examined);
-            if wrapped || (!rescan && allowance == 0) {
+            if wrapped {
                 return Ok(());
             }
         }
+    }
+    fn publish_settled(&self, executions: Vec<String>) {
+        self.database.wait_wakes().publish(
+            executions
+                .into_iter()
+                .map(crate::control::wait::wakes::Key::ShellOutput),
+        );
     }
     /// Start/restart marking for an explicit Thread-deletion GC job. The TEMP
     /// marks are disposable; durable progress is never trusted without them.
@@ -1219,8 +1252,9 @@ impl GcService {
 pub struct GcHold<'a>(tokio::sync::MutexGuard<'a, BackgroundRequester>);
 
 /// Garbage-collection kinds, in the order one pass runs them.
-const GC_WORK: [Work; 9] = [
+const GC_WORK: [Work; 10] = [
     Work::Raw,
+    Work::RawMarkers,
     Work::EndedRuns,
     Work::EventBacklog,
     Work::Drafts,
@@ -1237,7 +1271,7 @@ const SPACE_UNIT: NonZeroU32 = NonZeroU32::new(32).unwrap();
 const RAW_UNIT: NonZeroU32 = NonZeroU32::new(32).unwrap();
 
 /// One window of terminal executions in retention order (`shell_terminal_time`).
-const RAW_PAGE: &str = "SELECT s.id,s.state,s.ended_at,s.started_at,s.rowid,COALESCE(s.ended_at,s.started_at),EXISTS(SELECT 1 FROM app_meta WHERE key='raw_tombstone.'||s.id AND json_extract(value,'$.state')='deleting'),EXISTS(SELECT 1 FROM runtime_pin WHERE resource_kind='shell_output' AND resource_id=s.id),COALESCE((SELECT SUM(length(bytes)) FROM output_chunk WHERE execution_id=s.id),0),s.schedule_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM app_meta WHERE key='raw_tombstone.'||s.id) FROM shell_execution s INDEXED BY shell_terminal_time WHERE s.state IN ('exited','failed','stopped') AND COALESCE(s.ended_at,s.started_at)>=?1 AND (COALESCE(s.ended_at,s.started_at)>?1 OR s.rowid>?2) ORDER BY COALESCE(s.ended_at,s.started_at),s.rowid LIMIT ?3";
+const RAW_PAGE: &str = "SELECT s.id,s.state,s.ended_at,s.started_at,s.rowid,COALESCE(s.ended_at,s.started_at),EXISTS(SELECT 1 FROM app_meta WHERE key='raw_tombstone.'||s.id AND json_extract(value,'$.state')='deleting'),EXISTS(SELECT 1 FROM runtime_pin WHERE resource_kind='shell_output' AND resource_id=s.id),COALESCE((SELECT SUM(length(bytes)) FROM output_chunk WHERE execution_id=s.id),0),s.schedule_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM app_meta WHERE key='raw_tombstone.'||s.id),s.schedule_id FROM shell_execution s INDEXED BY shell_terminal_time WHERE s.state IN ('exited','failed','stopped') AND COALESCE(s.ended_at,s.started_at)>=?1 AND (COALESCE(s.ended_at,s.started_at)>?1 OR s.rowid>?2) ORDER BY COALESCE(s.ended_at,s.started_at),s.rowid LIMIT ?3";
 /// One key-range page of summary parts with their staleness. A part whose
 /// `sources` is missing, empty or invalid cannot be traced to a conversation
 /// and counts as stale; the same input rebuilds it on retry.
@@ -1406,22 +1440,54 @@ fn raw_step(
     Ok((bytes, !remaining, false))
 }
 
-/// One key-range page of raw-retention markers: (key, execution gone,
-/// execution settled). Settled means a terminal schedule/service execution
-/// whose marker says `deleted`, with no chunk, no read pin, and a newer
-/// execution of the same definition, so `schedule list` keeps its latest.
-const RAW_MARKER_PAGE: &str = "SELECT m.key,s.id IS NULL,s.id IS NOT NULL AND s.schedule_id IS NOT NULL AND s.state IN ('exited','failed','stopped') AND CASE WHEN json_valid(m.value) THEN json_extract(m.value,'$.state') END='deleted' AND NOT EXISTS(SELECT 1 FROM output_chunk c WHERE c.execution_id=s.id) AND NOT EXISTS(SELECT 1 FROM runtime_pin p WHERE p.resource_kind='shell_output' AND p.resource_id=s.id) AND EXISTS(SELECT 1 FROM shell_execution n WHERE n.schedule_id=s.schedule_id AND n.rowid>s.rowid) FROM app_meta m LEFT JOIN shell_execution s ON s.id=substr(m.key,15) WHERE m.key>?1 AND m.key<'raw_tombstone/' ORDER BY m.key LIMIT ?2";
+/// A settled execution (#450): a terminal schedule/service execution whose
+/// raw marker says `deleted`, with no chunk, no read pin, and a newer execution
+/// of the same definition, so `schedule list` keeps its latest. The one rule
+/// both the per-definition and the full-sweep settlement use.
+const SETTLED: &str = "s.schedule_id IS NOT NULL AND s.state IN ('exited','failed','stopped') AND EXISTS(SELECT 1 FROM app_meta k WHERE k.key='raw_tombstone.'||s.id AND CASE WHEN json_valid(k.value) THEN json_extract(k.value,'$.state') END='deleted') AND NOT EXISTS(SELECT 1 FROM output_chunk c WHERE c.execution_id=s.id) AND NOT EXISTS(SELECT 1 FROM runtime_pin p WHERE p.resource_kind='shell_output' AND p.resource_id=s.id) AND EXISTS(SELECT 1 FROM shell_execution n WHERE n.schedule_id=s.schedule_id AND n.rowid>s.rowid)";
 
-/// Returns (markers examined, deleted executions, next cursor or `None` at the end).
+fn delete_settled(tx: &Transaction<'_>, execution: &str) -> rusqlite::Result<()> {
+    tx.execute("DELETE FROM shell_execution WHERE id=?1", [execution])?;
+    tx.execute(
+        "DELETE FROM app_meta WHERE key=?1",
+        [format!("{RAW_PREFIX}{execution}")],
+    )?;
+    Ok(())
+}
+
+/// One definition's settled executions; returns them and whether more remain.
+fn settle_schedule_tx(
+    db: &mut Connection,
+    schedule: &str,
+    limit: usize,
+) -> std::result::Result<(Vec<String>, bool), StorageError> {
+    let tx = db.transaction()?;
+    let executions = tx
+        .prepare(&format!(
+            "SELECT s.id FROM shell_execution s WHERE s.schedule_id=?1 AND {SETTLED} LIMIT ?2"
+        ))?
+        .query_map(params![schedule, limit as i64], |r| r.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    for execution in &executions {
+        delete_settled(&tx, execution)?;
+    }
+    tx.commit()?;
+    let more = executions.len() == limit;
+    Ok((executions, more))
+}
+
+/// One key-range page of raw markers: deletes markers whose execution row is
+/// gone and settled executions with their markers. Returns the deleted
+/// executions and the next cursor, or `None` at the end of the key range.
 fn settle_markers_tx(
     db: &mut Connection,
     after: &str,
     limit: usize,
-) -> std::result::Result<(u64, Vec<String>, Option<String>), StorageError> {
+) -> std::result::Result<(Vec<String>, Option<String>), StorageError> {
     let after = if after.is_empty() { RAW_PREFIX } else { after };
     let tx = db.transaction()?;
     let rows = tx
-        .prepare(RAW_MARKER_PAGE)?
+        .prepare(&format!("SELECT m.key,s.id IS NULL,s.id IS NOT NULL AND {SETTLED} FROM app_meta m LEFT JOIN shell_execution s ON s.id=substr(m.key,15) WHERE m.key>?1 AND m.key<'raw_tombstone/' ORDER BY m.key LIMIT ?2"))?
         .query_map(params![after, limit as i64], |r| {
             Ok((
                 r.get::<_, String>(0)?,
@@ -1434,10 +1500,9 @@ fn settle_markers_tx(
     for (key, gone, settled) in &rows {
         if *settled {
             let execution = &key[RAW_PREFIX.len()..];
-            tx.execute("DELETE FROM shell_execution WHERE id=?1", [execution])?;
+            delete_settled(&tx, execution)?;
             executions.push(execution.to_owned());
-        }
-        if *gone || *settled {
+        } else if *gone {
             tx.execute("DELETE FROM app_meta WHERE key=?1", [key])?;
         }
     }
@@ -1445,7 +1510,7 @@ fn settle_markers_tx(
     let next = (rows.len() == limit)
         .then(|| rows.last().map(|r| r.0.clone()))
         .flatten();
-    Ok((rows.len() as u64, executions, next))
+    Ok((executions, next))
 }
 
 fn work_tables(db: &Connection) -> Result<()> {

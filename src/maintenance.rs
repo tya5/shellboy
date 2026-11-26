@@ -39,10 +39,14 @@ pub enum Work {
     ReplyOutcomes = 1 << 10,
     Schedule = 1 << 11,
     UsageLimitRetry = 1 << 12,
+    /// Raw markers that collection did not settle (#450): a schedule/service
+    /// definition or Thread was removed, or a reservation superseded an
+    /// already collected execution. One full bounded marker sweep.
+    RawMarkers = 1 << 13,
 }
 
 impl Work {
-    pub const ALL: [Work; 13] = [
+    pub const ALL: [Work; 14] = [
         Work::Receipts,
         Work::Raw,
         Work::History,
@@ -56,6 +60,7 @@ impl Work {
         Work::ReplyOutcomes,
         Work::Schedule,
         Work::UsageLimitRetry,
+        Work::RawMarkers,
     ];
     /// Source deletion makes derived data eligible as well.
     pub const DELETION: [Work; 3] = [Work::History, Work::SummaryCache, Work::IndexSources];

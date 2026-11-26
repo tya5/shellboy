@@ -55,6 +55,10 @@ fn occurrence(
 struct Advanced {
     shell: Option<DueShell>,
     notice: Option<super::MutationResult>,
+    /// The reservation made an execution whose raw output was already
+    /// collected no longer its definition's latest; the caller marks
+    /// raw-marker settlement after commit (#450).
+    superseded: bool,
 }
 
 fn advance_due(
@@ -86,8 +90,14 @@ fn advance_due(
         return Ok(Advanced {
             shell: None,
             notice,
+            superseded: false,
         });
     }
+    let superseded = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM app_meta WHERE key='raw_tombstone.'||(SELECT id FROM shell_execution WHERE schedule_id=?1 ORDER BY rowid DESC LIMIT 1) AND CASE WHEN json_valid(value) THEN json_extract(value,'$.state') END='deleted')",
+        [&schedule],
+        |r| r.get(0),
+    )?;
     let id = uuid::Uuid::new_v4().to_string();
     let shell = serde_json::json!({"command": command,"kind":shell_kind});
     let at = now.to_rfc3339();
@@ -100,6 +110,7 @@ fn advance_due(
             command,
         }),
         notice,
+        superseded,
     })
 }
 
@@ -193,6 +204,13 @@ pub(super) async fn dispatch(control: &Arc<Control>) -> Result<Option<DateTime<U
         })
         .await
         .map_err(super::storage_error)?;
+    if advanced.superseded {
+        control
+            .store
+            .database
+            .signals()
+            .mark(crate::maintenance::Work::RawMarkers);
+    }
     if let Some(id) = expired
         && let Some(handle) = control.live.clone_shell_handle(&id).await
     {
@@ -730,6 +748,8 @@ pub(super) async fn delete(
     use crate::protocol::{Command, ErrorCode};
     let command = request.command;
     let prepare = command.clone();
+    // Removing a definition or Thread drops executions whose raw markers stay.
+    let removes = shell_definition_command(&command).is_none_or(|(_, _, removing)| removing);
     let prepared = async {
         let (targets, executions) = control
             .store
@@ -833,6 +853,9 @@ pub(super) async fn delete(
         ]);
     }
     signals.mark(crate::maintenance::Work::Schedule);
+    if removes {
+        signals.mark(crate::maintenance::Work::RawMarkers);
+    }
     let value = effects.result.clone();
     control.apply_effects(Some(effects)).await;
     Ok(value)
@@ -1406,6 +1429,79 @@ mod tests {
         control.shutdown().await.unwrap();
         server.shutdown().await.unwrap();
         dispatcher.await.unwrap();
+        owner.shutdown().await.unwrap();
+    }
+
+    /// #450: removing a definition and superseding a collected run both mark
+    /// raw-marker settlement, and the signalled maintenance pass (no explicit
+    /// collect) settles the markers and rows they left.
+    #[tokio::test]
+    async fn removal_and_supersession_mark_raw_marker_settlement_for_maintenance() {
+        let root = tempfile::tempdir().unwrap();
+        let owner =
+            crate::app::DataOwner::start(None, Some(root.path().join("data")), root.path().into())
+                .await
+                .unwrap();
+        let control = Control::new(&owner, root.path().into());
+        let cwd = root.path().to_string_lossy().into_owned();
+        let collected =
+            serde_json::json!({"reason":"raw_retention_age","state":"deleted","generation":1})
+                .to_string();
+        owner.db.call(move |db| {
+            db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('t',?1,'','p','m','now')",[&cwd])?;
+            for (schedule, next_at) in [("removed", None), ("weekly", Some(1_i64))] {
+                db.execute("INSERT INTO schedule(id,thread_id,cron,next_at,enabled,cwd,command) VALUES(?1,'t','0 0 * * 0',?2,1,?3,'true')",params![schedule,next_at,cwd])?;
+                let execution = format!("{schedule}-run");
+                db.execute("INSERT INTO shell_execution(id,schedule_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at,ended_at) VALUES(?1,?2,?1,'exited',?3,'{}','utf-8','utf-8','closed','2020-01-01T00:00:00Z','2020-01-01T00:00:00Z')",params![execution,schedule,cwd])?;
+                db.execute("INSERT INTO app_meta(key,value) VALUES('raw_tombstone.'||?1,?2)",params![execution,collected])?;
+            }
+            Ok(())
+        }).await.unwrap();
+        let signals = owner.db.signals().clone();
+        signals.take_seen();
+        let removed = control
+            .request(Request::new(
+                format!("{}:{}", owner.instance_id, uuid::Uuid::new_v4()),
+                Command::ScheduleRemove(crate::protocol::ScheduleTarget {
+                    schedule_id: "removed".into(),
+                }),
+            ))
+            .await;
+        assert!(removed.ok, "{:?}", removed.error);
+        assert!(
+            signals
+                .take_seen()
+                .contains(crate::maintenance::Work::RawMarkers)
+        );
+        // The weekly run is still its definition's latest; a new reservation
+        // supersedes it after its output was already collected.
+        let superseded = owner
+            .db
+            .call(|db| {
+                let tx = db.transaction()?;
+                let mut superseded = false;
+                advance_due(&tx, Utc::now(), "native", &mut superseded)?.unwrap();
+                tx.commit()?;
+                Ok(superseded)
+            })
+            .await
+            .unwrap();
+        assert!(
+            superseded,
+            "the reservation reports the collected run it supersedes"
+        );
+        let mut set = crate::maintenance::WorkSet::default();
+        set.insert(crate::maintenance::Work::RawMarkers);
+        control.gc.collect_kinds(set, Utc::now()).await.unwrap();
+        owner.db.call(|db| {
+            let markers: Vec<String> = db.prepare("SELECT key FROM app_meta WHERE key>='raw_tombstone.' AND key<'raw_tombstone/'")?.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
+            assert!(markers.is_empty(), "orphan and superseded markers are settled: {markers:?}");
+            let weekly: Vec<String> = db.prepare("SELECT id FROM shell_execution WHERE schedule_id='weekly'")?.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
+            assert!(!weekly.iter().any(|id| id == "weekly-run"), "superseded collected run is deleted");
+            assert!(!weekly.is_empty(), "the new latest run stays");
+            Ok(())
+        }).await.unwrap();
+        control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
     }
 

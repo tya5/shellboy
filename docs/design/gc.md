@@ -16,21 +16,31 @@ managed画像のdeleting→unlink→deletedとpin/active検査は共有Attachmen
 
 ## Raw markers and Thread-owned executions (#450)
 
-Raw retention owns every `app_meta.raw_tombstone.<execution>` marker. After the
-candidate windows, each non-idle raw pass settles markers from an in-memory key
-cursor that wraps at the end of the key range (restart starts over). Per
-transaction it examines at most 128 markers: a marker whose execution row is
-gone (a removed schedule or service, a deleted Thread) is deleted, and a
-schedule/service execution that raw retention has collected (marker state
-`deleted`, no chunk left, no read pin) and that is not its definition's latest
-execution by rowid is deleted together with its marker. `schedule list` and
-`service list` therefore show the same latest execution as before; only older
-runs go. A pass examines one batch plus one batch per batch of markers it
-created, so the sweep keeps pace with marker creation without rescanning every
-marker on each age deadline; an explicit `storage collect` or a pass that
-resumes `deleting` markers examines every marker from the start of the key range. A Thread-owned
-execution without output is a retention candidate by the same age and capacity
-rule, so a schedule that prints nothing does not keep one row per run either.
+Raw retention owns every `app_meta.raw_tombstone.<execution>` marker and the
+settlement of the rows they describe. A settled execution is a terminal
+schedule/service execution whose marker says `deleted`, with no chunk left, no
+read pin, and a newer execution of the same definition by rowid; it is deleted
+together with its marker, so `schedule list` and `service list` keep the same
+latest execution. One SQL rule (`SETTLED` in `src/gc.rs`) decides it for both
+paths below, and every unit is at most 128 rows under the GC step budget.
+
+- **Collection.** When raw retention finishes collecting a schedule/service
+  execution, the same pass settles that definition's collected, superseded
+  executions. This is the common case: an hourly run is collected seven days
+  later, long after newer runs exist.
+- **Changes that collect nothing.** `Work::RawMarkers` is a full marker sweep:
+  markers whose execution row is gone are deleted and settled executions are
+  deleted with their markers. It is marked after commit by removing a schedule
+  or service and by deleting Threads (both drop executions whose markers stay),
+  by a reservation that supersedes an execution whose output was already
+  collected (the definition's latest was older than the retention), at startup
+  (every kind), and by `storage collect --category raw`/`all`. It does not
+  depend on the raw byte total or the age deadline. A deferred unit keeps the
+  sweep position and restores the kind, so the next pass continues; a finished
+  sweep starts over on its next mark. No timer is added.
+
+A Thread-owned execution without output is a raw candidate by the same age and
+capacity rule, so a schedule that prints nothing does not keep one row per run.
 No retention number is added. Run-owned executions and their markers, and the
 detached execution of a spent one-shot, are not deleted.
 
@@ -272,17 +282,28 @@ with no deadline.
 ## Runtime pin release and crash temporaries (#450)
 
 Every `runtime_pin` row belongs to one `PinLease` (`src/runtime_pin.rs`): its
-id is the lease's prefix plus an ordinal, and the lease exists before the
-transaction that inserts the rows. Shell output reads, attachment preparation
-and clipboard saves therefore release their pins on every ending path, including
-an error after the insert committed and a caller cancelled after the DB worker
-admitted the insert: the lease's drop queues one range delete on the same
-foreground lane, behind the insert. An explicit release that fails leaves the
-lease armed, so its drop tries again. Only rows of an earlier owner instance,
-or a drop after the runtime has stopped, are left to startup cleanup, which
-deletes pins of other instances. That startup cleanup, run by the owner while it
-holds the owner lock, also removes `tmp/<id>.png.tmp` files that a crashed or
-abandoned clipboard save left: it lists the directory on the control file
-worker, keeps a file whose managed row is still `creating` (its row is inserted
-before its file, so a save of this instance cannot be missed), and unlinks the
-rest. Other files in `tmp` are not touched.
+id is the lease's prefix plus an ordinal, and the lease exists before the job
+that inserts the rows. That job holds the lease's insert token until it has run
+or been dropped unrun. Dropping the lease, after success, an error, or a caller
+cancelled after the DB worker admitted the insert, queues one release on the DB
+worker; no task is spawned and `Drop` never retries. The DB worker thread drains
+the queue at every job boundary in its own transaction, at most 128 releases at
+a time: a release waits while its insert job can still run, a failed
+transaction keeps its releases queued for the next boundary, and any job that
+runs after the drop observes the pins released. The queue holds at most one
+entry per lease dropped and not yet released. A clipboard save's lease also
+carries its managed row: if that row is still `creating` when the lease is
+released (the save future was dropped, and the file worker, which holds the
+lease, has finished), the same transaction marks it `failed`, so managed
+collection reclaims it and its files. Releasing managed pins or failing a save
+marks managed and raw maintenance; releasing read pins marks nothing. Only rows
+of an earlier owner instance are left to startup cleanup, which deletes pins of
+other instances.
+
+That startup cleanup, run by the owner while it holds the owner lock, also
+removes `tmp/<id>.png.tmp` files that a crashed or abandoned clipboard save
+left, in batches of at most 128 names: a bounded directory scan on the control
+file worker, one bounded row lookup, then the unlinks. A file whose managed row
+is still `creating` stays (its row is inserted before its file, so a save of
+this instance cannot be missed) and later batches skip it. Other files in `tmp`
+are not touched.
