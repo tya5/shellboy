@@ -271,6 +271,66 @@ impl Session {
         )
         .map_err(|_| Failure::new(6, "owner_error", "Owner returned an invalid typed result"))
     }
+    /// `--result reply`: an open duty (pending, or awaiting the recipient's own
+    /// ask) keeps the client waiting on `reply_received` until a terminal reply
+    /// state or the client deadline (#441).
+    async fn await_reply(
+        &mut self,
+        message: &str,
+        saved: Option<&Value>,
+    ) -> Result<Option<String>, Failure> {
+        let mut state = match reply_outcome(saved)? {
+            ReplyOutcome::Replied(node) => return Ok(node),
+            ReplyOutcome::Open(state) => state,
+        };
+        loop {
+            let remaining = self
+                .deadline
+                .saturating_duration_since(Instant::now())
+                .as_millis()
+                .min(30_000) as u64;
+            if remaining == 0 {
+                return Err(Failure::new(
+                    5,
+                    "timeout",
+                    format!(
+                        "Client deadline expired while the reply duty is {state}; no target was stopped"
+                    ),
+                ));
+            }
+            let wait: WaitResult = self
+                .request(
+                    "wait",
+                    Command::Wait(WaitArgs {
+                        after: None,
+                        conditions: vec![WaitCondition::ReplyReceived {
+                            message_id: message.to_owned(),
+                        }],
+                        timeout_ms: remaining,
+                    }),
+                )
+                .await?;
+            if wait.status == WaitStatus::Unavailable {
+                return Err(Failure::new(
+                    4,
+                    "execution_unavailable",
+                    "Wait target became unavailable",
+                ));
+            }
+            let delivery: MessageDetails = self
+                .request(
+                    "message",
+                    Command::MessageGet(MessageTarget {
+                        message_id: message.to_owned(),
+                    }),
+                )
+                .await?;
+            state = match reply_outcome(delivery.reply.as_ref())? {
+                ReplyOutcome::Replied(node) => return Ok(node),
+                ReplyOutcome::Open(state) => state,
+            };
+        }
+    }
     async fn answer(&mut self, mode: ResultMode) -> Result<String, Failure> {
         if self.progress.run_id.is_none() {
             return Err(Failure::new(4, "held", "Message has no assigned Run"));
@@ -293,7 +353,7 @@ impl Session {
                             .request(
                                 "message",
                                 Command::MessageGet(MessageTarget {
-                                    message_id: message,
+                                    message_id: message.clone(),
                                 }),
                             )
                             .await?;
@@ -301,10 +361,33 @@ impl Session {
                             return Err(Failure::new(4, "held", "Message was not applied"));
                         }
                         self.progress.end_message_node_id = if mode == ResultMode::Reply {
-                            reply_node(delivery.reply.as_ref())?
+                            self.await_reply(&message, delivery.reply.as_ref()).await?
                         } else {
                             facts.end_message_node_id
                         };
+                        break;
+                    }
+                    RunState::Stopped | RunState::Failed if mode == ResultMode::Reply => {
+                        // A Stop settles the duty unless it awaits the recipient's
+                        // own ask (#433); the saved reply state decides (#441).
+                        let message = self.progress.message_id.clone().expect("accepted message");
+                        let delivery: MessageDetails = self
+                            .request(
+                                "message",
+                                Command::MessageGet(MessageTarget {
+                                    message_id: message.clone(),
+                                }),
+                            )
+                            .await?;
+                        if delivery.delivery_status != DeliveryStatus::Applied {
+                            return Err(Failure::new(
+                                4,
+                                "execution_unavailable",
+                                "Run ended without a successful end message",
+                            ));
+                        }
+                        self.progress.end_message_node_id =
+                            self.await_reply(&message, delivery.reply.as_ref()).await?;
                         break;
                     }
                     RunState::Stopped | RunState::Failed => {
@@ -526,20 +609,26 @@ impl Session {
         ))
     }
 }
-fn reply_node(reply: Option<&Value>) -> Result<Option<String>, Failure> {
+enum ReplyOutcome {
+    Replied(Option<String>),
+    /// An open duty: `pending` or `awaiting_own_ask`.
+    Open(String),
+}
+fn reply_outcome(reply: Option<&Value>) -> Result<ReplyOutcome, Failure> {
     let reply =
         reply.ok_or_else(|| Failure::new(4, "reply_unavailable", "No reply outcome was saved"))?;
     match reply["state"].as_str() {
-        Some("replied") => Ok(reply["node_id"].as_str().map(str::to_owned)),
-        Some("ignored" | "cancelled" | "recipient_deleted") => Err(Failure::new(
-            4,
-            "reply_unavailable",
-            format!("Reply ended with state {}", reply["state"]),
+        Some("replied") => Ok(ReplyOutcome::Replied(
+            reply["node_id"].as_str().map(str::to_owned),
         )),
-        _ => Err(Failure::new(
+        Some(state @ ("pending" | "awaiting_own_ask")) => Ok(ReplyOutcome::Open(state.into())),
+        state => Err(Failure::new(
             4,
             "reply_unavailable",
-            "Run ended without a reply",
+            format!(
+                "Reply ended with state {} without a reply",
+                state.unwrap_or("missing")
+            ),
         )),
     }
 }
@@ -548,15 +637,21 @@ fn reply_node(reply: Option<&Value>) -> Result<Option<String>, Failure> {
 mod reply_mode_tests {
     use super::*;
     #[test]
-    fn terminal_nonreply_outcomes_are_exit_four() {
-        for state in ["ignored", "cancelled", "recipient_deleted", "pending"] {
-            let Err(error) = reply_node(Some(&json!({"state": state}))) else {
+    fn terminal_nonreply_outcomes_are_exit_four_and_open_duties_wait() {
+        for state in ["ignored", "cancelled", "recipient_deleted"] {
+            let Err(error) = reply_outcome(Some(&json!({"state": state}))) else {
                 panic!("{state} must fail");
             };
             assert_eq!(error.code, 4, "{state}");
+            assert!(error.message.contains(state), "{}", error.message);
+        }
+        for state in ["pending", "awaiting_own_ask"] {
+            assert!(
+                matches!(reply_outcome(Some(&json!({"state": state}))), Ok(ReplyOutcome::Open(open)) if open == state)
+            );
         }
         assert!(
-            matches!(reply_node(Some(&json!({"state":"replied", "node_id":"reply"}))), Ok(Some(node)) if node == "reply")
+            matches!(reply_outcome(Some(&json!({"state":"replied", "node_id":"reply"}))), Ok(ReplyOutcome::Replied(Some(node))) if node == "reply")
         );
     }
 }

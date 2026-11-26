@@ -994,6 +994,141 @@ async fn reply_mode_returns_explicit_reply_not_end_message() {
     fixture.close().await;
 }
 
+fn cli_call(args: &[&str]) -> String {
+    let quote = |text: &str| {
+        if cfg!(windows) {
+            format!("'{}'", text.replace('\'', "''"))
+        } else {
+            format!("'{}'", text.replace('\'', "'\\''"))
+        }
+    };
+    let mut command = if cfg!(windows) {
+        "& ".to_owned()
+    } else {
+        String::new()
+    };
+    command.push_str(&quote(env!("CARGO_BIN_EXE_shellboy")));
+    for arg in args {
+        command.push(' ');
+        command.push_str(&quote(arg));
+    }
+    tool_call(&command)
+}
+
+/// #441: the recipient asks back and ends its Run; the duty stays open
+/// (`awaiting_own_ask`, #433), so exec keeps waiting until the recipient's
+/// reply after the answer arrives.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn reply_mode_waits_while_the_recipient_awaits_its_own_ask() {
+    let mut fixture = Fixture::new().await;
+    let (accepted, first) = fixture.active().await;
+    // A scalar result keeps the model's shell reply free of quoted JSON.
+    let schema = fixture.root.path().join("integer.json");
+    std::fs::write(&schema, br#"{"type":"integer"}"#).unwrap();
+    let mut command = fixture.command_mode(&schema, "reply");
+    command.arg("--thread").arg(&accepted.thread_id).arg("work");
+    let mut child = spawn(command);
+    fixture.queued_exec(&accepted.thread_id).await;
+    let thread = accepted.thread_id.clone();
+    let duty: String = fixture.owner.db.call(move |db| Ok(db.query_row("SELECT message_node_id FROM receipt WHERE target_thread_id=?1 AND json_extract(sender_json,'$.label')='shellboy exec'",[thread],|r|r.get(0))?)).await.unwrap();
+    // The exec request is admitted at the next boundary; then the model asks back.
+    first.reply.send(tool_call("echo boundary")).unwrap();
+    fixture
+        .next(&mut child)
+        .await
+        .reply
+        .send(cli_call(&[
+            "message",
+            "ask",
+            "--to",
+            "claude",
+            "--text",
+            "Which option?",
+        ]))
+        .unwrap();
+    fixture
+        .next(&mut child)
+        .await
+        .reply
+        .send(answer("Asked Claude; waiting."))
+        .unwrap();
+    let run = accepted.run_id.clone().unwrap();
+    let saved = duty.clone();
+    let question: String = crate::test_watchdog::watchdog("awaiting own ask", async {
+        loop {
+            let (saved, run) = (saved.clone(), run.clone());
+            let settled: Option<String> = fixture.owner.db.call(move |db| {
+                let completed: bool = db.query_row("SELECT state='completed' FROM run WHERE id=?1", [&run], |r| r.get(0))?;
+                let awaiting: Option<String> = db.query_row("SELECT json_extract(result_json,'$.reply.blocking_message_id') FROM receipt WHERE message_node_id=?1 AND json_extract(result_json,'$.reply.state')='awaiting_own_ask'", [&saved], |r| r.get(0)).ok();
+                Ok(awaiting.filter(|_| completed))
+            }).await.unwrap();
+            if let Some(question) = settled {
+                break question;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap();
+    // exec read the open duty after the Run completed and is still waiting.
+    crate::test_watchdog::watchdog("exec reads the open duty", async {
+        while fixture.count("MessageGet") == 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(
+        !child.is_finished(),
+        "exec must keep waiting while the duty is open"
+    );
+
+    // The answer starts a later Run, whose model replies to the duty.
+    let answered = fixture
+        .control
+        .request(Request::new(
+            format!("{}:{}", fixture.owner.instance_id, uuid::Uuid::new_v4()),
+            Command::MessageReply(MessageReplyArgs {
+                message_id: question,
+                text: "Option A".into(),
+                sender_label: None,
+            }),
+        ))
+        .await;
+    assert!(answered.ok, "{:?}", answered.error);
+    fixture
+        .next(&mut child)
+        .await
+        .reply
+        .send(cli_call(&[
+            "message",
+            "reply",
+            "--message",
+            &duty,
+            "--text",
+            "42",
+        ]))
+        .unwrap();
+    let output = crate::test_watchdog::watchdog("reply result", child)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(
+        serde_json::from_slice::<Value>(&output.stdout).unwrap(),
+        json!(42)
+    );
+    // exec returned on the reply itself; the recipient's Turn then ends.
+    crate::test_watchdog::watchdog("recipient end", fixture.incoming.recv())
+        .await
+        .unwrap()
+        .unwrap()
+        .reply
+        .send(answer("Replied."))
+        .unwrap();
+    fixture.close().await;
+}
+
 // ---- shellboy chat: thin client over the same owner RPCs ----
 
 fn chat_command(fixture: &Fixture, args: &[&str]) -> tokio::process::Command {
