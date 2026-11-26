@@ -196,6 +196,6 @@ A refused edited send follows normal failed-receipt restoration; newer composer 
 
 Run-to-Run ownership and automatic child lifecycle/progress rows are superseded. Thread parentage remains for
 organization/forks. Each Run and its shells are inspected/stopped directly; one Run's stop does not cascade to
-another. TUI/Studio background styling denotes owned shell work, not a live child or pending reply. Child requests
+another. TUI and IPC client background styling denotes owned shell work, not a live child or pending reply. Child requests
 use explicit expected replies and ordinary message/progress rendering. Waiting-for-reply presentation comes from
 one recipient-tagged pending reply list; no child ownership row or parent-owned recovery replay is synthesized.

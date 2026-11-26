@@ -120,7 +120,7 @@ Zero, duplicate, malformed or oversized candidates are omitted, never
 resolved by choosing a winner. A shared node viewed in a different Thread does
 not receive this field. This is an additive read projection: no receipt write,
 index, migration, `operation_receipt` scan, payload JSON parse, or relation API
-change. Studio matches this ID only against its own plain-send pending records;
+change. A client matches this ID only against its own plain-send pending records;
 the field names the creating send/draft-edit/reply-delivery operation in Core
 general, not a claim about which verb the client invoked.
 
@@ -491,10 +491,9 @@ No target_tokens field remains. `thread.get.context_usage` uses bounded display
 readback: up to 33 recent Turns, 201 replacement candidates and 201 output
 candidates for the selected attempt. Incomplete evidence is explicit; an unknown
 `next_request_pending` is not false. `thread.get` does not include whole-Thread
-`usage_totals`; use `usage.get` for the exact aggregate. The #346 wire change is
-qualified with the Protocol 9 Studio pairing, after Protocols 7 and 8. Studio's
-Information view pulls `usage.get` when shown and displays unknown until that
-read succeeds. Conversation and sidebar reads do not fetch exact totals.
+`usage_totals`; use `usage.get` for the exact aggregate. A client view that
+shows the exact aggregate pulls `usage.get` when shown and displays unknown
+until that read succeeds. Conversation and sidebar reads do not fetch exact totals.
 
 ## Message sender inspection (#59)
 
@@ -1025,7 +1024,7 @@ retains its original connection; next-request lookup of a removed Thread connect
 
 `config.get.restart.all_fields_require_restart` changes to false. `loaded.values` and `differing_fields` account for
 live connection/default adoption. `loaded.content_hash` and `differs` remain startup-byte facts, not a restart gate.
-Consumers such as Studio must use the per-change flags/differing fields rather than infer restart from `differs`.
+Consumers must use the per-change flags/differing fields rather than infer restart from `differs`.
 
 Stage C review clarification: `applied_to_running_owner` means adopted by the owner registry. New Runs use that
 registry, while an already-active Run pins its start-time generation across tool continuations, admission refresh,
@@ -1089,7 +1088,7 @@ the model-independent config CLI. The next new Turn observes the repair.
 current live Run and its preparing or running Turn have the same bounded,
 validated automatic-compaction witness used by the TUI activity snapshot.
 Otherwise it is false. `last_compaction` is retained history, not current
-activity. Studio rereads `thread.get` after existing Thread change hints and
+activity. A client rereads `thread.get` after existing Thread change hints and
 uses only `summarizing` for the current indicator. This is not a progress estimate
 and adds no list field, event or polling path.
 
@@ -1135,7 +1134,7 @@ lookup was insufficient: parsing payload JSON before applying substring limits s
 
 ## Saved assistant response references on status attempts (#279)
 
-Durable `status` attempt WorkItems expose `response_nodes`, an output-item-ordered list of saved `assistant_response` references from the existing `output_item` rows for that exact `attempt_id`. Each entry preserves `ordinal`, nullable provider `item_id`, provider `kind`, nullable `phase`, and the saved `node_id`; repeated items that point at the same node remain repeated entries so item identity/order is not lost. Studio may pass `node_id` to `history.window`; it must not use `end_message_node_id` for intermediate attempts. That field remains exclusively the Turn's final answer pointer. For each attempt, the list contains only eligible assistant-response items found within the inspected candidate prefix. It can be empty because no row was saved yet/at all, because saved rows have no assistant-response node, or because all inspected candidates were ineligible. An empty list with `response_nodes_truncated=false` means the full candidate range was inspected and contained no eligible response; an empty list with `response_nodes_truncated=true` means later candidates were not inspected and eligible refs may exist. Failed/retried attempts retain their own refs; retries use different attempt IDs. Live-only observations use an empty list and `response_nodes_truncated=false` because they have no durable output-item ownership.
+Durable `status` attempt WorkItems expose `response_nodes`, an output-item-ordered list of saved `assistant_response` references from the existing `output_item` rows for that exact `attempt_id`. Each entry preserves `ordinal`, nullable provider `item_id`, provider `kind`, nullable `phase`, and the saved `node_id`; repeated items that point at the same node remain repeated entries so item identity/order is not lost. A client may pass `node_id` to `history.window`; it must not use `end_message_node_id` for intermediate attempts. That field remains exclusively the Turn's final answer pointer. For each attempt, the list contains only eligible assistant-response items found within the inspected candidate prefix. It can be empty because no row was saved yet/at all, because saved rows have no assistant-response node, or because all inspected candidates were ineligible. An empty list with `response_nodes_truncated=false` means the full candidate range was inspected and contained no eligible response; an empty list with `response_nodes_truncated=true` means later candidates were not inspected and eligible refs may exist. Failed/retried attempts retain their own refs; retries use different attempt IDs. Live-only observations use an empty list and `response_nodes_truncated=false` because they have no durable output-item ownership.
 
 The query first reads at most 257 rows from the existing `(attempt_id, ordinal)` primary-key range. It examines at most 256 candidate rows, publishes at most 64 eligible output-item refs, and sets `response_nodes_truncated=true` if either limit leaves a row unexamined. Thus truncated means the result is incomplete, not that omitted eligible responses are known to exist. There is no continuation cursor for this nested list; clients must not claim complete coverage, and an empty+truncated list must not be treated as proof no response was saved. No new index/table/migration is added.
 

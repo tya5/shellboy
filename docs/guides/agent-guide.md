@@ -63,7 +63,7 @@ The JSON's `result.text` contains the text; use `next_cursor` to continue. The f
 | The recent end (or a position) of a long Thread | `shellboy history window --thread THREAD_ID --before 20` | `--ordinal N --expect-node NODE_ID` to read around a position you saw; `cursor_expired` means the path changed, re-read from the end |
 | Search across guides, documents, and history | `shellboy rag search --scope ... --query ...` | rag get by reference; explicitly include the history scope |
 
-History provenance may include `client_operation_id` on a user node when its original receipt uniquely proves the ID. Studio uses it only to reconcile its own plain-send pending row; it is not a general command-kind marker and is absent when evidence is ambiguous or unavailable.
+History provenance may include `client_operation_id` on a user node when its original receipt uniquely proves the ID. A client uses it only to reconcile its own plain-send pending row; it is not a general command-kind marker and is absent when evidence is ambiguous or unavailable.
 
 Zero search hits or reading only one page is not proof of absence; check the command list in `shellboy --help`.
 
@@ -219,8 +219,8 @@ For a named Ask, the result `thread_id` identifies the asking Thread.
 If both destination flags are omitted, the recipient still defaults to `human`; `--deliver` requires a Thread recipient. Use `--thread`
 only to ask another Thread for a reply, never to ask your own Thread.
 
-When the person submits ordinary input in the asking Thread in Studio or the
-TUI, Shellboy admits it as the reply to the pending human question and closes
+When the person submits ordinary input in the asking Thread in the TUI or
+another client, Shellboy admits it as the reply to the pending human question and closes
 that duty. The reply is linked by `reply_to` and starts a Run if needed. A later
 external CLI reply (no model Origin) returns `invalid_state` (`reply is already
 terminal`). Never use `message reply` on your own question: the asking model

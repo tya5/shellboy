@@ -54,7 +54,7 @@ reply state and `reply.node_id`, including while assignment remains pending; do 
 For an external observer, explicit `wait` with `reply_received` remains an inspection option, not the delegation
 lifecycle. Ordinary progress updates use `message send`; there are no automatic child lifecycle notifications.
 
-The recipient Thread replies once the message is applied. A person may also answer in Studio or the TUI; the asking model cannot reply on the recipient's behalf:
+The recipient Thread replies once the message is applied. A person may also answer in the TUI or another client; the asking model cannot reply on the recipient's behalf:
 
 ```bash
 shellboy message reply --message CHILD_MESSAGE_ID --text 'Findings, evidence, and remaining work.'

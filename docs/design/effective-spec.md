@@ -252,7 +252,7 @@ Thread artifacts are versioned metadata only; see [Thread artifacts](thread-arti
 
 PTY、MCP、permission engine、pipeline、Windows本体からのWSL直接起動、
 常駐する所有外Run、モデル価格カタログ、RAG内部でのLLM生成は採用対象に含めない。
-Shellboy CoreにはWeb UIを含めず、別プロジェクト `shellboy-studio` を同一マシンの外部IPC client/bridgeとして扱う。
+Shellboy CoreにはWeb UIを含めない。ブラウザ向けのclientは同一マシンの外部IPC client/bridgeとして扱う。
 Thread archiveは#222 stage 1としてmainに実装済み。将来一般的なskill対応と衝突させず、同梱ガイドのコマンド名は `docs` とする。
 
 ## 人向けの状態と復旧契約

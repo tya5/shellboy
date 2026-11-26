@@ -3961,8 +3961,8 @@ move key is asked for, models re-parent Threads they do not own in practice (a c
 then be reconsidered), or trees deeper than 1,024 appear.
 ## D-266: Configuration read and write in the owner (2026-11-07)
 
-The user decided the core gets `config.get` and `config.set`, for the Web settings screen (shellboy-studio
-`docs/design/analytics-settings.md`, option A).
+The user decided the core gets `config.get` and `config.set`, for a Web settings
+screen in an IPC client.
 
 - **New dependency `toml_edit =0.25.19`.** Needed to change a value while keeping comments, order and untouched
   bytes; `toml` parses and serializes without them, and hand-editing by byte spans would duplicate a TOML parser
@@ -4110,7 +4110,7 @@ unchanged). Recheck when: tag sets with hundreds of thousands of members appear 
 (a suggestion or case-folding rule), or the Web UI needs `tags` on browser rows.
 ## D-269: Connection setup, stages A and B (2026-11-07)
 
-Issue #269, for the Studio first-run screen. The issue fixed the main shape (a stored key per connection, environment
+Issue #269, for an IPC client's first-run screen. The issue fixed the main shape (a stored key per connection, environment
 first, `credentials.set` / `credentials.clear`, `connection.test`, a key-source fact in `config.get`, stdin only,
 Unix `0600`, no keychain). Decisions below are mine where the issue was silent. No schema, table, worker, event, queue,
 dependency or migration is added (`toml_edit` and `toml` are already dependencies).
@@ -4119,7 +4119,7 @@ dependency or migration is added (`toml_edit` and `toml` are already dependencie
   table mirrors `config.toml` and leaves room for another per-connection secret without a format change. Beside the
   config file (not in the data directory) because the issue says "設定フォルダ" and the key then follows `--config`.
   Uncertain: a user who relocates the data directory keeps the keys with the config; a user who shares a config
-  folder shares the keys. Recheck with the first real Studio use.
+  folder shares the keys. Recheck with the first real client use.
 - **Plain text, 0600, replaced atomically**, reusing `config_edit::replace_atomically`/`replace_file` (including the
   Windows interrupted-replace recovery) with a `0600` temporary file. The Windows result (default ACL of the folder,
   an existing ACL kept by `ReplaceFileW`) is stated from the API documentation and was not run on Windows.
@@ -4131,7 +4131,7 @@ dependency or migration is added (`toml_edit` and `toml` are already dependencie
   keyless local use.
 - **A stored key works without `api_key_env`**, in `Authorization: Bearer`, unless `headers` defines `Authorization`
   (then the explicit header wins and `credentials.set` is refused). **`api_key_header` no longer requires `api_key_env`**
-  (coordinator request, 2026-11-07): the variable wins over a stored key on every request, so Studio writes
+  (coordinator request, 2026-11-07): the variable wins over a stored key on every request, so a client writes
   `api_key_env` only when the person chose a variable, and a typed key must not be overridden by an unrelated
   `ANTHROPIC_API_KEY`. The "header defined once" checks now key off either setting. With the header and no key from
   either source the request fails with a new `ConfigError::MissingKey` (same `config_missing` kind, text names
@@ -4176,7 +4176,7 @@ dependency or migration is added (`toml_edit` and `toml` are already dependencie
   can now disappear mid-Run. `config.set` applies the connections it just wrote while still holding `config_write`
   (the parsed result is in hand); `config.get` reports live connections as loaded, so `differing_fields` and
   `restart_required` become false for `connections.*` and `applied_to_running_owner` per change (a wire change for
-  Studio). Open decisions: (1) the connection named by `embedding.connection` keeps restart semantics because the
+  IPC clients). Open decisions: (1) the connection named by `embedding.connection` keeps restart semantics because the
   index profile key is computed once from `base_url` and model at `IndexService` construction (`index/mod.rs:357`);
   (2) removing a connection that the running `default_connection` still names, unless `default_connection` and
   `default_model` become live too (both are `hot_candidate`); (3) whether the TUI reads the registry directly (an

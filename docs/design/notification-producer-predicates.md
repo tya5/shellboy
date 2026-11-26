@@ -2,7 +2,6 @@
 
 SOURCE checkpoint only; no storage/wire/migration adoption or runtime changes.
 Core source: 69bae5b9591aee2023c13e782ec9df343a041323. Architect reference:
-Studio ec422bb8fd0810a786cc9d8c62766e77a0e7077c,
 notification-semantic-descriptor.md SHA256
 ff29162091c128c9c2c895791d534778a20b9ffe5614e28ea1442392803b0b31.
 
@@ -83,8 +82,7 @@ no user database or service is accessed. This checkpoint executes no qualificati
 ## Leader Adoption: Implementation Authorized
 
 Leader explicitly adopts Core302 storage/wire scope after S6 fc6c3cd0. Final
-architect contract: Studio commit d3e4fd71327e13403712e2943f2131d6742c5c46,
-file SHA256 b68642d764e1f2a4675cba4dbd4d1d16aaab06b364a7f62d0613eba2ae4b63c2.
+architect contract: file SHA256 b68642d764e1f2a4675cba4dbd4d1d16aaab06b364a7f62d0613eba2ae4b63c2.
 The candidate language above is historical SOURCE investigation, superseded for
 implementation by this adoption and the final architect contract.
 

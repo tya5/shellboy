@@ -3,7 +3,7 @@
 Adopted recording-only contract. Implementation and validation are recorded in
 status/acceptance separately. S1 changes no adoption, retry, suppression, #A,
 settings or scheduling decision. S2 suppression, S3 adoption, S4 running progress
-and S5 Studio rendering are separate reviewed units.
+and S5 client rendering are separate reviewed units.
 
 ## One Current Fact
 
@@ -130,7 +130,7 @@ Paired vectors are explicit pre-S1 semantics, not paid/live comparisons.
    disabled/full logger cannot undo adoption or manufacture success.
 9. All current consumers/schema migrate atomically: dynamic compact.list, status
    page/point and existing thread.get projection; historical facts unchanged;
-   no progress/Studio writer or compatibility layer hidden in S1.
+   no progress/client writer or compatibility layer hidden in S1.
 
 ## Implementation Ownership And Equivalence Map
 

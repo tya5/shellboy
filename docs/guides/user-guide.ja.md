@@ -142,7 +142,7 @@ shellboy --config /path/to/config.toml --data-dir /path/to/shellboy-data
 
 引数なしの起動には対話端末が必要です。同じdata-dirではownerを二重起動できません。別ターミナルからのサブコマンドは起動済みownerを使い、ownerを自動起動しません。独立した環境が必要なら別のdata-dirを選びます。
 
-サポートに共有する場合は構造化されたownerログ（`logs/shellboy.log`）の該当箇所を使ってください。Studioの`owner.log`を含むクラッシュ時のstderrはローカルの生ログであり、そのまま共有しないでください。
+サポートに共有する場合は構造化されたownerログ（`logs/shellboy.log`）の該当箇所を使ってください。clientが保存した`owner.log`などのクラッシュ時のstderrはローカルの生ログであり、そのまま共有しないでください。
 
 Windowsでは、ローカルNTFSへリダイレクトされたフォルダーや、ローカルに保存されたOneDriveフォルダーを利用できます。SQLiteのWALにはローカルストレージが必要なため、UNC共有やネットワークドライブは `details.reason=network_data_directory` で拒否されます。`shellboy --data-dir PATH` でローカルの保存先を指定してください。保存先の最後のパス要素をシンボリックリンクにすることはできません。モデルが使うシェルについては [Windowsのシェル](shell.md#windows-shell-notes) を参照してください。
 
@@ -335,7 +335,7 @@ F1で説明を確認できます。Enterは操作に応じて表示・実行・�
 
 `CONNECTION`と`MODEL_ID`は実際の設定値へ置き換えます。一覧は接続先から取得し、モデルや対応effortをShellboyが内蔵しているわけではありません。接続先がembedding等も列挙した場合は一覧に含まれ、会話APIで使える保証ではありません。取得未対応の接続先では `/model CONNECTION MODEL_ID` で直接指定できます。`/effort none`はeffort指定を解除し、モデルへ`none`を必ず送る指示ではありません。モデル変更でも既存effortは保持するので、必要なら明示的に変更・解除します。
 
-同じ LiteLLM proxy を Responses と Anthropic Messages で使い分ける場合は、接続ごとに `models.include = ["gpt-*"]` または `models.include = ["claude-*"]` を設定して一覧を絞れます。`models.exclude = ["*-preview"]` で一致するIDを除外できます。CLI・TUI・Studioで同じ一覧を表示しますが、一覧にないIDも直接指定できます。設定変更の結果に owner の再起動が必要かどうかが表示されます。[設定ガイド](configuration.md)も参照してください。
+同じ LiteLLM proxy を Responses と Anthropic Messages で使い分ける場合は、接続ごとに `models.include = ["gpt-*"]` または `models.include = ["claude-*"]` を設定して一覧を絞れます。`models.exclude = ["*-preview"]` で一致するIDを除外できます。CLI・TUI・IPC clientで同じ一覧を表示しますが、一覧にないIDも直接指定できます。設定変更の結果に owner の再起動が必要かどうかが表示されます。[設定ガイド](configuration.md)も参照してください。
 
 変更は以後の要求に反映され、既に送信済みの通信を書き換えません。接続・モデル変更では推論の送信epochも変わり、元モデルへ戻しても古いopaque reasoningを自動復活しません。会話原文は残ります。
 

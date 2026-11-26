@@ -19,7 +19,7 @@ pub(crate) const CLI_ONLY_OWNER_OPERATIONS: &[OperationId] = &[
     OperationId::ScheduleEnable,
     OperationId::ScheduleDisable,
     OperationId::ScheduleRemove,
-    // Pending replies (#317): CLI/protocol and Studio, no generated TUI form.
+    // Pending replies (#317): CLI/protocol and IPC clients, no generated TUI form.
     OperationId::MessageList,
 ];
 

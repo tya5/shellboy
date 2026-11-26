@@ -36,7 +36,7 @@ lower stack; section 6 is the outline for the on-site part.
 | Tags, re-parent | Core + CLI | #222 stages 2-3 | Archive, re-parent, tags, `thread cwds`, and list cwd filter landed on main |
 | Knowledge | CLI + files | `rag`, `history search`, plain files | Exists |
 | Cheaper index | Core | #253, #254 | API-free int8 conversion and explicit remove/revert behavior (#253); configurable automatic node kinds (#254) are on main |
-| Web UI | Bridge (separate repo `shellboy-studio`) | Local IPC to the owner; HTTP/WebSocket to the browser on localhost | Not usable yet per its README |
+| Web UI | External bridge (separate project) | Local IPC to the owner; HTTP/WebSocket to the browser on localhost | Outside Core; not verified by Core |
 | TUI on a running owner | Core | #247 | Study only; not a prerequisite |
 | Spend limit | External | Provider or LiteLLM budget | No spend limit in Shellboy |
 | Liveness, failure alerts | External | Scheduler history, on-site monitor | Not Shellboy's |
@@ -75,9 +75,9 @@ Run; retry by generation CAS; one reply per message; reply only after applicatio
 | #256 (closed) | Stop, retry and shell write/EOF/stop have no caller authority check; landed at `5e140d3011` | This is not an OS boundary |
 | #259 (closed) | Removes the listed non-boundary restrictions on message actors/recipients and `exec` input size; landed at `dfffde451f` | OS/user-account permissions remain the boundary |
 | #261 (closed) | Data cap defaults to 50 GiB, warning at 40 GiB, and admission floor at 5 GiB; landed at `facc05669c` | Already-running command writes are not stopped |
-| #263 (closed) | Recovery-wait external CLI messages and explicit `--resume-recovery`; landed at `9a07276e5a` | Studio/provider behavior was not exercised in its acceptance |
+| #263 (closed) | Recovery-wait external CLI messages and explicit `--resume-recovery`; landed at `9a07276e5a` | IPC client/provider behavior was not exercised in its acceptance |
 | #275 | Protocol 4 adds separately opt-in reasoning activity to `events.wait`; landed on main at `482e7ead` | Exact-tip standard/all-OS CI was pending in the main status record snapshot |
-| #262 (closed) | `message ask`, human-recipient reply duties, per-Thread inbox and TUI region; landed at `6960a27e3f` | No cross-Thread inbox; real Studio behavior was not exercised in its acceptance |
+| #262 (closed) | `message ask`, human-recipient reply duties, per-Thread inbox and TUI region; landed at `6960a27e3f` | No cross-Thread inbox; real IPC client behavior was not exercised in its acceptance |
 | #272/#273 | Model-grouped usage (grouped compaction totals at `16784db966`) and `--since-node` branch-relative usage with branch kind (#273 at `c54ed50c98`, finalized `dc98c52cb3`) | Grouped compaction follow-up is represented by open PR #223; its reviewed delta is separate from already-landed behavior |
 
 ## 3. Owner modes
@@ -109,7 +109,7 @@ explicit decision; elapsed time alone does not resume it.
 | R7 | Archive can hide a question | #262 unarchives when a question is created. An archive afterwards hides the Thread's pending count from the default list | Cleanup excludes Threads with a pending count. #262 should settle whether `thread archive` reports them |
 | R8 | Question cap versus "can accumulate" | Superseded by #262 decision (2026-11-08): 16 pending duties per recipient Thread, including human asks | Reject the 17th ask with `reply_limit`; withdraw a request you sent, or wait for a reply |
 | R9 | Disk guard limit | A running command's own writes are not stopped. Free space that cannot be read does not hold work | Stated in #261; guide text with it |
-| R10 | Web readiness | Protocol 4 and generated schema (#244/#275) are on main; the separate `shellboy-studio` bridge's usability was not verified by these Core changes | Keep TUI or CLI as the fallback until the bridge itself is checked |
+| R10 | Web readiness | Protocol 4 and generated schema (#244/#275) are on main; a separate browser bridge's usability was not verified by these Core changes | Keep TUI or CLI as the fallback until the bridge itself is checked |
 
 ## 5. Windows: check on a real machine
 

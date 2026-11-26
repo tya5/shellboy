@@ -295,7 +295,7 @@ because the file is the one the owner loaded. `config init` and `config check` r
 
 ## Stored API keys and connection test (#269)
 
-Stage A and B of the owner-side connection setup. A client (the Studio first-run screen, the CLI) can store a key,
+Stage A and B of the owner-side connection setup. A client (an IPC client's first-run screen, the CLI) can store a key,
 check a connection and see where each key comes from without a hand-edited TOML file. No new worker, table, event or
 queue: the file work runs on `AttachmentService::control_files()` under `config_write`, the catalog request reuses
 `HttpModelClient::models`, and the key is read by the lazy credential lookup in `Connection::credentials_with`.
