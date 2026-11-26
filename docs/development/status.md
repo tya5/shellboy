@@ -46,6 +46,13 @@ read yet. They are listed in
 [the TUI client design](../design/tui-client.md#unit-4d-cutover-gaps);
 resume when each has an approved owner read.
 
+Slice 2 (live work) is on `task/core311-4d-s2-live`: shell waits on
+`shell.list`/`shell.get`, the index pause from `index.status` and context
+usage from the display `thread.get` replace the TUI's wait registry, pause and
+context-usage private reads
+([design](../design/tui-client.md#live-work-and-header-facts-4d-slice-2)).
+The rest of the activity projection is still a private snapshot read.
+
 ## Core #311 selected history client (4e/4f)
 
 The TUI's selected view, history pages, windows, rebases, saved-message

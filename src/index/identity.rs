@@ -179,15 +179,17 @@ impl IndexService {
         Ok(())
     }
 
+    /// One read-only owner snapshot; it does not wait behind index writes.
     pub async fn status(&self, args: IndexArgs) -> Result<IndexStatus, ApiError> {
         let keys = self.identity_keys();
         let family = self.endpoint_family_key.clone();
         let auto_history = self.config.indexing.auto_history;
-        let mut status = self
-            .database
-            .call(move |db| read_status(db, args, keys, family, auto_history))
-            .await
-            .map_err(db_error)?;
+        let mut status = crate::control::db::read_only(&self.database, "IndexStatus", move |db| {
+            let mut status = read_status(db, args, keys.clone(), family.clone(), auto_history)?;
+            observations::enrich(db, &mut status, &keys, family.as_deref())?;
+            Ok(status)
+        })
+        .await?;
         status.auto_kinds = self.config.indexing.auto_kinds.clone();
         if let Some(reason) = self.storage_stop_reason() {
             status.paused = true;
@@ -196,15 +198,7 @@ impl IndexService {
                 None => reason,
             });
         }
-        let keys = self.identity_keys();
-        let family = self.endpoint_family_key.clone();
-        self.database
-            .call(move |db| {
-                observations::enrich(db, &mut status, &keys, family.as_deref())?;
-                Ok(status)
-            })
-            .await
-            .map_err(db_error)
+        Ok(status)
     }
     pub(super) async fn next_delay(&self) -> Result<Option<Duration>, ApiError> {
         let keys = self.identity_keys();

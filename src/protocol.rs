@@ -320,6 +320,7 @@ pub fn schema_json() -> String {
     add_root!("StatusMemoryCache", StatusMemoryCache);
     add_root!("StatusMemoryMetric", StatusMemoryMetric);
     add_root!("ShellListItem", ShellListItem);
+    add_root!("ShellWait", ShellWait);
     add_root!("ShellListResult", ShellListResult);
     add_root!("TimeWindowResult", TimeWindowResult);
     add_root!("UsageNumber", UsageNumber);
@@ -2444,8 +2445,19 @@ record!(TurnDetails { #[serde(default, skip_serializing_if = "Option::is_none")]
 // Optional shell fields describe unknown/live lifecycle facts and the internal
 // output-reader snapshot, which deliberately does not load command ownership.
 // They are not an older-owner protocol compatibility contract.
+// A wait this shell is running now: the owner's live registration of the
+// operation matches its saved pending record. Absent when no such wait exists;
+// a shell running several waits reports the earliest accepted one.
+record!(ShellWait {
+    operation_id: String,
+    accepted_at: String,
+    timeout_ms: u64,
+    condition_count: u32,
+    first_condition: WaitCondition
+});
 record!(ShellDetails {
     #[serde(default, skip_serializing_if = "Option::is_none")] foreground: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] wait: Option<ShellWait>,
     execution_id: String, run_id: Option<String>, state: ShellState, output_complete: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")] schedule_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")] started_at: Option<String>,
@@ -2843,6 +2855,7 @@ record!(StorageAdvisory {
 record!(StorageStatus { #[serde(default, skip_serializing_if = "Vec::is_empty")] advisories: Vec<StorageAdvisory>, logical_live_bytes: u64, reclaimable_bytes: u64, db_bytes: u64, wal_bytes: u64, managed_bytes: u64, log_bytes: u64, #[serde(default, skip_serializing_if = "Option::is_none")] filesystem_free_bytes: Option<u64>, warning_bytes: u64, limit_bytes: u64 });
 record!(ShellListItem {
     #[serde(default, skip_serializing_if = "Option::is_none")] foreground: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] wait: Option<ShellWait>,
     execution_id: String,
     run_id: String,
     thread_id: String,

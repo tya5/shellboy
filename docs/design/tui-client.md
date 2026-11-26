@@ -234,10 +234,10 @@ context usage, and the detail panel's current tool executions.
 read or wake below goes through the owner protocol. Recorded at the 4d
 checkpoint (4a–4g stacked); not a mechanism proposal.
 
-Existing reads cover these (migration only): context usage
-(`thread.get` `context_usage`), the branch list (`thread.branches`), the
+Existing reads cover these (migration only): the branch list
+(`thread.branches`), the
 in-process command dispatch (`Thread` create/set, the management fallback) over
-the selected endpoint, index pause value (`index.status` `paused`/`reason`),
+the selected endpoint,
 compaction markers (`compact.list` plus node provenance `attempt_id`), the
 detail panel's current executions (`history.window` `observe_node_ids`;
 parity of its has-output bit is unchecked), and
@@ -249,8 +249,6 @@ No protocol read or wake fact exists for these:
   and `message.get` carry sender and reply state but not the delivery reason.
 - Branch markers for the visible nodes. `thread.branches` pages the family at
   most 200 Threads per page, so a marker for one visible node can need every page.
-- Wait-to-shell relations for live work. The owner's pending wait registry is
-  in memory; the saved run wait reason has no waited execution.
 - Wakes that `events.wait` does not report: index saved/pause change, storage
   availability change, management owner-state hint, and committed output
   across the visible and watched executions (`wait` `shell_output` covers one
@@ -259,6 +257,21 @@ No protocol read or wake fact exists for these:
   (index coverage window, storage physical sample, lifecycle, saved, operation,
   attachment and deletion inspections). The protocol records lack, for
   example, the index coverage window.
+
+### Live work and header facts (4d slice 2)
+
+The selected activity takes each running shell's wait from `shell.list`
+(`wait`, written by the owner only while its live registration matches the
+saved pending record) for the selected Thread, at most 128 running shells in
+one page; a page that does not cover them leaves the wait count unknown. The
+activity snapshot keeps the waits of the selected Run and replaces each waiting
+shell's row with its wait. The index pause comes from `index.status`
+(`paused`, with `reason` classified as before; a reason that carries an
+appended explanation shows as another pause), and context usage from the
+header's `thread.get` `context_usage`. All three are owner reads on the
+read-only lane, so the current view still does not wait behind the writer.
+The remaining activity projection (Run, Turn, attempt and shell rows) is still
+a private snapshot read.
 
 ### Draft save and selected view
 

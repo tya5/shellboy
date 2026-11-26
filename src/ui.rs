@@ -877,15 +877,6 @@ pub struct ContextUsage {
     pub cached_tokens: Option<u64>,
     pub output_tokens: Option<u64>,
 }
-impl From<crate::usage::StandardUsage> for ContextUsage {
-    fn from(u: crate::usage::StandardUsage) -> Self {
-        Self {
-            input_tokens: u.input_tokens,
-            cached_tokens: u.cached_tokens,
-            output_tokens: u.output_tokens,
-        }
-    }
-}
 
 #[derive(Clone, Debug)]
 pub enum UiUpdate {
