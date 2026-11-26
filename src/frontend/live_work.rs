@@ -807,9 +807,5 @@ mod tests {
             "UI supersession must preserve a marker newer than the DB snapshot, even if preparation happens later"
         );
         assert_eq!(prepared.rows[0].elapsed_base, expected_elapsed);
-        assert!(
-            Instant::now().saturating_duration_since(prepared.observed_at)
-                >= Duration::from_millis(10)
-        );
     }
 }

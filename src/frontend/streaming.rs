@@ -208,10 +208,6 @@ impl Display {
         window.body.dirty = false;
         #[cfg(test)]
         {
-            super::stream_metrics::snapshot(
-                window.body.text.len()
-                    + window.body.reasoning_ranges.len() * std::mem::size_of::<(usize, usize)>(),
-            );
             self.snapshots += 1;
             self.cloned_bytes += window.body.text.len()
                 + window.body.reasoning_ranges.len() * std::mem::size_of::<(usize, usize)>();
@@ -280,7 +276,6 @@ impl Prepared {
         // with terminal persistence. Formatting and queue waits never run here.
         let queued = control.store.database.call(move |db| {
             if cancel.is_cancelled() { return Ok(Admission::Cancelled); }
-            #[cfg(test)] let _gate = super::stream_metrics::Gate::start();
             let mut frame = frame;
             let running: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM model_attempt a JOIN turn u ON u.id=a.turn_id JOIN run r ON r.id=u.run_id JOIN thread t ON t.id=u.thread_id WHERE a.id=?1 AND u.thread_id=?2 AND a.state='inflight' AND a.generation=u.generation AND a.selection_revision=t.selection_revision AND u.state='running' AND r.state='live' AND t.deleted_at IS NULL)", rusqlite::params![frame.ticket.attempt, frame.ticket.thread], |row| row.get(0))?;
             if running && frame.node.as_ref().is_some_and(|node|node.text.is_empty()) { return Ok(Admission::Unchanged); }

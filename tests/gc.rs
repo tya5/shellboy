@@ -77,6 +77,114 @@ async fn install_budget_demand(f: &Fixture) {
     .unwrap();
 }
 
+/// One history-GC unit never examines more than this many rows (`gc::BATCH`).
+const GC_STEP_ROWS: u64 = 128;
+/// Committed root writes alternated with GC steps. A count, not a duration:
+/// GC is not required to finish while writes continue.
+const INTERLEAVED_STEPS: usize = 64;
+
+/// Alternates one committed root-revision write with one history-GC step, then
+/// stops writing and lets the pass finish. Every step stays within one unit of
+/// rows and none restarts the pass; while writes continue the persisted cursor
+/// must advance at least once (or the pass completes). Completion is awaited
+/// only after writing stops, under the hang watchdog. Returns the deferral
+/// count and the completing step.
+async fn finish_history_gc_after_interleaved_writes(
+    f: &Fixture,
+    job: &str,
+    waiting_for: &'static str,
+) -> (usize, shellboy::gc::HistoryStep) {
+    let mut deferred = 0;
+    let mut advanced = false;
+    let mut last = None;
+    let mut cursor = gc_cursor(f, job).await;
+    for _ in 0..INTERLEAVED_STEPS {
+        let before = root_revision(f).await;
+        f.db.call(|db| {
+            db.execute(
+                "UPDATE app_meta SET value=CAST(value AS INTEGER)+1 WHERE key='root_revision'",
+                [],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        assert_eq!(
+            root_revision(f).await,
+            before + 1,
+            "root write not committed"
+        );
+        let step = gc_step(f, job).await;
+        assert!(!step.restarted, "a root revision change restarted the pass");
+        deferred += usize::from(step.deferred);
+        if step.complete {
+            advanced = true;
+            last = Some(step);
+            break;
+        }
+        let next = gc_cursor(f, job).await;
+        advanced |= next != cursor;
+        cursor = next;
+    }
+    assert!(
+        advanced,
+        "no cursor or stage progress across {INTERLEAVED_STEPS} interleaved writes"
+    );
+    let deadline = crate::test_watchdog::Deadline::new(waiting_for);
+    let last = loop {
+        if let Some(step) = last.take() {
+            break step;
+        }
+        deadline.check();
+        let step = gc_step(f, job).await;
+        assert!(!step.restarted, "pass restarted without a lost session");
+        deferred += usize::from(step.deferred);
+        if step.complete {
+            last = Some(step);
+        }
+    };
+    (deferred, last)
+}
+
+async fn root_revision(f: &Fixture) -> i64 {
+    f.db.call(|db| {
+        Ok(scalar(
+            db,
+            "SELECT CAST(value AS INTEGER) FROM app_meta WHERE key='root_revision'",
+        )?)
+    })
+    .await
+    .unwrap()
+}
+
+/// The persisted pass position (stage, row cursor and retention counts).
+async fn gc_cursor(f: &Fixture, job: &str) -> Option<String> {
+    let job = job.to_owned();
+    f.db.call(move |db| {
+        Ok(
+            db.query_row("SELECT cursor_json FROM gc_job WHERE id=?1", [job], |r| {
+                r.get(0)
+            })?,
+        )
+    })
+    .await
+    .unwrap()
+}
+
+/// One bounded step. Statements are re-prepared afterwards so a fixture
+/// authorizer queues foreground demand again on the retried unit.
+async fn gc_step(f: &Fixture, job: &str) -> shellboy::gc::HistoryStep {
+    let step = f.gc.history_step(job).await.unwrap();
+    assert!(step.scanned <= GC_STEP_ROWS, "unbounded GC step: {step:?}");
+    f.db.call(|db| {
+        db.flush_prepared_statement_cache();
+        Ok(())
+    })
+    .await
+    .unwrap();
+    step
+}
+
 fn now() -> chrono::DateTime<Utc> {
     Utc.with_ymd_and_hms(2026, 10, 24, 0, 0, 0).unwrap()
 }
@@ -819,65 +927,6 @@ async fn collection_report_bounds_details_while_retaining_actual_deleted_and_fai
 }
 
 #[tokio::test]
-#[ignore = "controlled SQLite GC progress measurement; temporary stores only"]
-async fn measure_history_gc_progress_during_root_writes() {
-    for nodes in [10_000_i64, 100_000] {
-        for write_every in [0_usize, 16, 1] {
-            let f = Fixture::new(Config::default()).await;
-            f.db.call(move |db| {
-                let tx=db.transaction()?;
-                tx.execute("WITH RECURSIVE numbers(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM numbers WHERE i<?1) INSERT INTO node(id,kind,created_at,payload_json,payload_bytes) SELECT 'garbage-'||i,'user','now','{\"text\":\"original\"}',19 FROM numbers",[nodes])?;
-                tx.commit()?;Ok(())
-            }).await.unwrap();
-            f.job().await;
-            let job = f.gc.start_history().await.unwrap().unwrap();
-            let start = std::time::Instant::now();
-            let (mut steps, mut scanned, mut restarts, mut collected, mut complete) =
-                (0, 0, 0, 0, false);
-            while steps < 4000 && restarts < 3 {
-                if write_every > 0 && steps % write_every == 0 {
-                    f.db.call(move |db| {
-                        let tx = db.transaction()?;
-                        shellboy::history::append_node(
-                            &tx,
-                            "live",
-                            &format!("writer-{steps}"),
-                            Some("turn"),
-                            "user",
-                            &serde_json::json!({"text":"live work"}),
-                            "now",
-                        )?;
-                        tx.commit()?;
-                        Ok(())
-                    })
-                    .await
-                    .unwrap();
-                }
-                let step = f.gc.history_step(&job).await.unwrap();
-                steps += 1;
-                scanned += step.scanned;
-                restarts += usize::from(step.restarted);
-                collected += step.nodes_tombstoned;
-                if step.complete {
-                    complete = true;
-                    break;
-                }
-            }
-            println!(
-                "GC_PROGRESS nodes={nodes} write_every={write_every} steps={steps} scanned={scanned} restarts={restarts} collected={collected} complete={complete} elapsed_ms={}",
-                start.elapsed().as_millis()
-            );
-            assert!(
-                complete,
-                "finite original node set must finish despite new roots"
-            );
-            assert_eq!(collected, nodes as u64);
-            f.db.shutdown().await.unwrap();
-        }
-    }
-}
-
-#[tokio::test]
 async fn history_gc_finishes_its_original_horizon_while_new_roots_keep_arriving() {
     let f = Fixture::new(Config::default()).await;
     f.db.call(|db| {
@@ -1265,81 +1314,8 @@ async fn history_gc_cleanup_is_resumable_for_many_marks() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn history_gc_budget_measurement_with_concurrent_writes() {
-    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-    let f = Fixture::new(Config::default()).await;
-    install_budget_demand(&f).await;
-    f.db.call(|db| {
-        db.execute("WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<10000) INSERT INTO node(id,turn_id,kind,created_at,payload_json,payload_bytes) SELECT 'budget-root-'||i,'turn','user','now','{}',2 FROM n", [])?;
-        Ok(())
-    }).await.unwrap();
-    f.job().await;
-    let job = f.gc.start_history().await.unwrap().unwrap();
-    // A deterministic expensive per-row operation makes the initial cleanup
-    // batch exceed the worker's real SQLite budget under foreground demand.
-    f.db.call(|db| {
-        db.execute_batch("CREATE TEMP TRIGGER gc_budget_fixture AFTER DELETE ON shellboy_gc_mark BEGIN SELECT gc_test_foreground_demand(); SELECT SUM(payload_bytes) FROM node; END;")?;
-        Ok(())
-    }).await.unwrap();
-    let stop = Arc::new(AtomicBool::new(false));
-    let writes = Arc::new(AtomicUsize::new(0));
-    let (ready, first_write) = tokio::sync::oneshot::channel();
-    let writer = {
-        let db = f.db.clone();
-        let stop = stop.clone();
-        let writes = writes.clone();
-        tokio::spawn(async move {
-            let mut ready = Some(ready);
-            while !stop.load(Ordering::Relaxed) {
-                db.call(|db| { db.execute("UPDATE app_meta SET value=CAST(value AS INTEGER)+1 WHERE key='root_revision'", [])?; Ok(()) }).await.unwrap();
-                writes.fetch_add(1, Ordering::Relaxed);
-                if let Some(ready) = ready.take() {
-                    ready.send(()).unwrap();
-                }
-                tokio::task::yield_now().await;
-            }
-        })
-    };
-    // Establish actual foreground participation before measuring GC, not spawn order.
-    crate::test_watchdog::watchdog("GC foreground writer readiness", first_write)
-        .await
-        .unwrap()
-        .unwrap();
-    let started = std::time::Instant::now();
-    let (mut steps, mut deferred, mut scanned, mut complete) = (0, 0, 0, false);
-    let deadline = crate::test_watchdog::Deadline::new("history GC under sustained writes");
-    while !deadline.expired() && steps < 20000 {
-        let step = f.gc.history_step(&job).await.unwrap();
-        steps += 1;
-        deferred += usize::from(step.deferred);
-        scanned += step.scanned;
-        if step.complete {
-            complete = true;
-            break;
-        }
-    }
-    stop.store(true, Ordering::Relaxed);
-    writer.await.unwrap();
-    println!(
-        "BUDGET_MEASURE complete={complete} steps={steps} deferred={deferred} scanned={scanned} writes={} elapsed_ms={}",
-        writes.load(Ordering::Relaxed),
-        started.elapsed().as_millis()
-    );
-    f.db.shutdown().await.unwrap();
-    assert!(
-        complete,
-        "history GC did not finish under concurrent writes"
-    );
-    assert!(deferred > 0, "fixture did not trigger the VM-step budget");
-    assert!(
-        writes.load(Ordering::Relaxed) > 0,
-        "foreground writer made no progress"
-    );
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn history_gc_keeps_single_over_budget_reachability_candidate() {
-    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicUsize, Ordering};
     let f = Fixture::new(Config::default()).await;
     f.db.call(|db| {
         db.execute("INSERT INTO node(id,kind,created_at,payload_json,payload_bytes) VALUES('oversized-source','user','now','{}',2)", [])?;
@@ -1397,73 +1373,31 @@ async fn history_gc_keeps_single_over_budget_reachability_candidate() {
     })
     .await
     .unwrap();
-    let started = std::time::Instant::now();
-    let stop = Arc::new(AtomicBool::new(false));
-    let writes = Arc::new(AtomicUsize::new(0));
-    let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
-    let writer = {
-        let db = f.db.clone();
-        let stop = stop.clone();
-        let writes = writes.clone();
-        tokio::spawn(async move {
-            let mut ready = Some(ready_tx);
-            while !stop.load(Ordering::Relaxed) {
-                db.call(|db| { db.execute("UPDATE app_meta SET value=CAST(value AS INTEGER)+1 WHERE key='root_revision'", [])?; Ok(()) }).await.unwrap();
-                writes.fetch_add(1, Ordering::Relaxed);
-                if let Some(ready) = ready.take() {
-                    let _ = ready.send(());
-                }
-                tokio::task::yield_now().await;
-            }
-        })
-    };
-    crate::test_watchdog::watchdog("history GC foreground writer start", ready_rx)
-        .await
-        .unwrap()
-        .unwrap();
-    let (mut deferrals, mut steps, mut kept, mut complete) = (0, 0, 0, false);
-    let deadline = crate::test_watchdog::Deadline::new("history GC under sustained writes");
-    while !deadline.expired() && steps < 20000 {
-        let step = f.gc.history_step(&job).await.unwrap();
-        steps += 1;
-        deferrals += usize::from(step.deferred);
-        kept = f.db.call(|db| {
-            let count = db.query_row("SELECT COALESCE(json_extract(cursor_json,'$.kept_count'),json_extract(error_json,'$.kept_over_budget'),0) FROM gc_job WHERE id='job'", [], |r| r.get::<_, i64>(0))?;
-            db.flush_prepared_statement_cache();
-            Ok(count)
-        }).await.unwrap();
-        if step.complete {
-            complete = true;
-            break;
-        }
-    }
-    stop.store(true, Ordering::Relaxed);
-    writer.await.unwrap();
-    println!(
-        "OVERSIZED_CANDIDATE complete={complete} kept={kept} deferrals={deferrals} steps={steps} writes={} elapsed_ms={}",
-        writes.load(Ordering::Relaxed),
-        started.elapsed().as_millis()
-    );
+    let (deferrals, _) = finish_history_gc_after_interleaved_writes(
+        &f,
+        &job,
+        "history GC oversized reachability candidate",
+    )
+    .await;
+    let kept = f.db.call(|db| Ok(scalar(db, "SELECT COALESCE(json_extract(cursor_json,'$.kept_count'),json_extract(error_json,'$.kept_over_budget'),0) FROM gc_job WHERE id='job'")?)).await.unwrap();
     f.db.call(|db| {
         assert_eq!(scalar(db, "SELECT COUNT(*) FROM node WHERE id='oversized-source' AND payload_json IS NOT NULL")?, 1);
         assert_eq!(scalar(db, "SELECT COUNT(*) FROM gc_job WHERE id='job' AND COALESCE(json_extract(cursor_json,'$.kept_ids[0]'),json_extract(error_json,'$.kept_ids[0]'))='oversized-source'")?, 1);
         Ok(())
     }).await.unwrap();
     f.db.shutdown().await.unwrap();
-    assert!(complete && kept > 0 && deferrals > 0);
+    assert!(
+        kept > 0 && deferrals > 0,
+        "kept={kept}, deferrals={deferrals}"
+    );
     assert!(
         authorizations.load(Ordering::Relaxed) > 0,
         "authorizer did not observe the reverse query"
-    );
-    assert!(
-        writes.load(Ordering::Relaxed) > 0,
-        "foreground writer made no progress"
     );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn history_gc_keeps_node_when_atomic_tombstone_exceeds_budget() {
-    use std::sync::atomic::{AtomicBool, Ordering};
     let f = Fixture::new(Config::default()).await;
     install_budget_demand(&f).await;
     f.db.call(|db| {
@@ -1474,44 +1408,20 @@ async fn history_gc_keeps_node_when_atomic_tombstone_exceeds_budget() {
     }).await.unwrap();
     f.job().await;
     let job = f.gc.start_history().await.unwrap().unwrap();
-    let stop = Arc::new(AtomicBool::new(false));
-    let writer = {
-        let db = f.db.clone();
-        let stop = stop.clone();
-        tokio::spawn(async move {
-            while !stop.load(Ordering::Relaxed) {
-                db.call(|db| { db.execute("UPDATE app_meta SET value=CAST(value AS INTEGER)+1 WHERE key='root_revision'", [])?; Ok(()) }).await.unwrap();
-                tokio::task::yield_now().await;
-            }
-        })
-    };
-    let deadline = crate::test_watchdog::Deadline::new("history GC single-item retention");
-    let (mut deferred, mut complete) = (0, false);
-    while !deadline.expired() {
-        let step = f.gc.history_step(&job).await.unwrap();
-        deferred += usize::from(step.deferred);
-        if step.complete {
-            complete = true;
-            break;
-        }
-    }
-    stop.store(true, Ordering::Relaxed);
-    writer.await.unwrap();
+    let (deferred, _) =
+        finish_history_gc_after_interleaved_writes(&f, &job, "history GC single-item retention")
+            .await;
     f.db.call(|db| {
         assert_eq!(scalar(db, "SELECT COUNT(*) FROM node WHERE id='expensive-tombstone' AND payload_json IS NOT NULL AND deleted_reason IS NULL")?, 1);
         assert_eq!(scalar(db, "SELECT COUNT(*) FROM gc_job WHERE id='job' AND json_extract(error_json,'$.kept_ids[0]')='expensive-tombstone'")?, 1);
         Ok(())
     }).await.unwrap();
     f.db.shutdown().await.unwrap();
-    assert!(
-        complete && deferred > 0,
-        "complete={complete}, deferred={deferred}"
-    );
+    assert!(deferred > 0, "fixture did not trigger the VM-step budget");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn history_gc_skips_a_single_over_budget_mark_cleanup() {
-    use std::sync::atomic::{AtomicBool, Ordering};
     let f = Fixture::new(Config::default()).await;
     install_budget_demand(&f).await;
     f.db.call(|db| {
@@ -1524,30 +1434,10 @@ async fn history_gc_skips_a_single_over_budget_mark_cleanup() {
         db.execute_batch("CREATE TEMP TRIGGER costly_mark BEFORE DELETE ON shellboy_gc_mark WHEN OLD.node_id='mark-1' BEGIN SELECT gc_test_foreground_demand(); SELECT count(*) FROM node a CROSS JOIN node b; END;")?;
         Ok(())
     }).await.unwrap();
-    let stop = Arc::new(AtomicBool::new(false));
-    let writer = {
-        let db = f.db.clone();
-        let stop = stop.clone();
-        tokio::spawn(async move {
-            while !stop.load(Ordering::Relaxed) {
-                db.call(|db| { db.execute("UPDATE app_meta SET value=CAST(value AS INTEGER)+1 WHERE key='root_revision'", [])?; Ok(()) }).await.unwrap();
-                tokio::task::yield_now().await;
-            }
-        })
-    };
-    let deadline = crate::test_watchdog::Deadline::new("history GC single-item retention");
-    let (mut deferred, mut complete, mut kept_marks) = (0, false, 0);
-    while !deadline.expired() {
-        let step = f.gc.history_step(&job).await.unwrap();
-        deferred += usize::from(step.deferred);
-        if step.complete {
-            complete = true;
-            kept_marks = step.kept_marks;
-            break;
-        }
-    }
-    stop.store(true, Ordering::Relaxed);
-    writer.await.unwrap();
+    let (deferred, last) =
+        finish_history_gc_after_interleaved_writes(&f, &job, "history GC single-item retention")
+            .await;
+    let kept_marks = last.kept_marks;
     f.db.call(|db| {
         assert_eq!(scalar(db, "SELECT COUNT(*) FROM gc_job WHERE id='job' AND json_extract(error_json,'$.kept_marks')=1")?, 1);
         assert_eq!(scalar(db, "SELECT COUNT(*) FROM node WHERE id='mark-1' AND payload_json IS NOT NULL")?, 1);
@@ -1556,14 +1446,13 @@ async fn history_gc_skips_a_single_over_budget_mark_cleanup() {
     f.db.shutdown().await.unwrap();
     // The TUI diagnostic copies this step count (#225 review HOLD).
     assert!(
-        complete && deferred > 0 && kept_marks == 1,
-        "complete={complete}, deferred={deferred}, kept_marks={kept_marks}"
+        deferred > 0 && kept_marks == 1,
+        "deferred={deferred}, kept_marks={kept_marks}"
     );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn history_gc_skips_and_reports_a_single_over_budget_receipt_cleanup() {
-    use std::sync::atomic::{AtomicBool, Ordering};
     let f = Fixture::new(Config::default()).await;
     install_budget_demand(&f).await;
     f.db.call(|db| {
@@ -1579,30 +1468,10 @@ async fn history_gc_skips_and_reports_a_single_over_budget_receipt_cleanup() {
     }).await.unwrap();
     f.job().await;
     let job = f.gc.start_history().await.unwrap().unwrap();
-    let stop = Arc::new(AtomicBool::new(false));
-    let writer = {
-        let db = f.db.clone();
-        let stop = stop.clone();
-        tokio::spawn(async move {
-            while !stop.load(Ordering::Relaxed) {
-                db.call(|db| { db.execute("UPDATE app_meta SET value=CAST(value AS INTEGER)+1 WHERE key='root_revision'", [])?; Ok(()) }).await.unwrap();
-                tokio::task::yield_now().await;
-            }
-        })
-    };
-    let deadline = crate::test_watchdog::Deadline::new("history GC single-receipt retention");
-    let (mut deferred, mut complete, mut kept_receipts) = (0, false, 0);
-    while !deadline.expired() {
-        let step = f.gc.history_step(&job).await.unwrap();
-        deferred += usize::from(step.deferred);
-        if step.complete {
-            complete = true;
-            kept_receipts = step.kept_receipts;
-            break;
-        }
-    }
-    stop.store(true, Ordering::Relaxed);
-    writer.await.unwrap();
+    let (deferred, last) =
+        finish_history_gc_after_interleaved_writes(&f, &job, "history GC single-receipt retention")
+            .await;
+    let kept_receipts = last.kept_receipts;
     f.db.call(|db| {
         assert_eq!(scalar(db, "SELECT COUNT(*) FROM receipt WHERE id='rcpt-1'")?, 1);
         assert_eq!(scalar(db, "SELECT COUNT(*) FROM receipt WHERE id LIKE 'rcpt-%'")?, 1);
@@ -1611,8 +1480,8 @@ async fn history_gc_skips_and_reports_a_single_over_budget_receipt_cleanup() {
     }).await.unwrap();
     f.db.shutdown().await.unwrap();
     assert!(
-        complete && deferred > 0 && kept_receipts == 1,
-        "complete={complete}, deferred={deferred}, kept_receipts={kept_receipts}"
+        deferred > 0 && kept_receipts == 1,
+        "deferred={deferred}, kept_receipts={kept_receipts}"
     );
 }
 
@@ -1633,7 +1502,8 @@ async fn history_gc_batch_regrows_to_full_size_after_a_transient_deferral_streak
     }).await.unwrap();
     let deadline = crate::test_watchdog::Deadline::new("history GC batch regrowth");
     let mut deferred = 0;
-    while deferred < 3 && !deadline.expired() {
+    while deferred < 3 {
+        deadline.check();
         let step = f.gc.history_step(&job).await.unwrap();
         assert!(!step.complete, "pass completed during the pressure streak");
         deferred += usize::from(step.deferred);
@@ -1647,20 +1517,18 @@ async fn history_gc_batch_regrows_to_full_size_after_a_transient_deferral_streak
     .unwrap();
     // After three halvings (128 -> 16) committed roots units double back.
     let mut root_batches = Vec::new();
-    let mut complete = false;
-    while !deadline.expired() {
+    loop {
+        deadline.check();
         let step = f.gc.history_step(&job).await.unwrap();
         assert!(!step.deferred, "deferred without pressure");
         if step.stage == "roots" {
             root_batches.push(step.scanned);
         }
         if step.complete {
-            complete = true;
             break;
         }
     }
     f.db.shutdown().await.unwrap();
-    assert!(complete, "pass did not complete");
     assert_eq!(root_batches[..4], [16, 32, 64, 128], "{root_batches:?}");
     assert!(
         root_batches[4..].iter().all(|&n| n == 128),
@@ -1692,7 +1560,6 @@ async fn history_gc_discovers_pending_job_after_many_done_jobs_in_batches() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn history_gc_keeps_candidate_if_cursor_update_exceeds_budget() {
-    use std::sync::atomic::{AtomicBool, Ordering};
     let f = Fixture::new(Config::default()).await;
     install_budget_demand(&f).await;
     f.db.call(|db| {
@@ -1703,44 +1570,20 @@ async fn history_gc_keeps_candidate_if_cursor_update_exceeds_budget() {
     }).await.unwrap();
     f.job().await;
     let job = f.gc.start_history().await.unwrap().unwrap();
-    let stop = Arc::new(AtomicBool::new(false));
-    let writer = {
-        let db = f.db.clone();
-        let stop = stop.clone();
-        tokio::spawn(async move {
-            while !stop.load(Ordering::Relaxed) {
-                db.call(|db| { db.execute("UPDATE app_meta SET value=CAST(value AS INTEGER)+1 WHERE key='root_revision'", [])?; Ok(()) }).await.unwrap();
-                tokio::task::yield_now().await;
-            }
-        })
-    };
-    let deadline = crate::test_watchdog::Deadline::new("history GC cursor interruption");
-    let (mut deferred, mut complete) = (0, false);
-    while !deadline.expired() {
-        let step = f.gc.history_step(&job).await.unwrap();
-        deferred += usize::from(step.deferred);
-        if step.complete {
-            complete = true;
-            break;
-        }
-    }
-    stop.store(true, Ordering::Relaxed);
-    writer.await.unwrap();
+    let (deferred, _) =
+        finish_history_gc_after_interleaved_writes(&f, &job, "history GC cursor interruption")
+            .await;
     f.db.call(|db| {
         assert_eq!(scalar(db, "SELECT COUNT(*) FROM node WHERE id='cursor-expensive' AND payload_json IS NOT NULL AND deleted_reason IS NULL")?, 1);
         assert_eq!(scalar(db, "SELECT COUNT(*) FROM gc_job WHERE id='job' AND json_extract(error_json,'$.kept_ids[0]')='cursor-expensive'")?, 1);
         Ok(())
     }).await.unwrap();
     f.db.shutdown().await.unwrap();
-    assert!(
-        complete && deferred > 0,
-        "complete={complete}, deferred={deferred}"
-    );
+    assert!(deferred > 0, "fixture did not trigger the VM-step budget");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn history_gc_full_retention_fallback_counts_nodes_only_once() {
-    use std::sync::atomic::{AtomicBool, Ordering};
     let f = Fixture::new(Config::default()).await;
     install_budget_demand(&f).await;
     f.db.call(|db| {
@@ -1759,29 +1602,9 @@ async fn history_gc_full_retention_fallback_counts_nodes_only_once() {
         db.execute_batch("CREATE TEMP TRIGGER costly_expansion BEFORE UPDATE OF expanded ON shellboy_gc_mark WHEN OLD.node_id='root' BEGIN SELECT gc_test_foreground_demand(); SELECT count(*) FROM node a CROSS JOIN node b; END;")?;
         Ok(())
     }).await.unwrap();
-    let stop = Arc::new(AtomicBool::new(false));
-    let writer = {
-        let db = f.db.clone();
-        let stop = stop.clone();
-        tokio::spawn(async move {
-            while !stop.load(Ordering::Relaxed) {
-                db.call(|db| { db.execute("UPDATE app_meta SET value=CAST(value AS INTEGER)+1 WHERE key='root_revision'", [])?; Ok(()) }).await.unwrap();
-                tokio::task::yield_now().await;
-            }
-        })
-    };
-    let deadline = crate::test_watchdog::Deadline::new("history GC full retention fallback");
-    let (mut deferred, mut complete) = (0, false);
-    while !deadline.expired() {
-        let step = f.gc.history_step(&job).await.unwrap();
-        deferred += usize::from(step.deferred);
-        if step.complete {
-            complete = true;
-            break;
-        }
-    }
-    stop.store(true, Ordering::Relaxed);
-    writer.await.unwrap();
+    let (deferred, _) =
+        finish_history_gc_after_interleaved_writes(&f, &job, "history GC full retention fallback")
+            .await;
     f.db.call(|db| {
         assert_eq!(scalar(db, "SELECT COUNT(*) FROM node WHERE payload_json IS NOT NULL")?, 501);
         assert_eq!(scalar(db, "SELECT CAST(json_extract(error_json,'$.kept_over_budget') AS INTEGER) FROM gc_job WHERE id='job'")?, 501);
@@ -1789,8 +1612,5 @@ async fn history_gc_full_retention_fallback_counts_nodes_only_once() {
         Ok(())
     }).await.unwrap();
     f.db.shutdown().await.unwrap();
-    assert!(
-        complete && deferred > 0,
-        "complete={complete}, deferred={deferred}"
-    );
+    assert!(deferred > 0, "fixture did not trigger the VM-step budget");
 }

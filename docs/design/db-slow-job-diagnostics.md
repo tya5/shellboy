@@ -91,4 +91,4 @@ and row callbacks plus a 1,000-step progress handler. Observed overheads were
 16.60%, 57.44%, 30.61%, 6.99%, and 16.39% (median 16.60%). This noisy debug
 microbenchmark is not a release-performance claim; the release build was
 interrupted before completion and the workload does not exercise slow captures.
-Command: `cargo test --lib storage::statement_observation::tests::measure_hook_overhead -- --ignored --nocapture`.
+The ignored harness that produced these numbers was removed in #442.

@@ -1250,8 +1250,6 @@ async fn run_client(
             } else {
                 view_read::Tickets::default()
             };
-            #[cfg(test)]
-            stream_metrics::FRONTEND_RELOADS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             read_workers.spawn(refresh::run(
                 refresh::Query {
                     data_dir: client_context.data_dir.clone(),
@@ -1565,7 +1563,6 @@ async fn run_client(
                     other => (other, None),
                 };
                 let has_submission = submission.is_some();
-                #[cfg(test)] stream_metrics::FRONTEND_ACTIONS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 if compose_disconnected.load(Ordering::Acquire) && !matches!(action, UiAction::ReconnectCompose | UiAction::Quit | UiAction::ForceQuit | UiAction::WaitForShutdown) {
                     let text = i18n::local!(language, "接続が切れました。/reconnect または /quit を使用してください", "Disconnected. Use /reconnect or /quit");
                     match &action {
@@ -3871,7 +3868,6 @@ async fn run_client(
                     status(&updates, Some(thread_id), tool_group_notice(release, cancelled_calls, language)).await
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                    #[cfg(test)] stream_metrics::FRONTEND_LAGGED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     if let Some(thread) = &selection.active_thread {
                         streams.invalidate(thread);
                         dirty_threads.insert(thread.clone());
@@ -5048,9 +5044,6 @@ mod notice_tests {
         );
     }
 }
-
-#[cfg(test)]
-mod delivery_performance;
 
 #[cfg(test)]
 mod catalogue_glyph_tests {

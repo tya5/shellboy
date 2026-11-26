@@ -3717,7 +3717,7 @@ existing parts. Impact: each rewind inserts one Thread row and about
 2 x path-length `thread_path` rows (child copy plus rewrite); no node is copied.
 Measured cost (release build, Apple silicon, temp file DB, synthetic message nodes,
 one operation = child fork + attachment delete + `select_path` + boundary check),
-`cargo test --release --test integration rewind_path_cost -- --ignored --nocapture` (the 1,000,000 row was measured with the limit temporarily raised):
+`cargo test --release --test integration rewind_path_cost -- --ignored --nocapture` (the 1,000,000 row was measured with the limit temporarily raised; the measurement test was removed in #442, the figures below are historical):
 
 | path nodes | rewind to the middle | second rewind of the new (half) path |
 |---|---|---|

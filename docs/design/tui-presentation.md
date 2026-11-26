@@ -186,7 +186,7 @@ F6で履歴項目とfield、Oで原文page、F7で現在項目の完全URL、F8�
 
 保存tool resultが統合出力だけを持つ場合、frontendが既存のpin/retention generation付きraw readerで表示用の先頭抜粋を補完する。各stream最大8KiBかつ既存tool_excerpt_bytes由来の上限、履歴page全体に最大1秒（設定のfile timeoutが短ければその値）の時間枠を適用する。識別不能・期限切れ等は理由とともに統合保存抜粋へ戻し、既に明示されたstream型は保持する。canonical本文・モデルへ返すitem・保存payloadを変更しない。部分表示と完全出力を混同しない。
 
-構造化表示の投影は [presentation実装](../../src/presentation.rs) と [表示回帰](../../tests/presentation.rs)、入力・overlayは [UI回帰](../../tests/ui.rs)、負荷測定の手順は [TUI性能試験](../../tests/performance_tui.rs) を参照する。実行した版・実端末セル/画像・未実施の制約は [検証状況](../validation/acceptance.md) に記録する。旧初版の性能値や実端末セル取得を、追加描画機能の新しい測定結果・pixel画像確認とは扱わない。
+構造化表示の投影は [presentation実装](../../src/presentation.rs) と [表示回帰](../../tests/presentation.rs)、入力・overlayは [UI回帰](../../tests/ui.rs) を参照する。実行した版・実端末セル/画像・未実施の制約は [検証状況](../validation/acceptance.md) に記録する。旧初版の性能値や実端末セル取得を、追加描画機能の新しい測定結果・pixel画像確認とは扱わない。
 
 ## 保存済み実行情報と削除影響の追加
 

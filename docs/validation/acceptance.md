@@ -421,7 +421,7 @@ Flaky landed tests, found while validating this change (macOS arm64, this machin
 Both fixes shipped in v0.10.0.
 
 Not fixed and not investigated, seen in full-suite runs under this load, tracked in #260. With the review fixes, in 8 more full-suite runs: no test failed, including the four below that had failed only with E3. That does not show they are gone; machine load was not controlled. The earlier list: on main only,
-`response_retries::overflow_trim_keeps_every_user_input_of_the_active_turn`, `gc::history_gc_budget_measurement_with_concurrent_writes`; with E3 only,
+`response_retries::overflow_trim_keeps_every_user_input_of_the_active_turn`, `gc::history_gc_budget_measurement_with_concurrent_writes` (removed in #442); with E3 only,
 `runtime::background_read_keeps_target_raw_separate_from_message_send_and_observer_output`,
 `runtime::slow_database_batches_binary_shell_output_without_losing_natural_exit_tail`, two `turn_interrupt` tests (the three read show a shell ending `failed`
 rather than `exited`); on both, `tui_recovery::multiple_calls_keep_source_order_numbers_commands_background_and_cancel_reasons`,
@@ -840,7 +840,7 @@ macOS, rust-slot: unit test `gc::tests::index_source_scan_seeks_deleted_nodes_an
 asserts the result (job- and chunk-owning deleted nodes plus a payload-less node)
 and EXPLAIN QUERY PLAN `SCAN n USING INDEX nodes_index_gc` with `jobs_source` /
 `chunks_source` seeks, no other SCAN and no temp B-tree. Synthetic measurement
-(ignored test `index_source_scan_measure`, debug build, in-memory DB, 58,902 live
+(ignored test `index_source_scan_measure`, removed in #442; debug build, in-memory DB, 58,902 live
 ~1 KB nodes, 5,098 deleted nodes, 130,000 jobs, 44,000 chunks, zero result rows;
 single run each, recorded facts not bounds): before 60.66 s (`SCAN embedding_job`
 per candidate), `jobs_source` only 20.5 ms (full node scan), both indexes 5.5 ms.
@@ -9555,7 +9555,7 @@ equality. A UI unit test checks that saved context lines render no rows.
 
 Local: `cargo fmt`, `cargo clippy --all-targets -D warnings`, and the
 integration runtime_features/request_inspect/runtime_hierarchy/anthropic_messages/
-model_http/replay_cache/performance_lifecycle subsets and lib control/ui
+model_http/replay_cache/performance_lifecycle (suite removed in #442) subsets and lib control/ui
 presentation/compaction subsets passed except three timing-sensitive shell
 tests. Rerun alone, `successful_incomplete_output_is_saved_and_cancels_unexecuted_calls`
 and `completed_shell_cannot_be_backgrounded_while_excerpt_is_loading` passed twice

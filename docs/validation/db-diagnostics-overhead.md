@@ -1,5 +1,7 @@
 # DB diagnostics hook measurement
 
+The measurement tests named here (`measure_hook_overhead`, `measure_hook_components`, `measure_final_hook_variants`) were removed in #442; the figures are historical.
+
 2026-11-03, Apple M1, macOS 26.3.1. `cargo test --release --lib measure_hook_overhead -- --ignored --nocapture`: five sequential passes, each 50,000 cached indexed point reads against 10,000 in-memory rows. Each pass compares no trace hook with statement/profile/row tracing and statement counters; it excludes worker scheduling and slow backtrace capture. This microbenchmark is not an end-to-end workload.
 
 Initial overheads: 19.97%, 19.49%, 26.67%, 29.51%, 30.24%; median 26.67%. After adding the exact-match fingerprint hook, the same benchmark measured 39.37%, 37.13%, 37.47%, 34.79%, 36.38%; median 37.13%. No variance or system-load control was applied.

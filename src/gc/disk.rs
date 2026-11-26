@@ -251,43 +251,4 @@ pub(crate) mod tests {
         assert_eq!(sample.disk_guard.unwrap().state, DiskState::Unknown);
         db.shutdown().await.unwrap();
     }
-
-    /// Cost record, not an assertion: run with `--ignored --nocapture`.
-    #[tokio::test]
-    #[ignore = "measurement only; temporary store"]
-    async fn measure_gate_cost() {
-        let temp = tempfile::tempdir().unwrap();
-        let db = DbWorker::open(temp.path().join("shellboy.db"))
-            .await
-            .unwrap();
-        let path = temp.path().to_owned();
-        let (free_ns, counters_ns, gate_ns) = db
-            .call(move |db| {
-                let config = Config::default();
-                let n = 20_000u32;
-                let time = |f: &dyn Fn()| {
-                    let start = std::time::Instant::now();
-                    for _ in 0..n {
-                        f();
-                    }
-                    start.elapsed().as_nanos() as u64 / u64::from(n)
-                };
-                let free = time(&|| {
-                    std::hint::black_box(fs2::available_space(&path).unwrap());
-                });
-                let counters = time(&|| {
-                    std::hint::black_box(crate::gc::usage::logical_usage(db).unwrap());
-                });
-                let gate = time(&|| {
-                    crate::gc::require_capacity_tx(db, &config).unwrap();
-                });
-                Ok((free, counters, gate))
-            })
-            .await
-            .unwrap();
-        println!(
-            "statvfs {free_ns} ns, logical counters {counters_ns} ns, whole gate {gate_ns} ns (mean per call)"
-        );
-        db.shutdown().await.unwrap();
-    }
 }

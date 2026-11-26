@@ -639,39 +639,6 @@ async fn result_lists_unanswered_replies_to_messages_the_thread_sent() {
     assert!(value["note"].as_str().unwrap().contains("shell_ended"));
 }
 
-/// Measurement for decisions.md, not a gate (wall-clock numbers are facts, not
-/// promises): `cargo test --release --test integration rewind_path_cost -- --ignored --nocapture`.
-#[tokio::test]
-#[ignore = "measurement only"]
-async fn rewind_path_cost() {
-    for size in [10_000u32, 100_000, 200_000] {
-        let f = Fixture::new(String::new()).await;
-        f.query(move |db| {
-            db.execute_batch(&format!(
-                "WITH RECURSIVE s(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM s WHERE i<{size})
-                 INSERT INTO node(id,turn_id,kind,created_at,payload_json,payload_bytes) SELECT 'n'||i,'turn','message','2026-01-01T00:00:00','{{\"text\":\"x\"}}',12 FROM s;
-                 INSERT INTO thread_path SELECT 'T',i-1,'n'||i FROM (WITH RECURSIVE s(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM s WHERE i<{size}) SELECT i FROM s);
-                 UPDATE thread SET cursor_node_id='n{size}' WHERE id='T';"
-            ))
-            .unwrap();
-        })
-        .await;
-        let cut = size / 2;
-        let started = std::time::Instant::now();
-        f.rewind(Some("T"), &format!("n{cut}"), None).await.unwrap();
-        let first = started.elapsed();
-        // Rewinding again near the new end copies a short prefix + the tail child.
-        let started = std::time::Instant::now();
-        f.rewind(Some("T"), &format!("n{}", cut - 10), None)
-            .await
-            .unwrap();
-        let second = started.elapsed();
-        println!(
-            "path {size}: rewind to the middle {first:?}; second rewind (path {cut}) {second:?}"
-        );
-    }
-}
-
 /// Every row of every table (app_meta, edges, thread revisions included), as
 /// one comparable string.
 fn dump(db: &Connection) -> String {

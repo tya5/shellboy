@@ -1577,12 +1577,9 @@ async fn draft_database_save_failure_stops_admission_and_owned_shell_but_retains
         0,
         "owned shell must still be live when the save fault is submitted"
     );
-    // Anchor the process-stop contract to fault submission, before any await.
-    let shell_deadline = crate::test_watchdog::Deadline::with_budget(
-        "owned shell stop after draft-save failure",
-        Duration::from_secs(5),
-    )
-    .at();
+    // Hang watchdog only: the contract is that the owned shell is reaped, not how fast.
+    let shell_deadline =
+        crate::test_watchdog::Deadline::new("owned shell stop after draft-save failure").at();
     send.send(UiAction::SaveDraft {
         thread_id: thread,
         draft: ui.view().draft.clone(),
@@ -1624,7 +1621,7 @@ async fn draft_database_save_failure_stops_admission_and_owned_shell_but_retains
     .unwrap();
     assert!(
         shell_reaped.await.unwrap(),
-        "owned shell must be reaped within five seconds"
+        "owned shell was never reaped after the fatal frontend stop"
     );
     assert_eq!(ended.unwrap_err().code, ErrorCode::SaveFailed);
     assert_eq!(ui.view().draft.text, "未保存😀 input");

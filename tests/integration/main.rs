@@ -75,8 +75,6 @@ mod history_relations;
 mod history_window;
 #[path = "../http_deadlines.rs"]
 mod http_deadlines;
-#[path = "../http_header_measurement.rs"]
-mod http_header_measurement;
 #[path = "../http_observation.rs"]
 mod http_observation;
 #[path = "../index.rs"]
@@ -111,22 +109,12 @@ mod model_tls;
 mod operation_contract;
 #[path = "../output.rs"]
 mod output;
-#[path = "../performance.rs"]
-mod performance;
-#[path = "../performance_lifecycle.rs"]
-mod performance_lifecycle;
-#[path = "../performance_load.rs"]
-mod performance_load;
-#[path = "../performance_tui.rs"]
-mod performance_tui;
 #[path = "../presentation.rs"]
 mod presentation;
 #[path = "../program_status.rs"]
 mod program_status;
 #[path = "../protocol.rs"]
 mod protocol;
-#[path = "../query_index_performance.rs"]
-mod query_index_performance;
 #[path = "../rag_cli.rs"]
 mod rag_cli;
 #[path = "../rag_extract.rs"]

@@ -238,8 +238,6 @@ fn ranked_hits(
     cancel: Option<&CancellationToken>,
 ) -> Result<RankedHits, ApiError> {
     ensure_running(cancel)?;
-    #[cfg(test)]
-    performance_tests::ranking_started();
     valid_table(&space.table).map_err(db_error)?;
     if let Some(thread) = &args.thread_id {
         let exists: bool = db
@@ -696,9 +694,6 @@ mod visibility_cost_tests {
         }
     }
 }
-
-#[cfg(test)]
-mod performance_tests;
 
 #[cfg(test)]
 mod pick_nodes_tests {
