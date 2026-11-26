@@ -2893,6 +2893,60 @@ pub fn message_details(connection: &Connection, id: &str) -> Result<MessageDetai
     })
 }
 
+/// Test helper: the reply state the named-message read reports, if any.
+#[cfg(test)]
+pub(crate) fn named_reply_state(db: &Connection, id: &str) -> Option<String> {
+    message_details(db, id)
+        .unwrap()
+        .reply
+        .as_ref()
+        .and_then(|reply| reply["state"].as_str())
+        .map(str::to_owned)
+}
+
+/// Test helper: reply state of the message that a receipt id carries.
+#[cfg(test)]
+pub(crate) fn named_reply_state_of_receipt(db: &Connection, receipt: &str) -> Option<String> {
+    let message: String = db
+        .query_row(
+            "SELECT message_node_id FROM receipt WHERE id=?1",
+            [receipt],
+            |r| r.get(0),
+        )
+        .unwrap();
+    named_reply_state(db, &message)
+}
+
+/// Test helper: named-message reply state counts for the receipts matching a
+/// selector that does not itself read reply state.
+#[cfg(test)]
+pub(crate) fn named_reply_counts(
+    db: &Connection,
+    receipt_where: &str,
+) -> std::collections::BTreeMap<String, i64> {
+    let ids: Vec<String> = db
+        .prepare(&format!(
+            "SELECT message_node_id FROM receipt WHERE {receipt_where}"
+        ))
+        .unwrap()
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .collect::<std::result::Result<_, _>>()
+        .unwrap();
+    let mut counts = std::collections::BTreeMap::new();
+    for id in ids {
+        let details = message_details(db, &id).unwrap();
+        let state = details
+            .reply
+            .as_ref()
+            .and_then(|reply| reply["state"].as_str())
+            .unwrap_or("none")
+            .to_owned();
+        *counts.entry(state).or_default() += 1;
+    }
+    counts
+}
+
 pub(crate) fn saved_usage_for_detail(
     db: &Connection,
     scope: &crate::usage_totals::Scope,
@@ -6122,7 +6176,11 @@ mod thread_deletion_notification_tests {
             }
             assert_eq!(db.query_row("SELECT count(*) FROM event WHERE kind='reply_outcome'", [], |r| r.get::<_,i64>(0))?, 129);
             assert_eq!(db.query_row("SELECT count(*) FROM fixture_reply_delivery d JOIN run r ON r.id=d.run WHERE d.event='reply-outcome-owner-message-128' AND r.thread_id='sender' AND r.id<>'sender-run'", [], |r| r.get::<_,i64>(0))?, 1, "reopened outcome uses a new independent sender Run");
-            assert_eq!(db.query_row("SELECT count(*) FROM receipt WHERE target_thread_id='unrelated' AND result_json='{\"expect_reply\":true,\"reply\":{\"state\":\"pending\"}}'", [], |r| r.get::<_,i64>(0))?, 7);
+            {
+                let unrelated: Vec<String> = db.prepare("SELECT message_node_id FROM receipt WHERE target_thread_id='unrelated'")?.query_map([], |r| r.get(0))?.collect::<std::result::Result<_, _>>()?;
+                let pending = unrelated.iter().filter(|id| { let d = message_details(db, id).unwrap(); d.expect_reply && d.reply.as_ref().is_some_and(|r| r["state"] == "pending") }).count();
+                assert_eq!(pending, 7);
+            }
             for n in 129..136 {
                 assert_eq!(db.query_row("SELECT payload_json FROM node WHERE id=?1", [format!("owner-message-{n:03}")], |r| r.get::<_,String>(0))?, "{}");
             }

@@ -3408,7 +3408,12 @@ async fn startup_maintenance_settles_terminal_reply_backlog_beyond_one_batch() {
         let mut seen_http = false;
         watchdog("bounded terminal startup sweep",async {
             loop {
-                let settled=control.store.database.call(|db|Ok(db.query_row("SELECT count(*) FROM receipt WHERE run_id='terminal-backlog' AND json_extract(result_json,'$.reply.state')='ignored'",[],|r|r.get::<_,i64>(0))?)).await.unwrap();
+                let settled=control.store.database.call(|db|{
+                    let ids:Vec<String>=db.prepare("SELECT message_node_id FROM receipt WHERE run_id='terminal-backlog'")?.query_map([],|r|r.get(0))?.collect::<Result<_,_>>()?;
+                    let mut ignored=0_i64;
+                    for id in ids{ignored+=i64::from(shellboy::control::db::message_details(db,&id)?.reply.is_some_and(|reply|reply["state"]=="ignored"));}
+                    Ok(ignored)
+                }).await.unwrap();
                 if settled==261 && seen_http {break;}
                 tokio::select! {
                     request=incoming_requests.recv()=>{

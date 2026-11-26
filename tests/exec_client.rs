@@ -1115,11 +1115,16 @@ async fn exec_waiting_on_an_ask_back(
         .owner
         .db
         .call(move |db| {
-            Ok(db.query_row(
-                "SELECT (SELECT state FROM run WHERE id=?2),json_extract(r.result_json,'$.reply.state'),json_extract(r.result_json,'$.reply.blocking_message_id') FROM receipt r WHERE r.message_node_id=?1",
-                [&saved, &run],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-            )?)
+            let run_state: String =
+                db.query_row("SELECT state FROM run WHERE id=?1", [&run], |r| r.get(0))?;
+            let reply = shellboy::control::db::message_details(db, &saved)?
+                .reply
+                .unwrap();
+            Ok((
+                run_state,
+                reply["state"].as_str().unwrap().to_owned(),
+                reply["blocking_message_id"].as_str().unwrap().to_owned(),
+            ))
         })
         .await
         .unwrap();
@@ -1234,11 +1239,12 @@ async fn reply_state(fixture: &Fixture, duty: &str) -> String {
         .owner
         .db
         .call(move |db| {
-            Ok(db.query_row(
-                "SELECT json_extract(result_json,'$.reply.state') FROM receipt WHERE message_node_id=?1",
-                [duty],
-                |r| r.get::<_, String>(0),
-            )?)
+            Ok(shellboy::control::db::message_details(db, &duty)?
+                .reply
+                .unwrap()["state"]
+                .as_str()
+                .unwrap()
+                .to_owned())
         })
         .await
         .unwrap()
@@ -1324,11 +1330,12 @@ async fn reply_mode_interruption_names_the_snapshot_state_and_leaves_the_duty_op
         .owner
         .db
         .call(move |db| {
-            Ok(db.query_row(
-                "SELECT json_extract(result_json,'$.reply.blocking_message_id') FROM receipt WHERE message_node_id=?1",
-                [saved],
-                |r| r.get(0),
-            )?)
+            Ok(shellboy::control::db::message_details(db, &saved)?
+                .reply
+                .unwrap()["blocking_message_id"]
+                .as_str()
+                .unwrap()
+                .to_owned())
         })
         .await
         .unwrap();

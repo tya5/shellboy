@@ -796,12 +796,28 @@ async fn model_shell_cli_rejects_a_same_thread_ask_without_creating_a_duty() {
     run_state(&f.control, &run, "completed").await;
 
     let thread = f.thread.clone();
-    let pending: i64 = f.control.store.database.call(move |db| {
-        Ok(db.query_row(
-            "SELECT count(*) FROM receipt WHERE target_thread_id=?1 AND json_extract(result_json,'$.reply.state')='pending'",
-            [&thread], |row| row.get(0),
-        )?)
-    }).await.unwrap();
+    let pending: usize = f
+        .control
+        .store
+        .database
+        .call(move |db| {
+            let ids: Vec<String> = db
+                .prepare("SELECT message_node_id FROM receipt WHERE target_thread_id=?1")?
+                .query_map([&thread], |row| row.get(0))?
+                .collect::<Result<_, _>>()?;
+            let mut pending = 0;
+            for id in ids {
+                let details = shellboy::control::db::message_details(db, &id)?;
+                pending += usize::from(
+                    details
+                        .reply
+                        .is_some_and(|reply| reply["state"] == "pending"),
+                );
+            }
+            Ok(pending)
+        })
+        .await
+        .unwrap();
     assert_eq!(pending, 0);
     f.control.shutdown().await.unwrap();
     ipc.shutdown().await.unwrap();
