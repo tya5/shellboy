@@ -581,6 +581,8 @@ impl<'a> HistoryReader<'a> {
         checked_storage(self.control, result).await
     }
 
+    /// Hydrate one node at a source offset from the owner: its extent by ID and,
+    /// unless it is a received response, the selected window's facts for it.
     pub(super) async fn node(
         &self,
         node_id: String,
@@ -588,45 +590,41 @@ impl<'a> HistoryReader<'a> {
         viewed_thread: &str,
     ) -> Result<UiNode, ApiError> {
         let result = async {
-            let (row, read_revision) = self
-                .control
-                .store
-                .database
-                .call(move |db| {
-                    let tx = db.transaction()?;
-                    let row = tx.query_row(
-                            "SELECT n.id,n.kind,n.payload_json,n.deleted_reason,CASE WHEN n.kind='incomplete_response' THEN EXISTS(SELECT 1 FROM turn u WHERE u.id=n.turn_id AND u.state='recovery_wait') ELSE 0 END,n.output_limit_attempt_id IS NOT NULL FROM node n WHERE n.id=?1",
-                            [&node_id],
-                            |r| {
-                                Ok(RawNode {
-                                    id: r.get(0)?,
-                                    kind: r.get(1)?,
-                                    payload: r.get(2)?,
-                                    reason: r.get(3)?,
-                                    received_recovery_wait: r.get(4)?,
-                                    output_limited: r.get(5)?,
-                                })
-                            },
-                        )
-                        .optional()?;
-                    let read_revision = message_queue::read_revision();
-                    tx.commit()?;
-                    Ok((row, read_revision))
-                })
-                .await
-                .map_err(storage_error)?;
-            let row = row.ok_or_else(|| {
-                    ApiError::new(ErrorCode::TargetUnavailable, "History node is unavailable")
-                })?;
+            let (display, observation) = native_history::Owner {
+                data_dir: compose_data_dir(self.control),
+                instance: &self.control.store.instance_id,
+            }
+            .node(
+                viewed_thread,
+                &node_id,
+                crate::protocol::HistoryDisplayPosition::Absolute {
+                    offset: offset as u64,
+                },
+            )
+            .await?;
             let width = self.width;
             let language = self.control.store.config.ui.language;
-            let mut node = presentation_work(move || {
-                row.into_ui_node(Some(NodePosition::At(offset)), width, language)
-            })
+            let mut node =
+                presentation_work(move || display.into_ui_node(node_id, width, language)).await?;
+            message_metadata::enrich(
+                self.control,
+                Some(viewed_thread),
+                std::slice::from_mut(&mut node),
+            )
             .await?;
-            message_metadata::enrich(self.control, Some(viewed_thread), std::slice::from_mut(&mut node)).await?;
-            streams::enrich(self.control, std::slice::from_mut(&mut node), self.width).await?;
-            stamp_source(&mut node, read_revision);
+            if let Some(observation) = observation {
+                node = presentation_work(move || {
+                    native_history::apply_observation(
+                        std::slice::from_mut(&mut node),
+                        &observation,
+                        language,
+                    );
+                    node
+                })
+                .await?;
+            }
+            streams::seal_nodes(std::slice::from_mut(&mut node)).await?;
+            stamp_source(&mut node, message_queue::read_revision());
             node.presentation.anchor_window = true;
             Ok(node)
         }

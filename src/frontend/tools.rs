@@ -537,7 +537,26 @@ pub(super) fn apply(nodes: &mut [UiNode], facts: &ToolFacts) {
 }
 
 pub(super) fn apply_window(nodes: &mut [UiNode], facts: &crate::protocol::HistoryWindowTools) {
+    super::notices::apply(nodes, &facts.notices);
     apply_calls(nodes, &facts.calls, &facts.limited_node_ids, true);
+    // The saved payload group only selects the exact call; like the former
+    // readers, a group is shown only when the owner confirmed that call.
+    for node in nodes {
+        for tool in node
+            .presentation
+            .blocks
+            .iter_mut()
+            .filter_map(|block| block.tool.as_mut())
+        {
+            if !facts.calls.iter().any(|call| {
+                call.node_id == node.node_id
+                    && call.call_id == tool.call_id
+                    && tool.group_id.as_deref() == Some(call.group_id.as_str())
+            }) {
+                tool.group_id = None;
+            }
+        }
+    }
 }
 
 fn apply_calls(
